@@ -689,12 +689,13 @@ impl<L: DragLeaf> DragGestureRecognizer for L {
                 _ => event.local_position(),
             };
             let time_stamp = event.time_stamp();
+            let now = app.clock();
             app.get_mut(self)
                 .drag_mut()
                 .velocity_trackers
                 .get_mut(&event.pointer())
                 .unwrap()
-                .add_position(time_stamp, position);
+                .add_position(now, time_stamp, position);
         }
         if let PointerEvent::Move(moved) = &event
             && Some(moved.buttons) != app.get(self).drag().initial_buttons
@@ -1247,7 +1248,7 @@ fn check_end<L: DragLeaf>(this: Handle<L>, app: &mut App, pointer: i64) {
 
     let (estimate, kind) = {
         let tracker = &app.get(this).drag().velocity_trackers[&pointer];
-        (tracker.get_velocity_estimate(), tracker.kind())
+        (tracker.get_velocity_estimate(app.clock()), tracker.kind())
     };
 
     let details = estimate

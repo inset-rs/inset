@@ -515,17 +515,20 @@ mod tests {
     use std::rc::Rc;
 
     use waft_cupertino::{CupertinoColors, CupertinoThemeData};
+    use waft_embedder::ViewRef;
     use waft_embedder::{Color, TargetPlatform};
-    use waft_foundation::AppCell;
     use waft_painting::AnyColor;
-    use waft_widgets::{Builder, IconThemeData, MediaQueryData, RawView, SizedBox, run_widget};
+    use waft_scheduler::{FrameTarget, SchedulerBinding};
+    use waft_widgets::{Builder, IconThemeData, MediaQueryData, RawView, SizedBox, WidgetsBinding};
+
+    use waft_widgets::testing::{
+        TargetPlatformVariant, WidgetTester, find, test_widgets, test_widgets_variant,
+    };
 
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::colors::{Colors, MaterialColor};
-    use crate::test_support::{
-        build, probe, pump, test_cell, test_cell_on, with_main_thread_stack,
-    };
+    use crate::test_support::probe;
     use crate::text_selection_theme::TextSelectionThemeData;
     use crate::theme_data::ThemeDataBuilder;
     use crate::typography::Typography;
@@ -535,21 +538,22 @@ mod tests {
     }
 
     /// Mounts `child` under a bare `RawView`, which, unlike `View`, adds no `MediaQuery`.
-    fn build_without_media_query(cell: &AppCell, child: WidgetRef) {
+    fn build_without_media_query(tester: &mut WidgetTester, child: WidgetRef) {
         {
-            let mut app = cell.borrow_mut();
-            let view = app.platform().views().into_iter().next().expect("a view");
-            run_widget(&mut app, RawView::new(view, child).into_widget());
+            let mut app = tester.cell.borrow_mut();
+            let view = Rc::clone(tester.view()) as ViewRef;
+            let view_id = view.id();
+            let root = RawView::new(view, child).into_widget();
+            WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
+            SchedulerBinding::schedule_frame(&mut app, FrameTarget::View(view_id));
         }
-        cell.elapse(Duration::ZERO);
-        pump(&mut cell.borrow_mut(), Duration::ZERO);
+        tester.pump();
     }
 
     #[test]
     fn theme_data_tween_control_test() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let light = Rc::new(ThemeData::new(&app));
             let dark = Rc::new(ThemeData::dark(&app, None));
             let tween = ThemeDataTween::new(Some(Rc::clone(&light)), Some(Rc::clone(&dark)));
@@ -559,10 +563,9 @@ mod tests {
 
     #[test]
     fn brightness_of_is_the_media_query_brightness_without_a_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let (brightness, maybe_brightness) = probe(
-                &cell,
+                tester,
                 |_app, child| {
                     MediaQuery::new(
                         MediaQueryData::new().platform_brightness(Brightness::Dark),
@@ -584,10 +587,9 @@ mod tests {
 
     #[test]
     fn brightness_of_prefers_the_theme_brightness_over_the_media_query() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let (brightness, maybe_brightness) = probe(
-                &cell,
+                tester,
                 |app, child| {
                     let data = ThemeData::builder()
                         .brightness(Brightness::Light)
@@ -612,36 +614,36 @@ mod tests {
 
     #[test]
     fn brightness_of_is_light_and_maybe_brightness_of_is_none_without_a_theme_or_media_query() {
-        let cell = test_cell();
-        let seen = Rc::new(Cell::new(None));
-        let probe = Builder::new({
-            let seen = Rc::clone(&seen);
-            move |app, context| {
-                seen.set(Some((
-                    Theme::brightness_of(app, context),
-                    Theme::maybe_brightness_of(app, context),
-                )));
-                SizedBox::shrink().into_widget()
-            }
+        test_widgets(|tester| {
+            let seen = Rc::new(Cell::new(None));
+            let probe = Builder::new({
+                let seen = Rc::clone(&seen);
+                move |app, context| {
+                    seen.set(Some((
+                        Theme::brightness_of(app, context),
+                        Theme::maybe_brightness_of(app, context),
+                    )));
+                    SizedBox::shrink().into_widget()
+                }
+            });
+            build_without_media_query(tester, probe.into_widget());
+            assert_eq!(seen.get(), Some((Brightness::Light, None)));
         });
-        build_without_media_query(&cell, probe.into_widget());
-        assert_eq!(seen.get(), Some((Brightness::Light, None)));
     }
 
     #[test]
     fn fallback_theme_is_the_localized_fallback() {
         for use_material3 in [false, true] {
-            with_main_thread_stack(|| {
-                let cell = test_cell();
+            test_widgets(|tester| {
                 let theme = probe(
-                    &cell,
+                    tester,
                     move |app, child| {
                         let data = ThemeData::builder().use_material3(use_material3).build(app);
                         Theme::new(data, child).into_widget()
                     },
                     Theme::of,
                 );
-                let mut app = cell.borrow_mut();
+                let mut app = tester.cell.borrow_mut();
                 let fallback = Rc::new(ThemeData::fallback(&app, Some(use_material3)));
                 let geometry = Rc::new(if use_material3 {
                     Typography::english_like2021()
@@ -655,9 +657,8 @@ mod tests {
 
     #[test]
     fn theme_data_localize_memoizes_the_result() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
             let light = Rc::new(ThemeData::new(&app));
             let dark = Rc::new(ThemeData::dark(&app, None));
             let default_geometry_theme = Rc::new(Typography::english_like2014());
@@ -688,9 +689,8 @@ mod tests {
             TargetPlatform::MacOS,
             TargetPlatform::Windows,
         ] {
-            with_main_thread_stack(move || {
-                let cell = test_cell_on(platform);
-                let theme = probe(&cell, |_app, child| child, Theme::of);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let theme = probe(tester, |_app, child| child, Theme::of);
                 assert_eq!(theme.platform, platform);
             });
         }
@@ -698,9 +698,8 @@ mod tests {
 
     #[test]
     fn theme_data_with_null_typography_uses_proper_defaults() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let m2_theme = ThemeData::builder().use_material3(false).build(&app);
             assert_eq!(m2_theme.typography, Typography::material2014().build());
             let m3_theme = ThemeData::new(&app);
@@ -715,8 +714,7 @@ mod tests {
 
     #[test]
     fn icon_themes_are_applied_and_animated() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let seen = Rc::new(Cell::new(None));
             let child = Builder::new({
                 let seen = Rc::clone(&seen);
@@ -739,28 +737,27 @@ mod tests {
             let green = Colors::GREEN.primary();
             let orange = Colors::ORANGE.primary();
 
-            let tree = animated(&cell.borrow(), green, 10.0);
-            build(&cell, tree);
+            let tree = animated(&tester.cell.borrow(), green, 10.0);
+            tester.pump_widget(tree);
             assert_eq!(seen.get(), Some((Some(green), Some(10.0))));
 
-            let tree = animated(&cell.borrow(), orange, 20.0);
-            build(&cell, tree);
+            let tree = animated(&tester.cell.borrow(), orange, 20.0);
+            tester.pump_widget(tree);
             // Halfway through the theme transition
-            pump(&mut cell.borrow_mut(), Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
             let (color, size) = seen.get().expect("the child built");
             assert_eq!(color, Color::lerp(Some(green), Some(orange), 0.5));
             assert_eq!(size, Some(15.0));
 
             // Finish the transition
-            pump(&mut cell.borrow_mut(), Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(100));
             assert_eq!(seen.get(), Some((Some(orange), Some(20.0))));
         });
     }
 
     #[test]
     fn same_theme_data_reapplied_does_not_trigger_descendant_rebuilds() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let builds = Rc::new(Cell::new(0));
             let child = Builder::new({
                 let builds = Rc::clone(&builds);
@@ -771,6 +768,7 @@ mod tests {
                 }
             })
             .into_widget();
+            let cell = Rc::clone(&tester.cell);
             let build_theme = |primary_color: u32| {
                 let data = ThemeData::builder()
                     .primary_color(Color::new(primary_color))
@@ -778,16 +776,16 @@ mod tests {
                 Theme::new(data, child.clone()).into_widget()
             };
 
-            build(&cell, build_theme(0xFF000000));
+            tester.pump_widget(build_theme(0xFF000000));
             assert_eq!(builds.get(), 1);
 
             // New instance of theme data but still the same content.
-            build(&cell, build_theme(0xFF000000));
+            tester.pump_widget(build_theme(0xFF000000));
             // Still no repeated calls.
             assert_eq!(builds.get(), 1);
 
             // Different now.
-            build(&cell, build_theme(0xFF222222));
+            tester.pump_widget(build_theme(0xFF222222));
             // Should call build again.
             assert_eq!(builds.get(), 2);
         });
@@ -795,11 +793,10 @@ mod tests {
 
     #[test]
     fn text_geometry_set_in_theme_has_higher_precedence_than_that_of_localizations() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let k_magic_font_size = 4321.0;
             let custom_theme = {
-                let fallback = ThemeData::fallback(&cell.borrow(), None);
+                let fallback = ThemeData::fallback(&tester.cell.borrow(), None);
                 let body_medium = fallback
                     .primary_text_theme
                     .body_medium
@@ -817,7 +814,7 @@ mod tests {
                     )
                     .build()
             };
-            let actual_font_size = probe(&cell, themed(custom_theme), |app, context| {
+            let actual_font_size = probe(tester, themed(custom_theme), |app, context| {
                 Theme::of(app, context)
                     .primary_text_theme
                     .body_medium
@@ -830,10 +827,9 @@ mod tests {
 
     #[test]
     fn material3_default_theme_provides_all_basic_text_style_properties() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let theme = probe(
-                &cell,
+                tester,
                 |app, child| themed(ThemeData::new(app))(app, child),
                 Theme::of,
             );
@@ -888,10 +884,9 @@ mod tests {
 
     #[test]
     fn inherited_theme_capture_reproduces_the_theme_elsewhere() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let (captured, theme) = probe(
-                &cell,
+                tester,
                 |app, child| {
                     let data = ThemeData::builder()
                         .primary_color(Colors::RED.primary())
@@ -905,7 +900,7 @@ mod tests {
                     )
                 },
             );
-            let recaptured = probe(&cell, |_app, child| captured.wrap(child), Theme::of);
+            let recaptured = probe(tester, |_app, child| captured.wrap(child), Theme::of);
             assert_eq!(recaptured, theme);
             assert_eq!(recaptured.primary_color, Colors::RED.primary());
         });
@@ -913,11 +908,11 @@ mod tests {
 
     /// The `CupertinoThemeData` a probe under `Theme(data:)` reads with `CupertinoTheme::of`.
     fn cupertino_theme_of(
-        cell: &AppCell,
+        tester: &mut WidgetTester,
         data: impl FnOnce(&App) -> ThemeData,
     ) -> CupertinoThemeData {
         probe(
-            cell,
+            tester,
             |app, child| Theme::new(data(app), child).into_widget(),
             CupertinoTheme::of,
         )
@@ -929,9 +924,8 @@ mod tests {
 
     #[test]
     fn material2_default_light_and_dark_cupertino_themes_have_defaults() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let light = cupertino_theme_of(&cell, |app| {
+        test_widgets(|tester| {
+            let light = cupertino_theme_of(tester, |app| {
                 ThemeData::builder().use_material3(false).build(app)
             });
             assert_eq!(light.brightness(), Some(Brightness::Light));
@@ -948,8 +942,7 @@ mod tests {
             );
             assert_eq!(text_style.font_size, Some(17.0));
 
-            let cell = test_cell();
-            let dark = cupertino_theme_of(&cell, |app| ThemeData::dark(app, Some(false)));
+            let dark = cupertino_theme_of(tester, |app| ThemeData::dark(app, Some(false)));
             assert_eq!(dark.brightness(), Some(Brightness::Dark));
             assert_eq!(dark.primary_color(), any(Colors::BLUE.primary()));
             assert_eq!(dark.primary_contrasting_color(), any(Colors::WHITE));
@@ -968,9 +961,8 @@ mod tests {
 
     #[test]
     fn material3_default_light_and_dark_cupertino_themes_have_defaults() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let light = cupertino_theme_of(&cell, ThemeData::new);
+        test_widgets(|tester| {
+            let light = cupertino_theme_of(tester, ThemeData::new);
             assert_eq!(light.brightness(), Some(Brightness::Light));
             assert_eq!(light.primary_color(), any(Color::new(0xff6750a4)));
             // ColorScheme.background
@@ -986,8 +978,7 @@ mod tests {
             );
             assert_eq!(text_style.font_size, Some(17.0));
 
-            let cell = test_cell();
-            let dark = cupertino_theme_of(&cell, |app| ThemeData::dark(app, None));
+            let dark = cupertino_theme_of(tester, |app| ThemeData::dark(app, None));
             assert_eq!(dark.brightness(), Some(Brightness::Dark));
             assert_eq!(dark.primary_color(), any(Color::new(0xffd0bcff)));
             assert_eq!(
@@ -1003,11 +994,10 @@ mod tests {
 
     #[test]
     fn material_theme_overrides_the_cupertino_brightness() {
-        with_main_thread_stack(|| {
-            let brightness_of = |data: fn(&App) -> ThemeData| {
-                let cell = test_cell();
+        test_widgets(|tester| {
+            let mut brightness_of = |data: fn(&App) -> ThemeData| {
                 probe(
-                    &cell,
+                    tester,
                     |app, child| Theme::new(data(app), child).into_widget(),
                     CupertinoTheme::brightness_of,
                 )
@@ -1051,9 +1041,8 @@ mod tests {
     #[test]
     fn cupertino_override_theme_overrides_the_material_theme_and_keeps_the_rest_cascaded() {
         for use_material3 in [false, true] {
-            with_main_thread_stack(|| {
-                let cell = test_cell();
-                let theme = cupertino_theme_of(&cell, move |app| {
+            test_widgets(|tester| {
+                let theme = cupertino_theme_of(tester, move |app| {
                     ThemeData::builder()
                         .cupertino_override_theme(
                             CupertinoThemeData::new()
@@ -1093,9 +1082,8 @@ mod tests {
     #[test]
     fn cupertino_override_theme_overrides_properties_that_are_independent_of_material() {
         for use_material3 in [false, true] {
-            with_main_thread_stack(|| {
-                let cell = test_cell();
-                let theme = cupertino_theme_of(&cell, move |app| {
+            test_widgets(|tester| {
+                let theme = cupertino_theme_of(tester, move |app| {
                     ThemeData::builder()
                         .cupertino_override_theme(
                             CupertinoThemeData::new()
@@ -1122,8 +1110,7 @@ mod tests {
 
     #[test]
     fn changing_the_material_theme_rebuilds_cupertino_dependents() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let builds = Rc::new(Cell::new(0));
             let primary = Rc::new(Cell::new(None));
             let child = Builder::new({
@@ -1138,6 +1125,7 @@ mod tests {
                 }
             })
             .into_widget();
+            let cell = Rc::clone(&tester.cell);
             let build_theme = |color: Color| {
                 let data = ThemeData::builder()
                     .color_scheme(ColorScheme::light().with_primary(color))
@@ -1145,11 +1133,11 @@ mod tests {
                 Theme::new(data, child.clone()).into_widget()
             };
 
-            build(&cell, build_theme(Colors::RED.primary()));
+            tester.pump_widget(build_theme(Colors::RED.primary()));
             assert_eq!(builds.get(), 1);
             assert_eq!(primary.get(), Some(Colors::RED.primary()));
 
-            build(&cell, build_theme(Colors::ORANGE.primary()));
+            tester.pump_widget(build_theme(Colors::ORANGE.primary()));
             assert_eq!(builds.get(), 2);
             assert_eq!(primary.get(), Some(Colors::ORANGE.primary()));
         });
@@ -1157,12 +1145,11 @@ mod tests {
 
     #[test]
     fn cupertino_theme_data_does_not_override_the_material_icon_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let material_icon_color = Colors::BLUE.primary();
             let cupertino_icon_color = Colors::BLACK;
             let icon_color = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .icon_theme(IconThemeData::new().color(material_icon_color))
@@ -1183,7 +1170,6 @@ mod tests {
     /// Dart's `testTheme` over its `singletonThemeSubtree`: each call pumps `Theme(data:)` over
     /// the same subtree, which counts its builds and keeps the `CupertinoThemeData` it read.
     struct CupertinoThemeTester {
-        cell: Rc<AppCell>,
         build_count: Rc<Cell<usize>>,
         actual_theme: Rc<RefCell<Option<CupertinoThemeData>>>,
         singleton_theme_subtree: WidgetRef,
@@ -1204,19 +1190,20 @@ mod tests {
             })
             .into_widget();
             CupertinoThemeTester {
-                cell: test_cell(),
                 build_count,
                 actual_theme,
                 singleton_theme_subtree,
             }
         }
 
-        fn test_theme(&self, theme: impl FnOnce(&App) -> ThemeData) -> CupertinoThemeData {
-            let data = theme(&self.cell.borrow());
-            build(
-                &self.cell,
-                Theme::new(data, self.singleton_theme_subtree.clone()).into_widget(),
-            );
+        fn test_theme(
+            &self,
+            tester: &mut WidgetTester,
+            theme: impl FnOnce(&App) -> ThemeData,
+        ) -> CupertinoThemeData {
+            let data = theme(&tester.cell.borrow());
+            tester
+                .pump_widget(Theme::new(data, self.singleton_theme_subtree.clone()).into_widget());
             let actual_theme = self.actual_theme.borrow().clone();
             actual_theme.expect("the subtree built")
         }
@@ -1243,9 +1230,9 @@ mod tests {
 
     #[test]
     fn changing_cupertino_theme_override_triggers_rebuilds() {
-        with_main_thread_stack(|| {
-            let tester = CupertinoThemeTester::new();
-            let theme = tester.test_theme(|app| {
+        test_widgets(|tester| {
+            let subtree = CupertinoThemeTester::new();
+            let theme = subtree.test_theme(tester, |app| {
                 ThemeData::builder()
                     .primary_swatch(Colors::PURPLE)
                     .cupertino_override_theme(
@@ -1255,10 +1242,10 @@ mod tests {
                     )
                     .build(app)
             });
-            assert_eq!(tester.build_count(), 1);
+            assert_eq!(subtree.build_count(), 1);
             assert_eq!(theme.primary_color(), CupertinoColors::ACTIVE_ORANGE);
 
-            let theme = tester.test_theme(|app| {
+            let theme = subtree.test_theme(tester, |app| {
                 ThemeData::builder()
                     .primary_swatch(Colors::PURPLE)
                     .cupertino_override_theme(
@@ -1268,16 +1255,16 @@ mod tests {
                     )
                     .build(app)
             });
-            assert_eq!(tester.build_count(), 2);
+            assert_eq!(subtree.build_count(), 2);
             assert_eq!(theme.primary_color(), CupertinoColors::ACTIVE_GREEN);
         });
     }
 
     #[test]
     fn cupertino_theme_override_blocks_derivative_changes() {
-        with_main_thread_stack(|| {
-            let tester = CupertinoThemeTester::new();
-            let theme = tester.test_theme(|app| {
+        test_widgets(|tester| {
+            let subtree = CupertinoThemeTester::new();
+            let theme = subtree.test_theme(tester, |app| {
                 ThemeData::builder()
                     .primary_swatch(Colors::PURPLE)
                     .cupertino_override_theme(
@@ -1287,11 +1274,11 @@ mod tests {
                     )
                     .build(app)
             });
-            assert_eq!(tester.build_count(), 1);
+            assert_eq!(subtree.build_count(), 1);
             assert_eq!(theme.primary_color(), CupertinoColors::ACTIVE_ORANGE);
 
             // Change the upstream material primary color.
-            let theme = tester.test_theme(|app| {
+            let theme = subtree.test_theme(tester, |app| {
                 ThemeData::builder()
                     .primary_swatch(Colors::BLUE)
                     .cupertino_override_theme(
@@ -1302,7 +1289,7 @@ mod tests {
                     )
                     .build(app)
             });
-            assert_eq!(tester.build_count(), 2);
+            assert_eq!(subtree.build_count(), 2);
             assert_eq!(theme.primary_color(), CupertinoColors::SYSTEM_RED);
         });
     }
@@ -1311,9 +1298,9 @@ mod tests {
     fn cupertino_overrides_do_not_block_derivatives_triggering_rebuilds_when_derivatives_are_not_overridden()
      {
         for use_material3 in [false, true] {
-            with_main_thread_stack(|| {
-                let tester = CupertinoThemeTester::new();
-                let theme = tester.test_theme(|app| {
+            test_widgets(|tester| {
+                let subtree = CupertinoThemeTester::new();
+                let theme = subtree.test_theme(tester, |app| {
                     material_theme_with_primary(use_material3, Colors::PURPLE)
                         .cupertino_override_theme(
                             CupertinoThemeData::new()
@@ -1322,7 +1309,7 @@ mod tests {
                         )
                         .build(app)
                 });
-                assert_eq!(tester.build_count(), 1);
+                assert_eq!(subtree.build_count(), 1);
                 assert_eq!(
                     theme.text_theme().action_text_style().color,
                     Some(any(Colors::PURPLE.primary()))
@@ -1332,7 +1319,7 @@ mod tests {
                     CupertinoColors::DESTRUCTIVE_RED
                 );
 
-                let theme = tester.test_theme(|app| {
+                let theme = subtree.test_theme(tester, |app| {
                     material_theme_with_primary(use_material3, Colors::GREEN)
                         .cupertino_override_theme(
                             CupertinoThemeData::new()
@@ -1341,7 +1328,7 @@ mod tests {
                         )
                         .build(app)
                 });
-                assert_eq!(tester.build_count(), 2);
+                assert_eq!(subtree.build_count(), 2);
                 assert_eq!(
                     theme.text_theme().action_text_style().color,
                     Some(any(Colors::GREEN.primary()))
@@ -1357,9 +1344,9 @@ mod tests {
     #[test]
     fn copy_with_only_copies_the_overrides_not_the_material_or_cupertino_derivatives() {
         for use_material3 in [false, true] {
-            with_main_thread_stack(|| {
-                let tester = CupertinoThemeTester::new();
-                let original_theme = tester.test_theme(|app| {
+            test_widgets(|tester| {
+                let subtree = CupertinoThemeTester::new();
+                let original_theme = subtree.test_theme(tester, |app| {
                     material_theme_with_primary(use_material3, Colors::PURPLE)
                         .cupertino_override_theme(
                             CupertinoThemeData::new()
@@ -1373,7 +1360,7 @@ mod tests {
                     .copy_with()
                     .with_bar_background_color(CupertinoColors::DESTRUCTIVE_RED);
 
-                let theme = tester.test_theme(|app| {
+                let theme = subtree.test_theme(tester, |app| {
                     material_theme_with_primary(use_material3, Colors::BLUE)
                         .cupertino_override_theme(copied_theme.no_default())
                         .build(app)
@@ -1395,9 +1382,9 @@ mod tests {
     #[test]
     fn material_themes_with_no_cupertino_overrides_can_also_be_copy_with_ed() {
         for use_material3 in [false, true] {
-            with_main_thread_stack(|| {
-                let tester = CupertinoThemeTester::new();
-                let original_theme = tester.test_theme(|app| {
+            test_widgets(|tester| {
+                let subtree = CupertinoThemeTester::new();
+                let original_theme = subtree.test_theme(tester, |app| {
                     material_theme_with_primary(use_material3, Colors::PURPLE).build(app)
                 });
 
@@ -1405,7 +1392,7 @@ mod tests {
                     .copy_with()
                     .with_primary_contrasting_color(CupertinoColors::DESTRUCTIVE_RED);
 
-                let theme = tester.test_theme(|app| {
+                let theme = subtree.test_theme(tester, |app| {
                     material_theme_with_primary(use_material3, Colors::BLUE)
                         .cupertino_override_theme(copied_theme.no_default())
                         .build(app)
@@ -1422,10 +1409,9 @@ mod tests {
 
     #[test]
     fn material_based_cupertino_theme_data_resolves_from_the_material_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let (material, resolved) = probe(
-                &cell,
+                tester,
                 |_app, child| child,
                 |app, context| {
                     let material = Rc::new(ThemeData::dark(app, None));
@@ -1479,10 +1465,9 @@ mod tests {
 
     #[test]
     fn theme_provides_a_default_selection_style_from_its_text_selection_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let seen = probe(
-                &cell,
+                tester,
                 |app, child| {
                     let data = ThemeData::builder()
                         .text_selection_theme(
@@ -1507,10 +1492,9 @@ mod tests {
 
     #[test]
     fn theme_keeps_the_ambient_selection_style_where_its_text_selection_theme_is_unset() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let seen = probe(
-                &cell,
+                tester,
                 |app, child| {
                     let data = ThemeData::builder()
                         .text_selection_theme(
@@ -1537,10 +1521,9 @@ mod tests {
     #[test]
     fn material_based_cupertino_theme_data_takes_the_selection_handle_color_from_the_text_selection_theme()
      {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let (from_material, overridden) = probe(
-                &cell,
+                tester,
                 |_app, child| child,
                 |app, _context| {
                     let material = ThemeData::builder()
@@ -1566,9 +1549,7 @@ mod tests {
 
     #[test]
     fn cupertino_widgets_correctly_get_the_right_text_theme_in_dark_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = crate::test_support::WidgetTester::on(TargetPlatform::Android);
-            tester.install_fonts();
+        test_widgets(|tester| {
             let text_field_key = waft_widgets::GlobalKey::new();
             let theme = ThemeData::dark(&tester.cell.borrow(), None);
             tester.pump_widget(crate::test_support::material_app(
@@ -1579,7 +1560,7 @@ mod tests {
             ));
             tester.pump_and_settle();
 
-            let editable_text = tester.find_by_type::<waft_widgets::EditableText>();
+            let editable_text = find::by_type::<waft_widgets::EditableText>().evaluate(tester);
             assert_eq!(editable_text.len(), 1);
             let style_color = tester
                 .widget::<waft_widgets::EditableText, _>(editable_text[0], |editable_text| {

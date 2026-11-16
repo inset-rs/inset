@@ -816,6 +816,8 @@ mod tests {
         WidgetStateColor, WidgetStateMouseCursor, WidgetStateProperty,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::drawer::Drawer;
@@ -823,11 +825,11 @@ mod tests {
     use crate::list_tile::ListTile;
     use crate::list_tile::tests::{
         THIRTEEN_LINES, avatar, ink_tile_color, key_rect, m2, m3, placeholder, pump_app, sized,
-        style_color, test_icon, test_text, text_rect, tile_rect,
+        style_color, test_icon, test_text, tile_rect,
     };
     use crate::material::Material;
     use crate::scaffold::{Scaffold, ScaffoldState};
-    use crate::test_support::{AhemText, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
     /// Dart's `WidgetStateMouseCursor.clickable` as a `WidgetStateProperty<MouseCursor?>`.
@@ -890,9 +892,12 @@ mod tests {
     }
 
     /// The theme a `ListTileTheme` gives its subtree, read in a builder under it.
-    fn theme_under(theme: impl FnOnce(WidgetRef) -> ListTileTheme) -> ListTileThemeData {
+    fn theme_under(
+        tester: &mut WidgetTester,
+        theme: impl FnOnce(WidgetRef) -> ListTileTheme,
+    ) -> ListTileThemeData {
         let seen = Rc::new(RefCell::new(None));
-        pump_app(m3, |_app| {
+        pump_app(tester, m3, |_app| {
             let seen = Rc::clone(&seen);
             let probe = Builder::new(move |app, context| {
                 *seen.borrow_mut() = Some(ListTileTheme::of(app, context));
@@ -907,9 +912,9 @@ mod tests {
 
     #[test]
     fn list_tile_theme_backwards_compatibility_constructor() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let mouse_cursor = clickable();
-            let theme = theme_under(|child| {
+            let theme = theme_under(tester, |child| {
                 ListTileTheme::new(child)
                     .dense(true)
                     .shape(StadiumBorder::default())
@@ -958,8 +963,8 @@ mod tests {
 
     /// The tester of "ListTileTheme", and the colours its `TestIcon`s and `TestText`s and the
     /// theme its builder saw in the last frame.
-    struct ThemedCase {
-        tester: WidgetTester,
+    struct ThemedCase<'a> {
+        tester: &'a mut WidgetTester,
         leading: Rc<Cell<Option<Color>>>,
         trailing: Rc<Cell<Option<Color>>>,
         title: Rc<RefCell<Option<TextStyle>>>,
@@ -981,10 +986,10 @@ mod tests {
         text_color: Option<Color>,
     }
 
-    impl ThemedCase {
-        fn new() -> ThemedCase {
+    impl<'a> ThemedCase<'a> {
+        fn new(tester: &'a mut WidgetTester) -> ThemedCase<'a> {
             ThemedCase {
-                tester: crate::list_tile::tests::tester(),
+                tester,
                 leading: Rc::new(Cell::new(None)),
                 trailing: Rc::new(Cell::new(None)),
                 title: Rc::new(RefCell::new(None)),
@@ -1076,21 +1081,21 @@ mod tests {
     /// "ListTileTheme". `TestIcon` sits in a keyed box: Dart keys the icon itself.
     #[test]
     fn list_tile_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const GREEN: Color = Color::new(0xFF00FF00);
             const RED: Color = Color::new(0xFFFF0000);
             let rounded_shape = RoundedRectangleBorder {
                 border_radius: BorderRadius::all(Radius::circular(4.0)).into(),
                 ..RoundedRectangleBorder::default()
             };
-            let mut case = ThemedCase::new();
+            let mut case = ThemedCase::new(tester);
 
             // A selected ListTile's leading, trailing, and text get the primary color by default
             case.pump_frame(ThemedArgs {
                 selected: true,
                 ..ThemedArgs::default()
             });
-            case.tester.pump(Duration::from_millis(300)); // DefaultTextStyle changes animate
+            case.tester.pump_by(Duration::from_millis(300)); // DefaultTextStyle changes animate
             assert_eq!(case.colors(), [Some(case.theme().primary_color); 4]);
 
             // A selected ListTile's leading, trailing, and text get the ListTileTheme's selectedColor
@@ -1099,7 +1104,7 @@ mod tests {
                 selected_color: Some(GREEN),
                 ..ThemedArgs::default()
             });
-            case.tester.pump(Duration::from_millis(300)); // DefaultTextStyle changes animate
+            case.tester.pump_by(Duration::from_millis(300)); // DefaultTextStyle changes animate
             assert_eq!(case.colors(), [Some(GREEN); 4]);
 
             // An unselected ListTile's leading and trailing get the ListTileTheme's iconColor
@@ -1109,7 +1114,7 @@ mod tests {
                 text_color: Some(GREEN),
                 ..ThemedArgs::default()
             });
-            case.tester.pump(Duration::from_millis(300)); // DefaultTextStyle changes animate
+            case.tester.pump_by(Duration::from_millis(300)); // DefaultTextStyle changes animate
             assert_eq!(
                 case.colors(),
                 [Some(RED), Some(RED), Some(GREEN), Some(GREEN)]
@@ -1120,7 +1125,7 @@ mod tests {
                 enabled: Some(false),
                 ..ThemedArgs::default()
             });
-            case.tester.pump(Duration::from_millis(300)); // DefaultTextStyle changes animate
+            case.tester.pump_by(Duration::from_millis(300)); // DefaultTextStyle changes animate
             assert_eq!(case.colors(), [Some(case.theme().disabled_color); 4]);
 
             // If the item is disabled it's rendered with the theme's disabled color.
@@ -1130,7 +1135,7 @@ mod tests {
                 selected: true,
                 ..ThemedArgs::default()
             });
-            case.tester.pump(Duration::from_millis(300)); // DefaultTextStyle changes animate
+            case.tester.pump_by(Duration::from_millis(300)); // DefaultTextStyle changes animate
             assert_eq!(case.colors(), [Some(case.theme().disabled_color); 4]);
 
             // A selected ListTile's InkWell gets the ListTileTheme's shape
@@ -1139,7 +1144,7 @@ mod tests {
                 shape: Some(ShapeBorderRef::new(rounded_shape)),
                 ..ThemedArgs::default()
             });
-            let ink_well = case.tester.find_by_type::<InkWell>()[0];
+            let ink_well = case.tester.element(find::by_type::<InkWell>().at(0));
             let custom_border = case.tester.widget(ink_well, |ink_well: &InkWell| {
                 ink_well.ink_response.custom_border.clone()
             });
@@ -1150,8 +1155,8 @@ mod tests {
                 enabled: Some(false),
                 ..ThemedArgs::default()
             });
-            let list_tile = text_rect(&case.tester, "title").center();
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let list_tile = case.tester.get_rect(find::text("title")).center();
+            let mut gesture = TestPointer::mouse(1, 0);
             case.tester.add_pointer(&mut gesture, Offset::ZERO);
             case.tester.move_to(&mut gesture, list_tile, false);
             case.tester.pump_and_settle();
@@ -1160,14 +1165,14 @@ mod tests {
 
             // VisualDensity is respected
             assert_eq!(
-                key_rect(&case.tester, &case.list_tile_key).size(),
+                key_rect(case.tester, &case.list_tile_key).size(),
                 Size::new(800.0, 80.0)
             );
 
             // titleAlignment is respected.
-            let title_offset = text_rect(&case.tester, "title").top_left();
-            let leading_offset = key_rect(&case.tester, &case.leading_key).top_left();
-            let trailing_offset = key_rect(&case.tester, &case.trailing_key).top_right();
+            let title_offset = case.tester.get_rect(find::text("title")).top_left();
+            let leading_offset = key_rect(case.tester, &case.leading_key).top_left();
+            let trailing_offset = key_rect(case.tester, &case.trailing_key).top_right();
             assert_eq!(leading_offset.dy() - title_offset.dy(), 6.0);
             assert_eq!(trailing_offset.dy() - title_offset.dy(), 6.0);
         });
@@ -1175,15 +1180,15 @@ mod tests {
 
     #[test]
     fn list_tile_theme_colors_are_applied_to_leading_and_trailing_text_widgets() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let selected_color = Colors::ORANGE.primary();
             let default_color = Colors::BLACK;
-            let colors = |enabled: bool, selected: bool| {
+            let mut colors = |enabled: bool, selected: bool| {
                 let leading = Rc::new(RefCell::new(None));
                 let trailing = Rc::new(RefCell::new(None));
                 let title = Rc::new(RefCell::new(None));
                 let theme = Rc::new(RefCell::new(None));
-                let mut tester = pump_app(m3, |_app| {
+                pump_app(tester, m3, |_app| {
                     let (leading, trailing, title, theme) = (
                         Rc::clone(&leading),
                         Rc::clone(&trailing),
@@ -1243,10 +1248,14 @@ mod tests {
     }
 
     /// The default text styles of the four slots under `theme`, for `tile`.
-    fn slot_styles(theme: impl FnOnce(&App) -> ThemeData, tile: ListTile) -> [TextStyle; 4] {
+    fn slot_styles(
+        tester: &mut WidgetTester,
+        theme: impl FnOnce(&App) -> ThemeData,
+        tile: ListTile,
+    ) -> [TextStyle; 4] {
         let seen: [Rc<RefCell<Option<TextStyle>>>; 4] =
             std::array::from_fn(|_| Rc::new(RefCell::new(None)));
-        pump_app(theme, |_app| {
+        pump_app(tester, theme, |_app| {
             Material::new()
                 .child(
                     Center::new().child(
@@ -1279,13 +1288,14 @@ mod tests {
         )
     }
 
-    fn respects_theme_text_styles(use_material3: bool) {
+    fn respects_theme_text_styles(tester: &mut WidgetTester, use_material3: bool) {
         let (title, subtitle, leading_and_trailing) = case_styles();
         let theme_data = ListTileThemeData::new()
             .title_text_style(title.clone())
             .subtitle_text_style(subtitle.clone())
             .leading_and_trailing_text_style(leading_and_trailing.clone());
         let styles = slot_styles(
+            tester,
             move |app| {
                 ThemeData::builder()
                     .use_material3(use_material3)
@@ -1307,17 +1317,18 @@ mod tests {
 
     #[test]
     fn material3_list_tile_respects_list_tile_theme_text_styles() {
-        with_main_thread_stack(|| respects_theme_text_styles(true));
+        test_widgets(|tester| respects_theme_text_styles(tester, true));
     }
 
     #[test]
     fn material2_list_tile_respects_list_tile_theme_text_styles() {
-        with_main_thread_stack(|| respects_theme_text_styles(false));
+        test_widgets(|tester| respects_theme_text_styles(tester, false));
     }
 
-    fn theme_text_styles_are_overridden(use_material3: bool) {
+    fn theme_text_styles_are_overridden(tester: &mut WidgetTester, use_material3: bool) {
         let (title, subtitle, leading_and_trailing) = case_styles();
         let styles = slot_styles(
+            tester,
             move |app| {
                 ThemeData::builder()
                     .use_material3(use_material3)
@@ -1347,21 +1358,22 @@ mod tests {
 
     #[test]
     fn material3_list_tile_text_styles_are_overridden_by_list_tile_properties() {
-        with_main_thread_stack(|| theme_text_styles_are_overridden(true));
+        test_widgets(|tester| theme_text_styles_are_overridden(tester, true));
     }
 
     #[test]
     fn material2_list_tile_text_styles_are_overridden_by_list_tile_properties() {
-        with_main_thread_stack(|| theme_text_styles_are_overridden(false));
+        test_widgets(|tester| theme_text_styles_are_overridden(tester, false));
     }
 
     /// The colour of the first rect the material's ink features draw.
     fn tile_colors_before_and_after_tap(
+        tester: &mut WidgetTester,
         theme_data: ListTileThemeData,
         tile: impl Fn() -> ListTile + 'static,
     ) -> (Option<Color>, Option<Color>) {
         let is_selected = Rc::new(Cell::new(false));
-        let mut tester = pump_app(m3, move |_app| {
+        pump_app(tester, m3, move |_app| {
             Material::new()
                 .child(
                     ListTileTheme::new(Center::new().child(StatefulBuilder::new(
@@ -1381,24 +1393,24 @@ mod tests {
                 )
                 .into_widget()
         });
-        let before = ink_tile_color(&tester);
+        let before = ink_tile_color(tester);
         // Tap on tile to change isSelected.
-        let center = tile_rect(&tester, 0).center();
-        tester.tap(center, 1);
+        let center = tile_rect(tester, 0).center();
+        tester.tap_at(center, 1);
         tester.pump_and_settle();
-        (before, ink_tile_color(&tester))
+        (before, ink_tile_color(tester))
     }
 
     /// "ListTile respects ListTileTheme's tileColor & selectedTileColor": the colours are
     /// read from the tile's `Ink` decoration, whose rect Dart's `paints` matches.
     #[test]
     fn list_tile_respects_list_tile_theme_tile_color_and_selected_tile_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let theme = ListTileThemeData::new()
                 .tile_color(Colors::GREEN.shade500())
                 .selected_tile_color(Colors::RED.shade500());
             assert_eq!(
-                tile_colors_before_and_after_tap(theme, ListTile::new),
+                tile_colors_before_and_after_tap(tester, theme, ListTile::new),
                 (Some(Colors::GREEN.shade500()), Some(Colors::RED.shade500()))
             );
         });
@@ -1407,14 +1419,14 @@ mod tests {
     /// "ListTileTheme's tileColor & selectedTileColor are overridden by ListTile properties".
     #[test]
     fn list_tile_theme_tile_colors_are_overridden_by_list_tile_properties() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let tile_color = Colors::GREEN.shade500();
             let selected_tile_color = Colors::RED.shade500();
             let theme = ListTileThemeData::new()
                 .selected_tile_color(Colors::GREEN.primary())
                 .tile_color(Colors::RED.primary());
             assert_eq!(
-                tile_colors_before_and_after_tap(theme, move || {
+                tile_colors_before_and_after_tap(tester, theme, move || {
                     ListTile::new()
                         .tile_color(tile_color)
                         .selected_tile_color(selected_tile_color)
@@ -1439,7 +1451,7 @@ mod tests {
     /// "ListTile uses ListTileTheme shape in a drawer".
     #[test]
     fn list_tile_uses_list_tile_theme_shape_in_a_drawer() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // This is a regression test for https://github.com/flutter/flutter/issues/106303
 
             let scaffold_key = GlobalKey::new();
@@ -1448,7 +1460,8 @@ mod tests {
                 ..RoundedRectangleBorder::default()
             };
 
-            let mut tester = pump_app(
+            pump_app(
+                tester,
                 |app| {
                     ThemeData::builder()
                         .list_tile_theme(ListTileThemeData::new().shape(shape_border))
@@ -1469,11 +1482,11 @@ mod tests {
                 .expect("a mounted scaffold");
             scaffold_state.open_drawer(&mut tester.cell.borrow_mut());
             // Start drawer animation.
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            let list_tile = tester.find_by_type::<ListTile>()[0];
-            let ink_well = tester
-                .find_by_type::<InkWell>()
+            let list_tile = tester.element(find::by_type::<ListTile>().at(0));
+            let ink_well = find::by_type::<InkWell>()
+                .evaluate(tester)
                 .into_iter()
                 .find(|ink_well| tester.ancestors(*ink_well).contains(&list_tile))
                 .expect("the tile's InkWell");
@@ -1487,9 +1500,10 @@ mod tests {
 
     #[test]
     fn list_tile_respects_widget_state_color_list_tile_theme_text_color() {
-        with_main_thread_stack(|| {
-            let title_color = |enabled: bool, selected: bool| {
-                let mut tester = pump_app(
+        test_widgets(|tester| {
+            let mut title_color = |enabled: bool, selected: bool| {
+                pump_app(
+                    tester,
                     |app| {
                         ThemeData::builder()
                             .list_tile_theme(ListTileThemeData::new().text_color(state_color()))
@@ -1523,10 +1537,11 @@ mod tests {
 
     #[test]
     fn list_tile_respects_widget_state_color_list_tile_theme_icon_color() {
-        with_main_thread_stack(|| {
-            let icon_color = |enabled: bool, selected: bool| {
+        test_widgets(|tester| {
+            let mut icon_color = |enabled: bool, selected: bool| {
                 let seen = Rc::new(Cell::new(None));
-                let mut tester = pump_app(
+                pump_app(
+                    tester,
                     |app| {
                         ThemeData::builder()
                             .list_tile_theme(ListTileThemeData::new().icon_color(state_color()))
@@ -1638,10 +1653,11 @@ mod tests {
 
     #[test]
     fn list_tile_theme_title_alignment_is_overridden_by_list_tile_title_alignment() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let leading_key = GlobalKey::new();
             let trailing_key = GlobalKey::new();
-            let tester = pump_app(
+            pump_app(
+                tester,
                 |app| {
                     ThemeData::builder()
                         .list_tile_theme(
@@ -1657,17 +1673,17 @@ mod tests {
                                 ListTile::new()
                                     .title_alignment(ListTileTitleAlignment::Top)
                                     .leading(sized(&leading_key, 24.0, 24.0))
-                                    .title(AhemText::new("\nHeadline Text\n"))
-                                    .subtitle(AhemText::new("\nSupporting Text\n"))
+                                    .title(Text::new("\nHeadline Text\n"))
+                                    .subtitle(Text::new("\nSupporting Text\n"))
                                     .trailing(sized(&trailing_key, 24.0, 24.0)),
                             ),
                         )
                         .into_widget()
                 },
             );
-            let tile_offset = tile_rect(&tester, 0).top_left();
-            let leading_offset = key_rect(&tester, &leading_key).top_left();
-            let trailing_offset = key_rect(&tester, &trailing_key).top_right();
+            let tile_offset = tile_rect(tester, 0).top_left();
+            let leading_offset = key_rect(tester, &leading_key).top_left();
+            let trailing_offset = key_rect(tester, &trailing_key).top_right();
             assert_eq!(leading_offset.dy() - tile_offset.dy(), 8.0);
             assert_eq!(trailing_offset.dy() - tile_offset.dy(), 8.0);
         });
@@ -1675,11 +1691,12 @@ mod tests {
 
     #[test]
     fn list_tile_theme_merge_supports_all_properties() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let parent_mouse_cursor = textable();
             let mouse_cursor = clickable();
             let seen = Rc::new(RefCell::new(None));
-            let tester = pump_app(
+            pump_app(
+                tester,
                 {
                     let parent_mouse_cursor = Rc::clone(&parent_mouse_cursor);
                     move |app| {
@@ -1838,11 +1855,13 @@ mod tests {
     /// The rects of the two tiles of the `isThreeLine` cases, with their avatars and
     /// placeholders.
     fn rects(
+        tester: &mut WidgetTester,
         theme_data_is_three_line: Option<bool>,
         theme_is_three_line: Option<bool>,
     ) -> [Rect; 6] {
         let keys: [GlobalKey; 4] = std::array::from_fn(|_| GlobalKey::new());
-        let tester = pump_app(
+        crate::list_tile::tests::pump_unique_app(
+            tester,
             |app| {
                 let mut theme = ThemeData::builder();
                 if let Some(is_three_line) = theme_data_is_three_line {
@@ -1856,8 +1875,8 @@ mod tests {
                     ListTile::new()
                         .leading(avatar(avatar_key))
                         .trailing(placeholder(placeholder_key, 24.0, 24.0))
-                        .title(AhemText::new("A"))
-                        .subtitle(AhemText::new(subtitle))
+                        .title(Text::new("A"))
+                        .subtitle(Text::new(subtitle))
                         .into_widget()
                 };
                 let list = ListView::new().children([
@@ -1874,32 +1893,32 @@ mod tests {
             },
         );
         [
-            tile_rect(&tester, 0),
-            key_rect(&tester, &keys[0]),
-            key_rect(&tester, &keys[1]),
-            tile_rect(&tester, 1),
-            key_rect(&tester, &keys[2]),
-            key_rect(&tester, &keys[3]),
+            tile_rect(tester, 0),
+            key_rect(tester, &keys[0]),
+            key_rect(tester, &keys[1]),
+            tile_rect(tester, 1),
+            key_rect(tester, &keys[2]),
+            key_rect(tester, &keys[3]),
         ]
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/165453
     #[test]
     fn list_tile_theme_data_is_three_line() {
-        with_main_thread_stack(|| {
-            assert_eq!(rects(None, None), two_line());
-            assert_eq!(rects(Some(false), None), two_line());
-            assert_eq!(rects(Some(true), None), three_line());
+        test_widgets(|tester| {
+            assert_eq!(rects(tester, None, None), two_line());
+            assert_eq!(rects(tester, Some(false), None), two_line());
+            assert_eq!(rects(tester, Some(true), None), three_line());
         });
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/165453
     #[test]
     fn list_tile_theme_is_three_line() {
-        with_main_thread_stack(|| {
-            assert_eq!(rects(Some(true), Some(false)), two_line());
+        test_widgets(|tester| {
+            assert_eq!(rects(tester, Some(true), Some(false)), two_line());
             // THREE-LINE
-            assert_eq!(rects(None, Some(true)), three_line());
+            assert_eq!(rects(tester, None, Some(true)), three_line());
         });
     }
 }

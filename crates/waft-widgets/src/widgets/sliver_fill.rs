@@ -596,35 +596,36 @@ sliver_fill_remaining_widget!(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
     use waft_foundation::Ref;
 
     use waft_embedder::{Color, Offset, Rect, Size, TargetPlatform, TextDirection};
-    use waft_foundation::{App, Handle, Listener};
+    use waft_foundation::{Handle, Listener};
     use waft_painting::{AlignmentGeometry, AxisDirection, EdgeInsetsGeometry};
     use waft_rendering::{
-        AnyRenderBox, BoxConstraints, ContainerRenderObjectMixin, GrowthDirection, MainAxisSize,
+        AnyRenderSliver, BoxConstraints, ContainerRenderObjectMixin, GrowthDirection, MainAxisSize,
         RenderSliverFixedExtentList, RenderSliverMultiBoxAdaptor, ScrollCacheExtent,
         ScrollDirection, SliverMultiBoxAdaptorParentData,
     };
 
     use super::*;
     use crate::framework::GlobalKey;
+    use crate::testing::{
+        TargetPlatformVariant, WidgetTester, expect, find, finds_nothing, finds_one_widget,
+        test_widgets, test_widgets_variant,
+    };
     use crate::widgets::basic::{
         Align, Center, ColoredBox, Column, Directionality, Flexible, Padding, SizedBox,
         SliverToBoxAdapter,
     };
     use crate::widgets::gesture_detector::GestureDetector;
-    use crate::widgets::page_view::test_support::WidgetTester;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
     use crate::widgets::scroll_delegate::SliverChildListDelegate;
     use crate::widgets::scroll_view::CustomScrollView;
+    use crate::widgets::scrollable::Scrollable;
     use crate::widgets::sliver::SliverFixedExtentList;
+    use crate::widgets::text::Text;
 
     const DEBUG_RED: Color = Color::new(0xFFFF0000);
-
-    /// The center of the 800 x 600 view, where `find.byType(Scrollable)` puts a gesture.
-    const CENTER: Offset = Offset::new(400.0, 300.0);
 
     fn ltr<K>(child: impl IntoWidget<K>) -> WidgetRef {
         Directionality::new(TextDirection::Ltr, child).into_widget()
@@ -632,16 +633,11 @@ mod tests {
 
     // ---- sliver_fill_viewport_test.dart ----
 
-    /// The index of every child the fill viewport has laid out whose extent overlaps its paint
+    /// The index of every child the first `T` has laid out whose extent overlaps its paint
     /// region, as `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren` tests.
-    fn onstage_children(tester: &WidgetTester) -> Vec<i32> {
-        onstage_children_of::<RenderSliverFillViewport>(tester)
-    }
-
-    /// [`onstage_children`] of the first `T` in the tree.
     fn onstage_children_of<T: RenderSliverMultiBoxAdaptor>(tester: &WidgetTester) -> Vec<i32> {
         let fill = *tester
-            .render_objects::<T>()
+            .all::<T>()
             .first()
             .expect("a mounted sliver of the type");
         let app = tester.cell.borrow();
@@ -665,22 +661,30 @@ mod tests {
         onstage
     }
 
-    fn first_child_height(tester: &WidgetTester) -> f64 {
-        let fill = *tester
-            .render_objects::<RenderSliverFillViewport>()
-            .first()
-            .expect("a mounted sliver fill viewport");
-        let app = tester.cell.borrow();
-        fill.first_child(&app)
-            .expect("a laid out child")
-            .size(&app)
+    /// The sliver the first `SliverFillViewport` builds: Dart's
+    /// `tester.renderObject<RenderSliver>(find.byType(SliverFillViewport))`.
+    fn fill_viewport_sliver(tester: &WidgetTester) -> AnyRenderSliver {
+        tester
+            .render_object(find::by_type::<SliverFillViewport>())
+            .as_sliver()
+            .expect("the fill viewport builds a sliver")
+    }
+
+    /// Dart's `tester.renderObject<RenderBox>(find.byType(ColoredBox).first).size.height`.
+    fn first_colored_box_height(tester: &WidgetTester) -> f64 {
+        tester
+            .get_size(find::by_type::<ColoredBox>().first())
             .height()
     }
 
     fn fill_viewport_children(count: usize) -> SliverChildDelegateRef {
         SliverChildListDelegate::new(
             (0..count)
-                .map(|_| ColoredBox::new(Color::new(0xff00ff00)).into_widget())
+                .map(|i| {
+                    ColoredBox::new(Color::new(0xff00ff00))
+                        .child(Text::new(format!("{i}")).text_direction(TextDirection::Ltr))
+                        .into_widget()
+                })
                 .collect(),
         )
         .add_automatic_keep_alives(false)
@@ -690,130 +694,137 @@ mod tests {
 
     #[test]
     fn a_sliver_fill_viewport_sizes_each_child_to_the_viewport() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(CustomScrollView::new().slivers([
-            SliverFillViewport::new(fill_viewport_children(20)).into_widget(),
-        ])));
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(CustomScrollView::new().slivers([
+                SliverFillViewport::new(fill_viewport_children(20)).into_widget(),
+            ])));
 
-        assert_eq!(first_child_height(&tester), 600.0);
-        assert_eq!(onstage_children(&tester), vec![0]);
+            assert_eq!(first_colored_box_height(tester), 600.0);
 
-        tester.drag_from(CENTER, Offset::new(0.0, -700.0));
-        tester.pump(Duration::ZERO);
+            expect(tester, &find::text("0"), finds_one_widget());
+            expect(tester, &find::text("1"), finds_nothing());
+            expect(tester, &find::text("2"), finds_nothing());
 
-        assert_eq!(onstage_children(&tester), vec![1, 2]);
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -700.0));
+            tester.pump();
 
-        tester.drag_from(CENTER, Offset::new(0.0, 200.0));
-        tester.pump(Duration::ZERO);
+            expect(tester, &find::text("0"), finds_nothing());
+            expect(tester, &find::text("1"), finds_one_widget());
+            expect(tester, &find::text("2"), finds_one_widget());
+            expect(tester, &find::text("3"), finds_nothing());
+            expect(tester, &find::text("4"), finds_nothing());
 
-        assert_eq!(onstage_children(&tester), vec![0, 1]);
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, 200.0));
+            tester.pump();
 
-        tester.drag_from(CENTER, Offset::new(0.0, 700.0));
-        tester.pump(Duration::ZERO);
+            expect(tester, &find::text("0"), finds_one_widget());
+            expect(tester, &find::text("1"), finds_one_widget());
+            expect(tester, &find::text("2"), finds_nothing());
+            expect(tester, &find::text("3"), finds_nothing());
 
-        assert_eq!(first_child_height(&tester), 600.0);
-        assert_eq!(onstage_children(&tester), vec![0]);
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, 700.0));
+            tester.pump();
 
-        let padding = tester
-            .render_object_of::<SliverFillViewport>()
-            .as_sliver()
-            .expect("the fill viewport builds a sliver");
-        let fill = *tester
-            .render_objects::<RenderSliverFillViewport>()
-            .first()
-            .expect("a mounted sliver fill viewport");
-        let app = tester.cell.borrow();
-        // The padding and the fill viewport inside it get the same constraints and geometry.
-        for (constraints, geometry) in [
-            (padding.constraints(&app), padding.geometry(&app)),
-            (fill.constraints(&app), fill.geometry(&app)),
-        ] {
-            assert_eq!(constraints.axis_direction, AxisDirection::Down);
-            assert_eq!(constraints.growth_direction, GrowthDirection::Forward);
-            assert_eq!(constraints.user_scroll_direction, ScrollDirection::Idle);
-            assert_eq!(constraints.scroll_offset, 0.0);
-            assert_eq!(constraints.preceding_scroll_extent, 0.0);
-            assert_eq!(constraints.remaining_paint_extent, 600.0);
-            assert_eq!(constraints.cross_axis_extent, 800.0);
-            assert_eq!(constraints.cross_axis_direction, AxisDirection::Right);
-            assert_eq!(constraints.viewport_main_axis_extent, 600.0);
-            assert_eq!(constraints.remaining_cache_extent, 850.0);
-            assert_eq!(constraints.cache_origin, 0.0);
+            assert_eq!(first_colored_box_height(tester), 600.0);
 
-            assert_eq!(geometry.scroll_extent, 12000.0);
-            assert_eq!(geometry.paint_extent, 600.0);
-            assert_eq!(geometry.max_paint_extent, 12000.0);
-            assert!(geometry.has_visual_overflow);
-            assert_eq!(geometry.cache_extent, 850.0);
-        }
+            expect(tester, &find::text("0"), finds_one_widget());
+            expect(tester, &find::text("1"), finds_nothing());
+            expect(tester, &find::text("2"), finds_nothing());
+            expect(tester, &find::text("3"), finds_nothing());
 
-        // Currently live children: 0 to 1.
-        let mut live = Vec::new();
-        let mut child = fill.first_child(&app);
-        while let Some(current) = child {
-            live.push((
-                fill.index_of(&app, current),
-                current
-                    .as_object()
-                    .parent_data_of::<SliverMultiBoxAdaptorParentData>(&app)
-                    .layout_offset(),
-                current.constraints(&app),
-                current.size(&app),
-            ));
-            child = fill.child_after(&app, current);
-        }
-        let page = Size::new(800.0, 600.0);
-        assert_eq!(
-            live,
-            [
-                (0, Some(0.0), BoxConstraints::tight(page), page),
-                (1, Some(600.0), BoxConstraints::tight(page), page),
-            ]
-        );
+            let padding = fill_viewport_sliver(tester);
+            let fill = *tester
+                .all::<RenderSliverFillViewport>()
+                .first()
+                .expect("a mounted sliver fill viewport");
+            let app = tester.cell.borrow();
+            // The padding and the fill viewport inside it get the same constraints and geometry.
+            for (constraints, geometry) in [
+                (padding.constraints(&app), padding.geometry(&app)),
+                (fill.constraints(&app), fill.geometry(&app)),
+            ] {
+                assert_eq!(constraints.axis_direction, AxisDirection::Down);
+                assert_eq!(constraints.growth_direction, GrowthDirection::Forward);
+                assert_eq!(constraints.user_scroll_direction, ScrollDirection::Idle);
+                assert_eq!(constraints.scroll_offset, 0.0);
+                assert_eq!(constraints.preceding_scroll_extent, 0.0);
+                assert_eq!(constraints.remaining_paint_extent, 600.0);
+                assert_eq!(constraints.cross_axis_extent, 800.0);
+                assert_eq!(constraints.cross_axis_direction, AxisDirection::Right);
+                assert_eq!(constraints.viewport_main_axis_extent, 600.0);
+                assert_eq!(constraints.remaining_cache_extent, 850.0);
+                assert_eq!(constraints.cache_origin, 0.0);
+
+                assert_eq!(geometry.scroll_extent, 12000.0);
+                assert_eq!(geometry.paint_extent, 600.0);
+                assert_eq!(geometry.max_paint_extent, 12000.0);
+                assert!(geometry.has_visual_overflow);
+                assert_eq!(geometry.cache_extent, 850.0);
+            }
+
+            // Currently live children: 0 to 1.
+            let mut live = Vec::new();
+            let mut child = fill.first_child(&app);
+            while let Some(current) = child {
+                live.push((
+                    fill.index_of(&app, current),
+                    current
+                        .as_object()
+                        .parent_data_of::<SliverMultiBoxAdaptorParentData>(&app)
+                        .layout_offset(),
+                    current.constraints(&app),
+                    current.size(&app),
+                ));
+                child = fill.child_after(&app, current);
+            }
+            let page = Size::new(800.0, 600.0);
+            assert_eq!(
+                live,
+                [
+                    (0, Some(0.0), BoxConstraints::tight(page), page),
+                    (1, Some(600.0), BoxConstraints::tight(page), page),
+                ]
+            );
+        });
     }
 
     #[test]
     fn a_sliver_fill_viewport_pads_its_ends_by_its_viewport_fraction() {
-        let mut tester = WidgetTester::new();
-        let delegate = SliverChildListDelegate::new(vec![SizedBox::new().into_widget()])
-            .add_automatic_keep_alives(false)
-            .add_semantic_indexes(false)
-            .into_delegate();
+        test_widgets(|tester| {
+            let delegate = SliverChildListDelegate::new(vec![SizedBox::new().into_widget()])
+                .add_automatic_keep_alives(false)
+                .add_semantic_indexes(false)
+                .into_delegate();
 
-        tester.pump_widget(ltr(CustomScrollView::new().slivers([
-            SliverFillViewport::new(Rc::clone(&delegate))
-                .viewport_fraction(0.5)
-                .into_widget(),
-        ])));
+            tester.pump_widget(ltr(CustomScrollView::new().slivers([
+                SliverFillViewport::new(Rc::clone(&delegate))
+                    .viewport_fraction(0.5)
+                    .into_widget(),
+            ])));
 
-        let box_with_padding = tester
-            .render_object_of::<SliverFillViewport>()
-            .as_sliver()
-            .expect("a sliver");
-        assert_eq!(
-            box_with_padding
-                .geometry(&tester.cell.borrow())
-                .paint_extent,
-            600.0
-        );
+            let box_with_padding = fill_viewport_sliver(tester);
+            assert_eq!(
+                box_with_padding
+                    .geometry(&tester.cell.borrow())
+                    .paint_extent,
+                600.0
+            );
 
-        tester.pump_widget(ltr(CustomScrollView::new().slivers([
-            SliverFillViewport::new(delegate)
-                .pad_ends(false)
-                .viewport_fraction(0.5)
-                .into_widget(),
-        ])));
+            tester.pump_widget(ltr(CustomScrollView::new().slivers([
+                SliverFillViewport::new(delegate)
+                    .pad_ends(false)
+                    .viewport_fraction(0.5)
+                    .into_widget(),
+            ])));
 
-        let box_without_padding = tester
-            .render_object_of::<SliverFillViewport>()
-            .as_sliver()
-            .expect("a sliver");
-        assert_eq!(
-            box_without_padding
-                .geometry(&tester.cell.borrow())
-                .paint_extent,
-            300.0
-        );
+            let box_without_padding = fill_viewport_sliver(tester);
+            assert_eq!(
+                box_without_padding
+                    .geometry(&tester.cell.borrow())
+                    .paint_extent,
+                300.0
+            );
+        });
     }
 
     // ---- sliver_fill_remaining_test.dart ----
@@ -845,31 +856,9 @@ mod tests {
         ltr(scroll_view)
     }
 
-    fn size_of(tester: &WidgetTester, key: &GlobalKey) -> Size {
-        let app = tester.cell.borrow();
-        let context = key.current_context(&app).expect("a mounted key");
-        render_box(&app, context).size(&app)
-    }
-
-    fn rect_of(tester: &WidgetTester, key: &GlobalKey) -> Rect {
-        let app = tester.cell.borrow();
-        let context = key.current_context(&app).expect("a mounted key");
-        let render_box = render_box(&app, context);
-        let top_left = render_box.local_to_global(&app, Offset::ZERO, None);
-        let size = render_box.size(&app);
-        Rect::from_ltwh(top_left.dx(), top_left.dy(), size.width(), size.height())
-    }
-
-    fn render_box(app: &App, context: BuildContext) -> AnyRenderBox {
-        context
-            .render_object(app)
-            .and_then(|object| object.as_box())
-            .expect("a box")
-    }
-
     fn jump_to(tester: &mut WidgetTester, controller: Handle<ScrollController>, value: f64) {
         controller.jump_to(&mut tester.cell.borrow_mut(), value);
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     fn offset(tester: &WidgetTester, controller: Handle<ScrollController>) -> f64 {
@@ -878,71 +867,74 @@ mod tests {
 
     #[test]
     fn a_scroll_body_with_no_siblings_fills_the_viewport() {
-        let mut tester = WidgetTester::new();
-        let controller = ScrollController::default(&mut tester.cell.borrow_mut());
-        let key = GlobalKey::new();
-        tester.pump_widget(boilerplate(
-            vec![
-                SliverFillRemaining::new()
-                    .child(SizedBox::new().key(key.clone().into()))
-                    .into_widget(),
-            ],
-            Some(controller.clone()),
-            Axis::Vertical,
-        ));
-        assert_eq!(size_of(&tester, &key).height(), 600.0);
+        test_widgets(|tester| {
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let key = GlobalKey::new();
+            tester.pump_widget(boilerplate(
+                vec![
+                    SliverFillRemaining::new()
+                        .child(SizedBox::new().key(key.clone().into()))
+                        .into_widget(),
+                ],
+                Some(controller.clone()),
+                Axis::Vertical,
+            ));
+            assert_eq!(tester.get_size(&key).height(), 600.0);
 
-        for pixels in [50.0, -100.0, 0.0] {
-            jump_to(&mut tester, controller.handle(), pixels);
-            assert_eq!(size_of(&tester, &key).height(), 600.0, "at {pixels}");
-        }
+            for pixels in [50.0, -100.0, 0.0] {
+                jump_to(tester, controller.handle(), pixels);
+                assert_eq!(tester.get_size(&key).height(), 600.0, "at {pixels}");
+            }
+        });
     }
 
     #[test]
     fn a_scroll_body_with_one_sibling_fills_what_remains() {
-        let mut tester = WidgetTester::new();
-        let controller = ScrollController::default(&mut tester.cell.borrow_mut());
-        let key = GlobalKey::new();
-        tester.pump_widget(boilerplate(
-            vec![
-                SliverToBoxAdapter::new()
-                    .child(SizedBox::new().height(100.0))
-                    .into_widget(),
-                SliverFillRemaining::new()
-                    .child(SizedBox::new().key(key.clone().into()))
-                    .into_widget(),
-            ],
-            Some(controller.clone()),
-            Axis::Vertical,
-        ));
-        assert_eq!(size_of(&tester, &key).height(), 500.0);
+        test_widgets(|tester| {
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let key = GlobalKey::new();
+            tester.pump_widget(boilerplate(
+                vec![
+                    SliverToBoxAdapter::new()
+                        .child(SizedBox::new().height(100.0))
+                        .into_widget(),
+                    SliverFillRemaining::new()
+                        .child(SizedBox::new().key(key.clone().into()))
+                        .into_widget(),
+                ],
+                Some(controller.clone()),
+                Axis::Vertical,
+            ));
+            assert_eq!(tester.get_size(&key).height(), 500.0);
 
-        for (pixels, height) in [(50.0, 550.0), (-100.0, 400.0), (0.0, 500.0)] {
-            jump_to(&mut tester, controller.handle(), pixels);
-            assert_eq!(size_of(&tester, &key).height(), height, "at {pixels}");
-        }
+            for (pixels, height) in [(50.0, 550.0), (-100.0, 400.0), (0.0, 500.0)] {
+                jump_to(tester, controller.handle(), pixels);
+                assert_eq!(tester.get_size(&key).height(), height, "at {pixels}");
+            }
+        });
     }
 
     #[test]
     fn a_scroll_body_scrolls_beyond_the_viewport_extent() {
-        let mut tester = WidgetTester::new();
-        let controller = ScrollController::default(&mut tester.cell.borrow_mut());
-        let fill_key = GlobalKey::new();
-        tester.pump_widget(boilerplate(
-            vec![
-                sliver_box(),
-                SliverFillRemaining::new()
-                    .child(ColoredBox::new(DEBUG_RED).key(fill_key.clone().into()))
-                    .into_widget(),
-            ],
-            Some(controller.clone()),
-            Axis::Vertical,
-        ));
-        assert_eq!(offset(&tester, controller.handle()), 0.0);
-        controller.jump_to(&mut tester.cell.borrow_mut(), 150.0);
-        tester.settle();
-        assert_eq!(offset(&tester, controller.handle()), 150.0);
-        assert_eq!(rect_of(&tester, &fill_key).top, 0.0);
+        test_widgets(|tester| {
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let fill_key = GlobalKey::new();
+            tester.pump_widget(boilerplate(
+                vec![
+                    sliver_box(),
+                    SliverFillRemaining::new()
+                        .child(ColoredBox::new(DEBUG_RED).key(fill_key.clone().into()))
+                        .into_widget(),
+                ],
+                Some(controller.clone()),
+                Axis::Vertical,
+            ));
+            assert_eq!(offset(tester, controller.handle()), 0.0);
+            controller.jump_to(&mut tester.cell.borrow_mut(), 150.0);
+            tester.pump_and_settle();
+            assert_eq!(offset(tester, controller.handle()), 150.0);
+            assert_eq!(tester.get_rect(&fill_key).top, 0.0);
+        });
     }
 
     /// `has correct semantics when`: past the viewport, a scroll body inside the cache extent is
@@ -959,28 +951,29 @@ mod tests {
             // This sliver takes up entire viewport and leaves 0 remaining cacheExtent
             (VIEWPORT_HEIGHT + CACHE_EXTENT, 0.0),
         ] {
-            let mut tester = WidgetTester::new();
-            let key = GlobalKey::new();
-            tester.pump_widget(ltr(CustomScrollView::new()
-                .scroll_cache_extent(ScrollCacheExtent::Pixels(CACHE_EXTENT))
-                .slivers([
-                    SliverToBoxAdapter::new()
-                        .child(
-                            SizedBox::new()
-                                .width(150.0)
-                                .height(preceding_height)
-                                .child(ColoredBox::new(DEBUG_RED)),
-                        )
-                        .into_widget(),
-                    SliverFillRemaining::new()
-                        .child(SizedBox::new().key(key.clone().into()).height(100.0))
-                        .into_widget(),
-                ])));
-            assert_eq!(
-                size_of(&tester, &key).height(),
-                height,
-                "after {preceding_height}"
-            );
+            test_widgets(|tester| {
+                let key = GlobalKey::new();
+                tester.pump_widget(ltr(CustomScrollView::new()
+                    .scroll_cache_extent(ScrollCacheExtent::Pixels(CACHE_EXTENT))
+                    .slivers([
+                        SliverToBoxAdapter::new()
+                            .child(
+                                SizedBox::new()
+                                    .width(150.0)
+                                    .height(preceding_height)
+                                    .child(ColoredBox::new(DEBUG_RED)),
+                            )
+                            .into_widget(),
+                        SliverFillRemaining::new()
+                            .child(SizedBox::new().key(key.clone().into()).height(100.0))
+                            .into_widget(),
+                    ])));
+                assert_eq!(
+                    tester.get_size(&key).height(),
+                    height,
+                    "after {preceding_height}"
+                );
+            });
         }
     }
 
@@ -996,58 +989,61 @@ mod tests {
 
     #[test]
     fn a_body_that_does_not_scroll_does_not_extend_past_the_viewport() {
-        let mut tester = WidgetTester::new();
-        let controller = ScrollController::default(&mut tester.cell.borrow_mut());
-        tester.pump_widget(boilerplate(
-            without_scroll_body(ColoredBox::new(DEBUG_RED).into_widget()),
-            Some(controller.clone()),
-            Axis::Vertical,
-        ));
-        assert_eq!(offset(&tester, controller.handle()), 0.0);
-        controller.jump_to(&mut tester.cell.borrow_mut(), 150.0);
-        tester.settle();
-        assert_eq!(offset(&tester, controller.handle()), 0.0);
+        test_widgets(|tester| {
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            tester.pump_widget(boilerplate(
+                without_scroll_body(ColoredBox::new(DEBUG_RED).into_widget()),
+                Some(controller.clone()),
+                Axis::Vertical,
+            ));
+            assert_eq!(offset(tester, controller.handle()), 0.0);
+            controller.jump_to(&mut tester.cell.borrow_mut(), 150.0);
+            tester.pump_and_settle();
+            assert_eq!(offset(tester, controller.handle()), 0.0);
+        });
     }
 
     #[test]
     fn a_child_without_a_size_is_sized_by_the_extent() {
-        let mut tester = WidgetTester::new();
-        let fill_key = GlobalKey::new();
-        let slivers = || {
-            without_scroll_body(
-                ColoredBox::new(DEBUG_RED)
-                    .key(fill_key.clone().into())
-                    .into_widget(),
-            )
-        };
+        test_widgets(|tester| {
+            let fill_key = GlobalKey::new();
+            let slivers = || {
+                without_scroll_body(
+                    ColoredBox::new(DEBUG_RED)
+                        .key(fill_key.clone().into())
+                        .into_widget(),
+                )
+            };
 
-        tester.pump_widget(boilerplate(slivers(), None, Axis::Vertical));
-        assert_eq!(size_of(&tester, &fill_key).height(), 450.0);
+            tester.pump_widget(boilerplate(slivers(), None, Axis::Vertical));
+            assert_eq!(tester.get_size(&fill_key).height(), 450.0);
 
-        tester.pump_widget(boilerplate(slivers(), None, Axis::Horizontal));
-        assert_eq!(size_of(&tester, &fill_key).width(), 650.0);
+            tester.pump_widget(boilerplate(slivers(), None, Axis::Horizontal));
+            assert_eq!(tester.get_size(&fill_key).width(), 650.0);
+        });
     }
 
     #[test]
     fn the_extent_is_overridden_by_a_larger_child() {
-        let mut tester = WidgetTester::new();
-        let key = GlobalKey::new();
-        let slivers = || {
-            without_scroll_body(
-                SizedBox::new()
-                    .key(key.clone().into())
-                    .width(1000.0)
-                    .height(600.0)
-                    .child(ColoredBox::new(DEBUG_RED))
-                    .into_widget(),
-            )
-        };
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let slivers = || {
+                without_scroll_body(
+                    SizedBox::new()
+                        .key(key.clone().into())
+                        .width(1000.0)
+                        .height(600.0)
+                        .child(ColoredBox::new(DEBUG_RED))
+                        .into_widget(),
+                )
+            };
 
-        tester.pump_widget(boilerplate(slivers(), None, Axis::Vertical));
-        assert_eq!(size_of(&tester, &key).height(), 600.0);
+            tester.pump_widget(boilerplate(slivers(), None, Axis::Vertical));
+            assert_eq!(tester.get_size(&key).height(), 600.0);
 
-        tester.pump_widget(boilerplate(slivers(), None, Axis::Horizontal));
-        assert_eq!(size_of(&tester, &key).width(), 1000.0);
+            tester.pump_widget(boilerplate(slivers(), None, Axis::Horizontal));
+            assert_eq!(tester.get_size(&key).width(), 1000.0);
+        });
     }
 
     /// The test file's `_sizedTestButton`: a box the size of Material's default elevated button
@@ -1125,47 +1121,50 @@ mod tests {
 
     #[test]
     fn a_child_with_a_smaller_size_is_sized_by_the_extent() {
-        let mut tester = WidgetTester::new();
-        let (key, button) = (GlobalKey::new(), GlobalKey::new());
-        let slivers =
-            || without_scroll_body(bottom_center_button(TargetPlatform::Android, &key, &button));
+        test_widgets(|tester| {
+            let (key, button) = (GlobalKey::new(), GlobalKey::new());
+            let slivers = || {
+                without_scroll_body(bottom_center_button(TargetPlatform::Android, &key, &button))
+            };
 
-        tester.pump_widget(boilerplate(slivers(), None, Axis::Vertical));
-        assert_eq!(size_of(&tester, &key).height(), 450.0);
+            tester.pump_widget(boilerplate(slivers(), None, Axis::Vertical));
+            assert_eq!(tester.get_size(&key).height(), 450.0);
 
-        // Also check that the button alignment is true to expectations
-        let button_rect = rect_of(&tester, &button);
-        assert_eq!(button_rect.bottom, 600.0);
-        assert_eq!(button_rect.center().dx(), 400.0);
+            // Also check that the button alignment is true to expectations
+            let button_rect = tester.get_rect(&button);
+            assert_eq!(button_rect.bottom, 600.0);
+            assert_eq!(button_rect.center().dx(), 400.0);
 
-        // Check Axis.horizontal
-        tester.pump_widget(boilerplate(slivers(), None, Axis::Horizontal));
-        assert_eq!(size_of(&tester, &key).width(), 650.0);
+            // Check Axis.horizontal
+            tester.pump_widget(boilerplate(slivers(), None, Axis::Horizontal));
+            assert_eq!(tester.get_size(&key).width(), 650.0);
+        });
     }
 
     #[test]
     fn the_extent_is_the_childs_once_the_preceding_slivers_pass_the_viewport() {
-        let mut tester = WidgetTester::new();
-        let (key, button) = (GlobalKey::new(), GlobalKey::new());
-        tester.pump_widget(boilerplate(
-            vec![
-                five_fixed_extent_items(),
-                fill_without_scroll_body(
-                    false,
-                    padded_center_button(TargetPlatform::Android, &key, &button),
-                ),
-            ],
-            None,
-            Axis::Vertical,
-        ));
-        tester.drag_from(CENTER, Offset::new(0.0, -750.0));
-        tester.pump(Duration::ZERO);
-        assert_eq!(size_of(&tester, &key).height(), 148.0);
+        test_widgets(|tester| {
+            let (key, button) = (GlobalKey::new(), GlobalKey::new());
+            tester.pump_widget(boilerplate(
+                vec![
+                    five_fixed_extent_items(),
+                    fill_without_scroll_body(
+                        false,
+                        padded_center_button(TargetPlatform::Android, &key, &button),
+                    ),
+                ],
+                None,
+                Axis::Vertical,
+            ));
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -750.0));
+            tester.pump();
+            assert_eq!(tester.get_size(&key).height(), 148.0);
 
-        // Also check that the button alignment is true to expectations
-        let button_rect = rect_of(&tester, &button);
-        assert_eq!(button_rect.bottom, 550.0);
-        assert_eq!(button_rect.center().dx(), 400.0);
+            // Also check that the button alignment is true to expectations
+            let button_rect = tester.get_rect(&button);
+            assert_eq!(button_rect.bottom, 550.0);
+            assert_eq!(button_rect.center().dx(), 400.0);
+        });
     }
 
     /// The column of `alignment with a flexible works`: a flexible, centered 100 x 100 logo above
@@ -1198,78 +1197,75 @@ mod tests {
     /// places as the scroll view overscrolls.
     #[test]
     fn a_flexible_child_keeps_its_alignment() {
-        for platform in IOS_AND_MACOS {
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let density_vertical = if platform == TargetPlatform::MacOS {
                 -2.0
             } else {
                 0.0
             };
-            let mut tester = WidgetTester::on(platform);
             let (key, logo, button) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
             tester.pump_widget(boilerplate(
                 without_scroll_body(flexible_logo_and_button(platform, &key, &logo, &button)),
                 None,
                 Axis::Vertical,
             ));
-            assert_eq!(size_of(&tester, &key).height(), 450.0, "{platform:?}");
+            assert_eq!(tester.get_size(&key).height(), 450.0, "{platform:?}");
 
             // Check that the logo alignment is true to expectations
             assert_eq!(
-                size_of(&tester, &logo),
+                tester.get_size(&logo),
                 Size::new(100.0, 100.0),
                 "{platform:?}"
             );
             assert_eq!(
-                rect_of(&tester, &logo).center(),
+                tester.get_rect(&logo).center(),
                 Offset::new(400.0, 351.0 - density_vertical * 2.0),
                 "{platform:?}"
             );
 
             // Also check that the button alignment is true to expectations
             assert_eq!(
-                size_of(&tester, &button),
+                tester.get_size(&button),
                 Size::new(116.0, 48.0 + density_vertical * 4.0),
                 "{platform:?}"
             );
-            let button_rect = rect_of(&tester, &button);
+            let button_rect = tester.get_rect(&button);
             assert_eq!(button_rect.bottom, 600.0, "{platform:?}");
             assert_eq!(button_rect.center().dx(), 400.0, "{platform:?}");
 
             // Overscroll and see that alignment and size is maintained
-            tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(size_of(&tester, &key).height(), 450.0, "{platform:?}");
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            assert_eq!(tester.get_size(&key).height(), 450.0, "{platform:?}");
             assert_eq!(
-                size_of(&tester, &logo),
+                tester.get_size(&logo),
                 Size::new(100.0, 100.0),
                 "{platform:?}"
             );
-            assert!(
-                rect_of(&tester, &logo).center().dy() < 351.0,
-                "{platform:?}"
-            );
+            assert!(tester.get_rect(&logo).center().dy() < 351.0, "{platform:?}");
             assert_eq!(
-                size_of(&tester, &button),
+                tester.get_size(&button),
                 Size::new(116.0, 48.0 + density_vertical * 4.0),
                 "{platform:?}"
             );
-            let button_rect = rect_of(&tester, &button);
+            let button_rect = tester.get_rect(&button);
             assert!(button_rect.bottom < 600.0, "{platform:?}");
             assert_eq!(button_rect.center().dx(), 400.0, "{platform:?}");
-        }
+        });
     }
 
     /// `alignment with a flexible works with fillOverscroll`: the logo stays centered in the
     /// column as it stretches into the overscroll, and the button stays at the bottom.
     #[test]
     fn a_flexible_child_keeps_its_alignment_as_it_fills_the_overscroll() {
-        for platform in IOS_AND_MACOS {
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let density_vertical = if platform == TargetPlatform::MacOS {
                 -2.0
             } else {
                 0.0
             };
-            let mut tester = WidgetTester::on(platform);
             let (key, logo, button) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
             tester.pump_widget(boilerplate(
                 vec![
@@ -1283,61 +1279,58 @@ mod tests {
                 Axis::Vertical,
             ));
             let assert_at_rest = |tester: &WidgetTester| {
-                assert_eq!(size_of(tester, &key).height(), 450.0, "{platform:?}");
+                assert_eq!(tester.get_size(&key).height(), 450.0, "{platform:?}");
 
                 // Check that the logo alignment is true to expectations.
                 assert_eq!(
-                    size_of(tester, &logo),
+                    tester.get_size(&logo),
                     Size::new(100.0, 100.0),
                     "{platform:?}"
                 );
                 assert_eq!(
-                    rect_of(tester, &logo).center(),
+                    tester.get_rect(&logo).center(),
                     Offset::new(400.0, 351.0 - density_vertical * 2.0),
                     "{platform:?}"
                 );
 
                 // Also check that the button alignment is true to expectations.
                 assert_eq!(
-                    size_of(tester, &button),
+                    tester.get_size(&button),
                     Size::new(116.0, 48.0 + density_vertical * 4.0),
                     "{platform:?}"
                 );
-                let button_rect = rect_of(tester, &button);
+                let button_rect = tester.get_rect(&button);
                 assert_eq!(button_rect.bottom, 600.0, "{platform:?}");
                 assert_eq!(button_rect.center().dx(), 400.0, "{platform:?}");
             };
-            assert_at_rest(&tester);
+            assert_at_rest(tester);
 
             // Overscroll and see that logo alignment shifts to maintain center as
             // container stretches with overscroll, button remains aligned at the
             // bottom.
-            tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-            tester.pump(Duration::ZERO);
-            assert!(size_of(&tester, &key).height() > 450.0, "{platform:?}");
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            assert!(tester.get_size(&key).height() > 450.0, "{platform:?}");
             assert_eq!(
-                size_of(&tester, &logo),
+                tester.get_size(&logo),
                 Size::new(100.0, 100.0),
                 "{platform:?}"
             );
-            assert!(
-                rect_of(&tester, &logo).center().dy() < 351.0,
-                "{platform:?}"
-            );
+            assert!(tester.get_rect(&logo).center().dy() < 351.0, "{platform:?}");
             assert_eq!(
-                size_of(&tester, &button),
+                tester.get_size(&button),
                 Size::new(116.0, 48.0 + density_vertical * 4.0),
                 "{platform:?}"
             );
-            let button_rect = rect_of(&tester, &button);
+            let button_rect = tester.get_rect(&button);
             assert_eq!(button_rect.bottom, 600.0, "{platform:?}");
             assert_eq!(button_rect.center().dx(), 400.0, "{platform:?}");
 
             // Ensure overscroll retracts to original position when gesture is
             // released.
-            tester.settle();
-            assert_at_rest(&tester);
-        }
+            tester.pump_and_settle();
+            assert_at_rest(tester);
+        });
     }
 
     fn overscrolling_slivers(fill_key: &GlobalKey, with_box: bool) -> Vec<WidgetRef> {
@@ -1356,35 +1349,37 @@ mod tests {
     }
 
     /// `TargetPlatformVariant(<TargetPlatform>{TargetPlatform.iOS, TargetPlatform.macOS})`.
-    const IOS_AND_MACOS: [TargetPlatform; 2] = [TargetPlatform::IOS, TargetPlatform::MacOS];
+    fn ios_and_macos() -> TargetPlatformVariant {
+        TargetPlatformVariant::new([TargetPlatform::IOS, TargetPlatform::MacOS])
+    }
 
     #[test]
     fn a_child_without_a_size_is_sized_by_the_extent_and_the_overscroll() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = WidgetTester::on(platform);
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let fill_key = GlobalKey::new();
             tester.pump_widget(boilerplate(
                 overscrolling_slivers(&fill_key, true),
                 None,
                 Axis::Vertical,
             ));
-            assert_eq!(size_of(&tester, &fill_key).height(), 450.0, "{platform:?}");
+            assert_eq!(tester.get_size(&fill_key).height(), 450.0, "{platform:?}");
 
             // Overscroll and check size
-            tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-            tester.pump(Duration::ZERO);
-            assert!(size_of(&tester, &fill_key).height() > 450.0, "{platform:?}");
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            assert!(tester.get_size(&fill_key).height() > 450.0, "{platform:?}");
 
             // Ensure overscroll retracts to original size after releasing gesture
-            tester.settle();
-            assert_eq!(size_of(&tester, &fill_key).height(), 450.0, "{platform:?}");
-        }
+            tester.pump_and_settle();
+            assert_eq!(tester.get_size(&fill_key).height(), 450.0, "{platform:?}");
+        });
     }
 
     #[test]
     fn a_child_stretches_into_overscroll_that_exceeds_the_preceding_extent() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = WidgetTester::on(platform);
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             let fill_key = GlobalKey::new();
             tester.pump_widget(boilerplate(
@@ -1393,32 +1388,32 @@ mod tests {
                 Axis::Vertical,
             ));
             assert_eq!(
-                rect_of(&tester, &fill_key),
+                tester.get_rect(&fill_key),
                 Rect::from_ltrb(0.0, 150.0, 800.0, 600.0),
                 "{platform:?}"
             );
 
             // Overscroll by 200: the preceding box frees up 150 of paint room
             // and the remaining 50 become this sliver's scrollOffset.
-            jump_to(&mut tester, controller.handle(), 200.0);
+            jump_to(tester, controller.handle(), 200.0);
 
-            let rect = rect_of(&tester, &fill_key);
+            let rect = tester.get_rect(&fill_key);
             assert_eq!(rect.bottom, 600.0, "{platform:?}");
             assert_eq!(rect.height(), 650.0, "{platform:?}");
 
-            jump_to(&mut tester, controller.handle(), 0.0);
+            jump_to(tester, controller.handle(), 0.0);
             assert_eq!(
-                rect_of(&tester, &fill_key),
+                tester.get_rect(&fill_key),
                 Rect::from_ltrb(0.0, 150.0, 800.0, 600.0),
                 "{platform:?}"
             );
-        }
+        });
     }
 
     #[test]
     fn a_lone_child_stretches_to_cover_the_whole_overscroll() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = WidgetTester::on(platform);
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             let fill_key = GlobalKey::new();
             tester.pump_widget(boilerplate(
@@ -1427,47 +1422,48 @@ mod tests {
                 Axis::Vertical,
             ));
             assert_eq!(
-                rect_of(&tester, &fill_key),
+                tester.get_rect(&fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, controller.handle(), 50.0);
+            jump_to(tester, controller.handle(), 50.0);
 
-            let rect = rect_of(&tester, &fill_key);
+            let rect = tester.get_rect(&fill_key);
             assert_eq!(rect.bottom, 600.0, "{platform:?}");
             assert_eq!(rect.height(), 650.0, "{platform:?}");
 
-            jump_to(&mut tester, controller.handle(), 0.0);
+            jump_to(tester, controller.handle(), 0.0);
             assert_eq!(
-                rect_of(&tester, &fill_key),
+                tester.get_rect(&fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
                 "{platform:?}"
             );
-        }
+        });
     }
 
     #[test]
     fn fill_overscroll_is_ignored_where_scrolling_clamps() {
-        let mut tester = WidgetTester::new();
-        let fill_key = GlobalKey::new();
-        tester.pump_widget(boilerplate(
-            vec![
-                sliver_box(),
-                SliverFillRemaining::new()
-                    .has_scroll_body(false)
-                    .fill_overscroll(true)
-                    .child(ColoredBox::new(DEBUG_RED).key(fill_key.clone().into()))
-                    .into_widget(),
-            ],
-            None,
-            Axis::Vertical,
-        ));
-        assert_eq!(size_of(&tester, &fill_key).height(), 450.0);
+        test_widgets(|tester| {
+            let fill_key = GlobalKey::new();
+            tester.pump_widget(boilerplate(
+                vec![
+                    sliver_box(),
+                    SliverFillRemaining::new()
+                        .has_scroll_body(false)
+                        .fill_overscroll(true)
+                        .child(ColoredBox::new(DEBUG_RED).key(fill_key.clone().into()))
+                        .into_widget(),
+                ],
+                None,
+                Axis::Vertical,
+            ));
+            assert_eq!(tester.get_size(&fill_key).height(), 450.0);
 
-        tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-        tester.pump(Duration::ZERO);
-        assert_eq!(size_of(&tester, &fill_key).height(), 450.0);
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            assert_eq!(tester.get_size(&fill_key).height(), 450.0);
+        });
     }
     /// A lone stretching child in a reversed scroll view, with a tap target that answers
     /// whether a hit test at a point reaches it.
@@ -1496,8 +1492,8 @@ mod tests {
 
     #[test]
     fn a_child_in_a_reversed_scroll_view_stretches_towards_the_leading_edge() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = WidgetTester::on(platform);
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             let fill_key = GlobalKey::new();
             let taps = Rc::new(std::cell::Cell::new(0));
@@ -1508,34 +1504,33 @@ mod tests {
                 &taps,
             ));
             assert_eq!(
-                rect_of(&tester, &fill_key),
+                tester.get_rect(&fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, controller.handle(), 50.0);
+            jump_to(tester, controller.handle(), 50.0);
 
-            let rect = rect_of(&tester, &fill_key);
+            let rect = tester.get_rect(&fill_key);
             assert_eq!(rect.top, 0.0, "{platform:?}");
             assert_eq!(rect.height(), 650.0, "{platform:?}");
             // `hitTestOnBinding(Offset(400.0, 25.0))` reaches the stretched child.
-            let gesture = tester.start_gesture(Offset::new(400.0, 25.0));
-            tester.up(gesture);
+            tester.tap_at(Offset::new(400.0, 25.0), 1);
             assert_eq!(taps.get(), 1, "{platform:?}");
 
-            jump_to(&mut tester, controller.handle(), 0.0);
+            jump_to(tester, controller.handle(), 0.0);
             assert_eq!(
-                rect_of(&tester, &fill_key),
+                tester.get_rect(&fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
                 "{platform:?}"
             );
-        }
+        });
     }
 
     #[test]
     fn a_child_in_a_reversed_horizontal_scroll_view_stretches_towards_the_leading_edge() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = WidgetTester::on(platform);
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             let fill_key = GlobalKey::new();
             let taps = Rc::new(std::cell::Cell::new(0));
@@ -1546,30 +1541,30 @@ mod tests {
                 &taps,
             ));
             assert_eq!(
-                rect_of(&tester, &fill_key),
+                tester.get_rect(&fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, controller.handle(), 50.0);
+            jump_to(tester, controller.handle(), 50.0);
 
-            let rect = rect_of(&tester, &fill_key);
+            let rect = tester.get_rect(&fill_key);
             assert_eq!(rect.left, 0.0, "{platform:?}");
             assert_eq!(rect.width(), 850.0, "{platform:?}");
 
-            jump_to(&mut tester, controller.handle(), 0.0);
+            jump_to(tester, controller.handle(), 0.0);
             assert_eq!(
-                rect_of(&tester, &fill_key),
+                tester.get_rect(&fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
                 "{platform:?}"
             );
-        }
+        });
     }
 
     #[test]
     fn a_child_with_a_smaller_size_stretches_by_the_extent_and_the_overscroll() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = WidgetTester::on(platform);
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let (key, button) = (GlobalKey::new(), GlobalKey::new());
             tester.pump_widget(boilerplate(
                 vec![
@@ -1579,32 +1574,32 @@ mod tests {
                 None,
                 Axis::Vertical,
             ));
-            assert_eq!(size_of(&tester, &key).height(), 450.0, "{platform:?}");
+            assert_eq!(tester.get_size(&key).height(), 450.0, "{platform:?}");
 
-            tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-            tester.pump(Duration::ZERO);
-            assert!(size_of(&tester, &key).height() > 450.0, "{platform:?}");
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            assert!(tester.get_size(&key).height() > 450.0, "{platform:?}");
 
             // Also check that the button alignment is true to expectations
-            let button_rect = rect_of(&tester, &button);
+            let button_rect = tester.get_rect(&button);
             assert_eq!(button_rect.bottom, 600.0, "{platform:?}");
             assert_eq!(button_rect.center().dx(), 400.0, "{platform:?}");
 
             // Ensure overscroll retracts to original size after releasing gesture
-            tester.settle();
-            assert_eq!(size_of(&tester, &key).height(), 450.0, "{platform:?}");
-        }
+            tester.pump_and_settle();
+            assert_eq!(tester.get_size(&key).height(), 450.0, "{platform:?}");
+        });
     }
 
     #[test]
     fn a_child_larger_than_the_extent_stretches_into_the_overscroll() {
-        for platform in IOS_AND_MACOS {
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let density_vertical = if platform == TargetPlatform::MacOS {
                 -2.0
             } else {
                 0.0
             };
-            let mut tester = WidgetTester::on(platform);
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             let (key, button) = (GlobalKey::new(), GlobalKey::new());
             tester.pump_widget(boilerplate(
@@ -1617,50 +1612,41 @@ mod tests {
             ));
 
             // Scroll to the end
-            jump_to_max_scroll_extent(&mut tester, controller.handle());
+            jump_to_max_scroll_extent(tester, controller.handle());
             assert_eq!(
-                size_of(&tester, &key).height(),
+                tester.get_size(&key).height(),
                 148.0 + density_vertical * 4.0,
                 "{platform:?}"
             );
             // Check that the button alignment is true to expectations
-            let button_rect = rect_of(&tester, &button);
+            let button_rect = tester.get_rect(&button);
             assert_eq!(button_rect.bottom, 550.0, "{platform:?}");
             assert_eq!(button_rect.center().dx(), 400.0, "{platform:?}");
 
             // Overscroll and check size
-            tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-            tester.pump(Duration::ZERO);
-            assert!(size_of(&tester, &key).height() > 148.0, "{platform:?}");
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            assert!(tester.get_size(&key).height() > 148.0, "{platform:?}");
 
             // Check that the button alignment is true to expectations
-            let button_rect = rect_of(&tester, &button);
+            let button_rect = tester.get_rect(&button);
             assert!(button_rect.bottom < 550.0, "{platform:?}");
             assert_eq!(button_rect.center().dx(), 400.0, "{platform:?}");
 
             // Ensure overscroll retracts to original size after releasing gesture
-            tester.settle();
+            tester.pump_and_settle();
             assert_eq!(
-                size_of(&tester, &key).height(),
+                tester.get_size(&key).height(),
                 148.0 + density_vertical * 4.0,
                 "{platform:?}"
             );
-        }
-    }
-
-    /// Whether the stretching fill sliver paints: `find.byKey` on its child skips it offstage.
-    fn fill_is_onstage(tester: &WidgetTester) -> bool {
-        let fill = *tester
-            .render_objects::<RenderSliverFillRemainingAndOverscroll>()
-            .first()
-            .expect("a mounted stretching fill");
-        fill.geometry(&tester.cell.borrow()).visible
+        });
     }
 
     #[test]
     fn a_child_without_a_size_past_the_viewport_shows_only_in_the_overscroll() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = WidgetTester::on(platform);
+        test_widgets_variant(ios_and_macos(), |tester| {
+            let platform = tester.target_platform();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             let key = GlobalKey::new();
             tester.pump_widget(boilerplate(
@@ -1676,25 +1662,25 @@ mod tests {
                 Some(controller.clone()),
                 Axis::Vertical,
             ));
-            assert!(!fill_is_onstage(&tester), "{platform:?}");
-            assert!(!fixed_extent_item_is_onstage(&tester, 4), "{platform:?}");
+            expect(tester, &find::by_global_key(&key), finds_nothing());
+            assert!(!fixed_extent_item_is_onstage(tester, 4), "{platform:?}");
 
             // Scroll to bottom
-            jump_to_max_scroll_extent(&mut tester, controller.handle());
+            jump_to_max_scroll_extent(tester, controller.handle());
             // End of list
-            assert!(!fill_is_onstage(&tester), "{platform:?}");
-            assert!(fixed_extent_item_is_onstage(&tester, 4), "{platform:?}");
+            expect(tester, &find::by_global_key(&key), finds_nothing());
+            assert!(fixed_extent_item_is_onstage(tester, 4), "{platform:?}");
 
             // Overscroll
-            tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-            tester.pump(Duration::ZERO);
-            assert!(fill_is_onstage(&tester), "{platform:?}");
-            assert!(fixed_extent_item_is_onstage(&tester, 4), "{platform:?}");
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            expect(tester, &find::by_global_key(&key), finds_one_widget());
+            assert!(fixed_extent_item_is_onstage(tester, 4), "{platform:?}");
 
-            tester.settle();
-            assert!(!fill_is_onstage(&tester), "{platform:?}");
-            assert!(fixed_extent_item_is_onstage(&tester, 4), "{platform:?}");
-        }
+            tester.pump_and_settle();
+            expect(tester, &find::by_global_key(&key), finds_nothing());
+            assert!(fixed_extent_item_is_onstage(tester, 4), "{platform:?}");
+        });
     }
 
     /// Whether the fixed extent list's item `index` is onstage: `find.bySemanticsLabel` finds
@@ -1705,100 +1691,103 @@ mod tests {
 
     #[test]
     fn a_child_without_a_size_past_the_viewport_ignores_fill_overscroll_where_scrolling_clamps() {
-        let mut tester = WidgetTester::new();
-        let controller = ScrollController::default(&mut tester.cell.borrow_mut());
-        let key = GlobalKey::new();
-        tester.pump_widget(boilerplate(
-            vec![
-                five_fixed_extent_items(),
-                fill_without_scroll_body(
-                    true,
-                    ColoredBox::new(DEBUG_RED)
-                        .key(key.clone().into())
-                        .into_widget(),
-                ),
-            ],
-            Some(controller.clone()),
-            Axis::Vertical,
-        ));
-        assert!(!fill_is_onstage(&tester));
-        assert!(!fixed_extent_item_is_onstage(&tester, 4));
+        test_widgets(|tester| {
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let key = GlobalKey::new();
+            tester.pump_widget(boilerplate(
+                vec![
+                    five_fixed_extent_items(),
+                    fill_without_scroll_body(
+                        true,
+                        ColoredBox::new(DEBUG_RED)
+                            .key(key.clone().into())
+                            .into_widget(),
+                    ),
+                ],
+                Some(controller.clone()),
+                Axis::Vertical,
+            ));
+            expect(tester, &find::by_global_key(&key), finds_nothing());
+            assert!(!fixed_extent_item_is_onstage(tester, 4));
 
-        // Scroll to bottom
-        jump_to_max_scroll_extent(&mut tester, controller.handle());
+            // Scroll to bottom
+            jump_to_max_scroll_extent(tester, controller.handle());
 
-        // End of list
-        assert!(!fill_is_onstage(&tester));
-        assert!(fixed_extent_item_is_onstage(&tester, 4));
+            // End of list
+            expect(tester, &find::by_global_key(&key), finds_nothing());
+            assert!(fixed_extent_item_is_onstage(tester, 4));
 
-        // Overscroll
-        tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-        tester.pump(Duration::ZERO);
+            // Overscroll
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
 
-        assert!(!fill_is_onstage(&tester));
-        assert!(fixed_extent_item_is_onstage(&tester, 4));
+            expect(tester, &find::by_global_key(&key), finds_nothing());
+            assert!(fixed_extent_item_is_onstage(tester, 4));
+        });
     }
 
     #[test]
     fn a_sized_child_ignores_fill_overscroll_where_scrolling_clamps() {
-        let mut tester = WidgetTester::new();
-        let (key, button) = (GlobalKey::new(), GlobalKey::new());
-        tester.pump_widget(boilerplate(
-            vec![
-                sliver_box(),
-                fill_without_scroll_body(
-                    true,
-                    bottom_center_button(TargetPlatform::Android, &key, &button),
-                ),
-            ],
-            None,
-            Axis::Vertical,
-        ));
-        assert_eq!(size_of(&tester, &key).height(), 450.0);
+        test_widgets(|tester| {
+            let (key, button) = (GlobalKey::new(), GlobalKey::new());
+            tester.pump_widget(boilerplate(
+                vec![
+                    sliver_box(),
+                    fill_without_scroll_body(
+                        true,
+                        bottom_center_button(TargetPlatform::Android, &key, &button),
+                    ),
+                ],
+                None,
+                Axis::Vertical,
+            ));
+            assert_eq!(tester.get_size(&key).height(), 450.0);
 
-        tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-        tester.pump(Duration::ZERO);
-        assert_eq!(size_of(&tester, &key).height(), 450.0);
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            assert_eq!(tester.get_size(&key).height(), 450.0);
 
-        // Also check that the button alignment is true to expectations
-        let button_rect = rect_of(&tester, &button);
-        assert_eq!(button_rect.bottom, 600.0);
-        assert_eq!(button_rect.center().dx(), 400.0);
+            // Also check that the button alignment is true to expectations
+            let button_rect = tester.get_rect(&button);
+            assert_eq!(button_rect.bottom, 600.0);
+            assert_eq!(button_rect.center().dx(), 400.0);
+        });
     }
 
     #[test]
     fn a_larger_child_ignores_fill_overscroll_where_scrolling_clamps() {
-        let mut tester = WidgetTester::new();
-        let controller = ScrollController::default(&mut tester.cell.borrow_mut());
-        let (key, button) = (GlobalKey::new(), GlobalKey::new());
-        tester.pump_widget(boilerplate(
-            vec![
-                five_fixed_extent_items(),
-                fill_without_scroll_body(
-                    true,
-                    padded_center_button(TargetPlatform::Android, &key, &button),
-                ),
-            ],
-            Some(controller.clone()),
-            Axis::Vertical,
-        ));
+        test_widgets(|tester| {
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let (key, button) = (GlobalKey::new(), GlobalKey::new());
+            tester.pump_widget(boilerplate(
+                vec![
+                    five_fixed_extent_items(),
+                    fill_without_scroll_body(
+                        true,
+                        padded_center_button(TargetPlatform::Android, &key, &button),
+                    ),
+                ],
+                Some(controller.clone()),
+                Axis::Vertical,
+            ));
 
-        // Scroll to the end
-        jump_to_max_scroll_extent(&mut tester, controller.handle());
-        assert_eq!(size_of(&tester, &key).height(), 148.0);
+            // Scroll to the end
+            jump_to_max_scroll_extent(tester, controller.handle());
+            assert_eq!(tester.get_size(&key).height(), 148.0);
 
-        // Check that the button alignment is true to expectations
-        let button_rect = rect_of(&tester, &button);
-        assert_eq!(button_rect.bottom, 550.0);
-        assert_eq!(button_rect.center().dx(), 400.0);
+            // Check that the button alignment is true to expectations
+            let button_rect = tester.get_rect(&button);
+            assert_eq!(button_rect.bottom, 550.0);
+            assert_eq!(button_rect.center().dx(), 400.0);
 
-        tester.drag_from(CENTER, Offset::new(0.0, -50.0));
-        tester.pump(Duration::ZERO);
-        assert_eq!(size_of(&tester, &key).height(), 148.0);
+            tester.drag(find::by_type::<Scrollable>(), Offset::new(0.0, -50.0));
+            tester.pump();
+            assert_eq!(tester.get_size(&key).height(), 148.0);
 
-        // Check that the button alignment is still centered
-        let button_rect = rect_of(&tester, &button);
-        assert_eq!(button_rect.bottom, 550.0);
-        assert_eq!(button_rect.center().dx(), 400.0);
+            // Check that the button alignment is still centered
+            let button_rect = tester.get_rect(&button);
+            assert_eq!(button_rect.bottom, 550.0);
+            assert_eq!(button_rect.center().dx(), 400.0);
+        });
     }
 }

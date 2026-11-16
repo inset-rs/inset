@@ -373,30 +373,18 @@ mod tests {
     use std::time::Duration;
     use waft_foundation::Ref;
 
-    use waft_embedder::PointerDeviceKind;
-    use waft_embedder::{Canvas, Offset, Size};
-    use waft_gestures::{GestureBinding, PointerDownEvent, PointerEvent, PointerUpEvent};
+    use waft_embedder::{Canvas, Size};
     use waft_rendering::CustomPainter;
     use waft_services::SystemMouseCursors;
 
     use super::*;
     use crate::framework::IntoWidget;
-    use crate::test_harness::{binding_mount, binding_pump};
+    use crate::testing::{WidgetTester, find, test_widgets};
     use crate::widgets::basic::{Builder, Center, CustomPaint, Directionality, SizedBox};
     use crate::widgets::focus_manager::FocusNode;
     use crate::widgets::radio_group::{AnyRadioClient, RadioGroup, RadioGroupRegistry};
     use crate::widgets::widget_state::WidgetStateProperty;
     use waft_embedder::TextDirection;
-    use waft_foundation::AppCell;
-    use waft_test::{TestPlatform, TestView};
-
-    /// flutter_test's 800 x 600 view at one physical pixel to the logical one.
-    fn binding_cell() -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::Android)
-            .with_view(Rc::new(TestView::new(800.0, 600.0)));
-        AppCell::with_platform(Rc::new(platform))
-    }
 
     /// Dart's `TestRegistry<int>`: the group value is whatever `on_changed` last set.
     struct TestRegistry {
@@ -474,128 +462,92 @@ mod tests {
             .into_widget()
     }
 
-    /// The logical view of `binding_cell` is the tester's: the radio fills it, so a tap at
-    /// (20, 20) lands on it.
-    fn tap(cell: &AppCell) {
-        let position = Offset::new(20.0, 20.0);
-        let mut app = cell.borrow_mut();
-        let binding = GestureBinding::instance(&mut app);
-        binding.handle_pointer_event(
-            &mut app,
-            PointerEvent::Down(PointerDownEvent {
-                pointer: 1,
-                position,
-                kind: PointerDeviceKind::Touch,
-                ..PointerDownEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-        let binding = GestureBinding::instance(&mut app);
-        binding.handle_pointer_event(
-            &mut app,
-            PointerEvent::Up(PointerUpEvent {
-                pointer: 1,
-                position,
-                kind: PointerDeviceKind::Touch,
-                ..PointerUpEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-    }
-
-    fn pump(cell: &AppCell, at: Duration) {
-        cell.elapse(at);
-        binding_pump(&mut cell.borrow_mut(), at);
-    }
-
-    fn focus_node(cell: &AppCell) -> FocusNodeRef {
-        FocusNode::new(&mut cell.borrow_mut()).erase()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        tester.update(|app| FocusNode::new(app).erase())
     }
 
     #[test]
     fn a_tap_selects_the_radio_in_its_registry() {
-        let cell = binding_cell();
-        let node = focus_node(&cell);
-        let registry = registry(&mut cell.borrow_mut());
-        let captured = Rc::new(Cell::new(None));
-        let build = |captured: &Rc<Cell<Option<AnyToggleableState>>>| {
-            raw_radio(
-                node.clone(),
-                Some(registry.handle()),
-                true,
-                true,
-                Rc::clone(captured),
-                painted_box,
-            )
-            .into_widget()
-        };
+        test_widgets(|tester| {
+            let node = focus_node(tester);
+            let registry = tester.update(registry);
+            let captured = Rc::new(Cell::new(None));
+            let build = |captured: &Rc<Cell<Option<AnyToggleableState>>>| {
+                raw_radio(
+                    node.clone(),
+                    Some(registry.handle()),
+                    true,
+                    true,
+                    Rc::clone(captured),
+                    painted_box,
+                )
+            };
 
-        binding_mount(&cell, build(&captured));
-        let actual_state = captured.get().expect("the builder ran");
-        {
-            let app = cell.borrow();
-            assert!(actual_state.tristate(&app));
-            assert_eq!(actual_state.value(&app), Some(false));
-            assert_eq!(app.get(&registry).group_value, None);
+            tester.pump_widget(build(&captured));
+            let actual_state = captured.get().expect("the builder ran");
+            {
+                let app = tester.cell.borrow();
+                assert!(actual_state.tristate(&app));
+                assert_eq!(actual_state.value(&app), Some(false));
+                assert_eq!(app.get(&registry).group_value, None);
 
-            let state = app
-                .handle::<RawRadioState<u32>>(actual_state.id())
-                .expect("the radio's state");
-            assert!(
-                app.get(&registry)
-                    .clients
-                    .contains(&state.as_radio_client())
-            );
-        }
+                let state = app
+                    .handle::<RawRadioState<u32>>(actual_state.id())
+                    .expect("the radio's state");
+                assert!(
+                    app.get(&registry)
+                        .clients
+                        .contains(&state.as_radio_client())
+                );
+            }
 
-        tap(&cell);
-        // Rebuilds with new group value
-        binding_mount(&cell, build(&captured));
+            tester.tap(find::by_type::<RawRadio<u32>>());
+            // Rebuilds with new group value
+            tester.pump_widget(build(&captured));
 
-        let app = cell.borrow();
-        assert_eq!(app.get(&registry).group_value, Some(0));
-        assert_eq!(actual_state.value(&app), Some(true));
+            let app = tester.cell.borrow();
+            assert_eq!(app.get(&registry).group_value, Some(0));
+            assert_eq!(actual_state.value(&app), Some(true));
+        });
     }
 
     #[test]
     fn a_disabled_radio_does_not_report_a_tap() {
-        let cell = binding_cell();
-        let node = focus_node(&cell);
-        let registry = registry(&mut cell.borrow_mut());
-        let captured = Rc::new(Cell::new(None));
+        test_widgets(|tester| {
+            let node = focus_node(tester);
+            let registry = tester.update(registry);
+            let captured = Rc::new(Cell::new(None));
 
-        binding_mount(
-            &cell,
-            raw_radio(
+            tester.pump_widget(raw_radio(
                 node,
                 Some(registry.handle()),
                 false,
                 true,
                 captured,
                 painted_box,
-            )
-            .into_widget(),
-        );
-        tap(&cell);
+            ));
+            tester.tap(find::by_type::<RawRadio<u32>>());
 
-        // onChanged won't fire
-        assert_eq!(cell.borrow().get(&registry).group_value, None);
+            // onChanged won't fire
+            assert_eq!(tester.cell.borrow().get(&registry).group_value, None);
+        });
     }
 
     #[test]
     #[should_panic(expected = "an enabled raw radio must have a registry")]
     fn an_enabled_radio_without_a_registry_is_rejected() {
-        let cell = binding_cell();
-        let node = focus_node(&cell);
+        test_widgets(|tester| {
+            let node = focus_node(tester);
 
-        raw_radio(
-            node,
-            None,
-            true,
-            true,
-            Rc::new(Cell::new(None)),
-            painted_box,
-        );
+            raw_radio(
+                node,
+                None,
+                true,
+                true,
+                Rc::new(Cell::new(None)),
+                painted_box,
+            );
+        });
     }
 
     /// A `RawRadio<String>` under a `RadioGroup<String>`, as Material's `Radio<String>` builds
@@ -636,95 +588,80 @@ mod tests {
 
     #[test]
     fn a_radio_takes_a_string_value_compared_with_eq() {
-        let cell = binding_cell();
-        let node = focus_node(&cell);
-        let changes: Rc<RefCell<Vec<Option<String>>>> = Rc::default();
-        let captured = Rc::new(Cell::new(None));
+        test_widgets(|tester| {
+            let node = focus_node(tester);
+            let changes: Rc<RefCell<Vec<Option<String>>>> = Rc::default();
+            let captured = Rc::new(Cell::new(None));
 
-        binding_mount(
-            &cell,
-            string_radio_group(
+            tester.pump_widget(string_radio_group(
                 node.clone(),
                 None,
                 Rc::clone(&changes),
                 Rc::clone(&captured),
-            ),
-        );
-        let state = captured.get().expect("the builder ran");
-        assert_eq!(state.value(&cell.borrow()), Some(false));
+            ));
+            let state = captured.get().expect("the builder ran");
+            assert_eq!(state.value(&tester.cell.borrow()), Some(false));
 
-        tap(&cell);
-        assert_eq!(*changes.borrow(), [Some(String::from("lafayette"))]);
+            tester.tap(find::by_type::<RawRadio<String>>());
+            assert_eq!(*changes.borrow(), [Some(String::from("lafayette"))]);
 
-        // An equal string that is another object selects the radio.
-        binding_mount(
-            &cell,
-            string_radio_group(
+            // An equal string that is another object selects the radio.
+            tester.pump_widget(string_radio_group(
                 node,
                 Some(String::from("lafayette")),
                 Rc::clone(&changes),
                 Rc::clone(&captured),
-            ),
-        );
-        assert_eq!(state.value(&cell.borrow()), Some(true));
+            ));
+            assert_eq!(state.value(&tester.cell.borrow()), Some(true));
 
-        // Selecting a toggleable radio again unselects it.
-        tap(&cell);
-        assert_eq!(*changes.borrow(), [Some(String::from("lafayette")), None]);
+            // Selecting a toggleable radio again unselects it.
+            tester.tap(find::by_type::<RawRadio<String>>());
+            assert_eq!(*changes.borrow(), [Some(String::from("lafayette")), None]);
+        });
     }
 
     #[test]
     #[should_panic(expected = "No WidgetsLocalizations found")]
     fn an_unselected_radio_on_ios_reads_the_widgets_localizations() {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::IOS)
-            .with_view(Rc::new(TestView::new(800.0, 600.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let node = focus_node(&cell);
-        let registry = registry(&mut cell.borrow_mut());
+        let mut tester = WidgetTester::on(TargetPlatform::IOS);
+        let node = focus_node(&tester);
+        let registry = tester.update(registry);
 
-        binding_mount(
-            &cell,
-            raw_radio(
-                node,
-                Some(registry.handle()),
-                true,
-                false,
-                Rc::new(Cell::new(None)),
-                painted_box,
-            )
-            .into_widget(),
-        );
-    }
-
-    #[test]
-    fn a_radio_at_zero_area_does_not_crash() {
-        let cell = binding_cell();
-        let node = focus_node(&cell);
-        let registry = registry(&mut cell.borrow_mut());
-        let captured = Rc::new(Cell::new(None));
-        let radio = raw_radio(
+        tester.pump_widget(raw_radio(
             node,
             Some(registry.handle()),
             true,
             false,
-            captured.clone(),
-            || SizedBox::square(Some(24.0)).into_widget(),
-        );
+            Rc::new(Cell::new(None)),
+            painted_box,
+        ));
+    }
 
-        binding_mount(
-            &cell,
-            Directionality::new(
+    #[test]
+    fn a_radio_at_zero_area_does_not_crash() {
+        test_widgets(|tester| {
+            let node = focus_node(tester);
+            let registry = tester.update(registry);
+            let captured = Rc::new(Cell::new(None));
+            let radio = raw_radio(
+                node,
+                Some(registry.handle()),
+                true,
+                false,
+                captured.clone(),
+                || SizedBox::square(Some(24.0)).into_widget(),
+            );
+
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Center::new().child(SizedBox::shrink().child(radio)),
-            )
-            .into_widget(),
-        );
-        pump(&cell, Duration::from_millis(16));
+            ));
+            tester.pump_by(Duration::from_millis(16));
 
-        let app = cell.borrow();
-        let state = captured.get().expect("the builder ran");
-        let size = state.context(&app).size(&app);
-        assert_eq!(size, Some(Size::ZERO));
+            let app = tester.cell.borrow();
+            let state = captured.get().expect("the builder ran");
+            let size = state.context(&app).size(&app);
+            assert_eq!(size, Some(Size::ZERO));
+        });
     }
 }

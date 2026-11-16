@@ -1181,17 +1181,14 @@ name = "cupertino-gallery"
 version = "0.5.0"
 dependencies = [
  "indexmap",
- "valo-system-fonts",
  "waft",
  "waft-animation",
  "waft-cupertino",
  "waft-embedder",
  "waft-embedder-default",
  "waft-foundation",
- "waft-gestures",
  "waft-painting",
  "waft-rendering",
- "waft-scheduler",
  "waft-shell",
  "waft-test",
  "waft-widgets",
@@ -2384,16 +2381,14 @@ dependencies = [
 name = "material-gallery"
 version = "0.5.0"
 dependencies = [
- "valo-system-fonts",
  "waft",
  "waft-embedder",
  "waft-embedder-default",
  "waft-foundation",
- "waft-gestures",
  "waft-material",
  "waft-painting",
  "waft-rendering",
- "waft-scheduler",
+ "waft-services",
  "waft-shell",
  "waft-test",
  "waft-widgets",
@@ -4859,9 +4854,9 @@ dependencies = [
 
 [[package]]
 name = "valo"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cb3fe84287f810d03ae97990c547a4e745738980226a6acddb38b2644ab2c78"
+checksum = "e70fc22a2552d5163680da5e6e0c5058eb68b96e0aaa54fab488ce4f88be611e"
 dependencies = [
  "futures-channel",
  "objc2",
@@ -4877,9 +4872,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c478e884b98c2684f478cf7a6338c6f4b97421de7623ebe5240b3119fac84398"
+checksum = "48a041aa3a57a46dd9a094f419a1c83c77cbb7d84b12370b7cfb43232008d236"
 dependencies = [
  "valo",
  "wgpu",
@@ -4887,9 +4882,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-apple"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03e3030f37fc2f74c163215e510697e2d14736174e7cc8a6685dd1a2d494cd06"
+checksum = "5fc25350405068a0875dce85d77e814440c8d383fd3dd1b558561868adba1b8f"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -4906,9 +4901,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-software"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aefe830983d5d3150ebf8b3673eefacead9a746f3937ef0de29c8dcb84943f2f"
+checksum = "db34f6303326e9bddf09e0f2a27a70cd3341d98f27736ba64f9d848f6be4a4e5"
 dependencies = [
  "gif",
  "image",
@@ -4921,9 +4916,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34063bbc486ee6882c19c7233c503074874d55f06aa074f2930a8d89946218ff"
+checksum = "8fa5ce9106401bd07e5008d2d7d31daa1ebe7415abd4c287407773cb93beeade"
 dependencies = [
  "naga",
  "valo-geometry",
@@ -4933,9 +4928,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "750d4302d838cc475a9f83b01640a93db1821e368c0d7293a7228508e4da0e18"
+checksum = "6972a3748d4a9c2b8727aabfbb1490c324d3212f0cf56a9f164c4cbf63425a03"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -4947,9 +4942,9 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "297267fc97b39e96f1286f830787221290e18d26cde81de7775290d5837463c8"
+checksum = "d6cdfb62211411ae4c3671fa3551ab404c1221c4c96987cd09c2287eaf40e38c"
 dependencies = [
  "glam",
  "valo-pathops",
@@ -4957,9 +4952,9 @@ dependencies = [
 
 [[package]]
 name = "valo-paragraph"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ac7a150a3493398fc5639ae3eb73326172eba6ea4594269a586bf4d028bebad"
+checksum = "b1a6071aee0d79265a3204cea83f4f4a87c1fd17ead92fcb79e37e80b9810075"
 dependencies = [
  "unicode-bidi",
  "unicode-linebreak",
@@ -4971,15 +4966,15 @@ dependencies = [
 
 [[package]]
 name = "valo-pathops"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67604fac49e9e19980f275a2fbfd58865907a76e054743c2fae6b5d3cb748da6"
+checksum = "95c054bb6107a5bb4172456b863b92f343bdadb595d8cc412fa343efe59d10b7"
 
 [[package]]
 name = "valo-renderer"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3393a88128fa89db82ba754301bccf76541beeabd633277ef1f2f191116cafe9"
+checksum = "f70d3fe5661588420e7251b9b2f1fa68ad3ae54fea53d7be566aebf4b0bc84af"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -4995,9 +4990,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c96a10b66373cfea36e8acedac14f4d602e4aa75b43b3526c1d9dc59fa2911a"
+checksum = "644216e3613bb2a560a75e810906357adad5aa16dfc55143ee2d75f3cf68bb4c"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -5005,9 +5000,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a20578fdce31d8c3dad27bfa0480926663279428bcdd1868b3cf7911cb05afe"
+checksum = "2c00c7f6c74ac6053026f85cc147a070c746220e4978479691d232e7f1401a50"
 dependencies = [
  "allsorts",
  "harfrust",
@@ -5119,7 +5114,6 @@ name = "waft-cupertino"
 version = "0.5.0"
 dependencies = [
  "indexmap",
- "valo-system-fonts",
  "waft-animation",
  "waft-embedder",
  "waft-foundation",
@@ -5307,7 +5301,6 @@ dependencies = [
  "waft-embedder",
  "waft-foundation",
  "waft-scheduler",
- "web-time",
 ]
 
 [[package]]
@@ -5342,7 +5335,6 @@ version = "0.5.0"
 dependencies = [
  "indexmap",
  "unicode-segmentation",
- "valo-system-fonts",
  "waft-animation",
  "waft-cupertino",
  "waft-embedder",

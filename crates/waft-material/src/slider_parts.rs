@@ -19,9 +19,7 @@ use waft_embedder::{
     Rect, Size, Stroke, TextDirection, rrect_radii_elliptical,
 };
 use waft_foundation::App;
-use waft_painting::{
-    BorderRadius, ClipContext, PaintingBinding, TextPainter, debug_disable_shadows, draw_rrect,
-};
+use waft_painting::{BorderRadius, ClipContext, PaintingBinding, TextPainter, draw_rrect};
 use waft_rendering::{AnyRenderBox, PaintingContext, RenderView};
 use waft_widgets::WidgetStates;
 
@@ -1204,23 +1202,15 @@ impl SliderComponentShape for RoundSliderThumbShape {
         path.arc(center, radius as f32, 0.0, std::f32::consts::TAU);
         let path = Path::new(path.build());
 
-        let mut paint_shadows = true;
-        if cfg!(debug_assertions) && debug_disable_shadows() {
-            debug_draw_shadow(context.canvas(), &path, evaluated_elevation);
-            paint_shadows = false;
-        }
-
-        if paint_shadows {
-            draw_shadow(
-                app,
-                context.canvas(),
-                parent_box,
-                &path,
-                Colors::BLACK,
-                evaluated_elevation,
-                true,
-            );
-        }
+        draw_shadow(
+            app,
+            context.canvas(),
+            parent_box,
+            &path,
+            Colors::BLACK,
+            evaluated_elevation,
+            true,
+        );
 
         context
             .canvas()
@@ -2120,21 +2110,6 @@ impl RoundedRectSliderValueIndicatorPathPainter {
         let fonts = PaintingBinding::instance(app).fonts(app);
         label_painter.paint(app.get_mut(fonts), canvas, label_offset);
         canvas.restore();
-    }
-}
-
-/// Dart's `_debugDrawShadow`.
-fn debug_draw_shadow(canvas: &mut Canvas, path: &Path, elevation: f64) {
-    if elevation > 0.0 {
-        canvas.draw_path(
-            path.as_valo(),
-            path.fill_type,
-            &Paint {
-                color: Colors::BLACK.into(),
-                style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
-                ..Paint::default()
-            },
-        );
     }
 }
 

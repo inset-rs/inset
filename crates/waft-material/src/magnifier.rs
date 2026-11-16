@@ -514,9 +514,10 @@ mod tests {
         GlobalKey, ImplicitlyAnimatedWidget, Positioned, SizedBox, downcast_widget,
     };
 
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+
     use super::*;
     use crate::app::MaterialApp;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
 
     const REASONABLE_TEXT_FIELD: Rect = Rect::from_ltrb(50.0, 100.0, 200.0, 100.0);
@@ -552,15 +553,11 @@ mod tests {
         tester.pump_widget(root);
     }
 
-    fn app_tester(platform: TargetPlatform) -> (WidgetTester, BuildContext) {
-        let mut tester = WidgetTester::on(platform);
-        tester.install_platform_fonts();
+    fn app_context(tester: &mut WidgetTester) -> BuildContext {
         let home = GlobalKey::new();
-        pump_app(&mut tester, &home);
-        let context = home
-            .current_context(&tester.cell.borrow_mut())
-            .expect("mounted");
-        (tester, context)
+        pump_app(tester, &home);
+        home.current_context(&tester.cell.borrow_mut())
+            .expect("mounted")
     }
 
     /// Dart's `showMagnifier`: shows a [`TextMagnifier`] over `magnifier_info` and settles.
@@ -589,7 +586,7 @@ mod tests {
     }
 
     fn magnifier_position(tester: &WidgetTester) -> Offset {
-        let positioned = tester.find_by_type::<Positioned>()[0];
+        let positioned = find::by_type::<Positioned>().evaluate(tester)[0];
         tester.widget::<Positioned, _>(positioned, |positioned| {
             Offset::new(
                 positioned.left.unwrap_or(0.0),
@@ -599,14 +596,14 @@ mod tests {
     }
 
     fn magnifier_additional_focal_point(tester: &WidgetTester) -> Offset {
-        let magnifier = tester.find_by_type::<Magnifier>()[0];
+        let magnifier = find::by_type::<Magnifier>().evaluate(tester)[0];
         tester.widget::<Magnifier, _>(magnifier, |magnifier| {
             magnifier.additional_focal_point_offset
         })
     }
 
     fn is_animated(tester: &WidgetTester) -> bool {
-        let positioned = tester.find_by_type::<AnimatedPositioned>()[0];
+        let positioned = find::by_type::<AnimatedPositioned>().evaluate(tester)[0];
         tester.widget::<AnimatedPositioned, _>(positioned, |positioned| {
             !positioned
                 .implicitly_animated_widget_data()
@@ -617,7 +614,8 @@ mod tests {
 
     /// What the configuration's builder builds on `platform`.
     fn built_by_adaptive_configuration(platform: TargetPlatform) -> Option<WidgetRef> {
-        let (tester, context) = app_tester(platform);
+        let mut tester = WidgetTester::on(platform);
+        let context = app_context(&mut tester);
         let mut app = tester.cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(MagnifierInfo::EMPTY));
         let controller = MagnifierController::new(&mut app);
@@ -630,7 +628,7 @@ mod tests {
 
         #[test]
         fn should_return_a_text_editing_magnifier_on_android() {
-            with_main_thread_stack(|| {
+            test_widgets(|_tester| {
                 let built = built_by_adaptive_configuration(TargetPlatform::Android)
                     .expect("a magnifier on Android");
                 assert!(downcast_widget::<TextMagnifier>(&*built).is_some());
@@ -639,7 +637,7 @@ mod tests {
 
         #[test]
         fn should_return_a_cupertino_magnifier_on_ios() {
-            with_main_thread_stack(|| {
+            test_widgets(|_tester| {
                 let built = built_by_adaptive_configuration(TargetPlatform::IOS)
                     .expect("a magnifier on iOS");
                 assert!(downcast_widget::<CupertinoTextMagnifier>(&*built).is_some());
@@ -648,7 +646,7 @@ mod tests {
 
         #[test]
         fn should_return_null_on_all_platforms_not_android_ios() {
-            with_main_thread_stack(|| {
+            test_widgets(|_tester| {
                 for platform in [
                     TargetPlatform::Fuchsia,
                     TargetPlatform::Linux,
@@ -665,7 +663,7 @@ mod tests {
 
         #[test]
         fn shows_the_editing_handles_only_on_ios() {
-            with_main_thread_stack(|| {
+            test_widgets(|_tester| {
                 for platform in [
                     TargetPlatform::Android,
                     TargetPlatform::Fuchsia,
@@ -688,8 +686,7 @@ mod tests {
 
         #[test]
         fn keeps_one_builder_identity_across_calls() {
-            with_main_thread_stack(|| {
-                let tester = WidgetTester::on(TargetPlatform::Android);
+            test_widgets(|tester| {
                 let app = tester.cell.borrow();
                 let first =
                     TextMagnifier::adaptive_magnifier_configuration(&app).magnifier_builder();
@@ -705,12 +702,12 @@ mod tests {
 
         #[test]
         fn should_never_move_outside_the_right_bounds_of_the_editing_line() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 const GESTURE_OUTSIDE_LINE: f64 = 100.0;
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+                let context = app_context(tester);
 
                 let (controller, _) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info(
                         REASONABLE_TEXT_FIELD,
@@ -724,19 +721,19 @@ mod tests {
                 );
 
                 // Should be less than the right edge, since we have padding.
-                assert!(magnifier_position(&tester).dx() <= REASONABLE_TEXT_FIELD.right);
+                assert!(magnifier_position(tester).dx() <= REASONABLE_TEXT_FIELD.right);
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
             });
         }
 
         #[test]
         fn should_never_move_outside_the_left_bounds_of_the_editing_line() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 const GESTURE_OUTSIDE_LINE: f64 = 100.0;
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+                let context = app_context(tester);
 
                 let (controller, _) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info(
                         REASONABLE_TEXT_FIELD,
@@ -748,7 +745,7 @@ mod tests {
                 );
 
                 assert!(
-                    magnifier_position(&tester).dx() + BASIC_OFFSET.dx()
+                    magnifier_position(tester).dx() + BASIC_OFFSET.dx()
                         >= REASONABLE_TEXT_FIELD.left
                 );
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
@@ -757,17 +754,17 @@ mod tests {
 
         #[test]
         fn should_position_vertically_at_the_center_of_the_line() {
-            with_main_thread_stack(|| {
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let context = app_context(tester);
 
                 let (controller, _) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info_over(REASONABLE_TEXT_FIELD, REASONABLE_TEXT_FIELD.center()),
                 );
 
                 assert_eq!(
-                    magnifier_position(&tester).dy(),
+                    magnifier_position(tester).dy(),
                     REASONABLE_TEXT_FIELD.center().dy() - BASIC_OFFSET.dy()
                 );
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
@@ -776,13 +773,13 @@ mod tests {
 
         #[test]
         fn should_reposition_vertically_if_mashed_against_the_ceiling() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let top_of_screen_text_field =
                     Rect::from_points(Offset::ZERO, Offset::new(200.0, 0.0));
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+                let context = app_context(tester);
 
                 let (controller, _) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info_over(
                         top_of_screen_text_field,
@@ -790,7 +787,7 @@ mod tests {
                     ),
                 );
 
-                assert!(magnifier_position(&tester).dy() >= 0.0);
+                assert!(magnifier_position(tester).dy() >= 0.0);
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
             });
         }
@@ -801,32 +798,30 @@ mod tests {
 
         #[test]
         fn should_shift_focal_point_so_that_the_lens_sees_nothing_out_of_bounds() {
-            with_main_thread_stack(|| {
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let context = app_context(tester);
 
                 let (controller, _) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     // Gesture on the far right of the magnifier.
                     info_over(REASONABLE_TEXT_FIELD, REASONABLE_TEXT_FIELD.top_left()),
                 );
 
-                assert!(
-                    magnifier_additional_focal_point(&tester).dx() < REASONABLE_TEXT_FIELD.left
-                );
+                assert!(magnifier_additional_focal_point(tester).dx() < REASONABLE_TEXT_FIELD.left);
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
             });
         }
 
         #[test]
         fn focal_point_should_shift_if_mashed_against_the_top_to_always_point_to_text() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let top_of_screen_text_field =
                     Rect::from_points(Offset::ZERO, Offset::new(200.0, 0.0));
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+                let context = app_context(tester);
 
                 let (controller, _) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info_over(
                         top_of_screen_text_field,
@@ -834,7 +829,7 @@ mod tests {
                     ),
                 );
 
-                assert!(magnifier_additional_focal_point(&tester).dy() < 0.0);
+                assert!(magnifier_additional_focal_point(tester).dy() < 0.0);
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
             });
         }
@@ -860,26 +855,26 @@ mod tests {
 
         #[test]
         fn should_not_be_animated_on_the_initial_state() {
-            with_main_thread_stack(|| {
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let context = app_context(tester);
 
                 let (controller, _) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info_over(REASONABLE_TEXT_FIELD, REASONABLE_TEXT_FIELD.center()),
                 );
 
-                assert!(!is_animated(&tester));
+                assert!(!is_animated(tester));
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
             });
         }
 
         #[test]
         fn should_not_be_animated_on_horizontal_shifts() {
-            with_main_thread_stack(|| {
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let context = app_context(tester);
                 let (controller, notifier) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info_over(REASONABLE_TEXT_FIELD, REASONABLE_TEXT_FIELD.center()),
                 );
@@ -894,17 +889,17 @@ mod tests {
                 );
                 tester.pump_and_settle();
 
-                assert!(!is_animated(&tester));
+                assert!(!is_animated(tester));
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
             });
         }
 
         #[test]
         fn should_be_animated_on_vertical_shifts() {
-            with_main_thread_stack(|| {
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let context = app_context(tester);
                 let (controller, notifier) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info_over(REASONABLE_TEXT_FIELD, REASONABLE_TEXT_FIELD.center()),
                 );
@@ -912,18 +907,18 @@ mod tests {
                 // New position has a vertical shift.
                 notifier.set_value(&mut tester.cell.borrow_mut(), info_one_line_down());
 
-                tester.pump(Duration::ZERO);
-                assert!(is_animated(&tester));
+                tester.pump();
+                assert!(is_animated(tester));
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
             });
         }
 
         #[test]
         fn should_stop_being_animated_when_timer_is_up() {
-            with_main_thread_stack(|| {
-                let (mut tester, context) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let context = app_context(tester);
                 let (controller, notifier) = show_magnifier(
-                    &mut tester,
+                    tester,
                     context,
                     info_over(REASONABLE_TEXT_FIELD, REASONABLE_TEXT_FIELD.center()),
                 );
@@ -931,12 +926,12 @@ mod tests {
                 // New position has a vertical shift.
                 notifier.set_value(&mut tester.cell.borrow_mut(), info_one_line_down());
 
-                tester.pump(Duration::ZERO);
-                assert!(is_animated(&tester));
-                tester.pump(
+                tester.pump();
+                assert!(is_animated(tester));
+                tester.pump_by(
                     TextMagnifier::JUMP_BETWEEN_LINES_ANIMATION_DURATION + Duration::from_secs(2),
                 );
-                assert!(!is_animated(&tester));
+                assert!(!is_animated(tester));
                 controller.remove_from_overlay(&mut tester.cell.borrow_mut());
             });
         }
@@ -949,8 +944,8 @@ mod tests {
 
         #[test]
         fn builds_a_raw_magnifier_in_the_material_style_by_default() {
-            with_main_thread_stack(|| {
-                let (mut tester, _) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let _context = app_context(tester);
                 let root = {
                     let app = tester.cell.borrow();
                     MaterialApp::new()
@@ -960,7 +955,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                let raw = tester.find_by_type::<RawMagnifier>()[0];
+                let raw = find::by_type::<RawMagnifier>().evaluate(tester)[0];
                 tester.widget::<RawMagnifier, _>(raw, |raw| {
                     assert_eq!(raw.size, Magnifier::K_DEFAULT_MAGNIFIER_SIZE);
                     assert_eq!(raw.size, Size::new(77.37, 37.9));
@@ -988,8 +983,8 @@ mod tests {
 
         #[test]
         fn adds_the_additional_focal_point_offset_to_the_standard_shift() {
-            with_main_thread_stack(|| {
-                let (mut tester, _) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let _context = app_context(tester);
                 let root = {
                     let app = tester.cell.borrow();
                     MaterialApp::new()
@@ -1001,7 +996,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                let raw = tester.find_by_type::<RawMagnifier>()[0];
+                let raw = find::by_type::<RawMagnifier>().evaluate(tester)[0];
                 let focal_point_offset =
                     tester.widget::<RawMagnifier, _>(raw, |raw| raw.focal_point_offset);
                 assert_eq!(
@@ -1013,8 +1008,8 @@ mod tests {
 
         #[test]
         fn sizes_the_lens_to_zero_area_when_given_a_zero_size() {
-            with_main_thread_stack(|| {
-                let (mut tester, _) = app_tester(TargetPlatform::Android);
+            test_widgets(|tester| {
+                let _context = app_context(tester);
                 let root = {
                     let app = tester.cell.borrow();
                     MaterialApp::new()
@@ -1024,7 +1019,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                let raw = tester.find_by_type::<RawMagnifier>()[0];
+                let raw = find::by_type::<RawMagnifier>().evaluate(tester)[0];
                 assert_eq!(
                     tester.widget::<RawMagnifier, _>(raw, |raw| raw.size),
                     Size::ZERO

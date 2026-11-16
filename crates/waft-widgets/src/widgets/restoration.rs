@@ -1614,48 +1614,14 @@ impl AnyRestorationMixin {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use std::time::Duration;
-    use waft_foundation::AppCell;
     use waft_foundation::Ref;
 
-    use waft_embedder::Restoration;
-    use waft_services::{RestorationMap, RestorationUpdate};
-    use waft_test::TestPlatform;
+    use waft_services::RestorationMap;
 
     use super::*;
-    use crate::framework::{Element, GlobalKey, StatelessWidget};
-    use crate::test_harness::Harness;
-    use crate::test_harness::pump_every_view;
+    use crate::framework::{GlobalKey, StatelessWidget};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::restoration_properties::{RestorableInt, RestorableValue};
-
-    /// A host that answers `Restoration::get` with what it was handed and records every
-    /// `Restoration::put`.
-    #[derive(Default)]
-    struct RecordingRestoration {
-        stored: RefCell<Option<RestorationUpdate>>,
-        puts: RefCell<Vec<RestorationMap>>,
-    }
-
-    impl Restoration for RecordingRestoration {
-        fn get(&self) -> Option<RestorationUpdate> {
-            self.stored.borrow().clone()
-        }
-
-        fn put(&self, data: RestorationMap) {
-            self.puts.borrow_mut().push(data);
-        }
-    }
-
-    /// An [`App`] whose host restores the provided bucket hierarchy.
-    fn app_restoring(data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<RecordingRestoration>) {
-        let restoration = Rc::new(RecordingRestoration::default());
-        *restoration.stored.borrow_mut() = Some(RestorationUpdate {
-            enabled: true,
-            data,
-        });
-        let platform = TestPlatform::new().with_restoration(restoration.clone());
-        (AppCell::with_platform(Rc::new(platform)), restoration)
-    }
 
     fn map<const N: usize>(entries: [(&str, RestorationData); N]) -> RestorationMap {
         entries
@@ -1796,107 +1762,95 @@ mod tests {
         }
     }
 
-    fn mount(app: &mut App, child: WidgetRef) -> Harness {
-        let harness = Harness::mount(app, child);
-        harness.pump(app);
-        harness
+    /// Dart's `tester.pumpWidget(child)` on a tester whose host restores `data`.
+    fn mount<K>(data: Option<RestorationMap>, child: impl IntoWidget<K>) -> WidgetTester {
+        let mut tester = WidgetTester::restoring(data);
+        tester.pump_widget(child);
+        tester
     }
 
-    fn counter_state(harness: &Harness, app: &App, key: &GlobalKey) -> Handle<CounterState> {
-        harness
-            .owner
-            .global_key_element(app, key)
+    fn counter_state(tester: &WidgetTester, key: &GlobalKey) -> Handle<CounterState> {
+        key.current_state::<CounterState>(&tester.cell.borrow())
             .expect("the counter is in the tree")
-            .state_handle::<CounterState>(app)
-            .expect("a CounterState")
+    }
+
+    /// The value the host was last handed down `path`.
+    fn sent_at(tester: &WidgetTester, path: &[&str]) -> Option<RestorationData> {
+        let sent = tester.restoration_data().expect("serialized");
+        at(&sent, path).cloned()
+    }
+
+    fn counter(key: &GlobalKey, restoration_id: &str) -> Counter {
+        Counter {
+            key: Some(key.clone().into()),
+            restoration_id: Some(restoration_id.to_string()),
+        }
+    }
+
+    fn app_scope<K>(child: impl IntoWidget<K>) -> RootRestorationScope {
+        RootRestorationScope::new(Some("app".to_string()), child)
     }
 
     #[test]
     fn the_root_scope_hands_the_hosts_root_bucket_down() {
-        let (cell, _restoration) =
-            app_restoring(Some(child("app", values([("count", 42i64.into())]))));
         let (probe, seen) = probe();
-        let mut app = cell.borrow_mut();
-        mount(
-            &mut app,
-            RootRestorationScope::new(Some("app".to_string()), probe).into_widget(),
+        let tester = mount(
+            Some(child("app", values([("count", 42i64.into())]))),
+            app_scope(probe),
         );
 
         let bucket = seen.borrow()[0].expect("the host enabled restoration");
+        let mut app = tester.cell.borrow_mut();
         assert_eq!(bucket.restoration_id(&app), "app");
         assert_eq!(bucket.read(&mut app, "count"), Some(42i64.into()));
     }
 
     #[test]
     fn the_root_scope_hands_nothing_down_without_a_restoration_id() {
-        let (cell, _restoration) = app_restoring(None);
-        let mut app = cell.borrow_mut();
         let (probe, seen) = probe();
-        mount(
-            &mut app,
-            RootRestorationScope::new(None, probe).into_widget(),
-        );
+        let _tester = mount(None, RootRestorationScope::new(None, probe));
 
         assert_eq!(seen.borrow().as_slice(), [None]);
     }
 
     #[test]
     fn a_restoration_scope_claims_the_child_bucket_named_by_its_id() {
-        let (cell, _restoration) = app_restoring(Some(child(
-            "app",
-            child("greeting", values([("hello", "world".into())])),
-        )));
-        let mut app = cell.borrow_mut();
         let (probe, seen) = probe();
-        mount(
-            &mut app,
-            RootRestorationScope::new(
-                Some("app".to_string()),
-                RestorationScope::new(Some("greeting".to_string()), probe),
-            )
-            .into_widget(),
+        let tester = mount(
+            Some(child(
+                "app",
+                child("greeting", values([("hello", "world".into())])),
+            )),
+            app_scope(RestorationScope::new(Some("greeting".to_string()), probe)),
         );
 
         let bucket = seen.borrow()[0].expect("the scope claimed a bucket");
+        let mut app = tester.cell.borrow_mut();
         assert_eq!(bucket.restoration_id(&app), "greeting");
         assert_eq!(bucket.read(&mut app, "hello"), Some("world".into()));
     }
 
     #[test]
     fn a_restoration_scope_without_an_id_turns_restoration_off_for_its_subtree() {
-        let (cell, _restoration) = app_restoring(None);
-        let mut app = cell.borrow_mut();
         let (probe, seen) = probe();
-        mount(
-            &mut app,
-            RootRestorationScope::new(Some("app".to_string()), RestorationScope::new(None, probe))
-                .into_widget(),
-        );
+        let _tester = mount(None, app_scope(RestorationScope::new(None, probe)));
 
         assert_eq!(seen.borrow().as_slice(), [None]);
     }
 
     #[test]
     fn a_registered_property_is_restored_from_the_hosts_data() {
-        let (cell, _restoration) = app_restoring(Some(child(
-            "app",
-            child("counter", values([("count", 7i64.into())])),
-        )));
-        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
-        let harness = mount(
-            &mut app,
-            RootRestorationScope::new(
-                Some("app".to_string()),
-                Counter {
-                    key: Some(key.clone().into()),
-                    restoration_id: Some("counter".to_string()),
-                },
-            )
-            .into_widget(),
+        let tester = mount(
+            Some(child(
+                "app",
+                child("counter", values([("count", 7i64.into())])),
+            )),
+            app_scope(counter(&key, "counter")),
         );
 
-        let state = counter_state(&harness, &app, &key);
+        let state = counter_state(&tester, &key);
+        let app = tester.cell.borrow();
         assert_eq!(app.get(state).restores, 1);
         let count = state.count(&app);
         assert_eq!(*count.value(&app), 7);
@@ -1904,194 +1858,146 @@ mod tests {
 
     #[test]
     fn a_property_with_no_stored_value_takes_its_default_and_writes_it_out() {
-        let (cell, restoration) = app_restoring(None);
-        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
-        let harness = mount(
-            &mut app,
-            RootRestorationScope::new(
-                Some("app".to_string()),
-                Counter {
-                    key: Some(key.clone().into()),
-                    restoration_id: Some("counter".to_string()),
-                },
-            )
-            .into_widget(),
-        );
+        let mut tester = mount(None, app_scope(counter(&key, "counter")));
 
-        let count = counter_state(&harness, &app, &key).count(&app);
-        assert_eq!(*count.value(&app), 0);
+        let state = counter_state(&tester, &key);
+        {
+            let app = tester.cell.borrow();
+            assert_eq!(*state.count(&app).value(&app), 0);
+        }
 
-        pump_every_view(&mut app, Duration::ZERO);
-        let sent = restoration
-            .puts
-            .borrow()
-            .last()
-            .cloned()
-            .expect("serialized");
+        tester.pump();
         assert_eq!(
-            at(&sent, &["c", "app", "c", "counter", "v", "count"]),
-            Some(&0i64.into())
+            sent_at(&tester, &["c", "app", "c", "counter", "v", "count"]),
+            Some(0i64.into())
         );
     }
 
     #[test]
     fn a_changed_property_reaches_the_host_at_the_end_of_the_frame() {
-        let (cell, restoration) = app_restoring(Some(child(
-            "app",
-            child("counter", values([("count", 7i64.into())])),
-        )));
-        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
-        let harness = mount(
-            &mut app,
-            RootRestorationScope::new(
-                Some("app".to_string()),
-                Counter {
-                    key: Some(key.clone().into()),
-                    restoration_id: Some("counter".to_string()),
-                },
-            )
-            .into_widget(),
+        let mut tester = mount(
+            Some(child(
+                "app",
+                child("counter", values([("count", 7i64.into())])),
+            )),
+            app_scope(counter(&key, "counter")),
         );
-        pump_every_view(&mut app, Duration::ZERO);
-        restoration.puts.borrow_mut().clear();
+        tester.pump();
+        let path = ["c", "app", "c", "counter", "v", "count"];
+        assert_eq!(sent_at(&tester, &path), Some(7i64.into()));
 
-        let count = counter_state(&harness, &app, &key).count(&app);
-        count.set_value(&mut app, 9);
-        assert!(
-            restoration.puts.borrow().is_empty(),
+        let state = counter_state(&tester, &key);
+        // Inside `setState`, as Dart's cases change a property, which asks for the frame.
+        tester.update(|app| {
+            state.count(app).set_value(app, 9);
+            state.set_state(app, |_| {});
+        });
+        assert_eq!(
+            sent_at(&tester, &path),
+            Some(7i64.into()),
             "the write waits for the end of the frame"
         );
 
-        pump_every_view(&mut app, Duration::ZERO);
-        let sent = restoration
-            .puts
-            .borrow()
-            .last()
-            .cloned()
-            .expect("serialized");
-        assert_eq!(
-            at(&sent, &["c", "app", "c", "counter", "v", "count"]),
-            Some(&9i64.into())
-        );
+        tester.pump();
+        assert_eq!(sent_at(&tester, &path), Some(9i64.into()));
     }
 
     #[test]
     fn did_update_restoration_id_moves_the_bucket_and_its_data() {
-        let (cell, restoration) = app_restoring(Some(child(
-            "app",
-            child("counter", values([("count", 7i64.into())])),
-        )));
-        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
-        let key_ref: KeyRef = key.clone().into();
-        let tree = |restoration_id: &str, key: &KeyRef| {
-            RootRestorationScope::new(
-                Some("app".to_string()),
-                Counter {
-                    key: Some(key.clone()),
-                    restoration_id: Some(restoration_id.to_string()),
-                },
-            )
-            .into_widget()
-        };
-        let harness = mount(&mut app, tree("counter", &key_ref));
-        let state = counter_state(&harness, &app, &key);
-        let bucket = state.bucket(&app).expect("the counter claimed a bucket");
-
-        harness.set_child(&mut app, tree("renamed", &key_ref));
-        harness.pump(&mut app);
-
-        assert_eq!(app.get(state).restores, 1, "a rename does not re-restore");
-        assert_eq!(
-            state.bucket(&app),
-            Some(bucket),
-            "the same bucket moved to the new ID"
+        let mut tester = mount(
+            Some(child(
+                "app",
+                child("counter", values([("count", 7i64.into())])),
+            )),
+            app_scope(counter(&key, "counter")),
         );
-        assert_eq!(bucket.restoration_id(&app), "renamed");
-        assert_eq!(*state.count(&app).value(&app), 7);
+        let state = counter_state(&tester, &key);
+        let bucket = state
+            .bucket(&tester.cell.borrow())
+            .expect("the counter claimed a bucket");
 
-        pump_every_view(&mut app, Duration::ZERO);
-        let sent = restoration
-            .puts
-            .borrow()
-            .last()
-            .cloned()
-            .expect("serialized");
+        tester.pump_widget(app_scope(counter(&key, "renamed")));
+
+        {
+            let app = tester.cell.borrow();
+            assert_eq!(app.get(state).restores, 1, "a rename does not re-restore");
+            assert_eq!(
+                state.bucket(&app),
+                Some(bucket),
+                "the same bucket moved to the new ID"
+            );
+            assert_eq!(bucket.restoration_id(&app), "renamed");
+            assert_eq!(*state.count(&app).value(&app), 7);
+        }
+
+        tester.pump();
         assert_eq!(
-            at(&sent, &["c", "app", "c", "renamed", "v", "count"]),
-            Some(&7i64.into())
+            sent_at(&tester, &["c", "app", "c", "renamed", "v", "count"]),
+            Some(7i64.into())
         );
-        assert_eq!(at(&sent, &["c", "app", "c", "counter"]), None);
+        assert_eq!(sent_at(&tester, &["c", "app", "c", "counter"]), None);
     }
 
     #[test]
     fn new_data_from_the_host_restores_the_registered_properties_again() {
-        let (cell, _restoration) = app_restoring(Some(child(
-            "app",
-            child("counter", values([("count", 7i64.into())])),
-        )));
-        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
-        let harness = mount(
-            &mut app,
-            RootRestorationScope::new(
-                Some("app".to_string()),
-                Counter {
-                    key: Some(key.clone().into()),
-                    restoration_id: Some("counter".to_string()),
-                },
-            )
-            .into_widget(),
-        );
-        let state = counter_state(&harness, &app, &key);
-        assert_eq!(*state.count(&app).value(&app), 7);
-
-        let manager = RestorationManager::instance(&mut app);
-        manager.handle_restoration_update_from_engine(
-            &mut app,
-            true,
+        let mut tester = mount(
             Some(child(
                 "app",
-                child("counter", values([("count", 21i64.into())])),
+                child("counter", values([("count", 7i64.into())])),
             )),
+            app_scope(counter(&key, "counter")),
         );
-        harness.pump(&mut app);
+        let state = counter_state(&tester, &key);
+        {
+            let app = tester.cell.borrow();
+            assert_eq!(*state.count(&app).value(&app), 7);
+        }
 
+        tester.update(|app| {
+            let manager = RestorationManager::instance(app);
+            manager.handle_restoration_update_from_engine(
+                app,
+                true,
+                Some(child(
+                    "app",
+                    child("counter", values([("count", 21i64.into())])),
+                )),
+            );
+        });
+        tester.pump();
+
+        let app = tester.cell.borrow();
         assert_eq!(app.get(state).restores, 2);
         assert_eq!(*state.count(&app).value(&app), 21);
     }
 
     #[test]
     fn a_state_without_a_surrounding_scope_gets_no_bucket() {
-        let (cell, _restoration) = app_restoring(None);
-        let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
-        let harness = mount(
-            &mut app,
-            Counter {
-                key: Some(key.clone().into()),
-                restoration_id: Some("counter".to_string()),
-            }
-            .into_widget(),
-        );
+        let tester = mount(None, counter(&key, "counter"));
 
-        let state = counter_state(&harness, &app, &key);
+        let state = counter_state(&tester, &key);
+        let app = tester.cell.borrow();
         assert_eq!(state.bucket(&app), None);
         assert_eq!(*state.count(&app).value(&app), 0);
     }
 
     #[test]
     fn of_panics_outside_any_restoration_scope() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let context = Harness::mount(&mut app, SizedBox::shrink().into_widget())
-            .root
-            .as_element();
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            RestorationScope::of(&mut app, context)
-        }));
-        assert!(panic.is_err());
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(SizedBox::shrink().key(key.clone().into()));
+            let context = key
+                .current_context(&tester.cell.borrow())
+                .expect("the box is mounted");
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                tester.update(|app| RestorationScope::of(app, context))
+            }));
+            assert!(panic.is_err());
+        });
     }
 }

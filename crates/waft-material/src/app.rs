@@ -1242,12 +1242,18 @@ mod tests {
         WidgetsBinding, WidgetsLocalizations, downcast_widget,
     };
 
+    use waft_rendering::testing::{PaintCall, paints};
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_one_widget,
+        test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::elevated_button::ElevatedButton;
     use crate::material::Material;
     use crate::material_localizations::MaterialLocalizations;
     use crate::scaffold::{Scaffold, ScaffoldMessengerState};
-    use crate::test_support::{WidgetTester, is_same_color_as, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, is_same_color_as};
     use waft_cupertino::CupertinoLocalizations;
 
     const ALL_PLATFORMS: [TargetPlatform; 6] = [
@@ -1259,21 +1265,13 @@ mod tests {
         TargetPlatform::Windows,
     ];
 
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
-
     /// An Android tester whose host reports `brightness`.
     fn tester_with_brightness(brightness: Brightness) -> WidgetTester {
-        let tester = WidgetTester::with_platform(
+        WidgetTester::with_platform(
             TestPlatform::new()
                 .on(TargetPlatform::Android)
                 .with_brightness(brightness),
-        );
-        tester.install_fonts();
-        tester
+        )
     }
 
     /// Dart's `tester.pumpWidget(app)`, with the theme data `app` needs made on the tester's app.
@@ -1340,16 +1338,16 @@ mod tests {
     }
 
     fn found(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_text(text).len()
+        find::text(text).skip_offstage(false).evaluate(tester).len()
     }
 
     fn onstage(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
+        find::text(text).evaluate(tester).len()
     }
 
     fn navigator(tester: &WidgetTester) -> Handle<NavigatorState> {
-        let element = *tester
-            .find_by_type::<Navigator>()
+        let element = *find::by_type::<Navigator>()
+            .evaluate(tester)
             .first()
             .expect("a navigator");
         element
@@ -1358,21 +1356,24 @@ mod tests {
     }
 
     fn center_of_text(tester: &WidgetTester, text: &str) -> Offset {
-        let element = *tester.find_text(text).first().expect("the text is mounted");
-        tester.global_rect(tester.render_box_of(element)).center()
+        let element = *find::text(text)
+            .evaluate(tester)
+            .first()
+            .expect("the text is mounted");
+        tester.get_rect(element).center()
     }
 
     /// The colour of the first `Material`: Dart's `tester.widget<Material>(find.byType(Material)).color`.
     fn material_color(tester: &WidgetTester) -> Option<Color> {
-        let element = *tester
-            .find_by_type::<Material>()
+        let element = *find::by_type::<Material>()
+            .evaluate(tester)
             .first()
             .expect("a Material");
         tester.widget(element, |material: &Material| material.color)
     }
 
     fn count_of<W: 'static>(tester: &WidgetTester) -> usize {
-        tester.find_by_type::<W>().len()
+        find::by_type::<W>().evaluate(tester).len()
     }
 
     #[test]
@@ -1393,23 +1394,21 @@ mod tests {
     // 'Can nest apps'.
     #[test]
     fn apps_can_nest() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |_| {
+        test_widgets(|tester| {
+            pump(tester, |_| {
                 MaterialApp::new().home(MaterialApp::new().home(Text::new("Home sweet home")))
             });
-            assert_eq!(found(&tester, "Home sweet home"), 1);
+            assert_eq!(onstage(tester, "Home sweet home"), 1);
         });
     }
 
     // 'Do not rebuild page during a route transition'.
     #[test]
     fn a_pushed_page_builds_once_through_its_route_transition() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let build_counter = Rc::new(Cell::new(0));
             let next = count_page("Y", &build_counter);
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .home(Builder::new(|_app, context| {
                         Material::new()
@@ -1425,26 +1424,25 @@ mod tests {
             });
 
             assert_eq!(build_counter.get(), 0);
-            let x = center_of_text(&tester, "X");
-            tester.tap(x, 1);
+            let x = center_of_text(tester, "X");
+            tester.tap_at(x, 1);
             assert_eq!(build_counter.get(), 0);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(build_counter.get(), 1);
             for _ in 0..4 {
-                tester.pump(Duration::from_millis(10));
+                tester.pump_by(Duration::from_millis(10));
                 assert_eq!(build_counter.get(), 1);
             }
-            tester.pump(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
             assert_eq!(build_counter.get(), 1);
-            assert_eq!(onstage(&tester, "Y"), 1);
+            assert_eq!(onstage(tester, "Y"), 1);
         });
     }
 
     // 'Do rebuild the home page if it changes'.
     #[test]
     fn the_home_page_rebuilds_when_it_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let build_counter = Rc::new(Cell::new(0));
             let home = |text: &'static str| {
                 let build_counter = Rc::clone(&build_counter);
@@ -1454,21 +1452,20 @@ mod tests {
                 })
             };
             let a = home("A");
-            pump(&mut tester, |_| MaterialApp::new().home(a));
+            pump(tester, |_| MaterialApp::new().home(a));
             assert_eq!(build_counter.get(), 1);
-            assert_eq!(found(&tester, "A"), 1);
+            assert_eq!(onstage(tester, "A"), 1);
             let b = home("B");
-            pump(&mut tester, |_| MaterialApp::new().home(b));
+            pump(tester, |_| MaterialApp::new().home(b));
             assert_eq!(build_counter.get(), 2);
-            assert_eq!(found(&tester, "B"), 1);
+            assert_eq!(onstage(tester, "B"), 1);
         });
     }
 
     // 'Do not rebuild the home page if it does not actually change'.
     #[test]
     fn the_home_page_does_not_rebuild_when_it_is_the_same_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let build_counter = Rc::new(Cell::new(0));
             let home: WidgetRef = {
                 let build_counter = Rc::clone(&build_counter);
@@ -1478,9 +1475,9 @@ mod tests {
                 })
                 .into_widget()
             };
-            pump(&mut tester, |_| MaterialApp::new().home(home.clone()));
+            pump(tester, |_| MaterialApp::new().home(home.clone()));
             assert_eq!(build_counter.get(), 1);
-            pump(&mut tester, |_| MaterialApp::new().home(home.clone()));
+            pump(tester, |_| MaterialApp::new().home(home.clone()));
             assert_eq!(build_counter.get(), 1);
         });
     }
@@ -1488,13 +1485,12 @@ mod tests {
     // 'Do rebuild pages that come from the routes table if the MaterialApp changes'.
     #[test]
     fn pages_from_the_routes_table_rebuild_when_the_app_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let build_counter = Rc::new(Cell::new(0));
             let routes = vec![("/".to_string(), count_page("page", &build_counter))];
-            pump(&mut tester, |_| MaterialApp::new().routes(routes.clone()));
+            pump(tester, |_| MaterialApp::new().routes(routes.clone()));
             assert_eq!(build_counter.get(), 1);
-            pump(&mut tester, |_| MaterialApp::new().routes(routes.clone()));
+            pump(tester, |_| MaterialApp::new().routes(routes.clone()));
             assert_eq!(build_counter.get(), 2);
         });
     }
@@ -1502,70 +1498,63 @@ mod tests {
     // 'Cannot pop the initial route'.
     #[test]
     fn the_initial_route_cannot_be_popped() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |_| MaterialApp::new().home(Text::new("Home")));
-            assert_eq!(found(&tester, "Home"), 1);
+        test_widgets(|tester| {
+            pump(tester, |_| MaterialApp::new().home(Text::new("Home")));
+            assert_eq!(onstage(tester, "Home"), 1);
 
-            let navigator = navigator(&tester);
+            let navigator = navigator(tester);
             let result = navigator.maybe_pop(&mut tester.cell.borrow_mut(), None);
 
             assert!(!result);
-            assert_eq!(found(&tester, "Home"), 1);
+            assert_eq!(onstage(tester, "Home"), 1);
         });
     }
 
     // 'Default initialRoute'.
     #[test]
     fn the_default_initial_route_is_the_slash_route() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |_| {
-                MaterialApp::new().routes(route_table(&["/"]))
-            });
-            assert_eq!(onstage(&tester, "route \"/\""), 1);
+        test_widgets(|tester| {
+            pump(tester, |_| MaterialApp::new().routes(route_table(&["/"])));
+            assert_eq!(onstage(tester, "route \"/\""), 1);
         });
     }
 
     // 'One-step initial route'.
     #[test]
     fn a_one_step_initial_route_is_pushed_over_the_slash_route() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |_| {
+        test_widgets(|tester| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .initial_route("/a")
                     .routes(route_table(&["/", "/a", "/a/b", "/b"]))
             });
-            assert_eq!(found(&tester, "route \"/\""), 1);
-            assert_eq!(onstage(&tester, "route \"/a\""), 1);
-            assert_eq!(found(&tester, "route \"/a/b\""), 0);
-            assert_eq!(found(&tester, "route \"/b\""), 0);
+            assert_eq!(found(tester, "route \"/\""), 1);
+            assert_eq!(onstage(tester, "route \"/a\""), 1);
+            assert_eq!(found(tester, "route \"/a/b\""), 0);
+            assert_eq!(found(tester, "route \"/b\""), 0);
         });
     }
 
     // 'Two-step initial route'.
     #[test]
     fn a_two_step_initial_route_is_pushed_over_each_of_its_parents() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |_| {
+        test_widgets(|tester| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .initial_route("/a/b")
                     .routes(route_table(&["/", "/a", "/a/b", "/b"]))
             });
-            assert_eq!(found(&tester, "route \"/\""), 1);
-            assert_eq!(found(&tester, "route \"/a\""), 1);
-            assert_eq!(onstage(&tester, "route \"/a/b\""), 1);
-            assert_eq!(found(&tester, "route \"/b\""), 0);
+            assert_eq!(found(tester, "route \"/\""), 1);
+            assert_eq!(found(tester, "route \"/a\""), 1);
+            assert_eq!(onstage(tester, "route \"/a/b\""), 1);
+            assert_eq!(found(tester, "route \"/b\""), 0);
         });
     }
 
     // 'Make sure initialRoute is only used the first time'.
     #[test]
     fn the_initial_route_is_only_used_the_first_time() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let routes = route_table(&["/", "/a", "/b"]);
             let expect_a = |tester: &WidgetTester| {
                 assert_eq!(found(tester, "route \"/\""), 1);
@@ -1573,24 +1562,24 @@ mod tests {
                 assert_eq!(found(tester, "route \"/b\""), 0);
             };
 
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .initial_route("/a")
                     .routes(routes.clone())
             });
-            expect_a(&tester);
+            expect_a(tester);
 
             // changing initialRoute has no effect
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .initial_route("/b")
                     .routes(routes.clone())
             });
-            expect_a(&tester);
+            expect_a(tester);
 
             // removing it has no effect
-            pump(&mut tester, |_| MaterialApp::new().routes(routes.clone()));
-            expect_a(&tester);
+            pump(tester, |_| MaterialApp::new().routes(routes.clone()));
+            expect_a(tester);
         });
     }
 
@@ -1598,82 +1587,78 @@ mod tests {
     // build app without a Navigator'.
     #[test]
     fn a_builder_without_routes_builds_the_app_without_a_navigator() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let builder_child = Rc::new(Cell::new(true));
             let seen = Rc::clone(&builder_child);
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new().builder(move |_app, _context, child| {
                     seen.set(child.is_some());
                     SizedBox::new().into_widget()
                 })
             });
             assert!(!builder_child.get());
-            assert_eq!(count_of::<Navigator>(&tester), 0);
+            assert_eq!(count_of::<Navigator>(tester), 0);
         });
     }
 
     // 'MaterialApp with builder works when themeAnimationStyle is AnimationStyle.noAnimation'.
     #[test]
     fn a_builder_works_without_the_theme_animation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |_| {
+        test_widgets(|tester| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .theme_animation_style(AnimationStyle::NO_ANIMATION)
                     .builder(|_app, _context, _child| Text::new("Works").into_widget())
             });
-            assert_eq!(found(&tester, "Works"), 1);
+            assert_eq!(onstage(tester, "Works"), 1);
         });
     }
 
     // 'MaterialApp.navigatorKey' and 'MaterialApp.navigatorKey can be updated'.
     #[test]
     fn the_navigator_key_names_the_navigator_while_the_app_is_given_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let color = Color::new(0xFF112233);
             let current = |tester: &WidgetTester, key: &GlobalKey| {
                 key.current_state::<NavigatorState>(&tester.cell.borrow_mut())
             };
 
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .navigator_key(key.clone())
                     .color(color)
                     .home(SizedBox::new())
             });
-            assert!(current(&tester, &key).is_some());
-            pump(&mut tester, |_| {
+            assert!(current(tester, &key).is_some());
+            pump(tester, |_| {
                 MaterialApp::new().color(color).home(SizedBox::new())
             });
-            assert!(current(&tester, &key).is_none());
-            pump(&mut tester, |_| {
+            assert!(current(tester, &key).is_none());
+            pump(tester, |_| {
                 MaterialApp::new()
                     .navigator_key(key.clone())
                     .color(color)
                     .home(SizedBox::new())
             });
-            assert!(current(&tester, &key).is_some());
+            assert!(current(tester, &key).is_some());
 
             let key2 = GlobalKey::new();
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .navigator_key(key2.clone())
                     .home(SizedBox::new())
             });
-            assert!(current(&tester, &key2).is_some());
-            assert!(current(&tester, &key).is_none());
+            assert!(current(tester, &key2).is_some());
+            assert!(current(tester, &key).is_none());
         });
     }
 
     #[test]
     fn the_scaffold_messenger_key_names_the_apps_scaffold_messenger() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .scaffold_messenger_key(key.clone())
                     .home(SizedBox::new())
@@ -1688,11 +1673,10 @@ mod tests {
     // 'Has default material and cupertino localizations'.
     #[test]
     fn the_app_has_default_material_and_cupertino_localizations() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let seen = Rc::new(Cell::new(None));
             let probe = context_probe(&seen);
-            pump(&mut tester, |_| MaterialApp::new().home(probe));
+            pump(tester, |_| MaterialApp::new().home(probe));
             let context = seen.get().expect("the probe built");
             let mut app = tester.cell.borrow_mut();
             // Default US "select all" text.
@@ -1726,7 +1710,7 @@ mod tests {
     #[test]
     fn a_light_theme_mode_uses_the_regular_theme() {
         for platform_brightness in [Brightness::Light, Brightness::Dark] {
-            with_main_thread_stack(|| {
+            test_widgets(|_tester| {
                 let brightness = applied_brightness(platform_brightness, |app, probe| {
                     MaterialApp::new()
                         .theme(brightness_theme(app, Brightness::Light))
@@ -1743,7 +1727,7 @@ mod tests {
     #[test]
     fn a_dark_theme_mode_uses_the_dark_theme() {
         for platform_brightness in [Brightness::Light, Brightness::Dark] {
-            with_main_thread_stack(|| {
+            test_widgets(|_tester| {
                 let brightness = applied_brightness(platform_brightness, |app, probe| {
                     MaterialApp::new()
                         .theme(brightness_theme(app, Brightness::Light))
@@ -1762,7 +1746,7 @@ mod tests {
     #[test]
     fn the_system_theme_mode_follows_the_platform_brightness() {
         for platform_brightness in [Brightness::Light, Brightness::Dark] {
-            with_main_thread_stack(|| {
+            test_widgets(|_tester| {
                 let brightness = applied_brightness(platform_brightness, |app, probe| {
                     MaterialApp::new()
                         .theme(brightness_theme(app, Brightness::Light))
@@ -1778,7 +1762,7 @@ mod tests {
     // provided'.
     #[test]
     fn a_dark_platform_without_a_dark_theme_uses_the_regular_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let brightness = applied_brightness(Brightness::Dark, |app, probe| {
                 MaterialApp::new()
                     .theme(brightness_theme(app, Brightness::Light))
@@ -1792,7 +1776,7 @@ mod tests {
     // provided at all'.
     #[test]
     fn a_dark_platform_without_any_theme_uses_the_fallback_light_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let brightness =
                 applied_brightness(Brightness::Dark, |_, probe| MaterialApp::new().home(probe));
             assert_eq!(brightness, Brightness::Light);
@@ -1803,7 +1787,7 @@ mod tests {
     // is provided'.
     #[test]
     fn a_light_platform_with_only_a_dark_theme_uses_the_fallback_light_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let brightness = applied_brightness(Brightness::Light, |app, probe| {
                 MaterialApp::new()
                     .dark_theme(brightness_theme(app, Brightness::Dark))
@@ -1837,7 +1821,7 @@ mod tests {
     // 'MaterialApp uses high contrast theme when appropriate'.
     #[test]
     fn high_contrast_uses_the_high_contrast_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let primary = applied_high_contrast_primary(Brightness::Light, |app, probe| {
                 MaterialApp::new()
                     .theme(primary_theme(app, Colors::LIGHT_BLUE.primary()))
@@ -1851,7 +1835,7 @@ mod tests {
     // 'MaterialApp uses high contrast dark theme when appropriate'.
     #[test]
     fn high_contrast_on_a_dark_platform_uses_the_high_contrast_dark_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let primary = applied_high_contrast_primary(Brightness::Dark, |app, probe| {
                 MaterialApp::new()
                     .theme(primary_theme(app, Colors::LIGHT_BLUE.primary()))
@@ -1867,7 +1851,7 @@ mod tests {
     // 'MaterialApp uses dark theme when no high contrast dark theme is provided'.
     #[test]
     fn high_contrast_on_a_dark_platform_without_a_high_contrast_dark_theme_uses_the_dark_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let primary = applied_high_contrast_primary(Brightness::Dark, |app, probe| {
                 MaterialApp::new()
                     .theme(primary_theme(app, Colors::LIGHT_BLUE.primary()))
@@ -1881,15 +1865,14 @@ mod tests {
     // 'MaterialApp animates theme changes'.
     #[test]
     fn the_app_animates_theme_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let (light_theme, dark_theme) = {
                 let app = tester.cell.borrow();
                 (ThemeData::new(&app), ThemeData::dark(&app, None))
             };
             let scaffold = || Builder::new(|_app, _context| Scaffold::new().into_widget());
             let (light, dark) = (light_theme.clone(), dark_theme.clone());
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .theme(light)
                     .dark_theme(dark)
@@ -1897,12 +1880,12 @@ mod tests {
                     .home(scaffold())
             });
             assert_eq!(
-                material_color(&tester),
+                material_color(tester),
                 Some(light_theme.scaffold_background_color)
             );
 
             // Change to dark theme
-            pump(&mut tester, |app| {
+            pump(tester, |app| {
                 MaterialApp::new()
                     .dark_theme(ThemeData::dark(app, None))
                     .theme_mode(ThemeMode::Dark)
@@ -1910,7 +1893,7 @@ mod tests {
             });
 
             // Wait half kThemeAnimationDuration = 200ms.
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
             // Default curve is linear so background should be half way between
             // the two colors.
@@ -1919,15 +1902,14 @@ mod tests {
                 Some(dark_theme.scaffold_background_color),
                 0.5,
             );
-            assert_eq!(material_color(&tester), half_bg_color);
+            assert_eq!(material_color(tester), half_bg_color);
         });
     }
 
     // 'MaterialApp theme animation can be turned off'.
     #[test]
     fn the_theme_animation_can_be_turned_off() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let (light_theme, dark_theme) = {
                 let app = tester.cell.borrow();
                 (ThemeData::new(&app), ThemeData::dark(&app, None))
@@ -1946,7 +1928,7 @@ mod tests {
             };
 
             let (light, dark) = (light_theme.clone(), dark_theme.clone());
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .theme(light)
                     .dark_theme(dark)
@@ -1955,13 +1937,13 @@ mod tests {
                     .home(scaffold.clone())
             });
             assert_eq!(
-                material_color(&tester),
+                material_color(tester),
                 Some(light_theme.scaffold_background_color)
             );
             assert_eq!(scaffold_rebuilds.get(), 1);
 
             // Change to dark theme
-            pump(&mut tester, |app| {
+            pump(tester, |app| {
                 MaterialApp::new()
                     .dark_theme(ThemeData::dark(app, None))
                     .theme_mode(ThemeMode::Dark)
@@ -1972,7 +1954,7 @@ mod tests {
             // Wait for any animation to finish.
             tester.pump_and_settle();
             assert_eq!(
-                material_color(&tester),
+                material_color(tester),
                 Some(dark_theme.scaffold_background_color)
             );
             assert_eq!(scaffold_rebuilds.get(), 2);
@@ -1982,13 +1964,8 @@ mod tests {
     // 'MaterialApp switches themes when the platformBrightness changes.'
     #[test]
     fn the_app_switches_themes_when_the_platform_brightness_changes() {
-        with_main_thread_stack(|| {
-            let (mut tester, platform) = WidgetTester::sharing(
-                TestPlatform::new()
-                    .on(TargetPlatform::Android)
-                    .with_brightness(Brightness::Light),
-            );
-            tester.install_fonts();
+        test_widgets(|tester| {
+            let platform = Rc::clone(tester.platform());
             let before: Rc<RefCell<Option<Brightness>>> = Rc::new(RefCell::new(None));
             let after: Rc<RefCell<Option<Brightness>>> = Rc::new(RefCell::new(None));
             let probe = {
@@ -2003,7 +1980,7 @@ mod tests {
                     SizedBox::new().into_widget()
                 })
             };
-            pump(&mut tester, |app| {
+            pump(tester, |app| {
                 MaterialApp::new()
                     .theme(brightness_theme(app, Brightness::Light))
                     .dark_theme(brightness_theme(app, Brightness::Dark))
@@ -2027,8 +2004,7 @@ mod tests {
     // 'MaterialApp can customize initial routes'.
     #[test]
     fn on_generate_initial_routes_replaces_the_initial_routes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let navigator_key = GlobalKey::new();
             let page = |text: &'static str| {
                 move |app: &mut App| {
@@ -2039,7 +2015,7 @@ mod tests {
                     PageRouteBuilder::new(app, page_builder).into_erased()
                 }
             };
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .navigator_key(navigator_key.clone())
                     .on_generate_initial_routes(move |app, initial_route| {
@@ -2055,10 +2031,10 @@ mod tests {
                         ("/abc".to_string(), text_page("regular page two")),
                     ])
             });
-            assert_eq!(onstage(&tester, "non-regular page two"), 1);
-            assert_eq!(onstage(&tester, "non-regular page one"), 0);
-            assert_eq!(onstage(&tester, "regular page one"), 0);
-            assert_eq!(onstage(&tester, "regular page two"), 0);
+            assert_eq!(onstage(tester, "non-regular page two"), 1);
+            assert_eq!(onstage(tester, "non-regular page one"), 0);
+            assert_eq!(onstage(tester, "regular page one"), 0);
+            assert_eq!(onstage(tester, "regular page two"), 0);
             {
                 let mut app = tester.cell.borrow_mut();
                 let navigator = navigator_key
@@ -2067,10 +2043,10 @@ mod tests {
                 navigator.pop(&mut app, None);
             }
             tester.pump_and_settle();
-            assert_eq!(onstage(&tester, "non-regular page two"), 0);
-            assert_eq!(onstage(&tester, "non-regular page one"), 1);
-            assert_eq!(onstage(&tester, "regular page one"), 0);
-            assert_eq!(onstage(&tester, "regular page two"), 0);
+            assert_eq!(onstage(tester, "non-regular page two"), 0);
+            assert_eq!(onstage(tester, "non-regular page one"), 1);
+            assert_eq!(onstage(tester, "regular page one"), 0);
+            assert_eq!(onstage(tester, "regular page two"), 0);
         });
     }
 
@@ -2078,27 +2054,28 @@ mod tests {
     // tween answers, since a `RectTweenObject` has no type to test.
     #[test]
     fn the_hero_controller_tweens_rects_along_a_material_arc() {
-        let tester = tester_on(TargetPlatform::Android);
-        let mut app = tester.cell.borrow_mut();
-        let controller = MaterialApp::create_material_hero_controller(&mut app);
-        let begin = Some(Rect::from_ltrb(0.0, 0.0, 10.0, 10.0));
-        let end = Some(Rect::from_ltrb(0.0, 0.0, 20.0, 20.0));
-        let create_rect_tween = app
-            .get(&controller)
-            .create_rect_tween
-            .clone()
-            .expect("the controller has a rect tween factory");
-        let tween = create_rect_tween(&mut app, begin, end);
-        let arc = MaterialRectArcTween::new(begin, end);
-        for t in [0.25, 0.5, 0.75] {
-            assert_eq!(tween.lerp(&app, t), Some(arc.lerp(t)));
-        }
-        assert_ne!(
-            tween.lerp(&app, 0.5),
-            Some(Rect::from_ltrb(0.0, 0.0, 15.0, 15.0)),
-            "not a linear RectTween"
-        );
-        controller.dispose(&mut app);
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let controller = MaterialApp::create_material_hero_controller(&mut app);
+            let begin = Some(Rect::from_ltrb(0.0, 0.0, 10.0, 10.0));
+            let end = Some(Rect::from_ltrb(0.0, 0.0, 20.0, 20.0));
+            let create_rect_tween = app
+                .get(&controller)
+                .create_rect_tween
+                .clone()
+                .expect("the controller has a rect tween factory");
+            let tween = create_rect_tween(&mut app, begin, end);
+            let arc = MaterialRectArcTween::new(begin, end);
+            for t in [0.25, 0.5, 0.75] {
+                assert_eq!(tween.lerp(&app, t), Some(arc.lerp(t)));
+            }
+            assert_ne!(
+                tween.lerp(&app, 0.5),
+                Some(Rect::from_ltrb(0.0, 0.0, 15.0, 15.0)),
+                "not a linear RectTween"
+            );
+            controller.dispose(&mut app);
+        });
     }
 
     /// The scroll configuration a page sees under `app`, and the page's context.
@@ -2118,10 +2095,9 @@ mod tests {
     // KeyboardDismissBehavior'.
     #[test]
     fn the_default_scroll_behavior_is_a_material_scroll_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let (behavior, context) =
-                page_scroll_behavior(&mut tester, |probe| MaterialApp::new().home(probe));
+                page_scroll_behavior(tester, |probe| MaterialApp::new().home(probe));
             assert_eq!(behavior.type_id(), TypeId::of::<MaterialScrollBehavior>());
             assert_eq!(
                 behavior.get_keyboard_dismiss_behavior(&mut tester.cell.borrow_mut(), context),
@@ -2133,9 +2109,8 @@ mod tests {
     // 'MaterialApp can override default KeyboardDismissBehavior'.
     #[test]
     fn the_keyboard_dismiss_behavior_can_be_overridden() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let (behavior, context) = page_scroll_behavior(&mut tester, |probe| {
+        test_widgets(|tester| {
+            let (behavior, context) = page_scroll_behavior(tester, |probe| {
                 MaterialApp::new()
                     .scroll_behavior(ScrollBehaviorRef::new(
                         ScrollBehaviorRef::new(MaterialScrollBehavior::new())
@@ -2154,8 +2129,7 @@ mod tests {
     // Dart's `getPlatform` reads `Theme.of(context)`, so a page that asks depends on the theme.
     #[test]
     fn the_material_scroll_behavior_platform_follows_a_theme_change() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let seen = Rc::new(RefCell::new(Vec::new()));
             let probe = {
                 let seen = Rc::clone(&seen);
@@ -2168,7 +2142,7 @@ mod tests {
             };
             for platform in [TargetPlatform::Android, TargetPlatform::IOS] {
                 let probe = probe.clone();
-                pump(&mut tester, |app| {
+                pump(tester, |app| {
                     MaterialApp::new()
                         .theme(ThemeData::builder().platform(platform).build(app))
                         .home(probe)
@@ -2197,9 +2171,8 @@ mod tests {
     // 'A ScrollBehavior can be set for MaterialApp'.
     #[test]
     fn a_scroll_behavior_can_be_set_for_the_app() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let (behavior, context) = page_scroll_behavior(&mut tester, |probe| {
+        test_widgets(|tester| {
+            let (behavior, context) = page_scroll_behavior(tester, |probe| {
                 MaterialApp::new()
                     .scroll_behavior(ScrollBehaviorRef::new(MockScrollBehavior))
                     .home(probe)
@@ -2228,12 +2201,11 @@ mod tests {
         app: impl FnOnce(&App, ListView) -> MaterialApp + Send,
     ) -> (usize, usize) {
         let mut result = (0, 0);
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |cell_app| app(cell_app, list_view()));
+        test_widgets(|tester| {
+            pump(tester, |cell_app| app(cell_app, list_view()));
             result = (
-                count_of::<StretchingOverscrollIndicator>(&tester),
-                count_of::<GlowingOverscrollIndicator>(&tester),
+                count_of::<StretchingOverscrollIndicator>(tester),
+                count_of::<GlowingOverscrollIndicator>(tester),
             );
         });
         result
@@ -2244,14 +2216,13 @@ mod tests {
     // debug banner, whose `CustomPaint` is above it, off.
     #[test]
     fn material_2_glows_in_the_color_scheme_secondary() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             // The overscroll color should be a transparent version of the colorScheme's
             // secondary color.
             let secondary_color = Color::new(0xff008800);
             #[allow(deprecated)]
             let glow_secondary_color = secondary_color.with_opacity(0.05);
-            pump(&mut tester, |app| {
+            pump(tester, |app| {
                 let theme =
                     ThemeData::from(crate::ColorScheme::light().with_secondary(secondary_color))
                         .use_material3(false)
@@ -2262,30 +2233,30 @@ mod tests {
                 )
             });
 
-            let glow = *tester
-                .find_by_type::<GlowingOverscrollIndicator>()
+            let glow = *find::by_type::<GlowingOverscrollIndicator>()
+                .evaluate(tester)
                 .first()
                 .expect("a glowing indicator");
-            let custom_paint = tester
-                .find_by_type::<waft_widgets::CustomPaint>()
+            let custom_paint = find::by_type::<waft_widgets::CustomPaint>()
+                .evaluate(tester)
                 .into_iter()
                 .find(|custom_paint| tester.ancestors(*custom_paint).contains(&glow))
                 .expect("the glow paints through a CustomPaint");
             let painter = tester.render_box_of(custom_paint).as_object();
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(200.0, 200.0));
             for _ in 0..10 {
                 let at = gesture.position + Offset::new(0.0, 5.0);
                 tester.move_to(&mut gesture, at, true);
-                tester.pump(Duration::from_millis(20));
+                tester.pump_by(Duration::from_millis(20));
             }
             tester.up(&gesture);
             assert!(
-                tester.painted(painter).iter().any(|drawn| matches!(
-                    drawn,
-                    crate::test_support::Drawn::Path(color, _)
-                        if *color == glow_secondary_color.to_argb32()
-                )),
+                paints(
+                    &tester.painted_ops(painter),
+                    &[PaintCall::circle(Some(glow_secondary_color))]
+                )
+                .is_ok(),
                 "the glow paints a circle in the secondary colour"
             );
         });
@@ -2296,8 +2267,7 @@ mod tests {
     fn the_stretch_clips_as_the_list_view_does() {
         use waft_rendering::{RenderClipRect, RenderCustomClip};
 
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let build_frame = |clip_behavior: Clip| {
                 MaterialApp::new()
                     .home(
@@ -2335,14 +2305,14 @@ mod tests {
                 render_clip.clip_behavior(&tester.cell.borrow())
             };
             let overscroll_the_start = |tester: &mut WidgetTester, expected: Clip| {
-                let mut gesture = WidgetTester::touch(1);
+                let mut gesture = TestPointer::touch(1);
                 let center = center_of_text(tester, "Index 1");
                 tester.down(&mut gesture, center);
                 // Overscroll the start.
                 let at = gesture.position + Offset::new(0.0, 200.0);
                 tester.move_to(&mut gesture, at, true);
                 tester.pump_and_settle();
-                assert_eq!(found(tester, "Index 1"), 1);
+                assert_eq!(onstage(tester, "Index 1"), 1);
                 assert!(center_of_text(tester, "Index 1").dy() > 0.0);
                 // Now clipping
                 assert_eq!(clip_of(tester), expected);
@@ -2354,20 +2324,20 @@ mod tests {
             // Test default clip behavior.
             tester.pump_widget(build_frame(Clip::HardEdge));
 
-            assert_eq!(count_of::<StretchingOverscrollIndicator>(&tester), 1);
-            assert_eq!(count_of::<GlowingOverscrollIndicator>(&tester), 0);
-            assert_eq!(found(&tester, "Index 1"), 1);
+            assert_eq!(count_of::<StretchingOverscrollIndicator>(tester), 1);
+            assert_eq!(count_of::<GlowingOverscrollIndicator>(tester), 0);
+            assert_eq!(onstage(tester, "Index 1"), 1);
 
             // Currently not clipping
-            assert_eq!(clip_of(&tester), Clip::None);
-            overscroll_the_start(&mut tester, Clip::HardEdge);
+            assert_eq!(clip_of(tester), Clip::None);
+            overscroll_the_start(tester, Clip::HardEdge);
 
             // Test custom clip behavior.
             tester.pump_widget(build_frame(Clip::None));
 
             // Currently not clipping
-            assert_eq!(clip_of(&tester), Clip::None);
-            overscroll_the_start(&mut tester, Clip::None);
+            assert_eq!(clip_of(tester), Clip::None);
+            overscroll_the_start(tester, Clip::None);
         });
     }
 
@@ -2472,11 +2442,10 @@ mod tests {
     #[test]
     fn a_vertical_scrollbar_asserts_its_controller_on_desktop() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let context = scroll_view_context(&mut tester, Axis::Vertical);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let context = scroll_view_context(tester, Axis::Vertical);
                 let details = ScrollableDetails::vertical(false);
-                let asserts = build_scrollbar_asserts(&tester, context, &details);
+                let asserts = build_scrollbar_asserts(tester, context, &details);
                 match platform {
                     TargetPlatform::Android | TargetPlatform::Fuchsia | TargetPlatform::IOS => {
                         // Does not throw if we aren't using it.
@@ -2494,14 +2463,13 @@ mod tests {
     #[test]
     fn a_horizontal_scroll_view_gets_no_scrollbar_on_any_platform() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let context = scroll_view_context(&mut tester, Axis::Horizontal);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let context = scroll_view_context(tester, Axis::Horizontal);
                 let details = ScrollableDetails::horizontal(true);
                 // Does not throw if we aren't using it.
                 // Horizontal axis gets no scrollbars for all platforms.
                 assert!(
-                    !build_scrollbar_asserts(&tester, context, &details),
+                    !build_scrollbar_asserts(tester, context, &details),
                     "{platform:?}"
                 );
             });
@@ -2511,9 +2479,8 @@ mod tests {
     #[test]
     fn a_vertical_scroll_view_gets_a_material_scrollbar_on_desktop_only() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let context = scroll_view_context(&mut tester, Axis::Vertical);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let context = scroll_view_context(tester, Axis::Vertical);
                 let mut app = tester.cell.borrow_mut();
                 let controller = ScrollController::default(&mut app)
                     .into_erased::<waft_widgets::AnyScrollController>();
@@ -2542,8 +2509,7 @@ mod tests {
     // 'Override theme animation using AnimationStyle'.
     #[test]
     fn the_theme_animation_style_overrides_the_theme_animation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let (light_theme, dark_theme) = {
                 let app = tester.cell.borrow();
                 (ThemeData::new(&app), ThemeData::dark(&app, None))
@@ -2563,27 +2529,24 @@ mod tests {
             tester.pump_widget(build_widget(ThemeMode::Light, None));
 
             assert!(is_same_color_as(
-                surface_of(&tester),
+                surface_of(tester),
                 light_theme.color_scheme.surface
             ));
 
             // Test the Scaffold background color animation from light to dark theme.
             tester.pump_widget(build_widget(ThemeMode::Dark, None));
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50)); // Advance animation by 50 milliseconds.
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50)); // Advance animation by 50 milliseconds.
 
             // Scaffold background color is slightly updated.
-            assert!(is_same_color_as(
-                surface_of(&tester),
-                Color::new(0xffc3bdc5)
-            ));
+            assert!(is_same_color_as(surface_of(tester), Color::new(0xffc3bdc5)));
 
             // Let the animation finish.
             tester.pump_and_settle();
 
             // Scaffold background color is fully updated to dark theme.
             assert!(is_same_color_as(
-                surface_of(&tester),
+                surface_of(tester),
                 dark_theme.color_scheme.surface
             ));
 
@@ -2602,22 +2565,19 @@ mod tests {
                     None,
                 )),
             ));
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
 
             // Scaffold background color is slightly updated but with a different
             // color than the default animation curve.
-            assert!(is_same_color_as(
-                surface_of(&tester),
-                Color::new(0xffe7e1e9)
-            ));
+            assert!(is_same_color_as(surface_of(tester), Color::new(0xffe7e1e9)));
 
             // Let the animation finish.
             tester.pump_and_settle();
 
             // Scaffold background color is fully updated to dark theme.
             assert!(is_same_color_as(
-                surface_of(&tester),
+                surface_of(tester),
                 dark_theme.color_scheme.surface
             ));
 
@@ -2626,12 +2586,12 @@ mod tests {
                 ThemeMode::Light,
                 Some(AnimationStyle::NO_ANIMATION),
             ));
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(1));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(1));
 
-            assert_ne!(surface_of(&tester), dark_theme.color_scheme.surface);
+            assert_ne!(surface_of(tester), dark_theme.color_scheme.surface);
             assert!(is_same_color_as(
-                surface_of(&tester),
+                surface_of(tester),
                 light_theme.color_scheme.surface
             ));
         });
@@ -2640,31 +2600,30 @@ mod tests {
     // 'AnimationStyle.noAnimation removes AnimatedTheme from the tree'.
     #[test]
     fn no_animation_removes_the_animated_theme_from_the_tree() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |_| {
+        test_widgets(|tester| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .theme_animation_style(AnimationStyle::default())
                     .home(SizedBox::new())
             });
 
-            assert_eq!(count_of::<AnimatedTheme>(&tester), 1);
-            assert_eq!(count_of::<Theme>(&tester), 1);
+            assert_eq!(count_of::<AnimatedTheme>(tester), 1);
+            assert_eq!(count_of::<Theme>(tester), 1);
 
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .theme_animation_style(AnimationStyle::NO_ANIMATION)
                     .home(SizedBox::new())
             });
 
-            assert_eq!(count_of::<AnimatedTheme>(&tester), 0);
-            assert_eq!(count_of::<Theme>(&tester), 1);
+            assert_eq!(count_of::<AnimatedTheme>(tester), 0);
+            assert_eq!(count_of::<Theme>(tester), 1);
         });
     }
 
     fn material_app_size(tester: &WidgetTester) -> Size {
-        let element: AnyElement = *tester
-            .find_by_type::<MaterialApp>()
+        let element: AnyElement = *find::by_type::<MaterialApp>()
+            .evaluate(tester)
             .first()
             .expect("a MaterialApp");
         tester.render_box_of(element).size(&tester.cell.borrow())
@@ -2673,53 +2632,49 @@ mod tests {
     // 'MaterialApp works in an unconstrained environment'.
     #[test]
     fn the_app_takes_its_homes_size_when_unconstrained() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let app = MaterialApp::new().home(SizedBox::new().width(123.0).height(456.0));
             tester.pump_widget(UnconstrainedBox::new().child(app).into_widget());
 
-            assert_eq!(material_app_size(&tester), Size::new(123.0, 456.0));
+            assert_eq!(material_app_size(tester), Size::new(123.0, 456.0));
         });
     }
 
     // 'MaterialApp does not crash at zero area'.
     #[test]
     fn the_app_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let app = MaterialApp::new().home(Text::new("X"));
             tester.pump_widget(
                 Center::new()
                     .child(SizedBox::shrink().child(app))
                     .into_widget(),
             );
-            assert_eq!(material_app_size(&tester), Size::ZERO);
+            assert_eq!(material_app_size(tester), Size::ZERO);
         });
     }
 
     #[test]
     fn the_checked_mode_banner_shows_unless_turned_off() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump(&mut tester, |_| MaterialApp::new().home(SizedBox::new()));
-            assert_eq!(count_of::<CheckedModeBanner>(&tester), 1);
+        test_widgets(|tester| {
+            pump(tester, |_| MaterialApp::new().home(SizedBox::new()));
+            assert_eq!(count_of::<CheckedModeBanner>(tester), 1);
 
-            pump(&mut tester, |_| {
+            pump(tester, |_| {
                 MaterialApp::new()
                     .debug_show_checked_mode_banner(false)
                     .home(SizedBox::new())
             });
-            assert_eq!(count_of::<CheckedModeBanner>(&tester), 0);
+            assert_eq!(count_of::<CheckedModeBanner>(tester), 0);
         });
     }
 
     #[test]
     fn the_default_selection_style_comes_from_the_color_scheme_primary() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let seen = Rc::new(Cell::new(None));
             let probe = context_probe(&seen);
-            pump(&mut tester, |_| MaterialApp::new().home(probe));
+            pump(tester, |_| MaterialApp::new().home(probe));
             let context = seen.get().expect("the probe built");
             let mut app = tester.cell.borrow_mut();
             let primary = Theme::of(&mut app, context).color_scheme.primary;
@@ -2736,8 +2691,7 @@ mod tests {
 
     #[test]
     fn can_place_app_inside_focus_scope() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let focus_scope_node = FocusScopeNode::new(&mut tester.cell.borrow_mut());
 
             tester.pump_widget(
@@ -2747,28 +2701,17 @@ mod tests {
                     .into_widget(),
             );
 
-            assert_eq!(tester.find_onstage_text("Home").len(), 1);
+            expect(tester, &find::text("Home"), finds_one_widget());
             focus_scope_node.dispose(&mut tester.cell.borrow_mut());
         });
     }
 
-    /// Dart's `tester.tap(find.text(text))`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let element = *tester
-            .find_onstage_text(text)
-            .first()
-            .expect("the text is onstage");
-        let center = tester.global_rect(tester.render_box_of(element)).center();
-        tester.tap(center, 1);
-    }
-
     #[test]
     fn return_value_from_pop_is_correct() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let result: Rc<RefCell<Option<CompleterFuture<RouteResult>>>> = Rc::default();
             let pushed = Rc::clone(&result);
-            pump(&mut tester, move |_| {
+            pump(tester, move |_| {
                 MaterialApp::new()
                     .home(Builder::new(move |_app, context| {
                         let pushed = Rc::clone(&pushed);
@@ -2800,12 +2743,12 @@ mod tests {
                         }) as WidgetBuilder,
                     )])
             });
-            tap_text(&mut tester, "X");
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
-            assert_eq!(tester.find_onstage_text("Y").len(), 1);
-            tap_text(&mut tester, "Y");
-            tester.pump(Duration::ZERO);
+            tester.tap(find::text("X"));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            expect(tester, &find::text("Y"), finds_one_widget());
+            tester.tap(find::text("Y"));
+            tester.pump();
 
             let value = result
                 .borrow()
@@ -2821,8 +2764,7 @@ mod tests {
     #[test]
     fn when_use_inherited_media_query_is_true_an_existing_media_query_is_used_if_one_is_available()
     {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let captured_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
             let unique_key: KeyRef = KeyRef::Local(Rc::new(waft_foundation::UniqueKey::new()));
             let captured = Rc::clone(&captured_context);

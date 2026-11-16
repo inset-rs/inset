@@ -1811,16 +1811,14 @@ mod tests {
         PlainLayoutChangedNotification, SizedBox, Stack, StatefulElement, View, ViewAnchor,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
     use crate::ink_well::InkWell;
-    use crate::test_support::{WidgetTester, build, test_view, with_main_thread_stack};
+    use crate::test_support::{build, test_view};
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
 
     /// Dart's `buildMaterial`.
     fn build_material(
@@ -1879,8 +1877,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/81504
     #[test]
     fn shadow_color_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_with_shadow = |shadow_color: Option<Color>| {
                 let mut material = Material::new()
                     .elevation(10.0)
@@ -1891,32 +1888,32 @@ mod tests {
 
             // Default M2 shadow color
             let widget = themed(
-                &tester,
+                tester,
                 |app| ThemeData::builder().use_material3(false).build(app),
                 build_with_shadow(None),
             );
             tester.pump_widget(widget);
             tester.pump_and_settle();
             let expected = ThemeData::new(&tester.cell.borrow()).shadow_color;
-            assert_eq!(model(&tester).shadow_color(&tester.cell.borrow()), expected);
+            assert_eq!(model(tester).shadow_color(&tester.cell.borrow()), expected);
 
             // Default M3 shadow color
-            let widget = themed(&tester, ThemeData::new, build_with_shadow(None));
+            let widget = themed(tester, ThemeData::new, build_with_shadow(None));
             tester.pump_widget(widget);
             tester.pump_and_settle();
             let expected = ThemeData::new(&tester.cell.borrow()).color_scheme.shadow();
-            assert_eq!(model(&tester).shadow_color(&tester.cell.borrow()), expected);
+            assert_eq!(model(tester).shadow_color(&tester.cell.borrow()), expected);
 
             // Drop shadow can be turned off with a transparent color.
             let widget = themed(
-                &tester,
+                tester,
                 ThemeData::new,
                 build_with_shadow(Some(Colors::TRANSPARENT)),
             );
             tester.pump_widget(widget);
             tester.pump_and_settle();
             assert_eq!(
-                model(&tester).shadow_color(&tester.cell.borrow()),
+                model(tester).shadow_color(&tester.cell.borrow()),
                 Colors::TRANSPARENT
             );
         });
@@ -1926,22 +1923,25 @@ mod tests {
     fn shadows_animate_smoothly() {
         // This code verifies that the PhysicalModel's elevation animates over
         // a kThemeChangeDuration time interval.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(default_material(0.0));
-            assert_eq!(model(&tester).elevation(&tester.cell.borrow()), 0.0);
+            assert_eq!(model(tester).elevation(&tester.cell.borrow()), 0.0);
 
             tester.pump_widget(default_material(9.0));
-            assert_eq!(model(&tester).elevation(&tester.cell.borrow()), 0.0);
+            assert_eq!(model(tester).elevation(&tester.cell.borrow()), 0.0);
 
-            tester.pump(Duration::from_millis(1));
-            assert!(model(&tester).elevation(&tester.cell.borrow()).abs() < 0.001);
+            tester.pump_by(Duration::from_millis(1));
+            waft_widgets::testing::assert_more_or_less_equals_within(
+                model(tester).elevation(&tester.cell.borrow()),
+                0.0,
+                0.001,
+            );
 
-            tester.pump(K_THEME_CHANGE_DURATION / 2);
-            assert!(model(&tester).elevation(&tester.cell.borrow()).abs() >= 0.001);
+            tester.pump_by(K_THEME_CHANGE_DURATION / 2);
+            assert!(model(tester).elevation(&tester.cell.borrow()).abs() >= 0.001);
 
-            tester.pump(K_THEME_CHANGE_DURATION);
-            assert_eq!(model(&tester).elevation(&tester.cell.borrow()), 9.0);
+            tester.pump_by(K_THEME_CHANGE_DURATION);
+            assert_eq!(model(tester).elevation(&tester.cell.borrow()), 9.0);
         });
     }
 
@@ -1993,7 +1993,7 @@ mod tests {
 
     #[test]
     fn a_material_given_its_own_shape_again_does_not_animate_its_shape() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let shaped = |shape: &ShapeBorderRef| {
                 centered(Material::new().color(GREEN).shape(shape.clone()))
             };
@@ -2002,22 +2002,21 @@ mod tests {
                     &mut tester.cell.borrow_mut(),
                 )
             };
-            let mut tester = tester();
             let shape = ShapeBorderRef::new(IdentityShape);
             tester.pump_widget(shaped(&shape));
-            tester.pump(K_THEME_CHANGE_DURATION);
+            tester.pump_by(K_THEME_CHANGE_DURATION);
 
             tester.pump_widget(shaped(&shape));
             assert_eq!(
-                transient_callbacks(&tester),
+                transient_callbacks(tester),
                 0,
                 "the same shape is no new target"
             );
-            assert_eq!(shape_of(&tester), shape);
+            assert_eq!(shape_of(tester), shape);
 
             tester.pump_widget(shaped(&ShapeBorderRef::new(IdentityShape)));
             assert_eq!(
-                transient_callbacks(&tester),
+                transient_callbacks(tester),
                 1,
                 "another shape of the same type is, as Dart's identity `==` makes it"
             );
@@ -2045,39 +2044,37 @@ mod tests {
     fn shadow_colors_animate_smoothly() {
         // This code verifies that the PhysicalModel's shadowColor animates over
         // a kThemeChangeDuration time interval.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let red = Color::new(0xFFFF0000);
             tester.pump_widget(default_material(0.0));
-            assert_eq!(model(&tester).shadow_color(&tester.cell.borrow()), GREEN);
+            assert_eq!(model(tester).shadow_color(&tester.cell.borrow()), GREEN);
 
             tester.pump_widget(centered(build_material(0.0, red, None, BLUE)));
-            assert_eq!(model(&tester).shadow_color(&tester.cell.borrow()), GREEN);
+            assert_eq!(model(tester).shadow_color(&tester.cell.borrow()), GREEN);
 
-            tester.pump(Duration::from_millis(1));
+            tester.pump_by(Duration::from_millis(1));
             assert!(within_one(
-                model(&tester).shadow_color(&tester.cell.borrow()),
+                model(tester).shadow_color(&tester.cell.borrow()),
                 GREEN
             ));
 
-            tester.pump(K_THEME_CHANGE_DURATION / 2);
+            tester.pump_by(K_THEME_CHANGE_DURATION / 2);
             assert!(!within_one(
-                model(&tester).shadow_color(&tester.cell.borrow()),
+                model(tester).shadow_color(&tester.cell.borrow()),
                 GREEN
             ));
 
-            tester.pump(K_THEME_CHANGE_DURATION);
-            assert_eq!(model(&tester).shadow_color(&tester.cell.borrow()), red);
+            tester.pump_by(K_THEME_CHANGE_DURATION);
+            assert_eq!(model(tester).shadow_color(&tester.cell.borrow()), red);
         });
     }
 
     #[test]
     fn apply_elevation_overlay_color_does_not_effect_anything_with_use_material3_set_to_true() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let surface_color = Color::new(0xFF121212);
             let widget = themed(
-                &tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .apply_elevation_overlay_color(true)
@@ -2087,30 +2084,29 @@ mod tests {
                 centered(build_material(8.0, GREEN, None, surface_color)),
             );
             tester.pump_widget(widget);
-            assert_eq!(model(&tester).color(&tester.cell.borrow()), surface_color);
+            assert_eq!(model(tester).color(&tester.cell.borrow()), surface_color);
         });
     }
 
     #[test]
     fn surface_tint_color_is_used_to_as_an_overlay_to_indicate_elevation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let base_color = Color::new(0xFF121212);
             let surface_tint_color = Color::new(0xff44ccff);
 
             // With no surfaceTintColor specified, it should not apply an overlay
             let widget = themed(
-                &tester,
+                tester,
                 ThemeData::new,
                 centered(build_material(12.0, GREEN, None, base_color)),
             );
             tester.pump_widget(widget);
             tester.pump_and_settle();
-            assert_eq!(model(&tester).color(&tester.cell.borrow()), base_color);
+            assert_eq!(model(tester).color(&tester.cell.borrow()), base_color);
 
             // With transparent surfaceTintColor, it should not apply an overlay
             let widget = themed(
-                &tester,
+                tester,
                 ThemeData::new,
                 centered(build_material(
                     12.0,
@@ -2121,12 +2117,12 @@ mod tests {
             );
             tester.pump_widget(widget);
             tester.pump_and_settle();
-            assert_eq!(model(&tester).color(&tester.cell.borrow()), base_color);
+            assert_eq!(model(tester).color(&tester.cell.borrow()), base_color);
 
             // With surfaceTintColor specified, it should not apply an overlay based
             // on the elevation.
             let widget = themed(
-                &tester,
+                tester,
                 ThemeData::new,
                 centered(build_material(
                     12.0,
@@ -2140,7 +2136,7 @@ mod tests {
 
             // Final color should be the base with a tint of 0.14 opacity or 0xff192c33
             assert!(is_same_color_as(
-                model(&tester).color(&tester.cell.borrow()),
+                model(tester).color(&tester.cell.borrow()),
                 Color::new(0xff192c33)
             ));
         });
@@ -2148,11 +2144,10 @@ mod tests {
 
     #[test]
     fn apply_elevation_overlay_color_set_to_false_does_not_change_surface_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let surface_color = Color::new(0xFF121212);
             let widget = themed(
-                &tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .use_material3(false)
@@ -2163,14 +2158,13 @@ mod tests {
                 centered(build_material(8.0, GREEN, None, surface_color)),
             );
             tester.pump_widget(widget);
-            assert_eq!(model(&tester).color(&tester.cell.borrow()), surface_color);
+            assert_eq!(model(tester).color(&tester.cell.borrow()), surface_color);
         });
     }
 
     #[test]
     fn apply_elevation_overlay_color_set_to_true_applies_a_semi_transparent_on_surface_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let surface_color = Color::new(0xFF121212);
             let on_surface_color = Colors::GREEN_ACCENT.primary();
 
@@ -2191,7 +2185,7 @@ mod tests {
 
             for (elevation, color) in elevation_colors {
                 let widget = themed(
-                    &tester,
+                    tester,
                     |app| {
                         ThemeData::builder()
                             .use_material3(false)
@@ -2207,7 +2201,7 @@ mod tests {
                 );
                 tester.pump_widget(widget);
                 tester.pump_and_settle(); // wait for the elevation animation to finish
-                let actual = model(&tester).color(&tester.cell.borrow());
+                let actual = model(tester).color(&tester.cell.borrow());
                 assert!(
                     is_same_color_as(actual, Color::new(color)),
                     "elevation {elevation}: {actual:?}"
@@ -2227,8 +2221,7 @@ mod tests {
 
     #[test]
     fn transparency_clipping_no_clip_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (_key, widget) = keyed(Material::new().r#type(MaterialType::Transparency));
             tester.pump_widget(widget);
             let clip = tester.first::<RenderClipPath>();
@@ -2254,15 +2247,14 @@ mod tests {
 
     #[test]
     fn transparency_clipping_clips_to_bounding_rect_by_default_given_clip_anti_alias() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (_key, widget) = keyed(
                 Material::new()
                     .r#type(MaterialType::Transparency)
                     .clip_behavior(Clip::AntiAlias),
             );
             tester.pump_widget(widget);
-            let (clip_behavior, shape) = clip_shape(&tester);
+            let (clip_behavior, shape) = clip_shape(tester);
             assert_eq!(clip_behavior, Clip::AntiAlias);
             assert!(shape.eq_shape(&RoundedRectangleBorder::default()));
         });
@@ -2270,8 +2262,7 @@ mod tests {
 
     #[test]
     fn transparency_clipping_clips_to_rounded_rect_when_border_radius_provided() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let radius = BorderRadius::all(Radius::circular(10.0));
             let (_key, widget) = keyed(
                 Material::new()
@@ -2280,7 +2271,7 @@ mod tests {
                     .clip_behavior(Clip::AntiAlias),
             );
             tester.pump_widget(widget);
-            let (_, shape) = clip_shape(&tester);
+            let (_, shape) = clip_shape(tester);
             assert!(shape.eq_shape(&RoundedRectangleBorder::new(
                 BorderSide::NONE,
                 radius.into()
@@ -2290,8 +2281,7 @@ mod tests {
 
     #[test]
     fn transparency_clipping_clips_to_shape_when_provided() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (_key, widget) = keyed(
                 Material::new()
                     .r#type(MaterialType::Transparency)
@@ -2299,15 +2289,14 @@ mod tests {
                     .clip_behavior(Clip::AntiAlias),
             );
             tester.pump_widget(widget);
-            let (_, shape) = clip_shape(&tester);
+            let (_, shape) = clip_shape(tester);
             assert!(shape.eq_shape(&StadiumBorder::default()));
         });
     }
 
     #[test]
     fn physical_models_canvas() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (_key, widget) = keyed(Material::new());
             tester.pump_widget(widget);
             let model = tester.first::<RenderPhysicalModel>();
@@ -2323,19 +2312,19 @@ mod tests {
     }
 
     fn assert_physical_shape(
+        tester: &mut WidgetTester,
         material: Material,
         expected: impl ShapeBorder + 'static,
         elevation: f64,
     ) {
-        let mut tester = tester();
         let (_key, widget) = keyed(material);
         tester.pump_widget(widget);
         assert!(
-            shape_of(&tester).eq_shape(&expected),
+            shape_of(tester).eq_shape(&expected),
             "{:?}",
-            shape_of(&tester)
+            shape_of(tester)
         );
-        assert_eq!(model(&tester).elevation(&tester.cell.borrow()), elevation);
+        assert_eq!(model(tester).elevation(&tester.cell.borrow()), elevation);
     }
 
     fn rounded(radius: f64) -> RoundedRectangleBorder {
@@ -2347,8 +2336,9 @@ mod tests {
 
     #[test]
     fn physical_models_canvas_with_border_radius_and_elevation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new()
                     .border_radius(BorderRadius::all(Radius::circular(5.0)))
                     .elevation(1.0),
@@ -2360,8 +2350,9 @@ mod tests {
 
     #[test]
     fn physical_models_canvas_with_shape_and_elevation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new()
                     .shape(StadiumBorder::default())
                     .elevation(1.0),
@@ -2373,8 +2364,9 @@ mod tests {
 
     #[test]
     fn physical_models_card() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new().r#type(MaterialType::Card),
                 rounded(2.0),
                 0.0,
@@ -2384,8 +2376,9 @@ mod tests {
 
     #[test]
     fn physical_models_card_with_border_radius_and_elevation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new()
                     .r#type(MaterialType::Card)
                     .border_radius(BorderRadius::all(Radius::circular(5.0)))
@@ -2398,8 +2391,9 @@ mod tests {
 
     #[test]
     fn physical_models_card_with_shape_and_elevation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new()
                     .r#type(MaterialType::Card)
                     .shape(StadiumBorder::default())
@@ -2412,8 +2406,9 @@ mod tests {
 
     #[test]
     fn physical_models_circle() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new()
                     .r#type(MaterialType::Circle)
                     .color(Color::new(0xFF0000FF)),
@@ -2425,8 +2420,9 @@ mod tests {
 
     #[test]
     fn physical_models_button() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new()
                     .r#type(MaterialType::Button)
                     .color(Color::new(0xFF0000FF)),
@@ -2438,8 +2434,9 @@ mod tests {
 
     #[test]
     fn physical_models_button_with_elevation_and_border_radius() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new()
                     .r#type(MaterialType::Button)
                     .color(Color::new(0xFF0000FF))
@@ -2453,8 +2450,9 @@ mod tests {
 
     #[test]
     fn physical_models_button_with_elevation_and_shape() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_physical_shape(
+                tester,
                 Material::new()
                     .r#type(MaterialType::Button)
                     .color(Color::new(0xFF0000FF))
@@ -2467,7 +2465,7 @@ mod tests {
     }
 
     /// What the border painter of the material draws.
-    fn border_draws(tester: &WidgetTester) -> (bool, Vec<crate::test_support::Drawn>) {
+    fn border_draws(tester: &WidgetTester) -> (bool, Vec<waft_rendering::testing::RecordedCall>) {
         let paint = tester.first::<RenderCustomPaint>();
         let mut app = tester.cell.borrow_mut();
         let (foreground, painter) = match paint.foreground_painter(&app) {
@@ -2479,7 +2477,7 @@ mod tests {
         painter.paint(&mut app, &mut canvas, size);
         (
             foreground,
-            crate::test_support::Drawn::draws(&canvas.build()),
+            crate::test_support::draw_calls(canvas.build().ops()),
         )
     }
 
@@ -2497,8 +2495,7 @@ mod tests {
 
     #[test]
     fn border_is_painted_on_physical_layers() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (_key, widget) = keyed(
                 Material::new()
                     .r#type(MaterialType::Button)
@@ -2506,7 +2503,7 @@ mod tests {
                     .shape(circle_with_side()),
             );
             tester.pump_widget(widget);
-            let (foreground, draws) = border_draws(&tester);
+            let (foreground, draws) = border_draws(tester);
             assert!(foreground);
             assert_eq!(draws.len(), 1, "{draws:?}");
         });
@@ -2514,30 +2511,28 @@ mod tests {
 
     #[test]
     fn border_is_painted_for_transparent_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (_key, widget) = keyed(
                 Material::new()
                     .r#type(MaterialType::Transparency)
                     .shape(circle_with_side()),
             );
             tester.pump_widget(widget);
-            let (_, draws) = border_draws(&tester);
+            let (_, draws) = border_draws(tester);
             assert_eq!(draws.len(), 1, "{draws:?}");
         });
     }
 
     #[test]
     fn border_is_not_painted_for_when_border_side_is_none() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (_key, widget) = keyed(
                 Material::new()
                     .r#type(MaterialType::Transparency)
                     .shape(CircleBorder::default()),
             );
             tester.pump_widget(widget);
-            let (_, draws) = border_draws(&tester);
+            let (_, draws) = border_draws(tester);
             assert!(draws.is_empty(), "{draws:?}");
         });
     }
@@ -2545,11 +2540,10 @@ mod tests {
     /// The structure behind the `border_paint_above` and `border_paint_below` goldens.
     #[test]
     fn border_is_painted_above_the_child_by_default_and_below_when_specified() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (_key, widget) = keyed(Material::new().shape(rounded(8.0)));
             tester.pump_widget(widget);
-            assert!(border_draws(&tester).0, "a foreground painter");
+            assert!(border_draws(tester).0, "a foreground painter");
 
             let (_key, widget) = keyed(
                 Material::new()
@@ -2557,7 +2551,7 @@ mod tests {
                     .border_on_foreground(false),
             );
             tester.pump_widget(widget);
-            assert!(!border_draws(&tester).0, "a background painter");
+            assert!(!border_draws(tester).0, "a background painter");
         });
     }
 
@@ -2620,8 +2614,7 @@ mod tests {
 
     #[test]
     fn ink_feature_skips_painting_if_intermediate_node_skips() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let sized_box_key = GlobalKey::new();
             let material_key = GlobalKey::new();
             tester.pump_widget(offstage_material(&material_key, &sized_box_key, true));
@@ -2644,7 +2637,7 @@ mod tests {
             assert_eq!(paint_count.get(), 0);
 
             // Force a repaint. Since it's offstage, the ink feature should not get painted.
-            repaint(&tester);
+            repaint(tester);
             assert_eq!(paint_count.get(), 0);
 
             tester.pump_widget(offstage_material(&material_key, &sized_box_key, false));
@@ -2653,15 +2646,15 @@ mod tests {
             assert_eq!(paint_count.get(), 1);
 
             // Force a repaint again. This time, it gets repainted because it is onstage.
-            repaint(&tester);
+            repaint(tester);
             assert_eq!(paint_count.get(), 2);
 
-            let feature = ink_features_under(&tester)
+            let feature = ink_features_under(tester)
                 .debug_ink_features(&tester.cell.borrow())
                 .expect("added")[0];
             feature.dispose(&mut tester.cell.borrow_mut());
             assert!(
-                ink_features_under(&tester)
+                ink_features_under(tester)
                     .debug_ink_features(&tester.cell.borrow())
                     .expect("added")
                     .is_empty()
@@ -2671,8 +2664,7 @@ mod tests {
 
     #[test]
     fn layout_changed_notification_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(
                 Material::new()
                     .child(Builder::new(|app, context| {
@@ -2686,8 +2678,7 @@ mod tests {
 
     #[test]
     fn lookup_boundary_hides_material_from_material_maybe_of() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let material: Rc<Cell<Option<Option<AnyMaterialInkController>>>> = Rc::default();
             tester.pump_widget(
                 Material::new()
@@ -2706,8 +2697,7 @@ mod tests {
 
     #[test]
     fn lookup_boundary_hides_material_from_material_of() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 tester.pump_widget(
                     Material::new()
@@ -2723,11 +2713,11 @@ mod tests {
             assert!(
                 message.starts_with(
                     "Material.of() was called with a context that does not have access to a \
-                     Material widget.\nThe context provided to Material.of() does have a \
-                     Material widget ancestor, but it is hidden by a LookupBoundary. This can \
-                     happen because you are using a widget that looks for a Material ancestor, \
-                     but no such ancestor exists within the closest LookupBoundary.\nThe \
-                     context used was:\n  "
+                 Material widget.\nThe context provided to Material.of() does have a \
+                 Material widget ancestor, but it is hidden by a LookupBoundary. This can \
+                 happen because you are using a widget that looks for a Material ancestor, \
+                 but no such ancestor exists within the closest LookupBoundary.\nThe \
+                 context used was:\n  "
                 ),
                 "{message}"
             );
@@ -2800,7 +2790,7 @@ mod tests {
     fn drag_list(tester: &mut WidgetTester, list_child: &GlobalKey, offset: Offset) {
         let start = tester.center_of(list_child);
         let start = Offset::new(start.dx(), 300.0);
-        let mut pointer = WidgetTester::touch(1);
+        let mut pointer = TestPointer::touch(1);
         tester.down(&mut pointer, start);
         tester.move_to(&mut pointer, start + offset, true);
         tester.up(&pointer);
@@ -2808,8 +2798,7 @@ mod tests {
 
     #[test]
     fn list_view_scroll_does_not_repaint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log: Rc<RefCell<Vec<Size>>> = Rc::default();
             let list_child = GlobalKey::new();
             tester.pump_widget(scrolled_material(&log, &list_child));
@@ -2822,8 +2811,8 @@ mod tests {
             );
             log.borrow_mut().clear();
 
-            drag_list(&mut tester, &list_child, Offset::new(0.0, -300.0));
-            tester.pump(Duration::ZERO);
+            drag_list(tester, &list_child, Offset::new(0.0, -300.0));
+            tester.pump();
 
             assert!(log.borrow().is_empty(), "{:?}", log.borrow());
         });
@@ -2833,8 +2822,7 @@ mod tests {
     // `LayoutChangedNotification`, so a Material that holds ink repaints when its list scrolls.
     #[test]
     fn list_view_scroll_repaints_the_ink_of_its_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log: Rc<RefCell<Vec<Size>>> = Rc::default();
             let list_child = GlobalKey::new();
             tester.pump_widget(scrolled_material(&log, &list_child));
@@ -2854,11 +2842,11 @@ mod tests {
                 });
                 controller.add_ink_feature(&mut app, tracker.erase());
             }
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(paint_count.get(), 1);
 
-            drag_list(&mut tester, &list_child, Offset::new(0.0, -300.0));
-            tester.pump(Duration::ZERO);
+            drag_list(tester, &list_child, Offset::new(0.0, -300.0));
+            tester.pump();
 
             assert_eq!(paint_count.get(), 2, "the ink repaints with the scroll");
         });
@@ -2867,8 +2855,7 @@ mod tests {
     #[test]
     fn transparent_material_widget_does_not_absorb_hit_test() {
         // This is a regression test for https://github.com/flutter/flutter/issues/58665.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pressed = Rc::new(Cell::new(false));
             let button = GlobalKey::new();
             let widget = Directionality::new(
@@ -2893,18 +2880,17 @@ mod tests {
             )
             .into_widget();
             tester.pump_widget(widget);
-            let center = tester.center_of(&button);
-            tester.tap(center, 1);
+            let center = tester.get_center(&button);
+            tester.tap_at(center, 1);
             assert!(pressed.get());
         });
     }
 
     #[test]
     fn overlay_will_not_apply_to_materials_using_a_non_surface_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = themed(
-                &tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .use_material3(false)
@@ -2917,7 +2903,7 @@ mod tests {
             tester.pump_widget(widget);
             // Shouldn't change, as it is not using a ColorScheme.surface color
             assert_eq!(
-                model(&tester).color(&tester.cell.borrow()),
+                model(tester).color(&tester.cell.borrow()),
                 Colors::CYAN.primary()
             );
         });
@@ -2925,10 +2911,9 @@ mod tests {
 
     #[test]
     fn overlay_will_not_apply_to_materials_using_a_light_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = themed(
-                &tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .use_material3(false)
@@ -2941,7 +2926,7 @@ mod tests {
             tester.pump_widget(widget);
             // Shouldn't change, as it was under a light color scheme.
             assert_eq!(
-                model(&tester).color(&tester.cell.borrow()),
+                model(tester).color(&tester.cell.borrow()),
                 Colors::CYAN.primary()
             );
         });
@@ -2950,12 +2935,11 @@ mod tests {
     #[test]
     #[allow(deprecated)]
     fn overlay_will_apply_to_materials_with_a_non_opaque_surface_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let surface_color = Color::new(0xFF121212);
             let surface_color_with_overlay = Color::new(0xC6353535);
             let widget = themed(
-                &tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .use_material3(false)
@@ -2971,7 +2955,7 @@ mod tests {
                 )),
             );
             tester.pump_widget(widget);
-            let color = model(&tester).color(&tester.cell.borrow());
+            let color = model(tester).color(&tester.cell.borrow());
             assert!(
                 is_same_color_as(color, surface_color_with_overlay),
                 "{color:?}"
@@ -2982,8 +2966,7 @@ mod tests {
 
     #[test]
     fn expected_overlay_color_can_be_computed_using_color_with_overlay() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let surface_color = Color::new(0xFF123456);
             let on_surface_color = Color::new(0xFF654321);
             let elevation = 8.0;
@@ -2992,7 +2975,7 @@ mod tests {
                 ElevationOverlay::color_with_overlay(surface_color, on_surface_color, elevation);
 
             let widget = themed(
-                &tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .use_material3(false)
@@ -3007,7 +2990,7 @@ mod tests {
                 centered(build_material(elevation, GREEN, None, surface_color)),
             );
             tester.pump_widget(widget);
-            let color = model(&tester).color(&tester.cell.borrow());
+            let color = model(tester).color(&tester.cell.borrow());
             assert_eq!(color, surface_color_with_overlay);
             assert_ne!(color, surface_color);
         });
@@ -3015,7 +2998,7 @@ mod tests {
 
     #[test]
     fn material_is_not_visible_from_sub_views() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let fake_view: ViewRef =
                 Rc::new(TestView::with_pixel_ratio(1600.0, 1200.0, 2.0).with_id(ViewId(100)));
             let platform = TestPlatform::new()
@@ -3060,8 +3043,7 @@ mod tests {
 
     #[test]
     fn a_surface_tint_tween_is_freed_when_the_tint_goes_away() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tinted = |surface_tint_color: Option<Color>| {
                 centered(
                     build_material(4.0, GREEN, surface_tint_color, BLUE).r#type(MaterialType::Card),
@@ -3090,8 +3072,7 @@ mod tests {
 
     #[test]
     fn material_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(
                 Center::new()

@@ -363,11 +363,19 @@ impl StatelessWidget for AdaptiveTextSelectionToolbar {
 #[cfg(test)]
 mod tests {
     use waft_embedder::{Offset, Size};
-    use waft_widgets::{Builder, Center, Container, GlobalKey, ListView};
+    use waft_widgets::{
+        AnyElement, Builder, Center, Container, CustomPaint, GlobalKey, KeyRef, ListView,
+        StandardComponentType,
+    };
+
+    use waft_widgets::testing::{
+        TargetPlatformVariant, WidgetTester, expect, find, finds_n_widgets, finds_one_widget,
+        test_widgets, test_widgets_variant,
+    };
 
     use super::*;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
     /// Flutter's `TargetPlatformVariant.all()`.
@@ -382,12 +390,6 @@ mod tests {
 
     /// A tester on `platform` with flutter_test's fonts, so a `Text` measures as in Flutter's
     /// tests.
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_platform_fonts();
-        tester
-    }
-
     /// `MaterialApp(home: Scaffold(body: Center(child: child)))` under the default theme.
     fn pump_centered_in_scaffold(tester: &mut WidgetTester, child: WidgetRef) {
         let root = {
@@ -408,13 +410,12 @@ mod tests {
 
     #[test]
     fn builds_the_right_toolbar_on_each_platform_including_web_and_shows_button_items() {
-        with_main_thread_stack(|| {
-            for platform in ALL_PLATFORMS {
-                let mut tester = tester_on(platform);
+        for platform in ALL_PLATFORMS {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 const BUTTON_TEXT: &str = "Click me";
 
                 pump_centered_in_scaffold(
-                    &mut tester,
+                    tester,
                     AdaptiveTextSelectionToolbar::button_items(
                         vec![ContextMenuButtonItem::new(pressed()).label(BUTTON_TEXT)],
                         TextSelectionToolbarAnchors::new(Offset::ZERO),
@@ -422,18 +423,20 @@ mod tests {
                     .into_widget(),
                 );
 
-                assert_eq!(
-                    tester.find_onstage_text(BUTTON_TEXT).len(),
-                    1,
-                    "{platform:?}"
-                );
+                expect(tester, &find::text(BUTTON_TEXT), finds_one_widget());
 
                 let counts = (
-                    tester.find_by_type::<TextSelectionToolbar>().len(),
-                    tester.find_by_type::<CupertinoTextSelectionToolbar>().len(),
-                    tester.find_by_type::<DesktopTextSelectionToolbar>().len(),
-                    tester
-                        .find_by_type::<CupertinoDesktopTextSelectionToolbar>()
+                    find::by_type::<TextSelectionToolbar>()
+                        .evaluate(tester)
+                        .len(),
+                    find::by_type::<CupertinoTextSelectionToolbar>()
+                        .evaluate(tester)
+                        .len(),
+                    find::by_type::<DesktopTextSelectionToolbar>()
+                        .evaluate(tester)
+                        .len(),
+                    find::by_type::<CupertinoDesktopTextSelectionToolbar>()
+                        .evaluate(tester)
                         .len(),
                 );
                 let expected = match platform {
@@ -445,18 +448,17 @@ mod tests {
                     }
                 };
                 assert_eq!(counts, expected, "{platform:?}");
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn can_build_children_directly_as_well() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let key = GlobalKey::new();
 
             pump_centered_in_scaffold(
-                &mut tester,
+                tester,
                 AdaptiveTextSelectionToolbar::new(
                     Some(vec![Container::new().key(key.clone().into()).into_widget()]),
                     TextSelectionToolbarAnchors::new(Offset::ZERO),
@@ -464,42 +466,32 @@ mod tests {
                 .into_widget(),
             );
 
-            assert_eq!(tester.find_onstage_by_key(&key.clone().into()).len(), 1);
+            expect(tester, &find::by_key(key.clone()), finds_one_widget());
         });
     }
 
     /// Dart's `findLiveTextButton()` on the desktop platforms.
     fn find_live_text_button(tester: &WidgetTester, platform: TargetPlatform) -> usize {
         match platform {
-            TargetPlatform::MacOS => tester
-                .find_onstage_text("")
-                .into_iter()
-                .filter(|text| {
-                    tester.ancestors(*text).into_iter().any(|ancestor| {
-                        let app = tester.cell.borrow();
-                        waft_widgets::downcast_widget::<CupertinoDesktopTextSelectionToolbarButton>(
-                            &**ancestor.widget(&app),
-                        )
-                        .is_some()
-                    })
-                })
-                .count(),
-            _ => tester.find_onstage_text("").len() + tester.find_onstage_text("Scan text").len(),
+            TargetPlatform::MacOS => find::descendant(
+                find::by_type::<CupertinoDesktopTextSelectionToolbarButton>(),
+                find::text(""),
+            )
+            .evaluate(tester)
+            .len(),
+            // The icon is a painted `CustomPaint` in a `SizedBox` on iOS, where `Text`s are not used.
+            TargetPlatform::IOS => cupertino_button_paints(tester, Size::ZERO).len(),
+            _ => {
+                find::text("").evaluate(tester).len()
+                    + find::text("Scan text").evaluate(tester).len()
+            }
         }
     }
 
     #[test]
     fn can_build_for_editable_text_from_raw_parameters() {
-        with_main_thread_stack(|| {
-            // Android and iOS wait on FlutterTest's glyph metrics: where their toolbars
-            // overflow depends on the width of each label.
-            for platform in [
-                TargetPlatform::Fuchsia,
-                TargetPlatform::Linux,
-                TargetPlatform::MacOS,
-                TargetPlatform::Windows,
-            ] {
-                let mut tester = tester_on(platform);
+        for platform in ALL_PLATFORMS {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let key = GlobalKey::new();
                 let toolbar = {
                     let app = tester.cell.borrow();
@@ -519,77 +511,175 @@ mod tests {
                     .key(key.clone().into())
                     .into_widget()
                 };
-                pump_centered_in_scaffold(&mut tester, toolbar);
+                pump_centered_in_scaffold(tester, toolbar);
 
-                assert_eq!(tester.find_onstage_by_key(&key.clone().into()).len(), 1);
+                expect(tester, &find::by_key(key.clone()), finds_one_widget());
 
-                let one = |text: &str| {
-                    assert_eq!(
-                        tester.find_onstage_text(text).len(),
-                        1,
-                        "{text} on {platform:?}"
-                    );
+                let one = |tester: &WidgetTester, text: &str| {
+                    expect(tester, &find::text(text), finds_one_widget());
                 };
                 match platform {
                     TargetPlatform::Fuchsia => {
-                        assert_eq!(
-                            tester
-                                .find_onstage_by_type::<TextSelectionToolbarTextButton>()
-                                .len(),
-                            8
+                        expect(
+                            tester,
+                            &find::by_type::<TextSelectionToolbarTextButton>(),
+                            finds_n_widgets(8),
                         );
-                        one("Cut");
-                        one("Copy");
-                        one("Paste");
-                        one("Select all");
-                        one("Look Up");
-                        one("Search Web");
-                        one("Share");
+                        one(tester, "Cut");
+                        one(tester, "Copy");
+                        one(tester, "Paste");
+                        one(tester, "Select all");
+                        one(tester, "Look Up");
+                        one(tester, "Search Web");
+                        one(tester, "Share");
                     }
                     TargetPlatform::Linux | TargetPlatform::Windows => {
-                        assert_eq!(
-                            tester
-                                .find_onstage_by_type::<DesktopTextSelectionToolbarButton>()
-                                .len(),
-                            8
+                        expect(
+                            tester,
+                            &find::by_type::<DesktopTextSelectionToolbarButton>(),
+                            finds_n_widgets(8),
                         );
-                        one("Cut");
-                        one("Copy");
-                        one("Paste");
-                        one("Select all");
-                        one("Look Up");
-                        one("Search Web");
-                        one("Share");
-                        assert_eq!(find_live_text_button(&tester, platform), 1);
+                        one(tester, "Cut");
+                        one(tester, "Copy");
+                        one(tester, "Paste");
+                        one(tester, "Select all");
+                        one(tester, "Look Up");
+                        one(tester, "Search Web");
+                        one(tester, "Share");
+                        assert_eq!(find_live_text_button(tester, platform), 1);
                     }
                     TargetPlatform::MacOS => {
-                        assert_eq!(
-                            tester
-                                .find_onstage_by_type::<CupertinoDesktopTextSelectionToolbarButton>(
-                                )
-                                .len(),
-                            8
+                        expect(
+                            tester,
+                            &find::by_type::<CupertinoDesktopTextSelectionToolbarButton>(),
+                            finds_n_widgets(8),
                         );
-                        one("Cut");
-                        one("Copy");
-                        one("Paste");
-                        one("Select All");
-                        one("Look Up");
-                        one("Search Web");
-                        one("Share...");
-                        assert_eq!(find_live_text_button(&tester, platform), 1);
+                        one(tester, "Cut");
+                        one(tester, "Copy");
+                        one(tester, "Paste");
+                        one(tester, "Select All");
+                        one(tester, "Look Up");
+                        one(tester, "Search Web");
+                        one(tester, "Share...");
+                        assert_eq!(find_live_text_button(tester, platform), 1);
                     }
-                    TargetPlatform::Android | TargetPlatform::IOS => unreachable!(),
+                    TargetPlatform::Android => {
+                        expect(
+                            tester,
+                            &find::by_type::<TextSelectionToolbarTextButton>(),
+                            finds_n_widgets(6),
+                        );
+                        one(tester, "Cut");
+                        one(tester, "Copy");
+                        one(tester, "Paste");
+                        one(tester, "Share");
+                        one(tester, "Select all");
+                        one(tester, "Look Up");
+                        // Material overflow buttons are not TextSelectionToolbarTextButton.
+                        expect(
+                            tester,
+                            &find::by_key(StandardComponentType::MoreButton.key()),
+                            finds_one_widget(),
+                        );
+
+                        tap_overflow_button(tester, &StandardComponentType::MoreButton.key());
+
+                        expect(
+                            tester,
+                            &find::by_type::<TextSelectionToolbarTextButton>(),
+                            finds_n_widgets(2),
+                        );
+                        one(tester, "Search Web");
+                        assert_eq!(find_live_text_button(tester, platform), 1);
+                        expect(
+                            tester,
+                            &find::by_key(StandardComponentType::BackButton.key()),
+                            finds_one_widget(),
+                        );
+                    }
+                    TargetPlatform::IOS => {
+                        expect(
+                            tester,
+                            &find::by_type::<CupertinoTextSelectionToolbarButton>(),
+                            finds_n_widgets(6),
+                        );
+                        one(tester, "Cut");
+                        one(tester, "Copy");
+                        one(tester, "Paste");
+                        one(tester, "Select All");
+                        one(tester, "Look Up");
+                        assert_eq!(cupertino_chevron_buttons(tester).len(), 1);
+
+                        tap_cupertino_chevron_button(tester);
+
+                        expect(
+                            tester,
+                            &find::by_type::<CupertinoTextSelectionToolbarButton>(),
+                            finds_n_widgets(4),
+                        );
+                        assert_eq!(cupertino_chevron_buttons(tester).len(), 1);
+                        one(tester, "Search Web");
+                        one(tester, "Share...");
+                        assert_eq!(find_live_text_button(tester, platform), 1);
+                    }
                 }
-            }
-        });
+            });
+        }
+    }
+
+    /// Dart's `tester.tapAt(tester.getCenter(find.byKey(key)))` and `pumpAndSettle`
+    /// (`tapMaterialOverflowNextButton`).
+    fn tap_overflow_button(tester: &mut WidgetTester, key: &KeyRef) {
+        let button = tester.element(find::by_key(key.clone()));
+        let center = tester.get_rect(button).center();
+        tester.tap_at(center, 1);
+        tester.pump_and_settle();
+    }
+
+    /// The `CustomPaint`s inside the `CupertinoTextSelectionToolbarButton`s whose size is `size`.
+    fn cupertino_button_paints(tester: &WidgetTester, size: Size) -> Vec<AnyElement> {
+        find::by_type::<CupertinoTextSelectionToolbarButton>()
+            .evaluate(tester)
+            .into_iter()
+            .flat_map(|button| tester.descendants_of_type::<CustomPaint>(button))
+            .filter(|paint| tester.widget(*paint, |paint: &CustomPaint| paint.size == size))
+            .collect()
+    }
+
+    /// The `CupertinoTextSelectionToolbarButton`s that hold a chevron
+    /// (`findCupertinoOverflowNextButton` and `findCupertinoOverflowBackButton`): the chevron
+    /// painters are private to waft-cupertino, so the `CustomPaint` of the chevron's size (10)
+    /// stands for them. A page shows one of the two.
+    fn cupertino_chevron_buttons(tester: &WidgetTester) -> Vec<AnyElement> {
+        find::by_type::<CupertinoTextSelectionToolbarButton>()
+            .evaluate(tester)
+            .into_iter()
+            .filter(|button| {
+                tester
+                    .descendants_of_type::<CustomPaint>(*button)
+                    .into_iter()
+                    .any(|paint| {
+                        tester.widget(paint, |paint: &CustomPaint| {
+                            paint.size == Size::square(10.0)
+                        })
+                    })
+            })
+            .collect()
+    }
+
+    /// Dart's `tapCupertinoOverflowNextButton`.
+    fn tap_cupertino_chevron_button(tester: &mut WidgetTester) {
+        let button = cupertino_chevron_buttons(tester)[0];
+        let center = tester.get_rect(button).center();
+        tester.tap_at(center, 1);
+        tester.pump_and_settle();
     }
 
     #[test]
     fn builds_empty_toolbar_when_children_and_button_items_are_null() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             for platform in ALL_PLATFORMS {
-                let mut tester = tester_on(platform);
+                let mut tester = WidgetTester::on(platform);
                 let root = {
                     let app = tester.cell.borrow();
                     material_app(
@@ -604,7 +694,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                let toolbars = tester.find_by_type::<AdaptiveTextSelectionToolbar>();
+                let toolbars = find::by_type::<AdaptiveTextSelectionToolbar>().evaluate(&tester);
                 let render = tester.render_box_of(toolbars[0]);
                 assert_eq!(
                     render.size(&tester.cell.borrow()),
@@ -617,13 +707,12 @@ mod tests {
 
     #[test]
     fn get_adaptive_buttons_builds_the_correct_button_widgets_per_platform() {
-        with_main_thread_stack(|| {
-            for platform in ALL_PLATFORMS {
-                let mut tester = tester_on(platform);
+        for platform in ALL_PLATFORMS {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 const BUTTON_TEXT: &str = "Click me";
 
                 pump_centered_in_scaffold(
-                    &mut tester,
+                    tester,
                     Builder::new(|app, context| {
                         let button_items =
                             vec![ContextMenuButtonItem::new(pressed()).label(BUTTON_TEXT)];
@@ -638,24 +727,20 @@ mod tests {
                     .into_widget(),
                 );
 
-                assert_eq!(
-                    tester.find_onstage_text(BUTTON_TEXT).len(),
-                    1,
-                    "{platform:?}"
-                );
+                expect(tester, &find::text(BUTTON_TEXT), finds_one_widget());
 
                 let counts = (
-                    tester
-                        .find_by_type::<TextSelectionToolbarTextButton>()
+                    find::by_type::<TextSelectionToolbarTextButton>()
+                        .evaluate(tester)
                         .len(),
-                    tester
-                        .find_by_type::<CupertinoTextSelectionToolbarButton>()
+                    find::by_type::<CupertinoTextSelectionToolbarButton>()
+                        .evaluate(tester)
                         .len(),
-                    tester
-                        .find_by_type::<DesktopTextSelectionToolbarButton>()
+                    find::by_type::<DesktopTextSelectionToolbarButton>()
+                        .evaluate(tester)
                         .len(),
-                    tester
-                        .find_by_type::<CupertinoDesktopTextSelectionToolbarButton>()
+                    find::by_type::<CupertinoDesktopTextSelectionToolbarButton>()
+                        .evaluate(tester)
                         .len(),
                 );
                 let expected = match platform {
@@ -665,7 +750,7 @@ mod tests {
                     TargetPlatform::Linux | TargetPlatform::Windows => (0, 0, 1, 0),
                 };
                 assert_eq!(counts, expected, "{platform:?}");
-            }
-        });
+            });
+        }
     }
 }

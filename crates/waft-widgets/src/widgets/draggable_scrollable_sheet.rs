@@ -1869,23 +1869,22 @@ mod tests {
     use std::cell::Cell;
 
     use waft_animation::Curves;
-    use waft_embedder::{Offset, Size, TextDirection};
+    use waft_embedder::{Offset, TextDirection};
     use waft_gestures::{DragEndDetails, DragUpdateDetails, Velocity};
 
     use super::*;
-    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_cell, binding_mount, binding_pump};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Builder, Directionality};
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::single_child_scroll_view::SingleChildScrollView;
 
+    const VIEW_HEIGHT: f64 = WidgetTester::SIZE.height();
+
     /// The tree every test mounts: a text direction and a media query, which a `Scrollable`
     /// reads for its gesture settings.
     fn wrap<K>(child: impl IntoWidget<K>) -> WidgetRef {
-        let query: WidgetRef = MediaQuery::new(
-            MediaQueryData::new().size(Size::new(VIEW_WIDTH, VIEW_HEIGHT)),
-            child,
-        )
-        .into_widget();
+        let query: WidgetRef =
+            MediaQuery::new(MediaQueryData::new().size(WidgetTester::SIZE), child).into_widget();
         Directionality::new(TextDirection::Ltr, query).into_widget()
     }
 
@@ -1894,7 +1893,11 @@ mod tests {
         Rc::new(|_app, _context, controller| {
             SingleChildScrollView::new()
                 .controller(controller)
-                .child(SizedBox::new().height(500.0).width(VIEW_WIDTH))
+                .child(
+                    SizedBox::new()
+                        .height(2.5 * VIEW_HEIGHT)
+                        .width(WidgetTester::SIZE.width()),
+                )
                 .into_widget()
         })
     }
@@ -1919,186 +1922,159 @@ mod tests {
 
     #[test]
     fn the_sheet_starts_at_the_initial_child_size() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = DraggableScrollableController::new(&mut app);
-        drop(app);
-        binding_mount(
-            &cell,
-            wrap(
+        test_widgets(|tester| {
+            let controller = tester.update(DraggableScrollableController::new);
+            tester.pump_widget(wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.4)
                     .controller(controller.clone()),
-            ),
-        );
-        let app = cell.borrow();
+            ));
+            let app = tester.cell.borrow();
 
-        assert!(controller.is_attached(&app));
-        assert_eq!(controller.size(&app), 0.4);
-        // The whole view height is available, so the sheet is 40% of it.
-        assert_eq!(controller.pixels(&app), VIEW_HEIGHT * 0.4);
+            assert!(controller.is_attached(&app));
+            assert_eq!(controller.size(&app), 0.4);
+            // The whole view height is available, so the sheet is 40% of it.
+            assert_eq!(controller.pixels(&app), VIEW_HEIGHT * 0.4);
+        });
     }
 
     #[test]
     fn a_drag_on_the_scrollable_grows_the_sheet_up_to_the_max_child_size() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = DraggableScrollableController::new(&mut app);
-        drop(app);
-        binding_mount(
-            &cell,
-            wrap(
+        test_widgets(|tester| {
+            let controller = tester.update(DraggableScrollableController::new);
+            tester.pump_widget(wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.5)
                     .controller(controller.clone()),
-            ),
-        );
-        let mut app = cell.borrow_mut();
+            ));
+            let mut app = tester.cell.borrow_mut();
 
-        let position = position(&app, controller.clone());
-        let drag = ScrollPosition::drag(
-            position,
-            &mut app,
-            waft_gestures::DragStartDetails::default(),
-            Listener::new(|_app| {}),
-        );
+            let position = position(&app, controller.clone());
+            let drag = ScrollPosition::drag(
+                position,
+                &mut app,
+                waft_gestures::DragStartDetails::default(),
+                Listener::new(|_app| {}),
+            );
 
-        // Dragging up by a fifth of the view grows the sheet by a fifth.
-        drag.update(&mut app, drag_by(-VIEW_HEIGHT / 5.0));
-        assert!(
-            (controller.size(&app) - 0.7).abs() < 1e-9,
-            "{}",
-            controller.size(&app)
-        );
-        // The sheet, not the list, took the drag.
-        assert_eq!(waft_rendering::ViewportOffset::pixels(position, &app), 0.0);
+            // Dragging up by a fifth of the view grows the sheet by a fifth.
+            drag.update(&mut app, drag_by(-VIEW_HEIGHT / 5.0));
+            assert!(
+                (controller.size(&app) - 0.7).abs() < 1e-9,
+                "{}",
+                controller.size(&app)
+            );
+            // The sheet, not the list, took the drag.
+            assert_eq!(waft_rendering::ViewportOffset::pixels(position, &app), 0.0);
 
-        // Past the maximum it stops at the maximum, and then the list scrolls.
-        drag.update(&mut app, drag_by(-VIEW_HEIGHT));
-        assert_eq!(controller.size(&app), 1.0);
-        drag.update(&mut app, drag_by(-10.0));
-        assert_eq!(controller.size(&app), 1.0);
-        assert!(waft_rendering::ViewportOffset::pixels(position, &app) > 0.0);
+            // Past the maximum it stops at the maximum, and then the list scrolls.
+            drag.update(&mut app, drag_by(-VIEW_HEIGHT));
+            assert_eq!(controller.size(&app), 1.0);
+            drag.update(&mut app, drag_by(-10.0));
+            assert_eq!(controller.size(&app), 1.0);
+            assert!(waft_rendering::ViewportOffset::pixels(position, &app) > 0.0);
 
-        drag.end(
-            &mut app,
-            DragEndDetails::new(Offset::ZERO, None, Velocity::ZERO, Some(0.0)),
-        );
+            drag.end(
+                &mut app,
+                DragEndDetails::new(Offset::ZERO, None, Velocity::ZERO, Some(0.0)),
+            );
+        });
     }
 
     #[test]
     fn animate_to_reaches_the_size_and_notifies() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = DraggableScrollableController::new(&mut app);
-        drop(app);
-        binding_mount(
-            &cell,
-            wrap(
+        test_widgets(|tester| {
+            let controller = tester.update(DraggableScrollableController::new);
+            tester.pump_widget(wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.5)
                     .controller(controller.clone()),
-            ),
-        );
-        let mut app = cell.borrow_mut();
+            ));
 
-        let notified = Rc::new(Cell::new(0));
-        let counter = Rc::clone(&notified);
-        ListenableObject::add_listener(
-            controller.handle(),
-            &mut app,
-            Listener::new(move |_app| counter.set(counter.get() + 1)),
-        );
+            let notified = Rc::new(Cell::new(0));
+            let counter = Rc::clone(&notified);
+            tester.update(|app| {
+                ListenableObject::add_listener(
+                    controller.handle(),
+                    app,
+                    Listener::new(move |_app| counter.set(counter.get() + 1)),
+                )
+            });
 
-        let done =
-            controller.animate_to(&mut app, 0.8, Duration::from_millis(100), Curves::linear());
+            let done = tester.update(|app| {
+                controller.animate_to(app, 0.8, Duration::from_millis(100), Curves::linear())
+            });
 
-        binding_pump(&mut app, Duration::ZERO);
-        binding_pump(&mut app, Duration::from_millis(50));
-        assert!(
-            (controller.size(&app) - 0.65).abs() < 0.01,
-            "{}",
-            controller.size(&app)
-        );
-        assert!(!done.is_completed());
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            let size = controller.size(&tester.cell.borrow());
+            assert!((size - 0.65).abs() < 0.01, "{size}");
+            assert!(!done.is_completed());
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        assert!(
-            (controller.size(&app) - 0.8).abs() < 1e-9,
-            "{}",
-            controller.size(&app)
-        );
-        assert!(notified.get() > 0);
-        // The frame past the duration ends the animation.
-        binding_pump(&mut app, Duration::from_millis(150));
-        assert!(
-            !done.is_completed(),
-            "the continuation after the animation runs at the checkpoint"
-        );
-        drop(app);
-        cell.checkpoint();
-        assert!(done.is_completed());
+            tester.pump_by(Duration::from_millis(50));
+            let size = controller.size(&tester.cell.borrow());
+            assert!((size - 0.8).abs() < 1e-9, "{size}");
+            assert!(notified.get() > 0);
+            // The frame past the duration ends the animation, and the pump's checkpoint runs
+            // the continuation after it.
+            tester.pump_by(Duration::from_millis(50));
+            assert!(done.is_completed());
+        });
     }
 
     #[test]
     fn a_snapping_sheet_settles_on_the_nearest_snap_size() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = DraggableScrollableController::new(&mut app);
-        drop(app);
-        binding_mount(
-            &cell,
-            wrap(
+        test_widgets(|tester| {
+            let controller = tester.update(DraggableScrollableController::new);
+            tester.pump_widget(wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.5)
                     .snap(true)
                     .snap_sizes(vec![0.5])
                     .controller(controller.clone()),
-            ),
-        );
-        let mut app = cell.borrow_mut();
+            ));
 
-        let position = position(&app, controller.clone());
-        let drag = ScrollPosition::drag(
-            position,
-            &mut app,
-            waft_gestures::DragStartDetails::default(),
-            Listener::new(|_app| {}),
-        );
-        // A drag up past the fling threshold, released with no velocity.
-        drag.update(&mut app, drag_by(-VIEW_HEIGHT * 0.15));
-        assert!(
-            (controller.size(&app) - 0.65).abs() < 1e-9,
-            "{}",
-            controller.size(&app)
-        );
-        drag.end(
-            &mut app,
-            DragEndDetails::new(Offset::ZERO, None, Velocity::ZERO, Some(0.0)),
-        );
+            tester.update(|app| {
+                let position = position(app, controller.clone());
+                let drag = ScrollPosition::drag(
+                    position,
+                    app,
+                    waft_gestures::DragStartDetails::default(),
+                    Listener::new(|_app| {}),
+                );
+                // A drag up past the fling threshold, released with no velocity.
+                drag.update(app, drag_by(-VIEW_HEIGHT * 0.15));
+                assert!(
+                    (controller.size(app) - 0.65).abs() < 1e-9,
+                    "{}",
+                    controller.size(app)
+                );
+                drag.end(
+                    app,
+                    DragEndDetails::new(Offset::ZERO, None, Velocity::ZERO, Some(0.0)),
+                );
+            });
 
-        for frame in 0..200 {
-            binding_pump(&mut app, Duration::from_millis(16 * frame));
-            if (controller.size(&app) - 0.5).abs() < 1e-9 {
-                break;
+            tester.pump();
+            for _ in 0..200 {
+                if (controller.size(&tester.cell.borrow()) - 0.5).abs() < 1e-9 {
+                    break;
+                }
+                tester.pump_by(Duration::from_millis(16));
             }
-        }
-        // The snap sizes are the min, the given 0.5 and the max; 0.65 is nearest 0.5.
-        assert_eq!(controller.size(&app), 0.5);
+            // The snap sizes are the min, the given 0.5 and the max; 0.65 is nearest 0.5.
+            assert_eq!(controller.size(&tester.cell.borrow()), 0.5);
+        });
     }
 
     #[test]
     fn the_actuator_resets_the_sheet_to_its_initial_size() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = DraggableScrollableController::new(&mut app);
-        let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::new(Cell::new(None));
-        let reported = Rc::clone(&inner_context);
-        let sheet_controller = controller.clone();
-        drop(app);
-        binding_mount(
-            &cell,
-            wrap(DraggableScrollableActuator::new(Builder::new(
+        test_widgets(|tester| {
+            let controller = tester.update(DraggableScrollableController::new);
+            let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::new(Cell::new(None));
+            let reported = Rc::clone(&inner_context);
+            let sheet_controller = controller.clone();
+            tester.pump_widget(wrap(DraggableScrollableActuator::new(Builder::new(
                 move |_app, context| {
                     reported.set(Some(context));
                     DraggableScrollableSheet::new(scrollable_builder())
@@ -2106,17 +2082,16 @@ mod tests {
                         .controller(sheet_controller.clone())
                         .into_widget()
                 },
-            ))),
-        );
-        let mut app = cell.borrow_mut();
+            ))));
 
-        controller.jump_to(&mut app, 0.9);
-        assert_eq!(controller.size(&app), 0.9);
+            tester.update(|app| controller.jump_to(app, 0.9));
+            assert_eq!(controller.size(&tester.cell.borrow()), 0.9);
 
-        let context = inner_context.get().expect("the builder ran");
-        assert!(DraggableScrollableActuator::reset(&mut app, context));
-        binding_pump(&mut app, Duration::from_millis(16));
+            let context = inner_context.get().expect("the builder ran");
+            assert!(tester.update(|app| DraggableScrollableActuator::reset(app, context)));
+            tester.pump_by(Duration::from_millis(16));
 
-        assert_eq!(controller.size(&app), 0.5);
+            assert_eq!(controller.size(&tester.cell.borrow()), 0.5);
+        });
     }
 }

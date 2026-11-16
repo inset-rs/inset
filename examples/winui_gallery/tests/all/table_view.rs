@@ -1,4 +1,4 @@
-//! TableView: the header and every row sharing each column's width, resizing a column from its gripper, frozen columns staying put while the rest scroll, the sort cycle and a canceled sort, filtering, the selection by pointer, keyboard and code and following its item through a sort, and the empty state.
+//! TableView: the header and every row sharing each column's width, resizing a column from its gripper, frozen columns staying put while the rest scroll, the sort cycle and a canceled sort, filtering, the selection by pointer, keyboard and code, following its item through a sort and heard by a widget above the table, and the empty state.
 
 use crate::common::Fixture;
 use std::{
@@ -69,6 +69,8 @@ struct Table {
     sorted: Cell<usize>,
     cancel_sorting: Cell<bool>,
     selection_changes: RefCell<Vec<TableViewSelectionChangedEventArgs>>,
+    /// How many times the widget above the table that listens to the selection was built.
+    listener_builds: Cell<usize>,
 }
 
 /// How the table under test is set up.
@@ -77,6 +79,8 @@ struct Setup {
     width: f64,
     items: bool,
     frozen: bool,
+    /// A widget above the table rebuilds whenever the selection notifies.
+    listened_above: bool,
 }
 
 impl Default for Setup {
@@ -85,6 +89,7 @@ impl Default for Setup {
             width: 560.0,
             items: true,
             frozen: false,
+            listened_above: false,
         }
     }
 }
@@ -120,6 +125,7 @@ fn fixture(setup: Setup) -> (Fixture, Rc<Table>) {
             sorted: Cell::new(0),
             cancel_sorting: Cell::new(false),
             selection_changes: RefCell::default(),
+            listener_builds: Cell::new(0),
         });
         *slot.borrow_mut() = Some(table.clone());
         let view = TableView::new(source, vec![name, role, city, age])
@@ -138,6 +144,17 @@ fn fixture(setup: Setup) -> (Fixture, Rc<Table>) {
                 let table = table.clone();
                 move |_, args| table.selection_changes.borrow_mut().push(args.clone())
             });
+        let view = if setup.listened_above {
+            let table = table.clone();
+            ListenableBuilder::new(Rc::new(table.selection.clone()), move |_, _, child| {
+                table.listener_builds.set(table.listener_builds.get() + 1);
+                child.unwrap().clone()
+            })
+            .child(view)
+            .into_widget()
+        } else {
+            view.into_widget()
+        };
         run_app(
             app,
             WidgetsApp::new(AccentPalette::default().base)
@@ -531,6 +548,185 @@ fn new_items_clear_the_selection() {
     assert_eq!(t.selection.selected_index(&f.cell.borrow()), None);
 }
 
+// The table binds its selection while it builds; binding changes nothing a listener reads, so a
+// widget above the table that rebuilds on every notification is not marked dirty during build.
+#[test]
+fn a_widget_above_the_table_hears_the_selection_change_but_not_its_binding() {
+    let (mut f, t) = fixture(Setup {
+        listened_above: true,
+        ..Setup::default()
+    });
+    assert_eq!(t.listener_builds.get(), 1);
+    tap_label(&mut f, "Diego");
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(2));
+    assert_eq!(t.listener_builds.get(), 2);
+}
+
+// MARK: Live items
+
+fn person(name: &'static str, age: u32) -> Person {
+    Person {
+        name,
+        role: "Analyst",
+        city: "Oslo",
+        age,
+    }
+}
+
+#[test]
+fn a_row_inserted_above_keeps_the_selection_on_its_item_without_an_event() {
+    let (mut f, t) = fixture(Setup::default());
+    tap_label(&mut f, "Diego");
+    let events = t.selection_changes.borrow().len();
+    t.source
+        .insert(&mut f.cell.borrow_mut(), 0, person("Bo", 50));
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        order(&f),
+        ["Mina", "Asha", "Diego", "Lea"],
+        "Bo is not among the names `order` reads"
+    );
+    assert!(label(&f, "Bo").is_some_and(|bo| bo.top < rect(&f, "Mina").top));
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(3));
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(3),
+        "Diego, moved down one"
+    );
+    assert_eq!(
+        t.selection_changes.borrow().len(),
+        events,
+        "a shift raises no SelectionChanged"
+    );
+}
+
+#[test]
+fn removing_or_replacing_the_selected_item_clears_the_selection() {
+    let (mut f, t) = fixture(Setup::default());
+    tap_label(&mut f, "Diego");
+    t.source.remove(&mut f.cell.borrow_mut(), 0);
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(1),
+        "Diego after Mina went"
+    );
+    t.source.remove(&mut f.cell.borrow_mut(), 1);
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), None);
+    assert_eq!(
+        t.selection_changes.borrow().last().unwrap().removed_items,
+        [1],
+        "the removed item, by the index it had"
+    );
+    tap_label(&mut f, "Asha");
+    t.source
+        .replace(&mut f.cell.borrow_mut(), 0, person("Asha", 30));
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        t.selection.selected_index(&f.cell.borrow()),
+        None,
+        "a replaced row is removed and inserted"
+    );
+}
+
+#[test]
+fn in_a_sorted_table_an_inserted_item_goes_to_its_place_and_the_selection_follows() {
+    let (mut f, t) = fixture(Setup::default());
+    f.tap("Name");
+    settle(&mut f);
+    tap_label(&mut f, "Lea");
+    t.source
+        .insert(&mut f.cell.borrow_mut(), 0, person("Bo", 50));
+    f.cell.checkpoint();
+    settle(&mut f);
+    let bo = rect(&f, "Bo").top;
+    assert!(rect(&f, "Asha").top < bo && bo < rect(&f, "Diego").top);
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(3));
+    assert_eq!(t.selection.selected_item(&f.cell.borrow()), Some(4), "Lea");
+}
+
+#[test]
+fn an_update_keeps_the_selection_and_a_sort_key_moves_the_row_with_it() {
+    let (mut f, t) = fixture(Setup::default());
+    f.tap("Age");
+    settle(&mut f);
+    assert_eq!(order(&f), ["Mina", "Diego", "Asha", "Lea"]);
+    tap_label(&mut f, "Asha");
+    let events = t.selection_changes.borrow().len();
+    t.source
+        .update(&mut f.cell.borrow_mut(), 1, |p| p.city = "Pune");
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert!(label(&f, "Pune").is_some(), "the row shows the new values");
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(2));
+    t.source.update(&mut f.cell.borrow_mut(), 1, |p| p.age = 60);
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        order(&f),
+        ["Asha", "Mina", "Diego", "Lea"],
+        "Age sorts descending"
+    );
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(0));
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(1),
+        "still Asha"
+    );
+    assert_eq!(
+        t.selection_changes.borrow().len(),
+        events,
+        "no SelectionChanged"
+    );
+}
+
+#[test]
+fn with_a_filter_or_a_tie_the_selection_still_follows_its_item() {
+    let (mut f, t) = fixture(Setup::default());
+    t.source.filter(&mut f.cell.borrow_mut(), |p| p.age < 40);
+    f.cell.checkpoint();
+    settle(&mut f);
+    tap_label(&mut f, "Lea");
+    t.source
+        .insert(&mut f.cell.borrow_mut(), 0, person("Bo", 29));
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(4),
+        "Lea, past Bo"
+    );
+    // Age sorts descending; Bo ties with Asha and Lea, and source order puts him first.
+    f.tap("Age");
+    settle(&mut f);
+    tap_label(&mut f, "Lea");
+    t.source
+        .insert(&mut f.cell.borrow_mut(), 0, person("Cy", 29));
+    f.cell.checkpoint();
+    settle(&mut f);
+    let cy = rect(&f, "Cy").top;
+    assert!(rect(&f, "Diego").top < cy && cy < rect(&f, "Bo").top);
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(5),
+        "still Lea"
+    );
+    // A filtered-out item leaves without disturbing the selection.
+    t.source.remove(&mut f.cell.borrow_mut(), 2);
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(4),
+        "Lea, Mina gone"
+    );
+}
+
 // MARK: Empty state
 
 #[test]
@@ -563,6 +759,14 @@ fn the_gallery_page_shows_a_table_and_an_empty_one() {
     assert!(
         backup < rect(&f, "music").top && backup < rect(&f, "browser").top,
         "the largest on top"
+    );
+    tap_label(&mut f, "mail");
+    f.tap("New connection");
+    settle(&mut f);
+    assert!(label(&f, "worker").is_some());
+    assert!(
+        label(&f, "Selected: mail (17.57.146.20:993)").is_some(),
+        "the selection stays on mail"
     );
     f.capture("table-view-gallery");
 }

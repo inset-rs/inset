@@ -580,9 +580,9 @@ mod tests {
     use waft_widgets::{Builder, DefaultWidgetsLocalizations, IntoWidget, SizedBox};
 
     use waft_foundation::AppCell;
+    use waft_widgets::testing::test_widgets;
 
     use super::*;
-    use crate::test_support::{build, test_cell};
 
     #[test]
     fn the_default_strings_format_dates_like_dart() {
@@ -635,30 +635,27 @@ mod tests {
 
     #[test]
     fn of_finds_the_strings_through_a_localizations_ancestor() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let seen = Rc::new(RefCell::new(None));
-        let probe = Builder::new({
-            let seen = Rc::clone(&seen);
-            move |app, context| {
-                *seen.borrow_mut() =
-                    Some(<dyn CupertinoLocalizations>::of(app, context).alert_dialog_label());
-                SizedBox::shrink().into_widget()
-            }
+        test_widgets(|tester| {
+            let seen = Rc::new(RefCell::new(None));
+            let probe = Builder::new({
+                let seen = Rc::clone(&seen);
+                move |app, context| {
+                    *seen.borrow_mut() =
+                        Some(<dyn CupertinoLocalizations>::of(app, context).alert_dialog_label());
+                    SizedBox::shrink().into_widget()
+                }
+            });
+            tester.pump_widget(
+                Localizations::new(
+                    Locale::new("en").country_code("US"),
+                    vec![
+                        DefaultWidgetsLocalizations::delegate(),
+                        DefaultCupertinoLocalizations::delegate(),
+                    ],
+                )
+                .child(probe),
+            );
+            assert_eq!(seen.borrow().as_deref(), Some("Alert"));
         });
-        drop(app);
-        build(
-            &cell,
-            Localizations::new(
-                Locale::new("en").country_code("US"),
-                vec![
-                    DefaultWidgetsLocalizations::delegate(),
-                    DefaultCupertinoLocalizations::delegate(),
-                ],
-            )
-            .child(probe)
-            .into_widget(),
-        );
-        assert_eq!(seen.borrow().as_deref(), Some("Alert"));
     }
 }

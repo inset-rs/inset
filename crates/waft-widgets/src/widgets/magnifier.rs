@@ -986,7 +986,6 @@ impl RenderBox for RenderMagnification {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-    use waft_foundation::Ref;
 
     use waft_animation::{AnimationBehavior, AnimationStatus};
     use waft_embedder::{BlurStyle, Color, Radius, TextDirection};
@@ -995,23 +994,14 @@ mod tests {
     use waft_rendering::{
         RenderClipPath, RenderCustomClip, RenderDecoratedBox, RenderOpacity, RenderStack,
     };
-    use waft_scheduler::{Ticker, TickerCallback, TickerProvider};
+    use waft_scheduler::{FrameTarget, SchedulerBinding};
 
     use super::*;
     use crate::binding::WidgetsBinding;
     use crate::framework::{AnyElement, GlobalKey};
-    use crate::test_harness::{binding_cell, binding_mount, binding_pump};
+    use crate::testing::{TestVSync, WidgetTester, test_widgets};
     use crate::widgets::basic::{Center, Directionality, Positioned};
     use crate::widgets::text::Text;
-
-    /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
-    struct TestVSync;
-
-    impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
-            Ticker::new(app, on_tick, None)
-        }
-    }
 
     fn elements(app: &mut App) -> Vec<AnyElement> {
         fn visit(app: &App, element: AnyElement, found: &mut Vec<AnyElement>) {
@@ -1065,15 +1055,17 @@ mod tests {
 
     /// Dart's `TestWidgetsApp(home: Placeholder())`: an overlay around a box whose context the
     /// magnifier is shown from.
-    fn app_with_overlay(cell: &waft_foundation::AppCell, home: GlobalKey) {
-        binding_mount(
-            cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Overlay::wrap(SizedBox::new().key(home.into())),
-            )
-            .into_widget(),
-        );
+    fn app_with_overlay(tester: &mut WidgetTester, home: GlobalKey) {
+        tester.pump_widget(Directionality::new(
+            TextDirection::Ltr,
+            Overlay::wrap(SizedBox::new().key(home.into())),
+        ));
+    }
+
+    /// Dart's `WidgetsBinding.instance.scheduleFrame()`, then `tester.pump()`.
+    fn schedule_frame_and_pump(tester: &mut WidgetTester) {
+        tester.update(|app| SchedulerBinding::schedule_frame(app, FrameTarget::EveryView));
+        tester.pump();
     }
 
     fn raw_magnifier_builder(magnifier_key: KeyRef) -> WidgetBuilder {
@@ -1084,226 +1076,211 @@ mod tests {
         })
     }
 
-    fn at(milliseconds: u64) -> Duration {
-        Duration::from_millis(milliseconds)
-    }
-
     #[test]
     fn a_raw_magnifier_is_as_large_as_its_size() {
-        let cell = binding_cell();
-        binding_mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(RawMagnifier::new(Size::new(100.0, 80.0))),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let magnifier = render_box_where(&mut app, |widget| widget.as_any().is::<RawMagnifier>());
-        assert_eq!(magnifier.size(&app), Size::new(100.0, 80.0));
-        let lens = render_objects::<RenderMagnification>(&mut app);
-        assert_eq!(lens.len(), 1);
-        assert_eq!(lens[0].size(&app), Size::new(100.0, 80.0));
-    }
-
-    /// What the shell does at start-up: the app-wide fonts, here the OS fonts.
-    fn install_fonts(app: &mut App) {
-        let binding = waft_painting::PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
+        test_widgets(|tester| {
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(RawMagnifier::new(Size::new(100.0, 80.0))),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let magnifier =
+                render_box_where(&mut app, |widget| widget.as_any().is::<RawMagnifier>());
+            assert_eq!(magnifier.size(&app), Size::new(100.0, 80.0));
+            let lens = render_objects::<RenderMagnification>(&mut app);
+            assert_eq!(lens.len(), 1);
+            assert_eq!(lens[0].size(&app), Size::new(100.0, 80.0));
+        });
     }
 
     #[test]
     fn a_raw_magnifier_does_not_crash_at_zero_area() {
-        let cell = binding_cell();
-        install_fonts(&mut cell.borrow_mut());
-        binding_mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(
-                    SizedBox::shrink()
-                        .child(RawMagnifier::new(Size::square(2.0)).child(Text::new("X"))),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let magnifier = render_box_where(&mut app, |widget| widget.as_any().is::<RawMagnifier>());
-        assert_eq!(magnifier.size(&app), Size::ZERO);
+        test_widgets(|tester| {
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(
+                        SizedBox::shrink()
+                            .child(RawMagnifier::new(Size::square(2.0)).child(Text::new("X"))),
+                    ),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let magnifier =
+                render_box_where(&mut app, |widget| widget.as_any().is::<RawMagnifier>());
+            assert_eq!(magnifier.size(&app), Size::ZERO);
+        });
     }
 
     #[test]
     fn the_lens_takes_the_focal_point_and_the_magnification_scale_of_the_magnifier() {
-        let cell = binding_cell();
-        let magnifier = |focal_point_offset: Offset, magnification_scale: f64| {
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(
-                    RawMagnifier::new(Size::new(100.0, 100.0))
-                        .focal_point_offset(focal_point_offset)
-                        .magnification_scale(magnification_scale),
-                ),
-            )
-            .into_widget()
-        };
-        binding_mount(&cell, magnifier(Offset::new(50.0, 50.0), 2.0));
-        let mut app = cell.borrow_mut();
-        let lens = render_objects::<RenderMagnification>(&mut app)[0];
-        assert_eq!(lens.focal_point_offset(&app), Offset::new(50.0, 50.0));
-        assert_eq!(lens.magnification_scale(&app), 2.0);
-        assert!(lens.as_object().needs_compositing(&app));
+        test_widgets(|tester| {
+            let magnifier = |focal_point_offset: Offset, magnification_scale: f64| {
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(
+                        RawMagnifier::new(Size::new(100.0, 100.0))
+                            .focal_point_offset(focal_point_offset)
+                            .magnification_scale(magnification_scale),
+                    ),
+                )
+                .into_widget()
+            };
+            tester.pump_widget(magnifier(Offset::new(50.0, 50.0), 2.0));
+            let mut app = tester.cell.borrow_mut();
+            let lens = render_objects::<RenderMagnification>(&mut app)[0];
+            assert_eq!(lens.focal_point_offset(&app), Offset::new(50.0, 50.0));
+            assert_eq!(lens.magnification_scale(&app), 2.0);
+            assert!(lens.as_object().needs_compositing(&app));
 
-        let view = crate::test_harness::platform_view(&app);
-        WidgetsBinding::instance(&mut app).attach_root_widget(
-            &mut app,
-            crate::view::View::new(view, magnifier(Offset::new(-20.0, 10.0), 3.0)).into_widget(),
-        );
-        binding_pump(&mut app, at(16));
-        assert_eq!(lens.focal_point_offset(&app), Offset::new(-20.0, 10.0));
-        assert_eq!(lens.magnification_scale(&app), 3.0);
+            drop(app);
+            tester.pump_widget(magnifier(Offset::new(-20.0, 10.0), 3.0));
+            let app = tester.cell.borrow();
+            assert_eq!(lens.focal_point_offset(&app), Offset::new(-20.0, 10.0));
+            assert_eq!(lens.magnification_scale(&app), 3.0);
+        });
     }
 
     #[test]
     fn the_magnification_matrix_scales_the_focal_point_into_the_center_of_the_lens() {
-        // Dart's 'should render with correct focal point and decoration' setup: a lens of
-        // 100 x 100 at (200, 200) that looks 50 right and 50 down, at twice the size.
-        let cell = binding_cell();
-        binding_mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(
-                    RawMagnifier::new(Size::new(100.0, 100.0))
-                        .focal_point_offset(Offset::new(50.0, 50.0))
-                        .magnification_scale(2.0),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let lens = render_objects::<RenderMagnification>(&mut app)[0];
-        let matrix = lens.magnification_matrix(&app, Offset::new(200.0, 200.0));
+        test_widgets(|tester| {
+            // Dart's 'should render with correct focal point and decoration' setup: a lens of
+            // 100 x 100 at (200, 200) that looks 50 right and 50 down, at twice the size.
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(
+                        RawMagnifier::new(Size::new(100.0, 100.0))
+                            .focal_point_offset(Offset::new(50.0, 50.0))
+                            .magnification_scale(2.0),
+                    ),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let lens = render_objects::<RenderMagnification>(&mut app)[0];
+            let matrix = lens.magnification_matrix(&app, Offset::new(200.0, 200.0));
 
-        let center = waft_embedder::valo::Point::new(250.0, 250.0);
-        let focal_point = waft_embedder::valo::Point::new(300.0, 300.0);
-        assert_eq!(matrix.map_point(focal_point), center);
-        let one_right_of_focal_point = waft_embedder::valo::Point::new(301.0, 300.0);
-        assert_eq!(
-            matrix.map_point(one_right_of_focal_point),
-            waft_embedder::valo::Point::new(252.0, 250.0)
-        );
-        assert_eq!(
-            matrix.to_flutter_array(),
-            [
-                2.0, 0.0, 0.0, 0.0, //
-                0.0, 2.0, 0.0, 0.0, //
-                0.0, 0.0, 2.0, 0.0, //
-                -350.0, -350.0, 0.0, 1.0,
-            ]
-        );
+            let center = waft_embedder::valo::Point::new(250.0, 250.0);
+            let focal_point = waft_embedder::valo::Point::new(300.0, 300.0);
+            assert_eq!(matrix.map_point(focal_point), center);
+            let one_right_of_focal_point = waft_embedder::valo::Point::new(301.0, 300.0);
+            assert_eq!(
+                matrix.map_point(one_right_of_focal_point),
+                waft_embedder::valo::Point::new(252.0, 250.0)
+            );
+            assert_eq!(
+                matrix.to_flutter_array(),
+                [
+                    2.0, 0.0, 0.0, 0.0, //
+                    0.0, 2.0, 0.0, 0.0, //
+                    0.0, 0.0, 2.0, 0.0, //
+                    -350.0, -350.0, 0.0, 1.0,
+                ]
+            );
+        });
     }
 
     #[test]
     fn the_lens_filters_the_backdrop_through_its_magnification_matrix() {
-        let cell = binding_cell();
-        binding_mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(
-                    RawMagnifier::new(Size::new(100.0, 100.0))
-                        .focal_point_offset(Offset::new(50.0, 50.0))
-                        .magnification_scale(2.0),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let lens = render_objects::<RenderMagnification>(&mut app)[0];
-        // The lens paints at the origin of the opacity layer `RawMagnifier` fades it in, as
-        // `PaintingContext.pushOpacity` paints its child at `Offset.zero`.
-        let offset = Offset::ZERO;
-        let layer = lens
-            .as_object()
-            .layer_as::<BackdropFilterLayer>(&app)
-            .expect("the lens pushes a backdrop filter layer");
-        assert_eq!(
-            layer.filter(&app),
-            Some(&ImageFilter::matrix(
-                lens.magnification_matrix(&app, offset),
-                FilterQuality::High
-            ))
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(
+                        RawMagnifier::new(Size::new(100.0, 100.0))
+                            .focal_point_offset(Offset::new(50.0, 50.0))
+                            .magnification_scale(2.0),
+                    ),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let lens = render_objects::<RenderMagnification>(&mut app)[0];
+            // The lens paints at the origin of the opacity layer `RawMagnifier` fades it in, as
+            // `PaintingContext.pushOpacity` paints its child at `Offset.zero`.
+            let offset = Offset::ZERO;
+            let layer = lens
+                .as_object()
+                .layer_as::<BackdropFilterLayer>(&app)
+                .expect("the lens pushes a backdrop filter layer");
+            assert_eq!(
+                layer.filter(&app),
+                Some(&ImageFilter::matrix(
+                    lens.magnification_matrix(&app, offset),
+                    FilterQuality::High
+                ))
+            );
+        });
     }
 
     #[test]
     fn the_decoration_is_painted_over_the_lens_through_a_negative_clip() {
-        let cell = binding_cell();
-        let shadow = BoxShadow::new(
-            Color::new(0xFFFFFF00),
-            Offset::new(5.0, 5.0),
-            10.0,
-            10.0,
-            BlurStyle::Normal,
-        );
-        let shape = RoundedRectangleBorder::new(
-            BorderSide::new(Color::new(0xFF000000), 2.0, BorderStyle::Solid, -1.0),
-            BorderRadius::all(Radius::circular(10.0)).into(),
-        );
-        binding_mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(
-                    RawMagnifier::new(Size::new(100.0, 100.0))
-                        .clip_behavior(Clip::HardEdge)
-                        .decoration(
-                            MagnifierDecoration::new()
-                                .shadows(vec![shadow])
-                                .opacity(0.5)
-                                .shape(shape),
-                        ),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let shadow = BoxShadow::new(
+                Color::new(0xFFFFFF00),
+                Offset::new(5.0, 5.0),
+                10.0,
+                10.0,
+                BlurStyle::Normal,
+            );
+            let shape = RoundedRectangleBorder::new(
+                BorderSide::new(Color::new(0xFF000000), 2.0, BorderStyle::Solid, -1.0),
+                BorderRadius::all(Radius::circular(10.0)).into(),
+            );
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(
+                        RawMagnifier::new(Size::new(100.0, 100.0))
+                            .clip_behavior(Clip::HardEdge)
+                            .decoration(
+                                MagnifierDecoration::new()
+                                    .shadows(vec![shadow])
+                                    .opacity(0.5)
+                                    .shape(shape),
+                            ),
+                    ),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let opacities = render_objects::<RenderOpacity>(&mut app);
-        assert_eq!(opacities.len(), 2, "the lens and the decoration both fade");
-        assert!(opacities.iter().all(|opacity| opacity.opacity(&app) == 0.5));
+            let opacities = render_objects::<RenderOpacity>(&mut app);
+            assert_eq!(opacities.len(), 2, "the lens and the decoration both fade");
+            assert!(opacities.iter().all(|opacity| opacity.opacity(&app) == 0.5));
 
-        let decorated = render_objects::<RenderDecoratedBox>(&mut app);
-        assert_eq!(decorated.len(), 1);
-        let decoration = decorated[0]
-            .decoration(&app)
-            .as_any()
-            .downcast_ref::<ShapeDecoration>()
-            .expect("a ShapeDecoration");
-        assert_eq!(decoration.shadows, Some(vec![shadow]));
-        assert!(decoration.shape.eq_shape(&shape));
-        assert_eq!(decorated[0].size(&app), Size::new(100.0, 100.0));
+            let decorated = render_objects::<RenderDecoratedBox>(&mut app);
+            assert_eq!(decorated.len(), 1);
+            let decoration = decorated[0]
+                .decoration(&app)
+                .as_any()
+                .downcast_ref::<ShapeDecoration>()
+                .expect("a ShapeDecoration");
+            assert_eq!(decoration.shadows, Some(vec![shadow]));
+            assert!(decoration.shape.eq_shape(&shape));
+            assert_eq!(decorated[0].size(&app), Size::new(100.0, 100.0));
 
-        let clips = render_objects::<RenderClipPath>(&mut app);
-        assert_eq!(clips.len(), 2);
-        let (lens_clip, decoration_clip) = (clips[0], clips[1]);
-        assert_eq!(lens_clip.clip_behavior(&app), Clip::AntiAlias);
-        assert_eq!(decoration_clip.clip_behavior(&app), Clip::HardEdge);
-        let negative = decoration_clip
-            .clipper(&app)
-            .expect("the negative clip")
-            .get_clip(&app, Size::new(100.0, 100.0));
-        assert!(negative.contains(Offset::new(-50.0, -50.0)));
-        assert!(negative.contains(Offset::new(150.0, 50.0)));
-        assert!(!negative.contains(Offset::new(50.0, 50.0)));
+            let clips = render_objects::<RenderClipPath>(&mut app);
+            assert_eq!(clips.len(), 2);
+            let (lens_clip, decoration_clip) = (clips[0], clips[1]);
+            assert_eq!(lens_clip.clip_behavior(&app), Clip::AntiAlias);
+            assert_eq!(decoration_clip.clip_behavior(&app), Clip::HardEdge);
+            let negative = decoration_clip
+                .clipper(&app)
+                .expect("the negative clip")
+                .get_clip(&app, Size::new(100.0, 100.0));
+            assert!(negative.contains(Offset::new(-50.0, -50.0)));
+            assert!(negative.contains(Offset::new(150.0, 50.0)));
+            assert!(!negative.contains(Offset::new(50.0, 50.0)));
 
-        let stack = render_objects::<RenderStack>(&mut app);
-        assert_eq!(stack[0].size(&app), Size::new(100.0, 100.0));
+            let stack = render_objects::<RenderStack>(&mut app);
+            assert_eq!(stack[0].size(&app), Size::new(100.0, 100.0));
+        });
     }
 
     #[test]
@@ -1369,171 +1346,196 @@ mod tests {
 
     #[test]
     fn should_immediately_remove_from_overlay_on_no_animation_controller() {
-        let cell = binding_cell();
-        let home = GlobalKey::new();
-        app_with_overlay(&cell, home.clone());
-        let mut app = cell.borrow_mut();
-        let context = home.current_context(&app).expect("mounted");
-        let magnifier_controller = MagnifierController::new(&mut app);
+        test_widgets(|tester| {
+            let home = GlobalKey::new();
+            app_with_overlay(tester, home.clone());
+            let mut app = tester.cell.borrow_mut();
+            let context = home.current_context(&app).expect("mounted");
+            let magnifier_controller = MagnifierController::new(&mut app);
 
-        magnifier_controller.show(
-            &mut app,
-            context,
-            raw_magnifier_builder(UniqueKey::new().into()),
-            None,
-        );
-        binding_pump(&mut app, at(0));
-        assert!(magnifier_controller.overlay_entry(&app).is_some());
+            magnifier_controller.show(
+                &mut app,
+                context,
+                raw_magnifier_builder(UniqueKey::new().into()),
+                None,
+            );
+            drop(app);
+            schedule_frame_and_pump(tester);
+            let mut app = tester.cell.borrow_mut();
+            assert!(magnifier_controller.overlay_entry(&app).is_some());
 
-        magnifier_controller.hide(&mut app, true);
-        binding_pump(&mut app, at(16));
-        assert!(magnifier_controller.overlay_entry(&app).is_none());
+            magnifier_controller.hide(&mut app, true);
+            drop(app);
+            schedule_frame_and_pump(tester);
+            let app = tester.cell.borrow();
+            assert!(magnifier_controller.overlay_entry(&app).is_none());
+        });
     }
 
     #[test]
     fn should_update_shown_based_on_animation_status() {
-        let cell = binding_cell();
-        let home = GlobalKey::new();
-        app_with_overlay(&cell, home.clone());
-        let mut app = cell.borrow_mut();
-        let context = home.current_context(&app).expect("mounted");
-        let duration = Duration::from_secs(120);
-        let animation_controller = AnimationController::new(
-            &mut app,
-            None,
-            Some(duration),
-            None,
-            0.0,
-            1.0,
-            AnimationBehavior::Normal,
-            TestVSync,
-        );
-        let magnifier_controller = MagnifierController::new(&mut app)
-            .animation_controller(&mut app, animation_controller.clone());
+        test_widgets(|tester| {
+            let home = GlobalKey::new();
+            app_with_overlay(tester, home.clone());
+            let mut app = tester.cell.borrow_mut();
+            let context = home.current_context(&app).expect("mounted");
+            let duration = Duration::from_secs(120);
+            let animation_controller = AnimationController::new(
+                &mut app,
+                None,
+                Some(duration),
+                None,
+                0.0,
+                1.0,
+                AnimationBehavior::Normal,
+                TestVSync,
+            );
+            let magnifier_controller = MagnifierController::new(&mut app)
+                .animation_controller(&mut app, animation_controller.clone());
 
-        magnifier_controller.show(
-            &mut app,
-            context,
-            raw_magnifier_builder(UniqueKey::new().into()),
-            None,
-        );
-        binding_pump(&mut app, at(0));
+            magnifier_controller.show(
+                &mut app,
+                context,
+                raw_magnifier_builder(UniqueKey::new().into()),
+                None,
+            );
+            drop(app);
+            schedule_frame_and_pump(tester);
+            let app = tester.cell.borrow();
 
-        // No time has passed, so the animation controller has not completed.
-        assert_eq!(animation_controller.status(&app), AnimationStatus::Forward);
-        assert!(magnifier_controller.shown(&app));
+            // No time has passed, so the animation controller has not completed.
+            assert_eq!(animation_controller.status(&app), AnimationStatus::Forward);
+            assert!(magnifier_controller.shown(&app));
 
-        binding_pump(&mut app, duration);
-        binding_pump(&mut app, duration + at(16));
-        assert_eq!(
-            animation_controller.status(&app),
-            AnimationStatus::Completed
-        );
-        assert!(magnifier_controller.shown(&app));
+            // Dart's `async.elapse(duration)` moves the case's own `FakeAsync`, which no frame
+            // reads; the frames `pumpAndSettle` runs drive the controller.
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                animation_controller.status(&app),
+                AnimationStatus::Completed
+            );
+            assert!(magnifier_controller.shown(&app));
 
-        magnifier_controller.hide(&mut app, true);
-        binding_pump(&mut app, duration + at(32));
-        assert_eq!(animation_controller.status(&app), AnimationStatus::Reverse);
-        assert!(!magnifier_controller.shown(&app));
+            magnifier_controller.hide(&mut app, true);
+            drop(app);
+            schedule_frame_and_pump(tester);
+            let app = tester.cell.borrow();
+            assert_eq!(animation_controller.status(&app), AnimationStatus::Reverse);
+            assert!(!magnifier_controller.shown(&app));
 
-        binding_pump(&mut app, duration * 2 + at(32));
-        binding_pump(&mut app, duration * 2 + at(48));
-        assert_eq!(
-            animation_controller.status(&app),
-            AnimationStatus::Dismissed
-        );
-        assert!(!magnifier_controller.shown(&app));
+            drop(app);
+            tester.pump_and_settle();
+            let app = tester.cell.borrow();
+            assert_eq!(
+                animation_controller.status(&app),
+                AnimationStatus::Dismissed
+            );
+            assert!(!magnifier_controller.shown(&app));
+        });
     }
 
     #[test]
     fn should_insert_below_below_widget() {
-        let cell = binding_cell();
-        let home = GlobalKey::new();
-        app_with_overlay(&cell, home.clone());
-        let mut app = cell.borrow_mut();
-        let context = home.current_context(&app).expect("mounted");
-        let magnifier_controller = MagnifierController::new(&mut app);
-        let fake_magnifier: KeyRef = UniqueKey::new().into();
-        let fake_before: KeyRef = UniqueKey::new().into();
+        test_widgets(|tester| {
+            let home = GlobalKey::new();
+            app_with_overlay(tester, home.clone());
+            let mut app = tester.cell.borrow_mut();
+            let context = home.current_context(&app).expect("mounted");
+            let magnifier_controller = MagnifierController::new(&mut app);
+            let fake_magnifier: KeyRef = UniqueKey::new().into();
+            let fake_before: KeyRef = UniqueKey::new().into();
 
-        let before_key = fake_before.clone();
-        let fake_before_overlay_entry = OverlayEntry::new(
-            &mut app,
-            Rc::new(move |_app: &mut App, _context: BuildContext| {
-                SizedBox::new().key(before_key.clone()).into_widget()
-            }),
-            false,
-            false,
-            false,
-        );
-        Overlay::of(&mut app, context, false).insert(
-            &mut app,
-            fake_before_overlay_entry.clone(),
-            None,
-            None,
-        );
-        let magnifier_key = fake_magnifier.clone();
-        magnifier_controller.show(
-            &mut app,
-            context,
-            Rc::new(move |_app: &mut App, _context: BuildContext| {
-                SizedBox::new().key(magnifier_key.clone()).into_widget()
-            }),
-            Some(fake_before_overlay_entry.handle()),
-        );
-        binding_pump(&mut app, at(0));
+            let before_key = fake_before.clone();
+            let fake_before_overlay_entry = OverlayEntry::new(
+                &mut app,
+                Rc::new(move |_app: &mut App, _context: BuildContext| {
+                    SizedBox::new().key(before_key.clone()).into_widget()
+                }),
+                false,
+                false,
+                false,
+            );
+            Overlay::of(&mut app, context, false).insert(
+                &mut app,
+                fake_before_overlay_entry.clone(),
+                None,
+                None,
+            );
+            let magnifier_key = fake_magnifier.clone();
+            magnifier_controller.show(
+                &mut app,
+                context,
+                Rc::new(move |_app: &mut App, _context: BuildContext| {
+                    SizedBox::new().key(magnifier_key.clone()).into_widget()
+                }),
+                Some(fake_before_overlay_entry.handle()),
+            );
+            SchedulerBinding::schedule_frame(&mut app, FrameTarget::EveryView);
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
 
-        let keyed: Vec<KeyRef> = elements(&mut app)
-            .into_iter()
-            .filter_map(|element| element.widget(&app).key().cloned())
-            .filter(|key| key == &fake_magnifier || key == &fake_before)
-            .collect();
-        // Expect the magnifier to be the first child, even though it was inserted
-        // after the fakeBefore.
-        assert_eq!(keyed, vec![fake_magnifier, fake_before]);
+            let keyed: Vec<KeyRef> = elements(&mut app)
+                .into_iter()
+                .filter_map(|element| element.widget(&app).key().cloned())
+                .filter(|key| key == &fake_magnifier || key == &fake_before)
+                .collect();
+            // Expect the magnifier to be the first child, even though it was inserted
+            // after the fakeBefore.
+            assert_eq!(keyed, vec![fake_magnifier, fake_before]);
 
-        magnifier_controller.remove_from_overlay(&mut app);
-        fake_before_overlay_entry.remove(&mut app);
-        fake_before_overlay_entry.dispose(&mut app);
+            magnifier_controller.remove_from_overlay(&mut app);
+            fake_before_overlay_entry.remove(&mut app);
+            fake_before_overlay_entry.dispose(&mut app);
+        });
     }
 
     #[test]
     fn should_insert_newly_built_widget_without_animating_out_if_overlay_is_not_none() {
-        let cell = binding_cell();
-        let home = GlobalKey::new();
-        app_with_overlay(&cell, home.clone());
-        let mut app = cell.borrow_mut();
-        let context = home.current_context(&app).expect("mounted");
-        let magnifier_controller = MagnifierController::new(&mut app);
-        let first: KeyRef = UniqueKey::new().into();
-        let second: KeyRef = UniqueKey::new().into();
+        test_widgets(|tester| {
+            let home = GlobalKey::new();
+            app_with_overlay(tester, home.clone());
+            let mut app = tester.cell.borrow_mut();
+            let context = home.current_context(&app).expect("mounted");
+            let magnifier_controller = MagnifierController::new(&mut app);
+            let first: KeyRef = UniqueKey::new().into();
+            let second: KeyRef = UniqueKey::new().into();
 
-        magnifier_controller.show(
-            &mut app,
-            context,
-            raw_magnifier_builder(first.clone()),
-            None,
-        );
-        binding_pump(&mut app, at(0));
-        binding_pump(&mut app, at(60_000));
+            magnifier_controller.show(
+                &mut app,
+                context,
+                raw_magnifier_builder(first.clone()),
+                None,
+            );
+            drop(app);
+            schedule_frame_and_pump(tester);
+            let app = tester.cell.borrow();
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
 
-        magnifier_controller.show(
-            &mut app,
-            context,
-            raw_magnifier_builder(second.clone()),
-            None,
-        );
-        binding_pump(&mut app, at(60_016));
+            magnifier_controller.show(
+                &mut app,
+                context,
+                raw_magnifier_builder(second.clone()),
+                None,
+            );
+            drop(app);
+            schedule_frame_and_pump(tester);
+            let mut app = tester.cell.borrow_mut();
 
-        let count = |app: &mut App, key: &KeyRef| {
-            elements(app)
-                .into_iter()
-                .filter(|element| has_key(element.widget(app), key))
-                .count()
-        };
-        assert_eq!(count(&mut app, &second), 1);
-        assert_eq!(count(&mut app, &first), 0);
-        magnifier_controller.remove_from_overlay(&mut app);
+            let count = |app: &mut App, key: &KeyRef| {
+                elements(app)
+                    .into_iter()
+                    .filter(|element| has_key(element.widget(app), key))
+                    .count()
+            };
+            assert_eq!(count(&mut app, &second), 1);
+            assert_eq!(count(&mut app, &first), 0);
+            magnifier_controller.remove_from_overlay(&mut app);
+        });
     }
 
     #[test]
@@ -1567,26 +1569,26 @@ mod tests {
 
     #[test]
     fn raw_magnifier_sits_where_it_is_positioned() {
-        let cell = binding_cell();
-        let key: KeyRef = UniqueKey::new().into();
-        binding_mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Stack::new().children([Positioned::new(
-                    RawMagnifier::new(Size::new(40.0, 40.0)).key(key.clone()),
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Stack::new().children([Positioned::new(
+                        RawMagnifier::new(Size::new(40.0, 40.0)).key(key.clone()),
+                    )
+                    .left(20.0)
+                    .top(30.0)
+                    .into_widget()]),
                 )
-                .left(20.0)
-                .top(30.0)
-                .into_widget()]),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let magnifier = render_box_where(&mut app, |widget| has_key(widget, &key));
-        assert_eq!(
-            magnifier.local_to_global(&app, Offset::ZERO, None),
-            Offset::new(20.0, 30.0)
-        );
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let magnifier = render_box_where(&mut app, |widget| has_key(widget, &key));
+            assert_eq!(
+                magnifier.local_to_global(&app, Offset::ZERO, None),
+                Offset::new(20.0, 30.0)
+            );
+        });
     }
 }

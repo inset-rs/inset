@@ -522,19 +522,14 @@ impl StatelessWidget for CupertinoListTileChevron {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::time::Duration;
-    use waft_foundation::{AppCell, Completer};
+    use waft_foundation::Completer;
 
-    use waft_embedder::{
-        Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, Size,
-        TextDirection,
-    };
-    use waft_gestures::GestureBinding;
+    use waft_embedder::{Offset, Size, TextDirection};
     use waft_rendering::AnyRenderBox;
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
     use waft_widgets::{Builder, Directionality, GlobalKey, downcast_widget};
 
     use super::*;
-    use crate::test_support::{build, test_cell};
     use crate::theme::CupertinoThemeData;
 
     fn key_of(key: &GlobalKey) -> KeyRef {
@@ -560,239 +555,199 @@ mod tests {
     }
 
     /// Mounts `tile` in a column, which hands it an unbounded height, as a list section does.
-    fn mount<K>(cell: &AppCell, tile: impl IntoWidget<K>) {
-        build(
-            cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Column::new().children([tile.into_widget()]),
-            )
-            .into_widget(),
-        );
-    }
-
-    /// The test view is 2x: logical coordinates double into the packet.
-    fn send(app: &mut App, change: PointerChange, x: f64, y: f64, at: Duration) {
-        GestureBinding::instance(app).handle_pointer_data_packet(
-            app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Touch,
-                time_stamp: at,
-                pointer_identifier: 1,
-                physical_x: x * 2.0,
-                physical_y: y * 2.0,
-                ..PointerData::default()
-            }]),
-        );
-        app.drain_microtasks();
+    fn mount<K>(tester: &mut WidgetTester, tile: impl IntoWidget<K>) {
+        tester.pump_widget(Directionality::new(
+            TextDirection::Ltr,
+            Column::new().children([tile.into_widget()]),
+        ));
     }
 
     #[test]
     fn a_notched_tile_lays_out_its_five_slots_with_the_notched_paddings() {
-        let cell = test_cell();
-        let (tile_key, leading, title, subtitle, info, trailing) = (
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-        );
-        mount(
-            &cell,
-            CupertinoListTile::notched(slot(&title, 100.0, 20.0))
-                .key(key_of(&tile_key))
-                .leading(slot(&leading, 24.0, 24.0))
-                .subtitle(slot(&subtitle, 80.0, 14.0))
-                .additional_info(slot(&info, 40.0, 16.0))
-                .trailing(slot(&trailing, 12.0, 12.0)),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let (tile_key, leading, title, subtitle, info, trailing) = (
+                GlobalKey::new(),
+                GlobalKey::new(),
+                GlobalKey::new(),
+                GlobalKey::new(),
+                GlobalKey::new(),
+                GlobalKey::new(),
+            );
+            mount(
+                tester,
+                CupertinoListTile::notched(slot(&title, 100.0, 20.0))
+                    .key(key_of(&tile_key))
+                    .leading(slot(&leading, 24.0, 24.0))
+                    .subtitle(slot(&subtitle, 80.0, 14.0))
+                    .additional_info(slot(&info, 40.0, 16.0))
+                    .trailing(slot(&trailing, 12.0, 12.0)),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(
-            box_of(&mut app, &tile_key).size(&app),
-            Size::new(400.0, K_NOTCHED_MIN_HEIGHT),
-            "the notched minimum height with a leading widget"
-        );
-        assert_eq!(
-            offset_of(&mut app, &leading),
-            Offset::new(17.0, 15.0),
-            "14 of padding, then centred in a 30-point leading box"
-        );
-        assert_eq!(
-            offset_of(&mut app, &title),
-            Offset::new(56.0, 8.5),
-            "14 of padding, the 30-point leading box, and 12 to the title"
-        );
-        assert_eq!(
-            offset_of(&mut app, &subtitle),
-            Offset::new(56.0, 31.5),
-            "3 below the title"
-        );
-        assert_eq!(
-            offset_of(&mut app, &info),
-            Offset::new(328.0, 19.0),
-            "before the trailing widget and its 6-point gap"
-        );
-        assert_eq!(
-            offset_of(&mut app, &trailing),
-            Offset::new(374.0, 21.0),
-            "14 of padding from the end"
-        );
+            assert_eq!(
+                box_of(&mut app, &tile_key).size(&app),
+                Size::new(800.0, K_NOTCHED_MIN_HEIGHT),
+                "the notched minimum height with a leading widget"
+            );
+            assert_eq!(
+                offset_of(&mut app, &leading),
+                Offset::new(17.0, 15.0),
+                "14 of padding, then centred in a 30-point leading box"
+            );
+            assert_eq!(
+                offset_of(&mut app, &title),
+                Offset::new(56.0, 8.5),
+                "14 of padding, the 30-point leading box, and 12 to the title"
+            );
+            assert_eq!(
+                offset_of(&mut app, &subtitle),
+                Offset::new(56.0, 31.5),
+                "3 below the title"
+            );
+            assert_eq!(
+                offset_of(&mut app, &info),
+                Offset::new(728.0, 19.0),
+                "before the trailing widget and its 6-point gap"
+            );
+            assert_eq!(
+                offset_of(&mut app, &trailing),
+                Offset::new(774.0, 21.0),
+                "14 of padding from the end"
+            );
+        });
     }
 
     #[test]
     fn a_base_tile_uses_the_edge_to_edge_padding_and_minimum_height() {
-        let cell = test_cell();
-        let (tile_key, title) = (GlobalKey::new(), GlobalKey::new());
-        mount(
-            &cell,
-            CupertinoListTile::new(slot(&title, 100.0, 20.0)).key(key_of(&tile_key)),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let (tile_key, title) = (GlobalKey::new(), GlobalKey::new());
+            mount(
+                tester,
+                CupertinoListTile::new(slot(&title, 100.0, 20.0)).key(key_of(&tile_key)),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(
-            box_of(&mut app, &tile_key).size(&app),
-            Size::new(400.0, K_MIN_HEIGHT)
-        );
-        assert_eq!(
-            offset_of(&mut app, &title).dx(),
-            20.0,
-            "the edge-to-edge start padding; a missing leading widget takes no room"
-        );
+            assert_eq!(
+                box_of(&mut app, &tile_key).size(&app),
+                Size::new(800.0, K_MIN_HEIGHT)
+            );
+            assert_eq!(
+                offset_of(&mut app, &title).dx(),
+                20.0,
+                "the edge-to-edge start padding; a missing leading widget takes no room"
+            );
+        });
     }
 
-    /// A tap on the tile: down, then up ten milliseconds later.
-    fn tap(app: &mut App) {
-        send(app, PointerChange::Down, 200.0, 20.0, Duration::ZERO);
-        send(
-            app,
-            PointerChange::Up,
-            200.0,
-            20.0,
-            Duration::from_millis(10),
-        );
-    }
+    /// Where the tests touch the tile.
+    const TILE: Offset = Offset::new(200.0, 20.0);
 
     #[test]
     fn tapping_a_tile_activates_it_and_runs_on_tap() {
-        let cell = test_cell();
-        let taps = Rc::new(Cell::new(0));
-        let tile_key = GlobalKey::new();
-        let title = GlobalKey::new();
-        mount(
-            &cell,
-            CupertinoListTile::new(slot(&title, 100.0, 20.0))
-                .key(key_of(&tile_key))
-                .on_tap(Rc::new({
-                    let taps = Rc::clone(&taps);
-                    move |_app: &mut App| {
-                        taps.set(taps.get() + 1);
-                        Task::ready(())
-                    }
-                })),
-        );
-        let mut app = cell.borrow_mut();
-        let state = tile_key
-            .current_state::<CupertinoListTileState>(&app)
-            .expect("the tile mounted");
+        test_widgets(|tester| {
+            let taps = Rc::new(Cell::new(0));
+            let tile_key = GlobalKey::new();
+            let title = GlobalKey::new();
+            mount(
+                tester,
+                CupertinoListTile::new(slot(&title, 100.0, 20.0))
+                    .key(key_of(&tile_key))
+                    .on_tap(Rc::new({
+                        let taps = Rc::clone(&taps);
+                        move |_app: &mut App| {
+                            taps.set(taps.get() + 1);
+                            Task::ready(())
+                        }
+                    })),
+            );
+            let state = tile_key
+                .current_state::<CupertinoListTileState>(&tester.cell.borrow())
+                .expect("the tile mounted");
 
-        send(&mut app, PointerChange::Down, 200.0, 20.0, Duration::ZERO);
-        assert!(app.get(state).tapped);
+            let mut touch = TestPointer::touch(1);
+            tester.down(&mut touch, TILE);
+            assert!(tester.cell.borrow().get(state).tapped);
 
-        send(
-            &mut app,
-            PointerChange::Up,
-            200.0,
-            20.0,
-            Duration::from_millis(10),
-        );
-        assert_eq!(taps.get(), 1);
-        assert!(
-            app.get(state).tapped,
-            "the continuation runs at the checkpoint, not inline"
-        );
-        drop(app);
-        cell.checkpoint();
-        let app = cell.borrow();
-        assert!(
-            !app.get(state).tapped,
-            "a callback with nothing to await deactivates the tile at the next checkpoint"
-        );
+            // The up ends at the checkpoint a host runs after each event, where the
+            // callback's continuation runs.
+            tester.up(&touch);
+            assert_eq!(taps.get(), 1);
+            let app = tester.cell.borrow();
+            assert!(
+                !app.get(state).tapped,
+                "a callback with nothing to await deactivates the tile at the next checkpoint"
+            );
+        });
     }
 
     #[test]
     fn a_tile_stays_activated_until_its_callback_task_completes() {
-        let cell = test_cell();
-        let completer: Completer<()> = Completer::new();
-        let tile_key = GlobalKey::new();
-        let title = GlobalKey::new();
-        mount(
-            &cell,
-            CupertinoListTile::new(slot(&title, 100.0, 20.0))
-                .key(key_of(&tile_key))
-                .on_tap(Rc::new({
-                    let completer = completer.clone();
-                    move |app: &mut App| {
-                        let future = completer.future();
-                        app.spawn(async move |_cx| future.await)
-                    }
-                })),
-        );
-        let mut app = cell.borrow_mut();
-        let state = tile_key
-            .current_state::<CupertinoListTileState>(&app)
-            .expect("the tile mounted");
+        test_widgets(|tester| {
+            let completer: Completer<()> = Completer::new();
+            let tile_key = GlobalKey::new();
+            let title = GlobalKey::new();
+            mount(
+                tester,
+                CupertinoListTile::new(slot(&title, 100.0, 20.0))
+                    .key(key_of(&tile_key))
+                    .on_tap(Rc::new({
+                        let completer = completer.clone();
+                        move |app: &mut App| {
+                            let future = completer.future();
+                            app.spawn(async move |_cx| future.await)
+                        }
+                    })),
+            );
+            let state = tile_key
+                .current_state::<CupertinoListTileState>(&tester.cell.borrow())
+                .expect("the tile mounted");
 
-        tap(&mut app);
-        assert!(app.get(state).tapped);
-        drop(app);
-        cell.checkpoint();
-        assert!(
-            cell.borrow().get(state).tapped,
-            "the callback's task is still pending"
-        );
+            tester.tap_at(TILE, 1);
+            assert!(
+                tester.cell.borrow().get(state).tapped,
+                "the callback's task is still pending"
+            );
 
-        completer.complete(&mut cell.borrow_mut(), ());
-        assert!(
-            cell.borrow().get(state).tapped,
-            "completion wakes the continuation; it does not run inline"
-        );
-        cell.checkpoint();
-        assert!(!cell.borrow().get(state).tapped);
+            completer.complete(&mut tester.cell.borrow_mut(), ());
+            assert!(
+                tester.cell.borrow().get(state).tapped,
+                "completion wakes the continuation; it does not run inline"
+            );
+            tester.cell.checkpoint();
+            assert!(!tester.cell.borrow().get(state).tapped);
+        });
     }
 
     #[test]
     fn the_chevron_is_a_grey_right_chevron_sized_to_the_theme_text() {
-        let cell = test_cell();
-        let seen: Rc<RefCell<Option<(WidgetRef, AnyColor)>>> = Rc::new(RefCell::new(None));
-        build(
-            &cell,
-            CupertinoTheme::new(
-                CupertinoThemeData::new(),
-                Builder::new({
-                    let seen = Rc::clone(&seen);
-                    move |app, context| {
-                        let chevron = CupertinoListTileChevron::new().build(app, context);
-                        let grey = CupertinoDynamicColor::resolve(
-                            &CupertinoColors::SYSTEM_GREY2,
-                            app,
-                            context,
-                        );
-                        *seen.borrow_mut() = Some((chevron, grey));
-                        SizedBox::shrink().into_widget()
-                    }
-                }),
-            )
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let seen: Rc<RefCell<Option<(WidgetRef, AnyColor)>>> = Rc::new(RefCell::new(None));
+            tester.pump_widget(
+                CupertinoTheme::new(
+                    CupertinoThemeData::new(),
+                    Builder::new({
+                        let seen = Rc::clone(&seen);
+                        move |app, context| {
+                            let chevron = CupertinoListTileChevron::new().build(app, context);
+                            let grey = CupertinoDynamicColor::resolve(
+                                &CupertinoColors::SYSTEM_GREY2,
+                                app,
+                                context,
+                            );
+                            *seen.borrow_mut() = Some((chevron, grey));
+                            SizedBox::shrink().into_widget()
+                        }
+                    }),
+                )
+                .into_widget(),
+            );
 
-        let seen = seen.borrow();
-        let (chevron, grey) = seen.as_ref().expect("the chevron built");
-        let icon = downcast_widget::<Icon>(&**chevron).expect("an Icon");
-        assert_eq!(icon.icon, Some(CupertinoIcons::right_chevron()));
-        assert_eq!(icon.size, Some(17.0), "the theme text style's font size");
-        assert_eq!(icon.color.as_ref(), Some(grey));
+            let seen = seen.borrow();
+            let (chevron, grey) = seen.as_ref().expect("the chevron built");
+            let icon = downcast_widget::<Icon>(&**chevron).expect("an Icon");
+            assert_eq!(icon.icon, Some(CupertinoIcons::right_chevron()));
+            assert_eq!(icon.size, Some(17.0), "the theme text style's font size");
+            assert_eq!(icon.color.as_ref(), Some(grey));
+        });
     }
 }

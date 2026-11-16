@@ -1,6 +1,7 @@
 //! Messages and sheets: `SnackBar`s fixed, floating, with an action and with a close icon, a
-//! `MaterialBanner`, both shown through the app's `ScaffoldMessenger`; and a modal and a
-//! persistent bottom sheet.
+//! `MaterialBanner`, both shown through the app's `ScaffoldMessenger`; a modal and a
+//! persistent bottom sheet; and `Tooltip`s with a plain and a rich message, shown by hover or
+//! long press, by a tap, or above their child.
 //!
 //! The messenger belongs to the `MaterialApp`, not to this page, so a snack bar or a banner
 //! outlives the page that showed it and stays up on the index after the back button. That is
@@ -11,14 +12,14 @@ use std::rc::Rc;
 use waft_foundation::{App, Listener};
 use waft_material::{
     FilledButton, Icons, MaterialBanner, MaterialBannerClosedReason, OutlinedButton,
-    ScaffoldMessenger, SnackBar, SnackBarAction, SnackBarBehavior, TextButton, show_bottom_sheet,
-    show_modal_bottom_sheet,
+    ScaffoldMessenger, SnackBar, SnackBarAction, SnackBarBehavior, TextButton, Tooltip,
+    show_bottom_sheet, show_modal_bottom_sheet,
 };
-use waft_painting::EdgeInsetsGeometry;
+use waft_painting::{EdgeInsetsGeometry, TextSpan};
 use waft_rendering::MainAxisSize;
 use waft_widgets::{
     BuildContext, Builder, Column, Icon, IntoWidget, ListView, Navigator, Padding, SizedBox, Text,
-    WidgetBuilder, WidgetRef,
+    TooltipTriggerMode, WidgetBuilder, WidgetRef,
 };
 
 use crate::catalog::Entry;
@@ -47,6 +48,8 @@ pub fn body(_app: &mut App, _context: BuildContext) -> WidgetRef {
                     modal_sheet_button(context),
                     persistent_sheet_button(context),
                 ]),
+                section_header(app, context, "Tooltips"),
+                showcase(tooltips()),
             ])
             .into_widget()
     });
@@ -206,4 +209,35 @@ fn sheet(text: &'static str, close_label: &'static str) -> WidgetBuilder {
             )
             .into_widget()
     })
+}
+
+/// A tooltip on a button of each way a tooltip shows: a hover or long press, a tap, below or
+/// above the child, and with a rich message.
+fn tooltips() -> Vec<WidgetRef> {
+    let button = |label: &'static str| {
+        TextButton::new(
+            Some(Listener::new(|_app: &mut App| {})),
+            Some(Text::new(label)),
+        )
+    };
+    vec![
+        Tooltip::new()
+            .message("Shown by hover or long press")
+            .child(button("Hover or hold"))
+            .into_widget(),
+        Tooltip::new()
+            .message("Shown by a tap")
+            .trigger_mode(TooltipTriggerMode::Tap)
+            .child(button("Tap"))
+            .into_widget(),
+        Tooltip::new()
+            .message("Shown above its child")
+            .prefer_below(false)
+            .child(button("Above"))
+            .into_widget(),
+        Tooltip::new()
+            .rich_message(Rc::new(TextSpan::new().text("A rich message")))
+            .child(button("Rich"))
+            .into_widget(),
+    ]
 }

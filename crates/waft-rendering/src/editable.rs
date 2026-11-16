@@ -2243,14 +2243,12 @@ mod tests {
     use valo::{Font, FontAttrs};
     use waft_embedder::{FontSource, TextAffinity};
     use waft_foundation::{AppCell, Task};
-    use waft_painting::{PaintingBinding, TextSpan, TextStyle};
+    use waft_painting::{AlignmentGeometry, PaintingBinding, TextSpan, TextStyle};
     use waft_scheduler::SchedulerBinding;
     use waft_services::{TextEditingValue, TextSelectionDelegate};
 
     use super::*;
-    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer};
-    use crate::pipeline_owner::PipelineOwner;
-    use crate::proxy_box::RenderRepaintBoundary;
+    use crate::testing::{EnginePhase, layout_with, pump_frame};
     use crate::viewport_offset::FixedViewportOffset;
 
     #[derive(Default)]
@@ -2327,19 +2325,13 @@ mod tests {
         );
         editable.set_text(app, Some(span(text)));
         editable.set_cursor_color(app, Some(Color::from_argb(255, 0, 0, 0)));
-        let root = RenderRepaintBoundary::new(app, Some(editable.as_box()));
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.schedule_initial_layout(app);
-        root.layout(
+        layout_with(
             app,
-            BoxConstraints::tight_for(Some(200.0), Some(40.0)),
-            false,
+            editable.as_box(),
+            Some(BoxConstraints::tight_for(Some(200.0), Some(40.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
         );
-        let paint_root = OffsetLayer::new(app, Offset::ZERO);
-        paint_root.as_layer().attach(app, root.as_object().id());
-        root.as_object()
-            .schedule_initial_paint(app, paint_root.as_container_layer());
         editable
     }
 
@@ -2580,12 +2572,13 @@ mod tests {
             delegate.as_text_selection_delegate(),
         );
         editable.set_text(&mut app, Some(span(text)));
-        let root = RenderRepaintBoundary::new(&mut app, Some(editable.as_box()));
-        let owner = PipelineOwner::new(&mut app, None, None);
-        owner.set_root_node(&mut app, Some(root.as_object()));
-        root.schedule_initial_layout(&mut app);
-        let constraints = BoxConstraints::tight_for(Some(200.0), Some(40.0));
-        root.layout(&mut app, constraints, false);
+        layout_with(
+            &mut app,
+            editable.as_box(),
+            Some(BoxConstraints::tight_for(Some(200.0), Some(40.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
+        );
 
         let cjk = TextRange::new(1, 2);
         let before = editable
@@ -2595,7 +2588,7 @@ mod tests {
         allow_non_ascii.set(true);
         PaintingBinding::instance(&mut app).handle_system_fonts_did_change(&mut app);
         SchedulerBinding::handle_begin_frame(&mut app, &[], None);
-        root.layout(&mut app, constraints, false);
+        pump_frame(&mut app, EnginePhase::Layout);
 
         let after = editable
             .get_rect_for_composing_range(&mut app, cjk)

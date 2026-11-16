@@ -1683,14 +1683,13 @@ impl RenderBox for RenderTable {
 mod tests {
     use waft_embedder::valo::Op;
     use waft_embedder::{Color, Radius};
-    use waft_foundation::{AppCell, Handle, Ref};
+    use waft_foundation::AppCell;
     use waft_painting::{AlignmentGeometry, BorderRadius, BorderStyle};
 
     use super::*;
-    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
-    use crate::pipeline_owner::PipelineOwner;
-    use crate::proxy_box::{RenderConstrainedBox, RenderRepaintBoundary};
+    use crate::proxy_box::RenderConstrainedBox;
     use crate::shifted_box::RenderPositionedBox;
+    use crate::testing::{EnginePhase, layout, layout_with, painted_ops, pump_frame};
 
     fn sized_box(app: &mut App, width: f64, height: f64) -> AnyRenderBox {
         RenderConstrainedBox::new(app, BoxConstraints::tight(Size::new(width, height)), None)
@@ -1701,54 +1700,9 @@ mod tests {
         RenderPositionedBox::new(app, AlignmentGeometry::CENTER, None, None, None, None).as_box()
     }
 
-    /// `rendering_tester.dart`'s `layout`: attach `root` under a repaint boundary, lay it out
-    /// with `constraints`, and paint it. The default constraints are an 800 by 600 screen.
-    struct Laid {
-        owner: Ref<PipelineOwner>,
-        boundary: RenderHandle<RenderRepaintBoundary>,
-    }
-
-    fn layout(app: &mut App, root: AnyRenderBox, constraints: BoxConstraints) -> Laid {
-        let boundary = RenderRepaintBoundary::new(app, Some(root));
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(boundary.as_object()));
-        boundary.as_box().layout(app, constraints, false);
-        let paint_root = OffsetLayer::new(app, Offset::ZERO);
-        paint_root.as_layer().attach(app, boundary.as_object().id());
-        boundary
-            .as_object()
-            .schedule_initial_paint(app, paint_root.as_container_layer());
-        pump_frame(app, owner.handle());
-        Laid { owner, boundary }
-    }
-
-    fn screen() -> BoxConstraints {
-        BoxConstraints::tight(Size::new(800.0, 600.0))
-    }
-
-    /// `rendering_tester.dart`'s `pumpFrame`: layout, compositing bits and paint.
-    fn pump_frame(app: &mut App, owner: Handle<PipelineOwner>) {
-        owner.flush_layout(app);
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
-    }
-
-    /// The display list ops the boundary painted, in order.
-    fn painted(app: &App, laid: &Laid) -> Vec<Op> {
-        let layer = laid.boundary.as_object().debug_layer(app).expect("painted");
-        layer
-            .depth_first_iterate_children(app)
-            .into_iter()
-            .filter_map(|child| {
-                app.handle::<PictureLayer>(child.id())
-                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
-            })
-            .flatten()
-            .collect()
-    }
-
-    fn paths_painted(app: &App, laid: &Laid) -> usize {
-        painted(app, laid)
+    /// The paths `table` paints: Dart's `paints..path()` count over the table.
+    fn paths_painted(app: &mut App, table: RenderHandle<RenderTable>) -> usize {
+        painted_ops(app, table.as_object())
             .iter()
             .filter(|op| matches!(op, Op::DrawPath { .. }))
             .count()
@@ -1760,7 +1714,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let table = RenderTable::new(&mut app, TextDirection::Ltr);
-        layout(&mut app, table.as_box(), screen());
+        layout(&mut app, table.as_box());
         assert_eq!(table.size(&app), Size::new(800.0, 600.0));
     }
 
@@ -1778,7 +1732,7 @@ mod tests {
             None,
             Some(table.as_box()),
         );
-        layout(&mut app, center.as_box(), screen());
+        layout(&mut app, center.as_box());
         assert_eq!(table.size(&app), Size::ZERO);
     }
 
@@ -1790,10 +1744,12 @@ mod tests {
         let table = RenderTable::new(&mut app, TextDirection::Ltr);
         let children: Vec<AnyRenderBox> = (0..6).map(|_| positioned_box(&mut app)).collect();
         table.set_flat_children(&mut app, 6, children.iter().copied().map(Some).collect());
-        layout(
+        layout_with(
             &mut app,
             table.as_box(),
-            BoxConstraints::tight_for(Some(100.0), None),
+            Some(BoxConstraints::tight_for(Some(100.0), None)),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
         );
         let expected_width = 100.0 / 6.0;
         for child in children {
@@ -1821,12 +1777,12 @@ mod tests {
             None,
             Some(table.as_box()),
         );
-        let laid = layout(&mut app, center.as_box(), screen());
+        layout(&mut app, center.as_box());
         assert_eq!(table.size(&app), Size::ZERO);
 
         let tall = sized_box(&mut app, 100.0, 200.0);
         table.set_child(&mut app, 2, 4, Some(tall));
-        pump_frame(&mut app, laid.owner.handle());
+        pump_frame(&mut app, EnginePhase::Layout);
         assert_eq!(table.size(&app), Size::new(100.0, 200.0));
 
         let first = sized_box(&mut app, 10.0, 30.0);
@@ -1835,7 +1791,7 @@ mod tests {
         table.set_child(&mut app, 0, 0, Some(first));
         table.set_child(&mut app, 1, 0, Some(second));
         table.set_child(&mut app, 2, 0, Some(third));
-        pump_frame(&mut app, laid.owner.handle());
+        pump_frame(&mut app, EnginePhase::Layout);
         assert_eq!(table.size(&app), Size::new(130.0, 230.0));
         assert_eq!(
             table.get(&app).column_lefts.as_deref(),
@@ -1863,7 +1819,7 @@ mod tests {
         table.set_rows(&mut app, 5);
         let child = sized_box(&mut app, 10.0, 10.0);
         table.set_child(&mut app, 4, 4, Some(child));
-        layout(&mut app, table.as_box(), screen());
+        layout(&mut app, table.as_box());
         assert!(child.as_object().attached(&app));
         table.set_rows(&mut app, 4);
         assert!(!child.as_object().attached(&app));
@@ -1883,7 +1839,7 @@ mod tests {
         }
         table.set_flat_children(&mut app, 3, cells);
         assert_eq!(table.rows(&app), 2);
-        let laid = layout(&mut app, table.as_box(), screen());
+        layout(&mut app, table.as_box());
         for _ in 0..2 {
             let mut cells = Vec::new();
             for child in &moving {
@@ -1891,7 +1847,7 @@ mod tests {
                 cells.push(Some(*child));
             }
             table.set_flat_children(&mut app, 3, cells);
-            pump_frame(&mut app, laid.owner.handle());
+            pump_frame(&mut app, EnginePhase::Layout);
         }
         assert_eq!(table.columns(&app), 3);
         assert_eq!(table.rows(&app), 2);
@@ -1916,7 +1872,7 @@ mod tests {
                 BorderRadius::ZERO,
             )),
         );
-        let laid = layout(&mut app, table.as_box(), screen());
+        layout(&mut app, table.as_box());
         for (columns, cells, paths) in [
             (1, 0, 4),
             (1, 1, 4),
@@ -1927,9 +1883,9 @@ mod tests {
         ] {
             let children = (0..cells).map(|_| Some(positioned_box(&mut app))).collect();
             table.set_flat_children(&mut app, columns, children);
-            pump_frame(&mut app, laid.owner.handle());
+            pump_frame(&mut app, EnginePhase::Layout);
             assert_eq!(
-                paths_painted(&app, &laid),
+                paths_painted(&mut app, table),
                 paths,
                 "{columns} columns, {cells} cells"
             );
@@ -1952,11 +1908,11 @@ mod tests {
                 BorderRadius::all(Radius::circular(8.0)),
             )),
         );
-        let laid = layout(&mut app, table.as_box(), screen());
+        layout(&mut app, table.as_box());
         let children = (0..4).map(|_| Some(positioned_box(&mut app))).collect();
         table.set_flat_children(&mut app, 2, children);
-        pump_frame(&mut app, laid.owner.handle());
-        assert_eq!(paths_painted(&app, &laid), 3);
+        pump_frame(&mut app, EnginePhase::Layout);
+        assert_eq!(paths_painted(&mut app, table), 3);
     }
 
     /// Row decorations paint behind each row, filling it.
@@ -1979,12 +1935,14 @@ mod tests {
                 )),
             ]),
         );
-        let laid = layout(
+        layout_with(
             &mut app,
             table.as_box(),
-            BoxConstraints::tight_for(Some(100.0), None),
+            Some(BoxConstraints::tight_for(Some(100.0), None)),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
         );
-        let rects: Vec<_> = painted(&app, &laid)
+        let rects: Vec<_> = painted_ops(&mut app, table.as_object())
             .into_iter()
             .filter_map(|op| match op {
                 Op::DrawRect { rect, .. } => Some(rect),
@@ -2029,10 +1987,12 @@ mod tests {
         widths.insert(0, Rc::new(FixedColumnWidth::new(50.0)));
         widths.insert(1, Rc::new(FractionColumnWidth::new(0.25)));
         table.set_column_widths(&mut app, Some(widths));
-        layout(
+        layout_with(
             &mut app,
             table.as_box(),
-            BoxConstraints::tight_for(Some(400.0), None),
+            Some(BoxConstraints::tight_for(Some(400.0), None)),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
         );
         let widths: Vec<f64> = children
             .iter()
@@ -2060,10 +2020,12 @@ mod tests {
             )),
         );
         table.set_column_widths(&mut app, Some(widths));
-        layout(
+        layout_with(
             &mut app,
             table.as_box(),
-            BoxConstraints::tight_for(Some(200.0), None),
+            Some(BoxConstraints::tight_for(Some(200.0), None)),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
         );
         let widths: Vec<f64> = children
             .iter()
@@ -2092,10 +2054,12 @@ mod tests {
         let table = RenderTable::new(&mut app, TextDirection::Rtl);
         table.set_default_vertical_alignment(&mut app, TableCellVerticalAlignment::IntrinsicHeight);
         table.set_children(&mut app, Some(vec![vec![short.as_box(), tall.as_box()]]));
-        layout(
+        layout_with(
             &mut app,
             table.as_box(),
-            BoxConstraints::tight(Size::new(300.0, 300.0)),
+            Some(BoxConstraints::tight(Size::new(300.0, 300.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
         );
         assert_eq!(table.size(&app), Size::new(300.0, 300.0));
         assert_eq!(short.size(&app).height(), tall.size(&app).height());
@@ -2141,7 +2105,13 @@ mod tests {
         assert_eq!(table.get_max_intrinsic_height(&mut app, 60.0), 45.0);
         let loose = BoxConstraints::new().max_width(500.0).max_height(500.0);
         let dry = table.get_dry_layout(&mut app, loose);
-        layout(&mut app, table, loose);
+        layout_with(
+            &mut app,
+            table,
+            Some(loose),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
+        );
         assert_eq!(dry, Size::new(60.0, 45.0));
         assert_eq!(table.size(&app), dry);
     }
@@ -2179,10 +2149,12 @@ mod tests {
         table.set_default_vertical_alignment(&mut app, TableCellVerticalAlignment::Baseline);
         table.set_text_baseline(&mut app, Some(TextBaseline::Alphabetic));
         table.set_children(&mut app, Some(vec![vec![small, large]]));
-        layout(
+        layout_with(
             &mut app,
             table.as_box(),
-            BoxConstraints::tight_for(Some(400.0), None),
+            Some(BoxConstraints::tight_for(Some(400.0), None)),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
         );
 
         let baseline_of = |app: &mut App, child: AnyRenderBox| {

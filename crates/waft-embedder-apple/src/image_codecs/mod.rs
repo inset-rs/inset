@@ -1,6 +1,6 @@
 //! The system's image codecs on macOS and iOS: Image I/O. An image opens as a `CGImageSource`, on
 //! its bytes or on a file's URL, which Image I/O reads only as far as it is asked, and reads what
-//! its properties say of it there (`source`), its EXIF fields among them (`exif`). A frame decodes
+//! its properties say of it there (`source`), its EXIF fields among them (`exif`). A picture decodes
 //! as a thumbnail at the size asked, which applies the file's orientation, drawn into the app's
 //! memory in RGBA or, by the hardware codecs, into a hardware buffer of the app's own, an
 //! `IOSurface` in BGRA (`decoding`, `hardware_buffers`). Pixels encode through a
@@ -89,7 +89,7 @@ impl HardwareImageCodecs for ImageIoHardwareCodecs {
     fn decode(
         &self,
         image: &dyn ImageSource,
-        frame: u32,
+        index: u32,
         max_size: Option<Size>,
     ) -> ImageFuture<Arc<dyn HardwareBuffer>> {
         let image: &dyn Any = image;
@@ -99,7 +99,7 @@ impl HardwareImageCodecs for ImageIoHardwareCodecs {
                 "an image Image I/O did not open",
             ));
         };
-        let decoding = image.decoding(frame, max_size);
+        let decoding = image.decoding(index, max_size);
         let decoded = in_background(move || decoding?.buffer());
         Box::pin(async move { Ok(Arc::new(decoded.await?) as Arc<dyn HardwareBuffer>) })
     }

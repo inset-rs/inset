@@ -1058,27 +1058,22 @@ impl State for TextFormFieldState {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::time::Duration;
 
-    use waft_embedder::{TargetPlatform, TextAffinity, TextSelection};
+    use waft_embedder::{TextAffinity, TextSelection};
     use waft_services::TextInputClient;
     use waft_widgets::{
         AnyElement, Center, Form, FormState, GlobalKey, ListView, StateSetter, StatefulBuilder,
         Text, TextEditingController,
     };
 
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+
     use super::*;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
     use waft_widgets::TextEditingControllerLeaf;
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
 
     /// Dart's `MaterialApp(home: Material(child: Center(child: field)))`.
     fn centered<K>(tester: &WidgetTester, field: impl IntoWidget<K>) -> WidgetRef {
@@ -1091,26 +1086,26 @@ mod tests {
     }
 
     fn editable_state(tester: &WidgetTester) -> Handle<EditableTextState> {
-        tester.find_by_type::<EditableText>()[0]
+        find::by_type::<EditableText>().evaluate(tester)[0]
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state")
     }
 
     fn field_state(tester: &WidgetTester) -> Handle<TextFormFieldState> {
-        tester.find_by_type::<TextFormField>()[0]
+        find::by_type::<TextFormField>().evaluate(tester)[0]
             .state_handle::<TextFormFieldState>(&tester.cell.borrow())
             .expect("a TextFormField state")
     }
 
     fn text_field(tester: &WidgetTester) -> AnyElement {
-        tester.find_by_type::<TextField>()[0]
+        find::by_type::<TextField>().evaluate(tester)[0]
     }
 
     /// Dart's `tester.showKeyboard(find.byType(TextField))`.
     fn show_keyboard(tester: &mut WidgetTester) {
         let state = editable_state(tester);
         state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     /// Dart's `tester.enterText(finder, text)`.
@@ -1134,30 +1129,28 @@ mod tests {
 
     #[test]
     fn passes_text_align_to_underlying_text_field() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let root = centered(&tester, TextFormField::new().text_align(TextAlign::Center));
+        test_widgets(|tester| {
+            let root = centered(tester, TextFormField::new().text_align(TextAlign::Center));
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_by_type::<TextField>().len(), 1);
+            assert_eq!(find::by_type::<TextField>().evaluate(tester).len(), 1);
             let text_align =
-                tester.widget::<TextField, _>(text_field(&tester), |field| field.text_align);
+                tester.widget::<TextField, _>(text_field(tester), |field| field.text_align);
             assert_eq!(text_align, TextAlign::Center);
         });
     }
 
     #[test]
     fn passes_text_input_action_to_underlying_text_field() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = centered(
-                &tester,
+                tester,
                 TextFormField::new().text_input_action(TextInputAction::Next),
             );
             tester.pump_widget(root);
 
             let action =
-                tester.widget::<TextField, _>(text_field(&tester), |field| field.text_input_action);
+                tester.widget::<TextField, _>(text_field(tester), |field| field.text_input_action);
             assert_eq!(action, Some(TextInputAction::Next));
         });
     }
@@ -1166,11 +1159,10 @@ mod tests {
     // Dart's 3.14 and 6.28 are plain values, not approximations of π and τ.
     #[allow(clippy::approx_constant)]
     fn passes_cursor_attributes_to_underlying_text_field() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let cursor_color = crate::colors::Colors::PURPLE.primary();
             let root = centered(
-                &tester,
+                tester,
                 TextFormField::new()
                     .cursor_width(3.14)
                     .cursor_height(6.28)
@@ -1180,7 +1172,7 @@ mod tests {
             tester.pump_widget(root);
 
             let (width, height, radius, color) =
-                tester.widget::<TextField, _>(text_field(&tester), |field| {
+                tester.widget::<TextField, _>(text_field(tester), |field| {
                     (
                         field.cursor_width,
                         field.cursor_height,
@@ -1197,48 +1189,45 @@ mod tests {
 
     #[test]
     fn on_field_submit_callbacks_are_called() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let called = Rc::new(Cell::new(false));
             let flag = Rc::clone(&called);
             let root = centered(
-                &tester,
+                tester,
                 TextFormField::new().on_field_submitted(move |_app, _value| flag.set(true)),
             );
             tester.pump_widget(root);
 
-            show_keyboard(&mut tester);
-            let state = editable_state(&tester);
+            show_keyboard(tester);
+            let state = editable_state(tester);
             TextInputClient::perform_action(
                 state,
                 &mut tester.cell.borrow_mut(),
                 TextInputAction::Done,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(called.get());
         });
     }
 
     #[test]
     fn on_changed_callbacks_are_called() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(RefCell::new(String::new()));
             let seen = Rc::clone(&value);
             let root = centered(
-                &tester,
+                tester,
                 TextFormField::new().on_changed(move |_app, v| *seen.borrow_mut() = v),
             );
             tester.pump_widget(root);
 
-            enter_text(&mut tester, "Soup");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "Soup");
+            tester.pump();
             assert_eq!(*value.borrow(), "Soup");
         });
     }
 
-    fn validate_counting(enabled: Option<bool>) {
-        let mut tester = tester();
+    fn validate_counting(tester: &mut WidgetTester, enabled: Option<bool>) {
         let validate_called = Rc::new(Cell::new(0));
         let counter = Rc::clone(&validate_called);
         let mut field = TextFormField::new()
@@ -1250,31 +1239,30 @@ mod tests {
         if let Some(enabled) = enabled {
             field = field.enabled(enabled);
         }
-        let root = centered(&tester, field);
+        let root = centered(tester, field);
         tester.pump_widget(root);
 
         assert_eq!(validate_called.get(), 1);
-        enter_text(&mut tester, "a");
-        tester.pump(Duration::ZERO);
+        enter_text(tester, "a");
+        tester.pump();
         assert_eq!(validate_called.get(), 2);
     }
 
     #[test]
     fn autovalidate_mode_is_passed_to_super() {
-        with_main_thread_stack(|| validate_counting(None));
+        test_widgets(|tester| validate_counting(tester, None));
     }
 
     #[test]
     fn validate_is_called_if_widget_is_enabled() {
-        with_main_thread_stack(|| validate_counting(Some(true)));
+        test_widgets(|tester| validate_counting(tester, Some(true)));
     }
 
     #[test]
     fn passing_a_build_counter_shows_returned_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = centered(
-                &tester,
+                tester,
                 TextFormField::new()
                     .build_counter(|_app, _context, current_length, max_length, _is_focused| {
                         let max_length =
@@ -1285,28 +1273,27 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_text("0 of 10").len(), 1);
+            assert_eq!(find::text("0 of 10").evaluate(tester).len(), 1);
 
-            enter_text(&mut tester, "01234");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "01234");
+            tester.pump();
 
-            assert_eq!(tester.find_text("5 of 10").len(), 1);
+            assert_eq!(find::text("5 of 10").evaluate(tester).len(), 1);
         });
     }
 
     #[test]
     fn readonly_text_form_field_will_hide_cursor_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = centered(
-                &tester,
+                tester,
                 TextFormField::new()
                     .initial_value("readonly")
                     .read_only(true),
             );
             tester.pump_widget(root);
 
-            let element = tester.find_by_type::<EditableText>()[0];
+            let element = find::by_type::<EditableText>().evaluate(tester)[0];
             let show_cursor =
                 tester.widget::<EditableText, _>(element, EditableText::effective_show_cursor);
             assert!(!show_cursor);
@@ -1322,70 +1309,66 @@ mod tests {
 
     #[test]
     fn reset_resets_the_text_fields_value_to_the_initial_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let root = centered(&tester, TextFormField::new().initial_value("initialValue"));
+        test_widgets(|tester| {
+            let root = centered(tester, TextFormField::new().initial_value("initialValue"));
             tester.pump_widget(root);
 
-            enter_text(&mut tester, "changedValue");
+            enter_text(tester, "changedValue");
 
-            let state = field_state(&tester);
+            let state = field_state(tester);
             state.reset(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(editable_text_value(&tester), "initialValue");
+            assert_eq!(editable_text_value(tester), "initialValue");
         });
     }
 
     #[test]
     fn reset_resets_the_text_fields_value_to_the_controller_initial_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = {
                 let mut app = tester.cell.borrow_mut();
                 let controller = TextEditingController::new(&mut app);
                 controller.set_text(&mut app, "initialValue");
                 controller
             };
-            let root = centered(&tester, TextFormField::new().controller(controller.erase()));
+            let root = centered(tester, TextFormField::new().controller(controller.erase()));
             tester.pump_widget(root);
 
-            enter_text(&mut tester, "changedValue");
+            enter_text(tester, "changedValue");
 
-            let state = field_state(&tester);
+            let state = field_state(tester);
             state.reset(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(editable_text_value(&tester), "initialValue");
+            assert_eq!(editable_text_value(tester), "initialValue");
         });
     }
 
     #[test]
     fn did_change_changes_text_fields_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let root = centered(&tester, TextFormField::new().initial_value("initialValue"));
+        test_widgets(|tester| {
+            let root = centered(tester, TextFormField::new().initial_value("initialValue"));
             tester.pump_widget(root);
 
-            assert_eq!(editable_text_value(&tester), "initialValue");
+            assert_eq!(editable_text_value(tester), "initialValue");
 
-            let state = field_state(&tester);
+            let state = field_state(tester);
             state.did_change(&mut tester.cell.borrow_mut(), Some("changedValue".into()));
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(editable_text_value(&tester), "changedValue");
+            assert_eq!(editable_text_value(tester), "changedValue");
         });
     }
 
     #[test]
     fn on_changed_callbacks_value_and_form_field_state_value_are_sync() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let called = Rc::new(Cell::new(false));
             let state_slot: Rc<Cell<Option<Handle<TextFormFieldState>>>> = Rc::new(Cell::new(None));
             let (flag, slot) = (Rc::clone(&called), Rc::clone(&state_slot));
             let root = centered(
-                &tester,
+                tester,
                 TextFormField::new().on_changed(move |app, value| {
                     flag.set(true);
                     let state = slot.get().expect("the case records the state");
@@ -1394,9 +1377,9 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            state_slot.set(Some(field_state(&tester)));
+            state_slot.set(Some(field_state(tester)));
 
-            enter_text(&mut tester, "Soup");
+            enter_text(tester, "Soup");
 
             assert!(called.get());
         });
@@ -1404,8 +1387,7 @@ mod tests {
 
     #[test]
     fn text_form_field_on_changed_is_called_when_the_form_is_reset() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let state_key = GlobalKey::new();
             let form_key = GlobalKey::new();
             let value = Rc::new(RefCell::new("initialValue".to_owned()));
@@ -1435,12 +1417,12 @@ mod tests {
             };
 
             // Initial value is 'initialValue'.
-            assert_eq!(field_value(&tester).as_deref(), Some("initialValue"));
+            assert_eq!(field_value(tester).as_deref(), Some("initialValue"));
             assert_eq!(*value.borrow(), "initialValue");
 
             // Change value to 'changedValue'.
-            enter_text(&mut tester, "changedValue");
-            assert_eq!(field_value(&tester).as_deref(), Some("changedValue"));
+            enter_text(tester, "changedValue");
+            assert_eq!(field_value(tester).as_deref(), Some("changedValue"));
             assert_eq!(*value.borrow(), "changedValue");
 
             // Should be back to 'initialValue' when the form is reset.
@@ -1451,16 +1433,15 @@ mod tests {
                     .expect("the form mounted");
                 form.reset(&mut app);
             }
-            tester.pump(Duration::ZERO);
-            assert_eq!(field_value(&tester).as_deref(), Some("initialValue"));
+            tester.pump();
+            assert_eq!(field_value(tester).as_deref(), Some("initialValue"));
             assert_eq!(*value.borrow(), "initialValue");
         });
     }
 
     #[test]
     fn is_valid_returns_false_when_force_error_text_is_set_and_will_change_error_display() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key1 = GlobalKey::new();
             let field_key2 = GlobalKey::new();
             let valid_string = "Valid string";
@@ -1511,10 +1492,9 @@ mod tests {
 
     #[test]
     fn widget_returned_by_error_builder_is_shown() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = centered(
-                &tester,
+                tester,
                 TextFormField::new()
                     .autovalidate_mode(AutovalidateMode::Always)
                     .validator(|_app, _value| Some("validation error".to_owned()))
@@ -1523,9 +1503,9 @@ mod tests {
                     }),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(tester.find_text("**validation error**").len(), 1);
+            assert_eq!(find::text("**validation error**").evaluate(tester).len(), 1);
         });
     }
 
@@ -1544,8 +1524,7 @@ mod tests {
 
     #[test]
     fn text_form_field_resets_to_initial_value_after_set_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let controller = {
                 let mut app = tester.cell.borrow_mut();
@@ -1572,13 +1551,13 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            enter_text(&mut tester, "Changed");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "Changed");
+            tester.pump();
             assert_eq!(controller.text_value(&tester.cell.borrow()), "Changed");
 
             let setter = set_state.borrow().clone().expect("the builder ran");
             setter(&mut tester.cell.borrow_mut(), &mut |_app| {});
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             {
                 let mut app = tester.cell.borrow_mut();
@@ -1587,7 +1566,7 @@ mod tests {
                     .expect("the form mounted");
                 form.reset(&mut app);
             }
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(
                 controller.text_value(&tester.cell.borrow()),

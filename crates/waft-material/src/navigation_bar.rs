@@ -2190,13 +2190,17 @@ pub(crate) mod tests {
         RichText, StatefulBuilder, WidgetStateProperty,
     };
 
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_n_widgets, finds_one_widget, test_widgets,
+    };
+
     use super::*;
     use crate::icons::Icons;
     use crate::material::RenderInkFeatures;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     pub(crate) fn icon(icon: IconData) -> WidgetRef {
         Icon::new(Some(icon)).into_widget()
@@ -2229,7 +2233,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn navigation_bar(tester: &WidgetTester) -> AnyElement {
-        tester.find_by_type::<NavigationBar>()[0]
+        find::by_type::<NavigationBar>().evaluate(tester)[0]
     }
 
     pub(crate) fn bar_size(tester: &WidgetTester) -> Size {
@@ -2247,9 +2251,9 @@ pub(crate) mod tests {
     /// Dart's `_getIndicatorDecoration(tester)`: the color and shape of the first `Ink` under
     /// a `FadeTransition`.
     pub(crate) fn indicator_decoration(tester: &WidgetTester) -> (Option<Color>, ShapeBorderRef) {
-        let fade = tester.find_by_type::<FadeTransition>();
-        let ink = tester
-            .find_by_type::<Ink>()
+        let fade = find::by_type::<FadeTransition>().evaluate(tester);
+        let ink = find::by_type::<Ink>()
+            .evaluate(tester)
             .into_iter()
             .find(|ink| {
                 let ancestors = tester.ancestors(*ink);
@@ -2269,19 +2273,16 @@ pub(crate) mod tests {
         })
     }
 
-    pub(crate) fn center_of(tester: &WidgetTester, element: AnyElement) -> Offset {
-        tester.global_rect(tester.render_box_of(element)).center()
-    }
-
     pub(crate) fn text(tester: &WidgetTester, text: &str) -> AnyElement {
-        let found = tester.find_onstage_text(text);
+        let found = find::text(text).evaluate(tester);
         assert_eq!(found.len(), 1, "one Text showing {text}");
         found[0]
     }
 
     /// Dart's `_getLabelPadding(tester, text)`.
     pub(crate) fn label_padding(tester: &WidgetTester, label: &str) -> EdgeInsetsGeometry {
-        let padding = tester.ancestor_of_type::<Padding>(text(tester, label));
+        let padding =
+            tester.element(find::ancestor(find::text(label), find::by_type::<Padding>()).first());
         tester.widget(padding, |padding: &Padding| padding.padding)
     }
 
@@ -2400,87 +2401,76 @@ pub(crate) mod tests {
             })
     }
 
-    fn mouse_over(
-        tester: &mut WidgetTester,
-        mouse: &mut crate::test_support::TestPointer,
-        at: Offset,
-    ) {
+    fn mouse_over(tester: &mut WidgetTester, mouse: &mut TestPointer, at: Offset) {
         tester.move_to(mouse, at, false);
         tester.pump_and_settle();
     }
 
     #[test]
     fn navigation_bar_updates_destinations_when_tapped() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let mutated_index = Rc::new(Cell::new(None));
-            let mut tester = tester();
             let seen = Rc::clone(&mutated_index);
-            build_widget(&mut tester, m3, move || {
+            build_widget(tester, m3, move || {
                 NavigationBar::new(ac_alarm())
                     .on_destination_selected(move |_app, i| seen.set(Some(i)))
                     .into_widget()
             });
 
-            assert_eq!(tester.find_onstage_text("AC").len(), 1);
-            assert_eq!(tester.find_onstage_text("Alarm").len(), 1);
+            expect(tester, &find::text("AC"), finds_one_widget());
+            expect(tester, &find::text("Alarm"), finds_one_widget());
 
-            tester.tap(center_of(&tester, text(&tester, "Alarm")), 1);
+            tester.tap_at(tester.get_center(text(tester, "Alarm")), 1);
             assert_eq!(mutated_index.get(), Some(1));
 
-            tester.tap(center_of(&tester, text(&tester, "AC")), 2);
+            tester.tap_at(tester.get_center(text(tester, "AC")), 2);
             assert_eq!(mutated_index.get(), Some(0));
         });
     }
 
     #[test]
     fn navigation_bar_can_update_background_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = Colors::YELLOW.primary();
-            let mut tester = tester();
-            build_widget(&mut tester, m3, move || {
+            build_widget(tester, m3, move || {
                 NavigationBar::new(ac_alarm())
                     .background_color(color)
                     .on_destination_selected(|_app, _i| {})
                     .into_widget()
             });
 
-            assert_eq!(
-                bar_material(&tester, |material| material.color),
-                Some(color)
-            );
+            assert_eq!(bar_material(tester, |material| material.color), Some(color));
         });
     }
 
     #[test]
     fn navigation_bar_can_update_elevation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            build_widget(&mut tester, m3, || {
+        test_widgets(|tester| {
+            build_widget(tester, m3, || {
                 NavigationBar::new(ac_alarm())
                     .elevation(42.0)
                     .on_destination_selected(|_app, _i| {})
                     .into_widget()
             });
 
-            assert_eq!(bar_material(&tester, |material| material.elevation), 42.0);
+            assert_eq!(bar_material(tester, |material| material.elevation), 42.0);
         });
     }
 
     #[test]
     fn navigation_bar_adds_bottom_padding_to_height() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let bottom_padding = 40.0;
-            let mut tester = tester();
-            build_widget(&mut tester, m3, || {
+            build_widget(tester, m3, || {
                 NavigationBar::new(ac_alarm())
                     .on_destination_selected(|_app, _i| {})
                     .into_widget()
             });
 
-            let default_size = bar_size(&tester).height();
+            let default_size = bar_size(tester).height();
             assert_eq!(default_size, 80.0);
 
-            build_widget(&mut tester, m3, || {
+            build_widget(tester, m3, || {
                 MediaQuery::new(
                     MediaQueryData::new().padding(EdgeInsets::only(0.0, 0.0, 0.0, bottom_padding)),
                     NavigationBar::new(ac_alarm()).on_destination_selected(|_app, _i| {}),
@@ -2489,7 +2479,7 @@ pub(crate) mod tests {
             });
 
             let expected_height = default_size + bottom_padding;
-            assert_eq!(bar_size(&tester).height(), expected_height);
+            assert_eq!(bar_size(tester).height(), expected_height);
         });
     }
 
@@ -2509,7 +2499,7 @@ pub(crate) mod tests {
 
     #[test]
     fn navigation_bar_respects_the_notch_or_system_navigation_bar_in_landscape_mode() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let safe_area_padding = 40.0;
             let center_key = || KeyRef::from(<dyn waft_foundation::Key>::new("Center"));
             let navigation_bar = move || {
@@ -2523,8 +2513,8 @@ pub(crate) mod tests {
                 .on_destination_selected(|_app, _i| {})
             };
             let center_item = |tester: &WidgetTester| {
-                let found = tester.find_onstage_by_key(&center_key());
-                center_of(tester, found[0])
+                let found = find::by_key(center_key()).evaluate(tester);
+                tester.get_center(found[0])
             };
             let with_padding = |padding: EdgeInsets| {
                 move || {
@@ -2533,21 +2523,20 @@ pub(crate) mod tests {
                 }
             };
 
-            let mut tester = tester();
-            build_widget(&mut tester, m3, || navigation_bar().into_widget());
-            let default_width = bar_size(&tester).width();
-            assert_coordinate_eq(center_item(&tester).dx(), default_width / 2.0);
+            build_widget(tester, m3, || navigation_bar().into_widget());
+            let default_width = bar_size(tester).width();
+            assert_coordinate_eq(center_item(tester).dx(), default_width / 2.0);
 
             // The position of center item of navigation bar should indicate whether
             // the safe area is sufficiently respected, when safe area is on the left side.
             // e.g. Android device with system navigation bar in landscape mode.
             build_widget(
-                &mut tester,
+                tester,
                 m3,
                 with_padding(EdgeInsets::only(safe_area_padding, 0.0, 0.0, 0.0)),
             );
             assert_coordinate_eq(
-                center_item(&tester).dx(),
+                center_item(tester).dx(),
                 (default_width + safe_area_padding) / 2.0,
             );
 
@@ -2555,12 +2544,12 @@ pub(crate) mod tests {
             // the safe area is sufficiently respected, when safe area is on the right side.
             // e.g. Android device with system navigation bar in landscape mode.
             build_widget(
-                &mut tester,
+                tester,
                 m3,
                 with_padding(EdgeInsets::only(0.0, 0.0, safe_area_padding, 0.0)),
             );
             assert_coordinate_eq(
-                center_item(&tester).dx(),
+                center_item(tester).dx(),
                 (default_width - safe_area_padding) / 2.0,
             );
 
@@ -2568,7 +2557,7 @@ pub(crate) mod tests {
             // the safe area is sufficiently respected, when safe areas are on both sides.
             // e.g. iOS device with both sides of round corner.
             build_widget(
-                &mut tester,
+                tester,
                 m3,
                 with_padding(EdgeInsets::from_ltrb(
                     safe_area_padding,
@@ -2577,32 +2566,31 @@ pub(crate) mod tests {
                     safe_area_padding,
                 )),
             );
-            assert_coordinate_eq(center_item(&tester).dx(), default_width / 2.0);
+            assert_coordinate_eq(center_item(tester).dx(), default_width / 2.0);
         });
     }
 
     #[test]
     fn material2_navigation_bar_uses_proper_defaults_when_no_parameters_are_given() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // M2 settings that were hand coded.
-            let mut tester = tester();
-            build_widget(&mut tester, m2, || {
+            build_widget(tester, m2, || {
                 NavigationBar::new(ac_alarm())
                     .on_destination_selected(|_app, _i| {})
                     .into_widget()
             });
 
             assert_eq!(
-                bar_material(&tester, |material| material.color),
+                bar_material(tester, |material| material.color),
                 Some(Color::new(0xffeaeaea))
             );
             assert_eq!(
-                bar_material(&tester, |material| material.surface_tint_color),
+                bar_material(tester, |material| material.surface_tint_color),
                 None
             );
-            assert_eq!(bar_material(&tester, |material| material.elevation), 0.0);
-            assert_eq!(bar_size(&tester).height(), 80.0);
-            let (color, shape) = indicator_decoration(&tester);
+            assert_eq!(bar_material(tester, |material| material.elevation), 0.0);
+            assert_eq!(bar_size(tester).height(), 80.0);
+            let (color, shape) = indicator_decoration(tester);
             assert_eq!(color, Some(Color::new(0x3d2196f3)));
             assert_eq!(
                 &*shape,
@@ -2616,27 +2604,26 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_navigation_bar_uses_proper_defaults_when_no_parameters_are_given() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // M3 settings from the token database.
-            let mut tester = tester();
             let theme = m3(&tester.cell.borrow());
-            build_widget(&mut tester, m3, || {
+            build_widget(tester, m3, || {
                 NavigationBar::new(ac_alarm())
                     .on_destination_selected(|_app, _i| {})
                     .into_widget()
             });
 
             assert_eq!(
-                bar_material(&tester, |material| material.color),
+                bar_material(tester, |material| material.color),
                 Some(theme.color_scheme.surface_container())
             );
             assert_eq!(
-                bar_material(&tester, |material| material.surface_tint_color),
+                bar_material(tester, |material| material.surface_tint_color),
                 Some(Colors::TRANSPARENT)
             );
-            assert_eq!(bar_material(&tester, |material| material.elevation), 3.0);
-            assert_eq!(bar_size(&tester).height(), 80.0);
-            let (color, shape) = indicator_decoration(&tester);
+            assert_eq!(bar_material(tester, |material| material.elevation), 3.0);
+            assert_eq!(bar_size(tester).height(), 80.0);
+            let (color, shape) = indicator_decoration(tester);
             assert_eq!(color, Some(theme.color_scheme.secondary_container()));
             assert_eq!(
                 &*shape,
@@ -2679,32 +2666,31 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_navigation_bar_shows_tooltips_with_text_scaling() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let label = "A";
             let first = || NavigationDestination::new(icon(Icons::ac_unit()), label).tooltip(label);
-            let mut tester = tester();
 
-            pump_scaled_bar(&mut tester, m2, TextScaler::NO_SCALING, first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            tester.long_press(center_of(&tester, tester.find_text(label)[0]), 1);
-            assert_eq!(tester.find_text(label).len(), 2);
+            pump_scaled_bar(tester, m2, TextScaler::NO_SCALING, first());
+            expect(tester, &find::text(label), finds_one_widget());
+            tester.long_press_at(tester.get_center(find::text(label).evaluate(tester)[0]), 1);
+            expect(tester, &find::text(label), finds_n_widgets(2));
 
             // The default size of a tooltip with the text A.
             let default_tooltip_size = Size::new(14.0, 14.0);
-            let found = tester.find_text(label);
+            let found = find::text(label).evaluate(tester);
             assert_eq!(
-                text_size(&tester, found[found.len() - 1]),
+                text_size(tester, found[found.len() - 1]),
                 default_tooltip_size
             );
             // The duration is needed to ensure the tooltip disappears.
             tester.pump_and_settle_by(Duration::from_secs(2));
 
-            pump_scaled_bar(&mut tester, m2, TextScaler::linear(4.0), first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            tester.long_press(center_of(&tester, tester.find_text(label)[0]), 2);
-            let found = tester.find_text(label);
+            pump_scaled_bar(tester, m2, TextScaler::linear(4.0), first());
+            expect(tester, &find::text(label), finds_one_widget());
+            tester.long_press_at(tester.get_center(find::text(label).evaluate(tester)[0]), 2);
+            let found = find::text(label).evaluate(tester);
             assert_eq!(
-                text_size(&tester, found[found.len() - 1]),
+                text_size(tester, found[found.len() - 1]),
                 Size::new(
                     default_tooltip_size.width() * 4.0,
                     default_tooltip_size.height() * 4.0
@@ -2715,31 +2701,30 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_navigation_bar_shows_tooltips_with_text_scaling() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let label = "A";
             let first = || NavigationDestination::new(icon(Icons::ac_unit()), label).tooltip(label);
-            let mut tester = tester();
 
-            pump_scaled_bar(&mut tester, m3, TextScaler::NO_SCALING, first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            tester.long_press(center_of(&tester, tester.find_text(label)[0]), 1);
-            assert_eq!(tester.find_text(label).len(), 2);
+            pump_scaled_bar(tester, m3, TextScaler::NO_SCALING, first());
+            expect(tester, &find::text(label), finds_one_widget());
+            tester.long_press_at(tester.get_center(find::text(label).evaluate(tester)[0]), 1);
+            expect(tester, &find::text(label), finds_n_widgets(2));
 
-            let found = tester.find_text(label);
+            let found = find::text(label).evaluate(tester);
             assert_eq!(
-                text_size(&tester, found[found.len() - 1]),
+                text_size(tester, found[found.len() - 1]),
                 Size::new(14.25, 20.0)
             );
             // The duration is needed to ensure the tooltip disappears.
             tester.pump_and_settle_by(Duration::from_secs(2));
 
-            pump_scaled_bar(&mut tester, m3, TextScaler::linear(4.0), first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            tester.long_press(center_of(&tester, tester.find_text(label)[0]), 2);
+            pump_scaled_bar(tester, m3, TextScaler::linear(4.0), first());
+            expect(tester, &find::text(label), finds_one_widget());
+            tester.long_press_at(tester.get_center(find::text(label).evaluate(tester)[0]), 2);
 
-            let found = tester.find_text(label);
+            let found = find::text(label).evaluate(tester);
             assert_eq!(
-                text_size(&tester, found[found.len() - 1]),
+                text_size(tester, found[found.len() - 1]),
                 Size::new(56.25, 80.0)
             );
         });
@@ -2752,35 +2737,34 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_navigation_bar_label_can_scale_and_has_max_scale_factor() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let label = "A";
             let first = || NavigationDestination::new(icon(Icons::ac_unit()), label);
-            let mut tester = tester();
 
-            pump_scaled_bar(&mut tester, m3, TextScaler::NO_SCALING, first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            let size = text_size(&tester, text(&tester, label));
+            pump_scaled_bar(tester, m3, TextScaler::NO_SCALING, first());
+            expect(tester, &find::text(label), finds_one_widget());
+            let size = text_size(tester, text(tester, label));
             assert!(size_almost_equal(size, Size::new(12.5, 16.0)), "{size:?}");
 
-            pump_scaled_bar(&mut tester, m3, TextScaler::linear(1.1), first());
+            pump_scaled_bar(tester, m3, TextScaler::linear(1.1), first());
             tester.pump_and_settle();
-            let size = text_size(&tester, text(&tester, label));
+            let size = text_size(tester, text(tester, label));
             assert!(size_almost_equal(size, Size::new(13.7, 18.0)), "{size:?}");
 
-            pump_scaled_bar(&mut tester, m3, TextScaler::linear(1.3), first());
-            let size = text_size(&tester, text(&tester, label));
+            pump_scaled_bar(tester, m3, TextScaler::linear(1.3), first());
+            let size = text_size(tester, text(tester, label));
             assert!(size_almost_equal(size, Size::new(16.1, 21.0)), "{size:?}");
 
-            pump_scaled_bar(&mut tester, m3, TextScaler::linear(4.0), first());
-            let size = text_size(&tester, text(&tester, label));
+            pump_scaled_bar(tester, m3, TextScaler::linear(4.0), first());
+            let size = text_size(tester, text(tester, label));
             assert!(size_almost_equal(size, Size::new(16.1, 21.0)), "{size:?}");
         });
     }
 
     /// Dart's `findByTooltip(message)`: the `Tooltip`s whose message is `message`.
     fn tooltips_with_message(tester: &WidgetTester, message: &str) -> usize {
-        tester
-            .find_by_type::<Tooltip>()
+        find::by_type::<Tooltip>()
+            .evaluate(tester)
             .into_iter()
             .filter(|tooltip| {
                 tester.widget(*tooltip, |tooltip: &Tooltip| {
@@ -2792,9 +2776,8 @@ pub(crate) mod tests {
 
     #[test]
     fn custom_tooltips_in_navigation_bar_destination() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .bottom_navigation_bar(NavigationBar::new([
                         NavigationDestination::new(icon(Icons::ac_unit()), "A")
@@ -2808,23 +2791,23 @@ pub(crate) mod tests {
                     .into_widget()
             });
 
-            assert_eq!(tester.find_onstage_text("A").len(), 1);
-            tester.long_press(center_of(&tester, text(&tester, "A")), 1);
-            assert_eq!(tooltips_with_message(&tester, "A tooltip"), 1);
+            expect(tester, &find::text("A"), finds_one_widget());
+            tester.long_press_at(tester.get_center(text(tester, "A")), 1);
+            assert_eq!(tooltips_with_message(tester, "A tooltip"), 1);
 
-            assert_eq!(tester.find_onstage_text("B").len(), 1);
-            tester.long_press(center_of(&tester, text(&tester, "B")), 2);
-            assert_eq!(tooltips_with_message(&tester, "B"), 1);
+            expect(tester, &find::text("B"), finds_one_widget());
+            tester.long_press_at(tester.get_center(text(tester, "B")), 2);
+            assert_eq!(tooltips_with_message(tester, "B"), 1);
 
-            assert_eq!(tester.find_onstage_text("C").len(), 1);
-            tester.long_press(center_of(&tester, text(&tester, "C")), 3);
-            assert_eq!(tooltips_with_message(&tester, "C"), 0);
+            expect(tester, &find::text("C"), finds_one_widget());
+            tester.long_press_at(tester.get_center(text(tester, "C")), 3);
+            assert_eq!(tooltips_with_message(tester, "C"), 0);
         });
     }
 
     #[test]
     fn navigation_bar_does_not_grow_with_text_scale_factor() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let widget = |text_scaler: TextScaler| {
                 move || {
                     MediaQuery::new(
@@ -2835,13 +2818,12 @@ pub(crate) mod tests {
                     .into_widget()
                 }
             };
-            let mut tester = tester();
 
-            build_widget(&mut tester, m3, widget(TextScaler::NO_SCALING));
-            let initial_height = bar_size(&tester).height();
+            build_widget(tester, m3, widget(TextScaler::NO_SCALING));
+            let initial_height = bar_size(tester).height();
 
-            build_widget(&mut tester, m3, widget(TextScaler::linear(2.0)));
-            let new_height = bar_size(&tester).height();
+            build_widget(tester, m3, widget(TextScaler::linear(2.0)));
+            let new_height = bar_size(tester).height();
 
             assert_eq!(new_height, initial_height);
         });
@@ -2866,91 +2848,101 @@ pub(crate) mod tests {
     }
 
     fn icon_center(tester: &WidgetTester, icon: &IconData) -> Offset {
-        center_of(tester, tester.find_by_icon(icon))
+        tester.get_center(tester.element(find::by_icon(icon).first()))
     }
 
     /// Dart's `Material3/Material2 - Navigation indicator renders ripple`, with the indicator
     /// centres the label behaviours give.
     fn indicator_renders_ripple(
+        tester: &mut WidgetTester,
         theme: fn(&App) -> ThemeData,
         always_show_center: Offset,
         always_hide_center: Offset,
     ) {
         // This is a regression test for https://github.com/flutter/flutter/issues/116751.
-        let mut tester = tester();
-        pump_ripple_bar(&mut tester, theme, 0, None);
+        pump_ripple_bar(tester, theme, 0, None);
 
-        let mut mouse = WidgetTester::mouse(1, 0);
+        let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, Offset::ZERO);
-        let alarm = icon_center(&tester, &Icons::access_alarm());
-        mouse_over(&mut tester, &mut mouse, alarm);
+        let alarm = icon_center(tester, &Icons::access_alarm());
+        mouse_over(tester, &mut mouse, alarm);
 
         // Test ripple when NavigationBar is using `NavigationDestinationLabelBehavior.alwaysShow` (default).
         assert!(paints_indicator_ripple(
-            &bar_ink_ops(&tester),
+            &bar_ink_ops(tester),
             always_show_center
         ));
 
         // Test ripple when NavigationBar is using `NavigationDestinationLabelBehavior.alwaysHide`.
         pump_ripple_bar(
-            &mut tester,
+            tester,
             theme,
             0,
             Some(NavigationDestinationLabelBehavior::AlwaysHide),
         );
-        let alarm = icon_center(&tester, &Icons::access_alarm());
-        mouse_over(&mut tester, &mut mouse, alarm);
+        let alarm = icon_center(tester, &Icons::access_alarm());
+        mouse_over(tester, &mut mouse, alarm);
         assert!(paints_indicator_ripple(
-            &bar_ink_ops(&tester),
+            &bar_ink_ops(tester),
             always_hide_center
         ));
 
         // Test ripple when NavigationBar is using `NavigationDestinationLabelBehavior.onlyShowSelected`.
         pump_ripple_bar(
-            &mut tester,
+            tester,
             theme,
             0,
             Some(NavigationDestinationLabelBehavior::OnlyShowSelected),
         );
-        let alarm = icon_center(&tester, &Icons::access_alarm());
-        mouse_over(&mut tester, &mut mouse, alarm);
+        let alarm = icon_center(tester, &Icons::access_alarm());
+        mouse_over(tester, &mut mouse, alarm);
         assert!(paints_indicator_ripple(
-            &bar_ink_ops(&tester),
+            &bar_ink_ops(tester),
             always_hide_center
         ));
 
         // Make sure ripple is shifted when selectedIndex changes.
         pump_ripple_bar(
-            &mut tester,
+            tester,
             theme,
             1,
             Some(NavigationDestinationLabelBehavior::OnlyShowSelected),
         );
         tester.pump_and_settle();
         assert!(paints_indicator_ripple(
-            &bar_ink_ops(&tester),
+            &bar_ink_ops(tester),
             always_show_center
         ));
     }
 
     #[test]
     fn material3_navigation_indicator_renders_ripple() {
-        with_main_thread_stack(|| {
-            indicator_renders_ripple(m3, Offset::new(600.0, 30.0), Offset::new(600.0, 40.0));
+        test_widgets(|tester| {
+            indicator_renders_ripple(
+                tester,
+                m3,
+                Offset::new(600.0, 30.0),
+                Offset::new(600.0, 40.0),
+            );
         });
     }
 
     #[test]
     fn material2_navigation_indicator_renders_ripple() {
-        with_main_thread_stack(|| {
-            indicator_renders_ripple(m2, Offset::new(600.0, 33.0), Offset::new(600.0, 40.0));
+        test_widgets(|tester| {
+            indicator_renders_ripple(
+                tester,
+                m2,
+                Offset::new(600.0, 33.0),
+                Offset::new(600.0, 40.0),
+            );
         });
     }
 
     /// The x scale of the last `Transform` under a `NavigationIndicator`.
     fn indicator_x_scale(tester: &WidgetTester) -> f32 {
-        let transforms: Vec<AnyElement> = tester
-            .find_by_type::<NavigationIndicator>()
+        let transforms: Vec<AnyElement> = find::by_type::<NavigationIndicator>()
+            .evaluate(tester)
             .into_iter()
             .flat_map(|indicator| tester.descendants_of_type::<Transform>(indicator))
             .collect();
@@ -2962,31 +2954,29 @@ pub(crate) mod tests {
 
     #[test]
     fn navigation_indicator_scale_transform() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_ripple_bar(&mut tester, m3, 0, None);
+        test_widgets(|tester| {
+            pump_ripple_bar(tester, m3, 0, None);
             tester.pump_and_settle();
-            assert_eq!(indicator_x_scale(&tester), 0.0);
+            assert_eq!(indicator_x_scale(tester), 0.0);
 
-            pump_ripple_bar(&mut tester, m3, 1, None);
-            tester.pump(Duration::from_millis(100));
+            pump_ripple_bar(tester, m3, 1, None);
+            tester.pump_by(Duration::from_millis(100));
             // The matrix is valo's f32 one: Dart's double, rounded to f32.
-            assert_eq!(indicator_x_scale(&tester), 0.7805849514007568_f64 as f32);
+            assert_eq!(indicator_x_scale(tester), 0.7805849514007568_f64 as f32);
 
-            tester.pump(Duration::from_millis(100));
-            assert_eq!(indicator_x_scale(&tester), 0.9473570239543915_f64 as f32);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(indicator_x_scale(tester), 0.9473570239543915_f64 as f32);
 
             tester.pump_and_settle();
-            assert_eq!(indicator_x_scale(&tester), 1.0);
+            assert_eq!(indicator_x_scale(tester), 1.0);
         });
     }
 
     #[test]
     fn material3_navigation_destination_updates_indicator_color_and_shape() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = Color::new(0xff0000ff);
             let shape = || RoundedRectangleBorder::new(BorderSide::NONE, BorderRadius::ZERO.into());
-            let mut tester = tester();
             let theme = m3(&tester.cell.borrow());
             let pump = |tester: &mut WidgetTester, custom: bool| {
                 pump_app(tester, m3, |_app| {
@@ -3001,10 +2991,10 @@ pub(crate) mod tests {
                 });
             };
 
-            pump(&mut tester, false);
+            pump(tester, false);
 
             // Test default indicator color and shape.
-            let (default_color, default_shape) = indicator_decoration(&tester);
+            let (default_color, default_shape) = indicator_decoration(tester);
             assert_eq!(
                 default_color,
                 Some(theme.color_scheme.secondary_container())
@@ -3014,10 +3004,10 @@ pub(crate) mod tests {
                 &StadiumBorder::new(BorderSide::NONE) as &dyn ShapeBorder
             );
 
-            pump(&mut tester, true);
+            pump(tester, true);
 
             // Test custom indicator color and shape.
-            let (custom_color, custom_shape) = indicator_decoration(&tester);
+            let (custom_color, custom_shape) = indicator_decoration(tester);
             assert_eq!(custom_color, Some(color));
             assert_eq!(&*custom_shape, &shape() as &dyn ShapeBorder);
         });
@@ -3025,11 +3015,10 @@ pub(crate) mod tests {
 
     #[test]
     fn destinations_respect_their_disabled_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let selected_index = Rc::new(Cell::new(0));
-            let mut tester = tester();
             let seen = Rc::clone(&selected_index);
-            build_widget(&mut tester, m3, move || {
+            build_widget(tester, m3, move || {
                 let current = seen.get();
                 NavigationBar::new([
                     destination(Icons::ac_unit(), "AC"),
@@ -3043,13 +3032,13 @@ pub(crate) mod tests {
                 .into_widget()
             });
 
-            tester.tap(center_of(&tester, text(&tester, "AC")), 1);
+            tester.tap_at(tester.get_center(text(tester, "AC")), 1);
             assert_eq!(selected_index.get(), 0);
 
-            tester.tap(center_of(&tester, text(&tester, "Alarm")), 2);
+            tester.tap_at(tester.get_center(text(tester, "Alarm")), 2);
             assert_eq!(selected_index.get(), 1);
 
-            tester.tap(center_of(&tester, text(&tester, "Bookmark")), 3);
+            tester.tap_at(tester.get_center(text(tester, "Bookmark")), 3);
             assert_eq!(selected_index.get(), 1);
         });
     }
@@ -3077,9 +3066,9 @@ pub(crate) mod tests {
         let focus_color = 0xff00ffff;
         let pressed_color = 0xffff00ff;
 
-        let indicators = tester.find_by_type::<NavigationIndicator>();
-        let indicator = center_of(tester, indicators[indicators.len() - 1]);
-        let mut mouse = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+        let indicators = find::by_type::<NavigationIndicator>().evaluate(tester);
+        let indicator = tester.get_center(indicators[indicators.len() - 1]);
+        let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         mouse_over(tester, &mut mouse, indicator);
 
@@ -3121,10 +3110,9 @@ pub(crate) mod tests {
 
     #[test]
     fn navigation_bar_respects_overlay_color_in_active_pressed_hovered_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .bottom_navigation_bar(
                         waft_widgets::RepaintBoundary::new().child(
@@ -3136,13 +3124,13 @@ pub(crate) mod tests {
                     .into_widget()
             });
 
-            respects_overlay_color(&mut tester);
+            respects_overlay_color(tester);
         });
     }
 
     #[test]
     fn navigation_bar_label_padding_overrides_navigation_destination_label_padding() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let label_padding = EdgeInsetsGeometry::all(8.0);
             let pump = |tester: &mut WidgetTester, padding: Option<EdgeInsetsGeometry>| {
                 pump_app(tester, m3, |_app| {
@@ -3157,16 +3145,15 @@ pub(crate) mod tests {
                     Scaffold::new().bottom_navigation_bar(bar).into_widget()
                 });
             };
-            let mut tester = tester();
 
-            pump(&mut tester, None);
+            pump(tester, None);
             let default_padding: EdgeInsetsGeometry = EdgeInsets::only(0.0, 4.0, 0.0, 0.0).into();
-            assert_eq!(label_padding_of(&tester, "Home"), default_padding);
-            assert_eq!(label_padding_of(&tester, "Settings"), default_padding);
+            assert_eq!(label_padding_of(tester, "Home"), default_padding);
+            assert_eq!(label_padding_of(tester, "Settings"), default_padding);
 
-            pump(&mut tester, Some(label_padding));
-            assert_eq!(label_padding_of(&tester, "Home"), label_padding);
-            assert_eq!(label_padding_of(&tester, "Settings"), label_padding);
+            pump(tester, Some(label_padding));
+            assert_eq!(label_padding_of(tester, "Home"), label_padding);
+            assert_eq!(label_padding_of(tester, "Settings"), label_padding);
         });
     }
 
@@ -3176,10 +3163,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_navigation_destination_updates_indicator_color_and_shape() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = Color::new(0xff0000ff);
             let shape = || RoundedRectangleBorder::new(BorderSide::NONE, BorderRadius::ZERO.into());
-            let mut tester = tester();
             let theme = m2(&tester.cell.borrow());
             let pump = |tester: &mut WidgetTester, custom: bool| {
                 pump_app(tester, m2, |_app| {
@@ -3192,10 +3178,10 @@ pub(crate) mod tests {
                 });
             };
 
-            pump(&mut tester, false);
+            pump(tester, false);
 
             // Test default indicator color and shape.
-            let (default_color, default_shape) = indicator_decoration(&tester);
+            let (default_color, default_shape) = indicator_decoration(tester);
             #[allow(deprecated)]
             let expected_color = theme.color_scheme.secondary.with_opacity(0.24);
             assert_eq!(default_color, Some(expected_color));
@@ -3207,10 +3193,10 @@ pub(crate) mod tests {
                 ) as &dyn ShapeBorder
             );
 
-            pump(&mut tester, true);
+            pump(tester, true);
 
             // Test custom indicator color and shape.
-            let (custom_color, custom_shape) = indicator_decoration(&tester);
+            let (custom_color, custom_shape) = indicator_decoration(tester);
             assert_eq!(custom_color, Some(color));
             assert_eq!(&*custom_shape, &shape() as &dyn ShapeBorder);
         });
@@ -3235,7 +3221,7 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_destination_icon_does_not_rebuild_when_tapped() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // This is a regression test for https://github.com/flutter/flutter/issues/122811.
             let builds = Rc::new(Cell::new(0));
             // Dart's `const` destinations: one instance across the builder's builds.
@@ -3257,8 +3243,7 @@ pub(crate) mod tests {
                 )
                 .into_widget(),
             ];
-            let mut tester = tester();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Scaffold::new()
                     .bottom_navigation_bar(StatefulBuilder::new(
                         move |_app, _context, set_state| {
@@ -3274,23 +3259,23 @@ pub(crate) mod tests {
                     .into_widget()
             });
             let last_icon_color = |tester: &WidgetTester| {
-                let icons = tester.find_by_type::<Icon>();
+                let icons = find::by_type::<Icon>().evaluate(tester);
                 tester.widget(icons[icons.len() - 1], |icon: &Icon| icon.color.clone())
             };
-            let initial_color = last_icon_color(&tester).expect("the icon has a color");
+            let initial_color = last_icon_color(tester).expect("the icon has a color");
 
             // Trigger a rebuild.
-            tester.tap(center_of(&tester, text(&tester, "Alarm")), 1);
+            tester.tap_at(tester.get_center(text(tester, "Alarm")), 1);
             tester.pump_and_settle();
 
             // Icon color should be the same as before the rebuild.
-            assert_eq!(last_icon_color(&tester), Some(initial_color));
+            assert_eq!(last_icon_color(tester), Some(initial_color));
         });
     }
 
     #[test]
     fn navigation_bar_label_text_style_overrides_navigation_destination_label_text_style() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let selected_text = "Home";
             let unselected_text = "Settings";
             let disabled_text = "Bookmark";
@@ -3310,25 +3295,21 @@ pub(crate) mod tests {
                     Scaffold::new().bottom_navigation_bar(bar).into_widget()
                 });
             };
-            let mut tester = tester();
             let theme = m3(&tester.cell.borrow());
 
-            pump(&mut tester, None);
+            pump(tester, None);
 
             // Test selected label text style.
-            assert_eq!(label_style(&tester, selected_text).font_size, Some(12.0));
+            assert_eq!(label_style(tester, selected_text).font_size, Some(12.0));
             assert_eq!(
-                label_style(&tester, selected_text)
-                    .color
-                    .as_deref()
-                    .copied(),
+                label_style(tester, selected_text).color.as_deref().copied(),
                 Some(theme.color_scheme.on_surface)
             );
 
             // Test unselected label text style.
-            assert_eq!(label_style(&tester, unselected_text).font_size, Some(12.0));
+            assert_eq!(label_style(tester, unselected_text).font_size, Some(12.0));
             assert_eq!(
-                label_style(&tester, unselected_text)
+                label_style(tester, unselected_text)
                     .color
                     .as_deref()
                     .copied(),
@@ -3336,14 +3317,11 @@ pub(crate) mod tests {
             );
 
             // Test disabled label text style.
-            assert_eq!(label_style(&tester, disabled_text).font_size, Some(12.0));
+            assert_eq!(label_style(tester, disabled_text).font_size, Some(12.0));
             #[allow(deprecated)]
             let disabled_color = theme.color_scheme.on_surface_variant().with_opacity(0.38);
             assert_eq!(
-                label_style(&tester, disabled_text)
-                    .color
-                    .as_deref()
-                    .copied(),
+                label_style(tester, disabled_text).color.as_deref().copied(),
                 Some(disabled_color)
             );
 
@@ -3357,7 +3335,7 @@ pub(crate) mod tests {
                 .font_size(16.0)
                 .color(Color::new(0xFFFF0000));
             pump(
-                &mut tester,
+                tester,
                 Some(<dyn WidgetStateProperty<Option<TextStyle>>>::from_map(
                     vec![
                         (
@@ -3375,31 +3353,31 @@ pub(crate) mod tests {
 
             // Test selected label text style.
             assert_eq!(
-                label_style(&tester, selected_text).font_size,
+                label_style(tester, selected_text).font_size,
                 selected_text_style.font_size
             );
             assert_eq!(
-                label_style(&tester, selected_text).color,
+                label_style(tester, selected_text).color,
                 selected_text_style.color
             );
 
             // Test unselected label text style.
             assert_eq!(
-                label_style(&tester, unselected_text).font_size,
+                label_style(tester, unselected_text).font_size,
                 unselected_text_style.font_size
             );
             assert_eq!(
-                label_style(&tester, unselected_text).color,
+                label_style(tester, unselected_text).color,
                 unselected_text_style.color
             );
 
             // Test disabled label text style.
             assert_eq!(
-                label_style(&tester, disabled_text).font_size,
+                label_style(tester, disabled_text).font_size,
                 disabled_text_style.font_size
             );
             assert_eq!(
-                label_style(&tester, disabled_text).color,
+                label_style(tester, disabled_text).color,
                 disabled_text_style.color
             );
         });
@@ -3407,11 +3385,10 @@ pub(crate) mod tests {
 
     #[test]
     fn navigation_bar_maintain_bottom_view_padding_can_consume_bottom_media_query_padding() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let bottom_padding = 40.0;
             let text_direction = TextDirection::Ltr;
-            let mut tester = tester();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Directionality::new(
                     text_direction,
                     MediaQuery::new(
@@ -3432,7 +3409,7 @@ pub(crate) mod tests {
                 .into_widget()
             });
 
-            let padding = tester.find_by_type::<Padding>()[0];
+            let padding = find::by_type::<Padding>().evaluate(tester)[0];
             let safe_area_bottom_padding = tester.widget(padding, |padding: &Padding| {
                 padding.padding.resolve(Some(text_direction)).bottom
             });
@@ -3442,9 +3419,8 @@ pub(crate) mod tests {
 
     #[test]
     fn navigation_bar_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(NavigationBar::new([
                         destination(Icons::add(), "X"),
@@ -3452,7 +3428,7 @@ pub(crate) mod tests {
                     ])))
                     .into_widget()
             });
-            assert_eq!(bar_size(&tester), Size::ZERO);
+            assert_eq!(bar_size(tester), Size::ZERO);
         });
     }
 }

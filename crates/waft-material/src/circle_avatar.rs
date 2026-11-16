@@ -294,10 +294,8 @@ impl StatelessWidget for CircleAvatar {
 
 #[cfg(test)]
 mod tests {
-    //! Ported from `test/circle_avatar_test.dart`. flutter_test lays text out in Ahem, which the
-    //! test platform does not have, so a case that measures or restyles the avatar's `Text('Z')`
-    //! uses [`ahem_label`], which reads the `DefaultTextStyle` the avatar gives it where Dart
-    //! reads the paragraph's style. The cases on `backgroundImage` and `foregroundImage` ('with
+    //! Ported from `test/circle_avatar_test.dart`. A case that reads the style of the avatar's
+    //! `Text('Z')` reads its `RenderParagraph`, as Dart does. The cases on `backgroundImage` and `foregroundImage` ('with
     //! image background', 'with image foreground', and 'backgroundImage is used as a fallback
     //! for foregroundImage') wait for `DecorationImage`.
 
@@ -308,11 +306,12 @@ mod tests {
     use waft_painting::{EdgeInsets, TextScaler};
     use waft_widgets::{Builder, DecoratedBox, MediaQueryData, SizedBox, Text, UnconstrainedBox};
 
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+
     use super::*;
-    use crate::badge::tests::{Seen, ahem_label};
+    use crate::bottom_navigation_bar::tests::paragraph_style;
     use crate::colors::Colors;
-    use crate::test_support::{AhemText, WidgetTester, with_main_thread_stack};
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// Dart's `wrap(child:)`: the child centered in a Material 2 `MaterialApp`.
     fn pump_wrapped(tester: &mut WidgetTester, child: WidgetRef) {
@@ -322,14 +321,17 @@ mod tests {
     }
 
     fn avatar_rect(tester: &WidgetTester) -> waft_embedder::Rect {
-        let avatar = tester.find_by_type::<CircleAvatar>()[0];
-        tester.global_rect(tester.render_box_of(avatar))
+        let avatar = find::by_type::<CircleAvatar>().evaluate(tester)[0];
+        tester.get_rect(avatar)
     }
 
     /// Dart's `box.child! as RenderDecoratedBox).decoration`.
     fn avatar_decoration(tester: &WidgetTester) -> BoxDecoration {
-        let avatar = tester.find_by_type::<CircleAvatar>()[0];
-        let boxes = tester.descendants_of_type::<DecoratedBox>(avatar);
+        let boxes = find::descendant(
+            find::by_type::<CircleAvatar>(),
+            find::by_type::<DecoratedBox>(),
+        )
+        .evaluate(tester);
         tester.widget(boxes[0], |decorated_box: &DecoratedBox| {
             decorated_box
                 .decoration
@@ -347,8 +349,11 @@ mod tests {
             .map(|color| color.color())
     }
 
-    fn text_color(seen: &Seen) -> Option<Color> {
-        seen.label_style().color.as_ref().map(|color| color.color())
+    fn text_color(tester: &WidgetTester) -> Option<Color> {
+        paragraph_style(tester, "Z")
+            .color
+            .as_ref()
+            .map(|color| color.color())
     }
 
     fn fallback(tester: &WidgetTester) -> ThemeData {
@@ -357,96 +362,84 @@ mod tests {
 
     #[test]
     fn circle_avatar_with_dark_background_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Colors::BLUE.shade900();
-            let seen = Seen::default();
-            let mut tester = tester();
             pump_wrapped(
-                &mut tester,
+                tester,
                 CircleAvatar::new()
                     .background_color(background_color)
                     .radius(50.0)
-                    .child(ahem_label("Z", &seen))
+                    .child(Text::new("Z"))
                     .into_widget(),
             );
 
-            assert_eq!(avatar_rect(&tester).size(), Size::new(100.0, 100.0));
-            assert_eq!(avatar_color(&tester), Some(background_color));
+            assert_eq!(avatar_rect(tester).size(), Size::new(100.0, 100.0));
+            assert_eq!(avatar_color(tester), Some(background_color));
             assert_eq!(
-                text_color(&seen),
-                Some(fallback(&tester).primary_color_light)
+                text_color(tester),
+                Some(fallback(tester).primary_color_light)
             );
         });
     }
 
     #[test]
     fn circle_avatar_with_light_background_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Colors::BLUE.shade100();
-            let seen = Seen::default();
-            let mut tester = tester();
             pump_wrapped(
-                &mut tester,
+                tester,
                 CircleAvatar::new()
                     .background_color(background_color)
                     .radius(50.0)
-                    .child(ahem_label("Z", &seen))
+                    .child(Text::new("Z"))
                     .into_widget(),
             );
 
-            assert_eq!(avatar_rect(&tester).size(), Size::new(100.0, 100.0));
-            assert_eq!(avatar_color(&tester), Some(background_color));
+            assert_eq!(avatar_rect(tester).size(), Size::new(100.0, 100.0));
+            assert_eq!(avatar_color(tester), Some(background_color));
             assert_eq!(
-                text_color(&seen),
-                Some(fallback(&tester).primary_color_dark)
+                text_color(tester),
+                Some(fallback(tester).primary_color_dark)
             );
         });
     }
 
     #[test]
     fn circle_avatar_with_foreground_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let foreground_color = Colors::RED.shade100();
-            let seen = Seen::default();
-            let mut tester = tester();
             pump_wrapped(
-                &mut tester,
+                tester,
                 CircleAvatar::new()
                     .foreground_color(foreground_color)
-                    .child(ahem_label("Z", &seen))
+                    .child(Text::new("Z"))
                     .into_widget(),
             );
 
-            assert_eq!(avatar_rect(&tester).size(), Size::new(40.0, 40.0));
+            assert_eq!(avatar_rect(tester).size(), Size::new(40.0, 40.0));
             assert_eq!(
-                avatar_color(&tester),
-                Some(fallback(&tester).primary_color_dark)
+                avatar_color(tester),
+                Some(fallback(tester).primary_color_dark)
             );
-            assert_eq!(text_color(&seen), Some(foreground_color));
+            assert_eq!(text_color(tester), Some(foreground_color));
         });
     }
 
     #[test]
     fn material3_circle_avatar_default_colors() {
-        with_main_thread_stack(|| {
-            let seen = Seen::default();
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             pump_wrapped(
-                &mut tester,
-                Theme::new(
-                    theme.clone(),
-                    CircleAvatar::new().child(ahem_label("Z", &seen)),
-                )
-                .into_widget(),
+                tester,
+                Theme::new(theme.clone(), CircleAvatar::new().child(Text::new("Z"))).into_widget(),
             );
 
             assert_eq!(
-                avatar_color(&tester),
+                avatar_color(tester),
                 Some(theme.color_scheme.primary_container())
             );
             assert_eq!(
-                text_color(&seen),
+                text_color(tester),
                 Some(theme.color_scheme.on_primary_container())
             );
         });
@@ -454,28 +447,25 @@ mod tests {
 
     #[test]
     fn circle_avatar_text_does_not_expand_with_text_scaler() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let foreground_color = Colors::RED.shade100();
-            let mut tester = tester();
             pump_wrapped(
-                &mut tester,
+                tester,
                 CircleAvatar::new()
                     .foreground_color(foreground_color)
-                    .child(AhemText::new("Z"))
+                    .child(Text::new("Z"))
                     .into_widget(),
             );
 
             assert_eq!(
-                tester
-                    .global_rect(tester.render_box_of(tester.find_ahem_text("Z")[0]))
-                    .size(),
+                tester.get_rect(find::text("Z").evaluate(tester)[0]).size(),
                 Size::new(16.0, 16.0)
             );
 
             let seen_data: Rc<RefCell<Option<MediaQueryData>>> = Rc::new(RefCell::new(None));
             let seen = Rc::clone(&seen_data);
             pump_wrapped(
-                &mut tester,
+                tester,
                 MediaQuery::new(
                     MediaQueryData::new()
                         .text_scaler(TextScaler::linear(2.0))
@@ -484,7 +474,7 @@ mod tests {
                         .padding(EdgeInsets::all(11.0)),
                     CircleAvatar::new().child(Builder::new(move |app, context| {
                         *seen.borrow_mut() = Some(MediaQuery::of(app, context));
-                        AhemText::new("Z").into_widget()
+                        Text::new("Z").into_widget()
                     })),
                 )
                 .into_widget(),
@@ -499,9 +489,7 @@ mod tests {
             // This should be overridden to 1.0.
             assert_eq!(data.text_scaler, TextScaler::NO_SCALING);
             assert_eq!(
-                tester
-                    .global_rect(tester.render_box_of(tester.find_ahem_text("Z")[0]))
-                    .size(),
+                tester.get_rect(find::text("Z").evaluate(tester)[0]).size(),
                 Size::new(16.0, 16.0)
             );
         });
@@ -509,101 +497,89 @@ mod tests {
 
     #[test]
     fn circle_avatar_respects_min_radius() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Colors::BLUE.shade900();
-            let seen = Seen::default();
-            let mut tester = tester();
             pump_wrapped(
-                &mut tester,
+                tester,
                 UnconstrainedBox::new()
                     .child(
                         CircleAvatar::new()
                             .background_color(background_color)
                             .min_radius(50.0)
-                            .child(ahem_label("Z", &seen)),
+                            .child(Text::new("Z")),
                     )
                     .into_widget(),
             );
 
-            assert_eq!(avatar_rect(&tester).size(), Size::new(100.0, 100.0));
-            assert_eq!(avatar_color(&tester), Some(background_color));
+            assert_eq!(avatar_rect(tester).size(), Size::new(100.0, 100.0));
+            assert_eq!(avatar_color(tester), Some(background_color));
             assert_eq!(
-                text_color(&seen),
-                Some(fallback(&tester).primary_color_light)
+                text_color(tester),
+                Some(fallback(tester).primary_color_light)
             );
         });
     }
 
     #[test]
     fn circle_avatar_respects_max_radius() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Colors::BLUE.shade900();
-            let seen = Seen::default();
-            let mut tester = tester();
             pump_wrapped(
-                &mut tester,
+                tester,
                 CircleAvatar::new()
                     .background_color(background_color)
                     .max_radius(50.0)
-                    .child(ahem_label("Z", &seen))
+                    .child(Text::new("Z"))
                     .into_widget(),
             );
 
-            assert_eq!(avatar_rect(&tester).size(), Size::new(100.0, 100.0));
-            assert_eq!(avatar_color(&tester), Some(background_color));
+            assert_eq!(avatar_rect(tester).size(), Size::new(100.0, 100.0));
+            assert_eq!(avatar_color(tester), Some(background_color));
             assert_eq!(
-                text_color(&seen),
-                Some(fallback(&tester).primary_color_light)
+                text_color(tester),
+                Some(fallback(tester).primary_color_light)
             );
         });
     }
 
     #[test]
     fn circle_avatar_respects_setting_both_min_radius_and_max_radius() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Colors::BLUE.shade900();
-            let seen = Seen::default();
-            let mut tester = tester();
             pump_wrapped(
-                &mut tester,
+                tester,
                 CircleAvatar::new()
                     .background_color(background_color)
                     .max_radius(50.0)
                     .min_radius(50.0)
-                    .child(ahem_label("Z", &seen))
+                    .child(Text::new("Z"))
                     .into_widget(),
             );
 
-            assert_eq!(avatar_rect(&tester).size(), Size::new(100.0, 100.0));
-            assert_eq!(avatar_color(&tester), Some(background_color));
+            assert_eq!(avatar_rect(tester).size(), Size::new(100.0, 100.0));
+            assert_eq!(avatar_color(tester), Some(background_color));
             assert_eq!(
-                text_color(&seen),
-                Some(fallback(&tester).primary_color_light)
+                text_color(tester),
+                Some(fallback(tester).primary_color_light)
             );
         });
     }
 
     #[test]
     fn material2_circle_avatar_default_colors_with_light_theme() {
-        with_main_thread_stack(|| {
-            let seen = Seen::default();
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .primary_color(Colors::GREY.shade100())
                 .build(&tester.cell.borrow());
             pump_wrapped(
-                &mut tester,
-                Theme::new(
-                    theme.clone(),
-                    CircleAvatar::new().child(ahem_label("Z", &seen)),
-                )
-                .into_widget(),
+                tester,
+                Theme::new(theme.clone(), CircleAvatar::new().child(Text::new("Z"))).into_widget(),
             );
 
-            assert_eq!(avatar_color(&tester), Some(theme.primary_color_light));
+            assert_eq!(avatar_color(tester), Some(theme.primary_color_light));
             assert_eq!(
-                seen.label_style().color,
+                paragraph_style(tester, "Z").color,
                 theme
                     .primary_text_theme
                     .title_large
@@ -616,25 +592,19 @@ mod tests {
 
     #[test]
     fn material2_circle_avatar_default_colors_with_dark_theme() {
-        with_main_thread_stack(|| {
-            let seen = Seen::default();
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .primary_color(Colors::GREY.shade800())
                 .build(&tester.cell.borrow());
             pump_wrapped(
-                &mut tester,
-                Theme::new(
-                    theme.clone(),
-                    CircleAvatar::new().child(ahem_label("Z", &seen)),
-                )
-                .into_widget(),
+                tester,
+                Theme::new(theme.clone(), CircleAvatar::new().child(Text::new("Z"))).into_widget(),
             );
 
-            assert_eq!(avatar_color(&tester), Some(theme.primary_color_dark));
+            assert_eq!(avatar_color(tester), Some(theme.primary_color_dark));
             assert_eq!(
-                seen.label_style().color,
+                paragraph_style(tester, "Z").color,
                 theme
                     .primary_text_theme
                     .title_large
@@ -647,14 +617,13 @@ mod tests {
 
     #[test]
     fn circle_avatar_renders_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 SizedBox::shrink()
                     .child(CircleAvatar::new().child(Text::new("X")))
                     .into_widget()
             });
-            assert_eq!(tester.find_by_type::<CircleAvatar>().len(), 1);
+            assert_eq!(find::by_type::<CircleAvatar>().evaluate(tester).len(), 1);
         });
     }
 
@@ -666,13 +635,12 @@ mod tests {
 
     #[test]
     fn circle_avatar_without_a_child_is_a_plain_circle() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, CircleAvatar::new().radius(10.0).into_widget());
-            assert_eq!(avatar_rect(&tester).size(), Size::new(20.0, 20.0));
+        test_widgets(|tester| {
+            pump_wrapped(tester, CircleAvatar::new().radius(10.0).into_widget());
+            assert_eq!(avatar_rect(tester).size(), Size::new(20.0, 20.0));
             assert!(
-                tester
-                    .descendants_of_type::<Center>(tester.find_by_type::<CircleAvatar>()[0])
+                find::descendant(find::by_type::<CircleAvatar>(), find::by_type::<Center>())
+                    .evaluate(tester)
                     .is_empty()
             );
         });

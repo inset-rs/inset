@@ -2431,14 +2431,14 @@ mod tests {
     use waft_foundation::AppCell;
     use waft_foundation::Ref;
 
-    use waft_foundation::Handle;
     use waft_gestures::HitTestResult;
+    use waft_painting::AlignmentGeometry;
 
     use super::*;
     use crate::box_::BoxConstraints;
-    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer};
     use crate::proxy_box::RenderConstrainedBox;
     use crate::sliver::{RenderSliver, RenderSliverToBoxAdapter};
+    use crate::testing::{EnginePhase, layout_with, pump_frame};
     use crate::viewport_offset::FixedViewportOffset;
 
     /// A sliver of a fixed scroll extent that records the offsets it was painted at.
@@ -2510,24 +2510,6 @@ mod tests {
         (sliver, paint_offsets)
     }
 
-    /// The test binding's first frame: root the tree, lay it out, and flush paint.
-    fn first_frame(
-        app: &mut App,
-        root: crate::box_::AnyRenderBox,
-        constraints: BoxConstraints,
-    ) -> Handle<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.layout(app, constraints, false);
-        let paint_root = OffsetLayer::new(app, Offset::ZERO);
-        paint_root.as_layer().attach(app, root.as_object().id());
-        root.as_object()
-            .schedule_initial_paint(app, paint_root.as_container_layer());
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
-        owner.handle()
-    }
-
     fn vertical_viewport(
         app: &mut App,
         offset: &Ref<FixedViewportOffset>,
@@ -2579,7 +2561,13 @@ mod tests {
         let viewport = vertical_viewport(&mut app, &offset, vec![sliver]);
         let constraints = BoxConstraints::new().max_width(200.0).max_height(400.0);
         let dry = viewport.as_box().get_dry_layout(&mut app, constraints);
-        first_frame(&mut app, viewport.as_box(), constraints);
+        layout_with(
+            &mut app,
+            viewport.as_box(),
+            Some(constraints),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         assert_eq!(dry, Size::new(200.0, 400.0));
         assert_eq!(dry, viewport.size(&app));
     }
@@ -2595,10 +2583,12 @@ mod tests {
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
 
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         assert_eq!(viewport.size(&app), Size::new(200.0, 400.0));
@@ -2625,10 +2615,12 @@ mod tests {
         let offset = FixedViewportOffset::new(&mut app, 60.0);
         let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
 
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         assert_eq!(first.constraints(&app).scroll_offset, 60.0);
@@ -2650,10 +2642,12 @@ mod tests {
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         let mut result = HitTestResult::new();
@@ -2682,10 +2676,12 @@ mod tests {
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         let mut result = HitTestResult::new();
@@ -2712,10 +2708,12 @@ mod tests {
         let viewport = vertical_viewport(&mut app, &offset, vec![sliver]);
         viewport.set_scroll_cache_extent(&mut app, Some(ScrollCacheExtent::Pixels(100.0)));
 
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         assert_eq!(sliver.constraints(&app).remaining_cache_extent, 500.0);
@@ -2723,11 +2721,7 @@ mod tests {
         assert_eq!(sliver.geometry(&app).paint_extent, 400.0);
 
         viewport.set_scroll_cache_extent(&mut app, Some(ScrollCacheExtent::Viewport(0.5)));
-        viewport.as_box().layout(
-            &mut app,
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
-            false,
-        );
+        pump_frame(&mut app, EnginePhase::Layout);
         assert_eq!(sliver.constraints(&app).remaining_cache_extent, 600.0);
     }
 
@@ -2747,13 +2741,17 @@ mod tests {
             Some(vec![first, second]),
         );
 
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::new()
-                .max_width(200.0)
-                .min_width(200.0)
-                .max_height(400.0),
+            Some(
+                BoxConstraints::new()
+                    .max_width(200.0)
+                    .min_width(200.0)
+                    .max_height(400.0),
+            ),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         assert_eq!(viewport.size(&app), Size::new(200.0, 150.0));
@@ -2777,16 +2775,20 @@ mod tests {
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, &offset, vec![adapter.as_sliver()]);
 
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         assert_eq!(child.size(&app), Size::new(200.0, 80.0));
         assert_eq!(adapter.geometry(&app).scroll_extent, 80.0);
         assert_eq!(
-            child.as_box().local_to_global(&app, Offset::ZERO, None),
+            child
+                .as_box()
+                .local_to_global(&app, Offset::ZERO, Some(viewport.as_object())),
             Offset::ZERO
         );
     }
@@ -2801,10 +2803,12 @@ mod tests {
         let adapter = RenderSliverToBoxAdapter::new(&mut app, Some(child.as_box()));
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, &offset, vec![adapter.as_sliver()]);
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         let found = AnyRenderAbstractViewport::maybe_of(&app, Some(child.as_object()));
@@ -2829,10 +2833,12 @@ mod tests {
             &offset,
             vec![first.as_sliver(), second.as_sliver()],
         );
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         let revealed = RenderAbstractViewport::get_offset_to_reveal(
@@ -2874,10 +2880,12 @@ mod tests {
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
-        first_frame(
+        layout_with(
             &mut app,
             viewport.as_box(),
-            BoxConstraints::tight(Size::new(200.0, 400.0)),
+            Some(BoxConstraints::tight(Size::new(200.0, 400.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
         );
 
         assert_eq!(viewport.children_in_paint_order(&app), vec![second, first]);

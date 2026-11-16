@@ -437,21 +437,26 @@ impl InheritedWidget for TooltipTheme {
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use waft_embedder::{Offset, Rect, TextDecoration};
+    use waft_embedder::{Color, Offset, Rect, TextDecoration};
     use waft_gestures::K_LONG_PRESS_TIMEOUT;
     use waft_painting::AnyColor;
     use waft_rendering::AnyRenderBox;
+    use waft_rendering::testing::{PaintCall, assert_paints};
     use waft_widgets::{Center, GlobalKey, Padding, RawTooltip, SizedBox, Text};
+
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::colors::Colors;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
+    use crate::test_support::PaintInspection;
     use crate::theme_data::ThemeData;
     use crate::tooltip::Tooltip;
     use crate::tooltip::tests::{
         TOOLTIP_TEXT, custom_decoration, ensure_visible_and_fade_in, found, green_box, m2, m3,
-        overlay, paints_rrect_over, paragraph_size, positioned_at, pump_app, rect, size, tester,
-        text_box, text_style, tooltip_center, tooltip_text,
+        overlay, paragraph_size, positioned_at, pump_app, rect, size, text_box, text_style,
+        tooltip_center, tooltip_text,
     };
 
     const CUSTOM_PADDING_VALUE: f64 = 10.0;
@@ -562,8 +567,12 @@ mod tests {
         render.as_box().expect("a render box")
     }
 
-    fn vertical_offset_case(source: Source, top: f64, prefer_below: bool) -> Rect {
-        let mut tester = tester();
+    fn vertical_offset_case(
+        tester: &mut WidgetTester,
+        source: Source,
+        top: f64,
+        prefer_below: bool,
+    ) -> Rect {
         let key = GlobalKey::new();
         let tooltip = Tooltip::new()
             .key(key.clone().into())
@@ -575,7 +584,7 @@ mod tests {
             190.0
         };
         pump_themed(
-            &mut tester,
+            tester,
             source,
             m3,
             TooltipThemeData::new()
@@ -585,8 +594,8 @@ mod tests {
                 .prefer_below(prefer_below),
             |app| overlay(app, positioned_at(400.0, top, tooltip)),
         );
-        ensure_visible_and_fade_in(&mut tester, &key);
-        rect(&tester, text_parent(&tester, 1))
+        ensure_visible_and_fade_in(tester, &key);
+        rect(tester, text_parent(tester, 1))
     }
 
     fn assert_prefer_above_fits(tip: Rect) {
@@ -609,30 +618,46 @@ mod tests {
 
     #[test]
     fn tooltip_vertical_offset_prefer_below_center_prefer_above_fits_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| {
-            assert_prefer_above_fits(vertical_offset_case(Source::ThemeData, 300.0, false));
+        test_widgets(|tester| {
+            assert_prefer_above_fits(vertical_offset_case(
+                tester,
+                Source::ThemeData,
+                300.0,
+                false,
+            ));
         });
     }
 
     #[test]
     fn tooltip_vertical_offset_prefer_below_center_prefer_above_fits_tooltip_theme() {
-        with_main_thread_stack(|| {
-            assert_prefer_above_fits(vertical_offset_case(Source::TooltipTheme, 300.0, false));
+        test_widgets(|tester| {
+            assert_prefer_above_fits(vertical_offset_case(
+                tester,
+                Source::TooltipTheme,
+                300.0,
+                false,
+            ));
         });
     }
 
     #[test]
     fn tooltip_vertical_offset_prefer_below_center_prefer_above_does_not_fit_theme_data_tooltip_theme()
      {
-        with_main_thread_stack(|| {
-            assert_prefer_above_does_not_fit(vertical_offset_case(Source::ThemeData, 299.0, false));
+        test_widgets(|tester| {
+            assert_prefer_above_does_not_fit(vertical_offset_case(
+                tester,
+                Source::ThemeData,
+                299.0,
+                false,
+            ));
         });
     }
 
     #[test]
     fn tooltip_vertical_offset_prefer_below_center_prefer_above_does_not_fit_tooltip_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_prefer_above_does_not_fit(vertical_offset_case(
+                tester,
                 Source::TooltipTheme,
                 299.0,
                 false,
@@ -642,22 +667,26 @@ mod tests {
 
     #[test]
     fn tooltip_vertical_offset_prefer_below_center_prefer_below_fits_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| {
-            assert_prefer_below_fits(vertical_offset_case(Source::ThemeData, 300.0, true));
+        test_widgets(|tester| {
+            assert_prefer_below_fits(vertical_offset_case(tester, Source::ThemeData, 300.0, true));
         });
     }
 
     #[test]
     fn tooltip_vertical_offset_prefer_below_center_prefer_below_fits_tooltip_theme() {
-        with_main_thread_stack(|| {
-            assert_prefer_below_fits(vertical_offset_case(Source::TooltipTheme, 300.0, true));
+        test_widgets(|tester| {
+            assert_prefer_below_fits(vertical_offset_case(
+                tester,
+                Source::TooltipTheme,
+                300.0,
+                true,
+            ));
         });
     }
 
     /// The margin cases, whose theme wraps the tooltip inside the overlay entry: a `Theme`
     /// with a fresh `ThemeData`, or a `TooltipTheme`.
-    fn margin_case(source: Source) {
-        let mut tester = tester();
+    fn margin_case(tester: &mut WidgetTester, source: Source) {
         let key = GlobalKey::new();
         let tooltip = Tooltip::new()
             .key(key.clone().into())
@@ -666,7 +695,7 @@ mod tests {
         let tooltip_theme = TooltipThemeData::new()
             .padding(EdgeInsetsGeometry::ZERO)
             .margin(EdgeInsetsGeometry::all(CUSTOM_PADDING_VALUE));
-        pump_app(&mut tester, m3, |app| {
+        pump_app(tester, m3, |app| {
             let themed = match source {
                 Source::ThemeData => {
                     let data = ThemeData::builder().tooltip_theme(tooltip_theme).build(app);
@@ -676,10 +705,10 @@ mod tests {
             };
             overlay(app, themed)
         });
-        ensure_visible_and_fade_in(&mut tester, &key);
+        ensure_visible_and_fade_in(tester, &key);
 
-        let tip = rect(&tester, text_parent(&tester, 5));
-        let tooltip_content = rect(&tester, text_box(&tester));
+        let tip = rect(tester, text_parent(tester, 5));
+        let tooltip_content = rect(tester, text_box(tester));
         assert_eq!(tooltip_content.left, tip.left + CUSTOM_PADDING_VALUE);
         assert_eq!(tooltip_content.top, tip.top + CUSTOM_PADDING_VALUE);
         assert_eq!(tooltip_content.right, tip.right - CUSTOM_PADDING_VALUE);
@@ -688,12 +717,12 @@ mod tests {
 
     #[test]
     fn tooltip_margin_theme_data() {
-        with_main_thread_stack(|| margin_case(Source::ThemeData));
+        test_widgets(|tester| margin_case(tester, Source::ThemeData));
     }
 
     #[test]
     fn tooltip_margin_tooltip_theme() {
-        with_main_thread_stack(|| margin_case(Source::TooltipTheme));
+        test_widgets(|tester| margin_case(tester, Source::TooltipTheme));
     }
 
     fn orange_underline() -> TextStyle {
@@ -713,8 +742,7 @@ mod tests {
 
     #[test]
     fn tooltip_message_text_style_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let tooltip = Tooltip::new()
                 .key(key.clone().into())
@@ -722,21 +750,20 @@ mod tests {
                 .child(green_box())
                 .into_widget();
             pump_themed(
-                &mut tester,
+                tester,
                 Source::ThemeData,
                 m3,
                 TooltipThemeData::new().text_style(orange_underline()),
                 |_app| tooltip,
             );
-            ensure_visible_and_fade_in(&mut tester, &key);
-            assert_orange_underline(&text_style(&tester));
+            ensure_visible_and_fade_in(tester, &key);
+            assert_orange_underline(&text_style(tester));
         });
     }
 
     #[test]
     fn tooltip_message_text_style_tooltip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let tooltip = Tooltip::new()
                 .text_style(orange_underline())
@@ -745,24 +772,23 @@ mod tests {
                 .child(green_box())
                 .into_widget();
             pump_themed(
-                &mut tester,
+                tester,
                 Source::TooltipTheme,
                 m3,
                 TooltipThemeData::new(),
                 |_app| tooltip,
             );
-            ensure_visible_and_fade_in(&mut tester, &key);
-            assert_orange_underline(&text_style(&tester));
+            ensure_visible_and_fade_in(tester, &key);
+            assert_orange_underline(&text_style(tester));
         });
     }
 
     #[test]
     fn tooltip_message_text_align_tooltip_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // A tester each: Waft's `WidgetsApp` keeps the `home` its first route was made
             // with, where Dart's page reads `widget.home` when it rebuilds.
-            let pump_tooltip_with_text_align = |text_align: Option<TextAlign>| {
-                let mut tester = tester();
+            let mut pump_tooltip_with_text_align = |text_align: Option<TextAlign>| {
                 let key = GlobalKey::new();
                 let tooltip = Tooltip::new()
                     .key(key.clone().into())
@@ -773,9 +799,9 @@ mod tests {
                 if let Some(text_align) = text_align {
                     data = data.text_align(text_align);
                 }
-                pump_themed(&mut tester, Source::TooltipTheme, m3, data, |_app| tooltip);
-                ensure_visible_and_fade_in(&mut tester, &key);
-                tester.widget(tooltip_text(&tester), |text: &Text| text.text_align)
+                pump_themed(tester, Source::TooltipTheme, m3, data, |_app| tooltip);
+                ensure_visible_and_fade_in(tester, &key);
+                tester.widget(tooltip_text(tester), |text: &Text| text.text_align)
             };
 
             // Default value should be TextAlign.start
@@ -791,8 +817,7 @@ mod tests {
         });
     }
 
-    fn decoration_case(source: Source, base: fn(&App) -> ThemeData) {
-        let mut tester = tester();
+    fn decoration_case(tester: &mut WidgetTester, source: Source, base: fn(&App) -> ThemeData) {
         let key = GlobalKey::new();
         let tooltip = Tooltip::new()
             .key(key.clone().into())
@@ -800,55 +825,57 @@ mod tests {
             .child(SizedBox::shrink())
             .into_widget();
         pump_themed(
-            &mut tester,
+            tester,
             source,
             base,
             TooltipThemeData::new().decoration(custom_decoration()),
             |app| overlay(app, tooltip),
         );
-        ensure_visible_and_fade_in(&mut tester, &key);
+        ensure_visible_and_fade_in(tester, &key);
 
-        let tip = text_parent(&tester, 4);
-        assert_eq!(size(&tester, tip).height(), 32.0);
-        // Flutter's 74.0 (Material 2) and 74.75 (Material 3): Ahem's `TIP` + 16.0 padding * 2.
+        let tip = text_parent(tester, 4);
+        assert_eq!(size(tester, tip).height(), 32.0);
+        // Flutter's 74.0 (Material 2) and 74.75 (Material 3): FlutterTest's `TIP` + 16.0 padding * 2.
         assert_eq!(
-            size(&tester, tip).width(),
-            paragraph_size(&tester).width() + 32.0
+            size(tester, tip).width(),
+            paragraph_size(tester).width() + 32.0
         );
-        assert!(paints_rrect_over(&tester, tip, 0x80800000));
+        assert_paints(
+            &tester.painted_ops(tip.as_object()),
+            &[PaintCall::rrect(Some(Color::new(0x80800000)))],
+        );
     }
 
     #[test]
     fn material2_tooltip_decoration_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| decoration_case(Source::ThemeData, m2));
+        test_widgets(|tester| decoration_case(tester, Source::ThemeData, m2));
     }
 
     #[test]
     fn material3_tooltip_decoration_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| decoration_case(Source::ThemeData, m3));
+        test_widgets(|tester| decoration_case(tester, Source::ThemeData, m3));
     }
 
     #[test]
     fn material2_tooltip_decoration_tooltip_theme() {
-        with_main_thread_stack(|| decoration_case(Source::TooltipTheme, m2));
+        test_widgets(|tester| decoration_case(tester, Source::TooltipTheme, m2));
     }
 
     #[test]
     fn material3_tooltip_decoration_tooltip_theme() {
-        with_main_thread_stack(|| decoration_case(Source::TooltipTheme, m3));
+        test_widgets(|tester| decoration_case(tester, Source::TooltipTheme, m3));
     }
 
-    fn height_and_padding_case(source: Source) {
+    fn height_and_padding_case(tester: &mut WidgetTester, source: Source) {
         const CUSTOM_TOOLTIP_HEIGHT: f64 = 100.0;
         const CUSTOM_PADDING_VAL: f64 = 20.0;
-        let mut tester = tester();
         let key = GlobalKey::new();
         let tooltip = Tooltip::new()
             .key(key.clone().into())
             .message(TOOLTIP_TEXT)
             .into_widget();
         pump_themed(
-            &mut tester,
+            tester,
             source,
             m3,
             TooltipThemeData::new()
@@ -863,10 +890,10 @@ mod tests {
         tester.pump_and_settle();
 
         // Select [Tooltip.padding] instead of [Tooltip.margin].
-        let padding = tester.ancestor_of_type::<Padding>(tooltip_text(&tester));
-        let tip = size(&tester, tester.render_box_of(padding));
-        let center = tester.ancestor_of_type::<Center>(tooltip_text(&tester));
-        let content = size(&tester, tester.render_box_of(center));
+        let padding = tester.ancestor_of_type::<Padding>(tooltip_text(tester));
+        let tip = size(tester, tester.render_box_of(padding));
+        let center = tester.ancestor_of_type::<Center>(tooltip_text(tester));
+        let content = size(tester, tester.render_box_of(center));
 
         assert_eq!(tip.height(), CUSTOM_TOOLTIP_HEIGHT);
         assert_eq!(
@@ -878,12 +905,12 @@ mod tests {
 
     #[test]
     fn tooltip_height_and_padding_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| height_and_padding_case(Source::ThemeData));
+        test_widgets(|tester| height_and_padding_case(tester, Source::ThemeData));
     }
 
     #[test]
     fn tooltip_height_and_padding_tooltip_theme() {
-        with_main_thread_stack(|| height_and_padding_case(Source::TooltipTheme));
+        test_widgets(|tester| height_and_padding_case(tester, Source::TooltipTheme));
     }
 
     /// Dart's `Theme(data: ThemeData(tooltipTheme:), child:)` around the home, or a
@@ -906,154 +933,149 @@ mod tests {
     }
 
     /// Dart's mouse `TestGesture` added at the origin and wiggled before the tree is pumped.
-    fn mouse_at_origin(tester: &mut WidgetTester) -> crate::test_support::TestPointer {
-        let mut gesture = WidgetTester::mouse(1, 0);
+    fn mouse_at_origin(tester: &mut WidgetTester) -> TestPointer {
+        let mut gesture = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut gesture, Offset::ZERO);
         tester.move_to(&mut gesture, Offset::new(1.0, 1.0), false);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         tester.move_to(&mut gesture, Offset::ZERO, false);
         gesture
     }
 
-    fn wait_duration_case(source: Source) {
+    fn wait_duration_case(tester: &mut WidgetTester, source: Source) {
         const CUSTOM_WAIT_DURATION: Duration = Duration::from_millis(500);
-        let mut tester = tester();
-        let mut gesture = mouse_at_origin(&mut tester);
+        let mut gesture = mouse_at_origin(tester);
         pump_home_themed(
-            &mut tester,
+            tester,
             source,
             TooltipThemeData::new().wait_duration(CUSTOM_WAIT_DURATION),
         );
 
         tester.move_to(&mut gesture, Offset::ZERO, false);
-        tester.pump(Duration::ZERO);
-        let at = tooltip_center(&tester);
+        tester.pump();
+        let at = tooltip_center(tester);
         tester.move_to(&mut gesture, at, false);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(250));
-        assert!(!found(&tester, TOOLTIP_TEXT)); // Should not appear yet
-        tester.pump(Duration::from_millis(250));
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1); // Should appear after customWaitDuration
+        tester.pump();
+        tester.pump_by(Duration::from_millis(250));
+        assert!(!found(tester, TOOLTIP_TEXT)); // Should not appear yet
+        tester.pump_by(Duration::from_millis(250));
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget()); // Should appear after customWaitDuration
 
         tester.move_to(&mut gesture, Offset::ZERO, false);
-        tester.pump(Duration::ZERO);
+        tester.pump();
 
         // Wait for it to disappear.
-        tester.pump(Duration::from_millis(100)); // Should disappear after default exitDuration
-        assert!(!found(&tester, TOOLTIP_TEXT));
+        tester.pump_by(Duration::from_millis(100)); // Should disappear after default exitDuration
+        assert!(!found(tester, TOOLTIP_TEXT));
     }
 
     #[test]
     fn tooltip_wait_duration_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| wait_duration_case(Source::ThemeData));
+        test_widgets(|tester| wait_duration_case(tester, Source::ThemeData));
     }
 
     #[test]
     fn tooltip_wait_duration_tooltip_theme() {
-        with_main_thread_stack(|| wait_duration_case(Source::TooltipTheme));
+        test_widgets(|tester| wait_duration_case(tester, Source::TooltipTheme));
     }
 
-    fn show_duration_case(source: Source) {
+    fn show_duration_case(tester: &mut WidgetTester, source: Source) {
         const CUSTOM_SHOW_DURATION: Duration = Duration::from_millis(3000);
-        let mut tester = tester();
         pump_home_themed(
-            &mut tester,
+            tester,
             source,
             TooltipThemeData::new().show_duration(CUSTOM_SHOW_DURATION),
         );
 
-        let at = tooltip_center(&tester);
-        let mut gesture = WidgetTester::touch(1);
+        let at = tooltip_center(tester);
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, at);
-        tester.pump(Duration::ZERO);
-        tester.pump(K_LONG_PRESS_TIMEOUT);
+        tester.pump();
+        tester.pump_by(K_LONG_PRESS_TIMEOUT);
         tester.up(&gesture);
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(2000)); // Tooltip should remain
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
-        tester.pump(Duration::from_millis(1000));
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
+        tester.pump();
+        tester.pump_by(Duration::from_millis(2000)); // Tooltip should remain
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
+        tester.pump_by(Duration::from_millis(1000));
         tester.pump_and_settle(); // Tooltip should fade out after
-        assert!(!found(&tester, TOOLTIP_TEXT));
+        assert!(!found(tester, TOOLTIP_TEXT));
     }
 
     #[test]
     fn tooltip_show_duration_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| show_duration_case(Source::ThemeData));
+        test_widgets(|tester| show_duration_case(tester, Source::ThemeData));
     }
 
     #[test]
     fn tooltip_show_duration_tooltip_theme() {
-        with_main_thread_stack(|| show_duration_case(Source::TooltipTheme));
+        test_widgets(|tester| show_duration_case(tester, Source::TooltipTheme));
     }
 
-    fn exit_duration_case(source: Source) {
+    fn exit_duration_case(tester: &mut WidgetTester, source: Source) {
         const CUSTOM_EXIT_DURATION: Duration = Duration::from_millis(500);
-        let mut tester = tester();
-        let mut gesture = mouse_at_origin(&mut tester);
+        let mut gesture = mouse_at_origin(tester);
         pump_home_themed(
-            &mut tester,
+            tester,
             source,
             TooltipThemeData::new().exit_duration(CUSTOM_EXIT_DURATION),
         );
 
-        let at = tooltip_center(&tester);
+        let at = tooltip_center(tester);
         tester.move_to(&mut gesture, at, false);
-        tester.pump(Duration::ZERO);
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+        tester.pump();
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
 
         tester.move_to(&mut gesture, Offset::ZERO, false);
-        tester.pump(Duration::from_millis(200));
+        tester.pump_by(Duration::from_millis(200));
         tester.pump_and_settle();
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
 
         // Wait for it to disappear.
-        tester.pump(CUSTOM_EXIT_DURATION);
+        tester.pump_by(CUSTOM_EXIT_DURATION);
         tester.pump_and_settle();
-        assert!(!found(&tester, TOOLTIP_TEXT));
+        assert!(!found(tester, TOOLTIP_TEXT));
     }
 
     #[test]
     fn tooltip_exit_duration_theme_data_tooltip_theme() {
-        with_main_thread_stack(|| exit_duration_case(Source::ThemeData));
+        test_widgets(|tester| exit_duration_case(tester, Source::ThemeData));
     }
 
     #[test]
     fn tooltip_exit_duration_tooltip_theme() {
-        with_main_thread_stack(|| exit_duration_case(Source::TooltipTheme));
+        test_widgets(|tester| exit_duration_case(tester, Source::TooltipTheme));
     }
 
-    fn trigger_mode_case(source: Source) {
-        let mut tester = tester();
+    fn trigger_mode_case(tester: &mut WidgetTester, source: Source) {
         pump_home_themed(
-            &mut tester,
+            tester,
             source,
             TooltipThemeData::new().trigger_mode(TooltipTriggerMode::Tap),
         );
 
-        let at = tooltip_center(&tester);
-        let mut gesture = WidgetTester::touch(1);
+        let at = tooltip_center(tester);
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, at);
         tester.up(&gesture);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         // Tooltip should show immediately after tap
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
     }
 
     #[test]
     fn tooltip_trigger_mode_theme_data_trigger_mode() {
-        with_main_thread_stack(|| trigger_mode_case(Source::ThemeData));
+        test_widgets(|tester| trigger_mode_case(tester, Source::ThemeData));
     }
 
     #[test]
     fn tooltip_trigger_mode_tooltip_theme() {
-        with_main_thread_stack(|| trigger_mode_case(Source::TooltipTheme));
+        test_widgets(|tester| trigger_mode_case(tester, Source::TooltipTheme));
     }
 
     #[test]
     fn tooltip_respects_constraints_from_the_ambient_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let theme_constraints = BoxConstraints::tight_for(Some(300.0), Some(150.0));
             let tooltip = Tooltip::new()
@@ -1063,15 +1085,15 @@ mod tests {
                 .child(waft_widgets::ColoredBox::new(Colors::GREEN.primary()))
                 .into_widget();
             pump_themed(
-                &mut tester,
+                tester,
                 Source::ThemeData,
                 m3,
                 TooltipThemeData::new().constraints(theme_constraints),
                 |_app| tooltip,
             );
-            ensure_visible_and_fade_in(&mut tester, &key);
+            ensure_visible_and_fade_in(tester, &key);
 
-            let text_ancestor = tester.ancestors(tooltip_text(&tester))[0];
+            let text_ancestor = tester.ancestors(tooltip_text(tester))[0];
             assert_eq!(
                 text_ancestor.size(&tester.cell.borrow()),
                 Some(theme_constraints.biggest())
@@ -1081,21 +1103,20 @@ mod tests {
 
     #[test]
     fn tooltip_respects_ignore_pointer_from_the_ambient_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tooltip = Tooltip::new()
                 .message(TOOLTIP_TEXT)
                 .child(SizedBox::new().width(100.0).height(100.0))
                 .into_widget();
             pump_themed(
-                &mut tester,
+                tester,
                 Source::ThemeData,
                 m3,
                 TooltipThemeData::new().ignore_pointer(false),
                 |_app| tooltip,
             );
 
-            let raw_tooltips = tester.find_by_type::<RawTooltip>();
+            let raw_tooltips = find::by_type::<RawTooltip>().evaluate(tester);
             assert_eq!(raw_tooltips.len(), 1);
             let ignore_pointer = tester.widget(raw_tooltips[0], |raw_tooltip: &RawTooltip| {
                 raw_tooltip.ignore_pointer

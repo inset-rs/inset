@@ -385,6 +385,8 @@ mod tests {
     use waft_painting::{BorderSide, CircleBorder, EdgeInsets};
     use waft_widgets::{Icon, IconData, Opacity, WidgetState};
 
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+
     use super::*;
     use crate::icons::Icons;
     use crate::material::Material;
@@ -395,9 +397,8 @@ mod tests {
         respects_overlay_color, state_overlay_color, text,
     };
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m3, pump_app, tester};
+    use crate::tooltip::tests::{m3, pump_app};
 
     #[test]
     fn copy_with_equality_basics() {
@@ -485,8 +486,13 @@ mod tests {
 
     /// Dart's `_iconTheme(tester, icon)`: the nearest `IconTheme` above the icon.
     fn icon_theme(tester: &WidgetTester, icon: &IconData) -> IconThemeData {
-        let icon_theme =
-            tester.ancestor_of_type::<waft_widgets::IconTheme>(tester.find_by_icon(icon));
+        let icon_theme = tester.element(
+            find::ancestor(
+                find::by_icon(icon),
+                find::by_type::<waft_widgets::IconTheme>(),
+            )
+            .first(),
+        );
         tester.widget(icon_theme, |icon_theme: &waft_widgets::IconTheme| {
             icon_theme.data.clone()
         })
@@ -515,7 +521,7 @@ mod tests {
 
     #[test]
     fn navigation_bar_theme_data_values_are_used_when_no_navigation_bar_properties_are_specified() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let height = 200.0;
             let background_color = Color::new(0x00000001);
             let elevation = 42.0;
@@ -532,8 +538,7 @@ mod tests {
             let behavior = NavigationDestinationLabelBehavior::AlwaysShow;
             let padding = EdgeInsetsGeometry::all(8.0);
 
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .bottom_navigation_bar(NavigationBarTheme::new(
                         NavigationBarThemeData::new()
@@ -577,26 +582,26 @@ mod tests {
                     .into_widget()
             });
 
-            assert_eq!(bar_size(&tester).height(), height);
+            assert_eq!(bar_size(tester).height(), height);
             assert_eq!(
-                bar_material(&tester, |material: &Material| material.color),
+                bar_material(tester, |material: &Material| material.color),
                 Some(background_color)
             );
             assert_eq!(
-                bar_material(&tester, |material: &Material| material.elevation),
+                bar_material(tester, |material: &Material| material.elevation),
                 elevation
             );
-            let (color, shape) = indicator_decoration(&tester);
+            let (color, shape) = indicator_decoration(tester);
             assert_eq!(color, Some(indicator_color));
             assert_eq!(&*shape, &indicator_shape() as &dyn ShapeBorder);
-            let selected = icon_theme(&tester, &Icons::favorite());
+            let selected = icon_theme(tester, &Icons::favorite());
             assert_eq!(selected.size, Some(selected_icon_size));
             assert_eq!(
                 selected.color.as_deref().copied(),
                 Some(selected_icon_color)
             );
             assert_eq!(selected.opacity, Some(selected_icon_opacity));
-            let unselected = icon_theme(&tester, &Icons::star_border());
+            let unselected = icon_theme(tester, &Icons::star_border());
             assert_eq!(unselected.size, Some(unselected_icon_size));
             assert_eq!(
                 unselected.color.as_deref().copied(),
@@ -604,31 +609,30 @@ mod tests {
             );
             assert_eq!(unselected.opacity, Some(unselected_icon_opacity));
             assert_eq!(
-                label_style(&tester, "Abc").font_size,
+                label_style(tester, "Abc").font_size,
                 Some(selected_label_font_size)
             );
             assert_eq!(
-                label_style(&tester, "Def").font_size,
+                label_style(tester, "Def").font_size,
                 Some(unselected_label_font_size)
             );
-            assert_eq!(label_behavior(&tester), behavior);
-            assert_eq!(label_padding(&tester, "Abc"), padding);
-            assert_eq!(label_padding(&tester, "Def"), padding);
+            assert_eq!(label_behavior(tester), behavior);
+            assert_eq!(label_padding(tester, "Abc"), padding);
+            assert_eq!(label_padding(tester, "Def"), padding);
         });
     }
 
     #[test]
     fn navigation_bar_values_take_priority_over_navigation_bar_theme_data_values_when_both_properties_are_specified()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let height = 200.0;
             let background_color = Color::new(0x00000001);
             let elevation = 42.0;
             let behavior = NavigationDestinationLabelBehavior::AlwaysShow;
             let padding = EdgeInsetsGeometry::symmetric(0.0, 16.0);
 
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .bottom_navigation_bar(NavigationBarTheme::new(
                         NavigationBarThemeData::new()
@@ -647,29 +651,28 @@ mod tests {
                     .into_widget()
             });
 
-            assert_eq!(bar_size(&tester).height(), height);
+            assert_eq!(bar_size(tester).height(), height);
             assert_eq!(
-                bar_material(&tester, |material: &Material| material.color),
+                bar_material(tester, |material: &Material| material.color),
                 Some(background_color)
             );
             assert_eq!(
-                bar_material(&tester, |material: &Material| material.elevation),
+                bar_material(tester, |material: &Material| material.elevation),
                 elevation
             );
-            assert_eq!(label_behavior(&tester), behavior);
-            assert_eq!(label_padding(&tester, "Abc"), padding);
-            assert_eq!(label_padding(&tester, "Def"), padding);
+            assert_eq!(label_behavior(tester), behavior);
+            assert_eq!(label_padding(tester, "Abc"), padding);
+            assert_eq!(label_padding(tester, "Def"), padding);
         });
     }
 
     #[test]
     fn navigation_bar_respects_navigation_bar_theme_overlay_color_in_active_pressed_hovered_states()
     {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .navigation_bar_theme(
@@ -689,16 +692,15 @@ mod tests {
                 },
             );
 
-            respects_overlay_color(&mut tester);
+            respects_overlay_color(tester);
         });
     }
 
     #[test]
     fn of_returns_the_closest_navigation_bar_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .navigation_bar_theme(NavigationBarThemeData::new().height(10.0))
@@ -713,7 +715,7 @@ mod tests {
                         .into_widget()
                 },
             );
-            assert_eq!(bar_size(&tester).height(), 64.0);
+            assert_eq!(bar_size(tester).height(), 64.0);
         });
     }
 

@@ -344,9 +344,9 @@ Ported against: aa3207e6
   Reason: language — Rust supplies widget construction through callbacks rather than runtime XAML template resources.
   Affect: Applications provide `flyout_presenter_style` when replacing the default border, scrolling or content layout.
 
-## flyout/shadow.rs → `Flyout`, `MenuFlyout`, `ContentDialog`, `NumberBox` and `ComboBox` popup shadows
+## flyout/shadow.rs → `Flyout`, `MenuFlyout`, `ContentDialog`, `NumberBox`, `ComboBox` and `AutoSuggestBox` popup shadows
 
-- Change: `Flyout`, `MenuFlyout`, `ContentDialog`, the popup of `NumberBox` and the drop-down of `ComboBox` paint their shadows using Waft's native BoxShadow blur with WinUI's default shadow colors, offsets and elevations: a flyout's rises with each nested submenu, a dialog's is the highest the recipe allows, the number box popup's is lower than a flyout's, and the combo box drop-down's matches a flyout's.
+- Change: `Flyout`, `MenuFlyout`, `ContentDialog`, the popup of `NumberBox`, the drop-down of `ComboBox` and the suggestion list of `AutoSuggestBox` paint their shadows using Waft's native BoxShadow blur with WinUI's default shadow colors, offsets and elevations: a flyout's rises with each nested submenu, a dialog's is the highest the recipe allows, the number box popup's is lower than a flyout's, and the combo box drop-down's and the suggestion list's match a flyout's.
   Reason: os — Windows Composition performs WinUI's blur, and its blur-radius conversion is not specified, so the port interprets the radii from WinUI's `DropShadowRecipe.h` using Flutter's native conversion.
   Affect: Popups have a soft shadow that becomes stronger in dark theme and at deeper submenu levels, but its softness can differ from Windows; the shadow is clipped at the application window's edges.
 
@@ -468,6 +468,42 @@ Ported against: aa3207e6
   Reason: os — the source compares with `FindNLSStringEx` under the user's locale, with flags that also ignore diacritics and apply the locale's casing, which Windows implements and this host does not provide.
   Affect: Typing `e` does not find an item that starts with `é`, and case follows Unicode's default rules rather than the user's language, as Turkish dotted and dotless i show.
 
+## auto_suggest_box/mod.rs → `AutoSuggestBox`
+
+- Change: `AutoSuggestBox` keeps its text in the application's controller and gives a change the `ProgrammaticChange` reason unless the text box reports it as the user's edit or the box makes it to show a chosen suggestion.
+  Reason: framework — WinUI sets `UserInput` by default and `ProgrammaticChange` from its own `Text` property, while here the application changes the text through the controller, which tells no one who changed it; the text box's own change callback, which only an edit calls, marks the user's.
+  Affect: Setting the controller's text raises `TextChanged` with `ProgrammaticChange`, as setting `Text` does in WinUI.
+
+- Change: `AutoSuggestBox` takes `items_source` as a new list of suggestions, clearing the selection and opening or closing the list of a focused box, only when the items' texts differ from the last list's.
+  Reason: language — the suggestions are a plain list that the application passes again whenever it builds, without the collection-changed notification WinUI's `OnItemsChanged` answers.
+  Affect: Passing the same suggestions again keeps the selection, and a list whose items read the same but differ otherwise is not taken as new; `suggestion_chosen` and `query_submitted` still lend the latest items.
+
+- Change: `AutoSuggestBox` opens or closes its list at the end of the frame when a new list of suggestions asks for it while the box takes its new widget, and an application's `is_suggestion_list_open` takes effect at the end of the frame it passes it.
+  Reason: framework — the box learns of both while it builds, when it can neither show the overlay nor run the application's code.
+  Affect: The list appears one frame after the suggestions that open it.
+
+- Change: `AutoSuggestBox` decides which side the list opens on, how tall it may be and where it goes each time it lays the list out, from the box's bounds in the root overlay, where WinUI does it when the popup opens, when the items or the box's size change, and when the candidate window moves.
+  Reason: framework — the overlay child's layout is where the box's position is known; WinUI's popup asks for it from its events.
+  Affect: A box that moves while its list is open, as in a scrolled page, can have its list change sides, which clears the selection, as a new list does.
+
+- Change: `AutoSuggestBox` measures the room above and below the box in the root overlay, the window, and its list is clipped at the window's edges.
+  Reason: os — WinUI's popup does not constrain itself to the window (`ShouldConstrainToRootBounds` is false), so on Windows it measures the room in the window's layout bounds but may draw past the window, while the overlay is the window.
+  Affect: A list that would reach past the window is cut at its edge, as it would in WinUI only near a screen's edge.
+
+- Change: `AutoSuggestBox` squares the corners of the box and the list where they meet one frame after the list opens.
+  Reason: framework — `AutoSuggestBoxHelper` does it on the popup's `Opened`, from where the popup was put, which the box learns in the list's layout, when it cannot rebuild.
+  Affect: The first frame of an open list shows the box's lower corners round.
+
+- Change: `AutoSuggestBox` shows `query_icon` at the icon's own size.
+  Reason: framework — the kit has no `SymbolIcon`, which WinUI sets to take `AutoSuggestBoxIconFontSize`, 12.
+  Affect: An application gives a `FontIcon` of size 12 for the size WinUI's `Find` symbol has.
+
+## auto_suggest_box/suggestion_item.rs → `ListViewItem` in `SuggestionsList`
+
+- Change: The suggestions are a lazy list of containers drawn as `ListViewItemPresenter` draws a `ListViewItem` in Single selection mode, with no focus of their own, rather than a `ListView`.
+  Reason: framework — the kit has no `ListView`; the box needs only its selection, its click and its item chrome, and moves the selection with the keys while the text box keeps the focus.
+  Affect: A click on a suggestion leaves the focus in the text box, and the selection indicator shrinks while pressed without its animation.
+
 ## drop_down_button.rs → `DropDownButton`
 
 - Change: `DropDownButton` uses a static Fluent chevron for the source animated icon.
@@ -505,6 +541,40 @@ Ported against: aa3207e6
 - Change: `MenuBar` groups its headers and menus using Flutter's TapRegion mechanism.
   Reason: framework — WinUI selects which elements receive input through its popup layer, while Flutter groups widgets and consumes gestures outside that group.
   Affect: Outside taps dismiss the menu without activating ordinary tap callbacks behind it, but raw pointer listeners behind the menu can still observe those pointer events.
+
+## command_bar/mod.rs → `CommandBar` and `AppBar`
+
+- Change: `CommandBar` is drawn in the root overlay, above a light-dismiss layer covering the window, from the moment it starts opening until it has closed, while its place in the layout keeps its closed size.
+  Reason: framework — WinUI lifts the open bar above the page through a layout transition element, which Waft does not have; the overlay is where a widget paints above the content after it, and the bar's subtree moves there under a global key.
+  Affect: An open bar covers the content below it and is not clipped by its parent, as in WinUI, but it also comes above a flyout or tooltip that was showing before it opened.
+
+- Change: `CommandBar` raises `Opening` and `Closing`, and moves the focus into the opening bar or back out of the closing one, at the end of the frame in which its owner's `is_open` changed.
+  Reason: framework — the bar learns of the change while it builds, when it can neither run the application's code nor move the focus, where WinUI does both from the `IsOpen` property change.
+  Affect: An `Opening` handler runs one frame after the change, with the open bar already laid out.
+
+- Change: `CommandBar` raises `DynamicOverflowItemsChanging` at the end of the frame whose layout moved the commands, not before they move.
+  Reason: framework — WinUI raises it from inside measure, and a Waft render object cannot run the application's code during layout.
+  Affect: A handler runs after the frame showing the commands already moved, and a change it makes to the commands shows a frame later.
+
+- Change: `CommandBar` keeps every primary command built in the bar and hides those it moved into the overflow, where it builds them again as overflow items.
+  Reason: framework — WinUI moves one element from the primary `ItemsControl` to the overflow's during measure, while a Waft element cannot change parents during layout.
+  Affect: A command's pointer-over and pressed state does not follow it into the overflow, and a focused command that moves loses the focus (see Deferred).
+
+- Change: `CommandBar` takes a rebuild whose commands differ in kind, label or `DynamicOverflowOrder` from the last as a reset of both command collections, every primary command back in the bar before it measures again.
+  Reason: language — the commands are values without identity, so the bar cannot see an insertion or a removal as WinUI's observable collections report one.
+  Affect: Changing a command's icon or callback keeps the overflow as it is; adding, removing or relabelling one starts over and may raise `DynamicOverflowItemsChanging` again.
+
+- Change: `CommandBar` opens upward when the menu would pass the overlay's bottom below the expanded bar, measuring the menu alone, where WinUI also counts the padding row it adds to its windowed popup, as tall as the bar.
+  Reason: os — WinUI's overflow menu is a separate window, padded so its animations have room, while the overlay needs no padding.
+  Affect: Near the window's bottom the bar keeps opening downward a little longer, by the difference between its open and closed heights: 16 pixels with labels at the bottom.
+
+- Change: `CommandBar` lets a Shift+Tab that arrives on the open bar's last element from outside the bar stop there, where WinUI's `ProcessCandidateTabStopOverride` sends it on into the overflow menu.
+  Reason: framework — the bar sees only the keys of a focus inside it, and Waft's focus traversal has no hook for a container to replace the target of a move into it.
+  Affect: Shift+Tab into a sticky open bar reaches the bar's last element before the menu; Tab and Shift+Tab within the bar pass to and from the menu as in WinUI.
+
+- Change: `AppBarButton` and `AppBarToggleButton` in the overflow menu show their accelerator text whenever an item of the menu has some, as on a machine with a keyboard.
+  Reason: os — WinUI asks Windows whether a keyboard is attached (`GetIsKeyboardPresent`).
+  Affect: The menu keeps its accelerator column on a tablet without a keyboard.
 
 ## flyout/placement.rs → `MenuFlyout` point placement
 
@@ -634,6 +704,10 @@ Ported against: aa3207e6
   Reason: framework — WinUI's bar keeps one `Items` collection whose changes reach the selection through `SelectionNode::OnSourceListChanged`, which shifts it in place, and Waft's source has no such path.
   Affect: None an application sees: the same index stays selected.
 
+- Change: `SelectorBarItem` takes a `child` in place of its text, as Flutter's `Tab` does, and gives its state's foreground to the child, the text and the icon through the inherited text style and icon theme.
+  Reason: framework — WinUI's `ItemContainer.Child` sits beside the template's icon and text and keeps its own foreground, so content such as a text with an `InfoBadge` would not follow the selected, pointer-over, pressed and disabled colours; Flutter's `TabBar` gives a tab's label its colour through `DefaultTextStyle.merge` and `IconTheme.merge`, which a child takes up without the application doing anything.
+  Affect: A child, given with `SelectorBarItem::with_child`, is drawn where the text would be, in the item's colours for its state; an item has a text or a child, not both.
+
 ## item_container.rs → `ItemContainer`
 
 - Change: `ItemContainer` takes a press through Waft's tap recognizer, which shows the pressed state once a press has lasted `kPressTimeout` or at its release, gives the press up to a list that starts to scroll, and takes the primary button only.
@@ -676,9 +750,9 @@ Ported against: aa3207e6
 
 ## items_view/selection_model.rs → `SelectionModel`
 
-- Change: `SelectionModel` holds one flat list's selection, without the tree of `IndexPath`s, the source collection or its change notifications.
+- Change: `SelectionModel` holds one flat list's selection, without the tree of `IndexPath`s or the source collection, and its owner tells it of an insertion or removal (`on_items_added`, `on_items_removed`) where WinUI's `SelectionNode` hears the collection's change notifications.
   Reason: framework — `ItemsView` asks only for a flat selection (`SelectAllFlat`), and Waft's list builder has no collection to observe.
-  Affect: Inserting or removing items does not shift the selection; an application that does so adjusts the selection itself, and items past a shortened count are dropped. A new count is a new `ItemsSource`: `ItemsViewSource::set_items` clears the selection as `SelectionModel::Source` does.
+  Affect: A `TableView`'s selection moves with its rows as `TableViewSource` inserts and removes them; an `ItemsView`'s does not, as `ItemsViewSource` has no in-place changes, and a new count is a new `ItemsSource`: `ItemsViewSource::set_items` clears the selection as `SelectionModel::Source` does.
 
 ## sort_indicator.rs → `SortIndicator`
 
@@ -720,9 +794,13 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
   Reason: framework — a widget has no methods an application can call.
   Affect: A request to a `TableViewSort` no mounted table holds answers false.
 
-- Change: `TableView`'s `SelectionChanged` reports the removed and added items by their indices in the source's items.
+- Change: `TableView`'s `SelectionChanged` reports the removed and added items by their indices in the source's items, a removed item by the index it had.
   Reason: language — the items are values with no identity to pass as `Object`s.
-  Affect: A handler reads `removed_items` and `added_items` as `usize` indices into `TableViewSource::items`.
+  Affect: A handler reads `removed_items` and `added_items` as `usize` indices for `TableViewSource::item`, and an index in `removed_items` of an item the source no longer holds names whatever moved into its place.
+
+- Change: `TableView` builds its rows by their index in the view, so a row inserted or removed above the focused row leaves the focus at its position rather than with its item.
+  Reason: framework — WinUI's `ItemsRepeater` moves a realized element with its item (`ElementIndexChanged`), while Waft's list builder builds each index anew.
+  Affect: After a live insertion above it, the focus visual and the arrow keys' starting row are on the row now at the focused index; the selection follows its item.
 
 - Change: `TableView`'s keyboard navigation brings a row that is not built into view at an offset estimated from the height of the nearest built row, and focuses it once built.
   Reason: framework — Waft's `SliverList` cannot build an arbitrary row on demand as `ItemsRepeater::GetOrCreateElement` does.
@@ -734,9 +812,17 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
 
 ## table_view/source.rs → `TableViewSource`
 
-- Change: `TableViewSource` holds the items it is given, and `set_items` replaces them all, as the collection it wraps raising a reset, the filter and the sorts applied again to the new items.
-  Reason: framework — WinUI's source observes an `IObservableVector` and applies insertions and removals to its projection one by one, following each row by its object's identity, and the port has no collection to observe.
-  Affect: Giving a table new items clears its selection.
+- Change: `TableViewSource` holds the items it is given and takes the collection's changes as calls, `insert`, `remove` and `replace` for one item, `update` for an item's values and `set_items` for a reset, and names a row by its item's index, which it moves as items are inserted and removed.
+  Reason: language — WinUI's source observes an `IObservableVector` of objects that raise `PropertyChanged`, and follows each row by its object's identity, and Rust items are values with no identity to observe.
+  Affect: An application changes the items through the source: `update` changes an item's values and keeps its row selected, as `PropertyChanged` does, and `replace` puts a new item in its place and deselects its row.
+
+- Change: `TableViewSource` places every inserted, removed, replaced or updated item at its exact row, among a filter's rows and within a sort's ties by source order, where WinUI's shaping rebuilds the whole view for a change under a filter without a sort, for an item that ties with a sorted row unless it is the last item, and for removing an item the filter left out.
+  Reason: deliberate improvement — each row of the view knows its item's source index, which WinUI's projection of objects does not carry, so the place source order gives can always be found.
+  Affect: The selection stays on its item through those changes, where WinUI's rebuild clears it.
+
+- Change: `TableViewSource::update` moves an updated item's row to its new place when a sort key changed, and adds or removes the row when the filter's answer changed, where WinUI's shaping sorts and filters again only on a collection change and leaves a row whose sort key changed through `PropertyChanged` at its old place until the next one (`ShapedItemsSource::ApplyIncrementalChange`, and the limitation `TableView_Sort.cpp` notes).
+  Reason: deliberate improvement — an update is a call on the source, so the source knows which item changed and can place it, where WinUI's source hears no `PropertyChanged`.
+  Affect: A live table stays sorted and filtered as its values change, and a row that moves keeps its selection without a `SelectionChanged`.
 
 - Change: `TableViewSource::sort` adds a sort axis on every call, where WinUI's `Sort` replaces the axis an earlier call declared with the same key selector.
   Reason: language — a Rust closure has no identity by which a later call could name an earlier axis.
@@ -811,12 +897,11 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
 - `Page`'s `TopAppBar` and `BottomAppBar`, whose closed height WinUI also keeps the content clear of, remain deferred. Trigger: The kit ports `AppBar`.
 - `Page`'s navigation members, `Frame`, `NavigationCacheMode` and `OnNavigatedTo`, `OnNavigatedFrom` and `OnNavigatingFrom`, remain deferred. Trigger: The kit ports `Frame`.
 - `Page` giving the focus to its first focusable element when it loads with nothing focused, with the soft keyboard held back for that focus (`InitialFocusSIPSuspender`), remains deferred. Trigger: Waft's text input can be focused without showing the soft keyboard.
-- `SelectionNode::OnSourceListChanged`, which shifts or drops the selection when items are added to or removed from the same `ItemsSource`, remains deferred; `ItemsViewSource::set_items` replaces the items and clears the selection. Trigger: A caller that changes items in place.
+- `ItemsViewSource`'s in-place changes, which `SelectionModel::on_items_added` and `on_items_removed` would follow as `TableViewSource`'s do, remain deferred; `ItemsViewSource::set_items` replaces the items and clears the selection. Trigger: A caller that changes an `ItemsView`'s items in place.
 - `ItemsView`'s other layouts, `LinedFlowLayout` and `UniformGridLayout`, its `ItemTransitionProvider` and its `VerticalScrollController` remain deferred. Trigger: An application needs a grid or flow of items, or animated insertion and removal.
 - `ItemsView`'s and `ItemContainer`'s accessibility, their automation peers and selection patterns, remains deferred. Trigger: The kit gains accessibility support.
 - `ItemsView`'s gamepad and XY focus navigation remains deferred. Trigger: A host supplies gamepad or remote-control input.
 
-- The next step for `TableView`: `insert`, `remove` and `replace` on `TableViewSource`, with `SelectionNode::OnSourceListChanged`, so that a row's selection follows it as items are added and removed in place, as WinUI's projection follows an `IObservableVector`; until then `set_items` replaces the items and clears the selection. Trigger: The inspector's live panels, which refresh their rows while one is selected.
 - `TableView`'s cell editing remains deferred: `IsReadOnly` and `IsEditing`, `CommitEdit` and `CancelEdit`, `BeginningEdit` and `CellEditEnding`, a column's `IsReadOnly` and `CellEditingTemplate`, and the text column's editor. Trigger: An application edits cells in a table.
 - `TableView`'s grouping, `GroupHeaderTemplate` and `TableViewGroupHeader`, remains deferred. Trigger: An application groups a table's rows.
 - `TableView`'s cell tooltips, `CellToolTipBinding`, remain deferred. Trigger: An application shows a cell's full text on hover.
@@ -824,3 +909,12 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
 - `TableViewColumn`'s `HeaderTemplate` and `HeaderTemplateSelector` remain deferred; a header is its text. Trigger: An application needs a header other than text.
 - `TableView`'s `IsEnabled`, with its rows' `Disabled` and `SelectedDisabled` states, remains deferred. Trigger: An application disables a table.
 - `TableView`'s right-to-left layout, its columns from the right and its header's trailing edge on the left, remains deferred. Trigger: A consumer needs right-to-left layout.
+- `AutoSuggestBox`'s `AutoMaximizeSuggestionArea` and its handling of the on-screen keyboard (`InputPane`'s showing and hiding, the scrolling of the page to keep the box and its list above the keyboard, and the `Landscape` and `Portrait` states) remain deferred; the property is kept and read by nothing. Trigger: A platform reports the area an on-screen keyboard covers.
+- `AutoSuggestBox`'s `LightDismissOverlayMode`, its `TextBoxStyle`, `DisplayMemberPath`, `ItemTemplateSelector` and `ItemContainerStyle`, its `IsEnabled`, its `Text` property and its input validation remain deferred. Trigger: An application restyles the box, disables it, or validates its text.
+- `AutoSuggestBox`'s gamepad and remote navigation, which moves the focus into the list, its alignment to the input method's candidate window, and its accessibility (the automation peer, the text box's `ControlledPeers` and the query button's name) remain deferred. Trigger: A host reports gamepad input or a candidate window, or the kit gains accessibility support.
+- `CommandBar`'s focus following a command between the bar and the overflow menu (`StoreFocusedCommandBarElement` and `RestoreCommandBarElementFocus`) remains deferred. Trigger: An application that narrows or changes a bar while one of its commands has the focus.
+- An `AppBarButton` with a `Flyout` in the overflow menu opens it beside the item on a click, as `OpenSubMenu` does, but the cascading menu's opening on hover, its delayed closing and its closing of the whole bar with a menu item (`CascadingMenuHelper`, `ISubMenuOwner`, `IMenu`) remain deferred. Trigger: An application with sub-menus in a bar's overflow.
+- `CommandBar`'s and `AppBar`'s template settings (`CommandBarTemplateSettings`, `AppBarTemplateSettings`, `AppBarButtonTemplateSettings`), the overflow presenter's style (`CommandBarOverflowPresenterStyle`, which the bar takes from the theme resources), `AppBarElementContainer` and `Page.TopAppBar` and `BottomAppBar` remain deferred. Trigger: An application that restyles the bar or hosts other controls among its commands.
+- `CommandBar`'s and its buttons' accessibility, the automation peers and the size and position in set of the `MoreButton` and the commands, remains deferred. Trigger: The kit gains accessibility support.
+- `CommandBar`'s access keys and key tips, its element sounds, its closing on system back and its gamepad navigation remain deferred. Trigger: A host exposes those facilities, or the kit provides shared access-key mode.
+- `CommandBar`'s `IsEnabled`, with its `Disabled` state's ellipsis foreground, and a command's `Visibility` remain deferred. Trigger: An application disables a bar or hides one of its commands.

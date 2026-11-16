@@ -49,6 +49,9 @@ DEFAULT_CONTROLS = (
     'PasswordBox',
     'CommandBarFlyout',
     'AppBarButton',
+    'AppBarToggleButton',
+    'AppBarSeparator',
+    'CommandBar',
     'AcrylicBrush',
     'ProgressBar',
     'Expander',
@@ -72,14 +75,20 @@ DEFAULT_CONTROLS = (
     'SortIndicator',
     'ResizeGripper',
     'TableView',
+    'ListViewItem',
+    'AutoSuggestBox',
 )
 
 NS = {
     'x': 'http://schemas.microsoft.com/winfx/2006/xaml',
     '': 'http://schemas.microsoft.com/winfx/2006/xaml/presentation',
 }
-# MenuFlyoutPresenter::UpdateTemplateSettings looks up this key in C++, not XAML.
-RUNTIME_RESOURCE_REFERENCES = {'MenuFlyout': ['FlyoutThemeTouchMinWidth']}
+# Keys looked up in C++, not XAML: MenuFlyoutPresenter::UpdateTemplateSettings's and
+# AppBar::UpdateOverlayElementBrush's.
+RUNTIME_RESOURCE_REFERENCES = {
+    'MenuFlyout': ['FlyoutThemeTouchMinWidth'],
+    'CommandBar': ['AppBarLightDismissOverlayBackground'],
+}
 # Controls whose resource dictionary is their default-style page itself rather than a
 # `<Control>_themeresources.xaml`: ResizeGripper.xaml keeps its keys there because theme-XBF
 # emission is off for the Tabular binary.

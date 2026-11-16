@@ -796,7 +796,7 @@ pub(crate) mod tests {
 
     use waft_cupertino::CupertinoScrollbarState;
     use waft_embedder::Size;
-    use waft_embedder::{Canvas, PointerDeviceKind, Rect};
+    use waft_embedder::{Canvas, PointerDeviceKind, RRect, Rect};
     use waft_gestures::{GestureBinding, PointerEvent, PointerScrollEvent};
     use waft_painting::{AxisDirection, Border, BorderSide, BorderStyle, BoxDecoration};
     use waft_rendering::{HitTestBehavior, RenderViewport, RenderViewportBase};
@@ -808,15 +808,20 @@ pub(crate) mod tests {
         SingleChildScrollView, SizedBox, SliverToBoxAdapter, StatefulBuilder, Text,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::app::{MaterialApp, MaterialScrollBehavior};
     use crate::floating_action_button::FloatingActionButton;
     use crate::icons::Icons;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{
-        Drawn, TestPointer, WidgetTester, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
+    use waft_embedder::valo::Op;
+    use waft_rendering::testing::{PaintCall, assert_paints, draws, paints_exactly};
     use waft_widgets::AnyScrollController;
 
     pub(crate) const K_SCROLLBAR_FADE_DURATION_FOR_TESTS: Duration = Duration::from_millis(300);
@@ -826,13 +831,6 @@ pub(crate) mod tests {
     pub(crate) const K_DEFAULT_THUMB_RADIUS: Radius = Radius::circular(8.0);
     pub(crate) const K_DEFAULT_IDLE_THUMB_COLOR: u32 = 0x1a000000;
     pub(crate) const K_TRANSPARENT: u32 = 0x00000000;
-
-    /// A tester on `platform` with fonts, which `material_app`'s text needs.
-    pub(crate) fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
 
     const ALL_PLATFORMS: [TargetPlatform; 6] = [
         TargetPlatform::Android,
@@ -925,8 +923,8 @@ pub(crate) mod tests {
 
     /// The Material scrollbar's state.
     fn material_state(tester: &WidgetTester) -> Handle<MaterialScrollbarState> {
-        let element = *tester
-            .find_by_type::<MaterialScrollbar>()
+        let element = *find::by_type::<MaterialScrollbar>()
+            .evaluate(tester)
             .first()
             .expect("a Material scrollbar");
         element
@@ -936,12 +934,12 @@ pub(crate) mod tests {
 
     /// What the scrollbar paints over its child: Dart's `paints` matcher on
     /// `find.byType(Scrollbar)`, without the child's own draws.
-    pub(crate) fn painted(tester: &WidgetTester) -> Vec<Drawn> {
+    pub(crate) fn painted(tester: &WidgetTester) -> Vec<Op> {
         painted_by(tester, material_state(tester))
     }
 
     /// What the scrollbar painter of `state` paints over its child.
-    fn painted_by<S: RawScrollbarStateLeaf>(tester: &WidgetTester, state: Handle<S>) -> Vec<Drawn>
+    fn painted_by<S: RawScrollbarStateLeaf>(tester: &WidgetTester, state: Handle<S>) -> Vec<Op>
     where
         S::Widget: RawScrollbarLeaf,
     {
@@ -955,7 +953,7 @@ pub(crate) mod tests {
             .size(&app);
         let mut canvas = Canvas::new();
         painter.paint(&mut app, &mut canvas, size);
-        Drawn::draws(&canvas.build())
+        canvas.build().ops().to_vec()
     }
 
     /// Dart's `paints..rect(rect: track, color:)..line(p1:, p2:, color:)`: the track and
@@ -966,14 +964,14 @@ pub(crate) mod tests {
     /// track's width from the thickness and margin it is laid out with.
     pub(crate) fn assert_track(
         tester: &WidgetTester,
-        drawn: &[Drawn],
+        drawn: &[Op],
         rect: Rect,
         color: u32,
         border: (Offset, Offset),
         border_color: u32,
     ) {
         if color == K_TRANSPARENT && border_color == K_TRANSPARENT {
-            assert_eq!(drawn.len(), 1, "only the thumb in {drawn:?}");
+            assert_eq!(draws(drawn).len(), 1, "only the thumb in {drawn:?}");
             let state = material_state(tester);
             let app = tester.cell.borrow();
             let painter = RawScrollbarState::scrollbar_painter(state, &app);
@@ -986,64 +984,50 @@ pub(crate) mod tests {
             );
             return;
         }
-        assert_eq!(
-            drawn.first(),
-            Some(&Drawn::Rect(color, rect)),
-            "the track in {drawn:?}"
-        );
-        // A stroked path's recorded bounds take in the stroke, so the border is matched by
-        // its centre and by covering both ends of the line.
-        let line = Rect::from_points(border.0, border.1);
-        let Some(Drawn::Path(painted_color, bounds)) = drawn.get(1) else {
-            panic!("the track border in {drawn:?}");
-        };
-        assert_eq!(*painted_color, border_color, "the track border's colour");
-        assert_eq!(bounds.center(), line.center(), "the track border's line");
-        assert!(
-            bounds.contains(border.0) && bounds.contains(border.1),
-            "the track border {bounds:?} covers {line:?}"
+        assert_paints(
+            drawn,
+            &[
+                PaintCall::rect_at(rect, Some(Color::new(color))),
+                PaintCall::Line {
+                    p1: Some(border.0),
+                    p2: Some(border.1),
+                    color: Some(Color::new(border_color)),
+                    stroke_width: None,
+                },
+            ],
         );
     }
 
     /// Dart's `paints..rect(rect: thumb, color:)`: a square thumb, the last draw.
-    pub(crate) fn assert_thumb_rect(drawn: &[Drawn], rect: Rect, color: u32) {
-        assert_eq!(
-            drawn.last(),
-            Some(&Drawn::Rect(color, rect)),
-            "the thumb in {drawn:?}"
-        );
+    pub(crate) fn assert_thumb_rect(drawn: &[Op], rect: Rect, color: u32) {
+        assert_paints(drawn, &[PaintCall::rect_at(rect, Some(Color::new(color)))]);
     }
 
     /// Dart's `paints..rrect(rrect: RRect.fromRectAndRadius(rect, radius), color:)`: a
-    /// rounded thumb, the last draw.
+    /// rounded thumb.
     pub(crate) fn assert_thumb_rrect(
         tester: &WidgetTester,
         rect: Rect,
         radius: Radius,
         color: u32,
     ) {
-        let drawn = painted(tester);
-        assert_eq!(
-            drawn.last(),
-            Some(&Drawn::Path(color, rect)),
-            "the thumb in {drawn:?}"
-        );
-        let state = material_state(tester);
-        let app = tester.cell.borrow();
-        assert_eq!(
-            RawScrollbarState::scrollbar_painter(state, &app).radius(&app),
-            Some(radius)
+        assert_paints(
+            &painted(tester),
+            &[PaintCall::rrect_at(
+                RRect::from_rect_and_radius(rect, radius),
+                Some(Color::new(color)),
+            )],
         );
     }
 
     /// Whether the thumb is painted: Dart's `paints..rect()` against `isNot(paints..rect())`.
     pub(crate) fn paints_thumb(tester: &WidgetTester) -> bool {
-        !painted(tester).is_empty()
+        !draws(&painted(tester)).is_empty()
     }
 
     /// Dart's `tester.startGesture(at)` and a settle.
     pub(crate) fn start_gesture(tester: &mut WidgetTester, at: Offset) -> TestPointer {
-        let mut pointer = WidgetTester::touch(1);
+        let mut pointer = TestPointer::touch(1);
         tester.down(&mut pointer, at);
         pointer
     }
@@ -1056,7 +1040,7 @@ pub(crate) mod tests {
 
     /// Dart's `tester.createGesture(kind: mouse)`, `addPointer()` and `moveTo(at)`.
     pub(crate) fn hover_at(tester: &mut WidgetTester, at: Offset) -> TestPointer {
-        let mut mouse = WidgetTester::mouse(7, 0);
+        let mut mouse = TestPointer::mouse(7, 0);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, at, false);
         mouse
@@ -1079,9 +1063,8 @@ pub(crate) mod tests {
 
     #[test]
     fn on_first_render_with_thumb_visibility_true_the_thumb_shows() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
@@ -1090,15 +1073,14 @@ pub(crate) mod tests {
                     .controller(controller),
             )));
             tester.pump_and_settle();
-            assert!(paints_thumb(&tester));
+            assert!(paints_thumb(tester));
         });
     }
 
     #[test]
     fn on_first_render_with_thumb_visibility_true_the_thumb_shows_with_primary_scroll_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
@@ -1109,15 +1091,14 @@ pub(crate) mod tests {
                 ),
             )));
             tester.pump_and_settle();
-            assert!(paints_thumb(&tester));
+            assert!(paints_thumb(tester));
         });
     }
 
     #[test]
     fn on_first_render_with_thumb_visibility_false_the_thumb_is_hidden() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
@@ -1126,15 +1107,14 @@ pub(crate) mod tests {
                     .controller(controller),
             )));
             tester.pump_and_settle();
-            assert!(!paints_thumb(&tester));
+            assert!(!paints_thumb(tester));
         });
     }
 
     #[test]
     fn toggling_thumb_visibility_while_not_scrolling_fades_the_thumb_in_and_out() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             let view_with_scroll = |tester: &WidgetTester, thumb_visibility: bool| {
                 let theme = ThemeData::new(&tester.cell.borrow());
                 build_boilerplate(Theme::new(
@@ -1144,21 +1124,21 @@ pub(crate) mod tests {
                         .controller(controller.clone()),
                 ))
             };
-            let tree = view_with_scroll(&tester, true);
+            let tree = view_with_scroll(tester, true);
             tester.pump_widget(tree);
             tester.pump_and_settle();
-            assert!(paints_thumb(&tester));
+            assert!(paints_thumb(tester));
 
-            let tree = view_with_scroll(&tester, false);
+            let tree = view_with_scroll(tester, false);
             tester.pump_widget(tree);
             tester.pump_and_settle();
-            assert!(!paints_thumb(&tester));
+            assert!(!paints_thumb(tester));
 
-            let tree = view_with_scroll(&tester, true);
+            let tree = view_with_scroll(tester, true);
             tester.pump_widget(tree);
             tester.pump_and_settle();
             assert!(
-                paints_thumb(&tester),
+                paints_thumb(tester),
                 "set thumbVisibility: true, the thumb shows directly"
             );
         });
@@ -1166,9 +1146,8 @@ pub(crate) mod tests {
 
     #[test]
     fn scrollbar_respects_thickness_and_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             let view_with_scroll = |tester: &WidgetTester, radius: Option<Radius>| {
                 let theme = ThemeData::new(&tester.cell.borrow());
                 let mut scrollbar =
@@ -1183,30 +1162,26 @@ pub(crate) mod tests {
 
             // Scroll a bit to cause the scrollbar thumb to be shown;
             // undo the scroll to put the thumb back at the top.
-            let tree = view_with_scroll(&tester, None);
+            let tree = view_with_scroll(tester, None);
             tester.pump_widget(tree);
             const SCROLL_AMOUNT: f64 = 10.0;
-            let mut scroll_gesture = start_gesture(&mut tester, Offset::new(400.0, 300.0));
+            let mut scroll_gesture = start_gesture(tester, Offset::new(400.0, 300.0));
             move_by(
-                &mut tester,
+                tester,
                 &mut scroll_gesture,
                 Offset::new(0.0, -SCROLL_AMOUNT),
             );
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(500));
-            move_by(
-                &mut tester,
-                &mut scroll_gesture,
-                Offset::new(0.0, SCROLL_AMOUNT),
-            );
-            tester.pump(Duration::ZERO);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(500));
+            move_by(tester, &mut scroll_gesture, Offset::new(0.0, SCROLL_AMOUNT));
+            tester.pump();
             tester.up(&scroll_gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Long press on the scrollbar thumb and expect it to grow
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 Rect::from_ltrb(780.0, 0.0, 800.0, 600.0),
                 K_TRANSPARENT,
@@ -1218,10 +1193,10 @@ pub(crate) mod tests {
                 Rect::from_ltrb(780.0, 0.0, 800.0, 300.0),
                 K_ANDROID_THUMB_IDLE_COLOR,
             );
-            let tree = view_with_scroll(&tester, Some(Radius::circular(10.0)));
+            let tree = view_with_scroll(tester, Some(Radius::circular(10.0)));
             tester.pump_widget(tree);
             assert_thumb_rrect(
-                &tester,
+                tester,
                 Rect::from_ltrb(780.0, 0.0, 800.0, 300.0),
                 Radius::circular(10.0),
                 K_ANDROID_THUMB_IDLE_COLOR,
@@ -1233,9 +1208,8 @@ pub(crate) mod tests {
 
     #[test]
     fn tapping_the_track_area_pages_the_scroll_view() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let scroll_controller = controller(&tester);
+        test_widgets(|tester| {
+            let scroll_controller = controller(tester);
             tester.pump_widget(
                 Directionality::new(
                     waft_embedder::TextDirection::Ltr,
@@ -1256,11 +1230,11 @@ pub(crate) mod tests {
             );
 
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
+            assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1274,13 +1248,13 @@ pub(crate) mod tests {
             );
 
             // Tap on the track area below the thumb.
-            tester.tap(Offset::new(796.0, 550.0), 1);
+            tester.tap_at(Offset::new(796.0, 550.0), 1);
             tester.pump_and_settle();
 
-            assert_eq!(offset(&tester, scroll_controller.handle()), 400.0);
-            let drawn = painted(&tester);
+            assert_eq!(offset(tester, scroll_controller.handle()), 400.0);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1294,13 +1268,13 @@ pub(crate) mod tests {
             );
 
             // Tap on the track area above the thumb.
-            tester.tap(Offset::new(796.0, 50.0), 1);
+            tester.tap_at(Offset::new(796.0, 50.0), 1);
             tester.pump_and_settle();
 
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
-            let drawn = painted(&tester);
+            assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1317,23 +1291,22 @@ pub(crate) mod tests {
 
     #[test]
     fn scrollbar_never_goes_away_until_finger_lift() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,
                 Scrollbar::new(scroll_view(None, 4000.0, 4000.0)).into_widget(),
             ));
-            let mut gesture = start_gesture(&mut tester, Offset::new(400.0, 300.0));
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, -20.0));
-            tester.pump(Duration::ZERO);
+            let mut gesture = start_gesture(tester, Offset::new(400.0, 300.0));
+            move_by(tester, &mut gesture, Offset::new(0.0, -20.0));
+            tester.pump();
             // Scrollbar fully showing
-            tester.pump(Duration::from_millis(500));
+            tester.pump_by(Duration::from_millis(500));
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
             let thumb = Rect::from_ltrb(796.0, 3.0, 800.0, 93.0);
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1342,12 +1315,12 @@ pub(crate) mod tests {
             );
             assert_thumb_rect(&drawn, thumb, K_ANDROID_THUMB_IDLE_COLOR);
 
-            tester.pump(Duration::from_secs(3));
-            tester.pump(Duration::from_secs(3));
+            tester.pump_by(Duration::from_secs(3));
+            tester.pump_by(Duration::from_secs(3));
             // Still there.
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1357,13 +1330,13 @@ pub(crate) mod tests {
             assert_thumb_rect(&drawn, thumb, K_ANDROID_THUMB_IDLE_COLOR);
 
             tester.up(&gesture);
-            tester.pump(K_SCROLLBAR_TIME_TO_FADE_FOR_TESTS);
-            tester.pump(K_SCROLLBAR_FADE_DURATION_FOR_TESTS / 2);
+            tester.pump_by(K_SCROLLBAR_TIME_TO_FADE_FOR_TESTS);
+            tester.pump_by(K_SCROLLBAR_FADE_DURATION_FOR_TESTS / 2);
 
             // Opacity going down now.
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1376,10 +1349,9 @@ pub(crate) mod tests {
 
     #[test]
     fn scrollbar_thumb_can_be_dragged() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let scroll_controller = controller(&tester);
-            let theme = m2(&tester);
+        test_widgets(|tester| {
+            let scroll_controller = controller(tester);
+            let theme = m2(tester);
             tester.pump_widget(material_app(
                 theme,
                 PrimaryScrollController::new(
@@ -1392,11 +1364,11 @@ pub(crate) mod tests {
                 .into_widget(),
             ));
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
+            assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1411,12 +1383,12 @@ pub(crate) mod tests {
 
             // Drag the thumb down to scroll down.
             const SCROLL_AMOUNT: f64 = 10.0;
-            let mut drag_scrollbar_gesture = start_gesture(&mut tester, Offset::new(797.0, 45.0));
+            let mut drag_scrollbar_gesture = start_gesture(tester, Offset::new(797.0, 45.0));
             tester.pump_and_settle();
 
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1427,7 +1399,7 @@ pub(crate) mod tests {
             assert_thumb_rect(&drawn, get_starting_thumb_rect(true), 0x99000000);
 
             move_by(
-                &mut tester,
+                tester,
                 &mut drag_scrollbar_gesture,
                 Offset::new(0.0, SCROLL_AMOUNT),
             );
@@ -1437,10 +1409,10 @@ pub(crate) mod tests {
 
             // The view has scrolled more than it would have by a swipe pointer of the
             // same distance.
-            assert!(offset(&tester, scroll_controller.handle()) > SCROLL_AMOUNT * 2.0);
-            let drawn = painted(&tester);
+            assert!(offset(tester, scroll_controller.handle()) > SCROLL_AMOUNT * 2.0);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1472,8 +1444,7 @@ pub(crate) mod tests {
     #[test]
     fn scrollbar_thumb_color_completes_a_hover_animation() {
         for platform in DESKTOP {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let theme =
                     ThemeData::builder()
                         .use_material3(false)
@@ -1481,22 +1452,22 @@ pub(crate) mod tests {
                             <dyn WidgetStateProperty<Option<bool>>>::all(Some(true)),
                         ))
                         .build(&tester.cell.borrow());
-                let app = desktop_app(&tester, theme);
+                let app = desktop_app(tester, theme);
                 tester.pump_widget(app);
                 tester.pump_and_settle();
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     get_starting_thumb_rect(false),
                     K_DEFAULT_THUMB_RADIUS,
                     K_DEFAULT_IDLE_THUMB_COLOR,
                 );
 
-                hover_at(&mut tester, Offset::new(794.0, 5.0));
+                hover_at(tester, Offset::new(794.0, 5.0));
                 tester.pump_and_settle();
 
                 // Hover color
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     get_starting_thumb_rect(false),
                     K_DEFAULT_THUMB_RADIUS,
                     0x80000000,
@@ -1528,58 +1499,59 @@ pub(crate) mod tests {
 
     #[test]
     fn hover_animation_is_not_triggered_by_tap_gestures() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Linux);
-            let theme = hover_track_theme(&tester, false, None);
-            let app = desktop_app(&tester, theme);
-            tester.pump_widget(app);
-            tester.pump_and_settle();
-            assert_thumb_rrect(
-                &tester,
-                get_starting_thumb_rect(false),
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
-            tester.tap(Offset::new(794.0, 5.0), 1);
-            tester.pump_and_settle();
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::Linux),
+            |tester| {
+                let theme = hover_track_theme(tester, false, None);
+                let app = desktop_app(tester, theme);
+                tester.pump_widget(app);
+                tester.pump_and_settle();
+                assert_thumb_rrect(
+                    tester,
+                    get_starting_thumb_rect(false),
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
+                tester.tap_at(Offset::new(794.0, 5.0), 1);
+                tester.pump_and_settle();
 
-            // Tapping triggers a hover enter event. In this case, the Scrollbar should
-            // be unchanged since it ignores hover events that aren't from a mouse.
-            assert_thumb_rrect(
-                &tester,
-                get_starting_thumb_rect(false),
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
+                // Tapping triggers a hover enter event. In this case, the Scrollbar should
+                // be unchanged since it ignores hover events that aren't from a mouse.
+                assert_thumb_rrect(
+                    tester,
+                    get_starting_thumb_rect(false),
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
 
-            // Now trigger hover with a mouse.
-            hover_at(&mut tester, Offset::new(794.0, 5.0));
-            tester.pump(Duration::ZERO);
+                // Now trigger hover with a mouse.
+                hover_at(tester, Offset::new(794.0, 5.0));
+                tester.pump();
 
-            let drawn = painted(&tester);
-            assert_track(
-                &tester,
-                &drawn,
-                Rect::from_ltrb(784.0, 0.0, 800.0, 600.0),
-                0x08000000,
-                (Offset::new(784.0, 0.0), Offset::new(784.0, 600.0)),
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
-            // Scrollbar thumb is larger; hover color
-            assert_thumb_rrect(
-                &tester,
-                Rect::from_ltrb(786.0, 0.0, 798.0, 90.0),
-                K_DEFAULT_THUMB_RADIUS,
-                0x80000000,
-            );
-        });
+                let drawn = painted(tester);
+                assert_track(
+                    tester,
+                    &drawn,
+                    Rect::from_ltrb(784.0, 0.0, 800.0, 600.0),
+                    0x08000000,
+                    (Offset::new(784.0, 0.0), Offset::new(784.0, 600.0)),
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
+                // Scrollbar thumb is larger; hover color
+                assert_thumb_rrect(
+                    tester,
+                    Rect::from_ltrb(786.0, 0.0, 798.0, 90.0),
+                    K_DEFAULT_THUMB_RADIUS,
+                    0x80000000,
+                );
+            },
+        );
     }
 
     #[test]
     fn scrollbar_theme_data_thickness_replaces_hover_thickness() {
         for platform in DESKTOP {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let thickness = <dyn WidgetStateProperty<Option<f64>>>::resolve_with(
                     |states: &WidgetStates| {
                         if states.contains(&WidgetState::Hovered) {
@@ -1589,23 +1561,23 @@ pub(crate) mod tests {
                         Some(8.0)
                     },
                 );
-                let theme = hover_track_theme(&tester, false, Some(thickness));
-                let app = desktop_app(&tester, theme);
+                let theme = hover_track_theme(tester, false, Some(thickness));
+                let app = desktop_app(tester, theme);
                 tester.pump_widget(app);
                 tester.pump_and_settle();
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     get_starting_thumb_rect(false),
                     K_DEFAULT_THUMB_RADIUS,
                     K_DEFAULT_IDLE_THUMB_COLOR,
                 );
 
-                hover_at(&mut tester, Offset::new(794.0, 5.0));
-                tester.pump(Duration::ZERO);
+                hover_at(tester, Offset::new(794.0, 5.0));
+                tester.pump();
 
-                let drawn = painted(&tester);
+                let drawn = painted(tester);
                 assert_track(
-                    &tester,
+                    tester,
                     &drawn,
                     Rect::from_ltrb(756.0, 0.0, 800.0, 600.0),
                     0x08000000,
@@ -1614,7 +1586,7 @@ pub(crate) mod tests {
                 );
                 // Scrollbar thumb is larger; hover color
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(758.0, 0.0, 798.0, 90.0),
                     K_DEFAULT_THUMB_RADIUS,
                     0x80000000,
@@ -1626,25 +1598,24 @@ pub(crate) mod tests {
     #[test]
     fn scrollbar_track_visibility_on_hovered() {
         for platform in DESKTOP {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let theme = hover_track_theme(&tester, false, None);
-                let app = desktop_app(&tester, theme);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let theme = hover_track_theme(tester, false, None);
+                let app = desktop_app(tester, theme);
                 tester.pump_widget(app);
                 tester.pump_and_settle();
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     get_starting_thumb_rect(false),
                     K_DEFAULT_THUMB_RADIUS,
                     K_DEFAULT_IDLE_THUMB_COLOR,
                 );
 
-                hover_at(&mut tester, Offset::new(794.0, 5.0));
-                tester.pump(Duration::ZERO);
+                hover_at(tester, Offset::new(794.0, 5.0));
+                tester.pump();
 
-                let drawn = painted(&tester);
+                let drawn = painted(tester);
                 assert_track(
-                    &tester,
+                    tester,
                     &drawn,
                     Rect::from_ltrb(784.0, 0.0, 800.0, 600.0),
                     0x08000000,
@@ -1653,7 +1624,7 @@ pub(crate) mod tests {
                 );
                 // Scrollbar thumb is larger; hover color
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(786.0, 0.0, 798.0, 90.0),
                     K_DEFAULT_THUMB_RADIUS,
                     0x80000000,
@@ -1664,8 +1635,7 @@ pub(crate) mod tests {
 
     #[test]
     fn adaptive_scrollbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let view_with_scroll = |tester: &WidgetTester, platform: TargetPlatform| {
                 let theme = ThemeData::builder()
                     .platform(platform)
@@ -1676,42 +1646,61 @@ pub(crate) mod tests {
                 ))
             };
 
-            let tree = view_with_scroll(&tester, TargetPlatform::Android);
+            let tree = view_with_scroll(tester, TargetPlatform::Android);
             tester.pump_widget(tree);
             tester.drag_from(Offset::new(400.0, 300.0), Offset::new(0.0, -10.0), 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Scrollbar fully showing
-            tester.pump(Duration::from_millis(500));
-            assert!(paints_thumb(&tester));
-            assert!(tester.find_by_type::<CupertinoScrollbar>().is_empty());
+            tester.pump_by(Duration::from_millis(500));
+            assert!(paints_thumb(tester));
+            expect(
+                tester,
+                &find::by_type::<CupertinoScrollbar>(),
+                finds_nothing(),
+            );
 
-            let tree = view_with_scroll(&tester, TargetPlatform::IOS);
+            let tree = view_with_scroll(tester, TargetPlatform::IOS);
             tester.pump_widget(tree);
-            assert_eq!(tester.find_by_type::<CupertinoScrollbar>().len(), 1);
-            assert!(tester.find_by_type::<MaterialScrollbar>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<CupertinoScrollbar>(),
+                finds_one_widget(),
+            );
+            expect(
+                tester,
+                &find::by_type::<MaterialScrollbar>(),
+                finds_nothing(),
+            );
             tester.pump_and_settle();
 
             // Only iOS adapts: macOS keeps the Material scrollbar.
-            let tree = view_with_scroll(&tester, TargetPlatform::MacOS);
+            let tree = view_with_scroll(tester, TargetPlatform::MacOS);
             tester.pump_widget(tree);
-            assert!(tester.find_by_type::<CupertinoScrollbar>().is_empty());
-            assert_eq!(tester.find_by_type::<MaterialScrollbar>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<CupertinoScrollbar>(),
+                finds_nothing(),
+            );
+            expect(
+                tester,
+                &find::by_type::<MaterialScrollbar>(),
+                finds_one_widget(),
+            );
         });
     }
 
     #[test]
     fn scrollbar_passes_controller_to_cupertino_scrollbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::IOS);
-            let controller = controller(&tester);
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let controller = controller(tester);
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
                 Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                     .controller(controller.clone()),
             )));
-            let cupertino = *tester
-                .find_by_type::<CupertinoScrollbar>()
+            let cupertino = *find::by_type::<CupertinoScrollbar>()
+                .evaluate(tester)
                 .first()
                 .expect("a Cupertino scrollbar on iOS");
             let passed = tester.widget(cupertino, |scrollbar: &CupertinoScrollbar| {
@@ -1723,82 +1712,83 @@ pub(crate) mod tests {
 
     #[test]
     fn scrollbar_dragging_can_be_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Fuchsia);
-            let scroll_controller = controller(&tester);
-            let theme = m2(&tester);
-            tester.pump_widget(material_app(
-                theme,
-                PrimaryScrollController::new(
-                    scroll_controller.clone(),
-                    Scrollbar::new(scroll_view(None, 4000.0, 4000.0))
-                        .interactive(false)
-                        .thumb_visibility(true)
-                        .controller(scroll_controller.clone()),
-                )
-                .into_widget(),
-            ));
-            tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
-            let drawn = painted(&tester);
-            assert_track(
-                &tester,
-                &drawn,
-                Rect::from_ltrb(788.0, 0.0, 800.0, 600.0),
-                K_TRANSPARENT,
-                (Offset::new(788.0, 0.0), Offset::new(788.0, 600.0)),
-                K_TRANSPARENT,
-            );
-            assert_thumb_rrect(
-                &tester,
-                get_starting_thumb_rect(false),
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::Fuchsia),
+            |tester| {
+                let scroll_controller = controller(tester);
+                let theme = m2(tester);
+                tester.pump_widget(material_app(
+                    theme,
+                    PrimaryScrollController::new(
+                        scroll_controller.clone(),
+                        Scrollbar::new(scroll_view(None, 4000.0, 4000.0))
+                            .interactive(false)
+                            .thumb_visibility(true)
+                            .controller(scroll_controller.clone()),
+                    )
+                    .into_widget(),
+                ));
+                tester.pump_and_settle();
+                assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
+                let drawn = painted(tester);
+                assert_track(
+                    tester,
+                    &drawn,
+                    Rect::from_ltrb(788.0, 0.0, 800.0, 600.0),
+                    K_TRANSPARENT,
+                    (Offset::new(788.0, 0.0), Offset::new(788.0, 600.0)),
+                    K_TRANSPARENT,
+                );
+                assert_thumb_rrect(
+                    tester,
+                    get_starting_thumb_rect(false),
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
 
-            // Try to drag the thumb down.
-            const SCROLL_AMOUNT: f64 = 10.0;
-            let mut drag_scrollbar_thumb_gesture =
-                start_gesture(&mut tester, Offset::new(797.0, 45.0));
-            tester.pump_and_settle();
-            move_by(
-                &mut tester,
-                &mut drag_scrollbar_thumb_gesture,
-                Offset::new(0.0, SCROLL_AMOUNT),
-            );
-            tester.pump_and_settle();
-            tester.up(&drag_scrollbar_thumb_gesture);
-            tester.pump_and_settle();
-            // Dragging on the thumb does not change the offset.
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
+                // Try to drag the thumb down.
+                const SCROLL_AMOUNT: f64 = 10.0;
+                let mut drag_scrollbar_thumb_gesture =
+                    start_gesture(tester, Offset::new(797.0, 45.0));
+                tester.pump_and_settle();
+                move_by(
+                    tester,
+                    &mut drag_scrollbar_thumb_gesture,
+                    Offset::new(0.0, SCROLL_AMOUNT),
+                );
+                tester.pump_and_settle();
+                tester.up(&drag_scrollbar_thumb_gesture);
+                tester.pump_and_settle();
+                // Dragging on the thumb does not change the offset.
+                assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
 
-            // Drag in the track area to validate pass through to scrollable.
-            let mut drag_pass_through_track = start_gesture(&mut tester, Offset::new(797.0, 250.0));
-            move_by(
-                &mut tester,
-                &mut drag_pass_through_track,
-                Offset::new(0.0, -SCROLL_AMOUNT),
-            );
-            tester.pump_and_settle();
-            tester.up(&drag_pass_through_track);
-            tester.pump_and_settle();
-            // The scroll view received the drag.
-            assert_eq!(offset(&tester, scroll_controller.handle()), SCROLL_AMOUNT);
+                // Drag in the track area to validate pass through to scrollable.
+                let mut drag_pass_through_track = start_gesture(tester, Offset::new(797.0, 250.0));
+                move_by(
+                    tester,
+                    &mut drag_pass_through_track,
+                    Offset::new(0.0, -SCROLL_AMOUNT),
+                );
+                tester.pump_and_settle();
+                tester.up(&drag_pass_through_track);
+                tester.pump_and_settle();
+                // The scroll view received the drag.
+                assert_eq!(offset(tester, scroll_controller.handle()), SCROLL_AMOUNT);
 
-            // Tap on the track to validate the scroll view will not page.
-            tester.tap(Offset::new(797.0, 200.0), 1);
-            tester.pump_and_settle();
-            // The offset should not have changed.
-            assert_eq!(offset(&tester, scroll_controller.handle()), SCROLL_AMOUNT);
-        });
+                // Tap on the track to validate the scroll view will not page.
+                tester.tap_at(Offset::new(797.0, 200.0), 1);
+                tester.pump_and_settle();
+                // The offset should not have changed.
+                assert_eq!(offset(tester, scroll_controller.handle()), SCROLL_AMOUNT);
+            },
+        );
     }
 
     #[test]
     fn scrollbar_dragging_is_disabled_by_default_on_android() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let tap_count = Rc::new(Cell::new(0));
-            let scroll_controller = controller(&tester);
+            let scroll_controller = controller(tester);
             let theme = ThemeData::new(&tester.cell.borrow());
             let on_tap = {
                 let tap_count = Rc::clone(&tap_count);
@@ -1824,11 +1814,11 @@ pub(crate) mod tests {
                 .into_widget(),
             ));
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
+            assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 K_ANDROID_TRACK_DIMENSIONS,
                 K_TRANSPARENT,
@@ -1849,10 +1839,10 @@ pub(crate) mod tests {
                 move_by(tester, &mut gesture, offset);
                 tester.up(&gesture);
             };
-            drag_without_slop(&mut tester, Offset::new(0.0, SCROLL_AMOUNT));
+            drag_without_slop(tester, Offset::new(0.0, SCROLL_AMOUNT));
             tester.pump_and_settle();
             // Dragging on the thumb does not change the offset.
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
+            assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
             assert_eq!(tap_count.get(), 0);
 
             // Try to drag up in the thumb area to validate pass through to scrollable.
@@ -1863,30 +1853,30 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             // The scroll view received the drag.
-            assert_eq!(offset(&tester, scroll_controller.handle()), SCROLL_AMOUNT);
+            assert_eq!(offset(tester, scroll_controller.handle()), SCROLL_AMOUNT);
             assert_eq!(tap_count.get(), 0);
 
             // Drag in the track area to validate pass through to scrollable.
-            drag_without_slop(&mut tester, Offset::new(0.0, -SCROLL_AMOUNT));
+            drag_without_slop(tester, Offset::new(0.0, -SCROLL_AMOUNT));
             tester.pump_and_settle();
             // The scroll view received the drag.
             assert_eq!(
-                offset(&tester, scroll_controller.handle()),
+                offset(tester, scroll_controller.handle()),
                 SCROLL_AMOUNT * 2.0
             );
             assert_eq!(tap_count.get(), 0);
 
             // Tap on the thumb to validate the scroll view receives a click.
-            tester.tap(Offset::new(797.0, 45.0), 1);
+            tester.tap_at(Offset::new(797.0, 45.0), 1);
             tester.pump_and_settle();
             assert_eq!(tap_count.get(), 1);
 
             // Tap on the track to validate the scroll view will not page and receives a click.
-            tester.tap(Offset::new(797.0, 400.0), 1);
+            tester.tap_at(Offset::new(797.0, 400.0), 1);
             tester.pump_and_settle();
             // The offset should not have changed.
             assert_eq!(
-                offset(&tester, scroll_controller.handle()),
+                offset(tester, scroll_controller.handle()),
                 SCROLL_AMOUNT * 2.0
             );
             assert_eq!(tap_count.get(), 2);
@@ -1895,9 +1885,8 @@ pub(crate) mod tests {
 
     #[test]
     fn scrollbar_scroll_orientation_works_correctly() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let scroll_controller = controller(&tester);
+        test_widgets(|tester| {
+            let scroll_controller = controller(tester);
             let theme = ThemeData::builder()
                 .platform(TargetPlatform::Android)
                 .build(&tester.cell.borrow());
@@ -1914,9 +1903,9 @@ pub(crate) mod tests {
             )));
             tester.pump_and_settle();
 
-            let drawn = painted(&tester);
+            let drawn = painted(tester);
             assert_track(
-                &tester,
+                tester,
                 &drawn,
                 Rect::from_ltrb(0.0, 0.0, 4.0, 600.0),
                 K_TRANSPARENT,
@@ -1933,8 +1922,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scrollbar_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,
@@ -1942,8 +1930,8 @@ pub(crate) mod tests {
                     .child(SizedBox::shrink().child(Scrollbar::new(SingleChildScrollView::new())))
                     .into_widget(),
             ));
-            let scrollbar = *tester
-                .find_by_type::<Scrollbar>()
+            let scrollbar = *find::by_type::<Scrollbar>()
+                .evaluate(tester)
                 .first()
                 .expect("the scrollbar");
             let app = tester.cell.borrow();
@@ -1958,93 +1946,93 @@ pub(crate) mod tests {
 
     #[test]
     fn material_3_scrollbar_colors_come_from_the_color_scheme_on_surface() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Linux);
-            let theme = hover_track_theme(&tester, true, None);
-            let on_surface = theme.color_scheme.on_surface;
-            let app = desktop_app(&tester, theme);
-            tester.pump_widget(app);
-            tester.pump_and_settle();
-            #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
-            let idle = on_surface.with_opacity(0.1).to_argb32();
-            assert_thumb_rrect(
-                &tester,
-                get_starting_thumb_rect(false),
-                K_DEFAULT_THUMB_RADIUS,
-                idle,
-            );
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::Linux),
+            |tester| {
+                let theme = hover_track_theme(tester, true, None);
+                let on_surface = theme.color_scheme.on_surface;
+                let app = desktop_app(tester, theme);
+                tester.pump_widget(app);
+                tester.pump_and_settle();
+                #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
+                let idle = on_surface.with_opacity(0.1).to_argb32();
+                assert_thumb_rrect(
+                    tester,
+                    get_starting_thumb_rect(false),
+                    K_DEFAULT_THUMB_RADIUS,
+                    idle,
+                );
 
-            hover_at(&mut tester, Offset::new(794.0, 5.0));
-            tester.pump(Duration::ZERO);
-            #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
-            let (track, border, hover) = (
-                on_surface.with_opacity(0.03).to_argb32(),
-                on_surface.with_opacity(0.1).to_argb32(),
-                on_surface.with_opacity(0.5).to_argb32(),
-            );
-            let drawn = painted(&tester);
-            assert_track(
-                &tester,
-                &drawn,
-                Rect::from_ltrb(784.0, 0.0, 800.0, 600.0),
-                track,
-                (Offset::new(784.0, 0.0), Offset::new(784.0, 600.0)),
-                border,
-            );
-            assert_thumb_rrect(
-                &tester,
-                Rect::from_ltrb(786.0, 0.0, 798.0, 90.0),
-                K_DEFAULT_THUMB_RADIUS,
-                hover,
-            );
-        });
+                hover_at(tester, Offset::new(794.0, 5.0));
+                tester.pump();
+                #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
+                let (track, border, hover) = (
+                    on_surface.with_opacity(0.03).to_argb32(),
+                    on_surface.with_opacity(0.1).to_argb32(),
+                    on_surface.with_opacity(0.5).to_argb32(),
+                );
+                let drawn = painted(tester);
+                assert_track(
+                    tester,
+                    &drawn,
+                    Rect::from_ltrb(784.0, 0.0, 800.0, 600.0),
+                    track,
+                    (Offset::new(784.0, 0.0), Offset::new(784.0, 600.0)),
+                    border,
+                );
+                assert_thumb_rrect(
+                    tester,
+                    Rect::from_ltrb(786.0, 0.0, 798.0, 90.0),
+                    K_DEFAULT_THUMB_RADIUS,
+                    hover,
+                );
+            },
+        );
     }
 
     #[test]
     fn a_hovered_thumb_without_a_track_fades_to_the_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Windows);
-            let theme = ThemeData::builder()
-                .use_material3(false)
-                .scrollbar_theme(
-                    ScrollbarThemeData::new().thumb_visibility(<dyn WidgetStateProperty<
-                        Option<bool>,
-                    >>::all(Some(
-                        true,
-                    ))),
-                )
-                .build(&tester.cell.borrow());
-            let app = desktop_app(&tester, theme);
-            tester.pump_widget(app);
-            tester.pump_and_settle();
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::Windows),
+            |tester| {
+                let theme =
+                    ThemeData::builder()
+                        .use_material3(false)
+                        .scrollbar_theme(ScrollbarThemeData::new().thumb_visibility(
+                            <dyn WidgetStateProperty<Option<bool>>>::all(Some(true)),
+                        ))
+                        .build(&tester.cell.borrow());
+                let app = desktop_app(tester, theme);
+                tester.pump_widget(app);
+                tester.pump_and_settle();
 
-            let mouse = hover_at(&mut tester, Offset::new(794.0, 5.0));
-            assert_eq!(mouse.kind, PointerDeviceKind::Mouse);
-            // Halfway through the 200ms hover animation the thumb is halfway between the
-            // idle and the hover colour.
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(100));
-            let halfway = Color::lerp(
-                Some(Color::new(K_DEFAULT_IDLE_THUMB_COLOR)),
-                Some(Color::new(0x80000000)),
-                0.5,
-            )
-            .expect("both colors are given")
-            .to_argb32();
-            assert_thumb_rrect(
-                &tester,
-                get_starting_thumb_rect(false),
-                K_DEFAULT_THUMB_RADIUS,
-                halfway,
-            );
-        });
+                let mouse = hover_at(tester, Offset::new(794.0, 5.0));
+                assert_eq!(mouse.kind, PointerDeviceKind::Mouse);
+                // Halfway through the 200ms hover animation the thumb is halfway between the
+                // idle and the hover colour.
+                tester.pump();
+                tester.pump_by(Duration::from_millis(100));
+                let halfway = Color::lerp(
+                    Some(Color::new(K_DEFAULT_IDLE_THUMB_COLOR)),
+                    Some(Color::new(0x80000000)),
+                    0.5,
+                )
+                .expect("both colors are given")
+                .to_argb32();
+                assert_thumb_rrect(
+                    tester,
+                    get_starting_thumb_rect(false),
+                    K_DEFAULT_THUMB_RADIUS,
+                    halfway,
+                );
+            },
+        );
     }
 
     // 'MaterialScrollBehavior flings on different platforms'.
     #[test]
     fn material_scroll_behavior_flings_on_different_platforms() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let get_scroll_offset = |tester: &WidgetTester| {
                 let viewport = *tester.all::<RenderViewport>().last().expect("a viewport");
                 let app = tester.cell.borrow();
@@ -2083,50 +2071,48 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 );
-                tester.pump(Duration::from_secs(5)); // to let the theme animate
+                tester.pump_by(Duration::from_secs(5)); // to let the theme animate
             };
             let fling = |tester: &mut WidgetTester| {
-                let scrollable = *tester
-                    .find_by_type::<Scrollable>()
+                let scrollable = *find::by_type::<Scrollable>()
+                    .evaluate(tester)
                     .first()
                     .expect("a scrollable");
-                let center = tester
-                    .global_rect(tester.render_box_of(scrollable))
-                    .center();
+                let center = tester.get_rect(scrollable).center();
                 tester.fling_from(center, Offset::new(0.0, -DRAG_OFFSET), 1000.0, 1);
             };
 
             const DRAG_OFFSET: f64 = 200.0;
 
-            pump_test(&mut tester, TargetPlatform::Android);
-            fling(&mut tester);
-            assert_eq!(get_scroll_offset(&tester), DRAG_OFFSET);
-            tester.pump(Duration::ZERO); // trigger fling
-            assert_eq!(get_scroll_offset(&tester), DRAG_OFFSET);
-            tester.pump(Duration::from_secs(5));
-            let android_result = get_scroll_offset(&tester);
+            pump_test(tester, TargetPlatform::Android);
+            fling(tester);
+            assert_eq!(get_scroll_offset(tester), DRAG_OFFSET);
+            tester.pump(); // trigger fling
+            assert_eq!(get_scroll_offset(tester), DRAG_OFFSET);
+            tester.pump_by(Duration::from_secs(5));
+            let android_result = get_scroll_offset(tester);
 
-            reset_scroll_offset(&tester);
+            reset_scroll_offset(tester);
 
-            pump_test(&mut tester, TargetPlatform::IOS);
-            fling(&mut tester);
+            pump_test(tester, TargetPlatform::IOS);
+            fling(tester);
             // Scroll starts ease into the scroll on iOS.
-            assert!((get_scroll_offset(&tester) - 197.16666666666669).abs() < 1e-10);
-            tester.pump(Duration::ZERO); // trigger fling
-            assert!((get_scroll_offset(&tester) - 197.16666666666669).abs() < 1e-10);
-            tester.pump(Duration::from_secs(5));
-            let ios_result = get_scroll_offset(&tester);
+            assert!((get_scroll_offset(tester) - 197.16666666666669).abs() < 1e-10);
+            tester.pump(); // trigger fling
+            assert!((get_scroll_offset(tester) - 197.16666666666669).abs() < 1e-10);
+            tester.pump_by(Duration::from_secs(5));
+            let ios_result = get_scroll_offset(tester);
 
-            reset_scroll_offset(&tester);
+            reset_scroll_offset(tester);
 
-            pump_test(&mut tester, TargetPlatform::MacOS);
-            fling(&mut tester);
+            pump_test(tester, TargetPlatform::MacOS);
+            fling(tester);
             // Scroll starts ease into the scroll on iOS.
-            assert!((get_scroll_offset(&tester) - 197.16666666666669).abs() < 1e-10);
-            tester.pump(Duration::ZERO); // trigger fling
-            assert!((get_scroll_offset(&tester) - 197.16666666666669).abs() < 1e-10);
-            tester.pump(Duration::from_secs(5));
-            let mac_os_result = get_scroll_offset(&tester);
+            assert!((get_scroll_offset(tester) - 197.16666666666669).abs() < 1e-10);
+            tester.pump(); // trigger fling
+            assert!((get_scroll_offset(tester) - 197.16666666666669).abs() < 1e-10);
+            tester.pump_by(Duration::from_secs(5));
+            let mac_os_result = get_scroll_offset(tester);
 
             // Android is slipperier than MacOS, so the scroll offset should be greater.
             assert!(android_result > mac_os_result);
@@ -2140,8 +2126,7 @@ pub(crate) mod tests {
     // "Scrollbar doesn't show when tapping list".
     #[test]
     fn scrollbar_does_not_show_when_tapping_list() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let rows = (0..8).map(|index| {
                 SizedBox::new()
                     .height(40.0)
@@ -2167,25 +2152,28 @@ pub(crate) mod tests {
                 SchedulerBinding::transient_callback_count(&mut tester.cell.borrow_mut())
             };
             assert_eq!(
-                transient_callback_count(&tester),
+                transient_callback_count(tester),
                 0,
                 "Building a list with a scrollbar triggered an animation."
             );
-            let list = *tester.find_by_type::<ListView>().first().expect("a list");
-            let center = tester.global_rect(tester.render_box_of(list)).center();
-            tester.tap(center, 1);
+            let list = *find::by_type::<ListView>()
+                .evaluate(tester)
+                .first()
+                .expect("a list");
+            let center = tester.get_rect(list).center();
+            tester.tap_at(center, 1);
             assert_eq!(
-                transient_callback_count(&tester),
+                transient_callback_count(tester),
                 0,
                 "Tapping a block with a scrollbar triggered an animation."
             );
             for _ in 0..4 {
-                tester.pump(Duration::from_millis(200));
+                tester.pump_by(Duration::from_millis(200));
             }
             tester.drag_from(center, Offset::new(0.0, -10.0), 1);
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
             for _ in 0..4 {
-                tester.pump(Duration::from_millis(200));
+                tester.pump_by(Duration::from_millis(200));
             }
         });
     }
@@ -2193,8 +2181,7 @@ pub(crate) mod tests {
     // 'ScrollbarPainter does not divide by zero'.
     #[test]
     fn scrollbar_painter_does_not_divide_by_zero() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.pump_widget(build_boilerplate(
                 SizedBox::new()
                     .height(200.0)
@@ -2208,15 +2195,15 @@ pub(crate) mod tests {
             ));
 
             let scroll_painter = {
-                let state = material_state(&tester);
+                let state = material_state(tester);
                 RawScrollbarState::scrollbar_painter(state, &tester.cell.borrow())
             };
             // Dragging makes the scrollbar first appear.
-            let text = *tester.find_text("0").first().expect("the text");
-            let center = tester.global_rect(tester.render_box_of(text)).center();
+            let text = *find::text("0").evaluate(tester).first().expect("the text");
+            let center = tester.get_rect(text).center();
             tester.drag_from(center, Offset::new(0.0, -10.0), 1);
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
             let mut app = tester.cell.borrow_mut();
             let metrics = FixedScrollMetrics::new(
@@ -2244,8 +2231,7 @@ pub(crate) mod tests {
         expected = "A ScrollController is required when Scrollbar.thumbVisibility is true."
     )]
     fn when_thumb_visibility_is_true_must_pass_a_controller_or_find_primary_scroll_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
@@ -2259,9 +2245,8 @@ pub(crate) mod tests {
     #[test]
     #[should_panic(expected = "The Scrollbar's ScrollController has no ScrollPosition attached.")]
     fn when_thumb_visibility_is_true_must_pass_a_controller_that_is_attached_to_a_scroll_view() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
@@ -2315,7 +2300,7 @@ pub(crate) mod tests {
         /// ScrollPositions during the transition: Dart's `tester.drag` and `pump`, then
         /// `tester.takeException()`.
         fn swipe_and_take_exception(tester: &mut WidgetTester) -> String {
-            let first = tester.find_text("Test")[0];
+            let first = find::text("Test").evaluate(tester)[0];
             let center = {
                 let render = tester.render_box_of(first);
                 let app = tester.cell.borrow();
@@ -2324,7 +2309,7 @@ pub(crate) mod tests {
             };
             let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 tester.drag_from(center, Offset::new(-100.0, 0.0), 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
             }))
             .expect_err("two attached positions panic");
             panicked
@@ -2334,13 +2319,12 @@ pub(crate) mod tests {
                 .expect("a panic message")
         }
 
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Asserts when using the PrimaryScrollController.
-            let mut tester = tester_on(TargetPlatform::Android);
-            let app = build_app(&tester, None);
+            let app = build_app(tester, None);
             tester.pump_widget(app);
             assert_eq!(
-                swipe_and_take_exception(&mut tester),
+                swipe_and_take_exception(tester),
                 "The PrimaryScrollController is attached to more than one ScrollPosition.\n\
                  The Scrollbar requires a single ScrollPosition in order to be painted.\n\
                  When Scrollbar.thumbVisibility is true, the associated ScrollController must \
@@ -2352,15 +2336,14 @@ pub(crate) mod tests {
                  the current context. ScrollView.primary can override this behavior."
             );
         });
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Asserts when using the ScrollController provided by the user; Dart's second app
             // has its own key, so a fresh tester stands for it.
-            let mut tester = tester_on(TargetPlatform::Android);
-            let scroll_controller = controller(&tester);
-            let app = build_app(&tester, Some(scroll_controller.clone()));
+            let scroll_controller = controller(tester);
+            let app = build_app(tester, Some(scroll_controller.clone()));
             tester.pump_widget(app);
             assert_eq!(
-                swipe_and_take_exception(&mut tester),
+                swipe_and_take_exception(tester),
                 "The provided ScrollController is attached to more than one ScrollPosition.\n\
                  The Scrollbar requires a single ScrollPosition in order to be painted.\n\
                  When Scrollbar.thumbVisibility is true, the associated ScrollController must \
@@ -2398,40 +2381,39 @@ pub(crate) mod tests {
 
     /// Dart's `tester.fling(find.byType(SingleChildScrollView), Offset(0.0, -10.0), 10)`.
     fn fling_scroll_view(tester: &mut WidgetTester) {
-        let view = *tester
-            .find_by_type::<SingleChildScrollView>()
+        let view = *find::by_type::<SingleChildScrollView>()
+            .evaluate(tester)
             .first()
             .expect("the scroll view");
-        let center = tester.global_rect(tester.render_box_of(view)).center();
+        let center = tester.get_rect(view).center();
         tester.fling_from(center, Offset::new(0.0, -10.0), 10.0, 1);
     }
 
     /// Dart's `tester.tap(find.byType(FloatingActionButton))`.
     fn tap_floating_action_button(tester: &mut WidgetTester) {
-        let button = *tester
-            .find_by_type::<FloatingActionButton>()
+        let button = *find::by_type::<FloatingActionButton>()
+            .evaluate(tester)
             .first()
             .expect("the button");
-        let center = tester.global_rect(tester.render_box_of(button)).center();
-        tester.tap(center, 2);
+        let center = tester.get_rect(button).center();
+        tester.tap_at(center, 2);
     }
 
     // 'With thumbVisibility: true, fling a scroll. While it is still scrolling, set
     // thumbVisibility: false. The thumb should not fade out until the scrolling stops.'
     #[test]
     fn with_thumb_visibility_true_the_thumb_does_not_fade_out_until_a_fling_stops() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             tester.pump_widget(toggled_view(controller.clone(), true));
             tester.pump_and_settle();
-            fling_scroll_view(&mut tester);
-            assert!(paints_thumb(&tester));
+            fling_scroll_view(tester);
+            assert!(paints_thumb(tester));
 
-            tap_floating_action_button(&mut tester);
+            tap_floating_action_button(tester);
             tester.pump_and_settle();
             // Scrollbar is not showing after scroll finishes
-            assert!(!paints_thumb(&tester));
+            assert!(!paints_thumb(tester));
         });
     }
 
@@ -2439,17 +2421,16 @@ pub(crate) mod tests {
     // shown directly'.
     #[test]
     fn with_thumb_visibility_false_setting_it_true_shows_the_thumb_directly() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             tester.pump_widget(toggled_view(controller.clone(), false));
             tester.pump_and_settle();
-            assert!(!paints_thumb(&tester));
+            assert!(!paints_thumb(tester));
 
-            tap_floating_action_button(&mut tester);
+            tap_floating_action_button(tester);
             tester.pump_and_settle();
             // Scrollbar is not showing after scroll finishes
-            assert!(paints_thumb(&tester));
+            assert!(paints_thumb(tester));
         });
     }
 
@@ -2457,30 +2438,29 @@ pub(crate) mod tests {
     // thumbVisibility: true. The thumb should not fade even after the scrolling stops'.
     #[test]
     fn with_thumb_visibility_false_setting_it_true_during_a_fling_keeps_the_thumb() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             tester.pump_widget(toggled_view(controller.clone(), false));
             tester.pump_and_settle();
-            assert!(!paints_thumb(&tester));
-            fling_scroll_view(&mut tester);
-            assert!(paints_thumb(&tester));
+            assert!(!paints_thumb(tester));
+            fling_scroll_view(tester);
+            assert!(paints_thumb(tester));
 
-            tap_floating_action_button(&mut tester);
-            tester.pump(Duration::ZERO);
-            assert!(paints_thumb(&tester));
+            tap_floating_action_button(tester);
+            tester.pump();
+            assert!(paints_thumb(tester));
 
             // Wait for the timer delay to expire.
-            tester.pump(Duration::from_millis(600)); // _kScrollbarTimeToFade
+            tester.pump_by(Duration::from_millis(600)); // _kScrollbarTimeToFade
             tester.pump_and_settle();
             // Scrollbar thumb is showing after scroll finishes and timer ends.
-            assert!(paints_thumb(&tester));
+            assert!(paints_thumb(tester));
         });
     }
 
     /// What the scrollbar under the `Scrollbar` keyed `key` paints over its child, whether
     /// it adapted to a `CupertinoScrollbar` or not.
-    fn painted_under(tester: &WidgetTester, key: &GlobalKey) -> Vec<Drawn> {
+    fn painted_under(tester: &WidgetTester, key: &GlobalKey) -> Vec<Op> {
         let keyed = key
             .current_context(&tester.cell.borrow_mut())
             .expect("the keyed scrollbar is mounted");
@@ -2513,8 +2493,7 @@ pub(crate) mod tests {
     #[test]
     fn scrollbar_does_not_show_when_scroll_the_inner_scrollable_widget() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let key1 = GlobalKey::new();
                 let key2 = GlobalKey::new();
                 let outer_key = GlobalKey::new();
@@ -2577,22 +2556,19 @@ pub(crate) mod tests {
                 let inner = tester.render_object(&inner_key).as_box().expect("a box");
                 let center = tester.global_rect(inner).center();
                 tester.drag_from(center, Offset::new(0.0, -25.0), 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 // Scrollbar fully showing.
-                tester.pump(Duration::from_millis(500));
+                tester.pump_by(Duration::from_millis(500));
 
                 // Valo records no op for the transparent track and its border, which Dart's
                 // `paintsExactlyCountTimes` counts: what is left is the thumb, and the outer
                 // scrollbar draws nothing (Dart's counts on `key2` take in `key1`'s draws).
-                assert_eq!(painted_under(&tester, &key2), []);
-                let inner_drawn = painted_under(&tester, &key1);
+                assert!(draws(&painted_under(tester, &key2)).is_empty());
+                let inner_drawn = painted_under(tester, &key1);
                 match theme_platform {
                     TargetPlatform::Android => {
                         // On android, draws two rectangles for the track and thumb.
-                        assert!(
-                            matches!(inner_drawn.as_slice(), [Drawn::Rect(..)]),
-                            "{inner_drawn:?}"
-                        );
+                        paints_exactly(&draws(&inner_drawn), &[PaintCall::rect(None)]).unwrap();
                     }
                     TargetPlatform::IOS
                     | TargetPlatform::Fuchsia
@@ -2600,10 +2576,7 @@ pub(crate) mod tests {
                     | TargetPlatform::MacOS
                     | TargetPlatform::Windows => {
                         // Draws a rectangle for the track and a rounded rectangle for the thumb.
-                        assert!(
-                            matches!(inner_drawn.as_slice(), [Drawn::Path(..)]),
-                            "{inner_drawn:?}"
-                        );
+                        paints_exactly(&draws(&inner_drawn), &[PaintCall::rrect(None)]).unwrap();
                     }
                 }
             });
@@ -2613,11 +2586,10 @@ pub(crate) mod tests {
     // 'Simultaneous dragging and pointer scrolling does not cause a crash'.
     #[test]
     fn simultaneous_dragging_and_pointer_scrolling_does_not_cause_a_crash() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/70105
-            let mut tester = tester_on(TargetPlatform::Android);
-            let scroll_controller = controller(&tester);
-            let theme = m2(&tester);
+            let scroll_controller = controller(tester);
+            let theme = m2(tester);
             tester.pump_widget(material_app(
                 theme,
                 PrimaryScrollController::new(
@@ -2630,7 +2602,7 @@ pub(crate) mod tests {
                 .into_widget(),
             ));
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
+            assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
             let assert_painted = |tester: &WidgetTester, thumb: Rect, color: u32| {
                 let drawn = painted(tester);
@@ -2645,29 +2617,29 @@ pub(crate) mod tests {
                 assert_thumb_rect(&drawn, thumb, color);
             };
             assert_painted(
-                &tester,
+                tester,
                 get_starting_thumb_rect(true),
                 K_ANDROID_THUMB_IDLE_COLOR,
             );
 
             // Drag the thumb down to scroll down.
             const SCROLL_AMOUNT: f64 = 10.0;
-            let mut drag_scrollbar_gesture = start_gesture(&mut tester, Offset::new(797.0, 45.0));
+            let mut drag_scrollbar_gesture = start_gesture(tester, Offset::new(797.0, 45.0));
             tester.pump_and_settle();
 
             // Drag color
-            assert_painted(&tester, get_starting_thumb_rect(true), 0x99000000);
+            assert_painted(tester, get_starting_thumb_rect(true), 0x99000000);
 
             move_by(
-                &mut tester,
+                tester,
                 &mut drag_scrollbar_gesture,
                 Offset::new(0.0, SCROLL_AMOUNT),
             );
             tester.pump_and_settle();
-            assert!(offset(&tester, scroll_controller.handle()) > 10.0);
-            let previous_offset = offset(&tester, scroll_controller.handle());
+            assert!(offset(tester, scroll_controller.handle()) > 10.0);
+            let previous_offset = offset(tester, scroll_controller.handle());
             assert_painted(
-                &tester,
+                tester,
                 Rect::from_ltrb(796.0, 10.0, 800.0, 100.0),
                 0x99000000,
             );
@@ -2687,48 +2659,36 @@ pub(crate) mod tests {
                 );
                 app.drain_microtasks();
             };
-            pointer_scroll(
-                &mut tester,
-                Offset::new(798.0, 15.0),
-                Offset::new(0.0, 20.0),
-            );
+            pointer_scroll(tester, Offset::new(798.0, 15.0), Offset::new(0.0, 20.0));
             tester.pump_and_settle();
 
             // Scrolling while holding the drag on the scrollbar and still hovered over
             // the scrollbar should not have changed the scroll offset.
-            assert_eq!(offset(&tester, scroll_controller.handle()), previous_offset);
+            assert_eq!(offset(tester, scroll_controller.handle()), previous_offset);
             assert_painted(
-                &tester,
+                tester,
                 Rect::from_ltrb(796.0, 10.0, 800.0, 100.0),
                 0x99000000,
             );
 
             // Drag is still being held, move pointer to be hovering over another area
             // of the scrollable (not over the scrollbar) and execute another pointer scroll
-            let view = *tester
-                .find_by_type::<SingleChildScrollView>()
+            let view = *find::by_type::<SingleChildScrollView>()
+                .evaluate(tester)
                 .first()
                 .expect("the scroll view");
-            let center = tester.global_rect(tester.render_box_of(view)).center();
+            let center = tester.get_rect(view).center();
             assert_eq!(center, Offset::new(400.0, 300.0));
-            pointer_scroll(&mut tester, center, Offset::new(0.0, -90.0));
+            pointer_scroll(tester, center, Offset::new(0.0, -90.0));
             tester.pump_and_settle();
             // Scrolling while holding the drag on the scrollbar changed the offset
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
-            assert_painted(
-                &tester,
-                Rect::from_ltrb(796.0, 0.0, 800.0, 90.0),
-                0x99000000,
-            );
+            assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
+            assert_painted(tester, Rect::from_ltrb(796.0, 0.0, 800.0, 90.0), 0x99000000);
 
             tester.up(&drag_scrollbar_gesture);
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
-            assert_painted(
-                &tester,
-                Rect::from_ltrb(796.0, 0.0, 800.0, 90.0),
-                0xffbcbcbc,
-            );
+            assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
+            assert_painted(tester, Rect::from_ltrb(796.0, 0.0, 800.0, 90.0), 0xffbcbcbc);
         });
     }
 
@@ -2736,9 +2696,8 @@ pub(crate) mod tests {
     /// state is gone; here it is freed with the state's reference to it.
     #[test]
     fn a_disposed_scrollbar_frees_its_hover_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller(&tester);
+        test_widgets(|tester| {
+            let controller = controller(tester);
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
@@ -2746,7 +2705,7 @@ pub(crate) mod tests {
                     .controller(controller),
             )));
             let hover = {
-                let scrollbar = tester.find_by_type::<MaterialScrollbar>()[0];
+                let scrollbar = find::by_type::<MaterialScrollbar>().evaluate(tester)[0];
                 let app = tester.cell.borrow();
                 scrollbar
                     .state_handle::<MaterialScrollbarState>(&app)

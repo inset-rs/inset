@@ -548,24 +548,19 @@ impl RenderSliver for RenderSliverPadding {
 mod tests {
     use waft_embedder::Size;
     use waft_foundation::AppCell;
-    use waft_foundation::Ref;
     use waft_gestures::HitTestResult;
+    use waft_painting::AlignmentGeometry;
 
     use super::*;
     use crate::box_::{AnyRenderBox, BoxConstraints, RenderBox};
-    use crate::pipeline_owner::PipelineOwner;
     use crate::sliver::{RenderSliverToBoxAdapter, SliverPhysicalParentData};
     use crate::sliver_multi_box_adaptor::test_support::hit_testable_box;
+    use crate::testing::{EnginePhase, layout_with};
     use crate::viewport::RenderViewport;
     use crate::viewport_offset::FixedViewportOffset;
 
-    /// Lays a sliver out in a viewport of the given size, without a `RenderView`.
-    fn lay_out(
-        app: &mut App,
-        sliver: AnyRenderSliver,
-        size: Size,
-        scroll_offset: f64,
-    ) -> (Ref<PipelineOwner>, RenderHandle<RenderViewport>) {
+    /// Lays a sliver out in a viewport of the given size, scrolled to `scroll_offset`.
+    fn lay_out(app: &mut App, sliver: AnyRenderSliver, size: Size, scroll_offset: f64) {
         let offset = FixedViewportOffset::new(app, scroll_offset);
         let viewport = RenderViewport::new(
             app,
@@ -574,12 +569,13 @@ mod tests {
             Some(vec![sliver]),
             None,
         );
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(viewport.as_object()));
-        viewport
-            .as_box()
-            .layout(app, BoxConstraints::tight(size), false);
-        (owner, viewport)
+        layout_with(
+            app,
+            viewport.as_box(),
+            Some(BoxConstraints::tight(size)),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
+        );
     }
 
     fn padded_box(

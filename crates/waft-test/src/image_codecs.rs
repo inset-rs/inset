@@ -1,5 +1,5 @@
 //! Image codecs in memory: each answers what the test set, at once, and keeps what the app asked
-//! of it, the bytes and files opened, the frames decoded and the images encoded.
+//! of it, the bytes and files opened, the pictures decoded and the images encoded.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -7,8 +7,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use waft_embedder::image_codecs::{
-    AlphaType, HardwareImageCodecs, ImageCodecs, ImageError, ImageErrorKind, ImageFrame,
-    ImageFuture, ImageMetadata, ImageOrientation, ImageSource, PixelBuffer, PixelFormat,
+    AlphaType, HardwareImageCodecs, ImageCodecs, ImageError, ImageErrorKind, ImageFuture,
+    ImageMetadata, ImageOrientation, ImagePictures, ImageSource, PixelBuffer, PixelFormat,
     PixelLayout,
 };
 use waft_embedder::{HardwareBuffer, Size};
@@ -45,7 +45,7 @@ pub struct ImageAnswers {
 pub struct ImageFacts {
     pub mime_type: String,
     pub size: Size,
-    pub frames: Vec<ImageFrame>,
+    pub pictures: ImagePictures,
     pub orientation: ImageOrientation,
     pub metadata: ImageMetadata,
 }
@@ -57,7 +57,7 @@ impl ImageFacts {
         ImageFacts {
             mime_type: mime_type.to_owned(),
             size,
-            frames: vec![ImageFrame::default()],
+            pictures: ImagePictures::Still,
             orientation: ImageOrientation::default(),
             metadata: ImageMetadata::default(),
         }
@@ -69,9 +69,9 @@ impl ImageFacts {
 pub enum CodecCall {
     Open(Vec<u8>),
     OpenFile(PathBuf),
-    /// A frame decoded into the app's memory, or into a hardware buffer.
+    /// A picture decoded into the app's memory, or into a hardware buffer.
     Decode {
-        frame: u32,
+        index: u32,
         max_size: Option<Size>,
         hardware: bool,
     },
@@ -198,7 +198,7 @@ impl HardwareImageCodecs for MockHardwareImageCodecs {
     fn decode(
         &self,
         image: &dyn ImageSource,
-        frame: u32,
+        index: u32,
         max_size: Option<Size>,
     ) -> ImageFuture<Arc<dyn HardwareBuffer>> {
         let codecs = self
@@ -206,14 +206,14 @@ impl HardwareImageCodecs for MockHardwareImageCodecs {
             .upgrade()
             .expect("the codecs hold their hardware codecs");
         codecs.ask(CodecCall::Decode {
-            frame,
+            index,
             max_size,
             hardware: true,
         });
         let image: &dyn std::any::Any = image;
         let decoded = match image.downcast_ref::<MockImage>() {
-            Some(image) => image.checked(frame).map(|()| {
-                let [width, height] = fitted(image.facts.size, max_size);
+            Some(image) => image.checked(index).map(|()| {
+                let [width, height] = fitted(image.size_of_picture(index), max_size);
                 Arc::new(MockHardwareBuffer {
                     width,
                     height,
@@ -249,15 +249,23 @@ struct MockImage {
 }
 
 impl MockImage {
-    /// Whether the image has frame `frame`.
-    fn checked(&self, frame: u32) -> Result<(), ImageError> {
-        if (frame as usize) < self.facts.frames.len() {
+    /// Whether the image has picture `index`.
+    fn checked(&self, index: u32) -> Result<(), ImageError> {
+        if (index as usize) < self.facts.pictures.count() {
             Ok(())
         } else {
             Err(ImageError::new(
                 ImageErrorKind::Other,
-                format!("no frame {frame}"),
+                format!("no picture {index}"),
             ))
+        }
+    }
+
+    /// The size picture `index` decodes at: a page's own, and the image's otherwise.
+    fn size_of_picture(&self, index: u32) -> Size {
+        match &self.facts.pictures {
+            ImagePictures::Pages(pages) => pages.pages[index as usize].size,
+            ImagePictures::Still | ImagePictures::Animation(_) => self.facts.size,
         }
     }
 }
@@ -271,8 +279,8 @@ impl ImageSource for MockImage {
         self.facts.size
     }
 
-    fn frames(&self) -> Vec<ImageFrame> {
-        self.facts.frames.clone()
+    fn pictures(&self) -> ImagePictures {
+        self.facts.pictures.clone()
     }
 
     fn orientation(&self) -> ImageOrientation {
@@ -283,16 +291,16 @@ impl ImageSource for MockImage {
         self.facts.metadata.clone()
     }
 
-    fn decode_pixels(&self, frame: u32, max_size: Option<Size>) -> ImageFuture<PixelBuffer> {
+    fn decode_pixels(&self, index: u32, max_size: Option<Size>) -> ImageFuture<PixelBuffer> {
         self.codecs.ask(CodecCall::Decode {
-            frame,
+            index,
             max_size,
             hardware: false,
         });
-        let decoded = self.checked(frame).and_then(|()| {
+        let decoded = self.checked(index).and_then(|()| {
             let colour = self.codecs.answers().pixels?;
             Ok(pixels_of(
-                fitted(self.facts.size, max_size),
+                fitted(self.size_of_picture(index), max_size),
                 colour,
                 PixelFormat::Rgba8,
             ))
@@ -357,12 +365,12 @@ mod tests {
         assert!(codecs.hardware_image_codecs().is_none());
         let image = now(codecs.open(Arc::from(&b"bytes"[..]))).unwrap();
         assert_eq!(image.mime_type(), "image/heic");
-        assert_eq!(image.frames().len(), 1);
+        assert_eq!(image.pictures(), ImagePictures::Still);
         let pixels = now(image.decode_pixels(0, Some(Size::new(200.0, 200.0)))).unwrap();
         assert_eq!(pixels.layout().size, [200, 150]);
         assert_eq!(&pixels.bytes()[..4], [255, 0, 0, 255]);
         let past = now(image.decode_pixels(1, None)).err().unwrap();
-        assert_eq!(past.kind, ImageErrorKind::Other, "a frame it does not have");
+        assert_eq!(past.kind, ImageErrorKind::Other, "a picture it does not have");
         let encoded = now(codecs.encode_pixels(pixels, "image/png", Some(0.5)));
         assert_eq!(encoded.unwrap(), b"encoded");
         assert_eq!(
@@ -370,12 +378,12 @@ mod tests {
             [
                 CodecCall::Open(b"bytes".to_vec()),
                 CodecCall::Decode {
-                    frame: 0,
+                    index: 0,
                     max_size: Some(Size::new(200.0, 200.0)),
                     hardware: false
                 },
                 CodecCall::Decode {
-                    frame: 1,
+                    index: 1,
                     max_size: None,
                     hardware: false
                 },

@@ -20,10 +20,18 @@ waft-physics.workspace = true
 waft-rendering.workspace = true
 waft-scheduler.workspace = true
 waft-services.workspace = true
+# The platform `testing`'s tester runs an app on (feature `test-support`).
+waft-test = { workspace = true, optional = true }
+
+[features]
+# `testing`: flutter_test's `WidgetTester` and `testWidgets`, for the tests of a crate above this
+# one; this crate's own tests have it without the feature.
+test-support = ["dep:waft-test", "waft-rendering/test-support"]
 
 [dev-dependencies]
 waft-test.workspace = true
 waft-embedder = { workspace = true, features = ["test-support"] }
+waft-rendering = { workspace = true, features = ["test-support"] }
 valo-system-fonts.workspace = true
 
 [lints]

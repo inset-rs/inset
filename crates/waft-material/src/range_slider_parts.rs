@@ -14,13 +14,11 @@ use std::rc::Rc;
 
 use waft_animation::AnyAnimation;
 use waft_embedder::{
-    Canvas, ClipOp, Color, FillRule, Offset, Paint, PaintStyle, Path, PathBuilder, RRect, Radius,
-    Rect, Size, Stroke, TextDirection, rrect_radii_elliptical,
+    ClipOp, Color, FillRule, Offset, Paint, PaintStyle, Path, PathBuilder, RRect, Radius, Rect,
+    Size, Stroke, TextDirection, rrect_radii_elliptical,
 };
 use waft_foundation::App;
-use waft_painting::{
-    BorderRadius, ClipContext, PaintingBinding, TextPainter, debug_disable_shadows, draw_rrect,
-};
+use waft_painting::{BorderRadius, ClipContext, PaintingBinding, TextPainter, draw_rrect};
 use waft_rendering::{AnyRenderBox, PaintingContext};
 use waft_widgets::WidgetStates;
 
@@ -1291,23 +1289,15 @@ impl RangeSliderThumbShape for RoundRangeSliderThumbShape {
         shadow_path.arc(center, radius as f32, 0.0, std::f32::consts::TAU);
         let shadow_path = Path::new(shadow_path.build());
 
-        let mut paint_shadows = true;
-        if cfg!(debug_assertions) && debug_disable_shadows() {
-            debug_draw_shadow(context.canvas(), &shadow_path, evaluated_elevation);
-            paint_shadows = false;
-        }
-
-        if paint_shadows {
-            let device_pixel_ratio = implicit_view_device_pixel_ratio(app);
-            context.canvas().draw_shadow(
-                shadow_path.as_valo(),
-                shadow_path.fill_type,
-                Colors::BLACK.into(),
-                evaluated_elevation as f32,
-                true,
-                device_pixel_ratio as f32,
-            );
-        }
+        let device_pixel_ratio = implicit_view_device_pixel_ratio(app);
+        context.canvas().draw_shadow(
+            shadow_path.as_valo(),
+            shadow_path.fill_type,
+            Colors::BLACK.into(),
+            evaluated_elevation as f32,
+            true,
+            device_pixel_ratio as f32,
+        );
 
         context
             .canvas()
@@ -1413,21 +1403,6 @@ impl RangeLabels {
 impl Debug for RangeLabels {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "RangeLabels({}, {})", self.start, self.end)
-    }
-}
-
-/// Dart's `_debugDrawShadow`.
-fn debug_draw_shadow(canvas: &mut Canvas, path: &Path, elevation: f64) {
-    if elevation > 0.0 {
-        canvas.draw_path(
-            path.as_valo(),
-            path.fill_type,
-            &Paint {
-                color: Colors::BLACK.into(),
-                style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
-                ..Paint::default()
-            },
-        );
     }
 }
 

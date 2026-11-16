@@ -1935,33 +1935,27 @@ fn debug_assert_widget_invariants(state: Handle<CupertinoTextFieldState>, app: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::any::TypeId;
     use std::time::Duration;
     use waft_widgets::TextEditingController;
 
     use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
     use crate::app::CupertinoApp;
-    use crate::test_support::{build, pump, test_cell};
-    use waft_embedder::{
-        KeyData, KeyEventDeviceType, KeyEventType, PointerChange, PointerData, PointerDataPacket,
-        PointerDeviceKind, TextAffinity, TextSelection,
-    };
-    use waft_foundation::AppCell;
-    use waft_gestures::GestureBinding;
-    use waft_painting::PaintingBinding;
+    use waft_embedder::{KeyData, KeyEventDeviceType, KeyEventType, TextAffinity, TextSelection};
+    use waft_gestures::{K_PRIMARY_BUTTON, K_SECONDARY_BUTTON};
     use waft_rendering::HitTestBehavior;
     use waft_services::{
         KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient,
     };
-    use waft_widgets::{AnyElement, Column, Expanded, Listener, SizedBox, WidgetsBinding};
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_widgets,
+        test_widgets, test_widgets_variant,
+    };
+    use waft_widgets::{Column, Expanded, Listener, SizedBox};
 
-    fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
+    /// The platform of the mouse and keyboard cases: they pin the Apple key bindings and
+    /// selection gestures, as Dart's cases of them run under `TargetPlatformVariant.only`.
+    fn on_ios(body: impl Fn(&mut WidgetTester) + Sync) {
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), body);
     }
 
     #[test]
@@ -1979,112 +1973,42 @@ mod tests {
 
     #[test]
     fn a_text_field_with_a_placeholder_builds() {
-        let cell = test_cell();
-        install_fonts(&mut cell.borrow_mut());
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(
+        test_widgets(|tester| {
+            tester.pump_widget(
+                CupertinoApp::new().home(
                     CupertinoTextField::new()
                         .placeholder("Name")
                         .autofocus(true),
-                )
-                .into_widget(),
-        );
-    }
-
-    fn send_mouse(app: &mut App, change: PointerChange, x: f64, y: f64, pointer: i64) {
-        send_mouse_buttons(app, change, Offset::new(x, y), Offset::ZERO, pointer, 1);
-    }
-
-    fn send_mouse_delta(
-        app: &mut App,
-        change: PointerChange,
-        x: f64,
-        y: f64,
-        dx: f64,
-        dy: f64,
-        pointer: i64,
-    ) {
-        send_mouse_buttons(
-            app,
-            change,
-            Offset::new(x, y),
-            Offset::new(dx, dy),
-            pointer,
-            1,
-        );
-    }
-
-    fn send_mouse_buttons(
-        app: &mut App,
-        change: PointerChange,
-        position: Offset,
-        delta: Offset,
-        pointer: i64,
-        buttons: i64,
-    ) {
-        GestureBinding::instance(app).handle_pointer_data_packet(
-            app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Mouse,
-                pointer_identifier: pointer,
-                physical_x: position.dx() * 2.0,
-                physical_y: position.dy() * 2.0,
-                physical_delta_x: delta.dx() * 2.0,
-                physical_delta_y: delta.dy() * 2.0,
-                buttons,
-                ..PointerData::default()
-            }]),
-        );
-        app.drain_microtasks();
-    }
-
-    /// The first element of `element`'s subtree whose widget is a `W`, and that widget.
-    fn first_widget_of<W: 'static>(
-        app: &App,
-        element: AnyElement,
-    ) -> Option<(AnyElement, WidgetRef)> {
-        let widget = element.widget(app).clone();
-        if waft_widgets::downcast_widget::<W>(&*widget).is_some() {
-            return Some((element, widget));
-        }
-        let mut found = None;
-        element.visit_children(app, &mut |child| {
-            if found.is_none() {
-                found = first_widget_of::<W>(app, child);
-            }
+                ),
+            );
         });
-        found
+    }
+
+    /// A mouse click with `buttons` at `at`: the mouse hovers there, presses and releases.
+    fn click(tester: &mut WidgetTester, at: Offset, pointer: i64, buttons: i64) {
+        let mut mouse = TestPointer::mouse(pointer, buttons);
+        tester.down(&mut mouse, at);
+        tester.up(&mouse);
+    }
+
+    /// A right click at `at`, and the frame it asks for.
+    fn right_click(tester: &mut WidgetTester, at: Offset, pointer: i64) {
+        click(tester, at, pointer, K_SECONDARY_BUTTON);
+        tester.pump();
     }
 
     /// The magnifier the `EditableText` of `CupertinoApp(home: CupertinoTextField())` builds on
-    /// `platform`, as the magnifier builder tests call its builder.
-    fn default_magnifier_on(platform: TargetPlatform) -> Option<WidgetRef> {
-        let platform = waft_test::TestPlatform::new()
-            .on(platform)
-            .with_view(crate::test_support::test_view());
-        let cell = AppCell::with_platform(Rc::new(platform));
-        install_fonts(&mut cell.borrow_mut());
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(CupertinoTextField::new())
-                .into_widget(),
+    /// the tester's platform, as the magnifier builder tests call its builder.
+    fn default_magnifier(tester: &mut WidgetTester) -> Option<WidgetRef> {
+        tester.pump_widget(CupertinoApp::new().home(CupertinoTextField::new()));
+        let context = tester.element(find::by_type::<CupertinoTextField>());
+        let magnifier_builder = tester.widget(
+            find::by_type::<EditableText>(),
+            |editable_text: &EditableText| {
+                editable_text.magnifier_configuration.magnifier_builder()
+            },
         );
-        let mut app = cell.borrow_mut();
-        let root = WidgetsBinding::instance(&mut app)
-            .root_element(&app)
-            .expect("a mounted app");
-        let (context, _) =
-            first_widget_of::<CupertinoTextField>(&app, root).expect("a CupertinoTextField");
-        let (_, editable_text) =
-            first_widget_of::<EditableText>(&app, root).expect("an EditableText");
-        let magnifier_builder = waft_widgets::downcast_widget::<EditableText>(&*editable_text)
-            .expect("an EditableText")
-            .magnifier_configuration
-            .magnifier_builder();
+        let mut app = tester.cell.borrow_mut();
         let controller = MagnifierController::new(&mut app);
         let magnifier_info = app.create(ValueNotifier::new(MagnifierInfo::EMPTY));
         magnifier_builder(&mut app, context, controller, magnifier_info)
@@ -2092,25 +2016,20 @@ mod tests {
 
     #[test]
     fn should_build_cupertino_magnifier_on_ios_and_android() {
-        for platform in [TargetPlatform::IOS, TargetPlatform::Android] {
-            let magnifier = default_magnifier_on(platform).expect("a magnifier");
-            assert!(
-                waft_widgets::downcast_widget::<CupertinoTextMagnifier>(&*magnifier).is_some(),
-                "{platform:?}"
-            );
-        }
+        let variant = TargetPlatformVariant::new([TargetPlatform::IOS, TargetPlatform::Android]);
+        test_widgets_variant(variant, |tester| {
+            let magnifier = default_magnifier(tester).expect("a magnifier");
+            assert!(waft_widgets::downcast_widget::<CupertinoTextMagnifier>(&*magnifier).is_some());
+        });
     }
 
     #[test]
     fn should_build_nothing_on_all_platforms_but_ios_and_android() {
-        for platform in [
-            TargetPlatform::Fuchsia,
-            TargetPlatform::Linux,
-            TargetPlatform::MacOS,
-            TargetPlatform::Windows,
-        ] {
-            assert!(default_magnifier_on(platform).is_none(), "{platform:?}");
-        }
+        let variant =
+            TargetPlatformVariant::all_excluding(&[TargetPlatform::IOS, TargetPlatform::Android]);
+        test_widgets_variant(variant, |tester| {
+            assert!(default_magnifier(tester).is_none());
+        });
     }
 
     #[test]
@@ -2119,19 +2038,6 @@ mod tests {
             &CupertinoTextField::ios_magnifier_configuration().magnifier_builder(),
             &CupertinoTextField::ios_magnifier_configuration().magnifier_builder(),
         ));
-    }
-
-    fn tree_contains(app: &App, element: AnyElement, type_id: TypeId) -> bool {
-        if element.widget(app).widget_type() == type_id {
-            return true;
-        }
-        let mut found = false;
-        element.visit_children(app, &mut |child| {
-            if !found {
-                found = tree_contains(app, child, type_id);
-            }
-        });
-        found
     }
 
     fn field_point(app: &mut App, key: &GlobalKey, local: Offset) -> Offset {
@@ -2144,26 +2050,22 @@ mod tests {
         render_box.local_to_global(app, local, None)
     }
 
-    fn mount_field(text: &str) -> (Rc<AppCell>, Ref<TextEditingController>, GlobalKey) {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        let controller = TextEditingController::new(&mut app);
-        controller.set_text(&mut app, text);
+    fn mount_field(
+        tester: &mut WidgetTester,
+        text: &str,
+    ) -> (Ref<TextEditingController>, GlobalKey) {
+        let controller = tester.update(TextEditingController::new);
+        tester.update(|app| controller.set_text(app, text));
         let key = GlobalKey::new();
         let key_ref: KeyRef = key.clone().into();
-        drop(app);
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(
-                    CupertinoTextField::new()
-                        .key(key_ref)
-                        .controller(controller.clone().into_erased()),
-                )
-                .into_widget(),
+        tester.pump_widget(
+            CupertinoApp::new().home(
+                CupertinoTextField::new()
+                    .key(key_ref)
+                    .controller(controller.clone().into_erased()),
+            ),
         );
-        (cell, controller, key)
+        (controller, key)
     }
 
     /// One key down and up, the way the shell delivers a platform key.
@@ -2213,11 +2115,10 @@ mod tests {
     }
 
     /// Clicks the field so it takes focus, which is what puts it under the shortcuts.
-    fn focus_field(app: &mut App, key: &GlobalKey) {
-        let at = field_point(app, key, Offset::new(12.0, 12.0));
-        send_mouse(app, PointerChange::Down, at.dx(), at.dy(), 1);
-        send_mouse(app, PointerChange::Up, at.dx(), at.dy(), 1);
-        pump(app, Duration::ZERO);
+    fn focus_field(tester: &mut WidgetTester, key: &GlobalKey) {
+        let at = field_point(&mut tester.cell.borrow_mut(), key, Offset::new(12.0, 12.0));
+        click(tester, at, 1, K_PRIMARY_BUTTON);
+        tester.pump();
     }
 
     fn utf16_len(text: &str) -> i32 {
@@ -2232,385 +2133,369 @@ mod tests {
     ///
     /// `mount_field` gives the field the whole view, so there is no outside to tap.
     fn mount_field_with_room_below(
+        tester: &mut WidgetTester,
         text: &str,
-    ) -> (Rc<AppCell>, Ref<TextEditingController>, GlobalKey) {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        let controller = TextEditingController::new(&mut app);
-        controller.set_text(&mut app, text);
+    ) -> (Ref<TextEditingController>, GlobalKey) {
+        let controller = tester.update(TextEditingController::new);
+        tester.update(|app| controller.set_text(app, text));
         let key = GlobalKey::new();
         let key_ref: KeyRef = key.clone().into();
-        drop(app);
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(
-                    Column::new().children([
-                        SizedBox::new()
-                            .height(40.0)
-                            .child(
-                                CupertinoTextField::new()
-                                    .key(key_ref)
-                                    .controller(controller.clone().into_erased()),
-                            )
-                            .into_widget(),
-                        // Something for a click below the field to land on, the way the gallery's
-                        // scrollable covers its page.
-                        Expanded::new(
-                            Listener::new()
-                                .behavior(HitTestBehavior::Opaque)
-                                .child(SizedBox::expand()),
+        tester.pump_widget(
+            CupertinoApp::new().home(
+                Column::new().children([
+                    SizedBox::new()
+                        .height(40.0)
+                        .child(
+                            CupertinoTextField::new()
+                                .key(key_ref)
+                                .controller(controller.clone().into_erased()),
                         )
                         .into_widget(),
-                    ]),
-                )
-                .into_widget(),
+                    // Something for a click below the field to land on, the way the gallery's
+                    // scrollable covers its page.
+                    Expanded::new(
+                        Listener::new()
+                            .behavior(HitTestBehavior::Opaque)
+                            .child(SizedBox::expand()),
+                    )
+                    .into_widget(),
+                ]),
+            ),
         );
-        (cell, controller, key)
+        (controller, key)
     }
 
     #[test]
     fn a_click_outside_the_field_drops_its_focus() {
-        let (cell, _controller, key) = mount_field_with_room_below("Hello world");
-        let mut app = cell.borrow_mut();
-        focus_field(&mut app, &key);
-        let state = key
-            .current_state::<CupertinoTextFieldState>(&app)
-            .expect("the field mounted");
-        assert!(
-            state.effective_focus_node(&app).has_focus(&mut app),
-            "clicking the field should focus it"
-        );
+        on_ios(|tester| {
+            let (_controller, key) = mount_field_with_room_below(tester, "Hello world");
+            focus_field(tester, &key);
+            let state = key
+                .current_state::<CupertinoTextFieldState>(&tester.cell.borrow())
+                .expect("the field mounted");
+            let has_focus = |tester: &WidgetTester| {
+                let mut app = tester.cell.borrow_mut();
+                state.effective_focus_node(&app).has_focus(&mut app)
+            };
+            assert!(has_focus(tester), "clicking the field should focus it");
 
-        // Well below the field. The tap region surface is what turns this into the field's
-        // on_tap_outside.
-        send_mouse(&mut app, PointerChange::Down, 200.0, 250.0, 1);
-        send_mouse(&mut app, PointerChange::Up, 200.0, 250.0, 1);
-        pump(&mut app, Duration::ZERO);
+            // Well below the field. The tap region surface is what turns this into the field's
+            // on_tap_outside.
+            click(tester, Offset::new(200.0, 250.0), 1, K_PRIMARY_BUTTON);
+            tester.pump();
 
-        assert!(
-            !state.effective_focus_node(&app).has_focus(&mut app),
-            "a click outside the field should unfocus it"
-        );
+            assert!(
+                !has_focus(tester),
+                "a click outside the field should unfocus it"
+            );
+        });
     }
 
     #[test]
     fn backspace_deletes_a_whole_grapheme() {
-        // The host reports plain key presses, so the field keeps its own key bindings and
-        // backspace reaches them.
-        let text = format!("a{FAMILY}");
-        let (cell, controller, key) = mount_field(&text);
-        let mut app = cell.borrow_mut();
-        focus_field(&mut app, &key);
-        controller.set_selection(
-            &mut app,
-            TextSelection::collapsed(utf16_len(&text), TextAffinity::Downstream),
-        );
-        pump(&mut app, Duration::ZERO);
+        on_ios(|tester| {
+            // The host reports plain key presses, so the field keeps its own key bindings and
+            // backspace reaches them.
+            let text = format!("a{FAMILY}");
+            let (controller, key) = mount_field(tester, &text);
+            focus_field(tester, &key);
+            tester.update(|app| {
+                controller.set_selection(
+                    app,
+                    TextSelection::collapsed(utf16_len(&text), TextAffinity::Downstream),
+                )
+            });
+            tester.pump();
 
-        send_key(
-            &mut app,
-            PhysicalKeyboardKey::BACKSPACE,
-            LogicalKeyboardKey::BACKSPACE,
-            None,
-        );
-        pump(&mut app, Duration::ZERO);
+            tester.update(|app| {
+                send_key(
+                    app,
+                    PhysicalKeyboardKey::BACKSPACE,
+                    LogicalKeyboardKey::BACKSPACE,
+                    None,
+                )
+            });
+            tester.pump();
 
-        assert_eq!(
-            controller.value(&app).text,
-            "a",
-            "one backspace should take the whole family emoji"
-        );
+            assert_eq!(
+                controller.value(&tester.cell.borrow()).text,
+                "a",
+                "one backspace should take the whole family emoji"
+            );
+        });
     }
 
     #[test]
     fn a_right_click_keeps_a_selection_it_lands_on_and_takes_the_word_otherwise() {
-        let (cell, controller, key) = mount_field("Hello world again");
-        let mut app = cell.borrow_mut();
-        focus_field(&mut app, &key);
-        controller.set_selection(&mut app, TextSelection::new(0, 11));
-        pump(&mut app, Duration::ZERO);
+        on_ios(|tester| {
+            let (controller, key) = mount_field(tester, "Hello world again");
+            focus_field(tester, &key);
+            tester.update(|app| controller.set_selection(app, TextSelection::new(0, 11)));
+            tester.pump();
 
-        let inside = field_point(&mut app, &key, Offset::new(20.0, 12.0));
-        right_click(&mut app, inside, 2);
-        let kept = controller.selection(&app);
-        assert_eq!(
-            (kept.start(), kept.end()),
-            (0, 11),
-            "a right click on the selection leaves it alone, so the menu acts on it"
-        );
+            let inside = field_point(&mut tester.cell.borrow_mut(), &key, Offset::new(20.0, 12.0));
+            right_click(tester, inside, 2);
+            let kept = controller.selection(&tester.cell.borrow());
+            assert_eq!(
+                (kept.start(), kept.end()),
+                (0, 11),
+                "a right click on the selection leaves it alone, so the menu acts on it"
+            );
 
-        let outside = field_point(&mut app, &key, Offset::new(120.0, 12.0));
-        right_click(&mut app, outside, 3);
-        let word = controller.selection(&app);
-        assert_eq!(
-            (word.start(), word.end()),
-            (12, 17),
-            "a right click off the selection takes the word under it"
-        );
+            // The middle of the third glyph of "again": after the field's 7 of padding,
+            // FlutterTest's glyphs are 17 wide at the field's 17-point text.
+            let outside = field_point(
+                &mut tester.cell.borrow_mut(),
+                &key,
+                Offset::new(7.0 + 14.5 * 17.0, 12.0),
+            );
+            right_click(tester, outside, 3);
+            let word = controller.selection(&tester.cell.borrow());
+            assert_eq!(
+                (word.start(), word.end()),
+                (12, 17),
+                "a right click off the selection takes the word under it"
+            );
+        });
     }
 
     #[test]
     fn a_right_button_drag_selects_nothing() {
-        let (cell, controller, key) = mount_field("Hello world again");
-        let mut app = cell.borrow_mut();
-        focus_field(&mut app, &key);
-        controller.set_selection(
-            &mut app,
-            TextSelection::collapsed(0, TextAffinity::Downstream),
-        );
-        pump(&mut app, Duration::ZERO);
+        on_ios(|tester| {
+            let (controller, key) = mount_field(tester, "Hello world again");
+            focus_field(tester, &key);
+            tester.update(|app| {
+                controller.set_selection(app, TextSelection::collapsed(0, TextAffinity::Downstream))
+            });
+            tester.pump();
 
-        // The drift a hand makes between pressing the right button and reaching the menu.
-        let start = field_point(&mut app, &key, Offset::new(20.0, 12.0));
-        send_mouse_buttons(&mut app, PointerChange::Hover, start, Offset::ZERO, 2, 0);
-        send_mouse_buttons(&mut app, PointerChange::Down, start, Offset::ZERO, 2, 2);
-        for step in 1..=4 {
-            let to = Offset::new(start.dx() + f64::from(step) * 25.0, start.dy());
-            send_mouse_buttons(
-                &mut app,
-                PointerChange::Move,
-                to,
-                Offset::new(25.0, 0.0),
-                2,
-                2,
+            // The drift a hand makes between pressing the right button and reaching the menu.
+            let start = field_point(&mut tester.cell.borrow_mut(), &key, Offset::new(20.0, 12.0));
+            let mut mouse = TestPointer::mouse(2, K_SECONDARY_BUTTON);
+            tester.down(&mut mouse, start);
+            for step in 1..=4 {
+                let to = Offset::new(start.dx() + f64::from(step) * 25.0, start.dy());
+                tester.move_to(&mut mouse, to, true);
+            }
+            tester.up(&mouse);
+            tester.pump();
+
+            let selection = controller.selection(&tester.cell.borrow());
+            assert!(
+                selection.is_collapsed(),
+                "the right button never drag-selects, got {selection:?}"
             );
-        }
-        let end = Offset::new(start.dx() + 100.0, start.dy());
-        send_mouse_buttons(&mut app, PointerChange::Up, end, Offset::ZERO, 2, 0);
-        pump(&mut app, Duration::ZERO);
-
-        let selection = controller.selection(&app);
-        assert!(
-            selection.is_collapsed(),
-            "the right button never drag-selects, got {selection:?}"
-        );
-    }
-
-    fn right_click(app: &mut App, at: Offset, pointer: i64) {
-        send_mouse_buttons(app, PointerChange::Hover, at, Offset::ZERO, pointer, 0);
-        send_mouse_buttons(app, PointerChange::Down, at, Offset::ZERO, pointer, 2);
-        send_mouse_buttons(app, PointerChange::Up, at, Offset::ZERO, pointer, 0);
-        pump(app, Duration::ZERO);
+        });
     }
 
     #[test]
     fn meta_a_selects_all_the_text() {
-        let (cell, controller, key) = mount_field("Hello world");
-        let mut app = cell.borrow_mut();
-        focus_field(&mut app, &key);
+        on_ios(|tester| {
+            let (controller, key) = mount_field(tester, "Hello world");
+            focus_field(tester, &key);
 
-        press_key(
-            &mut app,
-            PhysicalKeyboardKey::META_LEFT,
-            LogicalKeyboardKey::META_LEFT,
-            None,
-        );
-        send_key(
-            &mut app,
-            PhysicalKeyboardKey::KEY_A,
-            LogicalKeyboardKey::KEY_A,
-            Some("a"),
-        );
-        release_key(
-            &mut app,
-            PhysicalKeyboardKey::META_LEFT,
-            LogicalKeyboardKey::META_LEFT,
-        );
-        pump(&mut app, Duration::ZERO);
+            tester.update(|app| {
+                press_key(
+                    app,
+                    PhysicalKeyboardKey::META_LEFT,
+                    LogicalKeyboardKey::META_LEFT,
+                    None,
+                );
+                send_key(
+                    app,
+                    PhysicalKeyboardKey::KEY_A,
+                    LogicalKeyboardKey::KEY_A,
+                    Some("a"),
+                );
+                release_key(
+                    app,
+                    PhysicalKeyboardKey::META_LEFT,
+                    LogicalKeyboardKey::META_LEFT,
+                );
+            });
+            tester.pump();
 
-        let selection = controller.selection(&app);
-        assert_eq!(
-            (selection.start(), selection.end()),
-            (0, utf16_len("Hello world")),
-            "meta+A should select the whole field, got {selection:?}"
-        );
+            let selection = controller.selection(&tester.cell.borrow());
+            assert_eq!(
+                (selection.start(), selection.end()),
+                (0, utf16_len("Hello world")),
+                "meta+A should select the whole field, got {selection:?}"
+            );
+        });
     }
 
     #[test]
     fn an_arrow_key_walks_the_caret_over_a_whole_grapheme() {
-        let text = format!("a{FAMILY}b");
-        let (cell, controller, key) = mount_field(&text);
-        let mut app = cell.borrow_mut();
-        focus_field(&mut app, &key);
-        controller.set_selection(
-            &mut app,
-            TextSelection::collapsed(0, TextAffinity::Downstream),
-        );
-        pump(&mut app, Duration::ZERO);
+        on_ios(|tester| {
+            let text = format!("a{FAMILY}b");
+            let (controller, key) = mount_field(tester, &text);
+            focus_field(tester, &key);
+            tester.update(|app| {
+                controller.set_selection(app, TextSelection::collapsed(0, TextAffinity::Downstream))
+            });
+            tester.pump();
+            let arrow_right = |tester: &mut WidgetTester| {
+                tester.update(|app| {
+                    send_key(
+                        app,
+                        PhysicalKeyboardKey::ARROW_RIGHT,
+                        LogicalKeyboardKey::ARROW_RIGHT,
+                        None,
+                    )
+                });
+                tester.pump();
+            };
 
-        send_key(
-            &mut app,
-            PhysicalKeyboardKey::ARROW_RIGHT,
-            LogicalKeyboardKey::ARROW_RIGHT,
-            None,
-        );
-        pump(&mut app, Duration::ZERO);
-        assert_eq!(controller.selection(&app).base_offset, 1, "past the 'a'");
+            arrow_right(tester);
+            assert_eq!(
+                controller.selection(&tester.cell.borrow()).base_offset,
+                1,
+                "past the 'a'"
+            );
 
-        send_key(
-            &mut app,
-            PhysicalKeyboardKey::ARROW_RIGHT,
-            LogicalKeyboardKey::ARROW_RIGHT,
-            None,
-        );
-        pump(&mut app, Duration::ZERO);
-        assert_eq!(
-            controller.selection(&app).base_offset,
-            utf16_len(&text) - 1,
-            "one press should step over the whole family emoji"
-        );
+            arrow_right(tester);
+            assert_eq!(
+                controller.selection(&tester.cell.borrow()).base_offset,
+                utf16_len(&text) - 1,
+                "one press should step over the whole family emoji"
+            );
+        });
     }
 
     #[test]
     fn shift_and_an_arrow_key_extend_the_selection() {
-        let (cell, controller, key) = mount_field("Hello world");
-        let mut app = cell.borrow_mut();
-        focus_field(&mut app, &key);
-        controller.set_selection(
-            &mut app,
-            TextSelection::collapsed(0, TextAffinity::Downstream),
-        );
-        pump(&mut app, Duration::ZERO);
+        on_ios(|tester| {
+            let (controller, key) = mount_field(tester, "Hello world");
+            focus_field(tester, &key);
+            tester.update(|app| {
+                controller.set_selection(app, TextSelection::collapsed(0, TextAffinity::Downstream))
+            });
+            tester.pump();
 
-        press_key(
-            &mut app,
-            PhysicalKeyboardKey::SHIFT_LEFT,
-            LogicalKeyboardKey::SHIFT_LEFT,
-            None,
-        );
-        send_key(
-            &mut app,
-            PhysicalKeyboardKey::ARROW_RIGHT,
-            LogicalKeyboardKey::ARROW_RIGHT,
-            None,
-        );
-        release_key(
-            &mut app,
-            PhysicalKeyboardKey::SHIFT_LEFT,
-            LogicalKeyboardKey::SHIFT_LEFT,
-        );
-        pump(&mut app, Duration::ZERO);
+            tester.update(|app| {
+                press_key(
+                    app,
+                    PhysicalKeyboardKey::SHIFT_LEFT,
+                    LogicalKeyboardKey::SHIFT_LEFT,
+                    None,
+                );
+                send_key(
+                    app,
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                    None,
+                );
+                release_key(
+                    app,
+                    PhysicalKeyboardKey::SHIFT_LEFT,
+                    LogicalKeyboardKey::SHIFT_LEFT,
+                );
+            });
+            tester.pump();
 
-        let selection = controller.selection(&app);
-        assert_eq!((selection.base_offset, selection.extent_offset), (0, 1));
+            let selection = controller.selection(&tester.cell.borrow());
+            assert_eq!((selection.base_offset, selection.extent_offset), (0, 1));
+        });
     }
 
     #[test]
     fn the_macos_delete_selector_removes_a_whole_grapheme() {
-        // What `NSStandardKeyBindingResponding` sends for the backspace key. The macOS and
-        // iOS shortcut tables leave backspace to the host, so this is the path it takes.
-        let text = format!("a{FAMILY}");
-        let (cell, controller, key) = mount_field(&text);
-        let mut app = cell.borrow_mut();
-        focus_field(&mut app, &key);
-        let end = utf16_len(&text);
-        controller.set_selection(
-            &mut app,
-            TextSelection::collapsed(end, TextAffinity::Downstream),
-        );
-        pump(&mut app, Duration::ZERO);
+        on_ios(|tester| {
+            // What `NSStandardKeyBindingResponding` sends for the backspace key. The macOS and
+            // iOS shortcut tables leave backspace to the host, so this is the path it takes.
+            let text = format!("a{FAMILY}");
+            let (controller, key) = mount_field(tester, &text);
+            focus_field(tester, &key);
+            let end = utf16_len(&text);
+            tester.update(|app| {
+                controller
+                    .set_selection(app, TextSelection::collapsed(end, TextAffinity::Downstream))
+            });
+            tester.pump();
 
-        let state = key
-            .current_state::<CupertinoTextFieldState>(&app)
-            .expect("the field mounted");
-        let editable_key = state.editable_text_key(&app);
-        let editable = editable_key
-            .current_state::<EditableTextState>(&app)
-            .expect("the field mounts an EditableText");
-        TextInputClient::perform_selector(editable, &mut app, "deleteBackward:");
-        pump(&mut app, Duration::ZERO);
+            tester.update(|app| {
+                let state = key
+                    .current_state::<CupertinoTextFieldState>(app)
+                    .expect("the field mounted");
+                let editable_key = state.editable_text_key(app);
+                let editable = editable_key
+                    .current_state::<EditableTextState>(app)
+                    .expect("the field mounts an EditableText");
+                TextInputClient::perform_selector(editable, app, "deleteBackward:");
+            });
+            tester.pump();
 
-        assert_eq!(
-            controller.value(&app).text,
-            "a",
-            "one deleteBackward: should take the whole family emoji"
-        );
+            assert_eq!(
+                controller.value(&tester.cell.borrow()).text,
+                "a",
+                "one deleteBackward: should take the whole family emoji"
+            );
+        });
     }
 
     #[test]
     fn a_mouse_click_moves_the_caret() {
-        let (cell, controller, key) = mount_field("Hello world");
-        let mut app = cell.borrow_mut();
-        let at = field_point(&mut app, &key, Offset::new(12.0, 12.0));
-        send_mouse(&mut app, PointerChange::Down, at.dx(), at.dy(), 1);
-        send_mouse(&mut app, PointerChange::Up, at.dx(), at.dy(), 1);
-        pump(&mut app, Duration::ZERO);
-        let selection = controller.selection(&app);
-        assert!(selection.is_collapsed(), "{selection:?}");
-        assert!(selection.base_offset >= 0);
+        on_ios(|tester| {
+            let (controller, key) = mount_field(tester, "Hello world");
+            let at = field_point(&mut tester.cell.borrow_mut(), &key, Offset::new(12.0, 12.0));
+            click(tester, at, 1, K_PRIMARY_BUTTON);
+            tester.pump();
+            let selection = controller.selection(&tester.cell.borrow());
+            assert!(selection.is_collapsed(), "{selection:?}");
+            assert!(selection.base_offset >= 0);
+        });
     }
 
     #[test]
     fn a_mouse_drag_selects_a_range() {
-        let (cell, controller, key) = mount_field("Hello world");
-        let mut app = cell.borrow_mut();
-        let start = field_point(&mut app, &key, Offset::new(8.0, 12.0));
-        let end = field_point(&mut app, &key, Offset::new(80.0, 12.0));
-        send_mouse(&mut app, PointerChange::Down, start.dx(), start.dy(), 1);
-        let mid = Offset::new((start.dx() + end.dx()) / 2.0, start.dy());
-        send_mouse_delta(
-            &mut app,
-            PointerChange::Move,
-            mid.dx(),
-            mid.dy(),
-            mid.dx() - start.dx(),
-            0.0,
-            1,
-        );
-        send_mouse_delta(
-            &mut app,
-            PointerChange::Move,
-            end.dx(),
-            end.dy(),
-            end.dx() - mid.dx(),
-            0.0,
-            1,
-        );
-        send_mouse(&mut app, PointerChange::Up, end.dx(), end.dy(), 1);
-        pump(&mut app, Duration::ZERO);
-        let selection = controller.selection(&app);
-        assert!(
-            !selection.is_collapsed(),
-            "expected a range, got {selection:?}"
-        );
+        on_ios(|tester| {
+            let (controller, key) = mount_field(tester, "Hello world");
+            let start = field_point(&mut tester.cell.borrow_mut(), &key, Offset::new(8.0, 12.0));
+            let end = field_point(&mut tester.cell.borrow_mut(), &key, Offset::new(80.0, 12.0));
+            let mut mouse = TestPointer::mouse(1, K_PRIMARY_BUTTON);
+            tester.down(&mut mouse, start);
+            let mid = Offset::new((start.dx() + end.dx()) / 2.0, start.dy());
+            tester.move_to(&mut mouse, mid, true);
+            tester.move_to(&mut mouse, end, true);
+            tester.up(&mouse);
+            tester.pump();
+            let selection = controller.selection(&tester.cell.borrow());
+            assert!(
+                !selection.is_collapsed(),
+                "expected a range, got {selection:?}"
+            );
+        });
     }
 
     #[test]
     fn a_mouse_double_click_selects_a_word() {
-        let (cell, controller, key) = mount_field("Hello world");
-        let mut app = cell.borrow_mut();
-        let at = field_point(&mut app, &key, Offset::new(16.0, 12.0));
-        send_mouse(&mut app, PointerChange::Down, at.dx(), at.dy(), 1);
-        send_mouse(&mut app, PointerChange::Up, at.dx(), at.dy(), 1);
-        send_mouse(&mut app, PointerChange::Down, at.dx(), at.dy(), 2);
-        send_mouse(&mut app, PointerChange::Up, at.dx(), at.dy(), 2);
-        pump(&mut app, Duration::ZERO);
-        let selection = controller.selection(&app);
-        assert!(
-            !selection.is_collapsed() && selection.end() - selection.start() > 1,
-            "expected a word, got {selection:?}"
-        );
+        on_ios(|tester| {
+            let (controller, key) = mount_field(tester, "Hello world");
+            let at = field_point(&mut tester.cell.borrow_mut(), &key, Offset::new(16.0, 12.0));
+            click(tester, at, 1, K_PRIMARY_BUTTON);
+            click(tester, at, 2, K_PRIMARY_BUTTON);
+            tester.pump();
+            let selection = controller.selection(&tester.cell.borrow());
+            assert!(
+                !selection.is_collapsed() && selection.end() - selection.start() > 1,
+                "expected a word, got {selection:?}"
+            );
+        });
     }
 
     #[test]
     fn a_secondary_mouse_click_shows_the_selection_toolbar() {
-        let (cell, _controller, key) = mount_field("Hello world");
-        let mut app = cell.borrow_mut();
-        let at = field_point(&mut app, &key, Offset::new(16.0, 12.0));
-        send_mouse_buttons(&mut app, PointerChange::Down, at, Offset::ZERO, 1, 2);
-        send_mouse_buttons(&mut app, PointerChange::Up, at, Offset::ZERO, 1, 0);
-        pump(&mut app, Duration::ZERO);
-        let binding = WidgetsBinding::instance(&mut app);
-        let root = binding.root_element(&app).expect("the tree is attached");
-        assert!(
-            tree_contains(
-                &app,
-                root,
-                TypeId::of::<CupertinoAdaptiveTextSelectionToolbar>(),
-            ),
-            "right-click should insert the adaptive selection toolbar"
-        );
+        on_ios(|tester| {
+            let (_controller, key) = mount_field(tester, "Hello world");
+            let at = field_point(&mut tester.cell.borrow_mut(), &key, Offset::new(16.0, 12.0));
+            click(tester, at, 1, K_SECONDARY_BUTTON);
+            tester.pump();
+            // Right-click should insert the adaptive selection toolbar.
+            expect(
+                tester,
+                &find::by_type::<CupertinoAdaptiveTextSelectionToolbar>().skip_offstage(false),
+                finds_widgets(),
+            );
+        });
     }
 }

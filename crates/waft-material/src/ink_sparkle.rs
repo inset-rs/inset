@@ -706,18 +706,16 @@ fn get_target_radius(
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{TargetPlatform, valo};
+    use waft_embedder::valo;
     use waft_widgets::{Center, Directionality, IntoWidget, SizedBox, WidgetRef};
+
+    use waft_widgets::testing::{WidgetTester, test_widgets};
 
     use super::*;
     use crate::elevated_button::ElevatedButton;
     use crate::ink_well::{InkResponse, InkWell};
     use crate::material::{Material, RenderInkFeatures};
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
-
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
+    use crate::test_support::PaintInspection;
 
     fn frame<K>(child: impl IntoWidget<K>) -> WidgetRef {
         Directionality::new(
@@ -803,18 +801,14 @@ mod tests {
     fn assert_uniform(shader: &valo::RuntimeShader, name: &str, expected: &[f64]) {
         let actual = uniform(shader, name, expected.len() as u32);
         for (actual, expected) in actual.iter().zip(expected) {
-            assert!(
-                (f64::from(*actual) - expected).abs() <= 1e-5 * expected.abs().max(1.0),
-                "{name}: {actual} is not {expected}"
-            );
+            waft_widgets::testing::assert_f32_equals(f64::from(*actual), *expected);
         }
     }
 
     /// Dart's `InkSparkle in a Button compiles and does not crash`.
     #[test]
     fn ink_sparkle_in_a_button_compiles_and_does_not_crash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(frame(
                 ElevatedButton::new(
                     Some(Listener::new(|_app| {})),
@@ -826,8 +820,8 @@ mod tests {
                         .build(),
                 ),
             ));
-            tester.tap(WidgetTester::SIZE.center(Offset::ZERO), 1);
-            tester.pump(Duration::ZERO);
+            tester.tap_at(WidgetTester::SIZE.center(Offset::ZERO), 1);
+            tester.pump();
             tester.pump_and_settle();
             assert!(InkSparkleFactory::program().is_some());
         });
@@ -836,50 +830,48 @@ mod tests {
     /// Dart's `InkSparkle default splashFactory paints with drawRect when bounded`.
     #[test]
     fn ink_sparkle_default_splash_factory_paints_with_draw_rect_when_bounded() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(frame(
                 InkWell::new()
                     .splash_factory(InkSparkle::splash_factory())
                     .child(SizedBox::new().width(80.0).height(20.0))
                     .on_tap(Listener::new(|_app| {})),
             ));
-            tester.tap(WidgetTester::SIZE.center(Offset::ZERO), 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(200));
+            tester.tap_at(WidgetTester::SIZE.center(Offset::ZERO), 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
 
-            assert_eq!(draw_counts(&tester).0, 1);
-            let (rects, _) = shader_draws(&tester);
+            assert_eq!(draw_counts(tester).0, 1);
+            let (rects, _) = shader_draws(tester);
             assert_eq!(
                 rects.iter().map(|(rect, _)| *rect).collect::<Vec<_>>(),
                 [waft_embedder::Rect::from_ltwh(0.0, 0.0, 80.0, 20.0)]
             );
 
-            assert_eq!(ink_features(&tester), 1);
+            assert_eq!(ink_features(tester), 1);
 
             tester.pump_and_settle();
             // ink feature is disposed.
-            assert_eq!(ink_features(&tester), 0);
+            assert_eq!(ink_features(tester), 0);
         });
     }
 
     /// Dart's `InkSparkle default splashFactory paints with drawPaint when unbounded`.
     #[test]
     fn ink_sparkle_default_splash_factory_paints_with_draw_paint_when_unbounded() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(frame(
                 InkResponse::new()
                     .splash_factory(InkSparkle::splash_factory())
                     .child(SizedBox::new().width(80.0).height(20.0))
                     .on_tap(Listener::new(|_app| {})),
             ));
-            tester.tap(WidgetTester::SIZE.center(Offset::ZERO), 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(200));
+            tester.tap_at(WidgetTester::SIZE.center(Offset::ZERO), 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
 
-            assert_eq!(draw_counts(&tester).1, 1);
-            assert_eq!(shader_draws(&tester).1.len(), 1);
+            assert_eq!(draw_counts(tester).1, 1);
+            assert_eq!(shader_draws(tester).1.len(), 1);
         });
     }
 
@@ -888,8 +880,7 @@ mod tests {
     /// off the well's centre.
     #[test]
     fn the_sparkle_sets_its_uniforms_from_the_animation_and_the_constant_turbulence_seed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color = Color::new(0x66AA3300);
             tester.pump_widget(frame(
                 InkWell::new()
@@ -899,11 +890,11 @@ mod tests {
                     .on_tap(Listener::new(|_app| {})),
             ));
             let well_center = WidgetTester::SIZE.center(Offset::ZERO);
-            tester.tap(well_center + Offset::new(-30.0, -5.0), 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
+            tester.tap_at(well_center + Offset::new(-30.0, -5.0), 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
 
-            let (rects, _) = shader_draws(&tester);
+            let (rects, _) = shader_draws(tester);
             let [(_, shader)] = rects.as_slice() else {
                 panic!("one sparkle rect, not {}", rects.len());
             };

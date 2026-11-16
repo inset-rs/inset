@@ -502,47 +502,19 @@ mod tests {
     use waft_animation::AnimationRef;
     use waft_animation::Drive;
 
-    use waft_embedder::{TargetPlatform, TextDirection};
-    use waft_foundation::AppCell;
-    use waft_painting::{PaintingBinding, TextStyle};
-    use waft_rendering::ContainerRenderObjectMixin;
-    use waft_test::{TestPlatform, TestView};
+    use waft_embedder::TextDirection;
+    use waft_painting::TextStyle;
 
     use super::*;
-    use crate::binding::run_app;
     use crate::framework::GlobalKey;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::{
+        WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
     use crate::widgets::basic::{Center, Directionality};
     use crate::widgets::navigator::{Navigator, NavigatorState, RouteRef, RouteSettings};
-    use crate::widgets::overlay::RenderTheater;
     use crate::widgets::pages::{PageRoute, PageRouteBuilder};
     use crate::widgets::text::Text;
     use crate::widgets::transitions::ScaleTransition;
-    use waft_test::{assert_no_new_objects, object_snapshot};
-
-    /// An [`App`] over one 800x600 view, flutter_test's default surface.
-    fn app_with_view() -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::Android)
-            .with_view(Rc::new(TestView::new(800.0, 600.0)));
-        AppCell::with_platform(Rc::new(platform))
-    }
-
-    fn mount(cell: &AppCell, child: WidgetRef) {
-        install_fonts(&mut cell.borrow_mut());
-        run_app(&mut cell.borrow_mut(), child);
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-    }
-
-    fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
-    }
 
     /// The test's `_CustomPageRoute`: a page route whose transitions are `transitions_builder`'s,
     /// handed the route itself.
@@ -624,59 +596,21 @@ mod tests {
         }
     }
 
-    fn state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
-        key.current_state::<NavigatorState>(app)
+    fn state(key: &GlobalKey, tester: &WidgetTester) -> Handle<NavigatorState> {
+        key.current_state::<NavigatorState>(&tester.cell.borrow())
             .expect("a mounted navigator")
     }
 
-    /// flutter_test's `getTopLeft`.
-    fn top_left(app: &mut App, key: &GlobalKey) -> Offset {
-        key.current_context(app)
-            .expect("the widget is mounted")
-            .find_render_object(app)
-            .expect("a mounted render object")
-            .as_box()
-            .expect("a box")
-            .local_to_global(app, Offset::ZERO, None)
-    }
-
-    /// Whether `find` finds the widget under `key`: it is mounted, and in an overlay entry the
-    /// overlay keeps onstage (flutter_test's `skipOffstage`).
-    fn is_onstage(app: &mut App, key: &GlobalKey) -> bool {
-        let Some(context) = key.current_context(app) else {
-            return false;
-        };
-        let mut object = context
-            .find_render_object(app)
-            .expect("a mounted render object");
-        while let Some(parent) = object.parent(app) {
-            if let Some(theater) = parent.downcast::<RenderTheater>(app) {
-                let mut child = theater.first_child(app);
-                for _ in 0..theater.skip_count(app) {
-                    child = child.and_then(|current| theater.child_after(app, current));
-                }
-                while let Some(current) = child {
-                    if current.as_object() == object {
-                        return true;
-                    }
-                    child = theater.child_after(app, current);
-                }
-                return false;
-            }
-            object = parent;
-        }
-        false
-    }
-
     /// The opacity of the `FadeTransition` nearest above the widget under `key`.
-    fn opacity_above(app: &mut App, key: &GlobalKey) -> f64 {
-        let context = key.current_context(app).expect("the widget is mounted");
+    fn opacity_above(tester: &WidgetTester, key: &GlobalKey) -> f64 {
+        let app = tester.cell.borrow();
+        let context = key.current_context(&app).expect("the widget is mounted");
         let opacity = context
-            .find_ancestor_widget_of_exact_type::<FadeTransition>(app)
+            .find_ancestor_widget_of_exact_type::<FadeTransition>(&app)
             .expect("a FadeTransition above")
             .opacity
             .handle();
-        opacity.value(app)
+        opacity.value(&app)
     }
 
     /// The test's `onBuildTransitions` signature: [`PageTransitionsBuilder::build_transitions`]'s.
@@ -719,35 +653,33 @@ mod tests {
 
     #[test]
     fn page_transitions_builder_works_with_custom_navigator_and_page_route() {
-        let cell = app_with_view();
-        // The opacity and scale animations of each route's transition, by route name.
-        let transitions: Rc<RefCell<HashMap<String, RouteTransition>>> = Rc::default();
-        let custom_transitions_builder =
-            PageTransitionsBuilderRef::new(TestPageTransitionsBuilder {
-                on_build_transitions: Rc::new({
-                    let transitions = Rc::clone(&transitions);
-                    move |app, route, _context, animation, _secondary_animation, child| {
-                        let curve_tween =
-                            waft_animation::CurveTween::new(app, Curves::ease_in_out());
-                        let scale_tween = waft_animation::Tween::new(app, Some(0.5), Some(1.0));
-                        let scale = animation.drive(app, scale_tween.chain(curve_tween));
-                        let name = route.as_route().settings(app).name().map(str::to_string);
-                        transitions.borrow_mut().insert(
-                            name.expect("a named route"),
-                            (animation.clone(), scale.clone()),
-                        );
-                        FadeTransition::new(animation)
-                            .child(ScaleTransition::new(scale).child(child))
-                            .into_widget()
-                    }
-                }),
-            });
-        let key = GlobalKey::new();
-        let navigate = GlobalKey::new();
-        let second_page = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, {
+        test_widgets(|tester| {
+            // The opacity and scale animations of each route's transition, by route name.
+            let transitions: Rc<RefCell<HashMap<String, RouteTransition>>> = Rc::default();
+            let custom_transitions_builder =
+                PageTransitionsBuilderRef::new(TestPageTransitionsBuilder {
+                    on_build_transitions: Rc::new({
+                        let transitions = Rc::clone(&transitions);
+                        move |app, route, _context, animation, _secondary_animation, child| {
+                            let curve_tween =
+                                waft_animation::CurveTween::new(app, Curves::ease_in_out());
+                            let scale_tween = waft_animation::Tween::new(app, Some(0.5), Some(1.0));
+                            let scale = animation.drive(app, scale_tween.chain(curve_tween));
+                            let name = route.as_route().settings(app).name().map(str::to_string);
+                            transitions.borrow_mut().insert(
+                                name.expect("a named route"),
+                                (animation.clone(), scale.clone()),
+                            );
+                            FadeTransition::new(animation)
+                                .child(ScaleTransition::new(scale).child(child))
+                                .into_widget()
+                        }
+                    }),
+                });
+            let key = GlobalKey::new();
+            let navigate = GlobalKey::new();
+            let second_page = GlobalKey::new();
+            tester.pump_widget(navigator(&key, {
                 let navigate = navigate.clone();
                 let second_page = second_page.clone();
                 move |app, settings| {
@@ -777,194 +709,176 @@ mod tests {
                         },
                     )
                 }
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        assert!(is_onstage(&mut app, &navigate));
-        assert!(!is_onstage(&mut app, &second_page));
+            }));
+            expect(tester, &find::text("Navigate"), finds_one_widget());
+            expect(tester, &find::text("Second Page"), finds_nothing());
 
-        // Flutter taps the "Navigate" box, whose handler pushes `/second`.
-        state(&key, &mut app).push_named(&mut app, "/second", None);
-        pump_every_view(&mut app, Duration::ZERO);
+            // Flutter taps the "Navigate" box, whose handler pushes `/second`.
+            let navigator_state = state(&key, tester);
+            tester.update(|app| navigator_state.push_named(app, "/second", None));
+            tester.pump();
 
-        assert!(is_onstage(&mut app, &navigate));
-        assert!(is_onstage(&mut app, &second_page));
+            expect(tester, &find::text("Navigate"), finds_one_widget());
+            expect(tester, &find::text("Second Page"), finds_one_widget());
 
-        pump_every_view(&mut app, Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
 
-        // Each route was handed to `build_transitions` as itself (the first Flutter case's
-        // `capturedRoute!.settings.name`).
-        let mut names: Vec<String> = transitions.borrow().keys().cloned().collect();
-        names.sort();
-        assert_eq!(names, ["/", "/second"]);
-        for (opacity, scale) in transitions.borrow().values() {
-            let opacity = opacity.value(&app);
-            assert!(opacity > 0.0 && opacity <= 1.0, "opacity {opacity}");
-            let scale = scale.value(&app);
-            assert!((0.5..=1.0).contains(&scale), "scale {scale}");
-        }
+            // Each route was handed to `build_transitions` as itself (the first Flutter case's
+            // `capturedRoute!.settings.name`).
+            let mut names: Vec<String> = transitions.borrow().keys().cloned().collect();
+            names.sort();
+            assert_eq!(names, ["/", "/second"]);
+            {
+                let app = tester.cell.borrow();
+                for (opacity, scale) in transitions.borrow().values() {
+                    let opacity = opacity.value(&app);
+                    assert!(opacity > 0.0 && opacity <= 1.0, "opacity {opacity}");
+                    let scale = scale.value(&app);
+                    assert!((0.5..=1.0).contains(&scale), "scale {scale}");
+                }
+            }
 
-        let mut at = Duration::from_millis(50);
-        for _ in 0..20 {
-            at += Duration::from_millis(50);
-            pump_every_view(&mut app, at);
-        }
+            tester.pump_and_settle();
 
-        assert!(!is_onstage(&mut app, &navigate));
-        assert!(is_onstage(&mut app, &second_page));
+            expect(tester, &find::text("Navigate"), finds_nothing());
+            expect(tester, &find::text("Second Page"), finds_one_widget());
+        });
+    }
+
+    /// The test's navigator whose two pages, `Page 1` and `Page 2`, take their transitions from
+    /// `builder`, pumped; answers the navigator's state.
+    fn pump_two_pages(
+        tester: &mut WidgetTester,
+        builder: PageTransitionsBuilderRef,
+        page_1: &GlobalKey,
+        page_2: &GlobalKey,
+    ) -> Handle<NavigatorState> {
+        let key = GlobalKey::new();
+        tester.pump_widget(navigator(&key, {
+            let page_1 = page_1.clone();
+            let page_2 = page_2.clone();
+            move |app, settings| {
+                let pages = two_pages(&page_1, &page_2, settings);
+                custom_page_route(app, settings, builder.clone(), pages)
+            }
+        }));
+        state(&key, tester)
     }
 
     #[test]
     fn fade_upwards_page_transitions_builder_test() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        let page_1 = GlobalKey::new();
-        let page_2 = GlobalKey::new();
-        let builder = PageTransitionsBuilderRef::new(FadeUpwardsPageTransitionsBuilder::new());
-        mount(
-            &cell,
-            navigator(&key, {
-                let page_1 = page_1.clone();
-                let page_2 = page_2.clone();
-                move |app, settings| {
-                    let pages = two_pages(&page_1, &page_2, settings);
-                    custom_page_route(app, settings, builder.clone(), pages)
-                }
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let widget_1_top_left = top_left(&mut app, &page_1);
+        test_widgets(|tester| {
+            let page_1 = GlobalKey::new();
+            let page_2 = GlobalKey::new();
+            let builder = PageTransitionsBuilderRef::new(FadeUpwardsPageTransitionsBuilder::new());
+            let navigator_state = pump_two_pages(tester, builder, &page_1, &page_2);
+            let widget_1_top_left = tester.get_top_left(&page_1);
 
-        // Flutter taps "Page 1", whose handler pushes `/second`.
-        state(&key, &mut app).push_named(&mut app, "/second", None);
-        pump_every_view(&mut app, Duration::ZERO);
-        pump_every_view(&mut app, Duration::from_millis(1));
+            // Flutter taps "Page 1", whose handler pushes `/second`.
+            tester.update(|app| navigator_state.push_named(app, "/second", None));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(1));
 
-        let widget_2_opacity = opacity_above(&mut app, &page_2);
-        let widget_2_top_left = top_left(&mut app, &page_2);
+            let widget_2_opacity = opacity_above(tester, &page_2);
+            let widget_2_top_left = tester.get_top_left(&page_2);
 
-        assert!(widget_1_top_left.dx() == widget_2_top_left.dx());
-        assert!(widget_1_top_left.dy() < widget_2_top_left.dy());
-        assert!(widget_2_opacity < 0.01);
+            assert!(widget_1_top_left.dx() == widget_2_top_left.dx());
+            assert!(widget_1_top_left.dy() < widget_2_top_left.dy());
+            assert!(widget_2_opacity < 0.01);
 
-        pump_every_view(&mut app, Duration::from_millis(301));
+            tester.pump_by(Duration::from_millis(300));
 
-        assert!(!is_onstage(&mut app, &page_1));
-        assert!(is_onstage(&mut app, &page_2));
+            expect(tester, &find::text("Page 1"), finds_nothing());
+            expect(tester, &find::text("Page 2"), finds_one_widget());
 
-        state(&key, &mut app).pop(&mut app, None);
-        pump_every_view(&mut app, Duration::from_millis(301));
-        pump_every_view(&mut app, Duration::from_millis(302));
+            tester.update(|app| navigator_state.pop(app, None));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(1));
 
-        let widget_2_opacity = opacity_above(&mut app, &page_2);
-        let widget_2_top_left = top_left(&mut app, &page_2);
+            let widget_2_opacity = opacity_above(tester, &page_2);
+            let widget_2_top_left = tester.get_top_left(&page_2);
 
-        assert!(widget_1_top_left.dy() < widget_2_top_left.dy());
-        assert!(widget_2_opacity < 1.0);
+            assert!(widget_1_top_left.dy() < widget_2_top_left.dy());
+            assert!(widget_2_opacity < 1.0);
 
-        pump_every_view(&mut app, Duration::from_millis(602));
+            tester.pump_by(Duration::from_millis(300));
 
-        assert!(is_onstage(&mut app, &page_1));
-        assert!(!is_onstage(&mut app, &page_2));
+            expect(tester, &find::text("Page 1"), finds_one_widget());
+            expect(tester, &find::text("Page 2"), finds_nothing());
+        });
     }
 
     /// Checks that a frame 100 ms into a push with `builder` leaves no new arena objects.
-    fn assert_a_mid_push_frame_leaves_nothing(builder: PageTransitionsBuilderRef) {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        let page_1 = GlobalKey::new();
-        let page_2 = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, {
-                let page_1 = page_1.clone();
-                let page_2 = page_2.clone();
-                move |app, settings| {
-                    let pages = two_pages(&page_1, &page_2, settings);
-                    custom_page_route(app, settings, builder.clone(), pages)
-                }
-            }),
-        );
-        {
-            let mut app = cell.borrow_mut();
-            state(&key, &mut app).push_named(&mut app, "/second", None);
-            pump_every_view(&mut app, Duration::ZERO);
-            pump_every_view(&mut app, Duration::from_millis(100));
-        }
-        cell.checkpoint();
-        let snapshot = object_snapshot(&cell.borrow());
-        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(116));
-        cell.checkpoint();
-        assert_no_new_objects(&cell.borrow(), &snapshot);
+    fn assert_a_mid_push_frame_leaves_nothing(builder: fn() -> PageTransitionsBuilderRef) {
+        test_widgets(|tester| {
+            let page_1 = GlobalKey::new();
+            let page_2 = GlobalKey::new();
+            let navigator_state = pump_two_pages(tester, builder(), &page_1, &page_2);
+            tester.update(|app| navigator_state.push_named(app, "/second", None));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100));
+            tester.assert_leaves_nothing_behind(|tester| tester.pump_by(Duration::from_millis(16)));
+        });
     }
 
     /// Not a Dart case: the animations each frame's `_FadeUpwardsPageTransition` drives go with
     /// the last transition that reads them, as Dart's collector frees them.
     #[test]
     fn a_frame_of_a_fade_upwards_push_leaves_no_new_arena_objects() {
-        let builder = PageTransitionsBuilderRef::new(FadeUpwardsPageTransitionsBuilder::new());
-        assert_a_mid_push_frame_leaves_nothing(builder);
+        assert_a_mid_push_frame_leaves_nothing(|| {
+            PageTransitionsBuilderRef::new(FadeUpwardsPageTransitionsBuilder::new())
+        });
     }
 
     /// Not a Dart case: the animations each layout of `_OpenUpwardsPageTransition` drives go
     /// with the last builder that reads them, as Dart's collector frees them.
     #[test]
     fn a_frame_of_an_open_upwards_push_leaves_no_new_arena_objects() {
-        let builder = PageTransitionsBuilderRef::new(OpenUpwardsPageTransitionsBuilder::new());
-        assert_a_mid_push_frame_leaves_nothing(builder);
+        assert_a_mid_push_frame_leaves_nothing(|| {
+            PageTransitionsBuilderRef::new(OpenUpwardsPageTransitionsBuilder::new())
+        });
     }
 
     #[test]
     fn open_upwards_page_transitions_builder_test() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        let page_1 = GlobalKey::new();
-        let page_2 = GlobalKey::new();
-        let builder = PageTransitionsBuilderRef::new(OpenUpwardsPageTransitionsBuilder::new());
-        mount(
-            &cell,
-            navigator(&key, {
-                let page_1 = page_1.clone();
-                let page_2 = page_2.clone();
-                move |app, settings| {
-                    let pages = two_pages(&page_1, &page_2, settings);
-                    custom_page_route(app, settings, builder.clone(), pages)
-                }
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let widget_1_top_left = top_left(&mut app, &page_1);
+        test_widgets(|tester| {
+            let page_1 = GlobalKey::new();
+            let page_2 = GlobalKey::new();
+            let builder = PageTransitionsBuilderRef::new(OpenUpwardsPageTransitionsBuilder::new());
+            let navigator_state = pump_two_pages(tester, builder, &page_1, &page_2);
+            let widget_1_top_left = tester.get_top_left(&page_1);
 
-        // Flutter taps "Page 1", whose handler pushes `/second`.
-        state(&key, &mut app).push_named(&mut app, "/second", None);
-        pump_every_view(&mut app, Duration::ZERO);
-        pump_every_view(&mut app, Duration::from_millis(1));
+            // Flutter taps "Page 1", whose handler pushes `/second`.
+            tester.update(|app| navigator_state.push_named(app, "/second", None));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(1));
 
-        assert!(is_onstage(&mut app, &page_1));
-        assert!(is_onstage(&mut app, &page_2));
+            expect(tester, &find::text("Page 1"), finds_one_widget());
+            expect(tester, &find::text("Page 2"), finds_one_widget());
 
-        let widget_2_top_left = top_left(&mut app, &page_2);
+            let widget_2_top_left = tester.get_top_left(&page_2);
 
-        assert_eq!(widget_1_top_left.dx(), widget_2_top_left.dx());
-        assert!(widget_1_top_left.dy() <= widget_2_top_left.dy());
+            assert_eq!(widget_1_top_left.dx(), widget_2_top_left.dx());
+            assert!(widget_1_top_left.dy() <= widget_2_top_left.dy());
 
-        pump_every_view(&mut app, Duration::from_millis(301));
+            tester.pump_by(Duration::from_millis(300));
 
-        // After animation, only Page 2 should be visible.
-        assert!(!is_onstage(&mut app, &page_1));
-        assert!(is_onstage(&mut app, &page_2));
+            // After animation, only Page 2 should be visible.
+            expect(tester, &find::text("Page 1"), finds_nothing());
+            expect(tester, &find::text("Page 2"), finds_one_widget());
 
-        state(&key, &mut app).pop(&mut app, None);
-        pump_every_view(&mut app, Duration::from_millis(301));
-        pump_every_view(&mut app, Duration::from_millis(302));
+            tester.update(|app| navigator_state.pop(app, None));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(1));
 
-        assert!(is_onstage(&mut app, &page_1));
-        assert!(is_onstage(&mut app, &page_2));
+            expect(tester, &find::text("Page 1"), finds_one_widget());
+            expect(tester, &find::text("Page 2"), finds_one_widget());
 
-        pump_every_view(&mut app, Duration::from_millis(602));
+            tester.pump_by(Duration::from_millis(300));
 
-        // After reverse animation, only Page 1 should be visible.
-        assert!(is_onstage(&mut app, &page_1));
-        assert!(!is_onstage(&mut app, &page_2));
+            // After reverse animation, only Page 1 should be visible.
+            expect(tester, &find::text("Page 1"), finds_one_widget());
+            expect(tester, &find::text("Page 2"), finds_nothing());
+        });
     }
 }

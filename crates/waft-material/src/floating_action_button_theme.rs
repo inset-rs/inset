@@ -553,10 +553,12 @@ mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{SizedBox, WidgetStatePropertyAll};
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
+    use crate::drawer_theme::tests::probe;
     use crate::drawer_theme::tests::theme_seen_through_capture;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
     use crate::theme_data::ThemeData;
 
     fn rounded(radius: f64) -> RoundedRectangleBorder {
@@ -727,15 +729,14 @@ mod tests {
 
     #[test]
     fn of_returns_the_theme_data_floating_action_button_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = FloatingActionButtonThemeData::new()
                 .elevation(3.0)
                 .background_color(Colors::RED.primary());
             let theme_data_fab = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .floating_action_button_theme(theme_data_fab.clone())
@@ -751,13 +752,12 @@ mod tests {
 
     #[test]
     fn of_returns_the_closest_floating_action_button_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let widget_fab = FloatingActionButtonThemeData::new().elevation(7.0);
             let expected = widget_fab.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .floating_action_button_theme(
@@ -779,13 +779,12 @@ mod tests {
 
     #[test]
     fn a_captured_floating_action_button_theme_is_kept_under_another_one() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let captured = FloatingActionButtonThemeData::new().elevation(1.0);
             let shadowing = FloatingActionButtonThemeData::new().elevation(2.0);
 
             let seen = theme_seen_through_capture(
-                &cell,
+                tester,
                 |probe| FloatingActionButtonTheme::new(captured.clone(), probe).into_widget(),
                 |wrapped| FloatingActionButtonTheme::new(shadowing.clone(), wrapped).into_widget(),
                 FloatingActionButtonTheme::of,
@@ -812,9 +811,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_floating_action_button_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(
                 theme.floating_action_button_theme,

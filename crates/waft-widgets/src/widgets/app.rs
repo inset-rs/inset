@@ -9,10 +9,9 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::ptr;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use waft_embedder::{AppLifecycleState, Clip, Color, Locale, TargetPlatform, ViewId, ViewRef};
-use waft_foundation::{App, Handle, K_IS_WEB, Listenable, OptionRetained, Ref};
+use waft_foundation::{App, DebugFlag, Handle, K_IS_WEB, Listenable, OptionRetained, Ref};
 use waft_painting::{AxisDirection, TextStyle};
 use waft_scheduler::SchedulerBinding;
 use waft_services::{KeyEvent, LogicalKeyboardKey};
@@ -278,11 +277,17 @@ pub type PageRouteFactory = Rc<dyn Fn(&mut App, &RouteSettings, WidgetBuilder) -
 /// Creates a series of one or more initial routes.
 pub type InitialRouteListFactory = Rc<dyn Fn(&mut App, &str) -> Vec<RouteRef>>;
 
-/// Dart's `WidgetsApp.showPerformanceOverlayOverride`.
-static SHOW_PERFORMANCE_OVERLAY_OVERRIDE: AtomicBool = AtomicBool::new(false);
+/// The [`App`] debug flag of [`WidgetsApp::show_performance_overlay_override`].
+pub struct ShowPerformanceOverlayOverride;
 
-/// Dart's `WidgetsApp.debugAllowBannerOverride`.
-static DEBUG_ALLOW_BANNER_OVERRIDE: AtomicBool = AtomicBool::new(true);
+impl DebugFlag for ShowPerformanceOverlayOverride {}
+
+/// The [`App`] debug flag of [`WidgetsApp::debug_allow_banner_override`].
+pub struct DebugAllowBannerOverride;
+
+impl DebugFlag for DebugAllowBannerOverride {
+    const DEFAULT: bool = true;
+}
 
 /// A convenience widget that wraps a number of widgets that are commonly
 /// required for an application.
@@ -1041,13 +1046,13 @@ impl WidgetsApp {
     /// If true, forces the performance overlay to be visible in all instances.
     ///
     /// Used by the `showPerformanceOverlay` VM service extension.
-    pub fn show_performance_overlay_override() -> bool {
-        SHOW_PERFORMANCE_OVERLAY_OVERRIDE.load(Ordering::Relaxed)
+    pub fn show_performance_overlay_override(app: &App) -> bool {
+        app.debug_flag::<ShowPerformanceOverlayOverride>()
     }
 
     /// Sets [`show_performance_overlay_override`](Self::show_performance_overlay_override).
-    pub fn set_show_performance_overlay_override(value: bool) {
-        SHOW_PERFORMANCE_OVERLAY_OVERRIDE.store(value, Ordering::Relaxed);
+    pub fn set_show_performance_overlay_override(app: &mut App, value: bool) {
+        app.set_debug_flag::<ShowPerformanceOverlayOverride>(value);
     }
 
     /// If false, prevents the debug banner from being visible.
@@ -1056,13 +1061,13 @@ impl WidgetsApp {
     ///
     /// This is how `flutter run` turns off the banner when you take a screen shot
     /// with "s".
-    pub fn debug_allow_banner_override() -> bool {
-        DEBUG_ALLOW_BANNER_OVERRIDE.load(Ordering::Relaxed)
+    pub fn debug_allow_banner_override(app: &App) -> bool {
+        app.debug_flag::<DebugAllowBannerOverride>()
     }
 
     /// Sets [`debug_allow_banner_override`](Self::debug_allow_banner_override).
-    pub fn set_debug_allow_banner_override(value: bool) {
-        DEBUG_ALLOW_BANNER_OVERRIDE.store(value, Ordering::Relaxed);
+    pub fn set_debug_allow_banner_override(app: &mut App, value: bool) {
+        app.set_debug_flag::<DebugAllowBannerOverride>(value);
     }
 
     /// Generates the default shortcut key bindings based on the platform.
@@ -1638,7 +1643,7 @@ impl State for WidgetsAppState {
 
         if cfg!(debug_assertions)
             && self.widget(app).debug_show_checked_mode_banner
-            && WidgetsApp::debug_allow_banner_override()
+            && WidgetsApp::debug_allow_banner_override(app)
         {
             result = CheckedModeBanner::new(result).into_widget();
         }
@@ -1857,10 +1862,12 @@ mod tests {
     use waft_services::LogicalKeyboardKey;
     use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
 
-    use crate::framework::{AnyElement, Notification, StatelessWidget, downcast_widget};
+    use crate::framework::{Notification, StatelessWidget};
+    use crate::testing::{
+        Finder, WidgetTester, expect, find, finds_nothing, finds_widgets, test_widgets,
+    };
     use crate::widgets::actions::IntentRef;
     use crate::widgets::basic::SizedBox;
-    use crate::widgets::focus_manager::tests::{app_with_view, mount};
     use crate::widgets::focus_manager::{AnyFocusNode, FocusManager, FocusNodeLeaf, primary_focus};
     use crate::widgets::focus_scope::Focus;
     use crate::widgets::localizations::WidgetsLocalizations;
@@ -1886,16 +1893,6 @@ mod tests {
         AppCell::with_platform(Rc::new(TestPlatform::new().on(platform)))
     }
 
-    /// A platform with one 800x600 view whose host answers `route` as its default, the way a
-    /// deep link reaches an app.
-    fn app_opening_at(route: &str) -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView::new(800.0, 600.0)))
-            .with_default_route(route);
-        AppCell::with_platform(Rc::new(platform))
-    }
-
     /// What the shell does at start-up: the app-wide fonts, here the OS fonts, which the
     /// debug banner needs to paint its text.
     fn install_fonts(app: &mut App) {
@@ -1907,8 +1904,16 @@ mod tests {
         }
     }
 
-    /// Runs frames until the route transitions have settled.
-    fn settle(app: &mut App) {
+    /// Runs `widget` as the content of every view, and the first frame of each: the
+    /// multi-view case's start, which the one-view tester has no counterpart of.
+    fn mount_in_every_view(cell: &AppCell, widget: WidgetRef) {
+        crate::binding::run_app(&mut cell.borrow_mut(), widget);
+        cell.elapse(Duration::ZERO);
+        crate::test_harness::pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+    }
+
+    /// Runs frames of every view until the route transitions have settled.
+    fn settle_every_view(app: &mut App) {
         let mut at = Duration::ZERO;
         for _ in 0..20 {
             at += Duration::from_millis(20);
@@ -1929,35 +1934,9 @@ mod tests {
         WidgetsApp::new(COLOR).page_route_builder(page_route)
     }
 
-    fn root_element(app: &mut App) -> AnyElement {
-        WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("a mounted app")
-    }
-
-    /// Every element of the mounted tree, parents before children.
-    fn descendants(app: &App, root: AnyElement) -> Vec<AnyElement> {
-        let mut all = vec![root];
-        let mut visited = 0;
-        while visited < all.len() {
-            let element = all[visited];
-            element.visit_children(app, &mut |child| all.push(child));
-            visited += 1;
-        }
-        all
-    }
-
-    fn find_widget<W: 'static>(app: &App, root: AnyElement) -> Option<&W> {
-        for element in descendants(app, root) {
-            if let Some(widget) = downcast_widget::<W>(&**element.widget(app)) {
-                return Some(widget);
-            }
-        }
-        None
-    }
-
-    fn has_widget<W: 'static>(app: &App, root: AnyElement) -> bool {
-        find_widget::<W>(app, root).is_some()
+    /// Dart's `find.byType(W, skipOffstage: false)`.
+    fn built<W: 'static>() -> Finder {
+        find::by_type::<W>().skip_offstage(false)
     }
 
     /// The intents the shortcuts bind to `key`, in the table's order.
@@ -1975,19 +1954,14 @@ mod tests {
 
     #[test]
     fn home_is_shown_by_the_first_route_of_the_navigator_the_app_builds() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        drop(app);
-        mount(&cell, widgets_app().home(Marker).into_widget());
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        assert!(has_widget::<Navigator>(&app, root), "the app builds one");
-        assert!(
-            has_widget::<Marker>(&app, root),
-            "the home route shows home"
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(widgets_app().home(Marker).into_widget());
+            tester.pump_and_settle();
+            // The app builds one.
+            expect(tester, &built::<Navigator>(), finds_widgets());
+            // The home route shows home.
+            expect(tester, &built::<Marker>(), finds_widgets());
+        });
     }
 
     /// A second leaf, told apart from [`Marker`].
@@ -2004,87 +1978,70 @@ mod tests {
     // a new home shows on the next frame.
     #[test]
     fn pumping_the_app_with_a_new_home_shows_the_new_page() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        drop(app);
-        mount(&cell, widgets_app().home(Marker).into_widget());
-        settle(&mut cell.borrow_mut());
+        test_widgets(|tester| {
+            tester.pump_widget(widgets_app().home(Marker).into_widget());
+            tester.pump_and_settle();
 
-        mount(&cell, widgets_app().home(OtherMarker).into_widget());
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        assert!(has_widget::<OtherMarker>(&app, root), "the new home shows");
-        assert!(!has_widget::<Marker>(&app, root), "the old home is gone");
+            tester.pump_widget(widgets_app().home(OtherMarker).into_widget());
+            tester.pump_and_settle();
+            // The new home shows.
+            expect(tester, &built::<OtherMarker>(), finds_widgets());
+            // The old home is gone.
+            expect(tester, &built::<Marker>(), finds_nothing());
+        });
     }
 
     #[test]
     fn a_routes_table_entry_for_the_default_route_is_the_first_route() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        let builder: WidgetBuilder = Rc::new(|_app, _context| Marker.into_widget());
-        drop(app);
-        mount(
-            &cell,
-            widgets_app()
-                .routes([(String::from("/"), builder)])
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        assert!(has_widget::<Marker>(&app, root));
+        test_widgets(|tester| {
+            let builder: WidgetBuilder = Rc::new(|_app, _context| Marker.into_widget());
+            tester.pump_widget(
+                widgets_app()
+                    .routes([(String::from("/"), builder)])
+                    .into_widget(),
+            );
+            tester.pump_and_settle();
+            expect(tester, &built::<Marker>(), finds_widgets());
+        });
     }
 
     #[test]
     fn a_builder_replaces_the_navigator_and_is_handed_no_child() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        let had_child = Rc::new(Cell::new(true));
-        let sink = Rc::clone(&had_child);
-        drop(app);
-        mount(
-            &cell,
-            WidgetsApp::new(COLOR)
-                .builder(move |_app, _context, child| {
-                    sink.set(child.is_some());
-                    Marker.into_widget()
-                })
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let root = root_element(&mut app);
-        assert!(!had_child.get(), "no routes, so the builder gets no child");
-        assert!(has_widget::<Marker>(&app, root));
-        assert!(!has_widget::<Navigator>(&app, root));
+        test_widgets(|tester| {
+            let had_child = Rc::new(Cell::new(true));
+            let sink = Rc::clone(&had_child);
+            tester.pump_widget(
+                WidgetsApp::new(COLOR)
+                    .builder(move |_app, _context, child| {
+                        sink.set(child.is_some());
+                        Marker.into_widget()
+                    })
+                    .into_widget(),
+            );
+            assert!(!had_child.get(), "no routes, so the builder gets no child");
+            expect(tester, &built::<Marker>(), finds_widgets());
+            expect(tester, &built::<Navigator>(), finds_nothing());
+        });
     }
 
     #[test]
     fn a_builder_wraps_the_navigator_when_the_app_has_routes() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        let had_child = Rc::new(Cell::new(false));
-        let sink = Rc::clone(&had_child);
-        drop(app);
-        mount(
-            &cell,
-            widgets_app()
-                .home(SizedBox::shrink())
-                .builder(move |_app, _context, child| {
-                    sink.set(child.is_some());
-                    child.expect("the navigator").clone()
-                })
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        assert!(had_child.get());
-        assert!(has_widget::<Navigator>(&app, root));
+        test_widgets(|tester| {
+            let had_child = Rc::new(Cell::new(false));
+            let sink = Rc::clone(&had_child);
+            tester.pump_widget(
+                widgets_app()
+                    .home(SizedBox::shrink())
+                    .builder(move |_app, _context, child| {
+                        sink.set(child.is_some());
+                        child.expect("the navigator").clone()
+                    })
+                    .into_widget(),
+            );
+            tester.pump_and_settle();
+            assert!(had_child.get());
+            expect(tester, &built::<Navigator>(), finds_widgets());
+        });
     }
 
     /// Android's back button and back gesture both arrive here. The app goes back while it
@@ -2092,58 +2049,49 @@ mod tests {
     /// the host knows to close the activity instead.
     #[test]
     fn a_back_press_pops_the_app_navigator_until_it_is_at_the_first_route() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let sink = Rc::clone(&captured);
-        drop(app);
-        mount(
-            &cell,
-            widgets_app()
-                .home(Builder::new(move |_app, context| {
-                    sink.set(Some(context));
-                    Marker.into_widget()
-                }))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let binding = WidgetsBinding::instance(&mut app);
-        assert!(
-            !binding.handle_pop_route(&mut app, IMPLICIT_VIEW_ID),
-            "at the first route there is nowhere to go back to"
-        );
+        test_widgets(|tester| {
+            let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let sink = Rc::clone(&captured);
+            tester.pump_widget(
+                widgets_app()
+                    .home(Builder::new(move |_app, context| {
+                        sink.set(Some(context));
+                        Marker.into_widget()
+                    }))
+                    .into_widget(),
+            );
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            let binding = WidgetsBinding::instance(&mut app);
+            assert!(
+                !binding.handle_pop_route(&mut app, IMPLICIT_VIEW_ID),
+                "at the first route there is nowhere to go back to"
+            );
 
-        let context = captured.get().expect("the home built");
-        let settings = RouteSettings::new().name("second");
-        let route = page_route(
-            &mut app,
-            &settings,
-            Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
-        );
-        Navigator::of(&mut app, context, false).push(&mut app, route.into_erased());
-        settle(&mut app);
+            let context = captured.get().expect("the home built");
+            let settings = RouteSettings::new().name("second");
+            let route = page_route(
+                &mut app,
+                &settings,
+                Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
+            );
+            Navigator::of(&mut app, context, false).push(&mut app, route.into_erased());
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
 
-        assert!(
-            binding.handle_pop_route(&mut app, IMPLICIT_VIEW_ID),
-            "the pushed route is popped"
-        );
-        settle(&mut app);
-        assert!(
-            !binding.handle_pop_route(&mut app, IMPLICIT_VIEW_ID),
-            "back at the first route it answers that it did not go back"
-        );
-    }
-
-    /// An [`App`] with one view on an Android host, where Flutter's predictive back is, and the
-    /// view, whose host records what the app tells it.
-    fn android_app_with_view() -> (Rc<AppCell>, Rc<TestView>) {
-        let view = Rc::new(TestView::with_pixel_ratio(800.0, 600.0, 2.0));
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::Android)
-            .with_view(Rc::clone(&view) as ViewRef);
-        (AppCell::with_platform(Rc::new(platform)), view)
+            assert!(
+                binding.handle_pop_route(&mut app, IMPLICIT_VIEW_ID),
+                "the pushed route is popped"
+            );
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert!(
+                !binding.handle_pop_route(&mut app, IMPLICIT_VIEW_ID),
+                "back at the first route it answers that it did not go back"
+            );
+        });
     }
 
     /// Every value the app told `view`'s host of whether it handles back, in order.
@@ -2155,113 +2103,143 @@ mod tests {
     /// ready".
     #[test]
     fn widgets_app_calls_set_framework_handles_back_only_when_app_is_ready() {
-        let (cell, view) = android_app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        // Start in the `resumed` state, where set_framework_handles_back should be called like
-        // normal.
-        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Resumed);
-        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let sink = Rc::clone(&captured);
-        drop(app);
-        mount(
-            &cell,
-            WidgetsApp::new(COLOR)
-                .builder(move |_app, context, _child| {
-                    sink.set(Some(context));
-                    Marker.into_widget()
-                })
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let context = captured.get().expect("the builder ran");
+        test_widgets(|tester| {
+            // Start in the `resumed` state, where set_framework_handles_back should be called like
+            // normal.
+            tester.update(|app| {
+                SchedulerBinding::handle_app_lifecycle_state_changed(
+                    app,
+                    AppLifecycleState::Resumed,
+                )
+            });
+            let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let sink = Rc::clone(&captured);
+            tester.pump_widget(
+                WidgetsApp::new(COLOR)
+                    .builder(move |_app, context, _child| {
+                        sink.set(Some(context));
+                        Marker.into_widget()
+                    })
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let context = captured.get().expect("the builder ran");
 
-        assert!(framework_handles_backs(&view).is_empty());
+            assert!(framework_handles_backs(tester.view()).is_empty());
 
-        NavigationNotification::new(true).dispatch(&mut app, Some(context));
-        settle(&mut app);
-        assert_eq!(framework_handles_backs(&view).last(), Some(&true));
+            NavigationNotification::new(true).dispatch(&mut app, Some(context));
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(framework_handles_backs(tester.view()).last(), Some(&true));
 
-        NavigationNotification::new(false).dispatch(&mut app, Some(context));
-        settle(&mut app);
-        assert_eq!(framework_handles_backs(&view).last(), Some(&false));
+            NavigationNotification::new(false).dispatch(&mut app, Some(context));
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(framework_handles_backs(tester.view()).last(), Some(&false));
 
-        // Set the app state to inactive, where set_framework_handles_back is still called. This
-        // could happen when responding to a tap on a notification when the app is not active and
-        // immediately navigating, for example.
-        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Inactive);
+            // Set the app state to inactive, where set_framework_handles_back is still called. This
+            // could happen when responding to a tap on a notification when the app is not active and
+            // immediately navigating, for example.
+            SchedulerBinding::handle_app_lifecycle_state_changed(
+                &mut app,
+                AppLifecycleState::Inactive,
+            );
 
-        let inactive_start_calls_length = framework_handles_backs(&view).len();
-        NavigationNotification::new(true).dispatch(&mut app, Some(context));
-        settle(&mut app);
-        assert_eq!(
-            framework_handles_backs(&view).len(),
-            inactive_start_calls_length + 1
-        );
+            let inactive_start_calls_length = framework_handles_backs(tester.view()).len();
+            NavigationNotification::new(true).dispatch(&mut app, Some(context));
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                framework_handles_backs(tester.view()).len(),
+                inactive_start_calls_length + 1
+            );
 
-        NavigationNotification::new(false).dispatch(&mut app, Some(context));
-        settle(&mut app);
-        assert_eq!(
-            framework_handles_backs(&view).len(),
-            inactive_start_calls_length + 2
-        );
+            NavigationNotification::new(false).dispatch(&mut app, Some(context));
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                framework_handles_backs(tester.view()).len(),
+                inactive_start_calls_length + 2
+            );
 
-        // Set the app state to detached, where set_framework_handles_back shouldn't be called.
-        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Detached);
+            // Set the app state to detached, where set_framework_handles_back shouldn't be called.
+            SchedulerBinding::handle_app_lifecycle_state_changed(
+                &mut app,
+                AppLifecycleState::Detached,
+            );
 
-        let final_calls_length = framework_handles_backs(&view).len();
-        NavigationNotification::new(true).dispatch(&mut app, Some(context));
-        settle(&mut app);
-        assert_eq!(framework_handles_backs(&view).len(), final_calls_length);
+            let final_calls_length = framework_handles_backs(tester.view()).len();
+            NavigationNotification::new(true).dispatch(&mut app, Some(context));
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                framework_handles_backs(tester.view()).len(),
+                final_calls_length
+            );
 
-        NavigationNotification::new(false).dispatch(&mut app, Some(context));
-        settle(&mut app);
-        assert_eq!(framework_handles_backs(&view).len(), final_calls_length);
+            NavigationNotification::new(false).dispatch(&mut app, Some(context));
+            drop(app);
+            tester.pump_and_settle();
+            assert_eq!(
+                framework_handles_backs(tester.view()).len(),
+                final_calls_length
+            );
+        });
     }
 
     /// Flutter's navigator_test.dart, "a single route is already defaulted to false" and
     /// "navigating around a single Navigator with system back", on a `WidgetsApp`.
     #[test]
     fn the_host_hears_whether_the_app_navigator_can_go_back_as_routes_come_and_go() {
-        let (cell, view) = android_app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        SchedulerBinding::handle_app_lifecycle_state_changed(&mut app, AppLifecycleState::Resumed);
-        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let sink = Rc::clone(&captured);
-        drop(app);
-        mount(
-            &cell,
-            widgets_app()
-                .home(Builder::new(move |_app, context| {
-                    sink.set(Some(context));
-                    Marker.into_widget()
-                }))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        assert_eq!(
-            framework_handles_backs(&view).last(),
-            Some(&false),
-            "a single route is already defaulted to false"
-        );
+        test_widgets(|tester| {
+            tester.update(|app| {
+                SchedulerBinding::handle_app_lifecycle_state_changed(
+                    app,
+                    AppLifecycleState::Resumed,
+                )
+            });
+            let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let sink = Rc::clone(&captured);
+            tester.pump_widget(
+                widgets_app()
+                    .home(Builder::new(move |_app, context| {
+                        sink.set(Some(context));
+                        Marker.into_widget()
+                    }))
+                    .into_widget(),
+            );
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                framework_handles_backs(tester.view()).last(),
+                Some(&false),
+                "a single route is already defaulted to false"
+            );
 
-        let context = captured.get().expect("the home built");
-        let settings = RouteSettings::new().name("/one");
-        let route = page_route(
-            &mut app,
-            &settings,
-            Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
-        );
-        Navigator::of(&mut app, context, false).push(&mut app, route.into_erased());
-        settle(&mut app);
-        assert_eq!(framework_handles_backs(&view).last(), Some(&true));
+            let context = captured.get().expect("the home built");
+            let settings = RouteSettings::new().name("/one");
+            let route = page_route(
+                &mut app,
+                &settings,
+                Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
+            );
+            Navigator::of(&mut app, context, false).push(&mut app, route.into_erased());
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(framework_handles_backs(tester.view()).last(), Some(&true));
 
-        let binding = WidgetsBinding::instance(&mut app);
-        assert!(binding.handle_pop_route(&mut app, IMPLICIT_VIEW_ID));
-        settle(&mut app);
-        assert_eq!(framework_handles_backs(&view).last(), Some(&false));
+            let binding = WidgetsBinding::instance(&mut app);
+            assert!(binding.handle_pop_route(&mut app, IMPLICIT_VIEW_ID));
+            drop(app);
+            tester.pump_and_settle();
+            assert_eq!(framework_handles_backs(tester.view()).last(), Some(&false));
+        });
     }
 
     /// Back in one of two views, each with its app, pops that view's navigator alone, and each
@@ -2281,7 +2259,7 @@ mod tests {
         let homes: Rc<RefCell<Vec<BuildContext>>> = Rc::default();
         let sink = Rc::clone(&homes);
         drop(app);
-        mount(
+        mount_in_every_view(
             &cell,
             widgets_app()
                 .home(Builder::new(move |_app, context| {
@@ -2291,7 +2269,7 @@ mod tests {
                 .into_widget(),
         );
         let mut app = cell.borrow_mut();
-        settle(&mut app);
+        settle_every_view(&mut app);
         let home_in = |app: &App, view: ViewId| {
             let homes = homes.borrow();
             *homes
@@ -2307,7 +2285,7 @@ mod tests {
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
         );
         Navigator::of(&mut app, second, false).push(&mut app, route.into_erased());
-        settle(&mut app);
+        settle_every_view(&mut app);
         assert_eq!(framework_handles_backs(&views[0]).last(), Some(&false));
         assert_eq!(framework_handles_backs(&views[1]).last(), Some(&true));
 
@@ -2317,39 +2295,36 @@ mod tests {
             "the first view's navigator has nowhere to go back to"
         );
         assert!(binding.handle_pop_route(&mut app, ViewId(1)));
-        settle(&mut app);
+        settle_every_view(&mut app);
         assert_eq!(framework_handles_backs(&views[1]).last(), Some(&false));
     }
 
     #[test]
     fn the_locale_argument_overrides_the_resolver_and_the_widgets_delegate_is_supplied() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let sink = Rc::clone(&captured);
-        drop(app);
-        mount(
-            &cell,
-            WidgetsApp::new(COLOR)
-                .locale(Locale::new("fr"))
-                .supported_locales([Locale::new("en").country_code("US"), Locale::new("fr")])
-                .builder(move |_app, context, _child| {
-                    sink.set(Some(context));
-                    Marker.into_widget()
-                })
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let context = captured.get().expect("the builder ran");
-        assert_eq!(
-            Localizations::locale_of(&mut app, context),
-            Locale::new("fr"),
-            "the locale argument wins over the platform's locales"
-        );
-        let localizations = Localizations::of::<dyn WidgetsLocalizations>(&mut app, context)
-            .expect("DefaultWidgetsLocalizations");
-        assert_eq!(localizations.text_direction(), TextDirection::Ltr);
+        test_widgets(|tester| {
+            let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let sink = Rc::clone(&captured);
+            tester.pump_widget(
+                WidgetsApp::new(COLOR)
+                    .locale(Locale::new("fr"))
+                    .supported_locales([Locale::new("en").country_code("US"), Locale::new("fr")])
+                    .builder(move |_app, context, _child| {
+                        sink.set(Some(context));
+                        Marker.into_widget()
+                    })
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let context = captured.get().expect("the builder ran");
+            assert_eq!(
+                Localizations::locale_of(&mut app, context),
+                Locale::new("fr"),
+                "the locale argument wins over the platform's locales"
+            );
+            let localizations = Localizations::of::<dyn WidgetsLocalizations>(&mut app, context)
+                .expect("DefaultWidgetsLocalizations");
+            assert_eq!(localizations.text_direction(), TextDirection::Ltr);
+        });
     }
 
     #[test]
@@ -2398,106 +2373,86 @@ mod tests {
 
     #[test]
     fn the_default_actions_request_focus_for_a_request_focus_intent() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        drop(app);
-        mount(
-            &cell,
-            Focus::new(SizedBox::shrink())
-                .debug_label("target")
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let root_scope = FocusManager::instance(&mut app).root_scope(&app).handle();
-        let node: AnyFocusNode = FocusNodeLeaf::as_node(root_scope)
-            .descendants(&mut app)
-            .into_iter()
-            .find(|node| node.debug_label(&app).as_deref() == Some("target"))
-            .expect("the focus node");
-        let actions = WidgetsApp::default_actions(&mut app);
-        let action = actions[&TypeId::of::<RequestFocusIntent>()].handle();
-        let kept_node = node.keep(&app);
-        action.invoke(&mut app, &RequestFocusIntent::new(kept_node), None);
-        app.drain_microtasks();
-        assert_eq!(primary_focus(&mut app), Some(node));
+        test_widgets(|tester| {
+            tester.pump_widget(
+                Focus::new(SizedBox::shrink())
+                    .debug_label("target")
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let root_scope = FocusManager::instance(&mut app).root_scope(&app).handle();
+            let node: AnyFocusNode = FocusNodeLeaf::as_node(root_scope)
+                .descendants(&mut app)
+                .into_iter()
+                .find(|node| node.debug_label(&app).as_deref() == Some("target"))
+                .expect("the focus node");
+            let actions = WidgetsApp::default_actions(&mut app);
+            let action = actions[&TypeId::of::<RequestFocusIntent>()].handle();
+            let kept_node = node.keep(&app);
+            action.invoke(&mut app, &RequestFocusIntent::new(kept_node), None);
+            app.drain_microtasks();
+            assert_eq!(primary_focus(&mut app), Some(node));
+        });
     }
 
     #[test]
     fn the_debug_banner_is_built_unless_it_is_turned_off() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        drop(app);
-        mount(&cell, widgets_app().home(Marker).into_widget());
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        assert_eq!(
-            has_widget::<CheckedModeBanner>(&app, root),
-            cfg!(debug_assertions),
-            "the banner is a debug-mode widget"
-        );
-
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        drop(app);
-        mount(
-            &cell,
-            widgets_app()
-                .home(Marker)
-                .debug_show_checked_mode_banner(false)
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        assert!(!has_widget::<CheckedModeBanner>(&app, root));
+        test_widgets(|tester| {
+            tester.pump_widget(widgets_app().home(Marker).into_widget());
+            tester.pump_and_settle();
+            // The banner is a debug-mode widget.
+            let banner = if cfg!(debug_assertions) {
+                finds_widgets()
+            } else {
+                finds_nothing()
+            };
+            expect(tester, &built::<CheckedModeBanner>(), banner);
+        });
+        test_widgets(|tester| {
+            tester.pump_widget(
+                widgets_app()
+                    .home(Marker)
+                    .debug_show_checked_mode_banner(false)
+                    .into_widget(),
+            );
+            tester.pump_and_settle();
+            expect(tester, &built::<CheckedModeBanner>(), finds_nothing());
+        });
     }
 
     #[test]
     fn a_restoration_scope_id_names_the_root_restoration_scope() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        drop(app);
-        mount(
-            &cell,
-            widgets_app()
-                .home(Marker)
-                .restoration_scope_id("app")
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        let scope =
-            find_widget::<RootRestorationScope>(&app, root).expect("the app always builds one");
-        assert_eq!(scope.restoration_id.as_deref(), Some("app"));
-
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        drop(app);
-        mount(&cell, widgets_app().home(Marker).into_widget());
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        let scope =
-            find_widget::<RootRestorationScope>(&app, root).expect("the app always builds one");
-        assert_eq!(scope.restoration_id, None, "restoration stays off");
+        test_widgets(|tester| {
+            tester.pump_widget(
+                widgets_app()
+                    .home(Marker)
+                    .restoration_scope_id("app")
+                    .into_widget(),
+            );
+            tester.pump_and_settle();
+            let restoration_id = tester.widget(
+                built::<RootRestorationScope>().first(),
+                |scope: &RootRestorationScope| scope.restoration_id.clone(),
+            );
+            assert_eq!(restoration_id.as_deref(), Some("app"));
+        });
+        test_widgets(|tester| {
+            tester.pump_widget(widgets_app().home(Marker).into_widget());
+            tester.pump_and_settle();
+            let restoration_id = tester.widget(
+                built::<RootRestorationScope>().first(),
+                |scope: &RootRestorationScope| scope.restoration_id.clone(),
+            );
+            assert_eq!(restoration_id, None, "restoration stays off");
+        });
     }
 
     #[test]
     fn the_platforms_default_route_name_overrides_the_initial_route() {
-        let cell = app_opening_at("/deep");
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
+        let tester =
+            &mut WidgetTester::with_platform(TestPlatform::new().with_default_route("/deep"));
         let deep: WidgetBuilder = Rc::new(|_app, _context| Marker.into_widget());
-        drop(app);
-        mount(
-            &cell,
+        tester.pump_widget(
             widgets_app()
                 .initial_route("/ignored")
                 .routes([
@@ -2511,9 +2466,7 @@ mod tests {
                 ])
                 .into_widget(),
         );
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        let root = root_element(&mut app);
-        assert!(has_widget::<Marker>(&app, root));
+        tester.pump_and_settle();
+        expect(tester, &built::<Marker>(), finds_widgets());
     }
 }

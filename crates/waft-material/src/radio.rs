@@ -1324,7 +1324,6 @@ pub(crate) mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::valo::Op;
     use waft_embedder::{PointerChange, Rect};
     use waft_gestures::{K_LONG_PRESS_TIMEOUT, K_PRIMARY_BUTTON};
     use waft_painting::AlignmentGeometry;
@@ -1335,22 +1334,20 @@ pub(crate) mod tests {
         MouseRegion, Row, SizedBox, StatefulBuilder, TooltipTriggerMode, WidgetStateColor,
     };
 
+    use waft_rendering::testing::{PaintCall, PaintedStyle};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
+
     use super::*;
     use crate::material::{Material, RenderInkFeatures};
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
     use crate::tooltip::Tooltip;
 
     /// Where a 100x100 `Container` centred in the 800x600 view lies.
     pub(crate) const CENTER_RECT: Rect = Rect::from_ltrb(350.0, 250.0, 450.0, 350.0);
-
-    /// A tester on Android with the OS fonts, which `MaterialApp`'s debug banner lays out.
-    pub(crate) fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        tester
-    }
 
     /// Dart's `ThemeData()`.
     pub(crate) fn m3(tester: &WidgetTester) -> ThemeData {
@@ -1411,7 +1408,7 @@ pub(crate) mod tests {
 
     /// Dart's `find.byType(Radio<T>)`: the one radio of that type.
     pub(crate) fn find_radio<T: Clone + PartialEq + 'static>(tester: &WidgetTester) -> AnyElement {
-        let found = tester.find_by_type::<Radio<T>>();
+        let found = find::by_type::<Radio<T>>().evaluate(tester);
         assert_eq!(found.len(), 1, "one Radio");
         found[0]
     }
@@ -1436,219 +1433,82 @@ pub(crate) mod tests {
 
     /// Dart's `createGesture(kind: mouse)`, `addPointer()` and `moveTo(at)`.
     pub(crate) fn hover_at(tester: &mut WidgetTester, at: Offset) {
-        let mut mouse = WidgetTester::mouse(1, K_PRIMARY_BUTTON);
+        let mut mouse = TestPointer::mouse(1, K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, at, false);
     }
 
     /// Dart's `tester.press(finder)`: a touch pointer `id` down at `at`, left down.
     pub(crate) fn press_at(tester: &mut WidgetTester, at: Offset, id: i64) {
-        let mut touch = WidgetTester::touch(id);
+        let mut touch = TestPointer::touch(id);
         tester.down(&mut touch, at);
     }
 
-    /// One recorded canvas op, reduced to what the radio cases' `paints` matchers compare. A
-    /// draw with a transparent paint is not recorded at all, so Dart's
-    /// `..circle(color: Colors.transparent)` has nothing to match here and is left out of the
-    /// expectations.
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    pub(crate) enum Painted {
-        /// `drawRect`: its colour as `0xAARRGGBB` and its rect.
-        Rect(u32, Rect),
-        /// `drawCircle`: its colour, its radius and, for a stroke, its stroke width.
-        Circle {
-            color: u32,
-            radius: f32,
-            stroke_width: Option<f32>,
-        },
-        Save,
-        Restore,
-    }
-
-    fn argb(color: waft_embedder::valo::Color) -> u32 {
-        let channel = |value: f32| (value * 255.0).round() as u32;
-        (channel(color.a) << 24)
-            | (channel(color.r) << 16)
-            | (channel(color.g) << 8)
-            | channel(color.b)
-    }
-
-    impl Painted {
-        fn of(op: &Op) -> Option<Painted> {
-            match op {
-                Op::DrawRect { paint, rect, .. } => Some(Painted::Rect(
-                    argb(paint.color),
-                    Rect::from_ltwh(
-                        f64::from(rect.x),
-                        f64::from(rect.y),
-                        f64::from(rect.width),
-                        f64::from(rect.height),
-                    ),
-                )),
-                Op::DrawPath { path, paint, .. } => {
-                    let bounds = path.bounds();
-                    if (bounds.width - bounds.height).abs() >= 1e-3 {
-                        return None;
-                    }
-                    Some(Painted::Circle {
-                        color: argb(paint.color),
-                        radius: bounds.width / 2.0,
-                        stroke_width: match &paint.style {
-                            PaintStyle::Stroke(stroke) => Some(stroke.width),
-                            PaintStyle::Fill => None,
-                        },
-                    })
-                }
-                Op::Save => Some(Painted::Save),
-                Op::Restore => Some(Painted::Restore),
-                _ => None,
-            }
-        }
-    }
-
-    /// What `render` and its subtree draw, painted at the origin.
-    pub(crate) fn painted(tester: &WidgetTester, render: AnyRenderObject) -> Vec<Painted> {
-        tester
-            .pictures(render)
-            .iter()
-            .flat_map(|picture| {
-                picture
-                    .ops()
-                    .iter()
-                    .filter_map(Painted::of)
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    }
-
-    /// One step of Dart's `paints` matcher.
-    #[derive(Clone, Copy, Debug)]
-    pub(crate) enum Paints {
-        Rect {
-            color: Option<Color>,
-            rect: Option<Rect>,
-        },
-        Circle {
-            color: Option<Color>,
-            radius: Option<f64>,
-            stroke_width: Option<f64>,
-        },
-        Save,
-        Restore,
-    }
-
     /// Dart's `..rect(color:, rect:)`.
-    pub(crate) fn rect(color: Color, rect: Rect) -> Paints {
-        Paints::Rect {
-            color: Some(color),
-            rect: Some(rect),
-        }
+    pub(crate) fn rect(color: Color, rect: Rect) -> PaintCall {
+        PaintCall::rect_at(rect, Some(color))
     }
 
-    /// Dart's `..rect()`.
-    pub(crate) fn any_rect() -> Paints {
-        Paints::Rect {
-            color: None,
-            rect: None,
-        }
+    /// Dart's `..rect()`: a rect of any colour.
+    pub(crate) fn any_rect() -> PaintCall {
+        PaintCall::rect(None)
     }
 
     /// Dart's `..circle(color:)`.
-    pub(crate) fn circle(color: Color) -> Paints {
-        Paints::Circle {
-            color: Some(color),
-            radius: None,
-            stroke_width: None,
-        }
+    pub(crate) fn circle(color: Color) -> PaintCall {
+        PaintCall::circle(Some(color))
     }
 
-    impl Paints {
-        /// Dart's `radius:` argument of `..circle`.
-        pub(crate) fn radius(self, radius: f64) -> Paints {
+    /// Dart's `radius:` and `strokeWidth:` arguments of `..circle`, the latter with or
+    /// without `style: stroke`.
+    pub(crate) trait CircleArguments {
+        fn radius(self, radius: f64) -> PaintCall;
+        fn stroke_width(self, stroke_width: f64) -> PaintCall;
+    }
+
+    impl CircleArguments for PaintCall {
+        fn radius(self, radius: f64) -> PaintCall {
             match self {
-                Paints::Circle {
-                    color,
-                    stroke_width,
-                    ..
-                } => Paints::Circle {
-                    color,
+                PaintCall::Circle {
+                    x, y, color, style, ..
+                } => PaintCall::Circle {
+                    x,
+                    y,
                     radius: Some(radius),
-                    stroke_width,
-                },
-                other => other,
-            }
-        }
-
-        /// Dart's `strokeWidth:` argument of `..circle`, with or without `style: stroke`.
-        pub(crate) fn stroke_width(self, stroke_width: f64) -> Paints {
-            match self {
-                Paints::Circle { color, radius, .. } => Paints::Circle {
                     color,
-                    radius,
-                    stroke_width: Some(stroke_width),
+                    style,
                 },
                 other => other,
             }
         }
 
-        fn is_same_call(&self, painted: &Painted) -> bool {
-            matches!(
-                (self, painted),
-                (Paints::Rect { .. }, Painted::Rect(..))
-                    | (Paints::Circle { .. }, Painted::Circle { .. })
-                    | (Paints::Save, Painted::Save)
-                    | (Paints::Restore, Painted::Restore)
-            )
-        }
-
-        fn matches(&self, painted: &Painted) -> bool {
-            match (*self, *painted) {
-                (Paints::Rect { color, rect }, Painted::Rect(painted_color, painted_rect)) => {
-                    color.is_none_or(|color| color.value() == painted_color)
-                        && rect.is_none_or(|rect| rect == painted_rect)
-                }
-                (
-                    Paints::Circle {
-                        color,
-                        radius,
-                        stroke_width,
-                    },
-                    Painted::Circle {
-                        color: painted_color,
-                        radius: painted_radius,
-                        stroke_width: painted_stroke_width,
-                    },
-                ) => {
-                    color.is_none_or(|color| color.value() == painted_color)
-                        && radius.is_none_or(|radius| (radius as f32 - painted_radius).abs() < 1e-3)
-                        && stroke_width.is_none_or(|stroke_width| {
-                            painted_stroke_width == Some(stroke_width as f32)
-                        })
-                }
-                (Paints::Save, Painted::Save) | (Paints::Restore, Painted::Restore) => true,
-                _ => false,
+        fn stroke_width(self, stroke_width: f64) -> PaintCall {
+            match self {
+                PaintCall::Circle {
+                    x,
+                    y,
+                    radius,
+                    color,
+                    ..
+                } => PaintCall::Circle {
+                    x,
+                    y,
+                    radius,
+                    color,
+                    style: Some(PaintedStyle::Stroke(Some(stroke_width))),
+                },
+                other => other,
             }
         }
     }
 
-    /// Dart's `expect(render, paints..a()..b())`: each step finds the next call of its kind,
-    /// skipping calls of other kinds, and that call must match it.
+    /// Dart's `expect(render, paints..a()..b())` on what `render` and its subtree draw.
     pub(crate) fn assert_paints(
         tester: &WidgetTester,
         render: AnyRenderObject,
-        expected: &[Paints],
+        expected: &[PaintCall],
     ) {
-        let actual = painted(tester, render);
-        let mut calls = actual.iter();
-        for step in expected {
-            let call = calls
-                .find(|call| step.is_same_call(call))
-                .unwrap_or_else(|| panic!("no call left for {step:?} in {actual:?}"));
-            assert!(
-                step.matches(call),
-                "{call:?} does not match {step:?} in {actual:?}"
-            );
-        }
+        waft_rendering::testing::assert_paints(&tester.painted_ops(render), expected);
     }
 
     /// The first `T` at or below `node`, depth first.
@@ -1684,9 +1544,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_radio_reports_its_value_when_tapped_unless_selected_or_without_on_changed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let key = GlobalKey::new();
             let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
             let wrap = |radio: Radio<i32>| {
@@ -1700,7 +1559,7 @@ pub(crate) mod tests {
             tester.pump_widget(wrap(
                 Radio::new(1).group_value(2).on_changed(log_into(&log)),
             ));
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert_eq!(*log.borrow(), [Some(1)]);
             log.borrow_mut().clear();
 
@@ -1710,20 +1569,19 @@ pub(crate) mod tests {
                     .on_changed(log_into(&log))
                     .active_color(Colors::GREEN.shade500()),
             ));
-            tester.tap(tester.center_of(&key), 2);
+            tester.tap_at(tester.get_center(&key), 2);
             assert!(log.borrow().is_empty());
 
             tester.pump_widget(wrap(Radio::new(1).group_value(2)));
-            tester.tap(tester.center_of(&key), 3);
+            tester.tap_at(tester.get_center(&key), 3);
             assert!(log.borrow().is_empty());
         });
     }
 
     #[test]
     fn a_disabled_radio_does_not_report_a_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let key = GlobalKey::new();
             let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
 
@@ -1742,16 +1600,15 @@ pub(crate) mod tests {
                 )
                 .into_widget(),
             );
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert!(log.borrow().is_empty());
         });
     }
 
     #[test]
     fn a_toggleable_radio_reports_null_when_tapped_while_selected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let key = GlobalKey::new();
             let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
             let wrap = |radio: Radio<i32>| {
@@ -1768,7 +1625,7 @@ pub(crate) mod tests {
                     .on_changed(log_into(&log))
                     .toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert_eq!(*log.borrow(), [Some(1)]);
             log.borrow_mut().clear();
 
@@ -1778,23 +1635,22 @@ pub(crate) mod tests {
                     .on_changed(log_into(&log))
                     .toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 2);
+            tester.tap_at(tester.get_center(&key), 2);
             assert_eq!(*log.borrow(), [None]);
             log.borrow_mut().clear();
 
             tester.pump_widget(wrap(
                 Radio::new(1).on_changed(log_into(&log)).toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 3);
+            tester.tap_at(tester.get_center(&key), 3);
             assert_eq!(*log.borrow(), [Some(1)]);
         });
     }
 
     #[test]
     fn the_radio_size_is_configurable_by_the_theme_tap_target_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let size_of = |tester: &mut WidgetTester, tap_target_size: MaterialTapTargetSize| {
                 let key = GlobalKey::new();
                 tester.pump_widget(
@@ -1822,11 +1678,11 @@ pub(crate) mod tests {
             };
 
             assert_eq!(
-                size_of(&mut tester, MaterialTapTargetSize::Padded),
+                size_of(tester, MaterialTapTargetSize::Padded),
                 Size::new(48.0, 48.0)
             );
             assert_eq!(
-                size_of(&mut tester, MaterialTapTargetSize::ShrinkWrap),
+                size_of(tester, MaterialTapTargetSize::ShrinkWrap),
                 Size::new(40.0, 40.0)
             );
         });
@@ -1834,11 +1690,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_radio_with_a_splash_radius_paints_its_focus_reaction_that_large() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const SPLASH_RADIUS: f64 = 30.0;
-            let theme = m3(&tester);
+            let theme = m3(tester);
             tester.pump_widget(centered_app(
                 theme,
                 white_box(
@@ -1852,8 +1707,8 @@ pub(crate) mod tests {
             ));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(Colors::ORANGE.shade500()).radius(SPLASH_RADIUS)],
             );
         });
@@ -1876,12 +1731,11 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_a_radio_is_focusable_and_has_the_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
-            let theme = m2(&tester);
+            let theme = m2(tester);
             let configure = {
                 let focus_node = focus_node.clone();
                 move |radio: Radio<i32>| {
@@ -1901,8 +1755,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Colors::ORANGE.shade500()),
@@ -1921,8 +1775,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Colors::ORANGE.shade500()),
@@ -1935,8 +1789,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Color::new(0x61000000)),
@@ -1948,12 +1802,11 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_a_radio_is_focusable_and_has_the_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let colors = theme.color_scheme.clone();
             let configure = {
                 let focus_node = focus_node.clone();
@@ -1974,8 +1827,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Colors::ORANGE.shade500()),
@@ -1994,8 +1847,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     any_rect(),
                     circle(Colors::ORANGE.shade500()),
@@ -2008,8 +1861,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(colors.on_surface.with_opacity(0.38)),
@@ -2021,18 +1874,17 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_a_radio_can_be_hovered_and_has_the_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let theme = m2(&tester);
+            let theme = m2(tester);
             let configure = |radio: Radio<i32>| radio.hover_color(Colors::ORANGE.shade500());
 
             tester.pump_widget(focus_and_hover_app(theme.clone(), 0, true, configure));
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Color::new(0xff2196f3)),
@@ -2041,17 +1893,17 @@ pub(crate) mod tests {
             );
 
             // Start hovering
-            let mut mouse = WidgetTester::mouse(1, K_PRIMARY_BUTTON);
-            let center = center_of_radio::<i32>(&tester);
+            let mut mouse = TestPointer::mouse(1, K_PRIMARY_BUTTON);
+            let center = center_of_radio::<i32>(tester);
             tester.move_to(&mut mouse, center, false);
 
             // Check when the radio isn't selected.
             tester.pump_widget(focus_and_hover_app(theme.clone(), 1, true, configure));
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Colors::ORANGE.shade500()),
@@ -2061,11 +1913,11 @@ pub(crate) mod tests {
 
             // Check when the radio is selected, but disabled.
             tester.pump_widget(focus_and_hover_app(theme, 0, false, configure));
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Color::new(0x61000000)),
@@ -2077,19 +1929,18 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_a_radio_can_be_hovered_and_has_the_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let colors = theme.color_scheme.clone();
             let configure = |radio: Radio<i32>| radio.hover_color(Colors::ORANGE.shade500());
 
             tester.pump_widget(focus_and_hover_app(theme.clone(), 0, true, configure));
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(colors.primary),
@@ -2098,17 +1949,17 @@ pub(crate) mod tests {
             );
 
             // Start hovering
-            let mut mouse = WidgetTester::mouse(1, K_PRIMARY_BUTTON);
-            let center = center_of_radio::<i32>(&tester);
+            let mut mouse = TestPointer::mouse(1, K_PRIMARY_BUTTON);
+            let center = center_of_radio::<i32>(tester);
             tester.move_to(&mut mouse, center, false);
 
             // Check when the radio isn't selected.
             tester.pump_widget(focus_and_hover_app(theme.clone(), 1, true, configure));
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Colors::ORANGE.shade500()),
@@ -2118,11 +1969,11 @@ pub(crate) mod tests {
 
             // Check when the radio is selected, but disabled.
             tester.pump_widget(focus_and_hover_app(theme, 0, false, configure));
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(colors.on_surface.with_opacity(0.38)),
@@ -2134,14 +1985,13 @@ pub(crate) mod tests {
 
     #[test]
     fn a_radio_can_be_controlled_by_keyboard_shortcuts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let group_value = Rc::new(Cell::new(Some(1)));
             let focus_node2 = FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
             focus_node2.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio2".into()));
-            let theme = m3(&tester);
+            let theme = m3(tester);
 
             let builder_value = Rc::clone(&group_value);
             tester.pump_widget(centered_app(
@@ -2203,12 +2053,11 @@ pub(crate) mod tests {
     /// widgets' radio_group_test 'Radio group can use arrow key', with Material radios.
     #[test]
     fn arrow_keys_move_the_selection_through_a_radio_group() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
             let group_value: Rc<Cell<Option<i32>>> = Rc::default();
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let key0 = GlobalKey::new();
 
             let builder_value = Rc::clone(&group_value);
@@ -2240,7 +2089,7 @@ pub(crate) mod tests {
                 }),
             ));
 
-            tester.tap(tester.center_of(&key0), 1);
+            tester.tap_at(tester.get_center(&key0), 1);
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
             assert_eq!(group_value.get(), Some(0));
@@ -2255,7 +2104,7 @@ pub(crate) mod tests {
             };
             assert_eq!(
                 press(
-                    &mut tester,
+                    tester,
                     PhysicalKeyboardKey::ARROW_DOWN,
                     LogicalKeyboardKey::ARROW_DOWN
                 ),
@@ -2263,7 +2112,7 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 press(
-                    &mut tester,
+                    tester,
                     PhysicalKeyboardKey::ARROW_RIGHT,
                     LogicalKeyboardKey::ARROW_RIGHT
                 ),
@@ -2272,7 +2121,7 @@ pub(crate) mod tests {
             // Wrap around
             assert_eq!(
                 press(
-                    &mut tester,
+                    tester,
                     PhysicalKeyboardKey::ARROW_RIGHT,
                     LogicalKeyboardKey::ARROW_RIGHT
                 ),
@@ -2281,7 +2130,7 @@ pub(crate) mod tests {
             // Wrap around
             assert_eq!(
                 press(
-                    &mut tester,
+                    tester,
                     PhysicalKeyboardKey::ARROW_LEFT,
                     LogicalKeyboardKey::ARROW_LEFT
                 ),
@@ -2289,7 +2138,7 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 press(
-                    &mut tester,
+                    tester,
                     PhysicalKeyboardKey::ARROW_UP,
                     LogicalKeyboardKey::ARROW_UP
                 ),
@@ -2300,9 +2149,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_radio_responds_to_density_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let key = GlobalKey::new();
             let build_test = |tester: &mut WidgetTester, visual_density: VisualDensity| {
                 tester.pump_widget(centered_app(
@@ -2319,19 +2167,19 @@ pub(crate) mod tests {
             };
 
             assert_eq!(
-                build_test(&mut tester, VisualDensity::STANDARD),
+                build_test(tester, VisualDensity::STANDARD),
                 Size::new(48.0, 48.0)
             );
             assert_eq!(
-                build_test(&mut tester, VisualDensity::new(3.0, 3.0)),
+                build_test(tester, VisualDensity::new(3.0, 3.0)),
                 Size::new(60.0, 60.0)
             );
             assert_eq!(
-                build_test(&mut tester, VisualDensity::new(-3.0, -3.0)),
+                build_test(tester, VisualDensity::new(-3.0, -3.0)),
                 Size::new(36.0, 36.0)
             );
             assert_eq!(
-                build_test(&mut tester, VisualDensity::new(3.0, -3.0)),
+                build_test(tester, VisualDensity::new(3.0, -3.0)),
                 Size::new(60.0, 36.0)
             );
         });
@@ -2339,9 +2187,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_radio_changes_the_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let app_with = |radio: Radio<i32>| {
                 scaffold_app(
                     theme.clone(),
@@ -2362,10 +2209,10 @@ pub(crate) mod tests {
                     .on_changed(no_op())
                     .group_value(2),
             ));
-            let mut mouse = WidgetTester::mouse(1, K_PRIMARY_BUTTON);
-            let center = center_of_radio::<i32>(&tester);
+            let mut mouse = TestPointer::mouse(1, K_PRIMARY_BUTTON);
+            let center = center_of_radio::<i32>(tester);
             tester.add_pointer(&mut mouse, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
 
             // Test default cursor
@@ -2387,7 +2234,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_fill_color_resolves_in_enabled_and_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ACTIVE_ENABLED_FILL_COLOR: Color = Color::new(0xFF000001);
             const ACTIVE_DISABLED_FILL_COLOR: Color = Color::new(0xFF000002);
             const INACTIVE_ENABLED_FILL_COLOR: Color = Color::new(0xFF000003);
@@ -2404,9 +2251,8 @@ pub(crate) mod tests {
                 }
                 INACTIVE_ENABLED_FILL_COLOR
             });
-            let mut tester = tester();
-            let theme = m3(&tester);
-            let mut check = |group_value: i32, enabled: bool, expected: &[Paints]| {
+            let theme = m3(tester);
+            let mut check = |group_value: i32, enabled: bool, expected: &[PaintCall]| {
                 let fill_color = Rc::clone(&fill_color);
                 tester.pump_widget(focus_and_hover_app(
                     theme.clone(),
@@ -2415,7 +2261,7 @@ pub(crate) mod tests {
                     move |radio| radio.fill_color(fill_color),
                 ));
                 tester.pump_and_settle();
-                assert_paints(&tester, radio_material::<i32>(&tester), expected);
+                assert_paints(tester, radio_material::<i32>(tester), expected);
             };
 
             // Selected and enabled.
@@ -2472,13 +2318,17 @@ pub(crate) mod tests {
         })
     }
 
-    fn fill_color_in_hovered_and_focused_states(m3_theme: bool, focus: Color, hover: Color) {
-        let mut tester = tester();
+    fn fill_color_in_hovered_and_focused_states(
+        tester: &mut WidgetTester,
+        m3_theme: bool,
+        focus: Color,
+        hover: Color,
+    ) {
         tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
         let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
             .into_erased::<waft_widgets::AnyFocusNode>();
         focus_node.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio".into()));
-        let theme = if m3_theme { m3(&tester) } else { m2(&tester) };
+        let theme = if m3_theme { m3(tester) } else { m2(tester) };
         let fill_color = hovered_or_focused_fill_color();
 
         tester.pump_widget(focus_and_hover_app(theme, 0, true, {
@@ -2493,8 +2343,8 @@ pub(crate) mod tests {
         tester.pump_and_settle();
         assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
         assert_paints(
-            &tester,
-            radio_material::<i32>(&tester),
+            tester,
+            radio_material::<i32>(tester),
             &[
                 if m3_theme {
                     any_rect()
@@ -2507,12 +2357,12 @@ pub(crate) mod tests {
         );
 
         // Start hovering
-        let center = center_of_radio::<i32>(&tester);
-        hover_at(&mut tester, center);
+        let center = center_of_radio::<i32>(tester);
+        hover_at(tester, center);
         tester.pump_and_settle();
         assert_paints(
-            &tester,
-            radio_material::<i32>(&tester),
+            tester,
+            radio_material::<i32>(tester),
             &[
                 rect(Color::new(0xffffffff), CENTER_RECT),
                 circle(hover),
@@ -2523,17 +2373,18 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_the_fill_color_resolves_in_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
-            let hover_color = m2(&tester()).hover_color;
-            fill_color_in_hovered_and_focused_states(false, Colors::BLACK12, hover_color);
+        test_widgets(|tester| {
+            let hover_color = m2(tester).hover_color;
+            fill_color_in_hovered_and_focused_states(tester, false, Colors::BLACK12, hover_color);
         });
     }
 
     #[test]
     fn material3_the_fill_color_resolves_in_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
-            let primary = m3(&tester()).color_scheme.primary;
+        test_widgets(|tester| {
+            let primary = m3(tester).color_scheme.primary;
             fill_color_in_hovered_and_focused_states(
+                tester,
                 true,
                 primary.with_opacity(0.1),
                 primary.with_opacity(0.08),
@@ -2543,7 +2394,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_overlay_color_resolves_in_active_pressed_focused_and_hovered_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const FILL_COLOR: Color = Color::new(0xFF000000);
             const ACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000001);
             const INACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000002);
@@ -2567,11 +2418,10 @@ pub(crate) mod tests {
                 }
                 None
             };
-            let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let build_radio = |active: bool, focused: bool, use_overlay: bool| {
                 let mut radio = Radio::new(active)
                     .focus_node(focus_node.clone())
@@ -2594,44 +2444,44 @@ pub(crate) mod tests {
             let reaction = |color: Color| [circle(color).radius(SPLASH_RADIUS)];
 
             tester.pump_widget(build_radio(false, false, false));
-            let center = center_of_radio::<bool>(&tester);
-            press_at(&mut tester, center, 1);
+            let center = center_of_radio::<bool>(tester);
+            press_at(tester, center, 1);
             tester.pump_and_settle();
             // Default inactive pressed Radio should have overlay color from fillColor
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &reaction(FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA)),
             );
 
             tester.pump_widget(build_radio(true, false, false));
-            let center = center_of_radio::<bool>(&tester);
-            press_at(&mut tester, center, 2);
+            let center = center_of_radio::<bool>(tester);
+            press_at(tester, center, 2);
             tester.pump_and_settle();
             // Default active pressed Radio should have overlay color from fillColor
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &reaction(FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA)),
             );
 
             tester.pump_widget(build_radio(false, false, true));
-            let center = center_of_radio::<bool>(&tester);
-            press_at(&mut tester, center, 3);
+            let center = center_of_radio::<bool>(tester);
+            press_at(tester, center, 3);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &reaction(INACTIVE_PRESSED_OVERLAY_COLOR),
             );
 
             tester.pump_widget(build_radio(true, false, true));
-            let center = center_of_radio::<bool>(&tester);
-            press_at(&mut tester, center, 4);
+            let center = center_of_radio::<bool>(tester);
+            press_at(tester, center, 4);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &reaction(ACTIVE_PRESSED_OVERLAY_COLOR),
             );
 
@@ -2641,19 +2491,19 @@ pub(crate) mod tests {
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             // Focused Radio should use overlay color FOCUS_OVERLAY_COLOR over FOCUS_COLOR
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &reaction(FOCUS_OVERLAY_COLOR),
             );
 
             // Start hovering
-            let center = center_of_radio::<bool>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<bool>(tester);
+            hover_at(tester, center);
             tester.pump_and_settle();
             // Hovered Radio should use overlay color HOVER_OVERLAY_COLOR over HOVER_COLOR
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &reaction(HOVER_OVERLAY_COLOR),
             );
         });
@@ -2661,9 +2511,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_radio_that_disappears_while_the_pointer_is_down_does_not_crash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let key = GlobalKey::new();
             let build_radio = |show: bool| {
                 if show {
@@ -2680,11 +2529,11 @@ pub(crate) mod tests {
             };
 
             tester.pump_widget(build_radio(true));
-            let center = tester.center_of(&key);
+            let center = tester.get_center(&key);
             // Put a pointer down on the screen.
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // While the pointer is down, the widget disappears.
             tester.pump_widget(build_radio(false));
             assert!(key.current_context(&tester.cell.borrow_mut()).is_none());
@@ -2695,14 +2544,13 @@ pub(crate) mod tests {
 
     #[test]
     fn a_disabled_radio_shows_a_tooltip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const LONG_PRESS_TOOLTIP: &str = "long press tooltip";
             const TAP_TOOLTIP: &str = "tap tooltip";
-            let mut tester = tester();
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let tooltip_center = |tester: &WidgetTester| {
-                let tooltip = tester.find_by_type::<Tooltip>()[0];
-                tester.global_rect(tester.render_box_of(tooltip)).center()
+                let tooltip = find::by_type::<Tooltip>().evaluate(tester)[0];
+                tester.get_rect(tooltip).center()
             };
             tester.pump_widget(material_app(
                 theme.clone(),
@@ -2716,20 +2564,20 @@ pub(crate) mod tests {
             ));
 
             // Default tooltip shows up after long pressed.
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
-            tester.tap(tooltip_center(&tester), 1);
-            tester.pump(Duration::from_millis(10));
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            tester.tap_at(tooltip_center(tester), 1);
+            tester.pump_by(Duration::from_millis(10));
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
-            let mut gesture_long_press = WidgetTester::touch(2);
-            tester.down(&mut gesture_long_press, tooltip_center(&tester));
-            tester.pump(Duration::ZERO);
-            tester.pump(K_LONG_PRESS_TIMEOUT);
+            let mut gesture_long_press = TestPointer::touch(2);
+            tester.down(&mut gesture_long_press, tooltip_center(tester));
+            tester.pump();
+            tester.pump_by(K_LONG_PRESS_TIMEOUT);
             tester.up(&gesture_long_press);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(tester.find_text(LONG_PRESS_TOOLTIP).len(), 1);
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_one_widget());
 
             // Tooltip shows up after tapping when set triggerMode to TooltipTriggerMode.tap.
             tester.pump_widget(material_app(
@@ -2744,20 +2592,19 @@ pub(crate) mod tests {
                     .into_widget(),
             ));
 
-            tester.pump(Duration::from_secs(24 * 60 * 60));
+            tester.pump_by(Duration::from_secs(24 * 60 * 60));
             tester.pump_and_settle();
-            assert!(tester.find_text(TAP_TOOLTIP).is_empty());
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(TAP_TOOLTIP), finds_nothing());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
-            tester.tap(tooltip_center(&tester), 3);
-            tester.pump(Duration::from_millis(10));
-            assert_eq!(tester.find_text(TAP_TOOLTIP).len(), 1);
+            tester.tap_at(tooltip_center(tester), 3);
+            tester.pump_by(Duration::from_millis(10));
+            expect(tester, &find::text(TAP_TOOLTIP), finds_one_widget());
         });
     }
 
-    fn default_colors(m3_theme: bool) {
-        let mut tester = tester();
-        let theme = if m3_theme { m3(&tester) } else { m2(&tester) };
+    fn default_colors(tester: &mut WidgetTester, m3_theme: bool) {
+        let theme = if m3_theme { m3(tester) } else { m2(tester) };
         let selected = if m3_theme {
             theme.color_scheme.primary
         } else {
@@ -2779,14 +2626,14 @@ pub(crate) mod tests {
         tester.pump_widget(build_radio(true));
         tester.pump_and_settle();
         assert_paints(
-            &tester,
-            radio_material::<bool>(&tester),
+            tester,
+            radio_material::<bool>(tester),
             &[
                 // Outer circle - primary value
                 circle(selected),
                 // Inner circle - primary value
                 circle(selected),
-                Paints::Restore,
+                PaintCall::Restore,
             ],
         );
 
@@ -2794,39 +2641,34 @@ pub(crate) mod tests {
         tester.pump_widget(build_radio(true));
         tester.pump_and_settle();
         assert_paints(
-            &tester,
-            radio_material::<bool>(&tester),
-            &[Paints::Save, circle(selected), Paints::Restore],
+            tester,
+            radio_material::<bool>(tester),
+            &[PaintCall::Save, circle(selected), PaintCall::Restore],
         );
 
         tester.pump_widget(Container::new().into_widget());
         tester.pump_widget(build_radio(false));
         tester.pump_and_settle();
-        assert_paints(
-            &tester,
-            radio_material::<bool>(&tester),
-            &[circle(disabled)],
-        );
+        assert_paints(tester, radio_material::<bool>(tester), &[circle(disabled)]);
     }
 
     #[test]
     fn material2_a_radio_has_the_default_colors() {
-        with_main_thread_stack(|| default_colors(false));
+        test_widgets(|tester| default_colors(tester, false));
     }
 
     #[test]
     fn material3_a_radio_has_the_default_colors() {
-        with_main_thread_stack(|| default_colors(true));
+        test_widgets(|tester| default_colors(tester, true));
     }
 
     #[test]
     fn material2_a_radio_has_the_default_overlay_colors_in_hover_focus_and_press_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
-            let theme = m2(&tester);
+            let theme = m2(tester);
             let colors = theme.color_scheme.clone();
             let build_radio = |focused: bool, selected: bool| {
                 scaffold_app(
@@ -2843,19 +2685,19 @@ pub(crate) mod tests {
             tester.pump_widget(build_radio(false, true));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[circle(colors.secondary)],
             );
 
             // selected radio in pressed state
             tester.pump_widget(build_radio(false, true));
-            let center = center_of_radio::<bool>(&tester);
-            press_at(&mut tester, center, 1);
+            let center = center_of_radio::<bool>(tester);
+            press_at(tester, center, 1);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     circle(colors.secondary.with_alpha(0x1F)),
                     circle(colors.secondary),
@@ -2864,12 +2706,12 @@ pub(crate) mod tests {
 
             // unselected radio in pressed state
             tester.pump_widget(build_radio(false, false));
-            let center = center_of_radio::<bool>(&tester);
-            press_at(&mut tester, center, 2);
+            let center = center_of_radio::<bool>(tester);
+            press_at(tester, center, 2);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     circle(theme.unselected_widget_color.with_alpha(0x1F)),
                     circle(theme.unselected_widget_color),
@@ -2882,8 +2724,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[circle(theme.focus_color), circle(colors.secondary)],
             );
 
@@ -2893,8 +2735,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     circle(theme.focus_color),
                     circle(theme.unselected_widget_color),
@@ -2904,12 +2746,12 @@ pub(crate) mod tests {
             // selected radio in hovered state
             tester.pump_widget(Container::new().into_widget()); // reset test
             tester.pump_widget(build_radio(false, true));
-            let center = center_of_radio::<bool>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<bool>(tester);
+            hover_at(tester, center);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[circle(theme.hover_color), circle(colors.secondary)],
             );
         });
@@ -2917,12 +2759,11 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_a_radio_has_the_default_overlay_colors_in_hover_focus_and_press_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let colors = theme.color_scheme.clone();
             let build_radio = |focused: bool, selected: bool| {
                 scaffold_app(
@@ -2939,19 +2780,19 @@ pub(crate) mod tests {
             tester.pump_widget(build_radio(false, true));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[circle(colors.primary.with_opacity(1.0))],
             );
 
             // selected radio in pressed state
             tester.pump_widget(build_radio(false, true));
-            let center = center_of_radio::<bool>(&tester);
-            press_at(&mut tester, center, 1);
+            let center = center_of_radio::<bool>(tester);
+            press_at(tester, center, 1);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     circle(colors.on_surface.with_opacity(0.1)),
                     circle(colors.primary.with_opacity(1.0)),
@@ -2960,12 +2801,12 @@ pub(crate) mod tests {
 
             // unselected radio in pressed state
             tester.pump_widget(build_radio(false, false));
-            let center = center_of_radio::<bool>(&tester);
-            press_at(&mut tester, center, 2);
+            let center = center_of_radio::<bool>(tester);
+            press_at(tester, center, 2);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     circle(colors.primary.with_opacity(0.1)),
                     circle(colors.on_surface_variant().with_opacity(1.0)),
@@ -2978,8 +2819,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     circle(colors.primary.with_opacity(0.1)),
                     circle(colors.primary.with_opacity(1.0)),
@@ -2992,8 +2833,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     circle(colors.on_surface.with_opacity(0.1)),
                     circle(colors.on_surface.with_opacity(1.0)),
@@ -3003,12 +2844,12 @@ pub(crate) mod tests {
             // selected radio in hovered state
             tester.pump_widget(Container::new().into_widget()); // reset test
             tester.pump_widget(build_radio(false, true));
-            let center = center_of_radio::<bool>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<bool>(tester);
+            hover_at(tester, center);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     circle(colors.primary.with_opacity(0.08)),
                     circle(colors.primary.with_opacity(1.0)),
@@ -3019,8 +2860,7 @@ pub(crate) mod tests {
 
     #[test]
     fn radio_adaptive_shows_the_widget_of_the_platform() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_app = |tester: &WidgetTester, platform: TargetPlatform| {
                 let theme = ThemeData::builder()
                     .platform(platform)
@@ -3029,13 +2869,13 @@ pub(crate) mod tests {
             };
 
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-                let app = build_app(&tester, platform);
+                let app = build_app(tester, platform);
                 tester.pump_widget(app);
                 tester.pump_and_settle();
-                assert_eq!(
-                    tester.find_by_type::<CupertinoRadio<i32>>().len(),
-                    1,
-                    "{platform:?}"
+                expect(
+                    tester,
+                    &find::by_type::<CupertinoRadio<i32>>(),
+                    finds_one_widget(),
                 );
             }
 
@@ -3045,11 +2885,13 @@ pub(crate) mod tests {
                 TargetPlatform::Linux,
                 TargetPlatform::Windows,
             ] {
-                let app = build_app(&tester, platform);
+                let app = build_app(tester, platform);
                 tester.pump_widget(app);
                 tester.pump_and_settle();
                 assert!(
-                    tester.find_by_type::<CupertinoRadio<i32>>().is_empty(),
+                    find::by_type::<CupertinoRadio<i32>>()
+                        .evaluate(tester)
+                        .is_empty(),
                     "{platform:?}"
                 );
             }
@@ -3057,17 +2899,17 @@ pub(crate) mod tests {
     }
 
     fn default_overlay_and_fill_colors_resolve_the_pressed_state(
+        tester: &mut WidgetTester,
         m3_theme: bool,
         hover: impl Fn(&ThemeData) -> Color,
         pressed: impl Fn(&ThemeData) -> Color,
         focus: impl Fn(&ThemeData) -> Color,
         fill: impl Fn(&ThemeData) -> Color,
     ) {
-        let mut tester = tester();
         tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
         let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
             .into_erased::<waft_widgets::AnyFocusNode>();
-        let theme = if m3_theme { m3(&tester) } else { m2(&tester) };
+        let theme = if m3_theme { m3(tester) } else { m2(tester) };
 
         tester.pump_widget(scaffold_app(
             theme.clone(),
@@ -3078,14 +2920,14 @@ pub(crate) mod tests {
         ));
 
         // Hover
-        let center = center_of_radio::<bool>(&tester);
-        let mut gesture = WidgetTester::mouse(1, K_PRIMARY_BUTTON);
+        let center = center_of_radio::<bool>(tester);
+        let mut gesture = TestPointer::mouse(1, K_PRIMARY_BUTTON);
         tester.add_pointer(&mut gesture, Offset::ZERO);
         tester.move_to(&mut gesture, center, false);
         tester.pump_and_settle();
         assert_paints(
-            &tester,
-            radio_material::<bool>(&tester),
+            tester,
+            radio_material::<bool>(tester),
             &[circle(hover(&theme)), circle(fill(&theme))],
         );
 
@@ -3093,8 +2935,8 @@ pub(crate) mod tests {
         tester.send(&gesture, PointerChange::Down);
         tester.pump_and_settle();
         assert_paints(
-            &tester,
-            radio_material::<bool>(&tester),
+            tester,
+            radio_material::<bool>(tester),
             &[circle(pressed(&theme)), circle(fill(&theme))],
         );
         // Remove pressed and hovered states
@@ -3107,16 +2949,17 @@ pub(crate) mod tests {
         focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
         tester.pump_and_settle();
         assert_paints(
-            &tester,
-            radio_material::<bool>(&tester),
+            tester,
+            radio_material::<bool>(tester),
             &[circle(focus(&theme)), circle(fill(&theme))],
         );
     }
 
     #[test]
     fn material2_the_default_overlay_and_fill_colors_resolve_the_pressed_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             default_overlay_and_fill_colors_resolve_the_pressed_state(
+                tester,
                 false,
                 |theme| theme.hover_color,
                 |theme| {
@@ -3133,8 +2976,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_the_default_overlay_and_fill_colors_resolve_the_pressed_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             default_overlay_and_fill_colors_resolve_the_pressed_state(
+                tester,
                 true,
                 |theme| theme.color_scheme.primary.with_opacity(0.08),
                 |theme| theme.color_scheme.on_surface.with_opacity(0.1),
@@ -3161,7 +3005,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_background_color_resolves_in_enabled_and_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ACTIVE_ENABLED_BACKGROUND_COLOR: Color = Color::new(0xFF000001);
             const ACTIVE_DISABLED_BACKGROUND_COLOR: Color = Color::new(0xFF000002);
             const INACTIVE_ENABLED_BACKGROUND_COLOR: Color = Color::new(0xFF000003);
@@ -3178,8 +3022,7 @@ pub(crate) mod tests {
                 }
                 INACTIVE_ENABLED_BACKGROUND_COLOR
             });
-            let mut tester = tester();
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let mut check = |group_value: i32, enabled: bool, expected: Color| {
                 let background_color = Rc::clone(&background_color);
                 tester.pump_widget(group_app(theme.clone(), group_value, move |radio| {
@@ -3187,8 +3030,8 @@ pub(crate) mod tests {
                 }));
                 tester.pump_and_settle();
                 assert_paints(
-                    &tester,
-                    radio_material::<i32>(&tester),
+                    tester,
+                    radio_material::<i32>(tester),
                     &[rect(Color::new(0xffffffff), CENTER_RECT), circle(expected)],
                 );
             };
@@ -3207,16 +3050,16 @@ pub(crate) mod tests {
     /// The focused-then-hovered cases on `backgroundColor`, `side` and `innerRadius`: what the
     /// radio paints after its overlay when focused, and when hovered too.
     fn resolves_in_hovered_and_focused_states(
+        tester: &mut WidgetTester,
         configure: impl FnOnce(Radio<i32>) -> Radio<i32>,
-        focused: &[Paints],
-        hovered: &[Paints],
+        focused: &[PaintCall],
+        hovered: &[PaintCall],
     ) {
-        let mut tester = tester();
         tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
         let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
             .into_erased::<waft_widgets::AnyFocusNode>();
         focus_node.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio".into()));
-        let theme = m3(&tester);
+        let theme = m3(tester);
         let primary = theme.color_scheme.primary;
 
         tester.pump_widget(group_app(theme, 0, {
@@ -3230,23 +3073,23 @@ pub(crate) mod tests {
             circle(primary.with_values(Some(0.1), None, None, None, None)),
         ];
         expected.extend_from_slice(focused);
-        assert_paints(&tester, radio_material::<i32>(&tester), &expected);
+        assert_paints(tester, radio_material::<i32>(tester), &expected);
 
         // Start hovering
-        let center = center_of_radio::<i32>(&tester);
-        hover_at(&mut tester, center);
+        let center = center_of_radio::<i32>(tester);
+        hover_at(tester, center);
         tester.pump_and_settle();
         let mut expected = vec![
             rect(Color::new(0xffffffff), CENTER_RECT),
             circle(primary.with_values(Some(0.08), None, None, None, None)),
         ];
         expected.extend_from_slice(hovered);
-        assert_paints(&tester, radio_material::<i32>(&tester), &expected);
+        assert_paints(tester, radio_material::<i32>(tester), &expected);
     }
 
     #[test]
     fn the_background_color_resolves_in_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const HOVERED_BACKGROUND_COLOR: Color = Color::new(0xFF000001);
             const FOCUSED_BACKGROUND_COLOR: Color = Color::new(0xFF000002);
             let background_color = colors(|states| {
@@ -3259,6 +3102,7 @@ pub(crate) mod tests {
                 Colors::TRANSPARENT
             });
             resolves_in_hovered_and_focused_states(
+                tester,
                 move |radio| radio.background_color(background_color),
                 &[circle(FOCUSED_BACKGROUND_COLOR)],
                 &[circle(HOVERED_BACKGROUND_COLOR)],
@@ -3268,7 +3112,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_side_resolves_in_enabled_and_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let active_enabled_side = BorderSide {
                 color: Color::new(0xFF000001),
                 ..BorderSide::default()
@@ -3288,8 +3132,7 @@ pub(crate) mod tests {
                 width: 4.0,
                 ..BorderSide::default()
             };
-            let mut tester = tester();
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let mut check = |group_value: i32, enabled: bool, expected: BorderSide| {
                 let side = WidgetStateBorderSide::resolve_with(move |states| {
                     if states.contains(&WidgetState::Disabled) {
@@ -3308,8 +3151,8 @@ pub(crate) mod tests {
                 }));
                 tester.pump_and_settle();
                 assert_paints(
-                    &tester,
-                    radio_material::<i32>(&tester),
+                    tester,
+                    radio_material::<i32>(tester),
                     &[
                         rect(Color::new(0xffffffff), CENTER_RECT),
                         circle(expected.color).stroke_width(expected.width),
@@ -3330,7 +3173,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_side_resolves_in_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let hovered_side = BorderSide {
                 color: Color::new(0xFF000001),
                 ..BorderSide::default()
@@ -3350,6 +3193,7 @@ pub(crate) mod tests {
                 None
             });
             resolves_in_hovered_and_focused_states(
+                tester,
                 move |radio| radio.side(side),
                 &[circle(focused_side.color).stroke_width(focused_side.width)],
                 &[circle(hovered_side.color).stroke_width(hovered_side.width)],
@@ -3359,7 +3203,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_inner_radius_resolves_in_enabled_and_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ENABLED_INNER_RADIUS: f64 = 1.0;
             const DISABLED_INNER_RADIUS: f64 = 2.0;
             let inner_radius = <dyn WidgetStateProperty<Option<f64>>>::resolve_with(|states| {
@@ -3368,16 +3212,15 @@ pub(crate) mod tests {
                 }
                 Some(ENABLED_INNER_RADIUS)
             });
-            let mut tester = tester();
-            let theme = m3(&tester);
+            let theme = m3(tester);
             let colors = theme.color_scheme.clone();
-            let mut check = |enabled: bool, expected: &[Paints]| {
+            let mut check = |enabled: bool, expected: &[PaintCall]| {
                 let inner_radius = Rc::clone(&inner_radius);
                 tester.pump_widget(group_app(theme.clone(), 0, move |radio| {
                     radio.inner_radius(inner_radius).enabled(enabled)
                 }));
                 tester.pump_and_settle();
-                assert_paints(&tester, radio_material::<i32>(&tester), expected);
+                assert_paints(tester, radio_material::<i32>(tester), expected);
             };
 
             // Enabled.
@@ -3403,7 +3246,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_inner_radius_resolves_in_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const HOVERED_INNER_RADIUS: f64 = 1.0;
             const FOCUSED_INNER_RADIUS: f64 = 2.0;
             let inner_radius = <dyn WidgetStateProperty<Option<f64>>>::resolve_with(|states| {
@@ -3415,8 +3258,9 @@ pub(crate) mod tests {
                 }
                 None
             });
-            let primary = m3(&tester()).color_scheme.primary;
+            let primary = m3(tester).color_scheme.primary;
             resolves_in_hovered_and_focused_states(
+                tester,
                 move |radio| radio.inner_radius(inner_radius),
                 &[
                     circle(primary),
@@ -3432,9 +3276,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_radio_takes_a_string_value_compared_with_eq() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let key = GlobalKey::new();
             let changes: Rc<RefCell<Vec<Option<String>>>> = Rc::default();
             let build = |group_value: Option<&str>| {
@@ -3452,35 +3295,34 @@ pub(crate) mod tests {
             };
 
             tester.pump_widget(build(Some("lafayette")));
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert_eq!(*changes.borrow(), [Some(String::from("jefferson"))]);
 
             // An equal string that is another object selects the radio.
             tester.pump_widget(build(Some("jefferson")));
             tester.pump_and_settle();
             assert_eq!(
-                painter::<String>(&tester)
+                painter::<String>(tester)
                     .position(&tester.cell.borrow())
                     .value(&tester.cell.borrow()),
                 1.0
             );
 
             // Selecting a toggleable radio again unselects it.
-            tester.tap(tester.center_of(&key), 2);
+            tester.tap_at(tester.get_center(&key), 2);
             assert_eq!(*changes.borrow(), [Some(String::from("jefferson")), None]);
         });
     }
 
     #[test]
     fn a_radio_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             tester.pump_widget(scaffold_app(
                 theme,
                 Center::new().child(SizedBox::shrink().child(Radio::new(true))),
             ));
-            let render = tester.render_box_of(find_radio::<bool>(&tester));
+            let render = tester.render_box_of(find_radio::<bool>(tester));
             assert_eq!(render.size(&tester.cell.borrow()), Size::ZERO);
         });
     }

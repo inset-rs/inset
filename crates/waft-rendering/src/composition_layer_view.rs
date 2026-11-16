@@ -109,12 +109,12 @@ impl RenderBox for RenderCompositionLayerView {
 mod tests {
     use waft_embedder::test_support::idle_layer;
     use waft_embedder::{Clip, Matrix4, Mutator, Part, Rect, SceneBuilder};
-    use waft_foundation::{AppCell, Ref};
+    use waft_foundation::AppCell;
+    use waft_painting::AlignmentGeometry;
 
     use super::*;
-    use crate::layer::{ContainerLayer, OffsetLayer};
     use crate::object::AnyRenderObject;
-    use crate::pipeline_owner::PipelineOwner;
+    use crate::testing::{EnginePhase, layout_with, test_render_root};
 
     /// Where a [`Parent`] paints its child.
     const CHILD_OFFSET: Offset = Offset::new(10.0, 5.0);
@@ -138,11 +138,6 @@ mod tests {
 
     impl RenderObject for Parent {
         crate::render_object_accessors!();
-
-        /// The root of a painted tree owns the root layer.
-        fn is_repaint_boundary(self: RenderHandle<Self>, _app: &App) -> bool {
-            true
-        }
 
         fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
             let child = self.get(app).child;
@@ -197,13 +192,12 @@ mod tests {
     }
 
     /// Lays out and paints a view of `composition_layer` under a parent that paints it as
-    /// `painting` says, and answers the scene.
+    /// `painting` says, at the test view's top left, and answers the scene.
     fn scene_of_one_frame(
         app: &mut App,
         composition_layer: Arc<dyn CompositionLayer>,
         painting: ChildPainting,
-    ) -> (waft_embedder::Scene, Ref<PipelineOwner>) {
-        let owner = PipelineOwner::new(app, None, None);
+    ) -> waft_embedder::Scene {
         let child = RenderCompositionLayerView::new(app, composition_layer);
         let parent = RenderHandle::new_box(
             app,
@@ -215,20 +209,18 @@ mod tests {
             },
         );
         parent.adopt_child(app, child.as_object());
-        owner.set_root_node(app, Some(parent.as_object()));
-        parent.schedule_initial_layout(app);
-        let root = OffsetLayer::new(app, Offset::ZERO);
-        root.as_layer().attach(app, parent.as_object().id());
-        parent
+        layout_with(
+            app,
+            parent.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::TOP_LEFT,
+            EnginePhase::Paint,
+        );
+        test_render_root(app)
             .as_object()
-            .schedule_initial_paint(app, root.as_container_layer());
-        owner.flush_layout(app);
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
-        let scene = root
-            .as_container_layer()
-            .build_scene(app, SceneBuilder::new());
-        (scene, owner)
+            .debug_layer(app)
+            .expect("painted")
+            .build_scene(app, SceneBuilder::new())
     }
 
     #[test]
@@ -236,7 +228,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let composition_layer = idle_layer();
-        let (scene, _owner) = scene_of_one_frame(
+        let scene = scene_of_one_frame(
             &mut app,
             Arc::clone(&composition_layer),
             ChildPainting::AtOffset,
@@ -258,8 +250,7 @@ mod tests {
     fn a_composition_layer_is_placed_under_the_transform_and_the_clip_above_it() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let (scene, _owner) =
-            scene_of_one_frame(&mut app, idle_layer(), ChildPainting::HalvedUnderAClip);
+        let scene = scene_of_one_frame(&mut app, idle_layer(), ChildPainting::HalvedUnderAClip);
         let slices = waft_embedder::slices(&scene, |_| None);
         let (_, placement) = slices.composition_layers().next().expect("placed");
         assert!(

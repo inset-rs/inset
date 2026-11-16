@@ -933,15 +933,18 @@ mod tests {
     use waft_embedder::Rect;
     use waft_painting::{AlignmentGeometry, TextStyle};
     use waft_rendering::OpacityLayer;
-    use waft_widgets::{Builder, Center, Container, GlobalKey};
+    use waft_widgets::{Builder, Center, Container, GlobalKey, Text, TextOverflow};
+
+    use waft_widgets::testing::{
+        TargetPlatformVariant, WidgetTester, find, test_widgets, test_widgets_variant,
+    };
 
     use super::*;
     use crate::app_bar::{AppBar, SliverAppBar};
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{AhemText, WidgetTester, ahem_text, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m3, pump_app, tester};
+    use crate::tooltip::tests::{m3, pump_app};
 
     /// What `FlexibleSpaceBar.createSettings` is given by an app bar.
     #[derive(Clone, Copy)]
@@ -989,11 +992,11 @@ mod tests {
         );
     }
 
-    /// An `ahem_text("X")` that tests can find.
+    /// A `Text::new("X")` that tests can find.
     fn keyed_title(key: &GlobalKey) -> SizedBox {
         SizedBox::new()
             .key(key.clone().into())
-            .child(ahem_text("X"))
+            .child(Text::new("X"))
     }
 
     /// The global rectangle of `key`'s widget.
@@ -1005,20 +1008,20 @@ mod tests {
     /// bottom of the space bar.
     fn title_bottom_left(tester: &WidgetTester, key: &GlobalKey) -> Offset {
         let title = rect_of_key(tester, key);
-        let bar = *tester
-            .find_by_type::<FlexibleSpaceBar>()
+        let bar = *find::by_type::<FlexibleSpaceBar>()
+            .evaluate(tester)
             .first()
             .expect("a FlexibleSpaceBar");
-        let bar = tester.global_rect(tester.render_box_of(bar));
+        let bar = tester.get_rect(bar);
         Offset::new(title.left, bar.bottom - title.bottom)
     }
 
     fn title_bottom_left_case(
+        tester: &mut WidgetTester,
         platform: TargetPlatform,
         center_title: Option<bool>,
         title_padding: Option<EdgeInsetsGeometry>,
     ) -> Offset {
-        let mut tester = tester();
         let key = GlobalKey::new();
         let mut bar = FlexibleSpaceBar::new().title(keyed_title(&key));
         if let Some(center_title) = center_title {
@@ -1027,14 +1030,23 @@ mod tests {
         if let Some(title_padding) = title_padding {
             bar = bar.title_padding(title_padding);
         }
-        pump_bar(&mut tester, platform, Extents::fixed(56.0), 56.0, bar);
-        title_bottom_left(&tester, &key)
+        pump_bar(tester, platform, Extents::fixed(56.0), 56.0, bar);
+        title_bottom_left(tester, &key)
+    }
+
+    /// Dart's `pumpWidget(Container(key: UniqueKey()))`: clears the widget tree to avoid
+    /// animating between platforms.
+    fn clear_tree(tester: &mut WidgetTester) {
+        tester.pump_widget(
+            Container::new()
+                .key(waft_foundation::UniqueKey::new().into())
+                .into_widget(),
+        );
     }
 
     #[test]
     fn flexible_space_bar_centers_title_on_ios() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pump = |tester: &mut WidgetTester, platform: TargetPlatform| {
                 pump_app(
                     tester,
@@ -1051,10 +1063,10 @@ mod tests {
                 );
             };
             let title = |tester: &WidgetTester| {
-                tester.global_rect(tester.render_box_of(tester.find_text("X")[0]))
+                tester.global_rect(tester.render_box_of(find::text("X").evaluate(tester)[0]))
             };
-            pump(&mut tester, TargetPlatform::Android);
-            let rect = title(&tester);
+            pump(tester, TargetPlatform::Android);
+            let rect = title(tester);
             assert!(rect.center().dx() < 400.0 - rect.width() / 2.0);
 
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
@@ -1065,8 +1077,8 @@ mod tests {
                         .into_widget(),
                 );
 
-                pump(&mut tester, platform);
-                let rect = title(&tester);
+                pump(tester, platform);
+                let rect = title(tester);
                 assert!(rect.center().dx() > 400.0 - rect.width() / 2.0);
                 assert!(rect.center().dx() < 400.0 + rect.width() / 2.0);
             }
@@ -1075,7 +1087,7 @@ mod tests {
 
     #[test]
     fn material3_flexible_space_bar_title_padding_defaults() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let left = Offset::new(72.0, 16.0);
             let center = Offset::new(389.0, 16.0);
             let cases = [
@@ -1086,9 +1098,14 @@ mod tests {
                 (TargetPlatform::MacOS, None, center),
                 (TargetPlatform::MacOS, Some(false), left),
             ];
+            let mut previous = None;
             for (platform, center_title, expected) in cases {
+                if previous.is_some() && previous != Some(platform) {
+                    clear_tree(tester);
+                }
+                previous = Some(platform);
                 assert_eq!(
-                    title_bottom_left_case(platform, center_title, None),
+                    title_bottom_left_case(tester, platform, center_title, None),
                     expected,
                     "{platform:?} with centerTitle {center_title:?}"
                 );
@@ -1098,7 +1115,7 @@ mod tests {
 
     #[test]
     fn material3_flexible_space_bar_title_padding_override() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let left = Offset::ZERO;
             let center = Offset::new(389.0, 0.0);
             let cases = [
@@ -1113,9 +1130,19 @@ mod tests {
                 (TargetPlatform::Linux, None, left),
                 (TargetPlatform::Linux, Some(true), center),
             ];
+            let mut previous = None;
             for (platform, center_title, expected) in cases {
+                if previous.is_some() && previous != Some(platform) {
+                    clear_tree(tester);
+                }
+                previous = Some(platform);
                 assert_eq!(
-                    title_bottom_left_case(platform, center_title, Some(EdgeInsetsGeometry::ZERO)),
+                    title_bottom_left_case(
+                        tester,
+                        platform,
+                        center_title,
+                        Some(EdgeInsetsGeometry::ZERO)
+                    ),
                     expected,
                     "{platform:?} with centerTitle {center_title:?}"
                 );
@@ -1163,8 +1190,7 @@ mod tests {
     // This is a regression test for https://github.com/flutter/flutter/issues/132030.
     #[test]
     fn flexible_space_bar_settings_has_leading_provides_a_gap_between_leading_and_title() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_settings = FlexibleSpaceBar::create_settings(
                 200.0,
                 AppBar::new()
@@ -1180,7 +1206,7 @@ mod tests {
             .has_leading(true)
             .build();
 
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Scaffold::new()
                     .body(
                         waft_widgets::CustomScrollView::new().slivers([
@@ -1203,16 +1229,15 @@ mod tests {
             });
 
             tester.pump_and_settle();
-            let text = tester.find_by_type::<waft_widgets::Text>()[0];
-            let left = tester.global_rect(tester.render_box_of(text)).left;
+            let text = find::by_type::<waft_widgets::Text>().evaluate(tester)[0];
+            let left = tester.get_rect(text).left;
             assert!((left - 72.0).abs() < 0.01, "{left}");
         });
     }
 
     #[test]
     fn flexible_space_bar_settings_without_a_leading_widget_has_no_gap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let settings = FlexibleSpaceBar::create_settings(
                 200.0,
@@ -1222,8 +1247,8 @@ mod tests {
             )
             .has_leading(false)
             .build();
-            pump_app(&mut tester, m3, move |_app| settings.into_widget());
-            assert_eq!(rect_of_key(&tester, &key).left, 0.0);
+            pump_app(tester, m3, move |_app| settings.into_widget());
+            assert_eq!(rect_of_key(tester, &key).left, 0.0);
         });
     }
 
@@ -1232,8 +1257,7 @@ mod tests {
     /// opacity.
     #[test]
     fn material3_flexible_space_bar_settings_provides_settings_to_a_flexible_space_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let style = Rc::new(RefCell::new(None));
             let title = Builder::new({
                 let style = Rc::clone(&style);
@@ -1253,7 +1277,7 @@ mod tests {
             .max_extent(300.0)
             .toolbar_opacity(0.5)
             .build();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Align::new()
                     .alignment(AlignmentGeometry::TOP_LEFT)
                     .child(SizedBox::new().width(800.0).height(300.0).child(settings))
@@ -1262,14 +1286,14 @@ mod tests {
 
             // The current (200) is half way between the min (100) and max (300) and the
             // lerp values used to calculate the scale are 1 and 1.5, so we check for 1.25.
-            let transform = tester.find_by_type::<Transform>();
+            let transform = find::by_type::<Transform>().evaluate(tester);
             let transform = *transform.first().expect("the title's Transform");
             let scale = tester.widget(transform, |transform: &Transform| transform.transform);
             assert_eq!(scale, Matrix4::scale(1.25, 1.25));
 
             // The space bar rect always starts fully expanded.
-            let clip_rect = *tester
-                .find_by_type::<ClipRect>()
+            let clip_rect = *find::by_type::<ClipRect>()
+                .evaluate(tester)
                 .last()
                 .expect("the space bar's ClipRect");
             let clip_size = tester.render_box_of(clip_rect).size(&tester.cell.borrow());
@@ -1306,7 +1330,9 @@ mod tests {
     /// overflow: TextOverflow.ellipsis, style: style)`, which the box's constraints cut to
     /// one line as wide as they allow.
     fn constrained_title(count: usize, style: TextStyle) -> WidgetRef {
-        DefaultTextStyle::merge(AhemText::new(&"X".repeat(count)))
+        Text::new("X".repeat(count))
+            .max_lines(1)
+            .overflow(TextOverflow::Ellipsis)
             .style(style)
             .into_widget()
     }
@@ -1334,11 +1360,14 @@ mod tests {
 
     /// Dart's 'FlexibleSpaceBar sets width constraints for the title' under `theme`, its title
     /// styled `style`: the global rectangle of the title.
-    fn width_constrained_title_rect(theme: fn(&App) -> ThemeData, style: TextStyle) -> Rect {
-        let mut tester = tester();
+    fn width_constrained_title_rect(
+        tester: &mut WidgetTester,
+        theme: fn(&App) -> ThemeData,
+        style: TextStyle,
+    ) -> Rect {
         let width = Rc::new(std::cell::Cell::new(0.0));
         let seen_width = Rc::clone(&width);
-        pump_app(&mut tester, theme, move |_app| {
+        pump_app(tester, theme, move |_app| {
             Scaffold::new()
                 .body(Builder::new(move |app, context| {
                     seen_width.set(waft_widgets::MediaQuery::size_of(app, context).width());
@@ -1354,8 +1383,8 @@ mod tests {
         });
         let text_width = width.get();
         assert_eq!(text_width, 800.0);
-        let title = tester.find_by_type::<AhemText>()[0];
-        transformed_rect(&tester, title)
+        let title = find::by_type::<Text>().evaluate(tester)[0];
+        transformed_rect(tester, title)
     }
 
     fn assert_rect_more_or_less_equals(actual: Rect, expected: Rect) {
@@ -1371,8 +1400,9 @@ mod tests {
 
     #[test]
     fn material3_flexible_space_bar_sets_width_constraints_for_the_title() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let rect = width_constrained_title_rect(
+                tester,
                 m3,
                 TextStyle::new().font_size(TITLE_FONT_SIZE).height(1.0),
             );
@@ -1395,8 +1425,9 @@ mod tests {
     // This is a regression test for https://github.com/flutter/flutter/issues/14227
     #[test]
     fn material2_flexible_space_bar_sets_width_constraints_for_the_title() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let rect = width_constrained_title_rect(
+                tester,
                 crate::tooltip::tests::m2,
                 TextStyle::new().font_size(TITLE_FONT_SIZE),
             );
@@ -1414,10 +1445,13 @@ mod tests {
 
     /// Dart's 'FlexibleSpaceBar sets constraints for the title - override expandedTitleScale'
     /// under `theme`, its title styled `style`.
-    fn expanded_title_scale_case(theme: fn(&App) -> ThemeData, style: TextStyle) {
+    fn expanded_title_scale_case(
+        tester: &mut WidgetTester,
+        theme: fn(&App) -> ThemeData,
+        style: TextStyle,
+    ) {
         const EXPANDED_TITLE_SCALE: f64 = 3.0;
-        let mut tester = tester();
-        pump_app(&mut tester, theme, move |_app| {
+        pump_app(tester, theme, move |_app| {
             Scaffold::new()
                 .body(
                     waft_widgets::CustomScrollView::new().slivers([
@@ -1445,20 +1479,20 @@ mod tests {
                 .into_widget()
         });
         let center_of_text = |tester: &WidgetTester, text: &str| {
-            let element = tester.find_text(text)[0];
-            tester.global_rect(tester.render_box_of(element)).center()
+            let element = find::text(text).evaluate(tester)[0];
+            tester.get_rect(element).center()
         };
 
         // We drag up to fully collapse the space bar.
-        let start = center_of_text(&tester, "Item 0");
+        let start = center_of_text(tester, "Item 0");
         tester.drag_from(start, Offset::new(0.0, -600.0), 1);
         tester.pump_and_settle();
 
-        let title = |tester: &WidgetTester| tester.find_by_type::<AhemText>()[0];
-        let collapsed_width = transformed_rect(&tester, title(&tester)).width();
+        let title = |tester: &WidgetTester| find::by_type::<Text>().evaluate(tester)[0];
+        let collapsed_width = transformed_rect(tester, title(tester)).width();
 
         // We drag down to fully expand the space bar.
-        let start = center_of_text(&tester, "Item 2");
+        let start = center_of_text(tester, "Item 2");
         tester.drag_from(start, Offset::new(0.0, 600.0), 2);
         tester.pump_and_settle();
 
@@ -1472,7 +1506,7 @@ mod tests {
         // 3 times smaller than the full width. The height of the text is the same
         // as the font size, with 40 dps bottom margin to maintain its bottom position.
         assert_rect_more_or_less_equals(
-            transformed_rect(&tester, title(&tester)),
+            transformed_rect(tester, title(tester)),
             Rect::from_ltrb(
                 0.0,
                 EXPANDED_HEIGHT - TITLE_FONT_SIZE - bottom_margin,
@@ -1484,15 +1518,20 @@ mod tests {
 
     #[test]
     fn material3_flexible_space_bar_sets_constraints_for_the_title_override_expanded_title_scale() {
-        with_main_thread_stack(|| {
-            expanded_title_scale_case(m3, TextStyle::new().font_size(TITLE_FONT_SIZE).height(1.0));
+        test_widgets(|tester| {
+            expanded_title_scale_case(
+                tester,
+                m3,
+                TextStyle::new().font_size(TITLE_FONT_SIZE).height(1.0),
+            );
         });
     }
 
     #[test]
     fn material2_flexible_space_bar_sets_constraints_for_the_title_override_expanded_title_scale() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expanded_title_scale_case(
+                tester,
                 crate::tooltip::tests::m2,
                 TextStyle::new().font_size(TITLE_FONT_SIZE),
             );
@@ -1503,20 +1542,19 @@ mod tests {
     /// kToolbarHeight`: an app bar that cannot collapse shows its background in full.
     #[test]
     fn flexible_space_bar_background_is_visible_when_using_height_other_than_k_toolbar_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_bar(
-                &mut tester,
+                tester,
                 TargetPlatform::Android,
                 Extents::fixed(300.0),
                 300.0,
                 FlexibleSpaceBar::new()
-                    .title(ahem_text("Title"))
-                    .background(ahem_text("Background"))
+                    .title(Text::new("Title"))
+                    .background(Text::new("Background"))
                     .collapse_mode(CollapseMode::Pin),
             );
-            let opacity = *tester
-                .find_by_type::<FlexibleSpaceHeaderOpacity>()
+            let opacity = *find::by_type::<FlexibleSpaceHeaderOpacity>()
+                .evaluate(tester)
                 .first()
                 .expect("a FlexibleSpaceHeaderOpacity");
             assert_eq!(
@@ -1530,9 +1568,8 @@ mod tests {
     // This is a regression test for https://github.com/flutter/flutter/issues/138608.
     #[test]
     fn flexible_space_bar_centers_title_with_a_leading_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Material::new()
                     .child(
                         waft_widgets::CustomScrollView::new().slivers([SliverAppBar::new()
@@ -1547,10 +1584,10 @@ mod tests {
                     .into_widget()
             });
 
-            let app_bar = tester.find_by_type::<AppBar>()[0];
-            let app_bar_center = tester.global_rect(tester.render_box_of(app_bar)).center();
-            let title = tester.find_text("X")[0];
-            let title_center = tester.global_rect(tester.render_box_of(title)).center();
+            let app_bar = find::by_type::<AppBar>().evaluate(tester)[0];
+            let app_bar_center = tester.get_rect(app_bar).center();
+            let title = find::text("X").evaluate(tester)[0];
+            let title_center = tester.get_rect(title).center();
             assert_eq!(app_bar_center.dx(), title_center.dx());
         });
     }
@@ -1558,10 +1595,9 @@ mod tests {
     // This is a regression test for https://github.com/flutter/flutter/issues/138296.
     #[test]
     fn material3_default_title_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Material::new()
                     .child(
                         waft_widgets::CustomScrollView::new().slivers([SliverAppBar::new()
@@ -1573,7 +1609,7 @@ mod tests {
                     .into_widget()
             });
 
-            let title = tester.find_text("Title")[0];
+            let title = find::text("Title").evaluate(tester)[0];
             let style = DefaultTextStyle::of(&mut tester.cell.borrow_mut(), title).style;
             assert_eq!(
                 style.color,
@@ -1584,9 +1620,8 @@ mod tests {
 
     #[test]
     fn flexible_space_bar_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(Scaffold::new().app_bar(
                         waft_widgets::PreferredSizeWidgetRef::new(AppBar::new().flexible_space(
@@ -1595,8 +1630,8 @@ mod tests {
                     )))
                     .into_widget()
             });
-            let bar = *tester
-                .find_by_type::<FlexibleSpaceBar>()
+            let bar = *find::by_type::<FlexibleSpaceBar>()
+                .evaluate(tester)
                 .first()
                 .expect("a FlexibleSpaceBar");
             assert_eq!(
@@ -1609,11 +1644,10 @@ mod tests {
     /// The top of the background at `current`, in a space bar that collapses from 250 to 56 and
     /// is as high as `current`: the position the Dart collapse mode cases read after dragging
     /// the scroll view by `250 - current`.
-    fn background_top(collapse_mode: CollapseMode, current: f64) -> f64 {
-        let mut tester = tester();
+    fn background_top(tester: &mut WidgetTester, collapse_mode: CollapseMode, current: f64) -> f64 {
         let key = GlobalKey::new();
         pump_bar(
-            &mut tester,
+            tester,
             TargetPlatform::Android,
             Extents {
                 current,
@@ -1625,30 +1659,30 @@ mod tests {
                 .background(Container::new().key(key.clone().into()))
                 .collapse_mode(collapse_mode),
         );
-        rect_of_key(&tester, &key).top
+        rect_of_key(tester, &key).top
     }
 
     #[test]
     fn flexible_space_bar_collapse_mode_none() {
-        with_main_thread_stack(|| {
-            assert_eq!(background_top(CollapseMode::None, 250.0), 0.0);
-            assert_eq!(background_top(CollapseMode::None, 150.0), 0.0);
+        test_widgets(|tester| {
+            assert_eq!(background_top(tester, CollapseMode::None, 250.0), 0.0);
+            assert_eq!(background_top(tester, CollapseMode::None, 150.0), 0.0);
         });
     }
 
     #[test]
     fn flexible_space_bar_collapse_mode_pin() {
-        with_main_thread_stack(|| {
-            assert_eq!(background_top(CollapseMode::Pin, 250.0), 0.0);
-            assert_eq!(background_top(CollapseMode::Pin, 150.0), -100.0);
+        test_widgets(|tester| {
+            assert_eq!(background_top(tester, CollapseMode::Pin, 250.0), 0.0);
+            assert_eq!(background_top(tester, CollapseMode::Pin, 150.0), -100.0);
         });
     }
 
     #[test]
     fn flexible_space_bar_collapse_mode_parallax() {
-        with_main_thread_stack(|| {
-            assert_eq!(background_top(CollapseMode::Parallax, 250.0), 0.0);
-            let top = background_top(CollapseMode::Parallax, 150.0);
+        test_widgets(|tester| {
+            assert_eq!(background_top(tester, CollapseMode::Parallax, 250.0), 0.0);
+            let top = background_top(tester, CollapseMode::Parallax, 150.0);
             assert!(top < 10.0);
             assert!(top > -50.0);
         });
@@ -1656,11 +1690,14 @@ mod tests {
 
     /// The background's size when the space bar is `height` high and its settings say it
     /// expands to 250: more than that is the overscroll a stretching `SliverAppBar` gives it.
-    fn background_height(stretch_modes: Vec<StretchMode>, height: f64) -> f64 {
-        let mut tester = tester();
+    fn background_height(
+        tester: &mut WidgetTester,
+        stretch_modes: Vec<StretchMode>,
+        height: f64,
+    ) -> f64 {
         let key = GlobalKey::new();
         pump_bar(
-            &mut tester,
+            tester,
             TargetPlatform::Android,
             Extents {
                 current: 250.0,
@@ -1672,23 +1709,23 @@ mod tests {
                 .background(Container::new().key(key.clone().into()))
                 .stretch_modes(stretch_modes),
         );
-        rect_of_key(&tester, &key).height()
+        rect_of_key(tester, &key).height()
     }
 
     #[test]
     fn flexible_space_bar_stretch_mode_default_zoom_background() {
-        with_main_thread_stack(|| {
-            let before = background_height(vec![StretchMode::ZoomBackground], 250.0);
-            let after = background_height(vec![StretchMode::ZoomBackground], 350.0);
+        test_widgets(|tester| {
+            let before = background_height(tester, vec![StretchMode::ZoomBackground], 250.0);
+            let after = background_height(tester, vec![StretchMode::ZoomBackground], 350.0);
             assert!(before < after);
         });
     }
 
     #[test]
     fn flexible_space_bar_stretch_mode_blur_background_does_not_zoom_the_background() {
-        with_main_thread_stack(|| {
-            let before = background_height(vec![StretchMode::BlurBackground], 250.0);
-            let after = background_height(vec![StretchMode::BlurBackground], 350.0);
+        test_widgets(|tester| {
+            let before = background_height(tester, vec![StretchMode::BlurBackground], 250.0);
+            let after = background_height(tester, vec![StretchMode::BlurBackground], 350.0);
             assert_eq!(before, after);
         });
     }
@@ -1697,11 +1734,10 @@ mod tests {
     /// the golden shows the cause of: the backdrop filter is there only while stretched.
     #[test]
     fn flexible_space_bar_stretch_mode_blur_background_blurs_only_when_stretched() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (height, filters) in [(250.0, 0), (350.0, 1)] {
-                let mut tester = tester();
                 pump_bar(
-                    &mut tester,
+                    tester,
                     TargetPlatform::Android,
                     Extents {
                         current: 250.0,
@@ -1714,7 +1750,9 @@ mod tests {
                         .background(Container::new()),
                 );
                 assert_eq!(
-                    tester.find_by_type::<waft_widgets::BackdropFilter>().len(),
+                    find::by_type::<waft_widgets::BackdropFilter>()
+                        .evaluate(tester)
+                        .len(),
                     filters
                 );
             }
@@ -1722,11 +1760,10 @@ mod tests {
     }
 
     /// The opacity of the `Opacity` around the title when the space bar is `height` high.
-    fn fade_title_opacity(height: f64) -> f64 {
-        let mut tester = tester();
+    fn fade_title_opacity(tester: &mut WidgetTester, height: f64) -> f64 {
         let key = GlobalKey::new();
         pump_bar(
-            &mut tester,
+            tester,
             TargetPlatform::Android,
             Extents {
                 current: 250.0,
@@ -1738,8 +1775,8 @@ mod tests {
                 .stretch_modes(vec![StretchMode::FadeTitle])
                 .title(keyed_title(&key)),
         );
-        let title = *tester
-            .find_by_type::<SizedBox>()
+        let title = *find::by_type::<SizedBox>()
+            .evaluate(tester)
             .iter()
             .find(|element| {
                 tester.ancestors(**element).iter().any(|ancestor| {
@@ -1754,9 +1791,9 @@ mod tests {
 
     #[test]
     fn flexible_space_bar_stretch_mode_fade_title() {
-        with_main_thread_stack(|| {
-            assert_eq!(fade_title_opacity(260.0).round(), 1.0);
-            assert_eq!(fade_title_opacity(350.0), 0.0);
+        test_widgets(|tester| {
+            assert_eq!(fade_title_opacity(tester, 260.0).round(), 1.0);
+            assert_eq!(fade_title_opacity(tester, 350.0), 0.0);
         });
     }
 
@@ -1814,8 +1851,7 @@ mod tests {
     /// where the scrolled `SliverAppBar` would have them: expanded, collapsing, collapsed.
     #[test]
     fn flexible_space_bar_rebuilds_when_scrolling() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let count = Rc::new(std::cell::Cell::new(0));
             let background = || {
                 waft_widgets::AspectRatio::new(1.7).child(waft_widgets::CustomPaint::new().painter(
@@ -1825,14 +1861,13 @@ mod tests {
                 ))
             };
 
-            assert_eq!(pump_collapsing(&mut tester, 200.0, background()), Some(255));
+            assert_eq!(pump_collapsing(tester, 200.0, background()), Some(255));
             assert_eq!(count.get(), 1);
 
-            let alpha =
-                pump_collapsing(&mut tester, 80.0, background()).expect("a layer while fading");
+            let alpha = pump_collapsing(tester, 80.0, background()).expect("a layer while fading");
             assert!(alpha < 255);
 
-            assert_eq!(pump_collapsing(&mut tester, 56.0, background()), None);
+            assert_eq!(pump_collapsing(tester, 56.0, background()), None);
             assert!(count.get() > 1);
             assert!(
                 tester
@@ -1855,8 +1890,7 @@ mod tests {
             TargetPlatform::IOS,
             TargetPlatform::Fuchsia,
         ] {
-            with_main_thread_stack(|| {
-                let mut tester = crate::tooltip::tests::tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let pump = |tester: &mut WidgetTester, current: f64| {
                     pump_bar(
                         tester,
@@ -1870,10 +1904,10 @@ mod tests {
                         FlexibleSpaceBar::new().background(SizedBox::new()),
                     );
                 };
-                pump(&mut tester, 200.0);
+                pump(tester, 200.0);
                 // Ensure collapsed height - current extent is near zero for the
                 // FlexibleSpaceBar to avoid compositing.
-                pump(&mut tester, 56.087_878_920_261_29);
+                pump(tester, 56.087_878_920_261_29);
                 tester.pump_and_settle();
                 let render = tester.first::<RenderFlexibleSpaceHeaderOpacity>();
                 let app = tester.cell.borrow();

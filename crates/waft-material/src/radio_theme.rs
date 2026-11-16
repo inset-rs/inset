@@ -391,13 +391,14 @@ mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{FocusHighlightStrategy, SizedBox, WidgetState, WidgetStatePropertyAll};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::radio::Radio;
     use crate::radio::tests::{
-        assert_paints, center_of_radio, circle, find_radio, hover_at, no_op, press_at,
-        radio_material, scaffold_app, tester,
+        CircleArguments, assert_paints, center_of_radio, circle, find_radio, hover_at, no_op,
+        press_at, radio_material, scaffold_app,
     };
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
 
     fn theme_with(tester: &WidgetTester, radio_theme: RadioThemeData) -> ThemeData {
@@ -458,8 +459,7 @@ mod tests {
 
     #[test]
     fn a_radio_is_themeable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const DEFAULT_FILL_COLOR: Color = Color::new(0xfffffff0);
             const SELECTED_FILL_COLOR: Color = Color::new(0xfffffff1);
@@ -507,7 +507,7 @@ mod tests {
                     },
                 ))
                 .inner_radius(Rc::new(WidgetStatePropertyAll::new(Some(INNER_RADIUS))));
-            let theme = theme_with(&tester, radio_theme);
+            let theme = theme_with(tester, radio_theme);
             let build_radio = |selected: bool, autofocus: bool| {
                 scaffold_app(
                     theme.clone(),
@@ -522,13 +522,13 @@ mod tests {
             tester.pump_widget(build_radio(false, false));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(DEFAULT_BACKGROUND_COLOR), circle(DEFAULT_FILL_COLOR)],
             );
             // Size from MaterialTapTargetSize.shrinkWrap with added VisualDensity.
             assert_eq!(
-                radio_size(&tester),
+                radio_size(tester),
                 Size::new(40.0, 40.0) + VISUAL_DENSITY.base_size_adjustment()
             );
 
@@ -536,8 +536,8 @@ mod tests {
             tester.pump_widget(build_radio(true, false));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     circle(SELECTED_BACKGROUND_COLOR),
                     circle(SELECTED_FILL_COLOR),
@@ -547,11 +547,11 @@ mod tests {
 
             // Radio with hover.
             tester.pump_widget(build_radio(false, false));
-            point_gesture_to_radio(&mut tester);
+            point_gesture_to_radio(tester);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(HOVER_OVERLAY_COLOR)],
             );
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
@@ -560,8 +560,8 @@ mod tests {
             tester.pump_widget(build_radio(false, true));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(FOCUS_OVERLAY_COLOR).radius(SPLASH_RADIUS)],
             );
         });
@@ -582,12 +582,11 @@ mod tests {
 
     #[test]
     fn the_radio_side_is_themeable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let default_side = side(Color::new(0xfffffff0), 2.0);
             let selected_side = side(Color::new(0xfffffff1), 3.0);
             let theme = theme_with(
-                &tester,
+                tester,
                 RadioThemeData::new().side(WidgetStateBorderSide::resolve_with(move |states| {
                     if states.contains(&WidgetState::Selected) {
                         return Some(selected_side);
@@ -597,19 +596,19 @@ mod tests {
             );
 
             // Radio.
-            side_radio(&mut tester, &theme, Radio::new(0).group_value(1));
+            side_radio(tester, &theme, Radio::new(0).group_value(1));
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(default_side.color).stroke_width(default_side.width)],
             );
 
             // Selected radio.
-            side_radio(&mut tester, &theme, Radio::new(1).group_value(1));
+            side_radio(tester, &theme, Radio::new(1).group_value(1));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(selected_side.color).stroke_width(selected_side.width)],
             );
         });
@@ -617,8 +616,7 @@ mod tests {
 
     #[test]
     fn radio_properties_are_taken_over_the_theme_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const THEME_DEFAULT_FILL_COLOR: Color = Color::new(0xfffffff0);
             const THEME_SELECTED_FILL_COLOR: Color = Color::new(0xfffffff1);
@@ -640,7 +638,7 @@ mod tests {
             const INNER_RADIUS: f64 = 6.0;
 
             let theme = theme_with(
-                &tester,
+                tester,
                 RadioThemeData::new()
                     .mouse_cursor(Rc::new(WidgetStatePropertyAll::new(Some(
                         SystemMouseCursors::CLICK.into(),
@@ -716,13 +714,13 @@ mod tests {
             tester.pump_widget(build_radio(false, false));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(DEFAULT_BACKGROUND_COLOR), circle(DEFAULT_FILL_COLOR)],
             );
             // Size from MaterialTapTargetSize.shrinkWrap with added VisualDensity.
             assert_eq!(
-                radio_size(&tester),
+                radio_size(tester),
                 Size::new(40.0, 40.0) + VISUAL_DENSITY.base_size_adjustment()
             );
 
@@ -730,8 +728,8 @@ mod tests {
             tester.pump_widget(build_radio(true, false));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[
                     circle(SELECTED_BACKGROUND_COLOR),
                     circle(SELECTED_FILL_COLOR),
@@ -741,11 +739,11 @@ mod tests {
 
             // Radio with hover.
             tester.pump_widget(build_radio(false, false));
-            point_gesture_to_radio(&mut tester);
+            point_gesture_to_radio(tester);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(HOVER_COLOR)],
             );
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
@@ -754,8 +752,8 @@ mod tests {
             tester.pump_widget(build_radio(false, true));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(FOCUS_COLOR).radius(SPLASH_RADIUS)],
             );
         });
@@ -763,15 +761,14 @@ mod tests {
 
     #[test]
     fn the_radio_side_property_is_taken_over_the_theme_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let theme_default_side = side(Color::new(0xfffffff0), 2.0);
             let theme_selected_side = side(Color::new(0xfffffff1), 3.0);
             let default_side = side(Color::new(0xeffffff2), 4.0);
             let selected_side = side(Color::new(0xeffffff3), 5.0);
             let theme = theme_with(
-                &tester,
+                tester,
                 RadioThemeData::new().side(WidgetStateBorderSide::resolve_with(move |states| {
                     if states.contains(&WidgetState::Selected) {
                         return Some(theme_selected_side);
@@ -791,20 +788,20 @@ mod tests {
             };
 
             // Radio.
-            side_radio(&mut tester, &theme, radio(false));
+            side_radio(tester, &theme, radio(false));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(default_side.color).stroke_width(default_side.width)],
             );
 
             // Selected radio.
-            side_radio(&mut tester, &theme, radio(true));
+            side_radio(tester, &theme, radio(true));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(selected_side.color).stroke_width(selected_side.width)],
             );
         });
@@ -812,13 +809,12 @@ mod tests {
 
     #[test]
     fn the_radio_active_color_is_taken_over_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const THEME_DEFAULT_FILL_COLOR: Color = Color::new(0xfffffff0);
             const THEME_SELECTED_FILL_COLOR: Color = Color::new(0xfffffff1);
             const SELECTED_FILL_COLOR: Color = Color::new(0xfffffff1);
             let theme = theme_with(
-                &tester,
+                tester,
                 RadioThemeData::new().fill_color(
                     <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
                         if states.contains(&WidgetState::Selected) {
@@ -835,20 +831,20 @@ mod tests {
             };
 
             // Radio.
-            side_radio(&mut tester, &theme, radio(false));
+            side_radio(tester, &theme, radio(false));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(THEME_DEFAULT_FILL_COLOR)],
             );
 
             // Selected radio.
-            side_radio(&mut tester, &theme, radio(true));
+            side_radio(tester, &theme, radio(true));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(SELECTED_FILL_COLOR)],
             );
         });
@@ -856,13 +852,12 @@ mod tests {
 
     #[test]
     fn the_theme_overlay_color_resolves_in_active_and_pressed_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const ACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000001);
             const INACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000002);
             const SPLASH_RADIUS: f64 = 24.0;
             let theme = theme_with(
-                &tester,
+                tester,
                 RadioThemeData::new()
                     .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
                         |states| {
@@ -879,25 +874,25 @@ mod tests {
             );
             let radio = |active: bool| Radio::new(if active { 1 } else { 0 }).group_value(1);
 
-            side_radio(&mut tester, &theme, radio(false));
-            let center = center_of_radio::<i32>(&tester);
-            press_at(&mut tester, center, 1);
+            side_radio(tester, &theme, radio(false));
+            let center = center_of_radio::<i32>(tester);
+            press_at(tester, center, 1);
             tester.pump_and_settle();
             // Inactive pressed Radio should have overlay color INACTIVE_PRESSED_OVERLAY_COLOR
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(INACTIVE_PRESSED_OVERLAY_COLOR).radius(SPLASH_RADIUS)],
             );
 
-            side_radio(&mut tester, &theme, radio(true));
-            let center = center_of_radio::<i32>(&tester);
-            press_at(&mut tester, center, 2);
+            side_radio(tester, &theme, radio(true));
+            let center = center_of_radio::<i32>(tester);
+            press_at(tester, center, 2);
             tester.pump_and_settle();
             // Active pressed Radio should have overlay color ACTIVE_PRESSED_OVERLAY_COLOR
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(ACTIVE_PRESSED_OVERLAY_COLOR).radius(SPLASH_RADIUS)],
             );
         });
@@ -905,12 +900,11 @@ mod tests {
 
     #[test]
     fn a_local_radio_theme_overrides_the_global_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const GLOBAL_THEME_FILL_COLOR: Color = Color::new(0xfffffff1);
             const LOCAL_THEME_FILL_COLOR: Color = Color::new(0xffff0000);
             let theme = theme_with(
-                &tester,
+                tester,
                 RadioThemeData::new().fill_color(Rc::new(WidgetStatePropertyAll::new(Some(
                     GLOBAL_THEME_FILL_COLOR,
                 )))),
@@ -927,8 +921,8 @@ mod tests {
             ));
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(LOCAL_THEME_FILL_COLOR)],
             );
         });

@@ -174,76 +174,22 @@ impl Debug for Placeholder {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
     use waft_embedder::TextDirection;
     use waft_embedder::valo::Op;
-    use waft_foundation::AppCell;
     use waft_rendering::{
-        AnyRenderObject, RenderBox, RenderCustomPaint, RenderLimitedBox, RenderObjectWithChildMixin,
+        RenderBox, RenderCustomPaint, RenderLimitedBox, RenderObjectWithChildMixin,
     };
-    use waft_test::{TestPlatform, TestView};
 
     use super::*;
     use crate::framework::GlobalKey;
-    use crate::test_harness::{binding_mount, binding_pump, platform_view};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Center, Directionality, Positioned, SizedBox, Stack};
     use crate::widgets::text::Text;
 
-    /// flutter_test's surface: one 800 x 600 view, with the OS fonts for a label.
-    fn cell() -> Rc<AppCell> {
-        let platform =
-            TestPlatform::new().with_view(Rc::new(TestView::with_pixel_ratio(800.0, 600.0, 1.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        {
-            let mut app = cell.borrow_mut();
-            let binding = waft_painting::PaintingBinding::instance(&mut app);
-            if !binding.has_fonts(&app) {
-                binding.install_fonts(&mut app, |fonts| {
-                    fonts.add_source(valo_system_fonts::SystemFonts::load());
-                });
-            }
-        }
-        cell
-    }
-
-    /// `tester.pumpWidget(widget)`: the first mounts, a later one replaces the root.
-    fn pump_widget(cell: &AppCell, mounted: &mut bool, widget: WidgetRef) {
-        if !*mounted {
-            *mounted = true;
-            binding_mount(cell, widget);
-            return;
-        }
-        {
-            let mut app = cell.borrow_mut();
-            let view = platform_view(&app);
-            crate::binding::run_widget(
-                &mut app,
-                crate::view::View::new(view, widget).into_widget(),
-            );
-        }
-        cell.elapse(std::time::Duration::ZERO);
-        binding_pump(&mut cell.borrow_mut(), std::time::Duration::ZERO);
-    }
-
-    /// `tester.renderObject(find.byType(Placeholder))`: its `LimitedBox`.
-    fn render_of(cell: &AppCell, key: &GlobalKey) -> AnyRenderObject {
-        let app = cell.borrow();
-        key.current_context(&app)
-            .and_then(|context| context.find_render_object(&app))
-            .expect("the placeholder is laid out")
-    }
-
-    fn size_of(cell: &AppCell, key: &GlobalKey) -> Size {
-        let render = render_of(cell, key);
-        let app = cell.borrow();
-        render.as_box().expect("a box").size(&app)
-    }
-
     /// The `drawPath` calls of the placeholder's painter at its size: Dart's `paints..path()`.
-    fn painted_paths(cell: &AppCell, key: &GlobalKey) -> Vec<Paint> {
-        let render = render_of(cell, key);
-        let mut app = cell.borrow_mut();
+    fn painted_paths(tester: &WidgetTester, key: &GlobalKey) -> Vec<Paint> {
+        let render = tester.render_object(key);
+        let mut app = tester.cell.borrow_mut();
         let custom_paint = render
             .downcast::<RenderLimitedBox>(&app)
             .and_then(|limited_box| limited_box.child(&app))
@@ -270,78 +216,59 @@ mod tests {
 
     #[test]
     fn placeholder() {
-        let cell = cell();
-        let key = GlobalKey::new();
-        let mut mounted = false;
-        pump_widget(&cell, &mut mounted, keyed_placeholder(&key).into_widget());
-        assert_eq!(size_of(&cell, &key), Size::new(800.0, 600.0));
-        pump_widget(
-            &cell,
-            &mut mounted,
-            Center::new().child(keyed_placeholder(&key)).into_widget(),
-        );
-        assert_eq!(size_of(&cell, &key), Size::new(800.0, 600.0));
-        pump_widget(
-            &cell,
-            &mut mounted,
-            Stack::new()
-                .text_direction(TextDirection::Ltr)
-                .children([Positioned::new(keyed_placeholder(&key))
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(keyed_placeholder(&key));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 600.0));
+            tester.pump_widget(Center::new().child(keyed_placeholder(&key)));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 600.0));
+            tester.pump_widget(
+                Stack::new()
+                    .text_direction(TextDirection::Ltr)
+                    .children([Positioned::new(keyed_placeholder(&key))
+                        .top(0.0)
+                        .bottom(0.0)
+                        .into_widget()]),
+            );
+            assert_eq!(tester.get_size(&key), Size::new(400.0, 600.0));
+            tester.pump_widget(
+                Stack::new()
+                    .text_direction(TextDirection::Ltr)
+                    .children([Positioned::new(keyed_placeholder(&key))
+                        .left(0.0)
+                        .right(0.0)
+                        .into_widget()]),
+            );
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 400.0));
+            tester.pump_widget(
+                Stack::new()
+                    .text_direction(TextDirection::Ltr)
+                    .children([Positioned::new(
+                        keyed_placeholder(&key)
+                            .fallback_width(200.0)
+                            .fallback_height(300.0),
+                    )
                     .top(0.0)
-                    .bottom(0.0)
-                    .into_widget()])
-                .into_widget(),
-        );
-        assert_eq!(size_of(&cell, &key), Size::new(400.0, 600.0));
-        pump_widget(
-            &cell,
-            &mut mounted,
-            Stack::new()
-                .text_direction(TextDirection::Ltr)
-                .children([Positioned::new(keyed_placeholder(&key))
-                    .left(0.0)
-                    .right(0.0)
-                    .into_widget()])
-                .into_widget(),
-        );
-        assert_eq!(size_of(&cell, &key), Size::new(800.0, 400.0));
-        pump_widget(
-            &cell,
-            &mut mounted,
-            Stack::new()
-                .text_direction(TextDirection::Ltr)
-                .children([Positioned::new(
-                    keyed_placeholder(&key)
-                        .fallback_width(200.0)
-                        .fallback_height(300.0),
-                )
-                .top(0.0)
-                .into_widget()])
-                .into_widget(),
-        );
-        assert_eq!(size_of(&cell, &key), Size::new(200.0, 300.0));
+                    .into_widget()]),
+            );
+            assert_eq!(tester.get_size(&key), Size::new(200.0, 300.0));
+        });
     }
 
     #[test]
     fn placeholder_color() {
-        let cell = cell();
-        let key = GlobalKey::new();
-        let mut mounted = false;
-        pump_widget(&cell, &mut mounted, keyed_placeholder(&key).into_widget());
-        let paths = painted_paths(&cell, &key);
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0].color, Color::new(0xFF455A64).into());
-        pump_widget(
-            &cell,
-            &mut mounted,
-            keyed_placeholder(&key)
-                .color(Color::new(0xFF00FF00))
-                .into_widget(),
-        );
-        assert_eq!(
-            painted_paths(&cell, &key)[0].color,
-            Color::new(0xFF00FF00).into()
-        );
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(keyed_placeholder(&key));
+            let paths = painted_paths(tester, &key);
+            assert_eq!(paths.len(), 1);
+            assert_eq!(paths[0].color, Color::new(0xFF455A64).into());
+            tester.pump_widget(keyed_placeholder(&key).color(Color::new(0xFF00FF00)));
+            assert_eq!(
+                painted_paths(tester, &key)[0].color,
+                Color::new(0xFF00FF00).into()
+            );
+        });
     }
 
     #[test]
@@ -350,54 +277,39 @@ mod tests {
             PaintStyle::Stroke(stroke) => Some(stroke.width),
             PaintStyle::Fill => None,
         };
-        let cell = cell();
-        let key = GlobalKey::new();
-        let mut mounted = false;
-        pump_widget(&cell, &mut mounted, keyed_placeholder(&key).into_widget());
-        assert_eq!(stroke_width(&painted_paths(&cell, &key)[0]), Some(2.0));
-        pump_widget(
-            &cell,
-            &mut mounted,
-            keyed_placeholder(&key).stroke_width(10.0).into_widget(),
-        );
-        assert_eq!(stroke_width(&painted_paths(&cell, &key)[0]), Some(10.0));
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(keyed_placeholder(&key));
+            assert_eq!(stroke_width(&painted_paths(tester, &key)[0]), Some(2.0));
+            tester.pump_widget(keyed_placeholder(&key).stroke_width(10.0));
+            assert_eq!(stroke_width(&painted_paths(tester, &key)[0]), Some(10.0));
+        });
     }
 
     #[test]
     fn placeholder_child_widget() {
-        let cell = cell();
-        let key = GlobalKey::new();
-        let label = GlobalKey::new();
-        let mut mounted = false;
-        pump_widget(&cell, &mut mounted, keyed_placeholder(&key).into_widget());
-        assert!(label.current_context(&cell.borrow()).is_none());
-        pump_widget(
-            &cell,
-            &mut mounted,
-            keyed_placeholder(&key)
-                .child(Directionality::new(
-                    TextDirection::Ltr,
-                    Text::new("Label").key(label.clone().into()),
-                ))
-                .into_widget(),
-        );
-        assert!(label.current_context(&cell.borrow()).is_some());
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let label = GlobalKey::new();
+            tester.pump_widget(keyed_placeholder(&key));
+            assert!(label.current_context(&tester.cell.borrow()).is_none());
+            tester.pump_widget(keyed_placeholder(&key).child(Directionality::new(
+                TextDirection::Ltr,
+                Text::new("Label").key(label.clone().into()),
+            )));
+            assert!(label.current_context(&tester.cell.borrow()).is_some());
+        });
     }
 
     #[test]
     fn placeholder_does_not_crash_at_zero_area() {
-        let cell = cell();
-        let key = GlobalKey::new();
-        let mut mounted = false;
-        pump_widget(
-            &cell,
-            &mut mounted,
-            Directionality::new(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Center::new().child(SizedBox::shrink().child(keyed_placeholder(&key))),
-            )
-            .into_widget(),
-        );
-        assert_eq!(size_of(&cell, &key), Size::ZERO);
+            ));
+            assert_eq!(tester.get_size(&key), Size::ZERO);
+        });
     }
 }

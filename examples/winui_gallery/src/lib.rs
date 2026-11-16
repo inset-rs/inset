@@ -245,6 +245,8 @@ impl GalleryState {
                 sections::command_buttons::page(feature, resources)
             }
             Feature::MenuBar => sections::menu_bar::page(resources),
+            Feature::CommandBar => sections::command_bar::build(resources),
+            Feature::AutoSuggestBox => sections::auto_suggest_box::build(resources),
             Feature::BreadcrumbBar => sections::breadcrumb_bar::page(resources),
             Feature::Flyout => sections::flyout::flyout(resources),
             Feature::ContentDialog => sections::content_dialog::build(resources),

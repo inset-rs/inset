@@ -23,13 +23,18 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - proxy_box.rs → RenderSemanticsAnnotations, RenderBlockSemantics, RenderMergeSemantics, RenderExcludeSemantics, RenderIndexedSemantics
 - object.rs / box.rs → getTransformTo, globalToLocal, localToGlobal
 - editable.rs → TextSelectionPoint
-- debug.rs → debug.dart
 - pipeline_owner.rs → object.dart (PipelineOwner)
 - sliver_fixed_extent_list.rs → sliver_fixed_extent_list.dart
 - image.rs → image.dart (RenderImage)
 - wrap.rs → wrap.dart
 - list_body.rs → list_body.dart
 - sliver_fill.rs → sliver_fill.dart
+
+## debug.rs → debug.dart
+
+- Change: each debug flag (`debugPaintSizeEnabled`, `debugDisableClipLayers` and the rest) is kept per `App`, read with `debug_paint_size_enabled(app)` and set with `set_debug_paint_size_enabled(app, value)`, not in a top-level variable.
+  Reason: language — Dart's top-level variables are isolate-global, and an `App` is Waft's isolate.
+  Affect: setting a flag changes only the app it is passed to, so each test's app starts with every flag off and nothing a test sets reaches another.
 
 ## object.rs → object.dart (RenderObject)
 
@@ -102,6 +107,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: the deprecated `renderView` and `pipelineOwner` are not ported, and `init_render_view` (`TestRenderingFlutterBinding.initRenderView`) takes the view it renders into.
   Reason: platform — they serve the implicit view, and there is no implicit view.
   Affect: a test that renders without widgets passes its view.
+
+- Change: `RendererBinding::set_surface_size(view, size)`, behind the `test-support` feature, is flutter_test's `TestWidgetsFlutterBinding.setSurfaceSize` with its `createViewConfigurationFor` override, and takes the view where Dart's applies to the implicit view.
+  Reason: language — Dart's test binding overrides `createViewConfigurationFor` as a subclass, and Rust has no subclass of the binding; there is no implicit view.
+  Affect: a case lays a view's render tree out at a surface size of its own through `WidgetTester::set_surface_size`; an app built without the feature has no such state.
 
 ## mouse_tracker.rs → mouse_tracker.dart
 

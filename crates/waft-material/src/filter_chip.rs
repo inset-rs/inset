@@ -296,24 +296,28 @@ pub(crate) mod tests {
         WidgetStateProperty,
     };
 
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, assert_more_or_less_equals_within, expect, find,
+        finds_one_widget, test_widgets,
+    };
+
     use super::*;
     use crate::action_chip::tests::{
         hover_over_chip, material_of, paints_rrect_color, pump_wrapped, raw_chips,
     };
     use crate::chip::tests::{
-        center_of, chip_material_of, close_to, icon_data, ink_decoration_color, label_style_color,
-        only, rect_of, size_of, tester, text,
+        chip_material_of, icon_data, ink_decoration_color, label_style_color, only, text,
     };
     use crate::chip_theme::ChipTheme;
     use crate::colors::Colors;
     use crate::material::Material;
     use crate::motion::Durations;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{
-        PaintCall, WidgetTester, material_app, paints_calls, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintInspection, material_app};
+
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};
+    use waft_rendering::testing::{PaintCall, paints};
 
     const LABEL: &str = "filter chip";
 
@@ -343,10 +347,11 @@ pub(crate) mod tests {
     pub(crate) fn expect_checkmark_color(tester: &WidgetTester, chip: AnyElement, color: Color) {
         let ops = tester.painted_ops_deep(tester.render_box_of(chip).as_object());
         assert!(
-            paints_calls(
+            paints(
                 &ops,
                 &[PaintCall::rrect(None), PaintCall::path(Some(color))]
-            ),
+            )
+            .is_ok(),
             "no check mark path of {color:?} after a rounded rect"
         );
     }
@@ -389,7 +394,7 @@ pub(crate) mod tests {
 
     /// Dart's `checkChipMaterialClipBehavior`.
     pub(crate) fn check_chip_material_clip_behavior(tester: &WidgetTester, clip_behavior: Clip) {
-        let materials = tester.find_by_type::<Material>();
+        let materials = find::by_type::<Material>().evaluate(tester);
         // There should be two Material widgets, first Material is from the "_wrapForChip" and
         // last Material is from the "RawChip".
         assert_eq!(materials.len(), 2);
@@ -402,8 +407,8 @@ pub(crate) mod tests {
 
     /// The `Container`s above the text `tooltip_text`: Dart's `findTooltipContainer`.
     pub(crate) fn tooltip_container_count(tester: &WidgetTester, tooltip_text: &str) -> usize {
-        tester
-            .find_text(tooltip_text)
+        find::text(tooltip_text)
+            .evaluate(tester)
             .into_iter()
             .flat_map(|text| tester.ancestors(text))
             .filter(|ancestor| is_widget_of_type::<Container>(tester, *ancestor))
@@ -412,8 +417,8 @@ pub(crate) mod tests {
 
     /// Dart's `find.byIcon(icon)`, counted.
     pub(crate) fn icons_found(tester: &WidgetTester, icon: &IconData) -> usize {
-        tester
-            .find_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| {
                 tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
@@ -468,60 +473,59 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_filter_chip_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m2(&tester.cell.borrow());
 
             // Test enabled FilterChip defaults.
-            pump_chip(&mut tester, &theme, filter_chip(LABEL, true), true);
+            pump_chip(tester, &theme, filter_chip(LABEL, true), true);
 
             // Test default chip size.
             assert_eq!(
-                size_of(&tester, only::<FilterChip>(&tester)),
+                tester.get_size(only::<FilterChip>(tester)),
                 Size::new(178.0, 48.0)
             );
             // Test default label style.
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 body_large_color(&theme).map(|color| color.with_alpha(0xde))
             );
-            assert_material(&tester, 0.0, Some(Colors::BLACK), None, stadium());
+            assert_material(tester, 0.0, Some(Colors::BLACK), None, stadium());
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(Colors::BLACK.with_alpha(0x1f))
             );
 
             // Test disabled FilterChip defaults.
-            pump_chip(&mut tester, &theme, filter_chip(LABEL, false), false);
+            pump_chip(tester, &theme, filter_chip(LABEL, false), false);
             tester.pump_and_settle();
-            assert_material(&tester, 0.0, Some(Colors::BLACK), None, stadium());
-            assert_eq!(ink_decoration_color(&tester), Some(Colors::BLACK38));
+            assert_material(tester, 0.0, Some(Colors::BLACK), None, stadium());
+            assert_eq!(ink_decoration_color(tester), Some(Colors::BLACK38));
 
             // Test selected enabled FilterChip defaults.
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 filter_chip(LABEL, true).selected(true),
                 false,
             );
             tester.pump_and_settle();
-            assert_material(&tester, 0.0, Some(Colors::BLACK), None, stadium());
+            assert_material(tester, 0.0, Some(Colors::BLACK), None, stadium());
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(Colors::BLACK.with_alpha(0x3d))
             );
 
             // Test selected disabled FilterChip defaults.
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 filter_chip(LABEL, false).selected(true),
                 false,
             );
             tester.pump_and_settle();
-            assert_material(&tester, 0.0, Some(Colors::BLACK), None, stadium());
+            assert_material(tester, 0.0, Some(Colors::BLACK), None, stadium());
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(Colors::BLACK.with_alpha(0x3d))
             );
         });
@@ -529,82 +533,81 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_filter_chip_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let scheme = &theme.color_scheme;
             let transparent = Some(Some(Colors::TRANSPARENT));
 
             // Test enabled FilterChip defaults.
-            pump_chip(&mut tester, &theme, filter_chip(LABEL, true), true);
+            pump_chip(tester, &theme, filter_chip(LABEL, true), true);
 
             // Test default chip size.
-            let size = size_of(&tester, only::<FilterChip>(&tester));
-            close_to(size.width(), 189.1, 0.001);
-            close_to(size.height(), 48.0, 0.001);
+            let size = tester.get_size(only::<FilterChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 189.1, 0.001);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.001);
             // Test default label style.
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 Some(scheme.on_surface_variant())
             );
             assert_material(
-                &tester,
+                tester,
                 0.0,
                 Some(Colors::TRANSPARENT),
                 transparent,
                 rounded_rectangle(scheme.outline_variant()),
             );
-            assert_eq!(ink_decoration_color(&tester), None);
+            assert_eq!(ink_decoration_color(tester), None);
 
             // Test disabled FilterChip defaults.
-            pump_chip(&mut tester, &theme, filter_chip(LABEL, false), false);
+            pump_chip(tester, &theme, filter_chip(LABEL, false), false);
             tester.pump_and_settle();
             assert_material(
-                &tester,
+                tester,
                 0.0,
                 Some(Colors::TRANSPARENT),
                 transparent,
                 rounded_rectangle(scheme.on_surface.with_alpha(0x1f)),
             );
-            assert_eq!(ink_decoration_color(&tester), None);
+            assert_eq!(ink_decoration_color(tester), None);
 
             // Test selected enabled FilterChip defaults.
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 filter_chip(LABEL, true).selected(true),
                 false,
             );
             tester.pump_and_settle();
             assert_material(
-                &tester,
+                tester,
                 0.0,
                 None,
                 transparent,
                 rounded_rectangle(Colors::TRANSPARENT),
             );
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(scheme.secondary_container())
             );
 
             // Test selected disabled FilterChip defaults.
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 filter_chip(LABEL, false).selected(true),
                 false,
             );
             tester.pump_and_settle();
             assert_material(
-                &tester,
+                tester,
                 0.0,
                 None,
                 transparent,
                 rounded_rectangle(Colors::TRANSPARENT),
             );
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(scheme.on_surface.with_alpha(0x1f))
             );
         });
@@ -616,88 +619,77 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_filter_chip_elevated_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let scheme = &theme.color_scheme;
             let transparent = Some(Some(Colors::TRANSPARENT));
 
             // Test enabled FilterChip.elevated defaults.
-            pump_chip(&mut tester, &theme, elevated(LABEL, true), true);
+            pump_chip(tester, &theme, elevated(LABEL, true), true);
 
             // Test default chip size.
-            let size = size_of(&tester, only::<FilterChip>(&tester));
-            close_to(size.width(), 189.1, 0.001);
-            close_to(size.height(), 48.0, 0.001);
+            let size = tester.get_size(only::<FilterChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 189.1, 0.001);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.001);
             // Test default label style.
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 Some(scheme.on_surface_variant())
             );
             assert_material(
-                &tester,
+                tester,
                 1.0,
                 Some(scheme.shadow()),
                 transparent,
                 rounded_rectangle(Colors::TRANSPARENT),
             );
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(scheme.surface_container_low())
             );
 
             // Test disabled FilterChip.elevated defaults.
-            pump_chip(&mut tester, &theme, elevated(LABEL, false), false);
+            pump_chip(tester, &theme, elevated(LABEL, false), false);
             tester.pump_and_settle();
             assert_material(
-                &tester,
+                tester,
                 0.0,
                 Some(scheme.shadow()),
                 transparent,
                 rounded_rectangle(Colors::TRANSPARENT),
             );
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(scheme.on_surface.with_alpha(0x1f))
             );
 
             // Test selected enabled FilterChip.elevated defaults.
-            pump_chip(
-                &mut tester,
-                &theme,
-                elevated(LABEL, true).selected(true),
-                false,
-            );
+            pump_chip(tester, &theme, elevated(LABEL, true).selected(true), false);
             tester.pump_and_settle();
             assert_material(
-                &tester,
+                tester,
                 1.0,
                 None,
                 transparent,
                 rounded_rectangle(Colors::TRANSPARENT),
             );
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(scheme.secondary_container())
             );
 
             // Test selected disabled FilterChip.elevated defaults.
-            pump_chip(
-                &mut tester,
-                &theme,
-                elevated(LABEL, false).selected(true),
-                false,
-            );
+            pump_chip(tester, &theme, elevated(LABEL, false).selected(true), false);
             tester.pump_and_settle();
             assert_material(
-                &tester,
+                tester,
                 0.0,
                 None,
                 transparent,
                 rounded_rectangle(Colors::TRANSPARENT),
             );
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(scheme.on_surface.with_alpha(0x1f))
             );
         });
@@ -736,8 +728,7 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_color_resolves_material_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_selected_color = Color::new(0xffffff00);
             let disabled_color = Color::new(0xff00ff00);
             let background_color = Color::new(0xff0000ff);
@@ -761,32 +752,31 @@ pub(crate) mod tests {
             };
 
             // Test enabled state.
-            pump_wrapped(&mut tester, build(true, false));
+            pump_wrapped(tester, build(true, false));
             // Enabled FilterChip and elevated FilterChip should have the provided
             // backgroundColor.
-            assert!(both_chips_paint(&tester, background_color));
+            assert!(both_chips_paint(tester, background_color));
 
             // Test disabled state.
-            pump_wrapped(&mut tester, build(false, false));
+            pump_wrapped(tester, build(false, false));
             tester.pump_and_settle();
-            assert!(both_chips_paint(&tester, disabled_color));
+            assert!(both_chips_paint(tester, disabled_color));
 
             // Test enabled & selected state.
-            pump_wrapped(&mut tester, build(true, true));
+            pump_wrapped(tester, build(true, true));
             tester.pump_and_settle();
-            assert!(both_chips_paint(&tester, selected_color));
+            assert!(both_chips_paint(tester, selected_color));
 
             // Test disabled & selected state.
-            pump_wrapped(&mut tester, build(false, true));
+            pump_wrapped(tester, build(false, true));
             tester.pump_and_settle();
-            assert!(both_chips_paint(&tester, disabled_selected_color));
+            assert!(both_chips_paint(tester, disabled_selected_color));
         });
     }
 
     #[test]
     fn filter_chip_uses_provided_state_color_properties() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_color = Color::new(0xff00ff00);
             let background_color = Color::new(0xff0000ff);
             let selected_color = Color::new(0xffff0000);
@@ -800,25 +790,24 @@ pub(crate) mod tests {
             };
 
             // Test enabled state.
-            pump_wrapped(&mut tester, build(true, false));
-            assert!(both_chips_paint(&tester, background_color));
+            pump_wrapped(tester, build(true, false));
+            assert!(both_chips_paint(tester, background_color));
 
             // Test disabled state.
-            pump_wrapped(&mut tester, build(false, false));
+            pump_wrapped(tester, build(false, false));
             tester.pump_and_settle();
-            assert!(both_chips_paint(&tester, disabled_color));
+            assert!(both_chips_paint(tester, disabled_color));
 
             // Test enabled & selected state.
-            pump_wrapped(&mut tester, build(true, true));
+            pump_wrapped(tester, build(true, true));
             tester.pump_and_settle();
-            assert!(both_chips_paint(&tester, selected_color));
+            assert!(both_chips_paint(tester, selected_color));
         });
     }
 
     #[test]
     fn filter_chip_can_be_tapped() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selections = Rc::new(Cell::new(0));
             let on_selected: ValueChanged<bool> = {
                 let selections = Rc::clone(&selections);
@@ -826,33 +815,34 @@ pub(crate) mod tests {
             };
             let theme = m3(&tester.cell.borrow());
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 FilterChip::new(Text::new("filter chip"), Some(on_selected)),
                 false,
             );
 
-            let center = center_of(&tester, only::<FilterChip>(&tester));
-            tester.tap(center, 1);
+            let center = tester.get_center(only::<FilterChip>(tester));
+            tester.tap_at(center, 1);
             assert_eq!(selections.get(), 1);
         });
     }
 
     fn checkmark_color_case(
+        tester: &mut WidgetTester,
         theme: impl FnOnce(&App) -> ThemeData,
         expected: impl FnOnce(&ThemeData) -> Color,
     ) {
-        let mut tester = tester();
         let theme = theme(&tester.cell.borrow());
         let expected = expected(&theme);
-        pump_checkmark_chip(&mut tester, selected_filter_chip(None), None, Some(theme));
-        expect_checkmark_color(&tester, only::<FilterChip>(&tester), expected);
+        pump_checkmark_chip(tester, selected_filter_chip(None), None, Some(theme));
+        expect_checkmark_color(tester, only::<FilterChip>(tester), expected);
     }
 
     #[test]
     fn material2_filter_chip_check_mark_color_is_determined_by_platform_brightness_when_light() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             checkmark_color_case(
+                tester,
                 |app| ThemeData::light(app, Some(false)),
                 |_| Colors::BLACK.with_alpha(0xde),
             );
@@ -861,15 +851,18 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_filter_chip_check_mark_color_is_determined_by_platform_brightness_when_light() {
-        with_main_thread_stack(|| {
-            checkmark_color_case(m3, |theme| theme.color_scheme.on_secondary_container());
+        test_widgets(|tester| {
+            checkmark_color_case(tester, m3, |theme| {
+                theme.color_scheme.on_secondary_container()
+            });
         });
     }
 
     #[test]
     fn material2_filter_chip_check_mark_color_is_determined_by_platform_brightness_when_dark() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             checkmark_color_case(
+                tester,
                 |app| ThemeData::dark(app, Some(false)),
                 |_| Colors::WHITE.with_alpha(0xde),
             );
@@ -878,8 +871,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_filter_chip_check_mark_color_is_determined_by_platform_brightness_when_dark() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             checkmark_color_case(
+                tester,
                 |app| {
                     ThemeData::builder()
                         .brightness(waft_embedder::Brightness::Dark)
@@ -892,85 +886,80 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_check_mark_color_can_be_set_by_the_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_checkmark_chip(
-                &mut tester,
+                tester,
                 selected_filter_chip(None),
                 Some(Color::new(0xff00ff00)),
                 None,
             );
-            expect_checkmark_color(&tester, only::<FilterChip>(&tester), Color::new(0xff00ff00));
+            expect_checkmark_color(tester, only::<FilterChip>(tester), Color::new(0xff00ff00));
         });
     }
 
     #[test]
     fn filter_chip_check_mark_color_can_be_set_by_the_chip_constructor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_checkmark_chip(
-                &mut tester,
+                tester,
                 selected_filter_chip(Some(Color::new(0xff00ff00))),
                 None,
                 None,
             );
-            expect_checkmark_color(&tester, only::<FilterChip>(&tester), Color::new(0xff00ff00));
+            expect_checkmark_color(tester, only::<FilterChip>(tester), Color::new(0xff00ff00));
         });
     }
 
     #[test]
     fn filter_chip_check_mark_color_is_set_by_chip_constructor_even_when_a_theme_color_is_specified()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_checkmark_chip(
-                &mut tester,
+                tester,
                 selected_filter_chip(Some(Color::new(0xffff0000))),
                 Some(Color::new(0xff00ff00)),
                 None,
             );
-            expect_checkmark_color(&tester, only::<FilterChip>(&tester), Color::new(0xffff0000));
+            expect_checkmark_color(tester, only::<FilterChip>(tester), Color::new(0xffff0000));
         });
     }
 
     #[test]
     fn filter_chip_clip_behavior_properly_passes_through_to_the_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, filter_chip("label", true));
-            check_chip_material_clip_behavior(&tester, Clip::None);
+        test_widgets(|tester| {
+            pump_wrapped(tester, filter_chip("label", true));
+            check_chip_material_clip_behavior(tester, Clip::None);
 
             pump_wrapped(
-                &mut tester,
+                tester,
                 filter_chip("label", true).clip_behavior(Clip::AntiAlias),
             );
-            check_chip_material_clip_behavior(&tester, Clip::AntiAlias);
+            check_chip_material_clip_behavior(tester, Clip::AntiAlias);
         });
     }
 
     #[test]
     fn material3_width_should_not_change_with_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // For the text "FilterChip" the chip should default to 175 regardless of selection.
             let expected_width = 175.0;
             let theme = m3(&tester.cell.borrow());
 
             // Unselected
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 filter_chip("FilterChip", true).show_checkmark(false),
                 true,
             );
             assert_eq!(
-                size_of(&tester, only::<FilterChip>(&tester)).width(),
+                tester.get_size(only::<FilterChip>(tester)).width(),
                 expected_width
             );
 
             // Selected
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 filter_chip("FilterChip", true)
                     .show_checkmark(false)
@@ -979,7 +968,7 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             assert_eq!(
-                size_of(&tester, only::<FilterChip>(&tester)).width(),
+                tester.get_size(only::<FilterChip>(tester)).width(),
                 expected_width
             );
         });
@@ -987,8 +976,7 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_uses_provided_icon_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let build_chip = |tester: &mut WidgetTester, icon_theme: Option<IconThemeData>| {
                 let mut chip =
@@ -1000,19 +988,19 @@ pub(crate) mod tests {
             };
 
             // Test default icon theme.
-            build_chip(&mut tester, None);
+            build_chip(tester, None);
             assert_eq!(
-                icon_data(&tester).color.map(|color| color.color()),
+                icon_data(tester).color.map(|color| color.color()),
                 Some(theme.color_scheme.primary)
             );
 
             // Test provided icon theme.
             build_chip(
-                &mut tester,
+                tester,
                 Some(IconThemeData::new().color(Color::new(0xff00ff00))),
             );
             assert_eq!(
-                icon_data(&tester).color.map(|color| color.color()),
+                icon_data(tester).color.map(|color| color.color()),
                 Some(Color::new(0xff00ff00))
             );
         });
@@ -1024,58 +1012,60 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_filter_chip_supports_delete_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let on_surface_variant = Some(theme.color_scheme.on_surface_variant());
             let delete_icon_color =
                 |tester: &WidgetTester| icon_data(tester).color.map(|color| color.color());
 
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 with_delete(filter_chip("FilterChip", true)),
                 true,
             );
 
             // Test the chip size with delete button.
-            assert_eq!(tester.find_text("FilterChip").len(), 1);
+            expect(tester, &find::text("FilterChip"), finds_one_widget());
             assert_eq!(
-                size_of(&tester, only::<FilterChip>(&tester)),
+                tester.get_size(only::<FilterChip>(tester)),
                 Size::new(195.0, 48.0)
             );
             // Test the delete button icon.
             assert_eq!(
-                size_of(&tester, tester.find_by_icon(&Icons::clear())),
+                tester.get_size(tester.element(find::by_icon(&Icons::clear()).first())),
                 Size::new(18.0, 18.0)
             );
-            assert_eq!(delete_icon_color(&tester), on_surface_variant);
+            assert_eq!(delete_icon_color(tester), on_surface_variant);
 
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 with_delete(elevated("Elevated FilterChip", true)),
                 true,
             );
 
             // Test the elevated chip size with delete button.
-            assert_eq!(tester.find_text("Elevated FilterChip").len(), 1);
-            let size = size_of(&tester, only::<FilterChip>(&tester));
-            close_to(size.width(), 321.9, 0.001);
-            close_to(size.height(), 48.0, 0.001);
+            expect(
+                tester,
+                &find::text("Elevated FilterChip"),
+                finds_one_widget(),
+            );
+            let size = tester.get_size(only::<FilterChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 321.9, 0.001);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.001);
             // Test the delete button icon.
             assert_eq!(
-                size_of(&tester, tester.find_by_icon(&Icons::clear())),
+                tester.get_size(tester.element(find::by_icon(&Icons::clear()).first())),
                 Size::new(18.0, 18.0)
             );
-            assert_eq!(delete_icon_color(&tester), on_surface_variant);
+            assert_eq!(delete_icon_color(tester), on_surface_variant);
         });
     }
 
     #[test]
     fn material2_filter_chip_supports_delete_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m2(&tester.cell.borrow());
             let expected = theme
                 .icon_theme
@@ -1086,51 +1076,54 @@ pub(crate) mod tests {
                 |tester: &WidgetTester| icon_data(tester).color.map(|color| color.color());
 
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 with_delete(filter_chip("FilterChip", true)),
                 true,
             );
 
             // Test the chip size with delete button.
-            assert_eq!(tester.find_text("FilterChip").len(), 1);
+            expect(tester, &find::text("FilterChip"), finds_one_widget());
             assert_eq!(
-                size_of(&tester, only::<FilterChip>(&tester)),
+                tester.get_size(only::<FilterChip>(tester)),
                 Size::new(188.0, 48.0)
             );
             // Test the delete button icon.
             assert_eq!(
-                size_of(&tester, tester.find_by_icon(&Icons::cancel())),
+                tester.get_size(tester.element(find::by_icon(&Icons::cancel()).first())),
                 Size::new(18.0, 18.0)
             );
-            assert_eq!(delete_icon_color(&tester), expected);
+            assert_eq!(delete_icon_color(tester), expected);
 
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 with_delete(elevated("Elevated FilterChip", true)),
                 true,
             );
 
             // Test the elevated chip size with delete button.
-            assert_eq!(tester.find_text("Elevated FilterChip").len(), 1);
+            expect(
+                tester,
+                &find::text("Elevated FilterChip"),
+                finds_one_widget(),
+            );
             assert_eq!(
-                size_of(&tester, only::<FilterChip>(&tester)),
+                tester.get_size(only::<FilterChip>(tester)),
                 Size::new(314.0, 48.0)
             );
             // Test the delete button icon.
             assert_eq!(
-                size_of(&tester, tester.find_by_icon(&Icons::cancel())),
+                tester.get_size(tester.element(find::by_icon(&Icons::cancel()).first())),
                 Size::new(18.0, 18.0)
             );
-            assert_eq!(delete_icon_color(&tester), expected);
+            assert_eq!(delete_icon_color(tester), expected);
         });
     }
 
     #[test]
     fn customize_filter_chip_delete_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let build_chip = |tester: &mut WidgetTester,
                               delete_icon: Option<Icon>,
@@ -1150,47 +1143,42 @@ pub(crate) mod tests {
             };
 
             // Test the custom delete icon.
-            build_chip(
-                &mut tester,
-                Some(Icon::new(Some(Icons::delete()))),
-                None,
-                None,
-            );
-            assert!(icons_found(&tester, &Icons::clear()) == 0);
-            assert_eq!(icons_found(&tester, &Icons::delete()), 1);
+            build_chip(tester, Some(Icon::new(Some(Icons::delete()))), None, None);
+            assert!(icons_found(tester, &Icons::clear()) == 0);
+            assert_eq!(icons_found(tester, &Icons::delete()), 1);
 
             // Test the custom delete icon color.
             build_chip(
-                &mut tester,
+                tester,
                 Some(Icon::new(Some(Icons::delete()))),
                 Some(Color::new(0xff00ff00)),
                 None,
             );
             tester.pump_and_settle();
-            assert!(icons_found(&tester, &Icons::clear()) == 0);
-            assert_eq!(icons_found(&tester, &Icons::delete()), 1);
+            assert!(icons_found(tester, &Icons::clear()) == 0);
+            assert_eq!(icons_found(tester, &Icons::delete()), 1);
             assert_eq!(
-                icon_data(&tester).color.map(|color| color.color()),
+                icon_data(tester).color.map(|color| color.color()),
                 Some(Color::new(0xff00ff00))
             );
 
             // Test the custom delete button tooltip message.
-            build_chip(&mut tester, None, None, Some("Delete FilterChip"));
+            build_chip(tester, None, None, Some("Delete FilterChip"));
             tester.pump_and_settle();
 
             // Press the delete icon of the chip.
-            let mut gesture = WidgetTester::touch(1);
-            let at = center_of(&tester, tester.find_by_icon(&Icons::clear()));
+            let mut gesture = TestPointer::touch(1);
+            let at = tester.get_center(tester.element(find::by_icon(&Icons::clear()).first()));
             tester.down(&mut gesture, at);
             tester.pump_and_settle();
 
             // Verify the tooltip message is set.
-            let tooltips = tester
-                .find_text("Delete FilterChip")
+            let tooltips = find::text("Delete FilterChip")
+                .evaluate(tester)
                 .into_iter()
                 .filter(|text| {
                     tester.ancestors(*text).into_iter().any(|ancestor| {
-                        is_widget_of_type::<crate::tooltip::Tooltip>(&tester, ancestor)
+                        is_widget_of_type::<crate::tooltip::Tooltip>(tester, ancestor)
                     })
                 })
                 .count();
@@ -1201,24 +1189,23 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_delete_button_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let deleted = Rc::new(RefCell::new(Vec::<String>::new()));
             let chip = filter_chip("FilterChip", true).on_deleted({
                 let deleted = Rc::clone(&deleted);
                 Listener::new(move |_app| deleted.borrow_mut().push("A".to_owned()))
             });
-            pump_chip(&mut tester, &theme, chip, true);
+            pump_chip(tester, &theme, chip, true);
 
             assert!(deleted.borrow().is_empty());
 
-            let at = center_of(&tester, tester.find_by_icon(&Icons::clear()));
-            tester.tap(at, 1);
+            let at = tester.get_center(tester.element(find::by_icon(&Icons::clear()).first()));
+            tester.tap_at(at, 1);
             assert_eq!(*deleted.borrow(), vec!["A"]);
             tester.pump_and_settle_by(Duration::from_secs(1));
 
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             assert_eq!(*deleted.borrow(), vec!["A", "A"]);
             tester.pump_and_settle_by(Duration::from_secs(1));
         });
@@ -1226,35 +1213,34 @@ pub(crate) mod tests {
 
     #[test]
     fn delete_button_tooltip_is_not_shown_on_disabled_filter_chip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_chip = |tester: &mut WidgetTester, enabled: bool| {
                 pump_wrapped(tester, with_delete(filter_chip("Label", enabled)));
             };
 
             // Test enabled chip.
-            build_chip(&mut tester, true);
+            build_chip(tester, true);
 
-            let delete_button_location = center_of(&tester, only::<Icon>(&tester));
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let delete_button_location = tester.get_center(only::<Icon>(tester));
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.move_to(&mut gesture, delete_button_location, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Delete button tooltip should be visible.
-            assert_eq!(tooltip_container_count(&tester, "Delete"), 1);
+            assert_eq!(tooltip_container_count(tester, "Delete"), 1);
 
             // Test disabled chip.
-            build_chip(&mut tester, false);
-            tester.pump(Duration::ZERO);
+            build_chip(tester, false);
+            tester.pump();
 
             // Delete button tooltip should not be visible.
-            assert_eq!(tooltip_container_count(&tester, "Delete"), 0);
+            assert_eq!(tooltip_container_count(tester, "Delete"), 0);
         });
     }
 
     /// The color of the nearest `IconTheme` above `icon`.
     pub(crate) fn icon_color(tester: &WidgetTester, icon: &IconData) -> Option<Color> {
-        let icon = tester.find_by_icon(icon);
+        let icon = tester.element(find::by_icon(icon).first());
         let theme = tester
             .ancestors(icon)
             .into_iter()
@@ -1267,8 +1253,7 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_default_filter_chip_icon_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let flat_avatar = Icons::favorite();
             let flat_delete_icon = Icons::delete();
             let elevated_avatar = Icons::house();
@@ -1295,38 +1280,35 @@ pub(crate) mod tests {
             };
 
             // Test unselected state.
-            build_chips(&mut tester, false);
+            build_chips(tester, false);
 
             // Check the flat chip icon colors.
-            assert_eq!(icon_color(&tester, &flat_avatar), Some(scheme.primary));
+            assert_eq!(icon_color(tester, &flat_avatar), Some(scheme.primary));
             assert_eq!(
-                icon_color(&tester, &flat_delete_icon),
+                icon_color(tester, &flat_delete_icon),
                 Some(scheme.on_surface_variant())
             );
             // Check the elevated chip icon colors.
-            assert_eq!(icon_color(&tester, &elevated_avatar), Some(scheme.primary));
+            assert_eq!(icon_color(tester, &elevated_avatar), Some(scheme.primary));
             assert_eq!(
-                icon_color(&tester, &elevated_delete_icon),
+                icon_color(tester, &elevated_delete_icon),
                 Some(scheme.on_surface_variant())
             );
 
             // Test selected state.
-            build_chips(&mut tester, true);
+            build_chips(tester, true);
 
             // Check the flat chip icon colors.
             let on_secondary_container = Some(scheme.on_secondary_container());
-            assert_eq!(icon_color(&tester, &flat_avatar), on_secondary_container);
+            assert_eq!(icon_color(tester, &flat_avatar), on_secondary_container);
             assert_eq!(
-                icon_color(&tester, &flat_delete_icon),
+                icon_color(tester, &flat_delete_icon),
                 on_secondary_container
             );
             // Check the elevated chip icon colors.
+            assert_eq!(icon_color(tester, &elevated_avatar), on_secondary_container);
             assert_eq!(
-                icon_color(&tester, &elevated_avatar),
-                on_secondary_container
-            );
-            assert_eq!(
-                icon_color(&tester, &elevated_delete_icon),
+                icon_color(tester, &elevated_delete_icon),
                 on_secondary_container
             );
         });
@@ -1334,8 +1316,7 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_avatar_layout_constraints_can_be_customized() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border = 1.0;
             let icon_size = 18.0;
             let label_padding = 8.0;
@@ -1356,21 +1337,24 @@ pub(crate) mod tests {
                 }
                 pump_wrapped(tester, Center::new().child(chip));
             };
-            let chip_size = |tester: &WidgetTester| size_of(tester, only::<FilterChip>(tester));
+            let chip_size = |tester: &WidgetTester| tester.get_size(only::<FilterChip>(tester));
             let chip_top_left = |tester: &WidgetTester| {
-                rect_of(tester, material_of(tester, only::<RawChip>(tester))).top_left()
+                tester
+                    .get_rect(material_of(tester, only::<RawChip>(tester)))
+                    .top_left()
             };
             let label_top_left =
-                |tester: &WidgetTester| rect_of(tester, only::<Container>(tester)).top_left();
+                |tester: &WidgetTester| tester.get_rect(only::<Container>(tester)).top_left();
 
             // Test default avatar layout constraints.
-            build_chip(&mut tester, None);
-            assert_eq!(chip_size(&tester).width(), 234.0);
-            assert_eq!(chip_size(&tester).height(), 118.0);
+            build_chip(tester, None);
+            assert_eq!(chip_size(tester).width(), 234.0);
+            assert_eq!(chip_size(tester).height(), 118.0);
 
             // Calculate the distance between avatar and chip edges.
-            let top_left = chip_top_left(&tester);
-            let avatar_center = center_of(&tester, tester.find_by_icon(&Icons::favorite()));
+            let top_left = chip_top_left(tester);
+            let avatar_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::favorite()).first()));
             assert_eq!(
                 top_left.dx(),
                 avatar_center.dx() - (label_size.width() / 2.0) - padding - border
@@ -1382,25 +1366,25 @@ pub(crate) mod tests {
 
             // Calculate the distance between avatar and label.
             assert_eq!(
-                label_top_left(&tester).dx(),
+                label_top_left(tester).dx(),
                 avatar_center.dx() + (label_size.width() / 2.0) + label_padding
             );
 
             // Test custom avatar layout constraints.
             build_chip(
-                &mut tester,
+                tester,
                 Some(BoxConstraints::tight_for_finite(
                     f64::INFINITY,
                     f64::INFINITY,
                 )),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(chip_size(&tester).width(), 152.0);
-            assert_eq!(chip_size(&tester).height(), 118.0);
+            assert_eq!(chip_size(tester).width(), 152.0);
+            assert_eq!(chip_size(tester).height(), 118.0);
 
             // Calculate the distance between avatar and chip edges.
-            let top_left = chip_top_left(&tester);
+            let top_left = chip_top_left(tester);
             assert_eq!(
                 top_left.dx(),
                 avatar_center.dx() - (icon_size / 2.0) - padding - border
@@ -1412,7 +1396,7 @@ pub(crate) mod tests {
 
             // Calculate the distance between avatar and label.
             assert_eq!(
-                label_top_left(&tester).dx(),
+                label_top_left(tester).dx(),
                 avatar_center.dx() + (icon_size / 2.0) + label_padding
             );
         });
@@ -1420,8 +1404,7 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_delete_icon_layout_constraints_can_be_customized() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border = 1.0;
             let icon_size = 18.0;
             let label_padding = 8.0;
@@ -1442,21 +1425,24 @@ pub(crate) mod tests {
                 }
                 pump_wrapped(tester, Center::new().child(chip));
             };
-            let chip_size = |tester: &WidgetTester| size_of(tester, only::<FilterChip>(tester));
+            let chip_size = |tester: &WidgetTester| tester.get_size(only::<FilterChip>(tester));
             let chip_top_right = |tester: &WidgetTester| {
-                rect_of(tester, material_of(tester, only::<RawChip>(tester))).top_right()
+                tester
+                    .get_rect(material_of(tester, only::<RawChip>(tester)))
+                    .top_right()
             };
             let label_top_right =
-                |tester: &WidgetTester| rect_of(tester, only::<Container>(tester)).top_right();
+                |tester: &WidgetTester| tester.get_rect(only::<Container>(tester)).top_right();
 
             // Test default delete icon layout constraints.
-            build_chip(&mut tester, None);
-            assert_eq!(chip_size(&tester).width(), 234.0);
-            assert_eq!(chip_size(&tester).height(), 118.0);
+            build_chip(tester, None);
+            assert_eq!(chip_size(tester).width(), 234.0);
+            assert_eq!(chip_size(tester).height(), 118.0);
 
             // Calculate the distance between delete icon and chip edges.
-            let top_right = chip_top_right(&tester);
-            let delete_icon_center = center_of(&tester, tester.find_by_icon(&Icons::clear()));
+            let top_right = chip_top_right(tester);
+            let delete_icon_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::clear()).first()));
             assert_eq!(
                 top_right.dx(),
                 delete_icon_center.dx() + (label_size.width() / 2.0) + padding + border
@@ -1468,25 +1454,25 @@ pub(crate) mod tests {
 
             // Calculate the distance between delete icon and label.
             assert_eq!(
-                label_top_right(&tester).dx(),
+                label_top_right(tester).dx(),
                 delete_icon_center.dx() - (label_size.width() / 2.0) - label_padding
             );
 
             // Test custom delete icon layout constraints.
             build_chip(
-                &mut tester,
+                tester,
                 Some(BoxConstraints::tight_for_finite(
                     f64::INFINITY,
                     f64::INFINITY,
                 )),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(chip_size(&tester).width(), 152.0);
-            assert_eq!(chip_size(&tester).height(), 118.0);
+            assert_eq!(chip_size(tester).width(), 152.0);
+            assert_eq!(chip_size(tester).height(), 118.0);
 
             // Calculate the distance between delete icon and chip edges.
-            let top_right = chip_top_right(&tester);
+            let top_right = chip_top_right(tester);
             assert_eq!(
                 top_right.dx(),
                 delete_icon_center.dx() + (icon_size / 2.0) + padding + border
@@ -1498,7 +1484,7 @@ pub(crate) mod tests {
 
             // Calculate the distance between delete icon and label.
             assert_eq!(
-                label_top_right(&tester).dx(),
+                label_top_right(tester).dx(),
                 delete_icon_center.dx() - (icon_size / 2.0) - label_padding
             );
         });
@@ -1515,11 +1501,10 @@ pub(crate) mod tests {
             ))
     }
 
-    fn assert_animation_style_passed_to_raw_chip(chip: FilterChip) {
-        let mut tester = tester();
-        pump_wrapped(&mut tester, Center::new().child(chip));
+    fn assert_animation_style_passed_to_raw_chip(tester: &mut WidgetTester, chip: FilterChip) {
+        pump_wrapped(tester, Center::new().child(chip));
         let passed = tester
-            .widget(only::<RawChip>(&tester), |raw_chip: &RawChip| {
+            .widget(only::<RawChip>(tester), |raw_chip: &RawChip| {
                 raw_chip.chip_animation_style.clone()
             })
             .expect("a chip animation style");
@@ -1538,8 +1523,9 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_chip_animation_style_is_passed_to_raw_chip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_animation_style_passed_to_raw_chip(
+                tester,
                 filter_chip("FilterChip", true).chip_animation_style(animation_style()),
             );
         });
@@ -1547,8 +1533,9 @@ pub(crate) mod tests {
 
     #[test]
     fn elevated_filter_chip_chip_animation_style_is_passed_to_raw_chip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_animation_style_passed_to_raw_chip(
+                tester,
                 elevated("FilterChip", true).chip_animation_style(animation_style()),
             );
         });
@@ -1556,11 +1543,10 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_has_expected_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, Center::new().child(filter_chip("Chip", true)));
-            let mut mouse = WidgetTester::mouse(1, 0);
-            hover_over_chip(&mut tester, &mut mouse);
+        test_widgets(|tester| {
+            pump_wrapped(tester, Center::new().child(filter_chip("Chip", true)));
+            let mut mouse = TestPointer::mouse(1, 0);
+            hover_over_chip(tester, &mut mouse);
             let expected: MouseCursorRef = if K_IS_WEB {
                 SystemMouseCursors::CLICK.into()
             } else {
@@ -1572,23 +1558,21 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_mouse_cursor_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_cursor: MouseCursorRef = SystemMouseCursors::GRAB.into();
             pump_wrapped(
-                &mut tester,
+                tester,
                 Center::new().child(filter_chip("Chip", true).mouse_cursor(custom_cursor.clone())),
             );
-            let mut mouse = WidgetTester::mouse(1, 0);
-            hover_over_chip(&mut tester, &mut mouse);
+            let mut mouse = TestPointer::mouse(1, 0);
+            hover_over_chip(tester, &mut mouse);
             assert!(*tester.active_cursor(1) == *custom_cursor);
         });
     }
 
     #[test]
     fn mouse_cursor_resolves_in_focused_unfocused_disabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
 
@@ -1612,21 +1596,21 @@ pub(crate) mod tests {
             };
 
             // Unfocused case.
-            build_chip(&mut tester, true);
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let chip = center_of(&tester, text(&tester, "Chip"));
+            build_chip(tester, true);
+            let mut mouse = TestPointer::mouse(1, 0);
+            let chip = tester.get_center(text(tester, "Chip"));
             tester.add_pointer(&mut mouse, chip);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.move_to(&mut mouse, chip, false);
             assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::BASIC));
 
             // Focused case.
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::GRAB));
 
             // Disabled case.
-            build_chip(&mut tester, false);
+            build_chip(tester, false);
             assert!(
                 *tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::FORBIDDEN)
             );
@@ -1636,8 +1620,7 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_chip_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,
@@ -1645,7 +1628,7 @@ pub(crate) mod tests {
                     .body(Center::new().child(SizedBox::shrink().child(filter_chip("X", true))))
                     .into_widget(),
             ));
-            assert!(size_of(&tester, only::<FilterChip>(&tester)).is_empty());
+            assert!(tester.get_size(only::<FilterChip>(tester)).is_empty());
         });
     }
 }

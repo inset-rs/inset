@@ -1772,26 +1772,20 @@ mod tests {
 
     use waft_embedder::{
         Clip, Color, KeyData, KeyEventDeviceType, KeyEventType, Matrix4, PointerDeviceKind,
-        TargetPlatform, TextDirection, ViewRef,
+        TextDirection,
     };
-    use waft_foundation::{AppCell, ChangeNotifier, Timer, UniqueKey, ValueNotifier};
-    use waft_gestures::{
-        GestureBinding, PointerEvent, PointerHoverEvent, PointerScrollEvent, PointerUpEvent,
-    };
-    use waft_painting::{
-        AlignmentGeometry, Axis, BoxDecoration, EdgeInsetsGeometry, PaintingBinding,
-    };
-    use waft_rendering::{
-        AnyRenderBox, AnyRenderObject, BoxConstraints, MainAxisSize, RenderHandle, RenderParagraph,
-        RendererBinding,
-    };
+    use waft_foundation::{ChangeNotifier, Timer, UniqueKey, ValueNotifier};
+    use waft_gestures::{GestureBinding, PointerEvent, PointerScrollEvent};
+    use waft_painting::{AlignmentGeometry, Axis, BoxDecoration, EdgeInsetsGeometry};
+    use waft_rendering::{AnyRenderObject, BoxConstraints, MainAxisSize, RenderHandle};
     use waft_services::{KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey};
-    use waft_test::{TestPlatform, TestView};
 
     use super::*;
-    use crate::binding::{WidgetsBinding, run_widget};
-    use crate::framework::{AnyElement, StatelessWidget, downcast_widget};
-    use crate::test_harness::pump_every_view;
+    use crate::framework::StatelessWidget;
+    use crate::testing::{
+        TestPointer, WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget,
+        test_widgets,
+    };
     use crate::widgets::actions::{
         ActionDispatcher, CallbackAction, Intent, IntentRef, PlainActionDispatcher,
         VoidCallbackIntent,
@@ -1806,6 +1800,7 @@ mod tests {
     use crate::widgets::focus_scope::Focus;
     use crate::widgets::focus_traversal::{NextFocusIntent, PreviousFocusIntent};
     use crate::widgets::gesture_detector::GestureDetector;
+    use crate::widgets::media_query::MediaQueryData;
     use crate::widgets::navigator::RouteSettingsRef;
     use crate::widgets::overlay::{Overlay, OverlayEntry, RenderTheater};
     use crate::widgets::pages::PageRouteBuilder;
@@ -1817,125 +1812,46 @@ mod tests {
 
     const BLACK: Color = Color::new(0xFF000000);
 
-    // ---- the tester: Flutter's `WidgetTester` on one 800x600 view ----
+    // ---- the tester: Flutter's `WidgetTester` and what these cases read of it ----
 
-    /// One app on a macOS platform with one view, the fonts installed so text has a size, and
-    /// the frame clock Flutter's fake async keeps.
-    struct Tester {
-        cell: Rc<AppCell>,
-        view: Rc<TestView>,
-        now: Cell<Duration>,
+    /// A case's [`WidgetTester`] with the view resizes, key events and focus reads Dart's cases
+    /// use on it.
+    struct Tester<'t> {
+        tester: &'t mut WidgetTester,
     }
 
-    impl Tester {
-        fn new() -> Tester {
-            Tester::with_size(800.0, 600.0)
-        }
+    impl std::ops::Deref for Tester<'_> {
+        type Target = WidgetTester;
 
-        fn with_size(width: f64, height: f64) -> Tester {
-            let view = Rc::new(TestView::new(width, height));
-            let platform = TestPlatform::new()
-                .on(TargetPlatform::MacOS)
-                .with_view(Rc::clone(&view) as ViewRef);
-            let cell = AppCell::with_platform(Rc::new(platform));
-            {
-                let mut app = cell.borrow_mut();
-                let binding = PaintingBinding::instance(&mut app);
-                if !binding.has_fonts(&app) {
-                    binding.install_fonts(&mut app, |fonts| {
-                        fonts.add_source(valo_system_fonts::SystemFonts::load());
-                    });
-                }
-                WidgetsBinding::instance(&mut app);
-            }
-            Tester {
-                cell,
-                view,
-                now: Cell::new(Duration::ZERO),
-            }
+        fn deref(&self) -> &WidgetTester {
+            self.tester
+        }
+    }
+
+    impl std::ops::DerefMut for Tester<'_> {
+        fn deref_mut(&mut self) -> &mut WidgetTester {
+            self.tester
+        }
+    }
+
+    impl<'t> Tester<'t> {
+        fn new(tester: &'t mut WidgetTester) -> Tester<'t> {
+            Tester { tester }
         }
 
         fn app(&self) -> RefMut<'_, App> {
-            self.cell.borrow_mut()
+            self.tester.cell.borrow_mut()
         }
 
-        /// `tester.pumpWidget(widget)`.
-        fn pump_widget<K>(&self, widget: impl IntoWidget<K>) {
-            let widget = widget.into_widget();
-            {
-                let mut app = self.app();
-                let view = app
-                    .platform()
-                    .views()
-                    .into_iter()
-                    .next()
-                    .expect("the tester's view");
-                run_widget(&mut app, View::new(view, widget).into_widget());
-            }
-            // The root widget attaches on the next timer turn, as Dart's `Timer.run` does.
-            self.cell.elapse(Duration::ZERO);
-            self.frame();
+        /// Dart's `changeSurfaceSize(tester, size)`: `tester.binding.setSurfaceSize(size)`,
+        /// which each case's own `App` resets.
+        fn change_surface_size(&self, size: Size) {
+            self.set_surface_size(Some(size));
         }
 
-        /// `tester.pump()`.
-        fn pump(&self) {
-            self.pump_for(Duration::ZERO);
-        }
-
-        /// `tester.pump(duration)`: the timers that come due, then a frame.
-        fn pump_for(&self, duration: Duration) {
-            self.cell.elapse(duration);
-            self.now.set(self.now.get() + duration);
-            self.frame();
-        }
-
-        fn frame(&self) {
-            let mut app = self.app();
-            pump_every_view(&mut app, self.now.get());
-        }
-
-        /// What the host does when the view's size changes: `tester.binding.setSurfaceSize`.
-        fn resize(&self, width: f64, height: f64) {
-            self.view.resize(width, height);
-            let mut app = self.app();
-            RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
-        }
-
-        /// `tester.tapAt(position)`.
-        fn tap_at(&self, position: Offset) {
-            let mut app = self.app();
-            GestureBinding::instance(&mut app).handle_pointer_event(
-                &mut app,
-                PointerEvent::Down(PointerDownEvent {
-                    pointer: 1,
-                    position,
-                    kind: PointerDeviceKind::Touch,
-                    ..PointerDownEvent::default()
-                }),
-            );
-            app.drain_microtasks();
-            GestureBinding::instance(&mut app).handle_pointer_event(
-                &mut app,
-                PointerEvent::Up(PointerUpEvent {
-                    pointer: 1,
-                    position,
-                    kind: PointerDeviceKind::Touch,
-                    ..PointerUpEvent::default()
-                }),
-            );
-            app.drain_microtasks();
-        }
-
-        /// `tester.tap(find.text(text))`.
-        fn tap(&self, text: &str) {
-            let center = self.rect_of_text(text).center();
-            self.tap_at(center);
-        }
-
-        /// `tester.sendKeyEvent(key)`: one key down and up.
-        fn send_key_event(&self, physical: PhysicalKeyboardKey, logical: LogicalKeyboardKey) {
-            self.send_key(KeyEventType::Down, physical, logical);
-            self.send_key(KeyEventType::Up, physical, logical);
+        /// Dart's `MediaQueryData.fromView(tester.view)`.
+        fn media_query_data(&self) -> MediaQueryData {
+            MediaQueryData::from_view(&self.tester.cell.borrow(), &**self.view(), None)
         }
 
         /// `tester.sendKeyDownEvent(key)` and `sendKeyUpEvent(key)`.
@@ -1966,98 +1882,6 @@ mod tests {
             let mut app = self.app();
             primary_focus(&mut app).and_then(|node| node.debug_label(&app))
         }
-
-        /// Every element of the mounted tree, parents before children.
-        fn elements(&self, app: &mut App) -> Vec<AnyElement> {
-            let root = WidgetsBinding::instance(app)
-                .root_element(app)
-                .expect("a mounted tree");
-            let mut all = vec![root];
-            let mut visited = 0;
-            while visited < all.len() {
-                let element = all[visited];
-                element.visit_children(app, &mut |child| all.push(child));
-                visited += 1;
-            }
-            all
-        }
-
-        /// Every render object of the mounted tree, parents before children.
-        fn render_objects(&self, app: &mut App) -> Vec<AnyRenderObject> {
-            let root = WidgetsBinding::instance(app)
-                .root_element(app)
-                .expect("a mounted tree")
-                .find_render_object(app)
-                .expect("a mounted tree has a render object");
-            let mut all = vec![root];
-            let mut visited = 0;
-            while visited < all.len() {
-                let object = all[visited];
-                object.visit_children(app, &mut |child| all.push(child));
-                visited += 1;
-            }
-            all
-        }
-
-        /// The paragraphs showing `text`: `find.text(text)`.
-        fn paragraphs_of(&self, text: &str) -> Vec<AnyRenderObject> {
-            let mut app = self.app();
-            self.render_objects(&mut app)
-                .into_iter()
-                .filter(|object| {
-                    object
-                        .downcast::<RenderParagraph>(&app)
-                        .is_some_and(|paragraph| {
-                            paragraph.text(&app).to_plain_text(true, true) == text
-                        })
-                })
-                .collect()
-        }
-
-        /// How many paragraphs show `text`.
-        fn count_text(&self, text: &str) -> usize {
-            self.paragraphs_of(text).len()
-        }
-
-        /// `tester.getRect(find.text(text))`.
-        fn rect_of_text(&self, text: &str) -> Rect {
-            let paragraphs = self.paragraphs_of(text);
-            assert_eq!(paragraphs.len(), 1, "one paragraph shows {text:?}");
-            let app = self.app();
-            global_rect(&app, paragraphs[0].as_box().expect("a paragraph is a box"))
-        }
-
-        /// `tester.getRect(find.byType(W))`: the first `W` of the tree.
-        fn rect_of<W: 'static>(&self) -> Rect {
-            let mut app = self.app();
-            let element = self
-                .elements(&mut app)
-                .into_iter()
-                .find(|element| downcast_widget::<W>(&**element.widget(&app)).is_some())
-                .expect("a mounted widget of the type");
-            let object = element.find_render_object(&app).expect("laid out");
-            global_rect(&app, object.as_box().expect("a box"))
-        }
-
-        /// `tester.getRect(find.byKey(key))`.
-        fn rect_of_key(&self, key: &GlobalKey) -> Rect {
-            let app = self.app();
-            let context = key
-                .current_context(&app)
-                .expect("the keyed widget is mounted");
-            let object = context.find_render_object(&app).expect("laid out");
-            global_rect(&app, object.as_box().expect("a box"))
-        }
-    }
-
-    /// Flutter's `tester.getRect`: the box's top-left and bottom-right corners in global
-    /// coordinates.
-    fn global_rect(app: &App, object: AnyRenderBox) -> Rect {
-        let size = object.size(app);
-        Rect::from_points(
-            object.local_to_global(app, Offset::ZERO, None),
-            object.local_to_global(app, Offset::new(size.width(), size.height()), None),
-        )
     }
 
     /// A list the callbacks of a test write to.
@@ -2528,300 +2352,321 @@ mod tests {
 
     #[test]
     fn menu_controller_is_open_while_the_overlay_is_shown() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .menu_panel(panel(texts(&["a"])))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .menu_panel(panel(texts(&["a"])))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 1);
+            assert!(controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert!(!controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 0);
+            assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_nothing());
+        });
     }
 
     #[test]
     fn menu_controller_open_and_close_toggle_overlay_visibility() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let nested_controller =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .menu_panel(panel(vec![
-                    Text::new("a").into_widget(),
-                    Menu::new()
-                        .controller(nested_controller.clone())
-                        .menu_panel(panel(texts(&["b.a"])))
-                        .child(AnchorButton::new("b"))
-                        .into_widget(),
-                ]))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let nested_controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .menu_panel(panel(vec![
+                        Text::new("a").into_widget(),
+                        Menu::new()
+                            .controller(nested_controller.clone())
+                            .menu_panel(panel(texts(&["b.a"])))
+                            .child(AnchorButton::new("b"))
+                            .into_widget(),
+                    ]))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        // Create the menu. The menu is closed, so no menu items should be found in the widget
-        // tree.
-        assert!(!controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("anchor"), 1);
-        assert_eq!(tester.count_text("a"), 0);
+            // Create the menu. The menu is closed, so no menu items should be found in the widget
+            // tree.
+            assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("anchor"), finds_one_widget());
+            expect(&tester, &find::text("a"), finds_nothing());
 
-        // Open the menu.
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            // Open the menu.
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
-        assert!(!nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+            assert!(controller.is_open(&tester.app()));
+            assert!(!nested_controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-        // Open the nested menu.
-        nested_controller.open(&mut tester.app(), None);
-        tester.pump();
+            // Open the nested menu.
+            nested_controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
-        assert!(nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(tester.count_text("b.a"), 1);
+            assert!(controller.is_open(&tester.app()));
+            assert!(nested_controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
-        // Close the menu from the root controller.
-        controller.close(&mut tester.app());
-        tester.pump();
+            // Close the menu from the root controller.
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        // All menus should be closed.
-        assert!(!controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 0);
-        assert_eq!(tester.count_text("b.a"), 0);
+            // All menus should be closed.
+            assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-        // Open the nested menu.
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            // Open the nested menu.
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        nested_controller.open(&mut tester.app(), None);
-        tester.pump();
+            nested_controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
-        assert!(nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(tester.count_text("b.a"), 1);
+            assert!(controller.is_open(&tester.app()));
+            assert!(nested_controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
-        // Close the nested menu, but not the root menu.
-        nested_controller.close(&mut tester.app());
-        tester.pump();
+            // Close the nested menu, but not the root menu.
+            nested_controller.close(&mut tester.app());
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
-        assert!(!nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+            assert!(controller.is_open(&tester.app()));
+            assert!(!nested_controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
+        });
     }
 
     #[test]
     fn close_children_closes_submenus_and_focus_stays_on_the_anchor_button() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .menu_panel(panel(vec![
-                    Text::new("a").into_widget(),
-                    Menu::new()
-                        .focus_node(focus_node.clone())
-                        .menu_panel(panel(texts(&["b.a"])))
-                        .child(AnchorButton::new("b").focus_node(focus_node.clone()))
-                        .into_widget(),
-                ]))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .menu_panel(panel(vec![
+                        Text::new("a").into_widget(),
+                        Menu::new()
+                            .focus_node(focus_node.clone())
+                            .menu_panel(panel(texts(&["b.a"])))
+                            .child(AnchorButton::new("b").focus_node(focus_node.clone()))
+                            .into_widget(),
+                    ]))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        tester.tap("b");
-        tester.pump();
+            tester.tap(find::text("b"));
+            tester.pump();
 
-        focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
+            focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
-        controller.close_children(&mut tester.app());
-        tester.pump();
+            controller.close_children(&mut tester.app());
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+            assert!(controller.is_open(&tester.app()));
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-        // Focus should stay on the anchor button.
-        assert_eq!(primary_focus(&mut tester.app()), Some(focus_node.handle()));
+            // Focus should stay on the anchor button.
+            assert_eq!(primary_focus(&mut tester.app()), Some(focus_node.handle()));
+        });
     }
 
     #[test]
     fn only_one_child_anchor_is_open_at_a_time() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(
-            RawMenuAnchor::new(controller, |_app, _context, _position| {
-                Column::new()
-                    .children([
-                        Menu::new()
-                            .menu_panel(panel(texts(&["a.a"])))
-                            .child(AnchorButton::new("a"))
-                            .into_widget(),
-                        Menu::new()
-                            .menu_panel(panel(texts(&["b.a"])))
-                            .child(AnchorButton::new("b"))
-                            .into_widget(),
-                    ])
-                    .into_widget()
-            })
-            .child(AnchorButton::new("anchor")),
-        ));
-
-        tester.tap("anchor");
-        tester.pump();
-
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("a.a"), 0);
-        assert_eq!(tester.count_text("b.a"), 0);
-
-        tester.tap("a");
-        tester.pump();
-
-        assert_eq!(tester.count_text("a.a"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
-
-        tester.tap("b");
-        tester.pump();
-
-        assert_eq!(tester.count_text("a.a"), 0);
-        assert_eq!(tester.count_text("b.a"), 1);
-    }
-
-    #[test]
-    fn context_menus_can_be_nested() {
-        let tester = Tester::new();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .menu_panel(panel(vec![Button::tag("a.a").into_widget()]))
-                .builder(|_app, _context, _controller, _child| {
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(
+                RawMenuAnchor::new(controller, |_app, _context, _position| {
                     Column::new()
-                        .main_axis_size(MainAxisSize::Min)
                         .children([
-                            AnchorButton::new("a").into_widget(),
                             Menu::new()
-                                .menu_panel(panel(vec![Button::tag("b.a").into_widget()]))
+                                .menu_panel(panel(texts(&["a.a"])))
+                                .child(AnchorButton::new("a"))
+                                .into_widget(),
+                            Menu::new()
+                                .menu_panel(panel(texts(&["b.a"])))
                                 .child(AnchorButton::new("b"))
                                 .into_widget(),
                         ])
                         .into_widget()
-                }),
-        ));
+                })
+                .child(AnchorButton::new("anchor")),
+            ));
 
-        tester.tap("a");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a.a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-        tester.tap("b");
-        tester.pump();
+            tester.tap(find::text("a"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("a.a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
+
+            tester.tap(find::text("b"));
+            tester.pump();
+
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
+        });
+    }
+
+    #[test]
+    fn context_menus_can_be_nested() {
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .menu_panel(panel(vec![Button::tag("a.a").into_widget()]))
+                    .builder(|_app, _context, _controller, _child| {
+                        Column::new()
+                            .main_axis_size(MainAxisSize::Min)
+                            .children([
+                                AnchorButton::new("a").into_widget(),
+                                Menu::new()
+                                    .menu_panel(panel(vec![Button::tag("b.a").into_widget()]))
+                                    .child(AnchorButton::new("b"))
+                                    .into_widget(),
+                            ])
+                            .into_widget()
+                    }),
+            ));
+
+            tester.tap(find::text("a"));
+            tester.pump();
+
+            expect(&tester, &find::text("a.a"), finds_one_widget());
+
+            tester.tap(find::text("b"));
+            tester.pump();
+
+            expect(&tester, &find::text("b.a"), finds_one_widget());
+        });
     }
 
     #[test]
     fn a_group_is_open_while_a_descendant_menu_is_open() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            Row::new().children([
-                Menu::new()
-                    .menu_panel(panel(texts(&["a.a"])))
-                    .child(AnchorButton::new("a"))
-                    .into_widget(),
-                // Menu should not need to be a direct descendant.
-                Padding::new(EdgeInsetsGeometry::all(8.0))
-                    .child(
-                        Menu::new()
-                            .menu_panel(panel(texts(&["b.a"])))
-                            .child(AnchorButton::new("b")),
-                    )
-                    .into_widget(),
-            ]),
-            controller.clone(),
-        )));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                Row::new().children([
+                    Menu::new()
+                        .menu_panel(panel(texts(&["a.a"])))
+                        .child(AnchorButton::new("a"))
+                        .into_widget(),
+                    // Menu should not need to be a direct descendant.
+                    Padding::new(EdgeInsetsGeometry::all(8.0))
+                        .child(
+                            Menu::new()
+                                .menu_panel(panel(texts(&["b.a"])))
+                                .child(AnchorButton::new("b")),
+                        )
+                        .into_widget(),
+                ]),
+                controller.clone(),
+            )));
 
-        assert!(!controller.is_open(&tester.app()));
+            assert!(!controller.is_open(&tester.app()));
 
-        tester.tap("a");
-        tester.pump();
+            tester.tap(find::text("a"));
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a.a"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+            assert!(controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a.a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-        tester.tap("b");
-        tester.pump();
-        tester.pump();
+            tester.tap(find::text("b"));
+            tester.pump();
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a.a"), 0);
-        assert_eq!(tester.count_text("b.a"), 1);
+            assert!(controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
-        tester.tap("b");
-        tester.pump();
+            tester.tap(find::text("b"));
+            tester.pump();
 
-        assert!(!controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("b.a"), 0);
+            assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("b.a"), finds_nothing());
+        });
     }
 
     #[test]
     fn opening_a_group_does_nothing() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let nested_controller =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            Column::new().children([Menu::new()
-                .controller(nested_controller.clone())
-                .menu_panel(panel(texts(&["b.a"])))
-                .child(AnchorButton::new("b"))
-                .into_widget()]),
-            controller.clone(),
-        )));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let nested_controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                Column::new().children([Menu::new()
+                    .controller(nested_controller.clone())
+                    .menu_panel(panel(texts(&["b.a"])))
+                    .child(AnchorButton::new("b"))
+                    .into_widget()]),
+                controller.clone(),
+            )));
 
-        // Create the menu. The menu is closed, so no menu items should be found in the widget
-        // tree.
-        assert!(!controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+            // Create the menu. The menu is closed, so no menu items should be found in the widget
+            // tree.
+            assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-        // Open the menu (which should do nothing).
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            // Open the menu (which should do nothing).
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert!(!controller.is_open(&tester.app()));
-        assert!(!nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+            assert!(!controller.is_open(&tester.app()));
+            assert!(!nested_controller.is_open(&tester.app()));
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
+        });
     }
 
     /// Dart's `[Group] MenuController.close closes children` and `[Group]
     /// MenuController.closeChildren closes children`, which differ in the one call.
     fn a_group_closes_its_children_with(close: fn(AnyMenuController, &mut App)) {
-        let tester = Tester::new();
+        let tester = &mut WidgetTester::new();
+        let mut tester = Tester::new(tester);
         let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
         let nested_controller =
             MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
@@ -2840,8 +2685,8 @@ mod tests {
 
         assert!(controller.is_open(&tester.app()));
         assert!(nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("b.a"), 1);
+        expect(&tester, &find::text("b"), finds_one_widget());
+        expect(&tester, &find::text("b.a"), finds_one_widget());
 
         // Close the root menu panel.
         close(controller.handle(), &mut tester.app());
@@ -2849,8 +2694,8 @@ mod tests {
 
         assert!(!controller.is_open(&tester.app()));
         assert!(!nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+        expect(&tester, &find::text("b"), finds_one_widget());
+        expect(&tester, &find::text("b.a"), finds_nothing());
     }
 
     #[test]
@@ -2865,444 +2710,476 @@ mod tests {
 
     #[test]
     fn submenus_call_on_close_before_their_parents() {
-        let tester = Tester::new();
-        let close_order = log();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_close(push(&close_order, "a"))
-                .menu_panel(panel(vec![
-                    Menu::new()
-                        .on_close(push(&close_order, "a.a"))
-                        .on_close_requested(|_app, _hide_menu| {})
-                        .menu_panel(panel(vec![SizedBox::new().into_widget()]))
-                        .child(AnchorButton::new("a.a"))
-                        .into_widget(),
-                ])),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let close_order = log();
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_close(push(&close_order, "a"))
+                    .menu_panel(panel(vec![
+                        Menu::new()
+                            .on_close(push(&close_order, "a.a"))
+                            .on_close_requested(|_app, _hide_menu| {})
+                            .menu_panel(panel(vec![SizedBox::new().into_widget()]))
+                            .child(AnchorButton::new("a.a"))
+                            .into_widget(),
+                    ])),
+            ));
 
-        // Open parent menu.
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            // Open parent menu.
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        // Open child menu.
-        tester.tap("a.a");
-        tester.pump();
+            // Open child menu.
+            tester.tap(find::text("a.a"));
+            tester.pump();
 
-        // Close the root menu panel, which should close all submenus.
-        controller.close(&mut tester.app());
-        tester.pump();
+            // Close the root menu panel, which should close all submenus.
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(*close_order.borrow(), ["a.a", "a"]);
+            assert_eq!(*close_order.borrow(), ["a.a", "a"]);
+        });
     }
 
     #[test]
     fn a_groups_submenus_call_on_close_before_their_parents() {
-        let tester = Tester::new();
-        let close_order = log();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            Menu::new()
-                .on_close(push(&close_order, "a"))
-                .menu_panel(panel(vec![
-                    Menu::new()
-                        .on_close(push(&close_order, "a.a"))
-                        .menu_panel(panel(vec![SizedBox::new().into_widget()]))
-                        .child(AnchorButton::new("a.a"))
-                        .into_widget(),
-                ]))
-                .child(AnchorButton::new("a")),
-            controller.clone(),
-        )));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let close_order = log();
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                Menu::new()
+                    .on_close(push(&close_order, "a"))
+                    .menu_panel(panel(vec![
+                        Menu::new()
+                            .on_close(push(&close_order, "a.a"))
+                            .menu_panel(panel(vec![SizedBox::new().into_widget()]))
+                            .child(AnchorButton::new("a.a"))
+                            .into_widget(),
+                    ]))
+                    .child(AnchorButton::new("a")),
+                controller.clone(),
+            )));
 
-        // Open parent menu.
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            // Open parent menu.
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        // Open child menu.
-        tester.tap("a");
-        tester.pump();
+            // Open child menu.
+            tester.tap(find::text("a"));
+            tester.pump();
 
-        tester.tap("a.a");
-        tester.pump();
+            tester.tap(find::text("a.a"));
+            tester.pump();
 
-        // Close the group, which should close all submenus.
-        controller.close(&mut tester.app());
-        tester.pump();
+            // Close the group, which should close all submenus.
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(*close_order.borrow(), ["a.a", "a"]);
+            assert_eq!(*close_order.borrow(), ["a.a", "a"]);
+        });
     }
 
     #[test]
     fn a_group_shows_one_open_child_anchor_at_a_time() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            Row::new().children([
-                Menu::new()
-                    .menu_panel(panel(texts(&["a.a"])))
-                    .child(AnchorButton::new("a"))
-                    .into_widget(),
-                Menu::new()
-                    .menu_panel(panel(texts(&["b.a"])))
-                    .child(AnchorButton::new("b"))
-                    .into_widget(),
-            ]),
-            controller,
-        )));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                Row::new().children([
+                    Menu::new()
+                        .menu_panel(panel(texts(&["a.a"])))
+                        .child(AnchorButton::new("a"))
+                        .into_widget(),
+                    Menu::new()
+                        .menu_panel(panel(texts(&["b.a"])))
+                        .child(AnchorButton::new("b"))
+                        .into_widget(),
+                ]),
+                controller,
+            )));
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("a.a"), 0);
-        assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-        tester.tap("a");
-        tester.pump();
+            tester.tap(find::text("a"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a.a"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a.a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-        tester.tap("b");
-        tester.pump();
+            tester.tap(find::text("b"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a.a"), 0);
-        assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
+        });
     }
 
     #[test]
     fn maybe_is_open_of_notifies_dependents_when_is_open_changes() {
-        let tester = Tester::new();
-        let group_controller =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let nested_controller =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let panel_is_open: Rc<Cell<Option<bool>>> = Rc::default();
-        let overlay_is_open: Rc<Cell<Option<bool>>> = Rc::default();
-        let anchor_is_open: Rc<Cell<Option<bool>>> = Rc::default();
-        let panel_builds = counter();
-        let anchor_builds = counter();
-        let overlay_builds = counter();
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let group_controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let nested_controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let panel_is_open: Rc<Cell<Option<bool>>> = Rc::default();
+            let overlay_is_open: Rc<Cell<Option<bool>>> = Rc::default();
+            let anchor_is_open: Rc<Cell<Option<bool>>> = Rc::default();
+            let panel_builds = counter();
+            let anchor_builds = counter();
+            let overlay_builds = counter();
 
-        let observer =
-            |is_open: &Rc<Cell<Option<bool>>>, builds: &Rc<Cell<u32>>, text: &'static str| {
-                let (is_open, builds) = (Rc::clone(is_open), Rc::clone(builds));
-                Builder::new(move |app, context| {
-                    is_open.set(MenuController::maybe_is_open_of(app, context));
-                    builds.set(builds.get() + 1);
-                    Text::new(text).into_widget()
-                })
-                .into_widget()
-            };
+            let observer =
+                |is_open: &Rc<Cell<Option<bool>>>, builds: &Rc<Cell<u32>>, text: &'static str| {
+                    let (is_open, builds) = (Rc::clone(is_open), Rc::clone(builds));
+                    Builder::new(move |app, context| {
+                        is_open.set(MenuController::maybe_is_open_of(app, context));
+                        builds.set(builds.get() + 1);
+                        Text::new(text).into_widget()
+                    })
+                    .into_widget()
+                };
 
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            Column::new().children([
-                // Panel context.
-                observer(&panel_is_open, &panel_builds, "a"),
-                Menu::new()
-                    .controller(controller.clone())
-                    .menu_panel(panel(vec![
-                        // Overlay context.
-                        observer(&overlay_is_open, &overlay_builds, "b.a.a"),
-                        Menu::new()
-                            .controller(nested_controller.clone())
-                            .menu_panel(panel(vec![Button::tag("b.a.b.a").into_widget()]))
-                            .child(Button::tag("b.a.b"))
-                            .into_widget(),
-                    ]))
-                    // Anchor context.
-                    .child(observer(&anchor_is_open, &anchor_builds, "b.a"))
-                    .into_widget(),
-            ]),
-            group_controller,
-        )));
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                Column::new().children([
+                    // Panel context.
+                    observer(&panel_is_open, &panel_builds, "a"),
+                    Menu::new()
+                        .controller(controller.clone())
+                        .menu_panel(panel(vec![
+                            // Overlay context.
+                            observer(&overlay_is_open, &overlay_builds, "b.a.a"),
+                            Menu::new()
+                                .controller(nested_controller.clone())
+                                .menu_panel(panel(vec![Button::tag("b.a.b.a").into_widget()]))
+                                .child(Button::tag("b.a.b"))
+                                .into_widget(),
+                        ]))
+                        // Anchor context.
+                        .child(observer(&anchor_is_open, &anchor_builds, "b.a"))
+                        .into_widget(),
+                ]),
+                group_controller,
+            )));
 
-        assert_eq!(panel_is_open.get(), Some(false));
-        assert_eq!(anchor_is_open.get(), Some(false));
-        assert_eq!(panel_builds.get(), 1);
-        assert_eq!(anchor_builds.get(), 1);
-        assert_eq!(overlay_builds.get(), 0);
+            assert_eq!(panel_is_open.get(), Some(false));
+            assert_eq!(anchor_is_open.get(), Some(false));
+            assert_eq!(panel_builds.get(), 1);
+            assert_eq!(anchor_builds.get(), 1);
+            assert_eq!(overlay_builds.get(), 0);
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(panel_is_open.get(), Some(true));
-        assert_eq!(anchor_is_open.get(), Some(true));
-        assert_eq!(overlay_is_open.get(), Some(true));
-        assert_eq!(panel_builds.get(), 2);
-        assert_eq!(anchor_builds.get(), 2);
-        assert_eq!(overlay_builds.get(), 1);
+            assert_eq!(panel_is_open.get(), Some(true));
+            assert_eq!(anchor_is_open.get(), Some(true));
+            assert_eq!(overlay_is_open.get(), Some(true));
+            assert_eq!(panel_builds.get(), 2);
+            assert_eq!(anchor_builds.get(), 2);
+            assert_eq!(overlay_builds.get(), 1);
 
-        nested_controller.open(&mut tester.app(), None);
-        tester.pump();
+            nested_controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        // No new builds should have occurred since all controllers are already open.
-        assert_eq!(panel_is_open.get(), Some(true));
-        assert_eq!(anchor_is_open.get(), Some(true));
-        assert_eq!(overlay_is_open.get(), Some(true));
-        assert_eq!(panel_builds.get(), 2);
-        assert_eq!(anchor_builds.get(), 2);
-        assert_eq!(overlay_builds.get(), 1);
+            // No new builds should have occurred since all controllers are already open.
+            assert_eq!(panel_is_open.get(), Some(true));
+            assert_eq!(anchor_is_open.get(), Some(true));
+            assert_eq!(overlay_is_open.get(), Some(true));
+            assert_eq!(panel_builds.get(), 2);
+            assert_eq!(anchor_builds.get(), 2);
+            assert_eq!(overlay_builds.get(), 1);
 
-        controller.close(&mut tester.app());
-        tester.pump();
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(panel_is_open.get(), Some(false));
-        assert_eq!(anchor_is_open.get(), Some(false));
+            assert_eq!(panel_is_open.get(), Some(false));
+            assert_eq!(anchor_is_open.get(), Some(false));
 
-        // Will be true because builder cannot rebuild when the menu is closed.
-        assert_eq!(overlay_is_open.get(), Some(true));
-        assert_eq!(panel_builds.get(), 3);
-        assert_eq!(anchor_builds.get(), 3);
-        assert_eq!(overlay_builds.get(), 1);
+            // Will be true because builder cannot rebuild when the menu is closed.
+            assert_eq!(overlay_is_open.get(), Some(true));
+            assert_eq!(panel_builds.get(), 3);
+            assert_eq!(anchor_builds.get(), 3);
+            assert_eq!(overlay_builds.get(), 1);
+        });
     }
 
     #[test]
     fn menu_controllers_can_be_changed() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let group_controller =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let new_controller =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let new_group_controller =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let group_controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let new_controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let new_group_controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
 
-        let tree = |group: MenuControllerRef, menu: MenuControllerRef| {
-            TestApp::new(RawMenuAnchorGroup::new(
-                Menu::new()
-                    .controller(menu)
-                    .menu_panel(panel(texts(&["a"])))
-                    .child(AnchorButton::new("anchor")),
-                group,
-            ))
-        };
-        tester.pump_widget(tree(controller.clone(), group_controller.clone()));
+            let tree = |group: MenuControllerRef, menu: MenuControllerRef| {
+                TestApp::new(RawMenuAnchorGroup::new(
+                    Menu::new()
+                        .controller(menu)
+                        .menu_panel(panel(texts(&["a"])))
+                        .child(AnchorButton::new("anchor")),
+                    group,
+                ))
+            };
+            tester.pump_widget(tree(controller.clone(), group_controller.clone()));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert!(controller.is_open(&tester.app()));
-        assert!(group_controller.is_open(&tester.app()));
-        assert!(!new_controller.is_open(&tester.app()));
-        assert!(!new_group_controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert!(controller.is_open(&tester.app()));
+            assert!(group_controller.is_open(&tester.app()));
+            assert!(!new_controller.is_open(&tester.app()));
+            assert!(!new_group_controller.is_open(&tester.app()));
 
-        // Swap the controllers.
-        tester.pump_widget(tree(new_controller.clone(), new_group_controller.clone()));
+            // Swap the controllers.
+            tester.pump_widget(tree(new_controller.clone(), new_group_controller.clone()));
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert!(!controller.is_open(&tester.app()));
-        assert!(!group_controller.is_open(&tester.app()));
-        assert!(new_controller.is_open(&tester.app()));
-        assert!(new_group_controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert!(!controller.is_open(&tester.app()));
+            assert!(!group_controller.is_open(&tester.app()));
+            assert!(new_controller.is_open(&tester.app()));
+            assert!(new_group_controller.is_open(&tester.app()));
 
-        // Close the new controller.
-        new_controller.close(&mut tester.app());
-        tester.pump();
+            // Close the new controller.
+            new_controller.close(&mut tester.app());
+            tester.pump();
 
-        assert!(!new_controller.is_open(&tester.app()));
-        assert!(!new_group_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 0);
+            assert!(!new_controller.is_open(&tester.app()));
+            assert!(!new_group_controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_nothing());
+        });
     }
 
     #[test]
     fn a_menu_controller_can_be_moved_to_a_different_menu() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let tree = |key: Option<KeyRef>| {
-            let mut menu = Menu::new()
-                .controller(controller.clone())
-                .menu_panel(panel(texts(&["a"])))
-                .child(AnchorButton::new("anchor"));
-            if let Some(key) = key {
-                menu = menu.key(key);
-            }
-            let group_controller =
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
                 MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-            TestApp::new(RawMenuAnchorGroup::new(menu, group_controller))
-        };
-        tester.pump_widget(tree(None));
+            let cell = Rc::clone(&tester.cell);
+            let tree = |key: Option<KeyRef>| {
+                let mut menu = Menu::new()
+                    .controller(controller.clone())
+                    .menu_panel(panel(texts(&["a"])))
+                    .child(AnchorButton::new("anchor"));
+                if let Some(key) = key {
+                    menu = menu.key(key);
+                }
+                let group_controller =
+                    MenuController::new(&mut cell.borrow_mut()).into_erased::<AnyMenuController>();
+                TestApp::new(RawMenuAnchorGroup::new(menu, group_controller))
+            };
+            tester.pump_widget(tree(None));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert!(controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert!(controller.is_open(&tester.app()));
 
-        // Swap the menus.
-        tester.pump_widget(tree(Some(UniqueKey::new().into())));
+            // Swap the menus.
+            tester.pump_widget(tree(Some(UniqueKey::new().into())));
 
-        assert_eq!(tester.count_text("a"), 0);
-        assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_nothing());
+            assert!(!controller.is_open(&tester.app()));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert!(controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert!(controller.is_open(&tester.app()));
 
-        // Close the menu.
-        controller.close(&mut tester.app());
-        tester.pump();
+            // Close the menu.
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert!(!controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 0);
+            assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_nothing());
+        });
     }
 
     #[test]
     fn a_groups_menu_controller_can_be_moved_to_a_different_group() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let tree = |key: Option<KeyRef>| {
-            let mut group = RawMenuAnchorGroup::new(
-                Menu::new()
-                    .menu_panel(panel(texts(&["a"])))
-                    .child(AnchorButton::new("anchor")),
-                controller.clone(),
-            );
-            if let Some(key) = key {
-                group = group.key(key);
-            }
-            TestApp::new(group)
-        };
-        tester.pump_widget(tree(None));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let tree = |key: Option<KeyRef>| {
+                let mut group = RawMenuAnchorGroup::new(
+                    Menu::new()
+                        .menu_panel(panel(texts(&["a"])))
+                        .child(AnchorButton::new("anchor")),
+                    controller.clone(),
+                );
+                if let Some(key) = key {
+                    group = group.key(key);
+                }
+                TestApp::new(group)
+            };
+            tester.pump_widget(tree(None));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert!(controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert!(controller.is_open(&tester.app()));
 
-        // Swap the controllers.
-        tester.pump_widget(tree(Some(UniqueKey::new().into())));
+            // Swap the controllers.
+            tester.pump_widget(tree(Some(UniqueKey::new().into())));
 
-        assert_eq!(tester.count_text("a"), 0);
-        assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_nothing());
+            assert!(!controller.is_open(&tester.app()));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert!(controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert!(controller.is_open(&tester.app()));
 
-        // Close the menu.
-        controller.close(&mut tester.app());
-        tester.pump();
+            // Close the menu.
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert!(!controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("a"), 0);
+            assert!(!controller.is_open(&tester.app()));
+            expect(&tester, &find::text("a"), finds_nothing());
+        });
     }
 
     #[test]
     fn maybe_of_does_not_notify_dependents_when_the_controller_changes() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let anchor_key = GlobalKey::new();
-        let demo_controller_one =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let demo_controller_two =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let anchor_key = GlobalKey::new();
+            let demo_controller_one =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let demo_controller_two =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
 
-        let panel_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
-        let overlay_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
-        let anchor_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
-        let panel_builds = counter();
-        let anchor_builds = counter();
-        let overlay_builds = counter();
+            let panel_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
+            let overlay_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
+            let anchor_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
+            let panel_builds = counter();
+            let anchor_builds = counter();
+            let overlay_builds = counter();
 
-        let observer = |found: &Rc<Cell<Option<AnyMenuController>>>,
-                        builds: &Rc<Cell<u32>>,
-                        text: &'static str| {
-            let (found, builds) = (Rc::clone(found), Rc::clone(builds));
-            Builder::new(move |app, context| {
-                found.set(MenuController::maybe_of(app, context));
-                builds.set(builds.get() + 1);
-                Text::new(text).into_widget()
-            })
-        };
-        let build_anchor = |group: MenuControllerRef, overlay: MenuControllerRef| {
-            TestApp::new(RawMenuAnchorGroup::new(
-                Column::new().children([
-                    // Panel context.
-                    observer(&panel_controller, &panel_builds, "a").into_widget(),
-                    Menu::new()
-                        .controller(overlay)
-                        .menu_panel(panel(vec![
-                            // Overlay context.
-                            observer(&overlay_controller, &overlay_builds, "b.a.a").into_widget(),
-                        ]))
-                        // Anchor context.
-                        .child(
-                            observer(&anchor_controller, &anchor_builds, "b.a")
-                                .key(anchor_key.clone().into()),
-                        )
-                        .into_widget(),
-                ]),
-                group,
-            ))
-        };
+            let observer = |found: &Rc<Cell<Option<AnyMenuController>>>,
+                            builds: &Rc<Cell<u32>>,
+                            text: &'static str| {
+                let (found, builds) = (Rc::clone(found), Rc::clone(builds));
+                Builder::new(move |app, context| {
+                    found.set(MenuController::maybe_of(app, context));
+                    builds.set(builds.get() + 1);
+                    Text::new(text).into_widget()
+                })
+            };
+            let build_anchor = |group: MenuControllerRef, overlay: MenuControllerRef| {
+                TestApp::new(RawMenuAnchorGroup::new(
+                    Column::new().children([
+                        // Panel context.
+                        observer(&panel_controller, &panel_builds, "a").into_widget(),
+                        Menu::new()
+                            .controller(overlay)
+                            .menu_panel(panel(vec![
+                                // Overlay context.
+                                observer(&overlay_controller, &overlay_builds, "b.a.a")
+                                    .into_widget(),
+                            ]))
+                            // Anchor context.
+                            .child(
+                                observer(&anchor_controller, &anchor_builds, "b.a")
+                                    .key(anchor_key.clone().into()),
+                            )
+                            .into_widget(),
+                    ]),
+                    group,
+                ))
+            };
 
-        tester.pump_widget(build_anchor(
-            demo_controller_one.clone(),
-            demo_controller_two.clone(),
-        ));
+            tester.pump_widget(build_anchor(
+                demo_controller_one.clone(),
+                demo_controller_two.clone(),
+            ));
 
-        assert_ne!(panel_controller.get(), Some(controller.handle()));
-        assert_ne!(anchor_controller.get(), Some(controller.handle()));
+            assert_ne!(panel_controller.get(), Some(controller.handle()));
+            assert_ne!(anchor_controller.get(), Some(controller.handle()));
 
-        tester.pump_widget(build_anchor(
-            controller.clone(),
-            demo_controller_two.clone(),
-        ));
+            tester.pump_widget(build_anchor(
+                controller.clone(),
+                demo_controller_two.clone(),
+            ));
 
-        assert_eq!(panel_controller.get(), Some(controller.handle()));
-        assert_ne!(anchor_controller.get(), Some(controller.handle()));
-        assert_eq!(panel_builds.get(), 2);
-        assert_eq!(anchor_builds.get(), 2);
+            assert_eq!(panel_controller.get(), Some(controller.handle()));
+            assert_ne!(anchor_controller.get(), Some(controller.handle()));
+            assert_eq!(panel_builds.get(), 2);
+            assert_eq!(anchor_builds.get(), 2);
 
-        {
-            let mut app = tester.app();
-            let context = anchor_key
-                .current_context(&app)
-                .expect("the anchor is mounted");
-            MenuController::maybe_of(&app, context)
-                .expect("the anchor's controller")
-                .open(&mut app, None);
-        }
-        tester.pump();
+            {
+                let mut app = tester.app();
+                let context = anchor_key
+                    .current_context(&app)
+                    .expect("the anchor is mounted");
+                MenuController::maybe_of(&app, context)
+                    .expect("the anchor's controller")
+                    .open(&mut app, None);
+            }
+            tester.pump();
 
-        assert_eq!(panel_builds.get(), 2);
-        assert_eq!(anchor_builds.get(), 2);
-        assert_eq!(overlay_builds.get(), 1);
+            assert_eq!(panel_builds.get(), 2);
+            assert_eq!(anchor_builds.get(), 2);
+            assert_eq!(overlay_builds.get(), 1);
 
-        tester.pump_widget(build_anchor(
-            demo_controller_one.clone(),
-            controller.clone(),
-        ));
+            tester.pump_widget(build_anchor(
+                demo_controller_one.clone(),
+                controller.clone(),
+            ));
 
-        assert_ne!(panel_controller.get(), Some(controller.handle()));
-        assert_eq!(anchor_controller.get(), Some(controller.handle()));
-        assert_eq!(overlay_controller.get(), Some(controller.handle()));
-        assert_eq!(panel_builds.get(), 3);
-        assert_eq!(anchor_builds.get(), 3);
-        assert_eq!(overlay_builds.get(), 2);
+            assert_ne!(panel_controller.get(), Some(controller.handle()));
+            assert_eq!(anchor_controller.get(), Some(controller.handle()));
+            assert_eq!(overlay_controller.get(), Some(controller.handle()));
+            assert_eq!(panel_builds.get(), 3);
+            assert_eq!(anchor_builds.get(), 3);
+            assert_eq!(overlay_builds.get(), 2);
+        });
     }
 
     #[test]
     fn a_detached_menu_controller_closes_without_panicking() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        controller.close(&mut tester.app());
-        tester.pump();
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            controller.close(&mut tester.app());
+            tester.pump();
+        });
     }
 
     #[test]
     fn a_detached_menu_controller_is_not_open() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        assert!(!controller.is_open(&tester.app()));
+        test_widgets(|tester| {
+            let tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            assert!(!controller.is_open(&tester.app()));
+        });
     }
 
     /// The message a call panics with, or `None` if it returns: Dart's `runZonedGuarded` that
@@ -3324,517 +3201,559 @@ mod tests {
 
     #[test]
     fn a_menu_controller_is_detached_when_its_anchor_is_given_another() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .menu_panel(SizedBox::shrink().into_widget())
-                .child(SizedBox::shrink()),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .menu_panel(SizedBox::shrink().into_widget())
+                    .child(SizedBox::shrink()),
+            ));
 
-        // Should not panic because the controller is attached to the menu.
-        controller.close_children(&mut tester.app());
+            // Should not panic because the controller is attached to the menu.
+            controller.close_children(&mut tester.app());
 
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .menu_panel(SizedBox::shrink().into_widget())
-                .child(SizedBox::shrink()),
-        ));
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .menu_panel(SizedBox::shrink().into_widget())
+                    .child(SizedBox::shrink()),
+            ));
 
-        let message = panic_message(|| controller.close_children(&mut tester.app()));
-        assert!(message.is_some_and(|message| message.contains("_anchor != null")));
+            let message = panic_message(|| controller.close_children(&mut tester.app()));
+            assert!(message.is_some_and(|message| message.contains("_anchor != null")));
+        });
     }
 
     #[test]
     fn a_menu_controller_is_detached_when_its_group_is_given_another() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            SizedBox::shrink(),
-            controller.clone(),
-        )));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                SizedBox::shrink(),
+                controller.clone(),
+            )));
 
-        // Should not panic because the controller is attached to the menu.
-        controller.close_children(&mut tester.app());
+            // Should not panic because the controller is attached to the menu.
+            controller.close_children(&mut tester.app());
 
-        let other = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            SizedBox::shrink(),
-            other,
-        )));
+            let other = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                SizedBox::shrink(),
+                other,
+            )));
 
-        let message = panic_message(|| controller.close_children(&mut tester.app()));
-        assert!(message.is_some_and(|message| message.contains("_anchor != null")));
+            let message = panic_message(|| controller.close_children(&mut tester.app()));
+            assert!(message.is_some_and(|message| message.contains("_anchor != null")));
+        });
     }
 
     #[test]
     fn a_menu_controller_is_detached_when_its_anchor_is_disposed() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .menu_panel(SizedBox::new().into_widget())
-                .child(SizedBox::new()),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .menu_panel(SizedBox::new().into_widget())
+                    .child(SizedBox::new()),
+            ));
 
-        // Should not panic because the controller is attached to the menu.
-        controller.close_children(&mut tester.app());
+            // Should not panic because the controller is attached to the menu.
+            controller.close_children(&mut tester.app());
 
-        tester.pump_widget(TestApp::new(SizedBox::new()));
+            tester.pump_widget(TestApp::new(SizedBox::new()));
 
-        let message = panic_message(|| controller.close_children(&mut tester.app()));
-        assert!(message.is_some_and(|message| message.contains("_anchor != null")));
+            let message = panic_message(|| controller.close_children(&mut tester.app()));
+            assert!(message.is_some_and(|message| message.contains("_anchor != null")));
+        });
     }
 
     #[test]
     fn a_menu_controller_is_detached_when_its_group_is_disposed() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            SizedBox::new(),
-            controller.clone(),
-        )));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                SizedBox::new(),
+                controller.clone(),
+            )));
 
-        // Should not panic because the controller is attached to the menu.
-        controller.close_children(&mut tester.app());
+            // Should not panic because the controller is attached to the menu.
+            controller.close_children(&mut tester.app());
 
-        tester.pump_widget(TestApp::new(SizedBox::new()));
+            tester.pump_widget(TestApp::new(SizedBox::new()));
 
-        let message = panic_message(|| controller.close_children(&mut tester.app()));
-        assert!(message.is_some_and(|message| message.contains("_anchor != null")));
+            let message = panic_message(|| controller.close_children(&mut tester.app()));
+            assert!(message.is_some_and(|message| message.contains("_anchor != null")));
+        });
     }
 
     #[test]
     fn an_anchor_given_a_new_controller_after_its_owner_dropped_the_old_one_does_not_panic() {
-        let tester = Tester::new();
-        let old = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let new = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let anchor = |controller| {
-            TestApp::new(
-                Menu::new()
-                    .controller(controller)
-                    .menu_panel(panel(texts(&["a"])))
-                    .child(AnchorButton::new("anchor")),
-            )
-        };
-        tester.pump_widget(anchor(old.clone()));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let old = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let new = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let anchor = |controller| {
+                TestApp::new(
+                    Menu::new()
+                        .controller(controller)
+                        .menu_panel(panel(texts(&["a"])))
+                        .child(AnchorButton::new("anchor")),
+                )
+            };
+            tester.pump_widget(anchor(old.clone()));
 
-        // Material's `MenuAnchor` drops its internal controller as it is given one; the old
-        // widget still keeps it while the anchor detaches from it.
-        drop(old);
-        tester.pump_widget(anchor(new.clone()));
+            // Material's `MenuAnchor` drops its internal controller as it is given one; the old
+            // widget still keeps it while the anchor detaches from it.
+            drop(old);
+            tester.pump_widget(anchor(new.clone()));
 
-        tester.tap("anchor");
-        tester.pump();
-        assert!(new.is_open(&tester.app()));
+            tester.tap(find::text("anchor"));
+            tester.pump();
+            assert!(new.is_open(&tester.app()));
+        });
     }
 
     #[test]
     fn a_group_given_a_new_controller_after_its_owner_dropped_the_old_one_does_not_panic() {
-        let tester = Tester::new();
-        let old = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let new = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            SizedBox::shrink(),
-            old.clone(),
-        )));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let old = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let new = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                SizedBox::shrink(),
+                old.clone(),
+            )));
 
-        drop(old);
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            SizedBox::shrink(),
-            new.clone(),
-        )));
+            drop(old);
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                SizedBox::shrink(),
+                new.clone(),
+            )));
 
-        new.close_children(&mut tester.app());
+            new.close_children(&mut tester.app());
+        });
     }
 
     #[test]
     fn the_anchor_rect_carries_the_anchors_transform() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let builder_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
-        let sink = Rc::clone(&builder_position);
-        tester.pump_widget(TestApp::new(
-            Transform::new(Matrix4::translation(-50.0, 50.0).then(&Matrix4::scale(1.2, 1.2)))
-                .child(
-                    RawMenuAnchor::new(controller.clone(), move |_app, _context, position| {
-                        sink.set(Some(position));
-                        Positioned::from_rect(
-                            position.anchor_rect,
-                            Container::new().color(Color::new(0xFF0000FF)),
-                        )
-                        .into_widget()
-                    })
-                    .child(AnchorButton::new("b")),
-                ),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let builder_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
+            let sink = Rc::clone(&builder_position);
+            tester.pump_widget(TestApp::new(
+                Transform::new(Matrix4::translation(-50.0, 50.0).then(&Matrix4::scale(1.2, 1.2)))
+                    .child(
+                        RawMenuAnchor::new(controller.clone(), move |_app, _context, position| {
+                            sink.set(Some(position));
+                            Positioned::from_rect(
+                                position.anchor_rect,
+                                Container::new().color(Color::new(0xFF0000FF)),
+                            )
+                            .into_widget()
+                        })
+                        .child(AnchorButton::new("b")),
+                    ),
+            ));
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(
-            Some(tester.rect_of::<AnchorButton>()),
-            builder_position.get().map(|info| info.anchor_rect)
-        );
+            assert_eq!(
+                Some(tester.get_rect(find::by_type::<AnchorButton>())),
+                builder_position.get().map(|info| info.anchor_rect)
+            );
+        });
     }
 
     #[test]
     fn escape_closes_menus() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let a_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
-        let baa_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
-        let menu_controller =
-            MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
-            Row::new().children([
-                Button::tag("a")
-                    .focus_node(a_focus_node.clone())
-                    .into_widget(),
-                Menu::new()
-                    .controller(menu_controller.clone())
-                    .menu_panel(panel(vec![
-                        Menu::new()
-                            .menu_panel(panel(vec![
-                                Button::tag("b.a.a")
-                                    .focus_node(baa_focus_node.clone())
-                                    .into_widget(),
-                            ]))
-                            .child(AnchorButton::new("b.a"))
-                            .into_widget(),
-                    ]))
-                    .child(AnchorButton::new("b"))
-                    .into_widget(),
-            ]),
-            controller,
-        )));
-
-        menu_controller.open(&mut tester.app(), None);
-        tester.pump();
-
-        a_focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
-
-        assert_eq!(
-            primary_focus(&mut tester.app()),
-            Some(a_focus_node.handle())
-        );
-        assert_eq!(tester.count_text("b.a"), 1);
-
-        // Test panel child can close siblings with escape key.
-        tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
-        tester.pump();
-
-        assert_eq!(tester.count_text("b.a"), 0);
-
-        tester.tap("b");
-        tester.pump();
-        tester.tap("b.a");
-        tester.pump();
-        baa_focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
-
-        assert_eq!(
-            primary_focus(&mut tester.app()),
-            Some(baa_focus_node.handle())
-        );
-
-        // Test ancestors menus are closed with escape key.
-        tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
-        tester.pump();
-
-        assert_eq!(tester.count_text("b.a"), 0);
-    }
-
-    #[test]
-    fn a_closed_anchor_lets_intents_through() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let a_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
-        let invoked = log();
-        let actions = {
-            let mut app = tester.app();
-            let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
-            let sink = Rc::clone(&invoked);
-            actions.insert(
-                TypeId::of::<DirectionalFocusIntent>(),
-                Retained::into_erased(CallbackAction::<DirectionalFocusIntent>::new(
-                    &mut app,
-                    Rc::new(move |_app, _intent| {
-                        sink.borrow_mut().push("DirectionalFocusIntent");
-                        None
-                    }),
-                )),
-            );
-            let sink = Rc::clone(&invoked);
-            actions.insert(
-                TypeId::of::<NextFocusIntent>(),
-                Retained::into_erased(CallbackAction::<NextFocusIntent>::new(
-                    &mut app,
-                    Rc::new(move |_app, _intent| {
-                        sink.borrow_mut().push("NextFocusIntent");
-                        None
-                    }),
-                )),
-            );
-            let sink = Rc::clone(&invoked);
-            actions.insert(
-                TypeId::of::<PreviousFocusIntent>(),
-                Retained::into_erased(CallbackAction::<PreviousFocusIntent>::new(
-                    &mut app,
-                    Rc::new(move |_app, _intent| {
-                        sink.borrow_mut().push("PreviousFocusIntent");
-                        None
-                    }),
-                )),
-            );
-            let sink = Rc::clone(&invoked);
-            actions.insert(
-                TypeId::of::<DismissIntent>(),
-                Retained::into_erased(CallbackAction::<DismissIntent>::new(
-                    &mut app,
-                    Rc::new(move |_app, _intent| {
-                        sink.borrow_mut().push("DismissIntent");
-                        None
-                    }),
-                )),
-            );
-            actions
-        };
-        tester.pump_widget(TestApp::new(Actions::new(
-            actions,
-            RawMenuAnchorGroup::new(
-                Row::new().children([Menu::new()
-                    .menu_panel(panel(texts(&["a"])))
-                    .child(AnchorButton::new("anchor").focus_node(a_focus_node.clone()))
-                    .into_widget()]),
-                controller,
-            ),
-        )));
-
-        a_focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
-        {
-            let mut app = tester.app();
-            let context = a_focus_node
-                .context(&app)
-                .expect("the focus node is attached");
-            Actions::invoke(
-                &mut app,
-                context,
-                &DirectionalFocusIntent::new(TraversalDirection::Up),
-            );
-            Actions::invoke(&mut app, context, &NextFocusIntent::new());
-            Actions::invoke(&mut app, context, &PreviousFocusIntent::new());
-            Actions::invoke(&mut app, context, &DismissIntent::new());
-        }
-        tester.pump();
-
-        assert_eq!(
-            *invoked.borrow(),
-            [
-                "DirectionalFocusIntent",
-                "NextFocusIntent",
-                "PreviousFocusIntent",
-                "DismissIntent"
-            ]
-        );
-    }
-
-    #[test]
-    fn dismiss_menu_action_closes_menus() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .menu_panel(panel(vec![
-                    Text::new("a").into_widget(),
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let a_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
+            let baa_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
+            let menu_controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
+                Row::new().children([
+                    Button::tag("a")
+                        .focus_node(a_focus_node.clone())
+                        .into_widget(),
                     Menu::new()
+                        .controller(menu_controller.clone())
                         .menu_panel(panel(vec![
-                            Text::new("b.a").into_widget(),
                             Menu::new()
-                                .controller(controller.clone())
-                                .menu_panel(panel(texts(&["b.b.a"])))
-                                .child(AnchorButton::new("b.b").focus_node(focus_node.clone()))
+                                .menu_panel(panel(vec![
+                                    Button::tag("b.a.a")
+                                        .focus_node(baa_focus_node.clone())
+                                        .into_widget(),
+                                ]))
+                                .child(AnchorButton::new("b.a"))
                                 .into_widget(),
                         ]))
                         .child(AnchorButton::new("b"))
                         .into_widget(),
-                ]))
-                .child(AnchorButton::new("anchor")),
-        ));
+                ]),
+                controller,
+            )));
 
-        tester.tap("anchor");
-        tester.pump();
-        tester.tap("b");
-        tester.pump();
-        tester.tap("b.b");
-        tester.pump();
+            menu_controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert!(controller.is_open(&tester.app()));
+            a_focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
 
-        focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
-
-        {
-            let mut app = tester.app();
-            let action = DismissMenuAction::new(&mut app, controller);
-            let context = focus_node.context(&app);
-            PlainActionDispatcher::new().invoke_action(
-                &mut app,
-                Action::as_action(action.handle()),
-                &DismissIntent::new(),
-                context,
+            assert_eq!(
+                primary_focus(&mut tester.app()),
+                Some(a_focus_node.handle())
             );
-        }
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
-        tester.pump();
+            // Test panel child can close siblings with escape key.
+            tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("b.a"), finds_nothing());
+
+            tester.tap(find::text("b"));
+            tester.pump();
+            tester.tap(find::text("b.a"));
+            tester.pump();
+            baa_focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
+
+            assert_eq!(
+                primary_focus(&mut tester.app()),
+                Some(baa_focus_node.handle())
+            );
+
+            // Test ancestors menus are closed with escape key.
+            tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
+            tester.pump();
+
+            expect(&tester, &find::text("b.a"), finds_nothing());
+        });
+    }
+
+    #[test]
+    fn a_closed_anchor_lets_intents_through() {
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let a_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
+            let invoked = log();
+            let actions = {
+                let mut app = tester.app();
+                let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
+                let sink = Rc::clone(&invoked);
+                actions.insert(
+                    TypeId::of::<DirectionalFocusIntent>(),
+                    Retained::into_erased(CallbackAction::<DirectionalFocusIntent>::new(
+                        &mut app,
+                        Rc::new(move |_app, _intent| {
+                            sink.borrow_mut().push("DirectionalFocusIntent");
+                            None
+                        }),
+                    )),
+                );
+                let sink = Rc::clone(&invoked);
+                actions.insert(
+                    TypeId::of::<NextFocusIntent>(),
+                    Retained::into_erased(CallbackAction::<NextFocusIntent>::new(
+                        &mut app,
+                        Rc::new(move |_app, _intent| {
+                            sink.borrow_mut().push("NextFocusIntent");
+                            None
+                        }),
+                    )),
+                );
+                let sink = Rc::clone(&invoked);
+                actions.insert(
+                    TypeId::of::<PreviousFocusIntent>(),
+                    Retained::into_erased(CallbackAction::<PreviousFocusIntent>::new(
+                        &mut app,
+                        Rc::new(move |_app, _intent| {
+                            sink.borrow_mut().push("PreviousFocusIntent");
+                            None
+                        }),
+                    )),
+                );
+                let sink = Rc::clone(&invoked);
+                actions.insert(
+                    TypeId::of::<DismissIntent>(),
+                    Retained::into_erased(CallbackAction::<DismissIntent>::new(
+                        &mut app,
+                        Rc::new(move |_app, _intent| {
+                            sink.borrow_mut().push("DismissIntent");
+                            None
+                        }),
+                    )),
+                );
+                actions
+            };
+            tester.pump_widget(TestApp::new(Actions::new(
+                actions,
+                RawMenuAnchorGroup::new(
+                    Row::new().children([Menu::new()
+                        .menu_panel(panel(texts(&["a"])))
+                        .child(AnchorButton::new("anchor").focus_node(a_focus_node.clone()))
+                        .into_widget()]),
+                    controller,
+                ),
+            )));
+
+            a_focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
+            {
+                let mut app = tester.app();
+                let context = a_focus_node
+                    .context(&app)
+                    .expect("the focus node is attached");
+                Actions::invoke(
+                    &mut app,
+                    context,
+                    &DirectionalFocusIntent::new(TraversalDirection::Up),
+                );
+                Actions::invoke(&mut app, context, &NextFocusIntent::new());
+                Actions::invoke(&mut app, context, &PreviousFocusIntent::new());
+                Actions::invoke(&mut app, context, &DismissIntent::new());
+            }
+            tester.pump();
+
+            assert_eq!(
+                *invoked.borrow(),
+                [
+                    "DirectionalFocusIntent",
+                    "NextFocusIntent",
+                    "PreviousFocusIntent",
+                    "DismissIntent"
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn dismiss_menu_action_closes_menus() {
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .menu_panel(panel(vec![
+                        Text::new("a").into_widget(),
+                        Menu::new()
+                            .menu_panel(panel(vec![
+                                Text::new("b.a").into_widget(),
+                                Menu::new()
+                                    .controller(controller.clone())
+                                    .menu_panel(panel(texts(&["b.b.a"])))
+                                    .child(AnchorButton::new("b.b").focus_node(focus_node.clone()))
+                                    .into_widget(),
+                            ]))
+                            .child(AnchorButton::new("b"))
+                            .into_widget(),
+                    ]))
+                    .child(AnchorButton::new("anchor")),
+            ));
+
+            tester.tap(find::text("anchor"));
+            tester.pump();
+            tester.tap(find::text("b"));
+            tester.pump();
+            tester.tap(find::text("b.b"));
+            tester.pump();
+
+            assert!(controller.is_open(&tester.app()));
+
+            focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
+
+            {
+                let mut app = tester.app();
+                let action = DismissMenuAction::new(&mut app, controller);
+                let context = focus_node.context(&app);
+                PlainActionDispatcher::new().invoke_action(
+                    &mut app,
+                    Action::as_action(action.handle()),
+                    &DismissIntent::new(),
+                    context,
+                );
+            }
+
+            tester.pump();
+
+            expect(&tester, &find::text("a"), finds_nothing());
+        });
     }
 
     #[test]
     fn a_group_lays_its_child_out_as_its_own() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let key = GlobalKey::new();
-        tester.pump_widget(TestApp {
-            child: RawMenuAnchorGroup::new(
-                Padding::new(EdgeInsetsGeometry::all(8.0))
-                    .key(key.clone().into())
-                    .child(
-                        Row::new().main_axis_size(MainAxisSize::Min).children([
-                            Container::new()
-                                .width(100.0)
-                                .height(100.0)
-                                .color(Color::new(0xff0000ff))
-                                .into_widget(),
-                            Container::new()
-                                .width(100.0)
-                                .height(100.0)
-                                .color(Color::new(0xFFFF00D4))
-                                .into_widget(),
-                        ]),
-                    ),
-                controller,
-            )
-            .into_widget(),
-            alignment: AlignmentGeometry::TOP_START,
-        });
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let key = GlobalKey::new();
+            tester.pump_widget(TestApp {
+                child: RawMenuAnchorGroup::new(
+                    Padding::new(EdgeInsetsGeometry::all(8.0))
+                        .key(key.clone().into())
+                        .child(
+                            Row::new().main_axis_size(MainAxisSize::Min).children([
+                                Container::new()
+                                    .width(100.0)
+                                    .height(100.0)
+                                    .color(Color::new(0xff0000ff))
+                                    .into_widget(),
+                                Container::new()
+                                    .width(100.0)
+                                    .height(100.0)
+                                    .color(Color::new(0xFFFF00D4))
+                                    .into_widget(),
+                            ]),
+                        ),
+                    controller,
+                )
+                .into_widget(),
+                alignment: AlignmentGeometry::TOP_START,
+            });
 
-        assert_eq!(
-            tester.rect_of_key(&key),
-            Rect::from_ltwh(0.0, 0.0, 216.0, 116.0)
-        );
+            assert_eq!(
+                tester.get_rect(&key),
+                Rect::from_ltwh(0.0, 0.0, 216.0, 116.0)
+            );
+        });
     }
 
     #[test]
     fn the_overlay_builder_is_passed_the_anchor_rect() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let overlay_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
-        let sink = Rc::clone(&overlay_position);
-        tester.pump_widget(TestApp::new(
-            RawMenuAnchor::new(controller, move |_app, _context, position| {
-                sink.set(Some(position));
-                SizedBox::new().into_widget()
-            })
-            .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let overlay_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
+            let sink = Rc::clone(&overlay_position);
+            tester.pump_widget(TestApp::new(
+                RawMenuAnchor::new(controller, move |_app, _context, position| {
+                    sink.set(Some(position));
+                    SizedBox::new().into_widget()
+                })
+                .child(AnchorButton::new("anchor")),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(
-            overlay_position.get().map(|info| info.anchor_rect),
-            Some(tester.rect_of::<Button>())
-        );
+            assert_eq!(
+                overlay_position.get().map(|info| info.anchor_rect),
+                Some(tester.get_rect(find::by_type::<Button>()))
+            );
+        });
     }
 
     #[test]
     fn overlay_contents_can_be_positioned() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let key = GlobalKey::new();
-        let content_key = key.clone();
-        tester.pump_widget(TestApp::new(
-            RawMenuAnchor::new(controller, move |_app, _context, position| {
-                Positioned::new(
-                    Container::new()
-                        .key(content_key.clone().into())
-                        .width(200.0)
-                        .height(200.0)
-                        .color(Color::new(0xFF00FF00)),
-                )
-                .top(position.anchor_rect.top)
-                .left(position.anchor_rect.left)
-                .into_widget()
-            })
-            .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let key = GlobalKey::new();
+            let content_key = key.clone();
+            tester.pump_widget(TestApp::new(
+                RawMenuAnchor::new(controller, move |_app, _context, position| {
+                    Positioned::new(
+                        Container::new()
+                            .key(content_key.clone().into())
+                            .width(200.0)
+                            .height(200.0)
+                            .color(Color::new(0xFF00FF00)),
+                    )
+                    .top(position.anchor_rect.top)
+                    .left(position.anchor_rect.left)
+                    .into_widget()
+                })
+                .child(AnchorButton::new("anchor")),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        let anchor_corner = tester.rect_of::<Button>().top_left();
-        let content_rect = tester.rect_of_key(&key);
+            let anchor_corner = tester.get_top_left(find::by_type::<Button>());
+            let content_rect = tester.get_rect(&key);
 
-        assert_eq!(content_rect, anchor_corner & Size::new(200.0, 200.0));
+            assert_eq!(content_rect, anchor_corner & Size::new(200.0, 200.0));
+        });
     }
 
     #[test]
     fn the_tap_region_group_id_is_passed_to_the_overlay() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let inside_tap: Rc<Cell<Option<bool>>> = Rc::default();
-        let builder_tap = Rc::clone(&inside_tap);
-        tester.pump_widget(TestApp::new(
-            RawMenuAnchor::new(controller, move |_app, _context, position| {
-                let (on_inside, on_outside) = (Rc::clone(&builder_tap), Rc::clone(&builder_tap));
-                let mut region = TapRegion::new(Button::tag("a"))
-                    .on_tap_inside(Rc::new(move |_app, _event| on_inside.set(Some(true))))
-                    .on_tap_outside(Rc::new(move |_app, _event| on_outside.set(Some(false))));
-                if !builder_tap.get().unwrap_or(false) {
-                    region = region.group_id(position.tap_region_group_id);
-                }
-                Positioned::from_rect(position.anchor_rect.translate(200.0, 200.0), region)
-                    .into_widget()
-            })
-            .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let inside_tap: Rc<Cell<Option<bool>>> = Rc::default();
+            let builder_tap = Rc::clone(&inside_tap);
+            tester.pump_widget(TestApp::new(
+                RawMenuAnchor::new(controller, move |_app, _context, position| {
+                    let (on_inside, on_outside) =
+                        (Rc::clone(&builder_tap), Rc::clone(&builder_tap));
+                    let mut region = TapRegion::new(Button::tag("a"))
+                        .on_tap_inside(Rc::new(move |_app, _event| on_inside.set(Some(true))))
+                        .on_tap_outside(Rc::new(move |_app, _event| on_outside.set(Some(false))));
+                    if !builder_tap.get().unwrap_or(false) {
+                        region = region.group_id(position.tap_region_group_id);
+                    }
+                    Positioned::from_rect(position.anchor_rect.translate(200.0, 200.0), region)
+                        .into_widget()
+                })
+                .child(AnchorButton::new("anchor")),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
 
-        // Start by testing that the tap region has the correct group ID.
-        tester.tap("anchor");
-        tester.pump();
+            // Start by testing that the tap region has the correct group ID.
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(inside_tap.get(), Some(true));
+            assert_eq!(inside_tap.get(), Some(true));
 
-        // The menu should close when the tap region is tapped, so we need to reopen.
-        tester.tap("anchor");
-        tester.pump();
+            // The menu should close when the tap region is tapped, so we need to reopen.
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(inside_tap.get(), Some(true));
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert_eq!(inside_tap.get(), Some(true));
 
-        // Now test that setting the tap region group ID to None will cause the tap to be
-        // considered outside the tap region.
-        tester.tap("anchor");
-        tester.pump();
+            // Now test that setting the tap region group ID to None will cause the tap to be
+            // considered outside the tap region.
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(inside_tap.get(), Some(false));
+            assert_eq!(inside_tap.get(), Some(false));
+        });
     }
 
     /// Dart's two `Menus close and ... consume tap when consumesOutsideTap is ...` cases.
     fn outside_taps_close_menus(consume_outside_taps: bool) {
-        let tester = Tester::new();
+        let tester = &mut WidgetTester::new();
+        let mut tester = Tester::new(tester);
         let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
         let selected = log();
         let opened = log();
@@ -3882,15 +3801,15 @@ mod tests {
         assert!(closed.borrow().is_empty());
 
         // Doesn't consume tap when the menu is closed.
-        tester.tap("outside");
+        tester.tap(find::text("outside"));
         tester.pump();
 
         assert_eq!(*selected.borrow(), ["outside"]);
         selected.borrow_mut().clear();
 
-        tester.tap("anchor");
+        tester.tap(find::text("anchor"));
         tester.pump();
-        tester.tap("a");
+        tester.tap(find::text("a"));
         tester.pump();
 
         assert_eq!(*opened.borrow(), ["anchor", "a"]);
@@ -3900,7 +3819,7 @@ mod tests {
         closed.borrow_mut().clear();
         selected.borrow_mut().clear();
 
-        tester.tap("outside");
+        tester.tap(find::text("outside"));
         tester.pump();
 
         assert!(opened.borrow().is_empty());
@@ -3928,114 +3847,129 @@ mod tests {
 
     #[test]
     fn on_open_is_called_when_the_menu_opens() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let opened = Rc::new(Cell::new(false));
-        let sink = Rc::clone(&opened);
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_open(Rc::new(move |_app| sink.set(true)))
-                .menu_panel(panel(Vec::new()))
-                .child(AnchorButton::new("anchor")),
-        ));
-        tester.tap("anchor");
-        tester.pump();
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let opened = Rc::new(Cell::new(false));
+            let sink = Rc::clone(&opened);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_open(Rc::new(move |_app| sink.set(true)))
+                    .menu_panel(panel(Vec::new()))
+                    .child(AnchorButton::new("anchor")),
+            ));
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert!(opened.get());
+            assert!(opened.get());
 
-        opened.set(false);
-        tester.tap("anchor");
-        tester.pump();
+            opened.set(false);
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        // on_open should not be called again.
-        assert!(!opened.get());
+            // on_open should not be called again.
+            assert!(!opened.get());
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert!(opened.get());
+            assert!(opened.get());
+        });
     }
 
     #[test]
     fn on_close_is_called_when_the_menu_closes() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let closed = Rc::new(Cell::new(true));
-        let (on_open, on_close) = (Rc::clone(&closed), Rc::clone(&closed));
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_open(Rc::new(move |_app| on_open.set(false)))
-                .on_close(Rc::new(move |_app| on_close.set(true)))
-                .menu_panel(panel(Vec::new()))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let closed = Rc::new(Cell::new(true));
+            let (on_open, on_close) = (Rc::clone(&closed), Rc::clone(&closed));
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_open(Rc::new(move |_app| on_open.set(false)))
+                    .on_close(Rc::new(move |_app| on_close.set(true)))
+                    .menu_panel(panel(Vec::new()))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert!(!closed.get());
+            assert!(!closed.get());
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert!(closed.get());
+            assert!(closed.get());
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert!(!closed.get());
+            assert!(!closed.get());
 
-        controller.close(&mut tester.app());
-        tester.pump();
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert!(closed.get());
+            assert!(closed.get());
+        });
     }
 
     #[test]
     fn a_menu_closes_when_the_view_changes_size() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let opened = Rc::new(Cell::new(false));
-        let closed = Rc::new(Cell::new(false));
-        let on_open = {
-            let (opened, closed) = (Rc::clone(&opened), Rc::clone(&closed));
-            Rc::new(move |_app: &mut App| {
-                opened.set(true);
-                closed.set(false);
-            }) as VoidCallback
-        };
-        let on_close = {
-            let (opened, closed) = (Rc::clone(&opened), Rc::clone(&closed));
-            Rc::new(move |_app: &mut App| {
-                opened.set(false);
-                closed.set(true);
-            }) as VoidCallback
-        };
-        let tree = || {
-            TestApp::new(
-                Menu::new()
-                    .on_open(Rc::clone(&on_open))
-                    .on_close(Rc::clone(&on_close))
-                    .controller(controller.clone())
-                    .menu_panel(panel(texts(&["a"])))
-                    .child(AnchorButton::new("anchor")),
-            )
-        };
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let opened = Rc::new(Cell::new(false));
+            let closed = Rc::new(Cell::new(false));
+            let on_open = {
+                let (opened, closed) = (Rc::clone(&opened), Rc::clone(&closed));
+                Rc::new(move |_app: &mut App| {
+                    opened.set(true);
+                    closed.set(false);
+                }) as VoidCallback
+            };
+            let on_close = {
+                let (opened, closed) = (Rc::clone(&opened), Rc::clone(&closed));
+                Rc::new(move |_app: &mut App| {
+                    opened.set(false);
+                    closed.set(true);
+                }) as VoidCallback
+            };
+            let media_query_data = tester.media_query_data();
+            let tree = |size: Size| -> WidgetRef {
+                MediaQuery::new(
+                    media_query_data.copy_with().size(size),
+                    TestApp::new(
+                        Menu::new()
+                            .on_open(Rc::clone(&on_open))
+                            .on_close(Rc::clone(&on_close))
+                            .controller(controller.clone())
+                            .menu_panel(panel(texts(&["a"])))
+                            .child(AnchorButton::new("anchor")),
+                    ),
+                )
+                .into_widget()
+            };
 
-        tester.pump_widget(tree());
-        tester.tap("anchor");
-        tester.pump();
+            tester.pump_widget(tree(media_query_data.size));
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert!(opened.get());
-        assert!(!closed.get());
+            assert!(opened.get());
+            assert!(!closed.get());
 
-        tester.resize(200.0, 200.0);
-        tester.pump_widget(tree());
+            let small_size = Size::new(200.0, 200.0);
+            tester.change_surface_size(small_size);
+            tester.pump_widget(tree(small_size));
 
-        assert!(!opened.get());
-        assert!(closed.get());
+            assert!(!opened.get());
+            assert!(closed.get());
+        });
     }
 
     /// The scroll controller Dart's `ScrollController()` makes.
@@ -4045,132 +3979,139 @@ mod tests {
 
     #[test]
     fn a_menu_closes_when_an_ancestor_scrolls() {
-        let tester = Tester::new();
-        let scroll_controller = scroll_controller(&mut tester.app());
-        let opened = log();
-        let closed = log();
-        let on_close = {
-            let (opened, closed) = (Rc::clone(&opened), Rc::clone(&closed));
-            Rc::new(move |_app: &mut App| {
-                opened.borrow_mut().retain(|opened| *opened != "anchor");
-                closed.borrow_mut().push("anchor");
-            }) as VoidCallback
-        };
-        tester.pump_widget(TestApp::new(
-            SingleChildScrollView::new()
-                .controller(scroll_controller.clone())
-                .child(
-                    Menu::new()
-                        .on_open(push(&opened, "anchor"))
-                        .on_close(on_close)
-                        .menu_panel(panel(vec![
-                            Button::tag("a").into_widget(),
-                            Button::tag("b").into_widget(),
-                            Button::tag("c").into_widget(),
-                            Button::tag("d").into_widget(),
-                        ]))
-                        .child(AnchorButton::new("anchor")),
-                ),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let scroll_controller = scroll_controller(&mut tester.app());
+            let opened = log();
+            let closed = log();
+            let on_close = {
+                let (opened, closed) = (Rc::clone(&opened), Rc::clone(&closed));
+                Rc::new(move |_app: &mut App| {
+                    opened.borrow_mut().retain(|opened| *opened != "anchor");
+                    closed.borrow_mut().push("anchor");
+                }) as VoidCallback
+            };
+            tester.pump_widget(TestApp::new(
+                SingleChildScrollView::new()
+                    .controller(scroll_controller.clone())
+                    .child(
+                        Menu::new()
+                            .on_open(push(&opened, "anchor"))
+                            .on_close(on_close)
+                            .menu_panel(panel(vec![
+                                Button::tag("a").into_widget(),
+                                Button::tag("b").into_widget(),
+                                Button::tag("c").into_widget(),
+                                Button::tag("d").into_widget(),
+                            ]))
+                            .child(AnchorButton::new("anchor")),
+                    ),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert!(!opened.borrow().is_empty());
-        assert!(closed.borrow().is_empty());
-        opened.borrow_mut().clear();
+            assert!(!opened.borrow().is_empty());
+            assert!(closed.borrow().is_empty());
+            opened.borrow_mut().clear();
 
-        scroll_controller.jump_to(&mut tester.app(), 1000.0);
-        tester.pump();
+            scroll_controller.jump_to(&mut tester.app(), 1000.0);
+            tester.pump();
 
-        assert!(opened.borrow().is_empty());
-        assert!(!closed.borrow().is_empty());
+            assert!(opened.borrow().is_empty());
+            assert!(!closed.borrow().is_empty());
+        });
     }
 
     #[test]
     fn the_ancestor_scroll_listener_is_removed_on_dispose() {
-        let tester = Tester::new();
-        let scroll_controller = scroll_controller(&mut tester.app());
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            SingleChildScrollView::new()
-                .controller(scroll_controller.clone())
-                .child(RawMenuAnchor::new(controller, |_app, _context, _info| {
-                    SizedBox::new().into_widget()
-                })),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let scroll_controller = scroll_controller(&mut tester.app());
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                SingleChildScrollView::new()
+                    .controller(scroll_controller.clone())
+                    .child(RawMenuAnchor::new(controller, |_app, _context, _info| {
+                        SizedBox::new().into_widget()
+                    })),
+            ));
 
-        let notifier = {
-            let app = tester.app();
-            scroll_controller.position(&app).is_scrolling_notifier(&app)
-        };
+            let notifier = {
+                let app = tester.app();
+                scroll_controller.position(&app).is_scrolling_notifier(&app)
+            };
 
-        assert!(has_listeners(&tester.app(), notifier));
+            assert!(has_listeners(&tester.app(), notifier));
 
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            SingleChildScrollView::new()
-                .controller(scroll_controller)
-                .child(SizedBox::new()),
-        ));
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                SingleChildScrollView::new()
+                    .controller(scroll_controller)
+                    .child(SizedBox::new()),
+            ));
 
-        assert!(!has_listeners(&tester.app(), notifier));
+            assert!(!has_listeners(&tester.app(), notifier));
+        });
     }
 
     #[test]
     fn the_menu_builder_rebuilds_when_is_open_changes() {
-        let tester = Tester::new();
-        let is_open = Rc::new(Cell::new(false));
-        let open_count = counter();
-        let close_count = counter();
-        let builder_is_open = Rc::clone(&is_open);
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .menu_panel(panel(vec![
-                    Button::new(Text::new("Menu Item")).into_widget(),
-                ]))
-                .builder(move |app, _context, controller, _child| {
-                    builder_is_open.set(controller.is_open(app));
-                    let label = if builder_is_open.get() {
-                        "close"
-                    } else {
-                        "open"
-                    };
-                    Button::new(Text::new(label))
-                        .on_pressed(Rc::new(move |app: &mut App| {
-                            if controller.is_open(app) {
-                                controller.close(app);
-                            } else {
-                                controller.open(app, None);
-                            }
-                        }))
-                        .into_widget()
-                })
-                .on_open(bump(&open_count))
-                .on_close(bump(&close_count)),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let is_open = Rc::new(Cell::new(false));
+            let open_count = counter();
+            let close_count = counter();
+            let builder_is_open = Rc::clone(&is_open);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .menu_panel(panel(vec![
+                        Button::new(Text::new("Menu Item")).into_widget(),
+                    ]))
+                    .builder(move |app, _context, controller, _child| {
+                        builder_is_open.set(controller.is_open(app));
+                        let label = if builder_is_open.get() {
+                            "close"
+                        } else {
+                            "open"
+                        };
+                        Button::new(Text::new(label))
+                            .on_pressed(Rc::new(move |app: &mut App| {
+                                if controller.is_open(app) {
+                                    controller.close(app);
+                                } else {
+                                    controller.open(app, None);
+                                }
+                            }))
+                            .into_widget()
+                    })
+                    .on_open(bump(&open_count))
+                    .on_close(bump(&close_count)),
+            ));
 
-        assert_eq!(tester.count_text("open"), 1);
-        assert!(!is_open.get());
-        assert_eq!(open_count.get(), 0);
-        assert_eq!(close_count.get(), 0);
+            expect(&tester, &find::text("open"), finds_one_widget());
+            assert!(!is_open.get());
+            assert_eq!(open_count.get(), 0);
+            assert_eq!(close_count.get(), 0);
 
-        tester.tap("open");
-        tester.pump();
+            tester.tap(find::text("open"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("close"), 1);
-        assert!(is_open.get());
-        assert_eq!(open_count.get(), 1);
-        assert_eq!(close_count.get(), 0);
+            expect(&tester, &find::text("close"), finds_one_widget());
+            assert!(is_open.get());
+            assert_eq!(open_count.get(), 1);
+            assert_eq!(close_count.get(), 0);
 
-        tester.tap("close");
-        tester.pump();
+            tester.tap(find::text("close"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("open"), 1);
-        assert!(!is_open.get());
-        assert_eq!(open_count.get(), 1);
-        assert_eq!(close_count.get(), 1);
+            expect(&tester, &find::text("open"), finds_one_widget());
+            assert!(!is_open.get());
+            assert_eq!(open_count.get(), 1);
+            assert_eq!(close_count.get(), 1);
+        });
     }
 
     /// The nearest [`RenderTheater`] above `object`.
@@ -4190,7 +4131,8 @@ mod tests {
     /// the nested anchor's `use_root_overlay` as given. Answers whether the menu's and the
     /// submenu's theater is the inner overlay's, after asserting that they share one.
     fn menu_is_shown_in_the_inner_overlay(root_uses_root: bool, nested_uses_root: bool) -> bool {
-        let tester = Tester::new();
+        let tester = &mut WidgetTester::new();
+        let mut tester = Tester::new(tester);
         let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
         let menu_controller = controller.clone();
         let overlay_key = GlobalKey::new();
@@ -4222,28 +4164,26 @@ mod tests {
                 .initial_entries(vec![overlay_entry.clone()]),
         ));
 
-        assert_eq!(tester.count_text("a"), 0);
+        expect(&tester, &find::text("a"), finds_nothing());
 
         // Open the menu.
         controller.open(&mut tester.app(), None);
         tester.pump();
-        tester.tap("a");
+        tester.tap(find::text("a"));
         tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(tester.count_text("a.a"), 1);
+        expect(&tester, &find::text("a"), finds_one_widget());
+        expect(&tester, &find::text("a.a"), finds_one_widget());
 
-        let (a, aa) = (tester.paragraphs_of("a")[0], tester.paragraphs_of("a.a")[0]);
-        let mut app = tester.app();
         // Expect two overlays: the root overlay created by WidgetsApp and the overlay created
         // by the boilerplate code.
-        let theaters = tester
-            .render_objects(&mut app)
-            .into_iter()
-            .filter(|object| object.downcast::<RenderTheater>(&app).is_some())
-            .count();
-        assert_eq!(theaters, 2);
+        expect(&tester, &find::by_type::<Overlay>(), finds_n_widgets(2));
 
+        let (a, aa) = (
+            tester.render_object(find::text("a")),
+            tester.render_object(find::text("a.a")),
+        );
+        let app = tester.app();
         let inner_theater = overlay_key
             .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
@@ -4272,108 +4212,135 @@ mod tests {
 
     #[test]
     fn parent_updates_are_not_triggered_during_builds() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let tree = || {
-            TestApp::new(RawMenuAnchorGroup::new(
-                Menu::new()
-                    .menu_panel(panel(Vec::new()))
-                    .child(AnchorButton::new("anchor")),
-                controller.clone(),
-            ))
-        };
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let media_query_data = tester.media_query_data();
+            let tree = |size: Size| {
+                let child: WidgetRef = MediaQuery::new(
+                    media_query_data.copy_with().size(size),
+                    RawMenuAnchorGroup::new(
+                        Menu::new()
+                            .menu_panel(panel(Vec::new()))
+                            .child(AnchorButton::new("anchor")),
+                        controller.clone(),
+                    ),
+                )
+                .into_widget();
+                TestApp::new(child)
+            };
 
-        tester.pump_widget(tree());
+            tester.pump_widget(tree(media_query_data.size));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        tester.resize(200.0, 200.0);
+            let small_size = Size::new(200.0, 200.0);
+            tester.change_surface_size(small_size);
 
-        tester.pump_widget(tree());
-        tester.pump();
+            tester.pump_widget(tree(small_size));
+            tester.pump();
+        });
     }
 
     #[test]
     fn the_anchor_rect_follows_the_anchor_when_it_moves() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let overlay_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
-        let set_state: Rc<RefCell<Option<StateSetter>>> = Rc::default();
-        let show_additional_widget = Rc::new(Cell::new(true));
-        let (sink, setter, show) = (
-            Rc::clone(&overlay_position),
-            Rc::clone(&set_state),
-            Rc::clone(&show_additional_widget),
-        );
-        tester.pump_widget(TestApp::new(StatefulBuilder::new(
-            move |_app, _context, set_state| {
-                *setter.borrow_mut() = Some(set_state);
-                let mut children = Vec::new();
-                if show.get() {
-                    children.push(SizedBox::new().width(100.0).height(100.0).into_widget());
-                }
-                let sink = Rc::clone(&sink);
-                children.push(
-                    RawMenuAnchor::new(controller.clone(), move |_app, _context, position| {
-                        sink.set(Some(position));
-                        SizedBox::new().into_widget()
-                    })
-                    .child(AnchorButton::new("anchor"))
-                    .into_widget(),
-                );
-                Column::new().children(children).into_widget()
-            },
-        )));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let overlay_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
+            let set_state: Rc<RefCell<Option<StateSetter>>> = Rc::default();
+            let show_additional_widget = Rc::new(Cell::new(true));
+            let (sink, setter, show) = (
+                Rc::clone(&overlay_position),
+                Rc::clone(&set_state),
+                Rc::clone(&show_additional_widget),
+            );
+            tester.pump_widget(TestApp::new(StatefulBuilder::new(
+                move |_app, _context, set_state| {
+                    *setter.borrow_mut() = Some(set_state);
+                    let mut children = Vec::new();
+                    if show.get() {
+                        children.push(SizedBox::new().width(100.0).height(100.0).into_widget());
+                    }
+                    let sink = Rc::clone(&sink);
+                    children.push(
+                        RawMenuAnchor::new(controller.clone(), move |_app, _context, position| {
+                            sink.set(Some(position));
+                            SizedBox::new().into_widget()
+                        })
+                        .child(AnchorButton::new("anchor"))
+                        .into_widget(),
+                    );
+                    Column::new().children(children).into_widget()
+                },
+            )));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(
-            overlay_position.get().map(|info| info.anchor_rect),
-            Some(tester.rect_of::<Button>())
-        );
+            assert_eq!(
+                overlay_position.get().map(|info| info.anchor_rect),
+                Some(tester.get_rect(find::by_type::<Button>()))
+            );
 
-        {
-            let set_state = set_state.borrow().clone().expect("built");
-            set_state(&mut tester.app(), &mut |_app| {
-                show_additional_widget.set(false)
-            });
-        }
-        tester.pump();
-        tester.pump();
+            {
+                let set_state = set_state.borrow().clone().expect("built");
+                set_state(&mut tester.app(), &mut |_app| {
+                    show_additional_widget.set(false)
+                });
+            }
+            tester.pump();
+            tester.pump();
 
-        assert_eq!(
-            overlay_position.get().map(|info| info.anchor_rect),
-            Some(tester.rect_of::<Button>())
-        );
+            assert_eq!(
+                overlay_position.get().map(|info| info.anchor_rect),
+                Some(tester.get_rect(find::by_type::<Button>()))
+            );
+        });
     }
 
     #[test]
     fn an_anchor_of_zero_area_does_not_panic() {
-        let tester = Tester::with_size(0.0, 0.0);
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            Center::new().child(RawMenuAnchor::new(
-                controller.clone(),
-                |_app, _context, _info| Text::new("X").into_widget(),
-            )),
-        ));
-        assert_eq!(tester.rect_of::<RawMenuAnchor>().size(), Size::ZERO);
-        controller.open(&mut tester.app(), None);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(RawMenuAnchor::new(
+                    controller.clone(),
+                    |_app, _context, _info| Text::new("X").into_widget(),
+                )),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<RawMenuAnchor>()),
+                Size::ZERO
+            );
+            controller.open(&mut tester.app(), None);
+        });
     }
 
     #[test]
     fn a_group_of_zero_area_does_not_panic() {
-        let tester = Tester::with_size(0.0, 0.0);
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            Center::new().child(RawMenuAnchorGroup::new(Text::new("X"), controller.clone())),
-        ));
-        assert_eq!(tester.rect_of::<RawMenuAnchorGroup>().size(), Size::ZERO);
-        controller.open(&mut tester.app(), None);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(RawMenuAnchorGroup::new(Text::new("X"), controller.clone())),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<RawMenuAnchorGroup>()),
+                Size::ZERO
+            );
+            controller.open(&mut tester.app(), None);
+        });
     }
 
     /// Dart's `CustomMenuController extends MenuController`, which counts its opens and closes.
@@ -4399,266 +4366,288 @@ mod tests {
 
     #[test]
     fn an_app_can_override_the_open_and_close_of_its_menu_controller() {
-        let tester = Tester::new();
-        let custom_controller = tester.app().create(CustomMenuController {
-            menu_controller: MenuControllerData::new(),
-            open_call_count: 0,
-            close_call_count: 0,
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let custom_controller = tester.app().create(CustomMenuController {
+                menu_controller: MenuControllerData::new(),
+                open_call_count: 0,
+                close_call_count: 0,
+            });
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(custom_controller.erase())
+                    .menu_panel(panel(texts(&["a"])))
+                    .child(AnchorButton::new("anchor")),
+            ));
+
+            custom_controller
+                .as_menu_controller()
+                .open(&mut tester.app(), None);
+            tester.pump();
+
+            assert!(custom_controller.is_open(&tester.app()));
+            assert_eq!(tester.app().get(&custom_controller).open_call_count, 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
+
+            custom_controller
+                .as_menu_controller()
+                .close(&mut tester.app());
+            tester.pump();
+
+            assert!(!custom_controller.is_open(&tester.app()));
+            assert_eq!(tester.app().get(&custom_controller).close_call_count, 1);
+            expect(&tester, &find::text("a"), finds_nothing());
         });
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(custom_controller.erase())
-                .menu_panel(panel(texts(&["a"])))
-                .child(AnchorButton::new("anchor")),
-        ));
-
-        custom_controller
-            .as_menu_controller()
-            .open(&mut tester.app(), None);
-        tester.pump();
-
-        assert!(custom_controller.is_open(&tester.app()));
-        assert_eq!(tester.app().get(&custom_controller).open_call_count, 1);
-        assert_eq!(tester.count_text("a"), 1);
-
-        custom_controller
-            .as_menu_controller()
-            .close(&mut tester.app());
-        tester.pump();
-
-        assert!(!custom_controller.is_open(&tester.app()));
-        assert_eq!(tester.app().get(&custom_controller).close_call_count, 1);
-        assert_eq!(tester.count_text("a"), 0);
     }
 
     // ---- onOpenRequested ----
 
     #[test]
     fn on_open_requested_is_triggered_by_open() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let on_open_called = counter();
-        let on_open_requested_called = counter();
-        let requested = Rc::clone(&on_open_requested_called);
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_open(bump(&on_open_called))
-                .on_open_requested(move |_app, _position, _show_menu| {
-                    requested.set(requested.get() + 1);
-                })
-                .menu_panel(panel(texts(&["Button 1"])))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let on_open_called = counter();
+            let on_open_requested_called = counter();
+            let requested = Rc::clone(&on_open_requested_called);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_open(bump(&on_open_called))
+                    .on_open_requested(move |_app, _position, _show_menu| {
+                        requested.set(requested.get() + 1);
+                    })
+                    .menu_panel(panel(texts(&["Button 1"])))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        assert_eq!(on_open_called.get(), 0);
-        assert_eq!(on_open_requested_called.get(), 0);
+            assert_eq!(on_open_called.get(), 0);
+            assert_eq!(on_open_requested_called.get(), 0);
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(on_open_called.get(), 0);
-        assert_eq!(on_open_requested_called.get(), 1);
+            assert_eq!(on_open_called.get(), 0);
+            assert_eq!(on_open_requested_called.get(), 1);
+        });
     }
 
     #[test]
     fn on_open_requested_is_passed_the_position() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let menu_position: Rc<Cell<Option<Offset>>> = Rc::default();
-        let sink = Rc::clone(&menu_position);
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_open_requested(move |_app, position, _show_overlay| sink.set(position))
-                .menu_panel(panel(texts(&["Button 1"])))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let menu_position: Rc<Cell<Option<Offset>>> = Rc::default();
+            let sink = Rc::clone(&menu_position);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_open_requested(move |_app, position, _show_overlay| sink.set(position))
+                    .menu_panel(panel(texts(&["Button 1"])))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        assert_eq!(menu_position.get(), None);
+            assert_eq!(menu_position.get(), None);
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(menu_position.get(), None);
+            assert_eq!(menu_position.get(), None);
 
-        controller.close(&mut tester.app());
-        tester.pump();
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(menu_position.get(), None);
+            assert_eq!(menu_position.get(), None);
 
-        controller.open(&mut tester.app(), Some(Offset::new(10.0, 15.0)));
-        tester.pump();
+            controller.open(&mut tester.app(), Some(Offset::new(10.0, 15.0)));
+            tester.pump();
 
-        assert_eq!(menu_position.get(), Some(Offset::new(10.0, 15.0)));
+            assert_eq!(menu_position.get(), Some(Offset::new(10.0, 15.0)));
+        });
     }
 
     #[test]
     fn show_overlay_triggers_on_open() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let on_open_called = counter();
-        let on_open_requested_called = counter();
-        let show_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
-        let (requested, sink) = (
-            Rc::clone(&on_open_requested_called),
-            Rc::clone(&show_menu_overlay),
-        );
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_open(bump(&on_open_called))
-                .on_open_requested(move |_app, _position, show_overlay| {
-                    requested.set(requested.get() + 1);
-                    *sink.borrow_mut() = Some(show_overlay);
-                })
-                .menu_panel(panel(texts(&["Button 1"])))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let on_open_called = counter();
+            let on_open_requested_called = counter();
+            let show_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
+            let (requested, sink) = (
+                Rc::clone(&on_open_requested_called),
+                Rc::clone(&show_menu_overlay),
+            );
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_open(bump(&on_open_called))
+                    .on_open_requested(move |_app, _position, show_overlay| {
+                        requested.set(requested.get() + 1);
+                        *sink.borrow_mut() = Some(show_overlay);
+                    })
+                    .menu_panel(panel(texts(&["Button 1"])))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        assert_eq!(on_open_requested_called.get(), 0);
-        assert_eq!(on_open_called.get(), 0);
+            assert_eq!(on_open_requested_called.get(), 0);
+            assert_eq!(on_open_called.get(), 0);
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(on_open_requested_called.get(), 1);
-        assert_eq!(on_open_called.get(), 0);
+            assert_eq!(on_open_requested_called.get(), 1);
+            assert_eq!(on_open_called.get(), 0);
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        // Calling open again will trigger on_open_requested again.
-        assert_eq!(on_open_requested_called.get(), 2);
-        assert_eq!(on_open_called.get(), 0);
+            // Calling open again will trigger on_open_requested again.
+            assert_eq!(on_open_requested_called.get(), 2);
+            assert_eq!(on_open_called.get(), 0);
 
-        let show = show_menu_overlay.borrow().clone().expect("requested");
-        show(&mut tester.app());
-        tester.pump();
+            let show = show_menu_overlay.borrow().clone().expect("requested");
+            show(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(on_open_requested_called.get(), 2);
-        assert_eq!(on_open_called.get(), 1);
+            assert_eq!(on_open_requested_called.get(), 2);
+            assert_eq!(on_open_called.get(), 1);
 
-        // Calling show_overlay again will trigger on_open again.
-        show(&mut tester.app());
-        tester.pump();
+            // Calling show_overlay again will trigger on_open again.
+            show(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(on_open_requested_called.get(), 2);
-        assert_eq!(on_open_called.get(), 2);
+            assert_eq!(on_open_requested_called.get(), 2);
+            assert_eq!(on_open_called.get(), 2);
+        });
     }
 
     #[test]
     fn show_overlay_shows_the_menu_at_the_position() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let key = GlobalKey::new();
-        let content_key = key.clone();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_open_requested(|app, _position, show_overlay| {
-                    Timer::new(
-                        app,
-                        Duration::from_millis(100),
-                        Listener::new(move |app| show_overlay(app)),
-                    );
-                })
-                .overlay_builder(move |_app, _context, info| {
-                    let position = info.position.unwrap_or(Offset::ZERO);
-                    Positioned::new(SizedBox::square(Some(300.0)).key(content_key.clone().into()))
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let key = GlobalKey::new();
+            let content_key = key.clone();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_open_requested(|app, _position, show_overlay| {
+                        Timer::new(
+                            app,
+                            Duration::from_millis(100),
+                            Listener::new(move |app| show_overlay(app)),
+                        );
+                    })
+                    .overlay_builder(move |_app, _context, info| {
+                        let position = info.position.unwrap_or(Offset::ZERO);
+                        Positioned::new(
+                            SizedBox::square(Some(300.0)).key(content_key.clone().into()),
+                        )
                         .top(position.dy())
                         .left(position.dx())
                         .into_widget()
-                })
-                .child(AnchorButton::new("anchor")),
-        ));
+                    })
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        assert!(key.current_context(&tester.app()).is_none());
+            assert!(key.current_context(&tester.app()).is_none());
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert!(key.current_context(&tester.app()).is_none());
+            assert!(key.current_context(&tester.app()).is_none());
 
-        tester.pump_for(Duration::from_millis(101));
+            tester.pump_by(Duration::from_millis(101));
 
-        assert_eq!(tester.rect_of_key(&key).top_left(), Offset::ZERO);
+            assert_eq!(tester.get_top_left(&key), Offset::ZERO);
 
-        controller.open(&mut tester.app(), Some(Offset::new(50.0, 50.0)));
-        tester.pump();
-        tester.pump_for(Duration::from_millis(101));
+            controller.open(&mut tester.app(), Some(Offset::new(50.0, 50.0)));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(101));
 
-        assert_eq!(tester.rect_of_key(&key).top_left(), Offset::new(50.0, 50.0));
+            assert_eq!(tester.get_top_left(&key), Offset::new(50.0, 50.0));
+        });
     }
 
     #[test]
     fn show_overlay_does_nothing_after_the_menu_is_disposed() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let show_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
-        let on_open_called = counter();
-        let sink = Rc::clone(&show_menu_overlay);
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_open(bump(&on_open_called))
-                .on_open_requested(move |_app, _position, show_overlay| {
-                    *sink.borrow_mut() = Some(show_overlay);
-                })
-                .overlay_builder(|_app, _context, _info| {
-                    SizedBox::square(Some(300.0))
-                        .child(Text::new("Overlay"))
-                        .into_widget()
-                })
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let show_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
+            let on_open_called = counter();
+            let sink = Rc::clone(&show_menu_overlay);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_open(bump(&on_open_called))
+                    .on_open_requested(move |_app, _position, show_overlay| {
+                        *sink.borrow_mut() = Some(show_overlay);
+                    })
+                    .overlay_builder(|_app, _context, _info| {
+                        SizedBox::square(Some(300.0))
+                            .child(Text::new("Overlay"))
+                            .into_widget()
+                    })
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        controller.open(&mut tester.app(), None);
-        let show = show_menu_overlay.borrow().clone().expect("requested");
-        show(&mut tester.app());
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            let show = show_menu_overlay.borrow().clone().expect("requested");
+            show(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(on_open_called.get(), 1);
-        assert_eq!(tester.count_text("Overlay"), 1);
+            assert_eq!(on_open_called.get(), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
-        controller.close(&mut tester.app());
-        tester.pump();
-        tester.pump_widget(TestApp::new(SizedBox::new()));
+            controller.close(&mut tester.app());
+            tester.pump();
+            tester.pump_widget(TestApp::new(SizedBox::new()));
 
-        show(&mut tester.app());
+            show(&mut tester.app());
 
-        assert_eq!(on_open_called.get(), 1);
+            assert_eq!(on_open_called.get(), 1);
+        });
     }
 
     // ---- onCloseRequested ----
 
     #[test]
     fn on_close_requested_is_triggered_by_close() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let on_close_requested_called = counter();
-        let requested = Rc::clone(&on_close_requested_called);
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_close_requested(move |_app, _hide_overlay| {
-                    requested.set(requested.get() + 1);
-                })
-                .menu_panel(panel(texts(&["Button 1"])))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let on_close_requested_called = counter();
+            let requested = Rc::clone(&on_close_requested_called);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_close_requested(move |_app, _hide_overlay| {
+                        requested.set(requested.get() + 1);
+                    })
+                    .menu_panel(panel(texts(&["Button 1"])))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        assert_eq!(on_close_requested_called.get(), 0);
+            assert_eq!(on_close_requested_called.get(), 0);
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(on_close_requested_called.get(), 0);
+            assert_eq!(on_close_requested_called.get(), 0);
 
-        controller.close(&mut tester.app());
-        tester.pump();
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(on_close_requested_called.get(), 1);
+            assert_eq!(on_close_requested_called.get(), 1);
+        });
     }
 
     /// An `on_close_requested` that hides the overlay `delay` later, as Dart's
@@ -4671,457 +4660,492 @@ mod tests {
 
     #[test]
     fn hide_overlay_triggers_on_close() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let on_close_called = counter();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_close(bump(&on_close_called))
-                .on_close_requested(hide_after(Duration::from_millis(100)))
-                .menu_panel(panel(texts(&["Button 1"])))
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let on_close_called = counter();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_close(bump(&on_close_called))
+                    .on_close_requested(hide_after(Duration::from_millis(100)))
+                    .menu_panel(panel(texts(&["Button 1"])))
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        controller.close(&mut tester.app());
-        tester.pump();
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(on_close_called.get(), 0);
+            assert_eq!(on_close_called.get(), 0);
 
-        tester.pump_for(Duration::from_millis(99));
+            tester.pump_by(Duration::from_millis(99));
 
-        assert_eq!(on_close_called.get(), 0);
+            assert_eq!(on_close_called.get(), 0);
 
-        tester.pump_for(Duration::from_millis(2));
+            tester.pump_by(Duration::from_millis(2));
 
-        assert_eq!(on_close_called.get(), 1);
+            assert_eq!(on_close_called.get(), 1);
+        });
     }
 
     #[test]
     fn hide_overlay_hides_the_menu_overlay() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_close_requested(hide_after(Duration::from_millis(100)))
-                .overlay_builder(|_app, _context, _info| {
-                    SizedBox::square(Some(300.0))
-                        .child(Text::new("Overlay"))
-                        .into_widget()
-                })
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_close_requested(hide_after(Duration::from_millis(100)))
+                    .overlay_builder(|_app, _context, _info| {
+                        SizedBox::square(Some(300.0))
+                            .child(Text::new("Overlay"))
+                            .into_widget()
+                    })
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        assert_eq!(tester.count_text("Overlay"), 0);
+            expect(&tester, &find::text("Overlay"), finds_nothing());
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
-        controller.close(&mut tester.app());
-        tester.pump();
-        tester.pump_for(Duration::from_millis(99));
+            controller.close(&mut tester.app());
+            tester.pump();
+            tester.pump_by(Duration::from_millis(99));
 
-        assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
-        tester.pump_for(Duration::from_millis(2));
+            tester.pump_by(Duration::from_millis(2));
 
-        assert_eq!(tester.count_text("Overlay"), 0);
+            expect(&tester, &find::text("Overlay"), finds_nothing());
+        });
     }
 
     #[test]
     fn hide_overlay_does_nothing_after_the_menu_is_disposed() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let hide_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
-        let on_close_called = counter();
-        let sink = Rc::clone(&hide_menu_overlay);
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_close(bump(&on_close_called))
-                .on_close_requested(move |_app, hide_overlay| {
-                    *sink.borrow_mut() = Some(hide_overlay);
-                })
-                .overlay_builder(|_app, _context, _info| {
-                    SizedBox::square(Some(300.0))
-                        .child(Text::new("Overlay"))
-                        .into_widget()
-                })
-                .child(AnchorButton::new("anchor")),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let hide_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
+            let on_close_called = counter();
+            let sink = Rc::clone(&hide_menu_overlay);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_close(bump(&on_close_called))
+                    .on_close_requested(move |_app, hide_overlay| {
+                        *sink.borrow_mut() = Some(hide_overlay);
+                    })
+                    .overlay_builder(|_app, _context, _info| {
+                        SizedBox::square(Some(300.0))
+                            .child(Text::new("Overlay"))
+                            .into_widget()
+                    })
+                    .child(AnchorButton::new("anchor")),
+            ));
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
-        controller.close(&mut tester.app());
-        let hide = hide_menu_overlay.borrow().clone().expect("requested");
-        hide(&mut tester.app());
-        tester.pump();
+            controller.close(&mut tester.app());
+            let hide = hide_menu_overlay.borrow().clone().expect("requested");
+            hide(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(on_close_called.get(), 1);
-        assert_eq!(tester.count_text("Overlay"), 0);
+            assert_eq!(on_close_called.get(), 1);
+            expect(&tester, &find::text("Overlay"), finds_nothing());
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
-        tester.pump_widget(TestApp::new(SizedBox::new()));
+            tester.pump_widget(TestApp::new(SizedBox::new()));
 
-        hide(&mut tester.app());
+            hide(&mut tester.app());
 
-        assert_eq!(on_close_called.get(), 1);
+            assert_eq!(on_close_called.get(), 1);
+        });
     }
 
     #[test]
     fn on_close_requested_is_called_on_parents_before_descendants() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let close_order = log();
-        let request = |tag: &'static str| {
-            let close_order = Rc::clone(&close_order);
-            move |_app: &mut App, _hide_overlay: VoidCallback| close_order.borrow_mut().push(tag)
-        };
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                .on_close_requested(request("a"))
-                .menu_panel(panel(vec![
-                    Menu::new()
-                        .on_close_requested(request("a.a"))
-                        .menu_panel(panel(vec![
-                            Menu::new()
-                                .on_close_requested(request("a.a.a"))
-                                .menu_panel(panel(vec![SizedBox::new().into_widget()]))
-                                .child(AnchorButton::new("a.a.a"))
-                                .into_widget(),
-                        ]))
-                        .child(AnchorButton::new("a.a"))
-                        .into_widget(),
-                ])),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let close_order = log();
+            let request = |tag: &'static str| {
+                let close_order = Rc::clone(&close_order);
+                move |_app: &mut App, _hide_overlay: VoidCallback| {
+                    close_order.borrow_mut().push(tag)
+                }
+            };
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    .on_close_requested(request("a"))
+                    .menu_panel(panel(vec![
+                        Menu::new()
+                            .on_close_requested(request("a.a"))
+                            .menu_panel(panel(vec![
+                                Menu::new()
+                                    .on_close_requested(request("a.a.a"))
+                                    .menu_panel(panel(vec![SizedBox::new().into_widget()]))
+                                    .child(AnchorButton::new("a.a.a"))
+                                    .into_widget(),
+                            ]))
+                            .child(AnchorButton::new("a.a"))
+                            .into_widget(),
+                    ])),
+            ));
 
-        // Open parent menu.
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            // Open parent menu.
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        // Open submenu.
-        tester.tap("a.a");
-        tester.pump();
+            // Open submenu.
+            tester.tap(find::text("a.a"));
+            tester.pump();
 
-        // Open sub-submenu.
-        tester.tap("a.a.a");
-        tester.pump();
+            // Open sub-submenu.
+            tester.tap(find::text("a.a.a"));
+            tester.pump();
 
-        // Menus call on_close_requested on their children when opening, so clear previous
-        // close events.
-        close_order.borrow_mut().clear();
+            // Menus call on_close_requested on their children when opening, so clear previous
+            // close events.
+            close_order.borrow_mut().clear();
 
-        controller.close(&mut tester.app());
-        tester.pump();
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        assert_eq!(*close_order.borrow(), ["a", "a.a", "a.a.a"]);
+            assert_eq!(*close_order.borrow(), ["a", "a.a", "a.a.a"]);
+        });
     }
 
     #[test]
     fn a_delayed_on_close_is_called_on_descendants_before_parents() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let close_order = log();
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .controller(controller.clone())
-                // Called second.
-                .on_close_requested(hide_after(Duration::from_millis(35)))
-                .on_close(push(&close_order, "a"))
-                .menu_panel(panel(vec![
-                    Menu::new()
-                        .on_close_requested(hide_after(Duration::from_millis(50)))
-                        .on_close(push(&close_order, "a.a"))
-                        .menu_panel(panel(vec![
-                            Menu::new()
-                                // Called first.
-                                .on_close_requested(hide_after(Duration::from_millis(10)))
-                                .on_close(push(&close_order, "a.a.a"))
-                                .menu_panel(panel(vec![
-                                    Menu::new()
-                                        .on_close_requested(hide_after(Duration::from_millis(25)))
-                                        .on_close(push(&close_order, "a.a.a.a"))
-                                        .menu_panel(panel(texts(&["a.a.a.a.a"])))
-                                        .child(AnchorButton::new("a.a.a.a"))
-                                        .into_widget(),
-                                ]))
-                                .child(AnchorButton::new("a.a.a"))
-                                .into_widget(),
-                        ]))
-                        .child(AnchorButton::new("a.a"))
-                        .into_widget(),
-                ])),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let close_order = log();
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .controller(controller.clone())
+                    // Called second.
+                    .on_close_requested(hide_after(Duration::from_millis(35)))
+                    .on_close(push(&close_order, "a"))
+                    .menu_panel(panel(vec![
+                        Menu::new()
+                            .on_close_requested(hide_after(Duration::from_millis(50)))
+                            .on_close(push(&close_order, "a.a"))
+                            .menu_panel(panel(vec![
+                                Menu::new()
+                                    // Called first.
+                                    .on_close_requested(hide_after(Duration::from_millis(10)))
+                                    .on_close(push(&close_order, "a.a.a"))
+                                    .menu_panel(panel(vec![
+                                        Menu::new()
+                                            .on_close_requested(hide_after(Duration::from_millis(
+                                                25,
+                                            )))
+                                            .on_close(push(&close_order, "a.a.a.a"))
+                                            .menu_panel(panel(texts(&["a.a.a.a.a"])))
+                                            .child(AnchorButton::new("a.a.a.a"))
+                                            .into_widget(),
+                                    ]))
+                                    .child(AnchorButton::new("a.a.a"))
+                                    .into_widget(),
+                            ]))
+                            .child(AnchorButton::new("a.a"))
+                            .into_widget(),
+                    ])),
+            ));
 
-        // Open parent menu.
-        controller.open(&mut tester.app(), None);
-        tester.pump();
+            // Open parent menu.
+            controller.open(&mut tester.app(), None);
+            tester.pump();
 
-        // Open submenu.
-        tester.tap("a.a");
-        tester.pump();
+            // Open submenu.
+            tester.tap(find::text("a.a"));
+            tester.pump();
 
-        // Open sub-submenu.
-        tester.tap("a.a.a");
-        tester.pump();
+            // Open sub-submenu.
+            tester.tap(find::text("a.a.a"));
+            tester.pump();
 
-        tester.tap("a.a.a.a");
-        tester.pump();
+            tester.tap(find::text("a.a.a.a"));
+            tester.pump();
 
-        // Menus call on_close_requested on their children when opening, so clear previous
-        // close events.
-        close_order.borrow_mut().clear();
+            // Menus call on_close_requested on their children when opening, so clear previous
+            // close events.
+            close_order.borrow_mut().clear();
 
-        controller.close(&mut tester.app());
-        tester.pump();
+            controller.close(&mut tester.app());
+            tester.pump();
 
-        tester.pump_for(Duration::from_millis(9));
+            tester.pump_by(Duration::from_millis(9));
 
-        assert!(close_order.borrow().is_empty());
+            assert!(close_order.borrow().is_empty());
 
-        // 11 milliseconds.
-        tester.pump_for(Duration::from_millis(2));
+            // 11 milliseconds.
+            tester.pump_by(Duration::from_millis(2));
 
-        assert_eq!(*close_order.borrow(), ["a.a.a.a", "a.a.a"]);
+            assert_eq!(*close_order.borrow(), ["a.a.a.a", "a.a.a"]);
 
-        // 34 milliseconds.
-        tester.pump_for(Duration::from_millis(23));
+            // 34 milliseconds.
+            tester.pump_by(Duration::from_millis(23));
 
-        assert_eq!(*close_order.borrow(), ["a.a.a.a", "a.a.a"]);
+            assert_eq!(*close_order.borrow(), ["a.a.a.a", "a.a.a"]);
 
-        // 36 milliseconds.
-        tester.pump_for(Duration::from_millis(2));
+            // 36 milliseconds.
+            tester.pump_by(Duration::from_millis(2));
 
-        assert_eq!(*close_order.borrow(), ["a.a.a.a", "a.a.a", "a.a", "a"]);
+            assert_eq!(*close_order.borrow(), ["a.a.a.a", "a.a.a", "a.a", "a"]);
 
-        tester.pump_for(Duration::from_millis(20));
+            tester.pump_by(Duration::from_millis(20));
+        });
     }
 
     #[test]
     fn dismiss_menu_action_triggers_on_close_requested() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
-        let close_requests = log();
-        let request = |tag: &'static str| {
-            let close_requests = Rc::clone(&close_requests);
-            move |_app: &mut App, _hide_overlay: VoidCallback| {
-                close_requests.borrow_mut().push(tag);
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
+            let close_requests = log();
+            let request = |tag: &'static str| {
+                let close_requests = Rc::clone(&close_requests);
+                move |_app: &mut App, _hide_overlay: VoidCallback| {
+                    close_requests.borrow_mut().push(tag);
+                }
+            };
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .on_close_requested(request("a"))
+                    .menu_panel(panel(vec![
+                        Menu::new()
+                            .on_close_requested(request("a.a"))
+                            .menu_panel(panel(vec![
+                                Menu::new()
+                                    .controller(controller.clone())
+                                    .on_close_requested(request("a.a.a"))
+                                    .menu_panel(panel(texts(&["a.a.a.a"])))
+                                    .child(
+                                        AnchorButton::new("a.a.a").focus_node(focus_node.clone()),
+                                    )
+                                    .into_widget(),
+                            ]))
+                            .child(AnchorButton::new("a.a"))
+                            .into_widget(),
+                    ]))
+                    .child(AnchorButton::new("a")),
+            ));
+
+            tester.tap(find::text("a"));
+            tester.pump();
+            tester.tap(find::text("a.a"));
+            tester.pump();
+            tester.tap(find::text("a.a.a"));
+            tester.pump();
+
+            focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
+
+            expect(&tester, &find::text("a.a.a.a"), finds_one_widget());
+            assert_eq!(*close_requests.borrow(), ["a.a", "a.a.a"]);
+
+            close_requests.borrow_mut().clear();
+
+            {
+                let mut app = tester.app();
+                let action = DismissMenuAction::new(&mut app, controller);
+                let context = focus_node.context(&app);
+                PlainActionDispatcher::new().invoke_action(
+                    &mut app,
+                    Action::as_action(action.handle()),
+                    &DismissIntent::new(),
+                    context,
+                );
             }
-        };
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .on_close_requested(request("a"))
-                .menu_panel(panel(vec![
-                    Menu::new()
-                        .on_close_requested(request("a.a"))
-                        .menu_panel(panel(vec![
-                            Menu::new()
-                                .controller(controller.clone())
-                                .on_close_requested(request("a.a.a"))
-                                .menu_panel(panel(texts(&["a.a.a.a"])))
-                                .child(AnchorButton::new("a.a.a").focus_node(focus_node.clone()))
-                                .into_widget(),
-                        ]))
-                        .child(AnchorButton::new("a.a"))
-                        .into_widget(),
-                ]))
-                .child(AnchorButton::new("a")),
-        ));
 
-        tester.tap("a");
-        tester.pump();
-        tester.tap("a.a");
-        tester.pump();
-        tester.tap("a.a.a");
-        tester.pump();
+            tester.pump();
 
-        focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
-
-        assert_eq!(tester.count_text("a.a.a.a"), 1);
-        assert_eq!(*close_requests.borrow(), ["a.a", "a.a.a"]);
-
-        close_requests.borrow_mut().clear();
-
-        {
-            let mut app = tester.app();
-            let action = DismissMenuAction::new(&mut app, controller);
-            let context = focus_node.context(&app);
-            PlainActionDispatcher::new().invoke_action(
-                &mut app,
-                Action::as_action(action.handle()),
-                &DismissIntent::new(),
-                context,
-            );
-        }
-
-        tester.pump();
-
-        assert_eq!(*close_requests.borrow(), ["a", "a.a", "a.a.a"]);
-        assert_eq!(tester.count_text("a.a.a.a"), 1);
+            assert_eq!(*close_requests.borrow(), ["a", "a.a", "a.a.a"]);
+            expect(&tester, &find::text("a.a.a.a"), finds_one_widget());
+        });
     }
 
     #[test]
     fn an_outside_tap_triggers_on_close_requested() {
-        let tester = Tester::new();
-        let close_requests = counter();
-        let requests = Rc::clone(&close_requests);
-        tester.pump_widget(TestApp::new(
-            Menu::new()
-                .on_close_requested(move |app, hide_overlay| {
-                    requests.set(requests.get() + 1);
-                    hide_overlay(app);
-                })
-                .child(AnchorButton::new("anchor"))
-                .overlay_builder(|_app, context, info| {
-                    Positioned::new(
-                        TapRegion::new(Text::new("a"))
-                            .group_id(info.tap_region_group_id)
-                            .on_tap_outside(Rc::new(move |app, _event| {
-                                if let Some(controller) = MenuController::maybe_of(app, context) {
-                                    controller.close(app);
-                                }
-                            })),
-                    )
-                    .left(info.anchor_rect.left)
-                    .top(info.anchor_rect.bottom)
-                    .into_widget()
-                }),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let close_requests = counter();
+            let requests = Rc::clone(&close_requests);
+            tester.pump_widget(TestApp::new(
+                Menu::new()
+                    .on_close_requested(move |app, hide_overlay| {
+                        requests.set(requests.get() + 1);
+                        hide_overlay(app);
+                    })
+                    .child(AnchorButton::new("anchor"))
+                    .overlay_builder(|_app, context, info| {
+                        Positioned::new(
+                            TapRegion::new(Text::new("a"))
+                                .group_id(info.tap_region_group_id)
+                                .on_tap_outside(Rc::new(move |app, _event| {
+                                    if let Some(controller) = MenuController::maybe_of(app, context)
+                                    {
+                                        controller.close(app);
+                                    }
+                                })),
+                        )
+                        .left(info.anchor_rect.left)
+                        .top(info.anchor_rect.bottom)
+                        .into_widget()
+                    }),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(close_requests.get(), 0);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert_eq!(close_requests.get(), 0);
 
-        // Tap outside the menu to trigger the close request.
-        tester.tap_at(Offset::ZERO);
-        tester.pump();
+            // Tap outside the menu to trigger the close request.
+            let pointer = tester.next_pointer();
+            tester.tap_at(Offset::ZERO, pointer);
+            tester.pump();
 
-        assert_eq!(close_requests.get(), 1);
-        assert_eq!(tester.count_text("a"), 0);
+            assert_eq!(close_requests.get(), 1);
+            expect(&tester, &find::text("a"), finds_nothing());
+        });
     }
 
     #[test]
     fn a_view_size_change_triggers_on_close_requested_on_an_open_menu() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let on_close_requested_called = counter();
-        let requests = Rc::clone(&on_close_requested_called);
-        let on_close_requested: RawMenuAnchorCloseRequestedCallback =
-            Rc::new(move |app, hide_overlay| {
-                requests.set(requests.get() + 1);
-                hide_overlay(app);
-            });
-        let tree = || {
-            let on_close_requested = Rc::clone(&on_close_requested);
-            TestApp::new(
-                Menu::new()
-                    .on_close_requested(move |app, hide_overlay| {
-                        on_close_requested(app, hide_overlay)
-                    })
-                    .controller(controller.clone())
-                    .menu_panel(panel(texts(&["a"])))
-                    .child(AnchorButton::new("anchor")),
-            )
-        };
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let on_close_requested_called = counter();
+            let requests = Rc::clone(&on_close_requested_called);
+            let on_close_requested: RawMenuAnchorCloseRequestedCallback =
+                Rc::new(move |app, hide_overlay| {
+                    requests.set(requests.get() + 1);
+                    hide_overlay(app);
+                });
+            let media_query_data = tester.media_query_data();
+            let tree = |size: Size| -> WidgetRef {
+                let on_close_requested = Rc::clone(&on_close_requested);
+                MediaQuery::new(
+                    media_query_data.copy_with().size(size),
+                    TestApp::new(
+                        Menu::new()
+                            .on_close_requested(move |app, hide_overlay| {
+                                on_close_requested(app, hide_overlay)
+                            })
+                            .controller(controller.clone())
+                            .menu_panel(panel(texts(&["a"])))
+                            .child(AnchorButton::new("anchor")),
+                    ),
+                )
+                .into_widget()
+            };
 
-        tester.pump_widget(tree());
-        tester.pump();
+            tester.pump_widget(tree(media_query_data.size));
+            tester.pump();
 
-        // Test menu resize before first open.
-        tester.resize(250.0, 250.0);
-        tester.pump_widget(tree());
-        tester.tap("anchor");
-        tester.pump();
+            // Test menu resize before first open.
+            tester.pump_widget(tree(Size::new(250.0, 250.0)));
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(on_close_requested_called.get(), 0);
-        assert_eq!(tester.count_text("a"), 1);
+            assert_eq!(on_close_requested_called.get(), 0);
+            expect(&tester, &find::text("a"), finds_one_widget());
 
-        tester.resize(200.0, 200.0);
-        tester.pump_widget(tree());
+            tester.pump_widget(tree(Size::new(200.0, 200.0)));
 
-        assert_eq!(on_close_requested_called.get(), 1);
+            assert_eq!(on_close_requested_called.get(), 1);
 
-        tester.pump();
+            tester.pump();
 
-        assert!(!controller.is_open(&tester.app()));
+            assert!(!controller.is_open(&tester.app()));
 
-        // Test menu resize after close.
-        tester.resize(300.0, 300.0);
-        tester.pump_widget(tree());
+            // Test menu resize after close.
+            tester.pump_widget(tree(Size::new(300.0, 300.0)));
 
-        assert_eq!(on_close_requested_called.get(), 1);
+            assert_eq!(on_close_requested_called.get(), 1);
+        });
     }
 
     #[test]
     fn an_ancestor_scroll_triggers_on_close_requested_on_an_open_menu() {
-        let tester = Tester::new();
-        let scroll_controller = scroll_controller(&mut tester.app());
-        let on_close_requested_called = counter();
-        let requests = Rc::clone(&on_close_requested_called);
-        tester.pump_widget(TestApp::new(
-            SingleChildScrollView::new()
-                .controller(scroll_controller.clone())
-                .child(
-                    SizedBox::new().height(1000.0).child(
-                        Menu::new()
-                            .on_close_requested(move |app, hide_overlay| {
-                                requests.set(requests.get() + 1);
-                                hide_overlay(app);
-                            })
-                            .menu_panel(panel(vec![
-                                Button::tag("a").into_widget(),
-                                Button::tag("b").into_widget(),
-                                Button::tag("c").into_widget(),
-                                Button::tag("d").into_widget(),
-                            ]))
-                            .child(AnchorButton::new("anchor")),
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let scroll_controller = scroll_controller(&mut tester.app());
+            let on_close_requested_called = counter();
+            let requests = Rc::clone(&on_close_requested_called);
+            tester.pump_widget(TestApp::new(
+                SingleChildScrollView::new()
+                    .controller(scroll_controller.clone())
+                    .child(
+                        SizedBox::new().height(1000.0).child(
+                            Menu::new()
+                                .on_close_requested(move |app, hide_overlay| {
+                                    requests.set(requests.get() + 1);
+                                    hide_overlay(app);
+                                })
+                                .menu_panel(panel(vec![
+                                    Button::tag("a").into_widget(),
+                                    Button::tag("b").into_widget(),
+                                    Button::tag("c").into_widget(),
+                                    Button::tag("d").into_widget(),
+                                ]))
+                                .child(AnchorButton::new("anchor")),
+                        ),
                     ),
-                ),
-        ));
+            ));
 
-        scroll_controller.jump_to(&mut tester.app(), 10.0);
-        tester.pump();
+            scroll_controller.jump_to(&mut tester.app(), 10.0);
+            tester.pump();
 
-        // The menu is not open, so on_close_requested should not be called.
-        assert_eq!(on_close_requested_called.get(), 0);
+            // The menu is not open, so on_close_requested should not be called.
+            assert_eq!(on_close_requested_called.get(), 0);
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.tap(find::text("anchor"));
+            tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(on_close_requested_called.get(), 0);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            assert_eq!(on_close_requested_called.get(), 0);
 
-        scroll_controller.jump_to(&mut tester.app(), 500.0);
-        tester.pump();
+            scroll_controller.jump_to(&mut tester.app(), 500.0);
+            tester.pump();
 
-        // Make sure we didn't just scroll the menu off-screen.
-        assert_eq!(tester.count_text("anchor"), 1);
-        assert_eq!(on_close_requested_called.get(), 1);
-        assert_eq!(tester.count_text("a"), 0);
+            // Make sure we didn't just scroll the menu off-screen.
+            expect(&tester, &find::text("anchor"), finds_one_widget());
+            assert_eq!(on_close_requested_called.get(), 1);
+            expect(&tester, &find::text("a"), finds_nothing());
 
-        scroll_controller.jump_to(&mut tester.app(), 5.0);
-        tester.pump();
+            scroll_controller.jump_to(&mut tester.app(), 5.0);
+            tester.pump();
 
-        assert_eq!(tester.count_text("anchor"), 1);
-        assert_eq!(on_close_requested_called.get(), 1);
+            expect(&tester, &find::text("anchor"), finds_one_widget());
+            assert_eq!(on_close_requested_called.get(), 1);
+        });
     }
 
     /// A focus node labelled as Dart's `FocusNode(debugLabel: tag.focusNode)`.
@@ -5149,7 +5173,7 @@ mod tests {
 
     /// Shift-Tab, as Dart's `sendKeyDownEvent(shift)`, `sendKeyEvent(tab)` and
     /// `sendKeyUpEvent(shift)`.
-    fn send_shift_tab(tester: &Tester) {
+    fn send_shift_tab(tester: &mut Tester) {
         tester.send_key(
             KeyEventType::Down,
             PhysicalKeyboardKey::SHIFT_LEFT,
@@ -5165,119 +5189,122 @@ mod tests {
 
     #[test]
     fn focus_traversal_shortcuts_are_not_bound_to_actions() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let anchor_focus_node = labelled_focus_node(&mut tester.app(), "anchor");
-        let b_focus_node = labelled_focus_node(&mut tester.app(), "b");
-        let invoked = log();
-        let actions = {
-            let mut app = tester.app();
-            let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
-            actions.insert(
-                TypeId::of::<DirectionalFocusIntent>(),
-                logging_action::<DirectionalFocusIntent>(&mut app, &invoked, "left"),
-            );
-            actions.insert(
-                TypeId::of::<NextFocusIntent>(),
-                logging_action::<NextFocusIntent>(&mut app, &invoked, "next"),
-            );
-            actions.insert(
-                TypeId::of::<PreviousFocusIntent>(),
-                logging_action::<PreviousFocusIntent>(&mut app, &invoked, "previous"),
-            );
-            actions
-        };
-        // Web doesn't automatically handle directional traversal.
-        let traversal_shortcuts = || -> ShortcutMap {
-            vec![
-                (
-                    Rc::new(LogicalKeySet::new(
-                        LogicalKeyboardKey::TAB,
-                        None,
-                        None,
-                        None,
-                    )) as ShortcutActivatorRef,
-                    Rc::new(NextFocusIntent::new()) as IntentRef,
-                ),
-                (
-                    Rc::new(LogicalKeySet::new(
-                        LogicalKeyboardKey::SHIFT,
-                        Some(LogicalKeyboardKey::TAB),
-                        None,
-                        None,
-                    )) as ShortcutActivatorRef,
-                    Rc::new(PreviousFocusIntent::new()) as IntentRef,
-                ),
-                (
-                    Rc::new(LogicalKeySet::new(
-                        LogicalKeyboardKey::ARROW_LEFT,
-                        None,
-                        None,
-                        None,
-                    )) as ShortcutActivatorRef,
-                    Rc::new(DirectionalFocusIntent::new(TraversalDirection::Left)) as IntentRef,
-                ),
-            ]
-        };
-        let menu_b_focus_node = b_focus_node.clone();
-        tester.pump_widget(TestApp::new(
-            Column::new().children([
-                Button::tag("a").into_widget(),
-                Actions::new(
-                    actions,
-                    RawMenuAnchor::new(controller.clone(), move |_app, _context, _position| {
-                        Column::new()
-                            .children([
-                                Button::tag("a").into_widget(),
-                                Shortcuts::new(
-                                    traversal_shortcuts(),
-                                    Button::tag("b").focus_node(menu_b_focus_node.clone()),
-                                )
-                                .into_widget(),
-                                Button::tag("d").into_widget(),
-                            ])
-                            .into_widget()
-                    })
-                    .child(AnchorButton::new("anchor").focus_node(anchor_focus_node.clone())),
-                )
-                .into_widget(),
-                Button::tag("c").into_widget(),
-            ]),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let anchor_focus_node = labelled_focus_node(&mut tester.app(), "anchor");
+            let b_focus_node = labelled_focus_node(&mut tester.app(), "b");
+            let invoked = log();
+            let actions = {
+                let mut app = tester.app();
+                let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
+                actions.insert(
+                    TypeId::of::<DirectionalFocusIntent>(),
+                    logging_action::<DirectionalFocusIntent>(&mut app, &invoked, "left"),
+                );
+                actions.insert(
+                    TypeId::of::<NextFocusIntent>(),
+                    logging_action::<NextFocusIntent>(&mut app, &invoked, "next"),
+                );
+                actions.insert(
+                    TypeId::of::<PreviousFocusIntent>(),
+                    logging_action::<PreviousFocusIntent>(&mut app, &invoked, "previous"),
+                );
+                actions
+            };
+            // Web doesn't automatically handle directional traversal.
+            let traversal_shortcuts = || -> ShortcutMap {
+                vec![
+                    (
+                        Rc::new(LogicalKeySet::new(
+                            LogicalKeyboardKey::TAB,
+                            None,
+                            None,
+                            None,
+                        )) as ShortcutActivatorRef,
+                        Rc::new(NextFocusIntent::new()) as IntentRef,
+                    ),
+                    (
+                        Rc::new(LogicalKeySet::new(
+                            LogicalKeyboardKey::SHIFT,
+                            Some(LogicalKeyboardKey::TAB),
+                            None,
+                            None,
+                        )) as ShortcutActivatorRef,
+                        Rc::new(PreviousFocusIntent::new()) as IntentRef,
+                    ),
+                    (
+                        Rc::new(LogicalKeySet::new(
+                            LogicalKeyboardKey::ARROW_LEFT,
+                            None,
+                            None,
+                            None,
+                        )) as ShortcutActivatorRef,
+                        Rc::new(DirectionalFocusIntent::new(TraversalDirection::Left)) as IntentRef,
+                    ),
+                ]
+            };
+            let menu_b_focus_node = b_focus_node.clone();
+            tester.pump_widget(TestApp::new(
+                Column::new().children([
+                    Button::tag("a").into_widget(),
+                    Actions::new(
+                        actions,
+                        RawMenuAnchor::new(controller.clone(), move |_app, _context, _position| {
+                            Column::new()
+                                .children([
+                                    Button::tag("a").into_widget(),
+                                    Shortcuts::new(
+                                        traversal_shortcuts(),
+                                        Button::tag("b").focus_node(menu_b_focus_node.clone()),
+                                    )
+                                    .into_widget(),
+                                    Button::tag("d").into_widget(),
+                                ])
+                                .into_widget()
+                        })
+                        .child(AnchorButton::new("anchor").focus_node(anchor_focus_node.clone())),
+                    )
+                    .into_widget(),
+                    Button::tag("c").into_widget(),
+                ]),
+            ));
 
-        controller.open(&mut tester.app(), None);
-        tester.pump();
-
-        anchor_focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
-
-        for focused in ["anchor", "b"] {
-            tester.send_key_event(
-                PhysicalKeyboardKey::ARROW_LEFT,
-                LogicalKeyboardKey::ARROW_LEFT,
-            );
-            assert_eq!(tester.focused_label(), Some(focus_label(focused)));
-
-            tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
-            assert_eq!(tester.focused_label(), Some(focus_label(focused)));
-
-            send_shift_tab(&tester);
-            assert_eq!(tester.focused_label(), Some(focus_label(focused)));
-
-            tester.send_key_event(PhysicalKeyboardKey::HOME, LogicalKeyboardKey::HOME);
-            assert_eq!(tester.focused_label(), Some(focus_label(focused)));
-
-            tester.send_key_event(PhysicalKeyboardKey::END, LogicalKeyboardKey::END);
-            assert_eq!(tester.focused_label(), Some(focus_label(focused)));
-
-            b_focus_node.request_focus(&mut tester.app(), None);
+            controller.open(&mut tester.app(), None);
             tester.pump();
-        }
 
-        assert_eq!(
-            *invoked.borrow(),
-            ["left", "next", "previous", "left", "next", "previous"]
-        );
+            anchor_focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
+
+            for focused in ["anchor", "b"] {
+                tester.send_key_event(
+                    PhysicalKeyboardKey::ARROW_LEFT,
+                    LogicalKeyboardKey::ARROW_LEFT,
+                );
+                assert_eq!(tester.focused_label(), Some(focus_label(focused)));
+
+                tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
+                assert_eq!(tester.focused_label(), Some(focus_label(focused)));
+
+                send_shift_tab(&mut tester);
+                assert_eq!(tester.focused_label(), Some(focus_label(focused)));
+
+                tester.send_key_event(PhysicalKeyboardKey::HOME, LogicalKeyboardKey::HOME);
+                assert_eq!(tester.focused_label(), Some(focus_label(focused)));
+
+                tester.send_key_event(PhysicalKeyboardKey::END, LogicalKeyboardKey::END);
+                assert_eq!(tester.focused_label(), Some(focus_label(focused)));
+
+                b_focus_node.request_focus(&mut tester.app(), None);
+                tester.pump();
+            }
+
+            assert_eq!(
+                *invoked.borrow(),
+                ["left", "next", "previous", "left", "next", "previous"]
+            );
+        });
     }
 
     // Menu implementations differ as to whether tabbing traverses a closes a menu or traverses
@@ -5285,246 +5312,244 @@ mod tests {
     // items.
     #[test]
     fn tab_traversal_is_not_handled() {
-        let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        let b_focus_node = labelled_focus_node(&mut tester.app(), "b");
-        let bb_focus_node = labelled_focus_node(&mut tester.app(), "b.b");
-        let invoked = log();
-        let actions = {
-            let mut app = tester.app();
-            let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
-            actions.insert(
-                TypeId::of::<NextFocusIntent>(),
-                logging_action::<NextFocusIntent>(&mut app, &invoked, "next"),
-            );
-            actions.insert(
-                TypeId::of::<PreviousFocusIntent>(),
-                logging_action::<PreviousFocusIntent>(&mut app, &invoked, "previous"),
-            );
-            actions
-        };
-        tester.pump_widget(TestApp::new(
-            Row::new().children([Actions::new(
-                actions,
-                RawMenuAnchorGroup::new(
-                    Column::new().children([
-                        Button::tag("a").into_widget(),
-                        Menu::new()
-                            .menu_panel(panel(vec![
-                                Button::tag("b.a").into_widget(),
-                                Button::tag("b.b")
-                                    .focus_node(bb_focus_node.clone())
-                                    .into_widget(),
-                                Button::tag("b.c").into_widget(),
-                            ]))
-                            .child(AnchorButton::new("b").focus_node(b_focus_node.clone()))
-                            .into_widget(),
-                        Button::tag("c").into_widget(),
-                    ]),
-                    controller,
-                ),
-            )
-            .into_widget()]),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            let b_focus_node = labelled_focus_node(&mut tester.app(), "b");
+            let bb_focus_node = labelled_focus_node(&mut tester.app(), "b.b");
+            let invoked = log();
+            let actions = {
+                let mut app = tester.app();
+                let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
+                actions.insert(
+                    TypeId::of::<NextFocusIntent>(),
+                    logging_action::<NextFocusIntent>(&mut app, &invoked, "next"),
+                );
+                actions.insert(
+                    TypeId::of::<PreviousFocusIntent>(),
+                    logging_action::<PreviousFocusIntent>(&mut app, &invoked, "previous"),
+                );
+                actions
+            };
+            tester.pump_widget(TestApp::new(
+                Row::new().children([Actions::new(
+                    actions,
+                    RawMenuAnchorGroup::new(
+                        Column::new().children([
+                            Button::tag("a").into_widget(),
+                            Menu::new()
+                                .menu_panel(panel(vec![
+                                    Button::tag("b.a").into_widget(),
+                                    Button::tag("b.b")
+                                        .focus_node(bb_focus_node.clone())
+                                        .into_widget(),
+                                    Button::tag("b.c").into_widget(),
+                                ]))
+                                .child(AnchorButton::new("b").focus_node(b_focus_node.clone()))
+                                .into_widget(),
+                            Button::tag("c").into_widget(),
+                        ]),
+                        controller,
+                    ),
+                )
+                .into_widget()]),
+            ));
 
-        b_focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
+            b_focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(tester.focused_label(), Some(focus_label("b")));
+            assert_eq!(tester.focused_label(), Some(focus_label("b")));
 
-        tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
-        tester.pump();
+            tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
+            tester.pump();
 
-        assert_eq!(tester.focused_label(), Some(focus_label("b")));
+            assert_eq!(tester.focused_label(), Some(focus_label("b")));
 
-        send_shift_tab(&tester);
-        tester.pump();
+            send_shift_tab(&mut tester);
+            tester.pump();
 
-        assert_eq!(tester.focused_label(), Some(focus_label("b")));
+            assert_eq!(tester.focused_label(), Some(focus_label("b")));
 
-        // Open and move focus to nested menu
-        tester.tap("b");
-        tester.pump();
-        bb_focus_node.request_focus(&mut tester.app(), None);
-        tester.pump();
+            // Open and move focus to nested menu
+            tester.tap(find::text("b"));
+            tester.pump();
+            bb_focus_node.request_focus(&mut tester.app(), None);
+            tester.pump();
 
-        assert_eq!(tester.focused_label(), Some(focus_label("b.b")));
+            assert_eq!(tester.focused_label(), Some(focus_label("b.b")));
 
-        tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
-        tester.pump();
+            tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
+            tester.pump();
 
-        assert_eq!(tester.focused_label(), Some(focus_label("b.b")));
+            assert_eq!(tester.focused_label(), Some(focus_label("b.b")));
 
-        send_shift_tab(&tester);
-        tester.pump();
+            send_shift_tab(&mut tester);
+            tester.pump();
 
-        assert_eq!(tester.focused_label(), Some(focus_label("b.b")));
-        assert_eq!(*invoked.borrow(), ["next", "previous", "next", "previous"]);
+            assert_eq!(tester.focused_label(), Some(focus_label("b.b")));
+            assert_eq!(*invoked.borrow(), ["next", "previous", "next", "previous"]);
+        });
     }
 
     #[test]
     fn actions_around_a_menu_are_invoked_from_both_the_anchor_and_the_overlay() {
-        let tester = Tester::new();
-        let anchor_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
-        let a_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
-        let invoked_anchor = Rc::new(Cell::new(false));
-        let invoked_overlay = Rc::new(Cell::new(false));
-        let actions = {
-            let mut app = tester.app();
-            let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
-            actions.insert(
-                TypeId::of::<VoidCallbackIntent>(),
-                Retained::into_erased(CallbackAction::<VoidCallbackIntent>::new(
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let anchor_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
+            let a_focus_node: FocusNodeRef = FocusNode::new(&mut tester.app()).into_erased();
+            let invoked_anchor = Rc::new(Cell::new(false));
+            let invoked_overlay = Rc::new(Cell::new(false));
+            let actions = {
+                let mut app = tester.app();
+                let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
+                actions.insert(
+                    TypeId::of::<VoidCallbackIntent>(),
+                    Retained::into_erased(CallbackAction::<VoidCallbackIntent>::new(
+                        &mut app,
+                        Rc::new(|app, intent: &VoidCallbackIntent| {
+                            intent.callback.call(app);
+                            None
+                        }),
+                    )),
+                );
+                actions
+            };
+            tester.pump_widget(TestApp::new(Actions::new(
+                actions,
+                Menu::new()
+                    .focus_node(anchor_focus_node.clone())
+                    .menu_panel(panel(vec![
+                        Button::tag("a")
+                            .focus_node(a_focus_node.clone())
+                            .into_widget(),
+                    ]))
+                    .child(AnchorButton::new("anchor").focus_node(anchor_focus_node.clone())),
+            )));
+
+            tester.tap(find::text("anchor"));
+            tester.pump();
+
+            {
+                let mut app = tester.app();
+                let (anchor, overlay) = (Rc::clone(&invoked_anchor), Rc::clone(&invoked_overlay));
+                let anchor_context = anchor_focus_node.context(&app).expect("attached");
+                Actions::invoke(
                     &mut app,
-                    Rc::new(|app, intent: &VoidCallbackIntent| {
-                        intent.callback.call(app);
-                        None
-                    }),
-                )),
-            );
-            actions
-        };
-        tester.pump_widget(TestApp::new(Actions::new(
-            actions,
-            Menu::new()
-                .focus_node(anchor_focus_node.clone())
-                .menu_panel(panel(vec![
-                    Button::tag("a")
-                        .focus_node(a_focus_node.clone())
-                        .into_widget(),
-                ]))
-                .child(AnchorButton::new("anchor").focus_node(anchor_focus_node.clone())),
-        )));
+                    anchor_context,
+                    &VoidCallbackIntent::new(Listener::new(move |_app| anchor.set(true))),
+                );
+                let overlay_context = a_focus_node.context(&app).expect("attached");
+                Actions::invoke(
+                    &mut app,
+                    overlay_context,
+                    &VoidCallbackIntent::new(Listener::new(move |_app| overlay.set(true))),
+                );
+            }
 
-        tester.tap("anchor");
-        tester.pump();
+            tester.pump();
 
-        {
-            let mut app = tester.app();
-            let (anchor, overlay) = (Rc::clone(&invoked_anchor), Rc::clone(&invoked_overlay));
-            let anchor_context = anchor_focus_node.context(&app).expect("attached");
-            Actions::invoke(
-                &mut app,
-                anchor_context,
-                &VoidCallbackIntent::new(Listener::new(move |_app| anchor.set(true))),
-            );
-            let overlay_context = a_focus_node.context(&app).expect("attached");
-            Actions::invoke(
-                &mut app,
-                overlay_context,
-                &VoidCallbackIntent::new(Listener::new(move |_app| overlay.set(true))),
-            );
-        }
-
-        tester.pump();
-
-        assert!(invoked_anchor.get());
-        assert!(invoked_overlay.get());
+            assert!(invoked_anchor.get());
+            assert!(invoked_overlay.get());
+        });
     }
 
     #[test]
     fn menus_do_not_close_when_the_root_menus_own_panel_scrolls() {
-        let tester = Tester::new();
-        let scroll_controller = scroll_controller(&mut tester.app());
-        let root_opened = Rc::new(Cell::new(false));
-        let opened = log();
-        let closed = log();
-        let large_button_constraints = BoxConstraints::tight_for(Some(200.0), Some(300.0));
-        let (on_root_open, on_root_close) = (Rc::clone(&root_opened), Rc::clone(&root_opened));
-        let on_close = {
-            let (opened, closed) = (Rc::clone(&opened), Rc::clone(&closed));
-            Rc::new(move |_app: &mut App| {
-                opened.borrow_mut().retain(|opened| *opened != "a");
-                closed.borrow_mut().push("a");
-            }) as VoidCallback
-        };
-        tester.pump_widget(TestApp::new(
-            SingleChildScrollView::new()
-                .controller(scroll_controller.clone())
-                .child(
-                    Container::new()
-                        .height(700.0)
-                        .alignment(AlignmentGeometry::TOP_LEFT)
-                        .child(
-                            Menu::new()
-                                .on_open(Rc::new(move |_app| on_root_open.set(true)))
-                                .on_close(Rc::new(move |_app| on_root_close.set(false)))
-                                .menu_panel(panel(vec![
-                                    Menu::new()
-                                        .on_open(push(&opened, "a"))
-                                        .on_close(on_close)
-                                        .menu_panel(panel(vec![
-                                            Button::tag("a.a")
-                                                .constraints(large_button_constraints)
-                                                .into_widget(),
-                                        ]))
-                                        .child(
-                                            AnchorButton::new("a")
-                                                .constraints(large_button_constraints),
-                                        )
-                                        .into_widget(),
-                                    Button::tag("b")
-                                        .constraints(large_button_constraints)
-                                        .into_widget(),
-                                    Button::tag("c")
-                                        .constraints(large_button_constraints)
-                                        .into_widget(),
-                                    Button::tag("d")
-                                        .constraints(large_button_constraints)
-                                        .into_widget(),
-                                ]))
-                                .child(AnchorButton::new("anchor")),
-                        ),
-                ),
-        ));
+        test_widgets(|tester| {
+            let mut tester = Tester::new(tester);
+            let scroll_controller = scroll_controller(&mut tester.app());
+            let root_opened = Rc::new(Cell::new(false));
+            let opened = log();
+            let closed = log();
+            let large_button_constraints = BoxConstraints::tight_for(Some(200.0), Some(300.0));
+            let (on_root_open, on_root_close) = (Rc::clone(&root_opened), Rc::clone(&root_opened));
+            let on_close = {
+                let (opened, closed) = (Rc::clone(&opened), Rc::clone(&closed));
+                Rc::new(move |_app: &mut App| {
+                    opened.borrow_mut().retain(|opened| *opened != "a");
+                    closed.borrow_mut().push("a");
+                }) as VoidCallback
+            };
+            tester.pump_widget(TestApp::new(
+                SingleChildScrollView::new()
+                    .controller(scroll_controller.clone())
+                    .child(
+                        Container::new()
+                            .height(700.0)
+                            .alignment(AlignmentGeometry::TOP_LEFT)
+                            .child(
+                                Menu::new()
+                                    .on_open(Rc::new(move |_app| on_root_open.set(true)))
+                                    .on_close(Rc::new(move |_app| on_root_close.set(false)))
+                                    .menu_panel(panel(vec![
+                                        Menu::new()
+                                            .on_open(push(&opened, "a"))
+                                            .on_close(on_close)
+                                            .menu_panel(panel(vec![
+                                                Button::tag("a.a")
+                                                    .constraints(large_button_constraints)
+                                                    .into_widget(),
+                                            ]))
+                                            .child(
+                                                AnchorButton::new("a")
+                                                    .constraints(large_button_constraints),
+                                            )
+                                            .into_widget(),
+                                        Button::tag("b")
+                                            .constraints(large_button_constraints)
+                                            .into_widget(),
+                                        Button::tag("c")
+                                            .constraints(large_button_constraints)
+                                            .into_widget(),
+                                        Button::tag("d")
+                                            .constraints(large_button_constraints)
+                                            .into_widget(),
+                                    ]))
+                                    .child(AnchorButton::new("anchor")),
+                            ),
+                    ),
+            ));
 
-        tester.tap("anchor");
-        tester.pump();
-        assert!(root_opened.get());
+            tester.tap(find::text("anchor"));
+            tester.pump();
+            assert!(root_opened.get());
 
-        // Hover the first submenu anchor.
-        tester.tap("a");
-        let a_center = tester.rect_of_text("a").center();
-        {
-            let mut app = tester.app();
-            GestureBinding::instance(&mut app).handle_pointer_event(
-                &mut app,
-                PointerEvent::Hover(PointerHoverEvent {
-                    pointer: 2,
-                    position: a_center,
-                    kind: PointerDeviceKind::Mouse,
-                    ..PointerHoverEvent::default()
-                }),
-            );
-            app.drain_microtasks();
-        }
-        tester.pump();
-        assert_eq!(*opened.borrow(), ["a"]);
+            // Hover the first submenu anchor.
+            tester.tap(find::text("a"));
+            let a_center = tester.get_center(find::text("a"));
+            {
+                let mut mouse = TestPointer::mouse(2, 0);
+                tester.move_to(&mut mouse, a_center, false);
+            }
+            tester.pump();
+            assert_eq!(*opened.borrow(), ["a"]);
 
-        // Menus do not close on internal scroll.
-        {
-            let mut app = tester.app();
-            GestureBinding::instance(&mut app).handle_pointer_event(
-                &mut app,
-                PointerEvent::Scroll(PointerScrollEvent {
-                    pointer: 2,
-                    position: a_center,
-                    kind: PointerDeviceKind::Mouse,
-                    scroll_delta: Offset::new(0.0, 30.0),
-                    ..PointerScrollEvent::default()
-                }),
-            );
-            app.drain_microtasks();
-        }
-        tester.pump();
-        assert!(root_opened.get());
-        assert!(closed.borrow().is_empty());
+            // Menus do not close on internal scroll.
+            {
+                let mut app = tester.app();
+                GestureBinding::instance(&mut app).handle_pointer_event(
+                    &mut app,
+                    PointerEvent::Scroll(PointerScrollEvent {
+                        pointer: 2,
+                        position: a_center,
+                        kind: PointerDeviceKind::Mouse,
+                        scroll_delta: Offset::new(0.0, 30.0),
+                        ..PointerScrollEvent::default()
+                    }),
+                );
+                app.drain_microtasks();
+            }
+            tester.pump();
+            assert!(root_opened.get());
+            assert!(closed.borrow().is_empty());
 
-        // Menus close on external scroll.
-        scroll_controller.jump_to(&mut tester.app(), 700.0);
-        tester.pump();
-        assert!(!root_opened.get());
-        assert_eq!(*closed.borrow(), ["a"]);
+            // Menus close on external scroll.
+            scroll_controller.jump_to(&mut tester.app(), 700.0);
+            tester.pump();
+            assert!(!root_opened.get());
+            assert_eq!(*closed.borrow(), ["a"]);
+        });
     }
 
     /// Dart's `notifier.hasListeners`.

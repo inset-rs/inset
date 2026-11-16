@@ -2696,31 +2696,27 @@ pub enum TraversalEdgeBehavior {
 pub(crate) mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
-    use waft_foundation::AppCell;
 
     use waft_embedder::{
         Matrix4, Rect, Size, SystemMouseCursorKind, TextEditingValue, TextInputConfiguration,
-        TextInputHost, View as EmbedderView, ViewFocusDirection, ViewFocusState, ViewHost, ViewId,
-        ViewMetrics,
+        TextInputHost, ViewFocusDirection, ViewFocusState, ViewHost,
     };
-    use waft_gestures::{PointerDownEvent, PointerEvent};
     use waft_services::{KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey, ServicesBinding};
     use waft_test::TestPlatform;
 
     use super::*;
-    use crate::binding::run_app;
-    use crate::framework::{IntoWidget, WidgetRef};
-    use crate::test_harness::pump_every_view;
+    use crate::framework::IntoWidget;
+    use crate::testing::{TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant};
     use crate::widgets::basic::{Builder, SizedBox};
 
-    /// A view, its own host, whose text input answers whether its host edits keys itself, and
-    /// whether it provides Edit's commands.
-    struct TestView {
+    /// A view's host whose text input answers whether it edits keys itself, and whether it
+    /// provides Edit's commands.
+    struct EditingHost {
         handles_editing_keys: bool,
         provides_edit_commands: bool,
     }
 
-    impl TextInputHost for TestView {
+    impl TextInputHost for EditingHost {
         fn set_client(&self, _configuration: &TextInputConfiguration) {}
 
         fn show(&self) {}
@@ -2748,28 +2744,7 @@ pub(crate) mod tests {
         }
     }
 
-    impl EmbedderView for TestView {
-        fn id(&self) -> ViewId {
-            ViewId(0)
-        }
-
-        fn metrics(&self) -> ViewMetrics {
-            ViewMetrics {
-                physical_size: [800.0, 600.0],
-                physical_constraints: waft_embedder::ViewConstraints::tight(800.0, 600.0),
-                device_pixel_ratio: 2.0,
-                ..ViewMetrics::default()
-            }
-        }
-
-        fn present(&self, _scene: std::sync::Arc<waft_embedder::Scene>) {}
-
-        fn host(&self) -> &dyn ViewHost {
-            self
-        }
-    }
-
-    impl ViewHost for TestView {
+    impl ViewHost for EditingHost {
         fn text_input(&self) -> Option<&dyn TextInputHost> {
             Some(self)
         }
@@ -2779,71 +2754,46 @@ pub(crate) mod tests {
         fn request_focus_change(&self, _state: ViewFocusState, _direction: ViewFocusDirection) {}
     }
 
-    /// An [`App`] with a single view, ready for [`run_app`].
-    ///
-    /// Its host reports plain key presses, so a text field keeps its own key bindings.
-    pub(crate) fn app_with_view() -> Rc<AppCell> {
-        app_with_view_of_host(TargetPlatform::MacOS, false)
+    /// A tester on a macOS host whose view's text input `host` answers for.
+    fn tester_on_mac_with(host: EditingHost) -> WidgetTester {
+        WidgetTester::with_view(
+            TestPlatform::new().on(TargetPlatform::MacOS),
+            waft_test::TestView::with_pixel_ratio(
+                WidgetTester::SIZE.width() * WidgetTester::DEVICE_PIXEL_RATIO,
+                WidgetTester::SIZE.height() * WidgetTester::DEVICE_PIXEL_RATIO,
+                WidgetTester::DEVICE_PIXEL_RATIO,
+            )
+            .with_host(Rc::new(host)),
+        )
     }
 
-    /// The same, over a host that turns editing keys into edits itself, as Flutter's macOS
+    /// A tester over a macOS host that turns editing keys into edits itself, as Flutter's macOS
     /// and iOS embedders do.
-    pub(crate) fn app_with_view_whose_host_edits() -> Rc<AppCell> {
-        app_with_view_of_host(TargetPlatform::MacOS, true)
-    }
-
-    /// An [`App`] with a single view on a host of `target`, whose text input edits keys
-    /// itself or not.
-    pub(crate) fn app_with_view_of_host(
-        target: TargetPlatform,
-        handles_editing_keys: bool,
-    ) -> Rc<AppCell> {
-        let platform = TestPlatform::new().on(target).with_view(Rc::new(TestView {
-            handles_editing_keys,
+    pub(crate) fn tester_whose_host_edits() -> WidgetTester {
+        tester_on_mac_with(EditingHost {
+            handles_editing_keys: true,
             provides_edit_commands: false,
-        }));
-        AppCell::with_platform(Rc::new(platform))
+        })
     }
 
-    /// An [`App`] with a single view on a macOS host that reports plain keys and provides Edit's
-    /// commands, as Waft's macOS host does with its Edit menu.
-    pub(crate) fn app_with_view_whose_host_provides_edit_commands() -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView {
-                handles_editing_keys: false,
-                provides_edit_commands: true,
-            }));
-        AppCell::with_platform(Rc::new(platform))
+    /// A tester over a macOS host that reports plain keys and provides Edit's commands, as Waft's
+    /// macOS host does with its Edit menu.
+    pub(crate) fn tester_whose_host_provides_edit_commands() -> WidgetTester {
+        tester_on_mac_with(EditingHost {
+            handles_editing_keys: false,
+            provides_edit_commands: true,
+        })
     }
 
-    /// Mounts `widget` through [`run_app`] and draws the first frame.
-    pub(crate) fn mount(cell: &AppCell, widget: WidgetRef) {
-        run_app(&mut cell.borrow_mut(), widget);
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-    }
-
-    /// A mounted app whose tree is one `Builder`, plus that builder's context.
-    fn mounted_context() -> (Rc<AppCell>, BuildContext) {
-        mounted_context_on(TargetPlatform::MacOS)
-    }
-
-    /// The same, over a host of `target`.
-    fn mounted_context_on(target: TargetPlatform) -> (Rc<AppCell>, BuildContext) {
-        let cell = app_with_view_of_host(target, false);
+    /// Pumps a tree that is one `Builder`, and answers that builder's context.
+    fn pump_builder(tester: &mut WidgetTester) -> BuildContext {
         let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
         let sink = Rc::clone(&captured);
-        mount(
-            &cell,
-            Builder::new(move |_app, context| {
-                sink.set(Some(context));
-                SizedBox::shrink().into_widget()
-            })
-            .into_widget(),
-        );
-        let context = captured.get().expect("the builder ran");
-        (cell, context)
+        tester.pump_widget(Builder::new(move |_app, context| {
+            sink.set(Some(context));
+            SizedBox::shrink().into_widget()
+        }));
+        captured.get().expect("the builder ran")
     }
 
     fn key_a_down() -> KeyEvent {
@@ -2868,181 +2818,193 @@ pub(crate) mod tests {
 
     #[test]
     fn a_node_attached_under_a_scope_gains_primary_focus_on_request_focus() {
-        let (cell, context) = mounted_context();
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app).handle();
-        let scope = FocusScopeNode::new(&mut app);
-        attach_under(&mut app, scope.as_node(), context, root.as_node());
-        let node = FocusNode::new(&mut app);
-        attach_under(&mut app, node.as_node(), context, scope.as_node());
+        test_widgets(|tester| {
+            let context = pump_builder(tester);
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let root = manager.root_scope(&app).handle();
+            let scope = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope.as_node(), context, root.as_node());
+            let node = FocusNode::new(&mut app);
+            attach_under(&mut app, node.as_node(), context, scope.as_node());
 
-        node.request_focus(&mut app, None);
-        // The node is notified in a microtask, so the manager still has the old focus.
-        assert!(!node.has_primary_focus(&app));
+            node.request_focus(&mut app, None);
+            // The node is notified in a microtask, so the manager still has the old focus.
+            assert!(!node.has_primary_focus(&app));
 
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(node.as_node()));
-        assert!(node.has_primary_focus(&app));
-        assert!(node.has_focus(&mut app));
-        assert!(scope.has_focus(&mut app));
-        assert!(!scope.has_primary_focus(&app));
-        assert_eq!(scope.focused_child(&mut app), Some(node.as_node()));
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(node.as_node()));
+            assert!(node.has_primary_focus(&app));
+            assert!(node.has_focus(&mut app));
+            assert!(scope.has_focus(&mut app));
+            assert!(!scope.has_primary_focus(&app));
+            assert_eq!(scope.focused_child(&mut app), Some(node.as_node()));
+        });
     }
 
     #[test]
     fn unfocus_moves_the_focus_according_to_its_disposition() {
-        let (cell, context) = mounted_context();
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app).handle();
-        let scope = FocusScopeNode::new(&mut app);
-        attach_under(&mut app, scope.as_node(), context, root.as_node());
-        let child1 = FocusNode::new(&mut app);
-        attach_under(&mut app, child1.as_node(), context, scope.as_node());
-        let child2 = FocusNode::new(&mut app);
-        attach_under(&mut app, child2.as_node(), context, scope.as_node());
+        test_widgets(|tester| {
+            let context = pump_builder(tester);
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let root = manager.root_scope(&app).handle();
+            let scope = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope.as_node(), context, root.as_node());
+            let child1 = FocusNode::new(&mut app);
+            attach_under(&mut app, child1.as_node(), context, scope.as_node());
+            let child2 = FocusNode::new(&mut app);
+            attach_under(&mut app, child2.as_node(), context, scope.as_node());
 
-        child1.request_focus(&mut app, None);
-        app.drain_microtasks();
-        child2.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(child2.as_node()));
+            child1.request_focus(&mut app, None);
+            app.drain_microtasks();
+            child2.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(child2.as_node()));
 
-        // `previouslyFocusedChild` walks back down to the child focused before this one.
-        child2.unfocus(&mut app, UnfocusDisposition::PreviouslyFocusedChild);
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(child1.as_node()));
+            // `previouslyFocusedChild` walks back down to the child focused before this one.
+            child2.unfocus(&mut app, UnfocusDisposition::PreviouslyFocusedChild);
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(child1.as_node()));
 
-        // `scope` clears the history and parks the focus on the enclosing scope.
-        child1.unfocus(&mut app, UnfocusDisposition::Scope);
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(scope.as_node()));
-        assert_eq!(scope.focused_child(&mut app), None);
+            // `scope` clears the history and parks the focus on the enclosing scope.
+            child1.unfocus(&mut app, UnfocusDisposition::Scope);
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(scope.as_node()));
+            assert_eq!(scope.focused_child(&mut app), None);
+        });
     }
 
     #[test]
     fn set_first_focus_adopts_the_scope_and_focuses_it_with_its_parent() {
-        let (cell, context) = mounted_context();
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app).handle();
-        let scope1 = FocusScopeNode::new(&mut app);
-        attach_under(&mut app, scope1.as_node(), context, root.as_node());
-        let scope2 = FocusScopeNode::new(&mut app);
+        test_widgets(|tester| {
+            let context = pump_builder(tester);
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let root = manager.root_scope(&app).handle();
+            let scope1 = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope1.as_node(), context, root.as_node());
+            let scope2 = FocusScopeNode::new(&mut app);
 
-        scope1.set_first_focus(&mut app, scope2.handle());
-        assert_eq!(scope2.parent(&app), Some(scope1.as_node()));
-        assert_eq!(scope1.focused_child(&mut app), Some(scope2.as_node()));
-        assert!(!scope2.has_focus(&mut app));
+            scope1.set_first_focus(&mut app, scope2.handle());
+            assert_eq!(scope2.parent(&app), Some(scope1.as_node()));
+            assert_eq!(scope1.focused_child(&mut app), Some(scope2.as_node()));
+            assert!(!scope2.has_focus(&mut app));
 
-        scope1.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(scope2.as_node()));
+            scope1.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(scope2.as_node()));
+        });
     }
 
     #[test]
     fn a_node_that_cannot_request_focus_refuses_the_request() {
-        let (cell, context) = mounted_context();
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app).handle();
-        let scope = FocusScopeNode::new(&mut app);
-        attach_under(&mut app, scope.as_node(), context, root.as_node());
-        let node = FocusNode::new(&mut app);
-        attach_under(&mut app, node.as_node(), context, scope.as_node());
-        node.set_can_request_focus(&mut app, false);
+        test_widgets(|tester| {
+            let context = pump_builder(tester);
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let root = manager.root_scope(&app).handle();
+            let scope = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope.as_node(), context, root.as_node());
+            let node = FocusNode::new(&mut app);
+            attach_under(&mut app, node.as_node(), context, scope.as_node());
+            node.set_can_request_focus(&mut app, false);
 
-        node.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert!(!node.has_primary_focus(&app));
-        // Nothing asked for the focus, so it reverted to the root scope.
-        assert_eq!(manager.primary_focus(&app), Some(root.as_node()));
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert!(!node.has_primary_focus(&app));
+            // Nothing asked for the focus, so it reverted to the root scope.
+            assert_eq!(manager.primary_focus(&app), Some(root.as_node()));
+        });
     }
 
     #[test]
     fn descendants_are_focusable_false_unfocuses_and_blocks_the_descendants() {
-        let (cell, context) = mounted_context();
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app).handle();
-        let scope = FocusScopeNode::new(&mut app);
-        attach_under(&mut app, scope.as_node(), context, root.as_node());
-        let node = FocusNode::new(&mut app);
-        attach_under(&mut app, node.as_node(), context, scope.as_node());
+        test_widgets(|tester| {
+            let context = pump_builder(tester);
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let root = manager.root_scope(&app).handle();
+            let scope = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope.as_node(), context, root.as_node());
+            let node = FocusNode::new(&mut app);
+            attach_under(&mut app, node.as_node(), context, scope.as_node());
 
-        node.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(node.as_node()));
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(node.as_node()));
 
-        // Dart unfocuses the node the flag was set on, so the focus leaves the scope for the
-        // nearest focusable enclosing scope: the root.
-        scope.set_descendants_are_focusable(&mut app, false);
-        app.drain_microtasks();
-        assert!(!scope.descendants_are_focusable(&app));
-        assert!(!node.can_request_focus(&mut app));
-        assert_eq!(manager.primary_focus(&app), Some(root.as_node()));
+            // Dart unfocuses the node the flag was set on, so the focus leaves the scope for the
+            // nearest focusable enclosing scope: the root.
+            scope.set_descendants_are_focusable(&mut app, false);
+            app.drain_microtasks();
+            assert!(!scope.descendants_are_focusable(&app));
+            assert!(!node.can_request_focus(&mut app));
+            assert_eq!(manager.primary_focus(&app), Some(root.as_node()));
 
-        node.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(root.as_node()));
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(root.as_node()));
+        });
     }
 
     #[test]
     fn a_key_event_walks_from_the_primary_focus_to_the_root_until_one_handles_it() {
-        let (cell, context) = mounted_context();
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app).handle();
-        let scope = FocusScopeNode::new(&mut app);
-        attach_under(&mut app, scope.as_node(), context, root.as_node());
-        let node = FocusNode::new(&mut app);
-        attach_under(&mut app, node.as_node(), context, scope.as_node());
-        node.request_focus(&mut app, None);
-        app.drain_microtasks();
+        test_widgets(|tester| {
+            let context = pump_builder(tester);
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let root = manager.root_scope(&app).handle();
+            let scope = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope.as_node(), context, root.as_node());
+            let node = FocusNode::new(&mut app);
+            attach_under(&mut app, node.as_node(), context, scope.as_node());
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
 
-        let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
-        let result: Rc<Cell<KeyEventResult>> = Rc::new(Cell::new(KeyEventResult::Ignored));
-        {
-            let log = Rc::clone(&log);
-            let result = Rc::clone(&result);
-            node.set_on_key_event(
-                &mut app,
-                Some(Rc::new(move |_app, _node, _event| {
-                    log.borrow_mut().push("node");
-                    result.get()
-                })),
-            );
-        }
-        {
-            let log = Rc::clone(&log);
-            scope.set_on_key_event(
-                &mut app,
-                Some(Rc::new(move |_app, _node, _event| {
-                    log.borrow_mut().push("scope");
-                    KeyEventResult::Ignored
-                })),
-            );
-        }
-        {
-            let log = Rc::clone(&log);
-            root.set_on_key_event(
-                &mut app,
-                Some(Rc::new(move |_app, _node, _event| {
-                    log.borrow_mut().push("root");
-                    KeyEventResult::Ignored
-                })),
-            );
-        }
+            let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+            let result: Rc<Cell<KeyEventResult>> = Rc::new(Cell::new(KeyEventResult::Ignored));
+            {
+                let log = Rc::clone(&log);
+                let result = Rc::clone(&result);
+                node.set_on_key_event(
+                    &mut app,
+                    Some(Rc::new(move |_app, _node, _event| {
+                        log.borrow_mut().push("node");
+                        result.get()
+                    })),
+                );
+            }
+            {
+                let log = Rc::clone(&log);
+                scope.set_on_key_event(
+                    &mut app,
+                    Some(Rc::new(move |_app, _node, _event| {
+                        log.borrow_mut().push("scope");
+                        KeyEventResult::Ignored
+                    })),
+                );
+            }
+            {
+                let log = Rc::clone(&log);
+                root.set_on_key_event(
+                    &mut app,
+                    Some(Rc::new(move |_app, _node, _event| {
+                        log.borrow_mut().push("root");
+                        KeyEventResult::Ignored
+                    })),
+                );
+            }
 
-        let keyboard = HardwareKeyboard::instance(&mut app);
-        assert!(!keyboard.handle_key_event(&mut app, &key_a_down()));
-        assert_eq!(*log.borrow(), vec!["node", "scope", "root"]);
+            let keyboard = HardwareKeyboard::instance(&mut app);
+            assert!(!keyboard.handle_key_event(&mut app, &key_a_down()));
+            assert_eq!(*log.borrow(), vec!["node", "scope", "root"]);
 
-        log.borrow_mut().clear();
-        result.set(KeyEventResult::Handled);
-        assert!(keyboard.handle_key_event(&mut app, &key_a_down()));
-        assert_eq!(*log.borrow(), vec!["node"]);
+            log.borrow_mut().clear();
+            result.set(KeyEventResult::Handled);
+            assert!(keyboard.handle_key_event(&mut app, &key_a_down()));
+            assert_eq!(*log.borrow(), vec!["node"]);
+        });
     }
 
     /// The host reports `state`, as Dart's test sends it on `flutter/lifecycle`.
@@ -3050,14 +3012,12 @@ pub(crate) mod tests {
         ServicesBinding::instance(app).handle_lifecycle_message(app, state);
     }
 
-    /// The set-up the lifecycle tests share: a node in a scope under the root scope, on a host
-    /// of `target`, with the primary focus.
-    fn focused_node_on(
-        target: TargetPlatform,
-    ) -> (Rc<AppCell>, Ref<FocusNode>, Ref<FocusAttachment>) {
-        let (cell, context) = mounted_context_on(target);
+    /// The set-up the lifecycle tests share: a node in a scope under the root scope, with the
+    /// primary focus.
+    fn focused_node(tester: &mut WidgetTester) -> (Ref<FocusNode>, Ref<FocusAttachment>) {
+        let context = pump_builder(tester);
         let (node, attachment) = {
-            let mut app = cell.borrow_mut();
+            let mut app = tester.cell.borrow_mut();
             let root = FocusManager::instance(&mut app).root_scope(&app).handle();
             let scope = FocusScopeNode::new(&mut app);
             attach_under(&mut app, scope.as_node(), context, root.as_node());
@@ -3068,34 +3028,33 @@ pub(crate) mod tests {
             assert!(node.has_primary_focus(&app));
             (node, attachment)
         };
-        (cell, node, attachment)
+        (node, attachment)
     }
 
     #[test]
     fn focus_manager_ignores_app_lifecycle_changes_on_android_and_ios() {
-        for target in [TargetPlatform::Android, TargetPlatform::IOS] {
-            let (cell, node, _attachment) = focused_node_on(target);
-            let mut app = cell.borrow_mut();
+        test_widgets_variant(
+            TargetPlatformVariant::new([TargetPlatform::Android, TargetPlatform::IOS]),
+            |tester| {
+                let (node, _attachment) = focused_node(tester);
+                let mut app = tester.cell.borrow_mut();
 
-            set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
-            app.drain_microtasks();
-            assert!(node.has_primary_focus(&app));
+                set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
+                app.drain_microtasks();
+                assert!(node.has_primary_focus(&app));
 
-            set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
-            app.drain_microtasks();
-            assert!(node.has_primary_focus(&app));
-        }
+                set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
+                app.drain_microtasks();
+                assert!(node.has_primary_focus(&app));
+            },
+        );
     }
 
     #[test]
     fn focus_manager_responds_to_app_lifecycle_changes() {
-        for target in [
-            TargetPlatform::Linux,
-            TargetPlatform::MacOS,
-            TargetPlatform::Windows,
-        ] {
-            let (cell, node, _attachment) = focused_node_on(target);
-            let mut app = cell.borrow_mut();
+        test_widgets_variant(TargetPlatformVariant::desktop(), |tester| {
+            let (node, _attachment) = focused_node(tester);
+            let mut app = tester.cell.borrow_mut();
 
             set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
             app.drain_microtasks();
@@ -3104,33 +3063,31 @@ pub(crate) mod tests {
             set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
             app.drain_microtasks();
             assert!(node.has_primary_focus(&app));
-        }
+        });
     }
 
     #[test]
     fn node_is_removed_completely_even_if_app_is_paused() {
-        let (cell, node, attachment) = focused_node_on(TargetPlatform::MacOS);
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let (node, attachment) = focused_node(tester);
+            let mut app = tester.cell.borrow_mut();
 
-        set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
-        app.drain_microtasks();
-        attachment.detach(&mut app);
-        assert!(!node.has_primary_focus(&app));
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Paused);
+            app.drain_microtasks();
+            attachment.detach(&mut app);
+            assert!(!node.has_primary_focus(&app));
 
-        set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
-        app.drain_microtasks();
-        assert!(!node.has_primary_focus(&app));
+            set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
+            app.drain_microtasks();
+            assert!(!node.has_primary_focus(&app));
+        });
     }
 
     #[test]
     fn suspended_focus_is_not_restored_on_resume_when_another_node_claimed_focus() {
-        for target in [
-            TargetPlatform::Linux,
-            TargetPlatform::MacOS,
-            TargetPlatform::Windows,
-        ] {
-            let (cell, context) = mounted_context_on(target);
-            let mut app = cell.borrow_mut();
+        test_widgets_variant(TargetPlatformVariant::desktop(), |tester| {
+            let context = pump_builder(tester);
+            let mut app = tester.cell.borrow_mut();
             let root = FocusManager::instance(&mut app).root_scope(&app).handle();
             let scope = FocusScopeNode::new(&mut app);
             attach_under(&mut app, scope.as_node(), context, root.as_node());
@@ -3157,87 +3114,86 @@ pub(crate) mod tests {
             app.drain_microtasks();
             assert!(node_b.has_primary_focus(&app));
             assert!(!node_a.has_primary_focus(&app));
-        }
+        });
     }
 
     #[test]
     fn disposing_a_focused_node_moves_the_focus_to_its_scope() {
-        let (cell, context) = mounted_context();
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app).handle();
-        let scope = FocusScopeNode::new(&mut app);
-        attach_under(&mut app, scope.as_node(), context, root.as_node());
-        let node = FocusNode::new(&mut app);
-        attach_under(&mut app, node.as_node(), context, scope.as_node());
-        node.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(node.as_node()));
+        test_widgets(|tester| {
+            let context = pump_builder(tester);
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let root = manager.root_scope(&app).handle();
+            let scope = FocusScopeNode::new(&mut app);
+            attach_under(&mut app, scope.as_node(), context, root.as_node());
+            let node = FocusNode::new(&mut app);
+            attach_under(&mut app, node.as_node(), context, scope.as_node());
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(node.as_node()));
 
-        node.dispose(&mut app);
-        assert_eq!(manager.primary_focus(&app), None);
-        assert_eq!(node.parent(&app), None);
+            node.dispose(&mut app);
+            assert_eq!(manager.primary_focus(&app), None);
+            assert_eq!(node.parent(&app), None);
 
-        app.drain_microtasks();
-        assert_eq!(manager.primary_focus(&app), Some(scope.as_node()));
+            app.drain_microtasks();
+            assert_eq!(manager.primary_focus(&app), Some(scope.as_node()));
+        });
     }
 
+    /// Dart's `Events change focus highlight mode.`, its key and tap steps, on Android.
     #[test]
     fn the_highlight_mode_follows_the_last_interaction() {
-        let cell = app_with_view();
-        mount(&cell, SizedBox::shrink().into_widget());
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let seen: Rc<RefCell<Vec<FocusHighlightMode>>> = Rc::default();
-        {
-            let seen = Rc::clone(&seen);
-            manager.add_highlight_mode_listener(
-                &mut app,
-                Rc::new(move |_app, mode| seen.borrow_mut().push(mode)),
+        test_widgets(|tester| {
+            tester.pump_widget(SizedBox::shrink());
+            let seen: Rc<RefCell<Vec<FocusHighlightMode>>> = Rc::default();
+            tester.update(|app| {
+                let manager = FocusManager::instance(app);
+                let seen = Rc::clone(&seen);
+                manager.add_highlight_mode_listener(
+                    app,
+                    Rc::new(move |_app, mode| seen.borrow_mut().push(mode)),
+                );
+                manager.set_highlight_strategy(app, FocusHighlightStrategy::Automatic);
+            });
+            let highlight_mode = |tester: &WidgetTester| {
+                tester.update(|app| FocusManager::instance(app).highlight_mode(app))
+            };
+            // Android with no interaction yet.
+            assert_eq!(highlight_mode(tester), FocusHighlightMode::Touch);
+
+            tester.send_key_event(
+                PhysicalKeyboardKey::META_LEFT,
+                LogicalKeyboardKey::META_LEFT,
             );
-        }
-        // macOS with no interaction yet.
-        assert_eq!(
-            manager.highlight_mode(&mut app),
-            FocusHighlightMode::Traditional
-        );
+            assert_eq!(*seen.borrow(), vec![FocusHighlightMode::Traditional]);
+            assert_eq!(highlight_mode(tester), FocusHighlightMode::Traditional);
 
-        let router = GestureBinding::instance(&mut app).pointer_router(&app);
-        router.route(
-            &mut app,
-            PointerEvent::Down(PointerDownEvent {
-                kind: PointerDeviceKind::Touch,
-                ..PointerDownEvent::default()
-            }),
-        );
-        assert_eq!(manager.highlight_mode(&mut app), FocusHighlightMode::Touch);
-
-        HardwareKeyboard::instance(&mut app).handle_key_event(&mut app, &key_a_down());
-        assert_eq!(
-            manager.highlight_mode(&mut app),
-            FocusHighlightMode::Traditional
-        );
-        assert_eq!(
-            *seen.borrow(),
-            vec![FocusHighlightMode::Touch, FocusHighlightMode::Traditional]
-        );
+            tester.tap_at(Offset::ZERO, 1);
+            assert_eq!(
+                *seen.borrow(),
+                vec![FocusHighlightMode::Traditional, FocusHighlightMode::Touch]
+            );
+            assert_eq!(highlight_mode(tester), FocusHighlightMode::Touch);
+        });
     }
 
     #[test]
     fn the_highlight_strategy_pins_the_mode() {
-        let cell = app_with_view();
-        mount(&cell, SizedBox::shrink().into_widget());
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        manager.set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTouch);
-        assert_eq!(
-            manager.highlight_strategy(&app),
-            FocusHighlightStrategy::AlwaysTouch
-        );
-        assert_eq!(manager.highlight_mode(&mut app), FocusHighlightMode::Touch);
+        test_widgets(|tester| {
+            tester.pump_widget(SizedBox::shrink());
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            manager.set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTouch);
+            assert_eq!(
+                manager.highlight_strategy(&app),
+                FocusHighlightStrategy::AlwaysTouch
+            );
+            assert_eq!(manager.highlight_mode(&mut app), FocusHighlightMode::Touch);
 
-        HardwareKeyboard::instance(&mut app).handle_key_event(&mut app, &key_a_down());
-        assert_eq!(manager.highlight_mode(&mut app), FocusHighlightMode::Touch);
+            HardwareKeyboard::instance(&mut app).handle_key_event(&mut app, &key_a_down());
+            assert_eq!(manager.highlight_mode(&mut app), FocusHighlightMode::Touch);
+        });
     }
 
     #[test]

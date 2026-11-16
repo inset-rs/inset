@@ -5,8 +5,6 @@ use std::fmt::{self, Debug};
 use waft_embedder::{BlurStyle, MaskBlur, Paint};
 use waft_embedder::{Color, Offset, Shadow, lerp_double};
 
-use crate::debug::debug_disable_shadows;
-
 /// A shadow cast by a box.
 ///
 /// [`BoxShadow`] can cast non-rectangular shadows if the box is non-rectangular
@@ -28,10 +26,6 @@ pub struct BoxShadow {
     /// The [`BlurStyle`] to use for this shadow.
     ///
     /// Defaults to [`BlurStyle::Normal`].
-    ///
-    /// When [`crate::debug_disable_shadows`] is true, [`to_paint`](Self::to_paint)
-    /// ignores the [`blur_style`](Self::blur_style) and acts as if
-    /// [`BlurStyle::Normal`] was used.
     pub blur_style: BlurStyle,
 }
 
@@ -73,11 +67,6 @@ impl BoxShadow {
     /// should be inflated by [`spread_radius`](Self::spread_radius) pixels in every
     /// direction and then translated by [`offset`](Self::offset) before being
     /// filled using this [`Paint`].
-    ///
-    /// The [`blur_style`](Self::blur_style) is ignored if [`crate::debug_disable_shadows`]
-    /// is true. This causes an especially significant change to the rendering
-    /// when [`BlurStyle::Outer`] is used; the caller is responsible for adjusting
-    /// for that case if necessary.
     pub fn to_paint(&self) -> Paint {
         let sigma = self.blur_sigma() as f32;
         let mask_blur = match self.blur_style {
@@ -86,15 +75,11 @@ impl BoxShadow {
             BlurStyle::Inner => MaskBlur::inner(sigma),
             BlurStyle::Outer => MaskBlur::outer(sigma),
         };
-        let mut result = Paint {
+        Paint {
             color: self.color.into(),
             mask_blur: Some(mask_blur),
             ..Paint::default()
-        };
-        if cfg!(debug_assertions) && debug_disable_shadows() {
-            result.mask_blur = None;
         }
-        result
     }
 
     /// Returns a new box shadow with its offset, blurRadius, and spreadRadius
@@ -218,7 +203,6 @@ impl Debug for BoxShadow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::debug::set_debug_disable_shadows;
 
     #[test]
     fn lerp_null_arms_and_list_padding_match_dart() {
@@ -356,21 +340,5 @@ mod tests {
                 ..BoxShadow::default()
             }
         );
-    }
-
-    #[test]
-    fn to_paint_drops_mask_blur_when_debug_disable_shadows() {
-        set_debug_disable_shadows(true);
-        let paint = BoxShadow {
-            blur_radius: 4.0,
-            ..BoxShadow::default()
-        }
-        .to_paint();
-        set_debug_disable_shadows(false);
-        if cfg!(debug_assertions) {
-            assert!(paint.mask_blur.is_none());
-        } else {
-            assert!(paint.mask_blur.is_some());
-        }
     }
 }

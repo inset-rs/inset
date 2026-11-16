@@ -175,9 +175,11 @@ mod tests {
     use waft_embedder::TextDirection;
     use waft_widgets::{Directionality, IntoWidget, LookupBoundary, WidgetRef};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
+    use crate::drawer_theme::tests::probe;
     use crate::material_localizations::tests::us_english;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
 
     fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
         panic
@@ -187,11 +189,13 @@ mod tests {
             .unwrap_or_default()
     }
 
-    fn checked(wrap: impl FnOnce(WidgetRef) -> WidgetRef + 'static) -> Result<bool, String> {
-        let cell = test_cell();
+    fn checked(
+        tester: &mut WidgetTester,
+        wrap: impl FnOnce(WidgetRef) -> WidgetRef + 'static,
+    ) -> Result<bool, String> {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             probe(
-                &cell,
+                tester,
                 move |_app, probe| {
                     Directionality::new(TextDirection::Ltr, wrap(probe)).into_widget()
                 },
@@ -203,38 +207,40 @@ mod tests {
 
     #[test]
     fn debug_check_has_material_passes_under_a_material() {
-        with_main_thread_stack(|| {
-            let found = checked(|probe| Material::new().child(probe).into_widget());
+        test_widgets(|tester| {
+            let found = checked(tester, |probe| Material::new().child(probe).into_widget());
             assert_eq!(found, Ok(true));
         });
     }
 
     #[test]
     fn debug_check_has_material_reports_a_missing_material() {
-        let message = checked(|probe| probe).expect_err("there is no Material");
-        assert!(
-            message.starts_with("No Material widget found."),
-            "{message}"
-        );
-        assert!(
-            message.contains(
-                "widgets require a Material widget ancestor within the closest LookupBoundary."
-            ),
-            "{message}"
-        );
-        assert!(
-            message.contains(
-                "To introduce a Material widget, you can either directly include one, or use a \
-                 widget that contains Material itself, such as a Card, Dialog, Drawer, or Scaffold."
-            ),
-            "{message}"
-        );
+        test_widgets(|tester| {
+            let message = checked(tester, |probe| probe).expect_err("there is no Material");
+            assert!(
+                message.starts_with("No Material widget found."),
+                "{message}"
+            );
+            assert!(
+                message.contains(
+                    "widgets require a Material widget ancestor within the closest LookupBoundary."
+                ),
+                "{message}"
+            );
+            assert!(
+                message.contains(
+                    "To introduce a Material widget, you can either directly include one, or use a \
+             widget that contains Material itself, such as a Card, Dialog, Drawer, or Scaffold."
+                ),
+                "{message}"
+            );
+        });
     }
 
     #[test]
     fn debug_check_has_material_reports_a_material_hidden_by_a_lookup_boundary() {
-        with_main_thread_stack(|| {
-            let message = checked(|probe| {
+        test_widgets(|tester| {
+            let message = checked(tester, |probe| {
                 Material::new()
                     .child(LookupBoundary::new(probe))
                     .into_widget()
@@ -255,43 +261,42 @@ mod tests {
 
     #[test]
     fn debug_check_has_material_localizations_reports_missing_localizations() {
-        let cell = test_cell();
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            probe(
-                &cell,
-                |_app, probe| probe,
-                debug_check_has_material_localizations,
-            )
-        }));
-        let message = panic_message(outcome.expect_err("there are no localizations"));
-        assert!(
-            message.starts_with("No MaterialLocalizations found."),
-            "{message}"
-        );
-        assert!(
+        test_widgets(|tester| {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                probe(
+                    tester,
+                    |_app, probe| probe,
+                    debug_check_has_material_localizations,
+                )
+            }));
+            let message = panic_message(outcome.expect_err("there are no localizations"));
+            assert!(
+                message.starts_with("No MaterialLocalizations found."),
+                "{message}"
+            );
+            assert!(
             message.contains(
-                "widgets require MaterialLocalizations to be provided by a Localizations widget \
-                 ancestor."
+            "widgets require MaterialLocalizations to be provided by a Localizations widget \
+             ancestor."
             ),
             "{message}"
         );
-        assert!(
-            message.contains(
-                "The material library uses Localizations to generate messages, labels, and \
-                 abbreviations."
-            ),
-            "{message}"
-        );
+            assert!(
+                message.contains(
+                    "The material library uses Localizations to generate messages, labels, and \
+             abbreviations."
+                ),
+                "{message}"
+            );
+        });
     }
 
     // 'debugCheckHasScaffold control test', without the diagnostics' structure (a panic carries
     // a message) and the ancestor chain (`describeMissingAncestor`, deferred).
     #[test]
     fn debug_check_has_scaffold_reports_a_missing_scaffold() {
-        with_main_thread_stack(|| {
-            let mut tester =
-                crate::test_support::WidgetTester::on(waft_embedder::TargetPlatform::Android);
-            tester.install_fonts();
+        test_widgets(|_| {
+            let mut tester = WidgetTester::on(waft_embedder::TargetPlatform::Android);
             let home = waft_widgets::Builder::new(|app, context| {
                 crate::bottom_sheet::show_bottom_sheet(
                     app,
@@ -334,12 +339,13 @@ mod tests {
 
     #[test]
     fn debug_check_has_material_localizations_passes_under_material_localizations() {
-        let cell = test_cell();
-        let found = probe(
-            &cell,
-            |_app, probe| us_english(probe),
-            debug_check_has_material_localizations,
-        );
-        assert!(found);
+        test_widgets(|tester| {
+            let found = probe(
+                tester,
+                |_app, probe| us_english(probe),
+                debug_check_has_material_localizations,
+            );
+            assert!(found);
+        });
     }
 }

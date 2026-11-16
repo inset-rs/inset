@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use waft_animation::{AnimationBehavior, AnimationController, Curve, Curves};
@@ -1001,7 +1000,10 @@ pub type EditableTextContextMenuBuilder =
 const K_CURSOR_BLINK_HALF_PERIOD: Duration = Duration::from_millis(500);
 const K_OBSCURE_SHOW_LATEST_CHAR_CURSOR_TICKS: i32 = 3;
 
-static DEBUG_DETERMINISTIC_CURSOR: AtomicBool = AtomicBool::new(false);
+/// The [`App`] debug flag of [`EditableText::debug_deterministic_cursor`].
+pub struct DebugDeterministicCursor;
+
+impl waft_foundation::DebugFlag for DebugDeterministicCursor {}
 
 /// A time-value pair that represents a key frame in an animation.
 #[derive(Clone, Copy, Debug)]
@@ -1218,14 +1220,15 @@ impl EditableText {
     /// The default value for [`stylus_handwriting_enabled`](Self::stylus_handwriting_enabled).
     pub const DEFAULT_STYLUS_HANDWRITING_ENABLED: bool = true;
 
-    /// Whether the blinking cursor should be drawn as always-on for tests.
-    pub fn debug_deterministic_cursor() -> bool {
-        DEBUG_DETERMINISTIC_CURSOR.load(Ordering::Relaxed)
+    /// Whether the blinking cursor should be drawn as always-on for tests: Dart's static
+    /// `EditableText.debugDeterministicCursor`, kept on the [`App`] (see [`App::debug_flag`]).
+    pub fn debug_deterministic_cursor(app: &App) -> bool {
+        app.debug_flag::<DebugDeterministicCursor>()
     }
 
-    /// Dart's `EditableText.debugDeterministicCursor` setter.
-    pub fn set_debug_deterministic_cursor(value: bool) {
-        DEBUG_DETERMINISTIC_CURSOR.store(value, Ordering::Relaxed);
+    /// Dart's `EditableText.debugDeterministicCursor` setter, for this app.
+    pub fn set_debug_deterministic_cursor(app: &mut App, value: bool) {
+        app.set_debug_flag::<DebugDeterministicCursor>(value);
     }
 
     /// Creates a basic text input field.
@@ -4500,7 +4503,7 @@ impl EditableTextState {
             .set_cursor_color(app, Some(cursor_color));
         let show_cursor = self.widget(app).effective_show_cursor();
         let visible = show_cursor
-            && (EditableText::debug_deterministic_cursor()
+            && (EditableText::debug_deterministic_cursor(app)
                 || self.cursor_blink_opacity_controller(app).value(app) > 0.0);
         self.cursor_visibility_notifier(app).set_value(app, visible);
     }
@@ -4526,7 +4529,7 @@ impl EditableTextState {
         }
         self.cursor_blink_opacity_controller(app)
             .set_value(app, 1.0);
-        if EditableText::debug_deterministic_cursor() {
+        if EditableText::debug_deterministic_cursor(app) {
             return;
         }
         if self.widget(app).cursor_opacity_animates {
@@ -7056,6 +7059,7 @@ mod tests {
     use std::cell::RefCell;
 
     use crate::test_harness::Harness;
+    use crate::testing::{TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant};
     use crate::widgets::basic::{Center, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
 
@@ -7331,70 +7335,69 @@ mod tests {
     /// `_scheduleShowCaretOnScreen` does after a user edit.
     #[test]
     fn a_user_edit_scrolls_the_caret_on_screen() {
-        use crate::test_harness::{binding_cell, binding_mount, binding_pump};
-
-        let cell = binding_cell();
-        install_fonts(&mut cell.borrow_mut());
-        let key = crate::framework::GlobalKey::new();
-        let (controller, focus_node, scroll_controller) = {
-            let mut app = cell.borrow_mut();
-            (
-                TextEditingController::new(&mut app),
-                FocusNode::new(&mut app),
-                ScrollController::default(&mut app),
+        test_widgets(|tester| {
+            let key = crate::framework::GlobalKey::new();
+            let (controller, focus_node, scroll_controller) = tester.update(|app| {
+                (
+                    TextEditingController::new(app),
+                    FocusNode::new(app),
+                    ScrollController::default(app),
+                )
+            });
+            let editable = EditableText::new(
+                controller.erase(),
+                focus_node.erase(),
+                TextStyle::new().font_size(20.0),
+                Color::from_argb(255, 255, 0, 0),
+                Color::from_argb(255, 128, 128, 128),
             )
-        };
-        let editable = EditableText::new(
-            controller.erase(),
-            focus_node.erase(),
-            TextStyle::new().font_size(20.0),
-            Color::from_argb(255, 255, 0, 0),
-            Color::from_argb(255, 128, 128, 128),
-        )
-        .scroll_controller(scroll_controller.erase())
-        .max_lines(None)
-        .key(key.clone().into());
-        let tree = MediaQuery::new(
-            MediaQueryData::new(),
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(SizedBox::square(Some(200.0)).child(editable)),
-            ),
-        )
-        .into_widget();
-        binding_mount(&cell, tree);
-        let state = key
-            .current_state::<EditableTextState>(&cell.borrow_mut())
-            .expect("the field is mounted");
-        focus_node.request_focus(&mut cell.borrow_mut(), None);
-        binding_pump(&mut cell.borrow_mut(), Duration::from_millis(16));
-        assert_eq!(
-            scroll_controller.as_controller().offset(&cell.borrow()),
-            0.0
-        );
+            .scroll_controller(scroll_controller.erase())
+            .max_lines(None)
+            .key(key.clone().into());
+            let tree = MediaQuery::new(
+                MediaQueryData::new(),
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(SizedBox::square(Some(200.0)).child(editable)),
+                ),
+            )
+            .into_widget();
+            tester.pump_widget(tree);
+            let state = key
+                .current_state::<EditableTextState>(&tester.cell.borrow_mut())
+                .expect("the field is mounted");
+            focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump_by(Duration::from_millis(16));
+            assert_eq!(
+                scroll_controller
+                    .as_controller()
+                    .offset(&tester.cell.borrow()),
+                0.0
+            );
 
-        let text = "line\n".repeat(20);
-        let end = utf16_len(&text);
-        TextSelectionDelegate::user_update_text_editing_value(
-            state,
-            &mut cell.borrow_mut(),
-            TextEditingValue::new()
-                .text(text)
-                .selection(TextSelection::collapsed(end, TextAffinity::Downstream)),
-            SelectionChangedCause::Keyboard,
-        );
-        // The edit's frame schedules the reveal, which then animates for 100 ms.
-        for ms in [32, 48, 100, 200, 300] {
-            binding_pump(&mut cell.borrow_mut(), Duration::from_millis(ms));
-        }
+            let text = "line\n".repeat(20);
+            let end = utf16_len(&text);
+            TextSelectionDelegate::user_update_text_editing_value(
+                state,
+                &mut tester.cell.borrow_mut(),
+                TextEditingValue::new()
+                    .text(text)
+                    .selection(TextSelection::collapsed(end, TextAffinity::Downstream)),
+                SelectionChangedCause::Keyboard,
+            );
+            // The edit's frame schedules the reveal, which then animates for 100 ms.
+            for ms in [16, 16, 52, 100, 100] {
+                tester.pump_by(Duration::from_millis(ms));
+            }
 
-        let app = cell.borrow();
-        let position = scroll_controller.as_controller().position(&app);
-        assert!(position.max_scroll_extent(&app) > 0.0);
-        assert_eq!(
-            scroll_controller.as_controller().offset(&app),
-            position.max_scroll_extent(&app)
-        );
+            let app = tester.cell.borrow();
+            let position = scroll_controller.as_controller().position(&app);
+            assert!(position.max_scroll_extent(&app) > 0.0);
+            assert_eq!(
+                scroll_controller.as_controller().offset(&app),
+                position.max_scroll_extent(&app)
+            );
+        });
     }
 
     /// A focused field over `text`, all of it selected, in an app whose host's clipboard is
@@ -7522,87 +7525,46 @@ mod tests {
 
     #[test]
     fn a_focused_field_leaves_the_tree_without_its_callbacks_outliving_it() {
-        use crate::{ListenableBuilder, SizedBox, primary_focus, run_app};
-        use waft_embedder::TargetPlatform;
+        use crate::{ListenableBuilder, SizedBox, primary_focus};
         use waft_foundation::ValueNotifier;
-        use waft_test::{TestPlatform, TestView};
 
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView::new(300.0, 200.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let shown = {
-            let mut app = cell.borrow_mut();
-            install_fonts(&mut app);
-            let shown = app.create(ValueNotifier::new(true));
-            let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
-            let focus_node = FocusNode::new(&mut app);
-            let visible = shown.handle();
-            let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
-                if !*app.get(visible).value() {
-                    return SizedBox::shrink().into_widget();
+        test_widgets(|tester| {
+            let (shown, tree) = {
+                let mut app = tester.cell.borrow_mut();
+                let shown = app.create(ValueNotifier::new(true));
+                let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
+                let focus_node = FocusNode::new(&mut app);
+                let visible = shown.handle();
+                let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
+                    if !*app.get(visible).value() {
+                        return SizedBox::shrink().into_widget();
+                    }
+                    EditableText::new(
+                        controller.erase(),
+                        focus_node.erase(),
+                        TextStyle::new(),
+                        Color::from_argb(255, 0, 0, 0),
+                        Color::from_argb(255, 128, 128, 128),
+                    )
+                    .autofocus(true)
+                    .into_widget()
+                });
+                (shown, Directionality::new(TextDirection::Ltr, field))
+            };
+            tester.pump_widget(tree);
+            let pump = |tester: &mut WidgetTester| {
+                for _ in 0..5 {
+                    tester.pump_by(Duration::from_millis(20));
                 }
-                EditableText::new(
-                    controller.erase(),
-                    focus_node.erase(),
-                    TextStyle::new(),
-                    Color::from_argb(255, 0, 0, 0),
-                    Color::from_argb(255, 128, 128, 128),
-                )
-                .autofocus(true)
-                .into_widget()
-            });
-            run_app(
-                &mut app,
-                Directionality::new(TextDirection::Ltr, field).into_widget(),
+            };
+            pump(tester);
+            assert!(
+                primary_focus(&mut tester.cell.borrow_mut()).is_some(),
+                "the field took the focus and opened its input connection"
             );
-            shown
-        };
-        cell.elapse(Duration::ZERO);
-        let mut at = Duration::ZERO;
-        let mut pump = |cell: &AppCell| {
-            for _ in 0..5 {
-                at += Duration::from_millis(20);
-                crate::test_harness::pump_every_view(&mut cell.borrow_mut(), at);
-            }
-        };
-        pump(&cell);
-        assert!(
-            primary_focus(&mut cell.borrow_mut()).is_some(),
-            "the field took the focus and opened its input connection"
-        );
-        shown.set_value(&mut cell.borrow_mut(), false);
-        pump(&cell);
-    }
-
-    /// A phone's screen, whose bottom inset grows while its keyboard shows.
-    struct KeyboardView {
-        screen: waft_test::TestView,
-        keyboard_height: Cell<f64>,
-    }
-
-    impl waft_embedder::View for KeyboardView {
-        fn id(&self) -> waft_embedder::ViewId {
-            self.screen.id()
-        }
-
-        fn metrics(&self) -> waft_embedder::ViewMetrics {
-            waft_embedder::ViewMetrics {
-                view_insets: waft_embedder::ViewPadding {
-                    bottom: self.keyboard_height.get(),
-                    ..waft_embedder::ViewPadding::ZERO
-                },
-                ..self.screen.metrics()
-            }
-        }
-
-        fn present(&self, scene: std::sync::Arc<waft_embedder::Scene>) {
-            self.screen.present(scene);
-        }
-
-        fn host(&self) -> &dyn waft_embedder::ViewHost {
-            self.screen.host()
-        }
+            shown.set_value(&mut tester.cell.borrow_mut(), false);
+            pump(tester);
+        });
     }
 
     /// The keyboard showing schedules `EditableText.updateForScroll` and
@@ -7610,105 +7572,77 @@ mod tests {
     /// frame disposes its state before they run.
     #[test]
     fn a_field_removed_before_its_keyboard_callbacks_run_does_not_crash() {
-        use crate::{ListenableBuilder, SizedBox, primary_focus, run_app};
-        use waft_embedder::TargetPlatform;
+        use crate::{ListenableBuilder, SizedBox, primary_focus};
+        use waft_embedder::ViewPadding;
         use waft_foundation::ValueNotifier;
-        use waft_test::{TestPlatform, TestView};
 
-        let view = Rc::new(KeyboardView {
-            screen: TestView::new(300.0, 600.0),
-            keyboard_height: Cell::new(0.0),
-        });
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::Android)
-            .with_view(Rc::clone(&view) as waft_embedder::ViewRef);
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let shown = {
-            let mut app = cell.borrow_mut();
-            install_fonts(&mut app);
-            let shown = app.create(ValueNotifier::new(true));
-            let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
-            let focus_node = FocusNode::new(&mut app);
-            let visible = shown.handle();
-            let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
-                if !*app.get(visible).value() {
-                    return SizedBox::shrink().into_widget();
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::new(300.0, 600.0));
+            tester.view().set_device_pixel_ratio(1.0);
+            let (shown, tree) = {
+                let mut app = tester.cell.borrow_mut();
+                let shown = app.create(ValueNotifier::new(true));
+                let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
+                let focus_node = FocusNode::new(&mut app);
+                let visible = shown.handle();
+                let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
+                    if !*app.get(visible).value() {
+                        return SizedBox::shrink().into_widget();
+                    }
+                    EditableText::new(
+                        controller.erase(),
+                        focus_node.erase(),
+                        TextStyle::new(),
+                        Color::from_argb(255, 0, 0, 0),
+                        Color::from_argb(255, 128, 128, 128),
+                    )
+                    .autofocus(true)
+                    .into_widget()
+                });
+                (shown, Directionality::new(TextDirection::Ltr, field))
+            };
+            tester.pump_widget(tree);
+            let pump = |tester: &mut WidgetTester| {
+                for _ in 0..5 {
+                    tester.pump_by(Duration::from_millis(20));
                 }
-                EditableText::new(
-                    controller.erase(),
-                    focus_node.erase(),
-                    TextStyle::new(),
-                    Color::from_argb(255, 0, 0, 0),
-                    Color::from_argb(255, 128, 128, 128),
-                )
-                .autofocus(true)
-                .into_widget()
-            });
-            run_app(
-                &mut app,
-                Directionality::new(TextDirection::Ltr, field).into_widget(),
+            };
+            pump(tester);
+            assert!(
+                primary_focus(&mut tester.cell.borrow_mut()).is_some(),
+                "the field took the focus and listens for the keyboard"
             );
-            shown
-        };
-        cell.elapse(Duration::ZERO);
-        let mut at = Duration::ZERO;
-        let mut pump = |cell: &AppCell| {
-            for _ in 0..5 {
-                at += Duration::from_millis(20);
-                crate::test_harness::pump_every_view(&mut cell.borrow_mut(), at);
-            }
-        };
-        pump(&cell);
-        assert!(
-            primary_focus(&mut cell.borrow_mut()).is_some(),
-            "the field took the focus and listens for the keyboard"
-        );
 
-        {
-            let mut app = cell.borrow_mut();
-            view.keyboard_height.set(250.0);
-            waft_rendering::RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
-            shown.set_value(&mut app, false);
-        }
-        pump(&cell);
+            tester.view().set_view_insets(ViewPadding {
+                bottom: 250.0,
+                ..ViewPadding::ZERO
+            });
+            shown.set_value(&mut tester.cell.borrow_mut(), false);
+            pump(tester);
+        });
     }
 
-    /// Dart's `tester` over an obscured `EditableText` on a host claiming to be `target`, its
-    /// platform kept so a case can change the host's settings while the field runs
-    /// (`tester.binding.platformDispatcher.*TestValue`).
-    struct FieldTester {
-        cell: Rc<AppCell>,
-        platform: Rc<waft_test::TestPlatform>,
-        /// The view the field is in, whose host records what the field asks of the text input.
-        view: Rc<waft_test::TestView>,
+    /// An obscured `EditableText` a case pumped, and how to rebuild it as Dart's case does.
+    struct ObscuredField {
         state: Handle<EditableTextState>,
         /// The `obscureText` the field is built with, which a `StatefulBuilder` holds in Dart.
         obscure_text: Rc<Cell<bool>>,
         /// What rebuilds the field: the `StatefulBuilder`'s `setState`.
         rebuild: Ref<waft_foundation::ValueNotifier<u32>>,
-        now: Duration,
     }
 
-    impl FieldTester {
+    impl ObscuredField {
         /// Dart's `tester.pumpWidget(EditableText(obscureText: true, ..))` over a controller
         /// and a focus node of the field's own.
-        fn obscured(target: TargetPlatform) -> FieldTester {
+        fn pump(tester: &mut WidgetTester) -> ObscuredField {
+            use crate::ListenableBuilder;
             use crate::framework::GlobalKey;
-            use crate::{ListenableBuilder, run_app};
             use waft_foundation::ValueNotifier;
 
-            let view = Rc::new(waft_test::TestView::new(800.0, 600.0));
-            let platform = Rc::new(
-                waft_test::TestPlatform::new()
-                    .on(target)
-                    .with_view(Rc::clone(&view) as waft_embedder::ViewRef),
-            );
-            let cell = AppCell::with_platform(Rc::clone(&platform) as waft_embedder::PlatformRef);
             let key = GlobalKey::new();
             let obscure_text = Rc::new(Cell::new(true));
-            let rebuild = {
-                let mut app = cell.borrow_mut();
-                install_fonts(&mut app);
+            let (rebuild, tree) = {
+                let mut app = tester.cell.borrow_mut();
                 let rebuild = app.create(ValueNotifier::new(0));
                 let controller = TextEditingController::new(&mut app);
                 let focus_node = FocusNode::new(&mut app);
@@ -7726,199 +7660,191 @@ mod tests {
                     .key(field_key.clone().into())
                     .into_widget()
                 });
-                run_app(
-                    &mut app,
-                    MediaQuery::new(
-                        MediaQueryData::new(),
-                        Directionality::new(TextDirection::Ltr, field),
-                    )
-                    .into_widget(),
-                );
-                rebuild
+                let tree = MediaQuery::new(
+                    MediaQueryData::new(),
+                    Directionality::new(TextDirection::Ltr, field),
+                )
+                .into_widget();
+                (rebuild, tree)
             };
-            // `run_app` attaches the root widget on the next timer turn.
-            cell.elapse(Duration::ZERO);
-            crate::test_harness::pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+            tester.pump_widget(tree);
             let state = key
-                .current_state::<EditableTextState>(&cell.borrow())
+                .current_state::<EditableTextState>(&tester.cell.borrow())
                 .expect("the field is mounted");
-            FieldTester {
-                cell,
-                platform,
-                view,
+            ObscuredField {
                 state,
                 obscure_text,
                 rebuild,
-                now: Duration::ZERO,
             }
         }
 
-        /// Dart's `tester.pump(duration)`: fires the timers due by then and runs a frame then.
-        fn pump(&mut self, duration: Duration) {
-            self.now += duration;
-            self.cell.elapse(duration);
-            crate::test_harness::pump_every_view(&mut self.cell.borrow_mut(), self.now);
-            self.cell.checkpoint();
-        }
-
         /// Dart's `tester.showKeyboard`: the field takes the focus and opens its connection.
-        fn show_keyboard(&mut self) {
-            self.state.request_keyboard(&mut self.cell.borrow_mut());
-            self.pump(Duration::ZERO);
+        fn show_keyboard(&self, tester: &mut WidgetTester) {
+            self.state.request_keyboard(&mut tester.cell.borrow_mut());
+            tester.pump_by(Duration::ZERO);
         }
 
         /// Dart's `tester.enterText`: the keyboard is shown, then the platform sends `text`
         /// with the caret at its end.
-        fn enter_text(&mut self, text: &str) {
-            self.show_keyboard();
+        fn enter_text(&self, tester: &mut WidgetTester, text: &str) {
+            self.show_keyboard(tester);
             let value = TextEditingValue::new()
                 .text(text)
                 .selection(TextSelection::collapsed(
                     utf16_len(text),
                     TextAffinity::Downstream,
                 ));
-            TextInputClient::update_editing_value(self.state, &mut self.cell.borrow_mut(), value);
-            self.cell.checkpoint();
+            TextInputClient::update_editing_value(self.state, &mut tester.cell.borrow_mut(), value);
+            tester.cell.checkpoint();
         }
 
         /// The `StatefulBuilder`'s `setState(() { obscureText = obscure_text; })`.
-        fn set_obscure_text(&mut self, obscure_text: bool) {
+        fn set_obscure_text(&self, tester: &WidgetTester, obscure_text: bool) {
             self.obscure_text.set(obscure_text);
-            let mut app = self.cell.borrow_mut();
+            let mut app = tester.cell.borrow_mut();
             let next = *app.get(&self.rebuild).value() + 1;
             self.rebuild.set_value(&mut app, next);
         }
 
         /// Dart's `(findRenderEditable(tester).text! as TextSpan).text`.
-        fn shown_text(&self) -> String {
-            let mut app = self.cell.borrow_mut();
+        fn shown_text(&self, tester: &WidgetTester) -> String {
+            let mut app = tester.cell.borrow_mut();
             let render_editable = self.state.render_editable(&app);
             render_editable.plain_text(&mut app)
         }
+    }
 
-        /// The selection rects the field sent its view's text input, oldest first.
-        fn selection_rects_sent(&self) -> Vec<Vec<SelectionRect>> {
-            self.view
-                .test_host()
-                .text_input_calls()
-                .into_iter()
-                .filter_map(|call| match call {
-                    waft_test::TextInputCall::SetSelectionRects(rects) => Some(rects),
-                    _ => None,
-                })
-                .collect()
-        }
+    /// The selection rects the field sent the tester's view's text input, oldest first.
+    fn selection_rects_sent(tester: &WidgetTester) -> Vec<Vec<SelectionRect>> {
+        tester
+            .view()
+            .test_host()
+            .text_input_calls()
+            .into_iter()
+            .filter_map(|call| match call {
+                waft_test::TextInputCall::SetSelectionRects(rects) => Some(rects),
+                _ => None,
+            })
+            .collect()
     }
 
     const HALF_A_BLINK: Duration = Duration::from_millis(500);
 
-    const MOBILE: [TargetPlatform; 3] = [
-        TargetPlatform::IOS,
-        TargetPlatform::Android,
-        TargetPlatform::Fuchsia,
-    ];
+    /// The platforms an obscured field reveals the latest character on, in Dart's order.
+    fn mobile() -> TargetPlatformVariant {
+        TargetPlatformVariant::new([
+            TargetPlatform::IOS,
+            TargetPlatform::Android,
+            TargetPlatform::Fuchsia,
+        ])
+    }
 
     #[test]
     fn password_briefly_shows_last_character_when_entered_on_mobile() {
-        for target in MOBILE {
-            let mut tester = FieldTester::obscured(target);
+        test_widgets_variant(mobile(), |tester| {
+            let field = ObscuredField::pump(tester);
 
-            tester.enter_text("AA");
-            tester.pump(Duration::ZERO);
-            tester.enter_text("AAA");
-            tester.pump(Duration::ZERO);
+            field.enter_text(tester, "AA");
+            tester.pump();
+            field.enter_text(tester, "AAA");
+            tester.pump();
 
-            assert_eq!(tester.shown_text(), "\u{2022}\u{2022}A", "on {target:?}");
-            tester.pump(HALF_A_BLINK);
-            tester.pump(HALF_A_BLINK);
-            tester.pump(HALF_A_BLINK);
-            assert_eq!(
-                tester.shown_text(),
-                "\u{2022}\u{2022}\u{2022}",
-                "on {target:?}"
-            );
-        }
+            assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}A");
+            tester.pump_by(HALF_A_BLINK);
+            tester.pump_by(HALF_A_BLINK);
+            tester.pump_by(HALF_A_BLINK);
+            assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}\u{2022}");
+        });
     }
 
     /// Dart's `selection rects re-sent when refocused`, its first update: on iOS the field sends
     /// the bounds of each grapheme as its text is laid out, once, and nowhere else sends any.
     #[test]
     fn selection_rects_are_sent_on_ios_once_the_text_is_laid_out() {
-        let mut tester = FieldTester::obscured(TargetPlatform::IOS);
-        tester.set_obscure_text(false);
-        tester.enter_text("Text1");
-        tester.pump(Duration::ZERO);
+        let tester = &mut WidgetTester::on(TargetPlatform::IOS);
+        let field = ObscuredField::pump(tester);
+        field.set_obscure_text(tester, false);
+        field.enter_text(tester, "Text1");
+        tester.pump();
 
-        let sent = tester.selection_rects_sent();
-        let positions: Vec<i32> = sent
+        let sent = selection_rects_sent(tester);
+        let rects: Vec<(i32, Rect)> = sent
             .last()
             .expect("the rects of the laid out text")
             .iter()
-            .map(|rect| rect.position)
+            .map(|rect| (rect.position, rect.bounds))
             .collect();
-        assert_eq!(positions, [0, 1, 2, 3, 4]);
-        tester.pump(Duration::ZERO);
-        assert_eq!(tester.selection_rects_sent().len(), sent.len(), "sent once");
+        assert_eq!(
+            rects,
+            [
+                (0, Rect::from_ltrb(0.0, 0.0, 14.0, 14.0)),
+                (1, Rect::from_ltrb(14.0, 0.0, 28.0, 14.0)),
+                (2, Rect::from_ltrb(28.0, 0.0, 42.0, 14.0)),
+                (3, Rect::from_ltrb(42.0, 0.0, 56.0, 14.0)),
+                (4, Rect::from_ltrb(56.0, 0.0, 70.0, 14.0)),
+            ]
+        );
+        tester.pump();
+        assert_eq!(selection_rects_sent(tester).len(), sent.len(), "sent once");
 
-        let mut tester = FieldTester::obscured(TargetPlatform::Android);
-        tester.enter_text("Text1");
-        tester.pump(Duration::ZERO);
-        assert!(tester.selection_rects_sent().is_empty(), "iOS alone");
+        let tester = &mut WidgetTester::on(TargetPlatform::Android);
+        let field = ObscuredField::pump(tester);
+        field.enter_text(tester, "Text1");
+        tester.pump();
+        assert!(selection_rects_sent(tester).is_empty(), "iOS alone");
     }
 
     /// Dart's case runs on flutter_test's default platform, Android.
     #[test]
     fn password_briefly_does_not_show_last_character_when_disabled_by_system() {
-        let mut tester = FieldTester::obscured(TargetPlatform::Android);
+        test_widgets(|tester| {
+            let field = ObscuredField::pump(tester);
 
-        tester.enter_text("AA");
-        tester.pump(Duration::ZERO);
-        tester.enter_text("AAA");
-        tester.pump(Duration::ZERO);
+            field.enter_text(tester, "AA");
+            tester.pump();
+            field.enter_text(tester, "AAA");
+            tester.pump();
 
-        tester.platform.set_briefly_show_password(false);
-        assert_eq!(tester.shown_text(), "\u{2022}\u{2022}A");
-        tester.pump(HALF_A_BLINK);
-        assert_eq!(tester.shown_text(), "\u{2022}\u{2022}\u{2022}");
-        tester.pump(HALF_A_BLINK);
-        tester.pump(HALF_A_BLINK);
-        tester.pump(HALF_A_BLINK);
-        assert_eq!(tester.shown_text(), "\u{2022}\u{2022}\u{2022}");
+            tester.platform().set_briefly_show_password(false);
+            assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}A");
+            tester.pump_by(HALF_A_BLINK);
+            assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}\u{2022}");
+            tester.pump_by(HALF_A_BLINK);
+            tester.pump_by(HALF_A_BLINK);
+            tester.pump_by(HALF_A_BLINK);
+            assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}\u{2022}");
+        });
     }
 
     #[test]
     fn prevent_last_character_visibility_in_obscure_text_when_obscure_text_is_toggled_on_mobile() {
-        for target in MOBILE {
-            let mut tester = FieldTester::obscured(target);
-            tester.show_keyboard();
+        test_widgets_variant(mobile(), |tester| {
+            let field = ObscuredField::pump(tester);
+            field.show_keyboard(tester);
 
-            tester.enter_text("H");
-            tester.pump(Duration::ZERO);
-            tester.enter_text("HH");
-            tester.pump(Duration::ZERO);
+            field.enter_text(tester, "H");
+            tester.pump();
+            field.enter_text(tester, "HH");
+            tester.pump();
 
-            assert_eq!(tester.shown_text(), "\u{2022}H", "on {target:?}");
-            tester.pump(HALF_A_BLINK);
-            tester.pump(HALF_A_BLINK);
-            tester.pump(HALF_A_BLINK);
-            assert_eq!(tester.shown_text(), "\u{2022}\u{2022}", "on {target:?}");
+            assert_eq!(field.shown_text(tester), "\u{2022}H");
+            tester.pump_by(HALF_A_BLINK);
+            tester.pump_by(HALF_A_BLINK);
+            tester.pump_by(HALF_A_BLINK);
+            assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}");
 
-            tester.enter_text("HHH");
-            tester.pump(Duration::ZERO);
+            field.enter_text(tester, "HHH");
+            tester.pump();
 
-            assert_eq!(tester.shown_text(), "\u{2022}\u{2022}H", "on {target:?}");
+            assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}H");
 
-            tester.set_obscure_text(false);
-            tester.pump(Duration::ZERO);
-            assert_eq!(tester.shown_text(), "HHH", "on {target:?}");
+            field.set_obscure_text(tester, false);
+            tester.pump();
+            assert_eq!(field.shown_text(tester), "HHH");
 
-            tester.set_obscure_text(true);
-            tester.pump(Duration::ZERO);
-            assert_eq!(
-                tester.shown_text(),
-                "\u{2022}\u{2022}\u{2022}",
-                "on {target:?}"
-            );
-        }
+            field.set_obscure_text(tester, true);
+            tester.pump();
+            assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}\u{2022}");
+        });
     }
 }

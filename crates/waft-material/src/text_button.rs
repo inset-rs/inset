@@ -669,6 +669,7 @@ impl TextButtonStyleFromBuilder {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use waft_widgets::testing::assert_f32_equals;
 
     use waft_embedder::{FontWeight, Offset, PointerChange, Rect, TargetPlatform, TextDirection};
     use waft_painting::{ShapeBorder, ShapeBorderRef, StadiumBorder};
@@ -679,6 +680,10 @@ mod tests {
 
     use waft_foundation::Listenable;
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, find, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::icons::Icons;
@@ -687,25 +692,12 @@ mod tests {
     use crate::material::{Material, MaterialType};
     use crate::material_state::MaterialStatesController;
     use crate::no_splash::NoSplash;
-    use crate::test_support::{
-        Drawn, WidgetTester, ahem_text, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintInspection, material_app, path_like};
     use crate::text_button_theme::TextButtonThemeData;
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::RecordedCall;
     use waft_widgets::FocusNodeRef;
-
-    /// A tester with the OS fonts, which a `Text` needs to lay out, and the Material icons.
-    fn tester() -> WidgetTester {
-        tester_on(TargetPlatform::Android)
-    }
-
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
-        tester
-    }
 
     fn pressed() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
@@ -744,8 +736,8 @@ mod tests {
     /// `tester.widget<Material>(find.descendant(of: find.byType(TextButton), matching:
     /// find.byType(Material)))`.
     fn material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let element = *tester
-            .find_by_type::<Material>()
+        let element = *find::by_type::<Material>()
+            .evaluate(tester)
             .last()
             .expect("the button's Material");
         tester.widget(element, read)
@@ -762,13 +754,16 @@ mod tests {
     }
 
     fn ink_well<R>(tester: &WidgetTester, read: impl FnOnce(&InkWell) -> R) -> R {
-        let element = *tester.find_by_type::<InkWell>().last().expect("an InkWell");
+        let element = *find::by_type::<InkWell>()
+            .evaluate(tester)
+            .last()
+            .expect("an InkWell");
         tester.widget(element, read)
     }
 
     fn button_enabled(tester: &WidgetTester) -> bool {
-        let element = *tester
-            .find_by_type::<TextButton>()
+        let element = *find::by_type::<TextButton>()
+            .evaluate(tester)
             .first()
             .expect("an TextButton");
         tester.widget(element, |button: &TextButton| button.enabled())
@@ -777,33 +772,36 @@ mod tests {
     /// The center of the first `TextButton`: Dart's
     /// `tester.getCenter(find.byType(TextButton))`.
     fn button_center(tester: &WidgetTester) -> Offset {
-        let element = *tester
-            .find_by_type::<TextButton>()
+        let element = *find::by_type::<TextButton>()
+            .evaluate(tester)
             .first()
             .expect("an TextButton");
-        tester.global_rect(tester.render_box_of(element)).center()
+        tester.get_rect(element).center()
     }
 
     fn button_rect(tester: &WidgetTester) -> Rect {
-        let element = *tester
-            .find_by_type::<Material>()
+        let element = *find::by_type::<Material>()
+            .evaluate(tester)
             .last()
             .expect("the button's Material");
-        tester.global_rect(tester.render_box_of(element))
+        tester.get_rect(element)
     }
 
     fn icon_rect(tester: &WidgetTester) -> Rect {
-        let element = *tester.find_by_type::<Icon>().first().expect("an Icon");
-        tester.global_rect(tester.render_box_of(element))
+        let element = *find::by_type::<Icon>()
+            .evaluate(tester)
+            .first()
+            .expect("an Icon");
+        tester.get_rect(element)
     }
 
     /// The colors of the rects the button's ink features draw.
     fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
         tester
-            .ink_drawn()
+            .ink_calls()
             .into_iter()
             .filter_map(|drawn| match drawn {
-                Drawn::Rect(color, _) => Some(color),
+                RecordedCall::Rect { color, .. } => Some(color.value()),
                 _ => None,
             })
             .collect()
@@ -811,27 +809,27 @@ mod tests {
 
     fn ink_circle_count(tester: &WidgetTester) -> usize {
         tester
-            .ink_drawn()
+            .ink_calls()
             .into_iter()
-            .filter(|drawn| matches!(drawn, Drawn::Path(..)))
+            .filter(|drawn| path_like(drawn).is_some())
             .count()
     }
 
     fn padding_of_button(tester: &WidgetTester) -> EdgeInsetsGeometry {
-        let button = *tester
-            .find_by_type::<TextButton>()
+        let button = *find::by_type::<TextButton>()
+            .evaluate(tester)
             .first()
             .expect("an TextButton");
-        let padding = tester
-            .find_by_type::<Padding>()
+        let padding = find::by_type::<Padding>()
+            .evaluate(tester)
             .into_iter()
             .find(|padding| tester.ancestors(*padding).contains(&button))
             .expect("the button's Padding");
         tester.widget(padding, |padding: &Padding| padding.padding)
     }
 
-    fn mouse() -> crate::test_support::TestPointer {
-        WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON)
+    fn mouse() -> TestPointer {
+        TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON)
     }
 
     fn argb(color: Color) -> u32 {
@@ -887,31 +885,30 @@ mod tests {
 
     // 'TextButton, TextButton.icon defaults', which Flutter runs in Material 3; the Material 2
     // values are its other branch.
-    fn defaults_case(material3: bool) {
-        let mut tester = tester();
+    fn defaults_case(tester: &mut WidgetTester, material3: bool) {
         let color_scheme = ColorScheme::light();
-        let theme = light(&tester, material3);
+        let theme = light(tester, material3);
 
         // Enabled TextButton
         tester.pump_widget(app_centered(
             theme.clone(),
             TextButton::new(pressed(), Some(Text::new("button"))),
         ));
-        check_default_material(&tester, &color_scheme, material3, false);
-        let label = *tester.find_text("button").first().expect("the label");
-        let align = tester.ancestor_of_type::<Align>(label);
+        check_default_material(tester, &color_scheme, material3, false);
+        let align =
+            tester.element(find::ancestor(find::text("button"), find::by_type::<Align>()).first());
         tester.widget(align, |align: &Align| {
             assert!(align.alignment == AlignmentGeometry::CENTER);
         });
 
-        let mut touch = WidgetTester::touch(1);
-        tester.down(&mut touch, button_center(&tester));
-        tester.pump(Duration::ZERO); // start the splash animation
-        tester.pump(Duration::from_millis(100)); // splash is underway
+        let mut touch = TestPointer::touch(1);
+        tester.down(&mut touch, button_center(tester));
+        tester.pump(); // start the splash animation
+        tester.pump_by(Duration::from_millis(100)); // splash is underway
         tester.up(&touch);
         tester.pump_and_settle();
         // No change vs enabled and not pressed.
-        check_default_material(&tester, &color_scheme, material3, false);
+        check_default_material(tester, &color_scheme, material3, false);
 
         // Enabled TextButton.icon
         let icon_button_key = GlobalKey::new();
@@ -921,32 +918,34 @@ mod tests {
                 .key(icon_button_key.into())
                 .icon(Icon::new(Some(Icons::add()))),
         ));
-        check_default_material(&tester, &color_scheme, material3, false);
+        check_default_material(tester, &color_scheme, material3, false);
 
         // Disabled TextButton
         tester.pump_widget(app_centered(
             theme,
             TextButton::new(None, Some(Text::new("button"))),
         ));
-        check_default_material(&tester, &color_scheme, material3, true);
+        check_default_material(tester, &color_scheme, material3, true);
     }
 
     #[test]
     fn material_3_defaults_of_text_button_and_its_icon_variant_per_state() {
-        with_main_thread_stack(|| defaults_case(true));
+        test_widgets(|tester| defaults_case(tester, true));
     }
 
     #[test]
     fn material_2_defaults_of_text_button_and_its_icon_variant_per_state() {
-        with_main_thread_stack(|| defaults_case(false));
+        test_widgets(|tester| defaults_case(tester, false));
     }
 
     /// Which of a default style's properties are set, read where `button` builds.
-    fn default_style_fields(button: TextButton) -> (Vec<bool>, Vec<bool>) {
-        let mut tester = tester();
+    fn default_style_fields(
+        tester: &mut WidgetTester,
+        button: TextButton,
+    ) -> (Vec<bool>, Vec<bool>) {
         let seen = Rc::new(RefCell::new(None));
         let button = Rc::new(button);
-        let theme = light(&tester, true);
+        let theme = light(tester, true);
         tester.pump_widget(app_centered(
             theme,
             Builder::new({
@@ -992,13 +991,16 @@ mod tests {
 
     #[test]
     fn the_default_style_sets_every_property_but_the_fixed_size_the_side_and_the_builders() {
-        with_main_thread_stack(|| {
-            let (set, unset) =
-                default_style_fields(TextButton::new(pressed(), Some(Text::new("button"))));
+        test_widgets(|tester| {
+            let (set, unset) = default_style_fields(
+                tester,
+                TextButton::new(pressed(), Some(Text::new("button"))),
+            );
             assert!(set.iter().all(|set| *set), "{set:?}");
             assert!(unset.iter().all(|set| !*set), "{unset:?}");
 
             let (set, unset) = default_style_fields(
+                tester,
                 TextButton::icon(pressed(), Text::new("button"))
                     .icon(SizedBox::new())
                     .build(),
@@ -1010,32 +1012,30 @@ mod tests {
 
     #[test]
     fn text_button_icon_without_an_icon_shows_only_the_label() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = light(&tester, true);
+        test_widgets(|tester| {
+            let theme = light(tester, true);
             tester.pump_widget(app_centered(
                 theme.clone(),
                 TextButton::icon(pressed(), Text::new("label")).icon(Icon::new(Some(Icons::add()))),
             ));
-            assert_eq!(tester.find_by_type::<Icon>().len(), 1);
-            assert_eq!(tester.find_text("label").len(), 1);
+            assert_eq!(find::by_type::<Icon>().evaluate(tester).len(), 1);
+            assert_eq!(find::text("label").evaluate(tester).len(), 1);
 
             tester.pump_widget(app_centered(
                 theme,
                 // No icon specified.
                 TextButton::icon(pressed(), Text::new("label")),
             ));
-            assert!(tester.find_by_type::<Icon>().is_empty());
-            assert_eq!(tester.find_text("label").len(), 1);
+            assert!(find::by_type::<Icon>().evaluate(tester).is_empty());
+            assert_eq!(find::text("label").evaluate(tester).len(), 1);
         });
     }
 
     #[test]
     fn the_default_overlay_color_resolves_hovered_pressed_and_focused() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
+            let theme = default_theme(tester);
             let primary = theme.color_scheme.primary;
             tester.pump_widget(app_centered(
                 theme,
@@ -1044,17 +1044,17 @@ mod tests {
             ));
 
             // Hovered.
-            let center = button_center(&tester);
+            let center = button_center(tester);
             let mut gesture = mouse();
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(primary.with_opacity(0.08))));
+            assert!(ink_rect_colors(tester).contains(&argb(primary.with_opacity(0.08))));
 
             // Highlighted (pressed).
             tester.send(&gesture, PointerChange::Down);
             tester.pump_and_settle();
-            let colors = ink_rect_colors(&tester);
+            let colors = ink_rect_colors(tester);
             assert!(
                 colors[1..].contains(&argb(primary.with_opacity(0.1))),
                 "{colors:x?}"
@@ -1068,14 +1068,13 @@ mod tests {
             // Focused.
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(primary.with_opacity(0.1))));
+            assert!(ink_rect_colors(tester).contains(&argb(primary.with_opacity(0.1))));
         });
     }
 
     #[test]
     fn a_style_overlay_color_shows_while_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let hover_color = Color::new(0xff001122);
             tester.pump_widget(ltr(TextButton::new(pressed(), Some(Text::new("button")))
                 .style(ButtonStyle::new().overlay_color(<dyn WidgetStateProperty<
@@ -1090,18 +1089,17 @@ mod tests {
 
             let mut gesture = mouse();
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.move_to(&mut gesture, button_center(&tester), false);
+            tester.move_to(&mut gesture, button_center(tester), false);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(hover_color)));
+            assert!(ink_rect_colors(tester).contains(&argb(hover_color)));
         });
     }
 
     #[test]
     fn a_style_overlay_color_shows_while_focused() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let focus_color = Color::new(0xff001122);
-            let focus_node = focus_node(&tester);
+            let focus_node = focus_node(tester);
             tester.pump_widget(ltr(TextButton::new(pressed(), Some(Text::new("button")))
                 .style(ButtonStyle::new().overlay_color(
                     <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
@@ -1116,7 +1114,7 @@ mod tests {
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
 
-            assert!(ink_rect_colors(&tester).contains(&argb(focus_color)));
+            assert!(ink_rect_colors(tester).contains(&argb(focus_color)));
         });
     }
 
@@ -1140,46 +1138,47 @@ mod tests {
 
     /// Runs default, focused, hovered and pressed, reading `read` at each.
     fn stateful_color_case(
+        tester: &mut WidgetTester,
         button: impl FnOnce(waft_widgets::FocusNodeRef) -> WidgetRef,
         read: impl Fn(&WidgetTester) -> Color,
         settle_pressed: bool,
     ) {
-        let mut tester = tester();
-        let focus_node = focus_node(&tester);
-        let theme = default_theme(&tester);
+        let focus_node = focus_node(tester);
+        let theme = default_theme(tester);
         tester.pump_widget(app_centered(theme, button(focus_node.clone())));
 
         // Default, not disabled.
-        assert_eq!(read(&tester), DEFAULT_COLOR);
+        assert_eq!(read(tester), DEFAULT_COLOR);
 
         // Focused.
         focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
         tester.pump_and_settle();
-        assert_eq!(read(&tester), FOCUSED_COLOR);
+        assert_eq!(read(tester), FOCUSED_COLOR);
 
         // Hovered.
-        let center = button_center(&tester);
+        let center = button_center(tester);
         let mut gesture = mouse();
         tester.add_pointer(&mut gesture, Offset::ZERO);
         tester.move_to(&mut gesture, center, false);
         tester.pump_and_settle();
-        assert_eq!(read(&tester), HOVER_COLOR);
+        assert_eq!(read(tester), HOVER_COLOR);
 
         // Highlighted (pressed).
         tester.send(&gesture, PointerChange::Down);
         if settle_pressed {
             tester.pump_and_settle();
         } else {
-            tester.pump(Duration::ZERO); // Start the splash and highlight animations.
-            tester.pump(Duration::from_millis(800)); // Wait for splash and highlight to be well under way.
+            tester.pump(); // Start the splash and highlight animations.
+            tester.pump_by(Duration::from_millis(800)); // Wait for splash and highlight to be well under way.
         }
-        assert_eq!(read(&tester), PRESSED_COLOR);
+        assert_eq!(read(tester), PRESSED_COLOR);
     }
 
     #[test]
     fn a_stateful_foreground_color_colors_the_text_in_each_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             stateful_color_case(
+                tester,
                 |focus_node| {
                     TextButton::new(pressed(), Some(Text::new("TextButton")))
                         .style(
@@ -1200,8 +1199,9 @@ mod tests {
 
     #[test]
     fn a_stateful_icon_color_colors_the_icon_in_each_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             stateful_color_case(
+                tester,
                 |focus_node| {
                     TextButton::icon(pressed(), Text::new("TextButton"))
                         .style(ButtonStyle::new().icon_color(<dyn WidgetStateProperty<
@@ -1221,8 +1221,7 @@ mod tests {
 
     #[test]
     fn on_pressed_or_on_long_press_enables_the_button_and_is_called() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let was_pressed = Rc::new(Cell::new(false));
             let setter = || {
                 let was_pressed = Rc::clone(&was_pressed);
@@ -1234,8 +1233,8 @@ mod tests {
                 Some(setter()),
                 Some(Text::new("button")),
             )));
-            assert!(button_enabled(&tester));
-            tester.tap(button_center(&tester), 1);
+            assert!(button_enabled(tester));
+            tester.tap_at(button_center(tester), 1);
             assert!(was_pressed.get());
 
             // onPressed null, onLongPress not null.
@@ -1243,13 +1242,13 @@ mod tests {
             tester.pump_widget(ltr(
                 TextButton::new(None, Some(Text::new("button"))).on_long_press(setter())
             ));
-            assert!(button_enabled(&tester));
-            tester.long_press(button_center(&tester), 2);
+            assert!(button_enabled(tester));
+            tester.long_press_at(button_center(tester), 2);
             assert!(was_pressed.get());
 
             // onPressed null, onLongPress null.
             tester.pump_widget(ltr(TextButton::new(None, Some(Text::new("button")))));
-            assert!(!button_enabled(&tester));
+            assert!(!button_enabled(tester));
         });
     }
 
@@ -1261,10 +1260,9 @@ mod tests {
     // "TextButton response doesn't hover when disabled".
     #[test]
     fn a_button_disabled_while_focused_and_hovered_loses_focus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTouch);
-            let focus_node = focus_node(&tester);
+            let focus_node = focus_node(tester);
             let child_key = GlobalKey::new();
             let hovering = Rc::new(Cell::new(false));
             let frame = |enabled: bool| {
@@ -1285,7 +1283,7 @@ mod tests {
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             let mut gesture = mouse();
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.move_to(&mut gesture, tester.center_of(&child_key), false);
+            tester.move_to(&mut gesture, tester.get_center(&child_key), false);
             tester.pump_and_settle();
             assert!(hovering.get());
 
@@ -1295,8 +1293,7 @@ mod tests {
         });
     }
 
-    fn mouse_exit_case() {
-        let mut tester = tester();
+    fn mouse_exit_case(tester: &mut WidgetTester) {
         let on_hover_count = Rc::new(Cell::new(0));
         let hover = Rc::new(Cell::new(false));
         let on_hover = || -> waft_foundation::ValueChanged<bool> {
@@ -1318,7 +1315,7 @@ mod tests {
         let mut gesture = mouse();
         tester.add_pointer(&mut gesture, Offset::ZERO);
 
-        tester.move_to(&mut gesture, button_center(&tester), false);
+        tester.move_to(&mut gesture, button_center(tester), false);
         tester.pump_and_settle();
         assert_eq!(on_hover_count.get(), 1);
         assert!(hover.get());
@@ -1331,7 +1328,7 @@ mod tests {
         assert_eq!(on_hover_count.get(), 2);
         assert!(!hover.get());
 
-        tester.move_to(&mut gesture, button_center(&tester), false);
+        tester.move_to(&mut gesture, button_center(tester), false);
         tester.pump_and_settle();
         // We no longer see hover events because the TextButton is disabled
         // and it's no longer in the "hovering" state.
@@ -1347,7 +1344,7 @@ mod tests {
 
         tester.move_to(
             &mut gesture,
-            button_center(&tester) - Offset::new(1.0, 1.0),
+            button_center(tester) - Offset::new(1.0, 1.0),
             false,
         );
         tester.pump_and_settle();
@@ -1358,12 +1355,11 @@ mod tests {
 
     #[test]
     fn a_disabled_and_hovered_button_reports_the_mouse_exit() {
-        with_main_thread_stack(mouse_exit_case);
+        test_widgets(mouse_exit_case);
     }
 
-    fn focus_change_case(enabled: bool) {
-        let mut tester = tester();
-        let node = focus_node(&tester);
+    fn focus_change_case(tester: &mut WidgetTester, enabled: bool) {
+        let node = focus_node(tester);
         let got_focus = Rc::new(Cell::new(false));
         let on_focus_change: waft_foundation::ValueChanged<bool> = {
             let got_focus = Rc::clone(&got_focus);
@@ -1376,7 +1372,7 @@ mod tests {
         tester.pump_widget(ltr(button));
 
         node.request_focus(&mut tester.cell.borrow_mut(), None);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         assert_eq!(got_focus.get(), enabled);
         assert_eq!(node.has_focus(&mut tester.cell.borrow_mut()), enabled);
         if !enabled {
@@ -1384,25 +1380,24 @@ mod tests {
         }
 
         node.unfocus(&mut tester.cell.borrow_mut(), UnfocusDisposition::Scope);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         assert!(!got_focus.get());
         assert!(!node.has_focus(&mut tester.cell.borrow_mut()));
     }
 
     #[test]
     fn a_button_can_be_focused_and_unfocused() {
-        with_main_thread_stack(|| focus_change_case(true));
+        test_widgets(|tester| focus_change_case(tester, true));
     }
 
     #[test]
     fn a_disabled_button_cannot_be_focused() {
-        with_main_thread_stack(|| focus_change_case(false));
+        test_widgets(|tester| focus_change_case(tester, false));
     }
 
     #[test]
     fn a_button_disabled_during_a_gesture_does_not_crash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = |tester: &WidgetTester, on_pressed: Option<Listener>| {
                 let theme = default_theme(tester);
                 ltr(Theme::new(
@@ -1410,23 +1405,21 @@ mod tests {
                     Center::new().child(TextButton::new(on_pressed, Some(Text::new("button")))),
                 ))
             };
-            let first = frame(&tester, pressed());
+            let first = frame(tester, pressed());
             tester.pump_widget(first);
-            let mut touch = WidgetTester::touch(1);
-            tester.down(&mut touch, button_center(&tester));
+            let mut touch = TestPointer::touch(1);
+            tester.down(&mut touch, button_center(tester));
             tester.pump_and_settle();
-            let second = frame(&tester, None);
+            let second = frame(tester, None);
             tester.pump_widget(second);
             tester.pump_and_settle();
         });
     }
 
-    // 'Does TextButton scale with font scale changes', with Ahem's 'ABC' measured by
-    // `ahem_text`, which is 17.5 high at 1.25 where Flutter's `Text` measures 18.
+    // 'Does TextButton scale with font scale changes'.
     #[test]
     fn the_text_scale_grows_the_text_and_then_the_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let label_key = GlobalKey::new();
             let button_key = GlobalKey::new();
             let frame = |tester: &WidgetTester, scale: Option<f64>| {
@@ -1435,7 +1428,7 @@ mod tests {
                     .build(&tester.cell.borrow());
                 let button = TextButton::new(
                     pressed(),
-                    Some(ahem_text("ABC").key(label_key.clone().into())),
+                    Some(Text::new("ABC").key(label_key.clone().into())),
                 )
                 .key(button_key.clone().into());
                 let center = Center::new().child(button).into_widget();
@@ -1457,29 +1450,28 @@ mod tests {
                     .size(&tester.cell.borrow())
             };
 
-            let frame1 = frame(&tester, None);
+            let frame1 = frame(tester, None);
             tester.pump_widget(frame1);
-            assert_eq!(size_of(&tester, &button_key), Size::new(64.0, 48.0));
-            assert_eq!(size_of(&tester, &label_key), Size::new(42.0, 14.0));
+            assert_eq!(size_of(tester, &button_key), Size::new(64.0, 48.0));
+            assert_eq!(size_of(tester, &label_key), Size::new(42.0, 14.0));
 
             // textScaleFactor expands text, but not button.
-            let frame2 = frame(&tester, Some(1.25));
+            let frame2 = frame(tester, Some(1.25));
             tester.pump_widget(frame2);
-            assert_eq!(size_of(&tester, &button_key), Size::new(68.5, 48.0));
-            assert_eq!(size_of(&tester, &label_key), Size::new(52.5, 17.5));
+            assert_eq!(size_of(tester, &button_key), Size::new(68.5, 48.0));
+            assert_eq!(size_of(tester, &label_key), Size::new(52.5, 18.0));
 
             // Set text scale large enough to expand text and button.
-            let frame3 = frame(&tester, Some(3.0));
+            let frame3 = frame(tester, Some(3.0));
             tester.pump_widget(frame3);
-            assert_eq!(size_of(&tester, &button_key), Size::new(134.0, 48.0));
-            assert_eq!(size_of(&tester, &label_key), Size::new(126.0, 42.0));
+            assert_eq!(size_of(tester, &button_key), Size::new(134.0, 48.0));
+            assert_eq!(size_of(tester, &label_key), Size::new(126.0, 42.0));
         });
     }
 
     #[test]
     fn the_theme_tap_target_size_pads_the_button_or_shrink_wraps_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = |tester: &WidgetTester, tap_target_size, key: &GlobalKey| {
                 let theme = ThemeData::builder()
                     .use_material3(false)
@@ -1508,23 +1500,22 @@ mod tests {
             };
 
             let key1 = GlobalKey::new();
-            let padded = frame(&tester, MaterialTapTargetSize::Padded, &key1);
+            let padded = frame(tester, MaterialTapTargetSize::Padded, &key1);
             tester.pump_widget(padded);
-            assert_eq!(size_of(&tester, &key1), Size::new(66.0, 48.0));
+            assert_eq!(size_of(tester, &key1), Size::new(66.0, 48.0));
 
             let key2 = GlobalKey::new();
-            let shrink_wrapped = frame(&tester, MaterialTapTargetSize::ShrinkWrap, &key2);
+            let shrink_wrapped = frame(tester, MaterialTapTargetSize::ShrinkWrap, &key2);
             tester.pump_widget(shrink_wrapped);
-            assert_eq!(size_of(&tester, &key2), Size::new(66.0, 36.0));
+            assert_eq!(size_of(tester, &key2), Size::new(66.0, 36.0));
         });
     }
 
-    // 'TextButton responds to density changes.'; the `Text` child is the 56x14 box the Ahem
-    // font lays 'Text' out in.
+    // 'TextButton responds to density changes.'; the `Text` child is the 56x14 box FlutterTest
+    // lays 'Text' out in.
     #[test]
     fn visual_density_grows_and_shrinks_the_button_around_its_child() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let child_key = GlobalKey::new();
             let mut build_test = |visual_density: VisualDensity, use_text: bool| {
@@ -1560,8 +1551,7 @@ mod tests {
                     .as_box()
                     .expect("a box")
                     .size(&tester.cell.borrow());
-                let child_rect =
-                    tester.global_rect(tester.render_object(&child_key).as_box().expect("a box"));
+                let child_rect = tester.get_rect(&child_key);
                 (size, child_rect)
             };
 
@@ -1610,10 +1600,10 @@ mod tests {
     }
 
     // 'Default TextButton padding for textScaleFactor, textDirection': each text scale,
-    // direction and icon, in Material 2; the label is Ahem's 'button' (`ahem_text`).
+    // direction and icon, in Material 2.
     #[test]
     fn the_default_padding_follows_the_text_scale_in_both_directions() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const TEXT_SCALE_FACTOR_OPTIONS: [f64; 8] = [0.5, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0];
             // Expected values for each textScaleFactor.
             let padding_vertical = |scale: f64| match scale {
@@ -1643,7 +1633,6 @@ mod tests {
             for text_scale_factor in TEXT_SCALE_FACTOR_OPTIONS {
                 for text_direction in [TextDirection::Ltr, TextDirection::Rtl] {
                     for with_icon in [false, true] {
-                        let mut tester = tester();
                         let button_key = GlobalKey::new();
                         let label_key = GlobalKey::new();
                         let icon_key = GlobalKey::new();
@@ -1658,7 +1647,7 @@ mod tests {
                                 ),
                             )
                             .build(&tester.cell.borrow());
-                        let label = ahem_text("button").key(label_key.clone().into());
+                        let label = Text::new("button").key(label_key.clone().into());
                         let button = if with_icon {
                             TextButton::icon(pressed(), label)
                                 .key(button_key.clone().into())
@@ -1699,20 +1688,15 @@ mod tests {
                         )
                         .resolve(Some(text_direction));
                         assert_eq!(
-                            padding_of_button(&tester).resolve(Some(text_direction)),
+                            padding_of_button(tester).resolve(Some(text_direction)),
                             expected_padding,
                             "scale {text_scale_factor}, {text_direction:?}, icon {with_icon}"
                         );
 
                         // Measure padding in terms of the difference between the button and
                         // its label child and check that.
-                        let label_bounds = tester
-                            .global_rect(tester.render_object(&label_key).as_box().expect("a box"));
-                        let icon_bounds = with_icon.then(|| {
-                            tester.global_rect(
-                                tester.render_object(&icon_key).as_box().expect("a box"),
-                            )
-                        });
+                        let label_bounds = tester.get_rect(&label_key);
+                        let icon_bounds = with_icon.then(|| tester.get_rect(&icon_key));
                         let child_bounds = match icon_bounds {
                             Some(icon_bounds) => label_bounds.expand_to_include(icon_bounds),
                             None => label_bounds,
@@ -1720,9 +1704,11 @@ mod tests {
                         // We measure the `InkResponse` descendant of the button element,
                         // because the button has a larger `RenderBox` which accommodates the
                         // minimum tap target with a height of 48.
-                        let ink_well =
-                            *tester.find_by_type::<InkWell>().last().expect("an InkWell");
-                        let button_bounds = tester.global_rect(tester.render_box_of(ink_well));
+                        let ink_well = *find::by_type::<InkWell>()
+                            .evaluate(tester)
+                            .last()
+                            .expect("an InkWell");
+                        let button_bounds = tester.get_rect(ink_well);
 
                         // Since there is a requirement of a minimum width of 64 and a minimum
                         // height of 36 on material buttons, the visual padding of smaller
@@ -1763,9 +1749,8 @@ mod tests {
 
     #[test]
     fn a_style_padding_overrides_the_scaled_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = light(&tester, true);
+        test_widgets(|tester| {
+            let theme = light(tester, true);
             tester.pump_widget(material_app(
                 theme,
                 MediaQuery::with_clamped_text_scaling(
@@ -1781,14 +1766,13 @@ mod tests {
                     ),
                 ),
             ));
-            assert!(padding_of_button(&tester) == EdgeInsetsGeometry::all(22.0));
+            assert!(padding_of_button(tester) == EdgeInsetsGeometry::all(22.0));
         });
     }
 
     #[test]
     fn a_larger_theme_label_font_size_scales_the_padding_down() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::from(ColorScheme::light())
                 .text_theme(TextTheme::new().label_large(TextStyle::new().font_size(28.0)))
                 .build(&tester.cell.borrow());
@@ -1796,20 +1780,19 @@ mod tests {
                 theme,
                 TextButton::new(pressed(), Some(Text::new("text"))),
             ));
-            assert!(padding_of_button(&tester) == EdgeInsetsGeometry::symmetric(0.0, 8.0));
+            assert!(padding_of_button(tester) == EdgeInsetsGeometry::symmetric(0.0, 8.0));
         });
     }
 
     #[test]
     fn material_3_padding_of_the_button_and_its_icon_variant() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = light(&tester, true);
+        test_widgets(|tester| {
+            let theme = light(tester, true);
             tester.pump_widget(app_centered(
                 theme.clone(),
                 TextButton::new(pressed(), Some(Text::new("TextButton"))),
             ));
-            assert!(padding_of_button(&tester) == EdgeInsetsGeometry::symmetric(8.0, 12.0));
+            assert!(padding_of_button(tester) == EdgeInsetsGeometry::symmetric(8.0, 12.0));
 
             tester.pump_widget(app_centered(
                 theme,
@@ -1817,20 +1800,19 @@ mod tests {
                     .icon(Icon::new(Some(Icons::add()))),
             ));
             assert!(
-                padding_of_button(&tester) == EdgeInsetsGeometry::from_steb(12.0, 8.0, 16.0, 8.0)
+                padding_of_button(tester) == EdgeInsetsGeometry::from_steb(12.0, 8.0, 16.0, 8.0)
             );
         });
     }
 
     #[test]
     fn no_splash_paints_no_splash_and_ink_ripple_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (splash_factory, circles) in [
                 (NoSplash::splash_factory(), 0),
                 (InkRipple::splash_factory(), 1),
             ] {
-                let theme = default_theme(&tester);
+                let theme = default_theme(tester);
                 tester.pump_widget(app_centered(
                     theme,
                     TextButton::new(pressed(), Some(Text::new("test"))).style(
@@ -1839,13 +1821,13 @@ mod tests {
                             .build(),
                     ),
                 ));
-                let mut touch = WidgetTester::touch(1);
-                tester.down(&mut touch, button_center(&tester));
+                let mut touch = TestPointer::touch(1);
+                tester.down(&mut touch, button_center(tester));
                 // Valo's canvas drops a draw whose paint is transparent, and the splash fades
                 // in from transparent on the frame after the press: let that frame pass first.
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(200));
-                assert_eq!(ink_circle_count(&tester), circles);
+                tester.pump();
+                tester.pump_by(Duration::from_millis(200));
+                assert_eq!(ink_circle_count(tester), circles);
                 tester.up(&touch);
                 tester.pump_and_settle();
             }
@@ -1856,7 +1838,7 @@ mod tests {
     // 'TextButton uses InkRipple when useMaterial3 is false', on every platform.
     #[test]
     fn the_splash_factory_is_ink_sparkle_on_android_in_material_3_and_ink_ripple_in_material_2() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             for platform in [
                 TargetPlatform::Android,
                 TargetPlatform::Fuchsia,
@@ -1866,25 +1848,27 @@ mod tests {
                 TargetPlatform::Windows,
             ] {
                 for material3 in [true, false] {
-                    let mut tester = tester_on(platform);
-                    let theme = ThemeData::builder()
-                        .use_material3(material3)
-                        .build(&tester.cell.borrow());
-                    let sparkles = material3 && platform == TargetPlatform::Android && !K_IS_WEB;
-                    let expected = if sparkles {
-                        InkSparkle::splash_factory()
-                    } else {
-                        InkRipple::splash_factory()
-                    };
-                    tester.pump_widget(app_centered(
-                        theme,
-                        TextButton::new(pressed(), Some(Text::new("button"))),
-                    ));
-                    let splash_factory = ink_well(&tester, |ink_well| {
-                        ink_well.ink_response.splash_factory.clone()
-                    })
-                    .expect("the button gives its InkWell a splash factory");
-                    assert!(Rc::ptr_eq(&splash_factory, &expected), "{platform:?}");
+                    test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                        let theme = ThemeData::builder()
+                            .use_material3(material3)
+                            .build(&tester.cell.borrow());
+                        let sparkles =
+                            material3 && platform == TargetPlatform::Android && !K_IS_WEB;
+                        let expected = if sparkles {
+                            InkSparkle::splash_factory()
+                        } else {
+                            InkRipple::splash_factory()
+                        };
+                        tester.pump_widget(app_centered(
+                            theme,
+                            TextButton::new(pressed(), Some(Text::new("button"))),
+                        ));
+                        let splash_factory = ink_well(tester, |ink_well| {
+                            ink_well.ink_response.splash_factory.clone()
+                        })
+                        .expect("the button gives its InkWell a splash factory");
+                        assert!(Rc::ptr_eq(&splash_factory, &expected), "{platform:?}");
+                    });
                 }
             }
         });
@@ -1893,9 +1877,8 @@ mod tests {
     #[test]
     fn an_icon_button_with_a_long_label_in_a_narrow_box_lays_out() {
         // Regression test for https://github.com/flutter/flutter/issues/77815
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 SizedBox::new()
@@ -1904,7 +1887,7 @@ mod tests {
                         TextButton::icon(
                             pressed(),
                             // Much wider than 200
-                            ahem_text(
+                            Text::new(
                                 "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Ut a \
                                  euismod nibh. Morbi laoreet purus.",
                             ),
@@ -1918,8 +1901,7 @@ mod tests {
 
     #[test]
     fn the_icon_and_label_sit_in_a_row_with_an_eight_pixel_gap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let icon_key = GlobalKey::new();
             let label_key = GlobalKey::new();
@@ -1927,7 +1909,7 @@ mod tests {
                 .padding(EdgeInsetsGeometry::ZERO)
                 .visual_density(VisualDensity::STANDARD) // dx=0, dy=0
                 .build();
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Align::new()
@@ -1959,9 +1941,7 @@ mod tests {
             // The overall button width is 200. So:
             // icon.x = 46
             // label.x = 46 + 50 + 8 = 104
-            let rect_of = |key: &GlobalKey| {
-                tester.global_rect(tester.render_object(key).as_box().expect("a box"))
-            };
+            let rect_of = |key: &GlobalKey| tester.get_rect(key);
             assert_eq!(
                 rect_of(&button_key),
                 Rect::from_ltrb(0.0, 0.0, 200.0, 100.0)
@@ -1976,8 +1956,7 @@ mod tests {
 
     #[test]
     fn style_from_cursors_show_while_hovered_and_the_default_is_basic() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = |on_pressed: Option<Listener>, custom: bool| {
                 let mut button = TextButton::new(on_pressed, Some(Text::new("button")));
                 if custom {
@@ -1997,19 +1976,19 @@ mod tests {
             };
 
             tester.pump_widget(frame(pressed(), true));
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.pump(Duration::ZERO);
-            assert!(is(&tester, SystemMouseCursors::TEXT));
+            tester.pump();
+            assert!(is(tester, SystemMouseCursors::TEXT));
 
             // Test cursor when disabled
             tester.pump_widget(frame(None, true));
-            assert!(is(&tester, SystemMouseCursors::GRAB));
+            assert!(is(tester, SystemMouseCursors::GRAB));
 
             // Test default cursor
             tester.pump_widget(frame(pressed(), false));
             assert!(is(
-                &tester,
+                tester,
                 if K_IS_WEB {
                     SystemMouseCursors::CLICK
                 } else {
@@ -2019,15 +1998,14 @@ mod tests {
 
             // Test default cursor when disabled
             tester.pump_widget(frame(None, false));
-            assert!(is(&tester, SystemMouseCursors::BASIC));
+            assert!(is(tester, SystemMouseCursors::BASIC));
         });
     }
 
     #[test]
     fn style_from_sets_the_foreground_and_background_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let purple = Colors::PURPLE.primary();
             tester.pump_widget(material_app(
                 theme,
@@ -2040,7 +2018,7 @@ mod tests {
                     )
                     .into_widget(),
             ));
-            material(&tester, |material| {
+            material(tester, |material| {
                 assert_eq!(material.color, Some(purple));
                 assert_eq!(
                     material
@@ -2056,8 +2034,7 @@ mod tests {
     // 'TextButton.icon statesController'; the plain button's case is button_style_button.rs's.
     #[test]
     fn an_icon_buttons_states_controller_follows_hover_press_and_disable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let count = Rc::new(Cell::new(0));
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             controller.add_listener(&mut tester.cell.borrow_mut(), {
@@ -2076,69 +2053,72 @@ mod tests {
             let value =
                 |tester: &WidgetTester| tester.cell.borrow().get(&controller).value().clone();
 
-            let first = frame(&tester, true);
+            let first = frame(tester, true);
             tester.pump_widget(first);
-            assert_eq!(value(&tester), states(&[]));
+            assert_eq!(value(tester), states(&[]));
             assert_eq!(count.get(), 0);
 
-            let label = *tester.find_text("button").first().expect("the label");
-            let center = tester.global_rect(tester.render_box_of(label)).center();
+            let label = *find::text("button")
+                .evaluate(tester)
+                .first()
+                .expect("the label");
+            let center = tester.get_rect(label).center();
             let mut gesture = mouse();
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[WidgetState::Hovered]));
+            assert_eq!(value(tester), states(&[WidgetState::Hovered]));
             assert_eq!(count.get(), 1);
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[]));
+            assert_eq!(value(tester), states(&[]));
             assert_eq!(count.get(), 2);
 
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[WidgetState::Hovered]));
+            assert_eq!(value(tester), states(&[WidgetState::Hovered]));
             assert_eq!(count.get(), 3);
 
             tester.send(&gesture, PointerChange::Down);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester),
+                value(tester),
                 states(&[WidgetState::Hovered, WidgetState::Pressed])
             );
             assert_eq!(count.get(), 4);
 
             tester.up(&gesture);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[WidgetState::Hovered]));
+            assert_eq!(value(tester), states(&[WidgetState::Hovered]));
             assert_eq!(count.get(), 5);
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[]));
+            assert_eq!(value(tester), states(&[]));
             assert_eq!(count.get(), 6);
 
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester),
+                value(tester),
                 states(&[WidgetState::Hovered, WidgetState::Pressed])
             );
             assert_eq!(count.get(), 8); // adds hovered and pressed - two changes
 
             // If the button is rebuilt disabled, then the pressed state is
             // removed.
-            let disabled = frame(&tester, false);
+            let disabled = frame(tester, false);
             tester.pump_widget(disabled);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester),
+                value(tester),
                 states(&[WidgetState::Hovered, WidgetState::Disabled])
             );
             assert_eq!(count.get(), 10); // removes pressed and adds disabled - two changes
             tester.move_to(&mut gesture, Offset::ZERO, true);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[WidgetState::Disabled]));
+            assert_eq!(value(tester), states(&[WidgetState::Disabled]));
             assert_eq!(count.get(), 11);
         });
     }
@@ -2146,8 +2126,7 @@ mod tests {
     #[test]
     fn style_from_with_only_an_enabled_cursor_builds() {
         // This is a regression test for https://github.com/flutter/flutter/issues/118071.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ltr(TextButton::new(pressed(), Some(Text::new("button")))
                 .style(
                     TextButton::style_from()
@@ -2160,8 +2139,7 @@ mod tests {
     #[test]
     fn style_from_a_lone_background_color_applies_when_disabled_too() {
         // Regression test for an internal Google issue: b/323399158
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let background_color = Color::new(0xFF000022);
             let frame = |on_pressed: Option<Listener>| {
                 ltr(
@@ -2174,12 +2152,12 @@ mod tests {
             };
 
             tester.pump_widget(frame(pressed())); // enabled
-            material(&tester, |material| {
+            material(tester, |material| {
                 assert_eq!(material.color, Some(background_color))
             });
 
             tester.pump_widget(frame(None)); // onPressed: null - disabled
-            material(&tester, |material| {
+            material(tester, |material| {
                 assert_eq!(material.color, Some(background_color))
             });
         });
@@ -2204,44 +2182,42 @@ mod tests {
 
     #[test]
     fn the_icon_sits_at_the_start_by_default_in_both_directions() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test default iconAlignment when textDirection is ltr.
             let frame = icon_alignment_frame(
-                &tester,
+                tester,
                 TextDirection::Ltr,
-                TextButton::icon(pressed(), ahem_text("button")),
+                TextButton::icon(pressed(), Text::new("button")),
             );
             tester.pump_widget(frame);
             // The icon is aligned to the left of the button.
             // 12.0 - padding between icon and button edge.
-            assert_eq!(button_rect(&tester).left, icon_rect(&tester).left - 12.0);
+            assert_eq!(button_rect(tester).left, icon_rect(tester).left - 12.0);
 
             // Test default iconAlignment when textDirection is rtl.
             let frame = icon_alignment_frame(
-                &tester,
+                tester,
                 TextDirection::Rtl,
-                TextButton::icon(pressed(), ahem_text("button")),
+                TextButton::icon(pressed(), Text::new("button")),
             );
             tester.pump_widget(frame);
             // The icon is aligned to the right of the button.
             // 12.0 - padding between icon and button edge.
-            assert_eq!(button_rect(&tester).right, icon_rect(&tester).right + 12.0);
+            assert_f32_equals(button_rect(tester).right, icon_rect(tester).right + 12.0);
         });
     }
 
     #[test]
     fn icon_alignment_places_the_icon_at_either_end_in_both_directions() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut case = |text_direction, icon_alignment| {
                 let frame = icon_alignment_frame(
-                    &tester,
+                    tester,
                     text_direction,
-                    TextButton::icon(pressed(), ahem_text("button")).icon_alignment(icon_alignment),
+                    TextButton::icon(pressed(), Text::new("button")).icon_alignment(icon_alignment),
                 );
                 tester.pump_widget(frame);
-                (button_rect(&tester), icon_rect(&tester))
+                (button_rect(tester), icon_rect(tester))
             };
 
             // The icon is aligned to the left of the button.
@@ -2250,11 +2226,11 @@ mod tests {
 
             // The icon is aligned to the right of the button.
             let (button, icon) = case(TextDirection::Ltr, IconAlignment::End);
-            assert_eq!(button.right, icon.right + 16.0);
+            assert_f32_equals(button.right, icon.right + 16.0);
 
             // The icon is aligned to the right of the button.
             let (button, icon) = case(TextDirection::Rtl, IconAlignment::Start);
-            assert_eq!(button.right, icon.right + 12.0);
+            assert_f32_equals(button.right, icon.right + 12.0);
 
             // The icon is aligned to the left of the button.
             let (button, icon) = case(TextDirection::Rtl, IconAlignment::End);
@@ -2264,32 +2240,30 @@ mod tests {
 
     #[test]
     fn the_icon_follows_the_style_icon_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut case = |style: ButtonStyle| {
-                let theme = default_theme(&tester);
+                let theme = default_theme(tester);
                 tester.pump_widget(app_centered(
                     theme,
-                    TextButton::icon(pressed(), ahem_text("button"))
+                    TextButton::icon(pressed(), Text::new("button"))
                         .style(style)
                         .icon(Icon::new(Some(Icons::add()))),
                 ));
-                (button_rect(&tester), icon_rect(&tester))
+                (button_rect(tester), icon_rect(tester))
             };
 
             let (button, icon) = case(ButtonStyle::new());
             assert_eq!(button.left, icon.left - 12.0);
 
             let (button, icon) = case(ButtonStyle::new().icon_alignment(IconAlignment::End));
-            assert_eq!(button.right, icon.right + 16.0);
+            assert_f32_equals(button.right, icon.right + 16.0);
         });
     }
 
     #[test]
     fn style_from_sets_the_icon_size_colors_and_alignment() {
         // Regression test for https://github.com/flutter/flutter/issues/154798.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_color = Color::new(0xFFF000FF);
             let icon_size = 32.0;
             let disabled_icon_color = Color::new(0xFFFFF000);
@@ -2302,7 +2276,7 @@ mod tests {
                             Center::new().child(
                                 TextButton::icon(
                                     if enabled { pressed() } else { None },
-                                    ahem_text("Button"),
+                                    Text::new("Button"),
                                 )
                                 .style(
                                     TextButton::style_from()
@@ -2320,16 +2294,16 @@ mod tests {
             };
 
             // Test enabled button.
-            let enabled = frame(&tester, true);
+            let enabled = frame(tester, true);
             tester.pump_widget(enabled);
-            assert_eq!(icon_rect(&tester).size(), Size::new(icon_size, icon_size));
+            assert_eq!(icon_rect(tester).size(), Size::new(icon_size, icon_size));
             assert_eq!(
                 tester.icon_style().color.as_deref().copied(),
                 Some(icon_color)
             );
 
             // Test disabled button.
-            let disabled = frame(&tester, false);
+            let disabled = frame(tester, false);
             tester.pump_widget(disabled);
             tester.pump_and_settle();
             assert_eq!(
@@ -2337,17 +2311,16 @@ mod tests {
                 Some(disabled_icon_color)
             );
 
-            assert_eq!(button_rect(&tester).right, icon_rect(&tester).right + 16.0);
+            assert_f32_equals(button_rect(tester).right, icon_rect(tester).right + 16.0);
         });
     }
 
     #[test]
     fn the_icon_takes_the_style_from_foreground_color_over_the_default_icon_color() {
         // Regression test for https://github.com/flutter/flutter/issues/162839.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xFFFF1234);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Material::new()
@@ -2373,8 +2346,7 @@ mod tests {
 
     #[test]
     fn an_icon_button_keeps_its_focus_when_its_icon_is_removed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = |tester: &WidgetTester, icon: bool| {
                 let theme = default_theme(tester);
                 let mut button = TextButton::icon(pressed(), Text::new("button"));
@@ -2384,34 +2356,36 @@ mod tests {
                 app_centered(theme, button)
             };
             let button_focus_node = |tester: &WidgetTester| {
-                let label = *tester.find_text("button").first().expect("the label");
+                let label = *find::text("button")
+                    .evaluate(tester)
+                    .first()
+                    .expect("the label");
                 let mut app = tester.cell.borrow_mut();
                 waft_widgets::Focus::of(&mut app, label, false, true)
             };
 
             // Build once with an icon.
-            let with_icon = frame(&tester, true);
+            let with_icon = frame(tester, true);
             tester.pump_widget(with_icon);
-            let node = button_focus_node(&tester);
+            let node = button_focus_node(tester);
             node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert!(button_focus_node(&tester).has_focus(&mut tester.cell.borrow_mut()));
+            assert!(button_focus_node(tester).has_focus(&mut tester.cell.borrow_mut()));
 
             // Rebuild without icon.
-            let without_icon = frame(&tester, false);
+            let without_icon = frame(tester, false);
             tester.pump_widget(without_icon);
 
             // The button should still be focused.
-            assert!(button_focus_node(&tester).has_focus(&mut tester.cell.borrow_mut()));
+            assert!(button_focus_node(tester).has_focus(&mut tester.cell.borrow_mut()));
         });
     }
 
     #[test]
     fn the_icon_color_can_differ_from_the_text_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color_scheme = ColorScheme::light();
-            let theme = light(&tester, true);
+            let theme = light(tester, true);
             let red = Colors::RED.primary();
             let blue = Colors::BLUE.primary();
             tester.pump_widget(app_centered(
@@ -2420,7 +2394,7 @@ mod tests {
                     .style(TextButton::style_from().icon_color(red).build())
                     .icon(Icon::new(Some(Icons::add()))),
             ));
-            material(&tester, |material| {
+            material(tester, |material| {
                 assert_eq!(
                     material
                         .text_style
@@ -2444,7 +2418,7 @@ mod tests {
                     .icon(Icon::new(Some(Icons::add()))),
             ));
             tester.pump_and_settle();
-            material(&tester, |material| {
+            material(tester, |material| {
                 assert_eq!(
                     material
                         .text_style
@@ -2459,10 +2433,9 @@ mod tests {
 
     #[test]
     fn a_hovering_stylus_hovers_like_a_mouse() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
+            let theme = default_theme(tester);
             let primary = theme.color_scheme.primary;
             let has_been_hovered = Rc::new(Cell::new(false));
             let on_hover: waft_foundation::ValueChanged<bool> = {
@@ -2476,10 +2449,10 @@ mod tests {
                     .focus_node(focus_node),
             ));
 
-            let center = button_center(&tester);
-            let mut gesture = crate::test_support::TestPointer {
+            let center = button_center(tester);
+            let mut gesture = TestPointer {
                 kind: waft_embedder::PointerDeviceKind::Stylus,
-                ..WidgetTester::mouse(1, 0)
+                ..TestPointer::mouse(1, 0)
             };
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.pump_and_settle();
@@ -2487,7 +2460,7 @@ mod tests {
 
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(primary.with_opacity(0.08))));
+            assert!(ink_rect_colors(tester).contains(&argb(primary.with_opacity(0.08))));
             assert!(has_been_hovered.get());
         });
     }

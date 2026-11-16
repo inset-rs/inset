@@ -392,12 +392,10 @@ pub fn hour_format(of: TimeOfDayFormat) -> HourFormat {
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
-    use std::time::Duration;
 
-    use waft_embedder::{Restoration, TargetPlatform};
     use waft_foundation::{AppCell, Listenable, Listener};
-    use waft_services::{RestorationBucket, RestorationManager, RestorationMap, RestorationUpdate};
-    use waft_test::TestPlatform;
+    use waft_services::{RestorationBucket, RestorationManager, RestorationMap};
+    use waft_widgets::testing::{WidgetTester, test_widgets};
     use waft_widgets::{
         Builder, GlobalKey, IntoWidget, KeyRef, MediaQueryData, RestorationMixin,
         RestorationMixinData, RootRestorationScope, SizedBox, State, StateData, StatefulWidget,
@@ -406,7 +404,6 @@ mod tests {
 
     use super::*;
     use crate::material_localizations::tests::us_english;
-    use crate::test_support::{build, pump, test_cell, test_view};
 
     // time_test.dart 'hourFormat'.
     #[test]
@@ -433,26 +430,26 @@ mod tests {
     #[test]
     fn format_respects_always_use_24_hour_format() {
         let pump_test = |always_use_24_hour_format: bool| {
-            let cell = test_cell();
-            let formatted_value = Rc::new(RefCell::new(String::new()));
-            let probe = Builder::new({
-                let formatted_value = Rc::clone(&formatted_value);
-                move |app, context| {
-                    *formatted_value.borrow_mut() = TimeOfDay::new(7, 0).format(app, context);
-                    SizedBox::shrink().into_widget()
-                }
-            });
-            build(
-                &cell,
-                us_english(
+            let mut formatted = String::new();
+            test_widgets(|tester| {
+                let formatted_value = Rc::new(RefCell::new(String::new()));
+                let probe = Builder::new({
+                    let formatted_value = Rc::clone(&formatted_value);
+                    move |app, context| {
+                        *formatted_value.borrow_mut() = TimeOfDay::new(7, 0).format(app, context);
+                        SizedBox::shrink().into_widget()
+                    }
+                });
+                tester.pump_widget(us_english(
                     MediaQuery::new(
                         MediaQueryData::new().always_use_24_hour_format(always_use_24_hour_format),
                         probe,
                     )
                     .into_widget(),
-                ),
-            );
-            formatted_value.take()
+                ));
+                formatted = formatted_value.take();
+            });
+            formatted
         };
 
         assert_eq!(pump_test(false), "7:00 AM");
@@ -553,44 +550,6 @@ mod tests {
         assert_eq!(format!("{:?}", TimeOfDay::new(23, 45)), "TimeOfDay(23:45)");
     }
 
-    /// A host that answers `Restoration::get` with what it was handed and records every
-    /// `Restoration::put`.
-    #[derive(Default)]
-    struct RecordingRestoration {
-        stored: RefCell<Option<RestorationUpdate>>,
-        puts: RefCell<Vec<RestorationMap>>,
-    }
-
-    impl Restoration for RecordingRestoration {
-        fn get(&self) -> Option<RestorationUpdate> {
-            self.stored.borrow().clone()
-        }
-
-        fn put(&self, data: RestorationMap) {
-            self.puts.borrow_mut().push(data);
-        }
-    }
-
-    impl RecordingRestoration {
-        fn last_put(&self) -> RestorationMap {
-            self.puts.borrow().last().cloned().expect("a put")
-        }
-    }
-
-    /// An app whose host restores `data`, with one 800x600 view at 2x.
-    fn restoring_cell(data: Option<RestorationMap>) -> (Rc<AppCell>, Rc<RecordingRestoration>) {
-        let restoration = Rc::new(RecordingRestoration::default());
-        *restoration.stored.borrow_mut() = Some(RestorationUpdate {
-            enabled: true,
-            data,
-        });
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::Android)
-            .with_view(test_view())
-            .with_restoration(restoration.clone());
-        (AppCell::with_platform(Rc::new(platform)), restoration)
-    }
-
     /// time_test.dart's `_RestorableWidget`.
     #[derive(Debug)]
     struct RestorableWidget {
@@ -674,7 +633,7 @@ mod tests {
 
     /// Mounts a `_RestorableWidget`, under a root restoration scope when `in_scope`, and hands
     /// back its state.
-    fn mount(cell: &AppCell, in_scope: bool) -> Handle<RestorableWidgetState> {
+    fn mount(tester: &mut WidgetTester, in_scope: bool) -> Handle<RestorableWidgetState> {
         let key = GlobalKey::new();
         let widget = RestorableWidget {
             key: key.clone().into(),
@@ -684,8 +643,8 @@ mod tests {
         } else {
             widget.into_widget()
         };
-        build(cell, root);
-        key.current_state::<RestorableWidgetState>(&cell.borrow_mut())
+        tester.pump_widget(root);
+        key.current_state::<RestorableWidgetState>(&tester.cell.borrow_mut())
             .expect("a _RestorableWidgetState")
     }
 
@@ -703,126 +662,142 @@ mod tests {
         RestorableValue::value(property.handle(), &app);
     }
 
+    /// Dart's `state.setProperties(() { state.timeOfDay.value = value; })`, then `tester.pump()`.
+    fn set_time_of_day(
+        tester: &mut WidgetTester,
+        state: Handle<RestorableWidgetState>,
+        value: TimeOfDay,
+    ) {
+        tester.update(|app| {
+            state.set_properties(app, |app| state.time_of_day(app).set_value(app, value));
+        });
+        tester.pump();
+    }
+
+    fn current_value(tester: &WidgetTester, state: Handle<RestorableWidgetState>) -> TimeOfDay {
+        value(&tester.cell.borrow(), state)
+    }
+
     // time_test.dart 'RestorableTimeOfDay tests: work when not in restoration scope'.
     #[test]
     fn a_property_works_when_not_in_a_restoration_scope() {
-        let cell = test_cell();
-        let state = mount(&cell, false);
-        let app = &mut cell.borrow_mut();
+        test_widgets(|tester| {
+            let state = mount(tester, false);
 
-        // Initialized to default values.
-        assert_eq!(value(app, state), TimeOfDay::new(10, 5));
+            // Initialized to default values.
+            assert_eq!(current_value(tester, state), TimeOfDay::new(10, 5));
 
-        // Modify values.
-        state.set_properties(app, |app| {
-            state.time_of_day(app).set_value(app, TimeOfDay::new(2, 2));
+            // Modify values.
+            set_time_of_day(tester, state, TimeOfDay::new(2, 2));
+
+            assert_eq!(current_value(tester, state), TimeOfDay::new(2, 2));
         });
-        pump(app, Duration::ZERO);
-
-        assert_eq!(value(app, state), TimeOfDay::new(2, 2));
     }
 
     // time_test.dart 'RestorableTimeOfDay tests: restart and restore'.
     #[test]
     fn a_restarted_app_restores_the_time_of_day() {
-        let (cell, restoration) = restoring_cell(None);
-        let state = mount(&cell, true);
-        {
-            let app = &mut cell.borrow_mut();
+        test_widgets(|_| {
+            let mut tester = WidgetTester::restoring(None);
+            let state = mount(&mut tester, true);
 
             // Initialized to default values.
-            assert_eq!(value(app, state), TimeOfDay::new(10, 5));
+            assert_eq!(current_value(&tester, state), TimeOfDay::new(10, 5));
 
             // Modify values.
-            state.set_properties(app, |app| {
-                state.time_of_day(app).set_value(app, TimeOfDay::new(2, 2));
-            });
-            pump(app, Duration::ZERO);
+            set_time_of_day(&mut tester, state, TimeOfDay::new(2, 2));
 
-            assert_eq!(value(app, state), TimeOfDay::new(2, 2));
-        }
+            assert_eq!(current_value(&tester, state), TimeOfDay::new(2, 2));
 
-        // Restores to previous values.
-        let (restarted, _) = restoring_cell(Some(restoration.last_put()));
-        let restarted_state = mount(&restarted, true);
-        let app = &mut restarted.borrow_mut();
-        assert_eq!(value(app, restarted_state), TimeOfDay::new(2, 2));
+            // Restores to previous values.
+            let mut restarted = WidgetTester::restoring(tester.restoration_data());
+            let restarted_state = mount(&mut restarted, true);
+            assert_eq!(
+                current_value(&restarted, restarted_state),
+                TimeOfDay::new(2, 2)
+            );
+        });
     }
 
     // time_test.dart 'RestorableTimeOfDay tests: restore to older state'.
     #[test]
     fn a_property_restores_to_older_data_and_to_its_default_from_empty_data() {
-        let (cell, restoration) = restoring_cell(None);
-        let state = mount(&cell, true);
-        let app = &mut cell.borrow_mut();
+        test_widgets(|_| {
+            let mut tester = WidgetTester::restoring(None);
+            let state = mount(&mut tester, true);
 
-        // Modify values.
-        state.set_properties(app, |app| {
-            state.time_of_day(app).set_value(app, TimeOfDay::new(2, 2));
+            // Modify values.
+            set_time_of_day(&mut tester, state, TimeOfDay::new(2, 2));
+
+            let restoration_data = tester.restoration_data();
+
+            // Modify values.
+            set_time_of_day(&mut tester, state, TimeOfDay::new(4, 4));
+
+            // Restore to previous.
+            tester.update(|app| {
+                let manager = RestorationManager::instance(app);
+                manager.handle_restoration_update_from_engine(app, true, restoration_data);
+            });
+            tester.pump();
+            assert_eq!(current_value(&tester, state), TimeOfDay::new(2, 2));
+
+            // Restore to empty data will re-initialize to default values.
+            tester.update(|app| {
+                let manager = RestorationManager::instance(app);
+                manager.handle_restoration_update_from_engine(
+                    app,
+                    true,
+                    Some(RestorationMap::new()),
+                );
+            });
+            tester.pump();
+            assert_eq!(current_value(&tester, state), TimeOfDay::new(10, 5));
         });
-        pump(app, Duration::ZERO);
-
-        let restoration_data = restoration.last_put();
-
-        // Modify values.
-        state.set_properties(app, |app| {
-            state.time_of_day(app).set_value(app, TimeOfDay::new(4, 4));
-        });
-        pump(app, Duration::ZERO);
-
-        // Restore to previous.
-        let manager = RestorationManager::instance(app);
-        manager.handle_restoration_update_from_engine(app, true, Some(restoration_data));
-        pump(app, Duration::ZERO);
-        assert_eq!(value(app, state), TimeOfDay::new(2, 2));
-
-        // Restore to empty data will re-initialize to default values.
-        manager.handle_restoration_update_from_engine(app, true, Some(RestorationMap::new()));
-        pump(app, Duration::ZERO);
-        assert_eq!(value(app, state), TimeOfDay::new(10, 5));
     }
 
     // time_test.dart 'RestorableTimeOfDay tests: call notifiers when value changes'.
     #[test]
     fn a_property_notifies_only_when_its_value_changes() {
-        let (cell, _) = restoring_cell(None);
-        let state = mount(&cell, true);
-        let app = &mut cell.borrow_mut();
+        test_widgets(|_| {
+            let mut tester = WidgetTester::restoring(None);
+            let state = mount(&mut tester, true);
 
-        let notify_log = Rc::new(RefCell::new(Vec::<&str>::new()));
-        state.time_of_day(app).add_listener(app, {
-            let notify_log = Rc::clone(&notify_log);
-            Listener::new(move |_app| notify_log.borrow_mut().push("hello world"))
+            let notify_log = Rc::new(RefCell::new(Vec::<&str>::new()));
+            tester.update(|app| {
+                state.time_of_day(app).add_listener(app, {
+                    let notify_log = Rc::clone(&notify_log);
+                    Listener::new(move |_app| notify_log.borrow_mut().push("hello world"))
+                });
+                state.set_properties(app, |app| {
+                    state.time_of_day(app).set_value(app, TimeOfDay::new(2, 2));
+                });
+            });
+            assert_eq!(*notify_log.borrow(), ["hello world"]);
+            notify_log.borrow_mut().clear();
+            tester.pump();
+
+            // Does not notify when set to same value.
+            set_time_of_day(&mut tester, state, TimeOfDay::new(2, 2));
+
+            assert!(notify_log.borrow().is_empty());
         });
-
-        state.set_properties(app, |app| {
-            state.time_of_day(app).set_value(app, TimeOfDay::new(2, 2));
-        });
-        assert_eq!(*notify_log.borrow(), ["hello world"]);
-        notify_log.borrow_mut().clear();
-        pump(app, Duration::ZERO);
-
-        // Does not notify when set to same value.
-        state.set_properties(app, |app| {
-            state.time_of_day(app).set_value(app, TimeOfDay::new(2, 2));
-        });
-
-        assert!(notify_log.borrow().is_empty());
     }
 
     #[test]
     fn the_restoration_data_is_the_minute_then_the_hour() {
-        let (cell, restoration) = restoring_cell(None);
-        let state = mount(&cell, true);
-        let app = &mut cell.borrow_mut();
-        state.set_properties(app, |app| {
-            state.time_of_day(app).set_value(app, TimeOfDay::new(2, 7));
+        test_widgets(|_| {
+            let mut tester = WidgetTester::restoring(None);
+            let state = mount(&mut tester, true);
+            set_time_of_day(&mut tester, state, TimeOfDay::new(2, 7));
+            assert_eq!(
+                tester.update(|app| RestorableProperty::to_primitives(
+                    state.time_of_day(app).handle(),
+                    app
+                )),
+                RestorationData::List(vec![RestorationData::Int(7), RestorationData::Int(2)])
+            );
+            assert!(tester.restoration_data().is_some());
         });
-        pump(app, Duration::ZERO);
-        assert_eq!(
-            RestorableProperty::to_primitives(state.time_of_day(app).handle(), app),
-            RestorationData::List(vec![RestorationData::Int(7), RestorationData::Int(2)])
-        );
-        assert!(!restoration.puts.borrow().is_empty());
     }
 }

@@ -1330,15 +1330,16 @@ mod tests {
     use waft_foundation::AppCell;
 
     use waft_embedder::{PointerDeviceKind, Restoration, TargetPlatform, TextDirection};
-    use waft_gestures::{PointerDownEvent, PointerMoveEvent, PointerUpEvent};
-    use waft_scheduler::SchedulerBinding;
     use waft_services::{RestorationMap, RestorationUpdate};
-    use waft_test::{TestPlatform, TestView};
+    use waft_test::TestPlatform;
 
     use super::*;
     use crate::framework::Element;
     use crate::test_harness::Harness;
-    use crate::test_harness::{binding_mount, binding_pump, pump_every_view};
+    use crate::test_harness::pump_every_view;
+    use crate::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, find, test_widgets, test_widgets_variant,
+    };
     use crate::widgets::basic::{Builder, Directionality, SizedBox, SliverToBoxAdapter};
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::restoration::RootRestorationScope;
@@ -1675,183 +1676,52 @@ mod tests {
         }
     }
 
-    /// The part of `flutter_test`'s `WidgetTester` these tests use: a fake clock that a pump
-    /// advances, frames stamped with it, and pointers sent straight to the gesture binding.
-    struct WidgetTester {
-        cell: Rc<AppCell>,
-        /// The binding's clock: the time stamp of the next frame.
-        now: Duration,
-        /// The last pointer number handed out; Flutter's first is 1.
-        last_pointer: i64,
+    /// `tester.startGesture(location)` for a touch numbered `pointer`.
+    fn start_gesture(tester: &mut WidgetTester, pointer: i64, location: Offset) -> TestPointer {
+        let mut gesture = TestPointer::touch(pointer);
+        tester.down(&mut gesture, location);
+        gesture
     }
 
-    /// A pointer that is down, as a `flutter_test` `TestGesture` holds one.
-    struct TestGesture {
-        pointer: i64,
-        location: Offset,
+    /// `tester.drag(find.byType(Scrollable), offset, touchSlopY: 0.0)` for a vertical
+    /// `offset`: with no slop to break the drag at, one move by all of it.
+    fn drag_without_touch_slop(tester: &mut WidgetTester, pointer: i64, offset: Offset) {
+        assert_eq!(offset.dx(), 0.0, "a horizontal drag is split at the slop");
+        let mut gesture = start_gesture(tester, pointer, SCROLLABLE_CENTER);
+        tester.move_to(&mut gesture, SCROLLABLE_CENTER + offset, true);
+        tester.up(&gesture);
     }
 
-    impl WidgetTester {
-        /// `tester.pump(duration)`: the clock advances by `duration`, firing the timers that
-        /// come due, then a frame runs if one was asked for.
-        fn pump(&mut self, duration: Duration) {
-            self.cell.elapse(duration);
-            self.now += duration;
-            let mut app = self.cell.borrow_mut();
-            binding_pump(&mut app, self.now);
-            app.drain_microtasks();
-        }
-
-        /// `tester.pumpAndSettle(duration)`: pumps by `duration` until no frame is asked for,
-        /// and answers how many pumps it took.
-        fn pump_and_settle(&mut self, duration: Duration) -> u32 {
-            let end_time = self.now + Duration::from_secs(10 * 60);
-            let mut count = 0;
-            loop {
-                assert!(self.now <= end_time, "pumpAndSettle timed out");
-                self.pump(duration);
-                count += 1;
-                if !SchedulerBinding::has_scheduled_frame(&mut self.cell.borrow_mut()) {
-                    return count;
-                }
-            }
-        }
-
-        /// `tester.sendEventToBinding(event)`, with the microtasks its `await` runs.
-        fn send_event_to_binding(&self, event: PointerEvent) {
-            let mut app = self.cell.borrow_mut();
-            GestureBinding::instance(&mut app).handle_pointer_event(&mut app, event);
-            app.drain_microtasks();
-        }
-
-        fn next_pointer(&mut self) -> i64 {
-            self.last_pointer += 1;
-            self.last_pointer
-        }
-
-        /// `tester.startGesture(location)`: a touch down at `location`, stamped zero.
-        fn start_gesture(&mut self, location: Offset) -> TestGesture {
-            let gesture = TestGesture {
-                pointer: self.next_pointer(),
-                location,
-            };
-            self.send_event_to_binding(PointerEvent::Down(PointerDownEvent {
-                pointer: gesture.pointer,
-                position: location,
-                ..PointerDownEvent::default()
-            }));
-            gesture
-        }
-
-        /// `gesture.moveBy(offset)`, stamped zero.
-        fn move_by(&self, gesture: &mut TestGesture, offset: Offset) {
-            self.move_to(gesture, gesture.location + offset, Duration::ZERO);
-        }
-
-        fn move_to(&self, gesture: &mut TestGesture, location: Offset, time_stamp: Duration) {
-            let delta = location - gesture.location;
-            gesture.location = location;
-            self.send_event_to_binding(PointerEvent::Move(PointerMoveEvent {
-                pointer: gesture.pointer,
-                position: location,
-                delta,
-                time_stamp,
-                ..PointerMoveEvent::default()
-            }));
-        }
-
-        /// `gesture.up()`, stamped zero.
-        fn up(&self, gesture: TestGesture) {
-            self.up_at(gesture, Duration::ZERO);
-        }
-
-        fn up_at(&self, gesture: TestGesture, time_stamp: Duration) {
-            self.send_event_to_binding(PointerEvent::Up(PointerUpEvent {
-                pointer: gesture.pointer,
-                position: gesture.location,
-                time_stamp,
-                ..PointerUpEvent::default()
-            }));
-        }
-
-        /// `tester.drag(find.byType(Scrollable), offset, touchSlopY: 0.0)` for a vertical
-        /// `offset`: with no slop to break the drag at, one move by all of it.
-        fn drag_without_touch_slop(&mut self, offset: Offset) {
-            assert_eq!(offset.dx(), 0.0, "a horizontal drag is split at the slop");
-            let mut gesture = self.start_gesture(SCROLLABLE_CENTER);
-            self.move_by(&mut gesture, offset);
-            self.up(gesture);
-        }
-
-        /// `tester.fling(find.byType(Scrollable), offset, speed)`: 50 moves over `offset` at
-        /// `speed` pixels a second, stamped from zero, with a pump each time more than 16ms of
-        /// them have passed.
-        fn fling(&mut self, offset: Offset, speed: f64) {
-            const MOVE_COUNT: u32 = 50;
-            let frame_interval = Duration::from_millis(16).as_micros() as f64;
-            let time_stamp_delta = 1000000.0 * offset.distance() / (MOVE_COUNT as f64 * speed);
-            let mut time_stamp: f64 = 0.0;
-            let mut last_time_stamp = time_stamp;
-            let mut gesture = self.start_gesture(SCROLLABLE_CENTER);
-            for i in 0..=MOVE_COUNT {
-                let location = SCROLLABLE_CENTER
-                    + Offset::lerp(
-                        Some(Offset::ZERO),
-                        Some(offset),
-                        i as f64 / MOVE_COUNT as f64,
-                    )
-                    .expect("both ends are given");
-                self.move_to(&mut gesture, location, micros(time_stamp.round()));
-                time_stamp += time_stamp_delta;
-                if time_stamp - last_time_stamp > frame_interval {
-                    self.pump(micros((time_stamp - last_time_stamp).trunc()));
-                    last_time_stamp = time_stamp;
-                }
-            }
-            self.up_at(gesture, micros(time_stamp.round()));
-        }
-
-        fn scrollable(&self) -> Handle<ScrollableState> {
-            let mut app = self.cell.borrow_mut();
-            let root = crate::binding::WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .expect("a mounted tree");
-            let mut elements = vec![root];
-            while let Some(element) = elements.pop() {
-                if let Some(state) = element.state_handle::<ScrollableState>(&app) {
-                    return state;
-                }
-                element.visit_children(&app, &mut |child| elements.push(child));
-            }
-            panic!("no Scrollable is mounted")
-        }
-
-        /// `scrollable_test.dart`'s `getScrollOffset`.
-        fn scroll_offset(&self) -> f64 {
-            let position = self.scrollable().position(&self.cell.borrow());
-            position.pixels(&self.cell.borrow())
-        }
-
-        /// `scrollable_test.dart`'s `getScrollVelocity`.
-        fn scroll_velocity(&self) -> f64 {
-            let position = self.scrollable().position(&self.cell.borrow());
-            let mut app = self.cell.borrow_mut();
-            let activity = position.activity(&app).expect("a position has an activity");
-            activity.velocity(&mut app)
-        }
+    /// `tester.fling(find.byType(Scrollable), offset, speed)`.
+    fn fling(tester: &mut WidgetTester, pointer: i64, offset: Offset, speed: f64) {
+        tester.fling_from(SCROLLABLE_CENTER, offset, speed, pointer);
     }
 
-    fn micros(micros: f64) -> Duration {
-        Duration::from_micros(micros as u64)
+    fn scrollable(tester: &WidgetTester) -> Handle<ScrollableState> {
+        let scrollable = tester.element(find::by_type::<Scrollable>());
+        scrollable
+            .state_handle::<ScrollableState>(&tester.cell.borrow())
+            .expect("a Scrollable has a ScrollableState")
     }
 
-    /// `scrollable_test.dart`'s `pumpTest` with its defaults on `platform`: a vertical
-    /// `CustomScrollView` over 2000 pixels that every device kind drags, with no scrollbar, in
-    /// `flutter_test`'s 800 x 600 view.
-    fn pump_test(platform: TargetPlatform) -> WidgetTester {
-        let view = TestView::with_pixel_ratio(2400.0, 1800.0, 3.0);
-        let platform = TestPlatform::new().on(platform).with_view(Rc::new(view));
-        let cell = AppCell::with_platform(Rc::new(platform));
+    /// `scrollable_test.dart`'s `getScrollOffset`.
+    fn scroll_offset(tester: &WidgetTester) -> f64 {
+        let position = scrollable(tester).position(&tester.cell.borrow());
+        position.pixels(&tester.cell.borrow())
+    }
+
+    /// `scrollable_test.dart`'s `getScrollVelocity`.
+    fn scroll_velocity(tester: &WidgetTester) -> f64 {
+        let position = scrollable(tester).position(&tester.cell.borrow());
+        tester.update(|app| {
+            let activity = position.activity(app).expect("a position has an activity");
+            activity.velocity(app)
+        })
+    }
+
+    /// `scrollable_test.dart`'s `pumpTest` with its defaults: a vertical `CustomScrollView`
+    /// over 2000 pixels that every device kind drags, with no scrollbar.
+    fn pump_test(tester: &mut WidgetTester) {
         let behavior = ScrollBehaviorRef::new(NoScrollbarBehavior)
             .copy_with()
             .drag_devices(HashSet::from([
@@ -1865,142 +1735,129 @@ mod tests {
         let scroll_view = CustomScrollView::new().slivers([SliverToBoxAdapter::new()
             .child(SizedBox::new().height(2000.0))
             .into_widget()]);
-        binding_mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                ScrollConfiguration::new(ScrollBehaviorRef::new(behavior), scroll_view),
-            )
-            .into_widget(),
-        );
-        WidgetTester {
-            cell,
-            now: Duration::ZERO,
-            last_pointer: 0,
-        }
+        tester.pump_widget(Directionality::new(
+            TextDirection::Ltr,
+            ScrollConfiguration::new(ScrollBehaviorRef::new(behavior), scroll_view),
+        ));
     }
 
     /// `TargetPlatformVariant(<TargetPlatform>{TargetPlatform.iOS, TargetPlatform.macOS})`.
-    const IOS_AND_MACOS: [TargetPlatform; 2] = [TargetPlatform::IOS, TargetPlatform::MacOS];
+    fn ios_and_macos() -> TargetPlatformVariant {
+        TargetPlatformVariant::new([TargetPlatform::IOS, TargetPlatform::MacOS])
+    }
 
     /// `scrollable_test.dart`: "Holding scroll".
     #[test]
     #[ignore = "settles in 2 pumps, not 3: Flutter's third is the semantics update a ScrollMetricsNotification asks for, and accessibility is deferred"]
     fn a_hold_in_overscroll_stops_the_ballistic_and_its_release_snaps_back() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = pump_test(platform);
-            tester.drag_without_touch_slop(Offset::new(0.0, 200.0));
-            assert_eq!(tester.scroll_offset(), -200.0, "{platform:?}");
-            tester.pump(Duration::ZERO); // trigger ballistic
-            tester.pump(Duration::from_millis(10));
-            assert!(tester.scroll_offset() > -200.0, "{platform:?}");
-            assert!(tester.scroll_offset() < 0.0, "{platform:?}");
-            let held_position = tester.scroll_offset();
+        test_widgets_variant(ios_and_macos(), |tester| {
+            pump_test(tester);
+            drag_without_touch_slop(tester, 1, Offset::new(0.0, 200.0));
+            assert_eq!(scroll_offset(tester), -200.0);
+            tester.pump(); // trigger ballistic
+            tester.pump_by(Duration::from_millis(10));
+            assert!(scroll_offset(tester) > -200.0);
+            assert!(scroll_offset(tester) < 0.0);
+            let held_position = scroll_offset(tester);
             // Hold and let go while in overscroll.
-            let gesture = tester.start_gesture(SCROLLABLE_CENTER);
-            assert_eq!(
-                tester.pump_and_settle(Duration::from_millis(100)),
-                1,
-                "{platform:?}"
-            );
-            assert_eq!(tester.scroll_offset(), held_position, "{platform:?}");
-            tester.up(gesture);
+            let gesture = start_gesture(tester, 2, SCROLLABLE_CENTER);
+            assert_eq!(tester.pump_and_settle(), 1);
+            assert_eq!(scroll_offset(tester), held_position);
+            tester.up(&gesture);
             // Once the hold is let go, it should still snap back to origin.
-            assert_eq!(
-                tester.pump_and_settle(Duration::from_secs(60)),
-                3,
-                "{platform:?}"
-            );
-            assert_eq!(tester.scroll_offset(), 0.0, "{platform:?}");
-        }
+            assert_eq!(tester.pump_and_settle_by(Duration::from_secs(60)), 3);
+            assert_eq!(scroll_offset(tester), 0.0);
+        });
     }
 
     /// `scrollable_test.dart`: "Repeated flings builds momentum".
     #[test]
     fn repeated_flings_build_momentum_on_ios_and_macos() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = pump_test(platform);
-            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
-            tester.pump(Duration::ZERO); // trigger fling
-            tester.pump(Duration::from_millis(10));
+        test_widgets_variant(ios_and_macos(), |tester| {
+            pump_test(tester);
+            fling(tester, 1, Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(); // trigger fling
+            tester.pump_by(Duration::from_millis(10));
             // Repeat the exact same motion.
-            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
-            tester.pump(Duration::ZERO);
+            fling(tester, 2, Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump();
             // On iOS, the velocity will be larger than the velocity of the last fling by a
             // non-trivial amount.
-            assert!(tester.scroll_velocity() > 1100.0, "{platform:?}");
-        }
+            assert!(scroll_velocity(tester) > 1100.0);
+        });
     }
 
     /// `scrollable_test.dart`: "Repeated flings do not build momentum on Android".
     #[test]
     fn repeated_flings_do_not_build_momentum_on_android() {
-        let mut tester = pump_test(TargetPlatform::Android);
-        tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
-        tester.pump(Duration::ZERO); // trigger fling
-        tester.pump(Duration::from_millis(10));
-        // Repeat the exact same motion.
-        tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
-        tester.pump(Duration::ZERO);
-        // On Android, there is no momentum build. The final velocity is the same as the
-        // velocity of the last fling.
-        let velocity = tester.scroll_velocity();
-        assert!((velocity - 1000.0).abs() <= 1e-10, "{velocity}");
+        test_widgets(|tester| {
+            pump_test(tester);
+            fling(tester, 1, Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(); // trigger fling
+            tester.pump_by(Duration::from_millis(10));
+            // Repeat the exact same motion.
+            fling(tester, 2, Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump();
+            // On Android, there is no momentum build. The final velocity is the same as the
+            // velocity of the last fling.
+            let velocity = scroll_velocity(tester);
+            assert!((velocity - 1000.0).abs() <= 1e-10, "{velocity}");
+        });
     }
 
     /// `scrollable_test.dart`: "A slower final fling does not apply carried momentum".
     #[test]
     fn a_slower_final_fling_does_not_apply_carried_momentum() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = pump_test(platform);
-            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
-            tester.pump(Duration::ZERO); // trigger fling
-            tester.pump(Duration::from_millis(10));
+        test_widgets_variant(ios_and_macos(), |tester| {
+            pump_test(tester);
+            fling(tester, 1, Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(); // trigger fling
+            tester.pump_by(Duration::from_millis(10));
             // Repeat the exact same motion to build momentum.
-            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
-            tester.pump(Duration::ZERO); // trigger the second fling
-            tester.pump(Duration::from_millis(10));
+            fling(tester, 2, Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(); // trigger the second fling
+            tester.pump_by(Duration::from_millis(10));
             // Make a final fling that is much slower.
-            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 200.0);
-            tester.pump(Duration::ZERO); // trigger the third fling
-            tester.pump(Duration::from_millis(10));
+            fling(tester, 3, Offset::new(0.0, -DRAG_OFFSET), 200.0);
+            tester.pump(); // trigger the third fling
+            tester.pump_by(Duration::from_millis(10));
             // expect that there is no carried velocity
-            assert!(tester.scroll_velocity() < 200.0, "{platform:?}");
-        }
+            assert!(scroll_velocity(tester) < 200.0);
+        });
     }
 
     /// `scrollable_test.dart`: "No iOS/macOS momentum build with flings in opposite
     /// directions".
     #[test]
     fn flings_in_opposite_directions_build_no_momentum_on_ios_and_macos() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = pump_test(platform);
-            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
-            tester.pump(Duration::ZERO); // trigger fling
-            tester.pump(Duration::from_millis(10));
+        test_widgets_variant(ios_and_macos(), |tester| {
+            pump_test(tester);
+            fling(tester, 1, Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(); // trigger fling
+            tester.pump_by(Duration::from_millis(10));
             // Repeat the exact same motion in the opposite direction.
-            tester.fling(Offset::new(0.0, DRAG_OFFSET), 1000.0);
-            tester.pump(Duration::ZERO);
+            fling(tester, 2, Offset::new(0.0, DRAG_OFFSET), 1000.0);
+            tester.pump();
             // The only applied velocity to the scrollable is the second fling that was in the
             // opposite direction.
-            assert_eq!(tester.scroll_velocity(), -1000.0, "{platform:?}");
-        }
+            assert_eq!(scroll_velocity(tester), -1000.0);
+        });
     }
 
     /// `scrollable_test.dart`: "No iOS/macOS momentum kept on hold gestures".
     #[test]
     fn a_hold_keeps_no_momentum_on_ios_and_macos() {
-        for platform in IOS_AND_MACOS {
-            let mut tester = pump_test(platform);
-            tester.fling(Offset::new(0.0, -DRAG_OFFSET), 1000.0);
-            tester.pump(Duration::ZERO); // trigger fling
-            tester.pump(Duration::from_millis(10));
-            assert!(tester.scroll_velocity() > 0.0, "{platform:?}");
-            let gesture = tester.start_gesture(SCROLLABLE_CENTER);
-            tester.pump(Duration::from_millis(40));
-            tester.up(gesture);
+        test_widgets_variant(ios_and_macos(), |tester| {
+            pump_test(tester);
+            fling(tester, 1, Offset::new(0.0, -DRAG_OFFSET), 1000.0);
+            tester.pump(); // trigger fling
+            tester.pump_by(Duration::from_millis(10));
+            assert!(scroll_velocity(tester) > 0.0);
+            let gesture = start_gesture(tester, 2, SCROLLABLE_CENTER);
+            tester.pump_by(Duration::from_millis(40));
+            tester.up(&gesture);
             // After a hold longer than 2 frames, previous velocity is lost.
-            assert_eq!(tester.scroll_velocity(), 0.0, "{platform:?}");
-        }
+            assert_eq!(scroll_velocity(tester), 0.0);
+        });
     }
 }

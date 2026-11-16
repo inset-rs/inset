@@ -890,13 +890,14 @@ impl ScaleGestureRecognizer {
         }
         if this.state == ScaleState::Started {
             if let Some(on_end) = app.get(self).on_end.clone() {
+                let now = app.clock();
                 let this = app.get(self);
-                let mut velocity = this.velocity_trackers[&pointer].get_velocity();
+                let mut velocity = this.velocity_trackers[&pointer].get_velocity(now);
                 let scale_velocity = this
                     .scale_velocity_tracker
                     .as_ref()
                     .map_or(-1.0, |tracker| {
-                        tracker.get_velocity().pixels_per_second.dx()
+                        tracker.get_velocity(now).pixels_per_second.dx()
                     });
                 let pointer_count = self.pointer_count(app);
                 if is_fling_gesture(velocity) {
@@ -979,8 +980,9 @@ impl ScaleGestureRecognizer {
 
         if app.get(self).state == ScaleState::Started {
             let scale_factor = app.get(self).scale_factor();
+            let now = app.clock();
             if let Some(tracker) = app.get_mut(self).scale_velocity_tracker.as_mut() {
-                tracker.add_position(event.time_stamp(), Offset::new(scale_factor, 0.0));
+                tracker.add_position(now, event.time_stamp(), Offset::new(scale_factor, 0.0));
             }
             if let Some(on_update) = app.get(self).on_update.clone() {
                 let this = app.get(self);
@@ -1100,6 +1102,7 @@ impl RecognizerLeaf for ScaleGestureRecognizer {
         debug_assert!(app.get(self).state != ScaleState::Ready);
         let mut did_change_configuration = false;
         let mut should_start_if_accepted = false;
+        let now = app.clock();
         let this = app.get_mut(self);
         match &event {
             PointerEvent::Move(move_event) => {
@@ -1108,7 +1111,7 @@ impl RecognizerLeaf for ScaleGestureRecognizer {
                     .get_mut(&move_event.pointer)
                     .expect("a tracker for every tracked pointer");
                 if !move_event.synthesized {
-                    tracker.add_position(move_event.time_stamp, move_event.position);
+                    tracker.add_position(now, move_event.time_stamp, move_event.position);
                 }
                 this.pointer_locations
                     .insert(move_event.pointer, move_event.position);
@@ -1143,7 +1146,7 @@ impl RecognizerLeaf for ScaleGestureRecognizer {
                     this.velocity_trackers
                         .get_mut(&update.pointer)
                         .expect("a tracker for every tracked pan/zoom")
-                        .add_position(update.time_stamp, update.pan);
+                        .add_position(now, update.time_stamp, update.pan);
                 }
                 this.pointer_pan_zooms.insert(
                     update.pointer,

@@ -137,6 +137,38 @@ pub enum FluentSymbol {
     List,
     /// Rows and columns of a table.
     Table,
+    /// A box of tools: a bar of commands.
+    Toolbox,
+    /// A camera; WinUI's `Symbol.Camera`.
+    Camera,
+    /// A microphone; WinUI's `Symbol.Microphone`.
+    Mic,
+    /// A folder; WinUI's `Symbol.Folder`.
+    Folder,
+    /// A globe; WinUI's `Symbol.Globe`.
+    Globe,
+    /// A shield, for security and protection.
+    Shield,
+    /// A clipboard; WinUI's `Symbol.Paste` shows one.
+    Clipboard,
+    /// A bell, for notifications and alerts.
+    Alert,
+    /// A console window, for a terminal.
+    WindowConsole,
+    /// A plug in its socket, for a connection.
+    PlugConnected,
+    /// A point sending out waves, for something live or listening.
+    Live,
+    /// A question mark; WinUI's `Symbol.Help`.
+    Question,
+    /// A desktop computer, for a machine.
+    Desktop,
+    /// A pulse line, for activity.
+    Pulse,
+    /// A triangle pointing forward; WinUI's `Symbol.Play`.
+    Play,
+    /// A square; WinUI's `Symbol.Stop`.
+    Stop,
 }
 
 impl FluentSymbol {
@@ -192,6 +224,22 @@ impl FluentSymbol {
             Self::Document => 62329,
             Self::List => 62702,
             Self::Table => 63326,
+            Self::Toolbox => 63534,
+            Self::Camera => 62036,
+            Self::Mic => 59385,
+            Self::Folder => 62488,
+            Self::Globe => 62554,
+            Self::Shield => 63166,
+            Self::Clipboard => 62153,
+            Self::Alert => 61716,
+            Self::WindowConsole => 61039,
+            Self::PlugConnected => 59801,
+            Self::Live => 62704,
+            Self::Question => 63032,
+            Self::Desktop => 62297,
+            Self::Pulse => 59868,
+            Self::Play => 62981,
+            Self::Stop => 63274,
         })
         .unwrap()
     }
@@ -425,5 +473,42 @@ impl CustomPainter for PathIconPainter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FluentSymbol;
+
+    // Each name is the bundled font's own: its glyph is the one `codepoints.json` gives that name.
+    #[test]
+    fn the_inspectors_symbols_are_the_fonts_named_glyphs() {
+        let codepoints = include_str!("../../assets/fluent-system-icons/codepoints.json");
+        for (symbol, name) in [
+            (FluentSymbol::Camera, "ic_fluent_camera_20_regular"),
+            (FluentSymbol::Mic, "ic_fluent_mic_20_regular"),
+            (FluentSymbol::Folder, "ic_fluent_folder_20_regular"),
+            (FluentSymbol::Globe, "ic_fluent_globe_20_regular"),
+            (FluentSymbol::Shield, "ic_fluent_shield_20_regular"),
+            (FluentSymbol::Clipboard, "ic_fluent_clipboard_20_regular"),
+            (FluentSymbol::Alert, "ic_fluent_alert_20_regular"),
+            (
+                FluentSymbol::WindowConsole,
+                "ic_fluent_window_console_20_regular",
+            ),
+            (
+                FluentSymbol::PlugConnected,
+                "ic_fluent_plug_connected_20_regular",
+            ),
+            (FluentSymbol::Live, "ic_fluent_live_20_regular"),
+            (FluentSymbol::Question, "ic_fluent_question_20_regular"),
+            (FluentSymbol::Desktop, "ic_fluent_desktop_20_regular"),
+            (FluentSymbol::Pulse, "ic_fluent_pulse_20_regular"),
+            (FluentSymbol::Play, "ic_fluent_play_20_regular"),
+            (FluentSymbol::Stop, "ic_fluent_stop_20_regular"),
+        ] {
+            let entry = format!("\"{name}\": {}", symbol.glyph() as u32);
+            assert!(codepoints.contains(&entry), "{symbol:?} is {name}");
+        }
     }
 }

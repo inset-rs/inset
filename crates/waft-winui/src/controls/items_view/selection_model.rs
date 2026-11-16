@@ -30,6 +30,61 @@ impl SelectionModel {
         true
     }
 
+    /// `SelectionNode::OnItemsAdded` (`SelectionNode.cpp`, 529), for `count` items inserted at `index` of the source: a range at or past `index` moves up by `count`, split where the insertion falls inside it, and so does the anchor. Answers whether the selection moved, which `OnSourceListChanged` raises `SelectionChanged` for.
+    pub fn on_items_added(&mut self, index: usize, count: usize) -> bool {
+        self.item_count += count;
+        let mut invalidated = false;
+        let mut split = Vec::new();
+        for range in &mut self.ranges {
+            if *range.end() >= index {
+                let mut begin = *range.start();
+                // The item before the insertion is inside the range: its left piece stays.
+                if index > 0 && range.contains(&(index - 1)) {
+                    split.push(begin..=index - 1);
+                    begin = index;
+                }
+                *range = begin + count..=*range.end() + count;
+                invalidated = true;
+            }
+        }
+        self.ranges.extend(split);
+        self.ranges.sort_by_key(|range| *range.start());
+        if let Some(anchor) = self.anchor
+            && anchor >= index
+        {
+            self.anchor = Some(anchor + count);
+        }
+        invalidated
+    }
+
+    /// `SelectionNode::OnItemsRemoved` (`SelectionNode.cpp`, 607), for `count` items removed at `index` of the source: those of them selected are deselected, a range past them moves down by `count`, and so does an anchor at or past `index`; a source left empty clears the selection. Answers whether the selection moved.
+    pub fn on_items_removed(&mut self, index: usize, count: usize) -> bool {
+        self.item_count = self.item_count.saturating_sub(count);
+        if self.item_count == 0 {
+            self.clear();
+            return true;
+        }
+        let mut invalidated = false;
+        let removed = index..=index + count - 1;
+        if removed.clone().any(|i| self.is_selected(i)) {
+            self.remove_range(removed);
+            invalidated = true;
+        }
+        for range in &mut self.ranges {
+            if *range.end() > index {
+                *range = *range.start() - count..=*range.end() - count;
+                invalidated = true;
+            }
+        }
+        if let Some(anchor) = self.anchor
+            && anchor >= index
+        {
+            // `AnchorIndex(AnchorIndex() - count)`: an anchor inside the removed items goes below them, or away.
+            self.anchor = anchor.checked_sub(count);
+        }
+        invalidated
+    }
+
     /// `SelectionNode::IsValidIndex` (`SelectionNode.cpp`, 335): the index is within the source's count.
     fn is_valid_index(&self, index: usize) -> bool {
         index < self.item_count
@@ -372,5 +427,46 @@ mod tests {
         assert!(model.select(9));
         assert_eq!(selected(&model), Vec::<usize>::new());
         assert_eq!(model.anchor_index(), None);
+    }
+
+    // `SelectionNode::OnItemsAdded`: a selection at or past the insertion moves up, the anchor
+    // with it, and one before it stays.
+    #[test]
+    fn items_added_before_the_selection_move_it_up() {
+        let mut model = model(5);
+        model.set_single_select(true);
+        model.select(2);
+        assert!(model.on_items_added(1, 2));
+        assert_eq!(selected(&model), [4]);
+        assert_eq!(model.anchor_index(), Some(4));
+        assert!(!model.on_items_added(6, 1), "after the selection");
+        assert_eq!(selected(&model), [4]);
+        assert_eq!(model.item_count(), 8);
+    }
+
+    #[test]
+    fn items_added_inside_a_range_split_it() {
+        let mut model = model(6);
+        model.select_range(1, 3);
+        model.on_items_added(2, 1);
+        assert_eq!(selected(&model), [1, 3, 4]);
+    }
+
+    // `SelectionNode::OnItemsRemoved`: a removed selected item is deselected, a selection past
+    // the removal moves down, and an emptied source clears.
+    #[test]
+    fn items_removed_deselect_what_went_and_move_what_follows() {
+        let mut model = model(5);
+        model.set_single_select(true);
+        model.select(3);
+        assert!(model.on_items_removed(0, 1));
+        assert_eq!(selected(&model), [2]);
+        assert!(model.on_items_removed(2, 1));
+        assert_eq!(selected(&model), Vec::<usize>::new());
+        assert!(!model.on_items_removed(0, 1), "nothing selected to move");
+        assert_eq!(model.item_count(), 2);
+        model.select(1);
+        assert!(model.on_items_removed(0, 2));
+        assert_eq!(selected(&model), Vec::<usize>::new());
     }
 }

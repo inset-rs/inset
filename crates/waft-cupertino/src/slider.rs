@@ -1008,23 +1008,18 @@ impl RenderBox for RenderCupertinoSlider {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
+    use std::cell::RefCell;
 
     use waft_embedder::valo::Op;
-    use waft_embedder::{
-        Brightness, HapticFeedbackType, PointerChange, PointerData, PointerDataPacket,
-        PointerDeviceKind,
-    };
-    use waft_foundation::AppCell;
-    use waft_gestures::GestureBinding;
-    use waft_rendering::{PictureLayer, RendererBinding};
+    use waft_embedder::{Brightness, HapticFeedbackType, PointerChange};
+    use waft_rendering::PictureLayer;
     use waft_scheduler::SchedulerBinding;
     use waft_test::TestPlatform;
+    use waft_widgets::testing::{TargetPlatformVariant, TestPointer, WidgetTester, test_widgets};
     use waft_widgets::{Center, GlobalKey, MediaQuery, MediaQueryData, SizedBox};
 
     use super::*;
     use crate::interface_level::{CupertinoUserInterfaceLevel, CupertinoUserInterfaceLevelData};
-    use crate::test_support::{build, pump, test_view};
     use crate::theme::CupertinoThemeData;
 
     /// The haptics a test platform played, in order.
@@ -1121,7 +1116,7 @@ mod tests {
     impl Setup {
         fn new() -> Setup {
             Setup {
-                platform: TargetPlatform::IOS,
+                platform: TargetPlatform::Android,
                 initial: 0.0,
                 text_direction: TextDirection::Ltr,
                 wrap: Rc::new(|child| child),
@@ -1162,56 +1157,48 @@ mod tests {
             self
         }
 
+        /// Mounts the host on a tester of its own, on a platform that records its haptics.
         fn mount(self) -> Fixture {
             let haptics = Rc::new(RecordedHaptics::default());
-            let platform = TestPlatform::new()
-                .on(self.platform)
-                .with_view(test_view())
-                .with_haptics(Rc::clone(&haptics) as Rc<dyn waft_embedder::Haptics>);
-            let cell = AppCell::with_platform(Rc::new(platform));
+            let mut tester = WidgetTester::with_platform(
+                TestPlatform::new()
+                    .on(self.platform)
+                    .with_haptics(Rc::clone(&haptics) as Rc<dyn waft_embedder::Haptics>),
+            );
             let heard: Rc<RefCell<Heard>> = Rc::default();
             let host_key = GlobalKey::new();
-            build(
-                &cell,
-                Host {
-                    key: Some(host_key.clone().into()),
-                    initial: self.initial,
-                    text_direction: self.text_direction,
-                    wrap: self.wrap,
-                    configure: self.configure,
-                    heard: Rc::clone(&heard),
-                }
-                .into_widget(),
-            );
+            tester.pump_widget(Host {
+                key: Some(host_key.clone().into()),
+                initial: self.initial,
+                text_direction: self.text_direction,
+                wrap: self.wrap,
+                configure: self.configure,
+                heard: Rc::clone(&heard),
+            });
             let host = host_key
-                .current_state::<HostState>(&cell.borrow_mut())
+                .current_state::<HostState>(&tester.cell.borrow_mut())
                 .expect("the host mounted");
             Fixture {
-                cell,
+                tester,
                 host,
                 haptics,
                 heard,
-                clock: Cell::new(Duration::ZERO),
-                last_position: Offset::ZERO,
             }
         }
     }
 
     struct Fixture {
-        cell: Rc<AppCell>,
+        tester: WidgetTester,
         host: Handle<HostState>,
         haptics: Rc<RecordedHaptics>,
         heard: Rc<RefCell<Heard>>,
-        clock: Cell<Duration>,
-        /// Where the last pointer event was, for the next one's delta.
-        last_position: Offset,
     }
 
     const UNIT: f64 = CupertinoThumbPainter::RADIUS;
 
     impl Fixture {
         fn value(&self) -> f64 {
-            self.cell.borrow().get(self.host).value
+            self.tester.cell.borrow().get(self.host).value
         }
 
         fn haptics(&self) -> Vec<HapticFeedbackType> {
@@ -1220,26 +1207,15 @@ mod tests {
 
         /// Rebuilds the host with `change` applied, as Dart's `updateState` and `pump`.
         fn set(&mut self, change: impl FnOnce(&mut HostState)) {
-            self.host.set_state(&mut self.cell.borrow_mut(), change);
-            self.pump();
+            self.host
+                .set_state(&mut self.tester.cell.borrow_mut(), change);
+            self.tester.pump();
         }
 
-        fn pump(&mut self) {
-            let at = self.clock.get() + Duration::from_millis(16);
-            self.clock.set(at);
-            pump(&mut self.cell.borrow_mut(), at);
-        }
-
-        fn settle(&mut self) {
-            for _ in 0..60 {
-                self.pump();
-            }
-        }
-
-        /// The slider's top-left corner in the view: the 400x300 logical view centres the
+        /// The slider's top-left corner in the view: the 800x600 logical view centres the
         /// 176x44 slider.
         fn top_left() -> Offset {
-            Offset::new((400.0 - 176.0) / 2.0, (300.0 - 44.0) / 2.0)
+            Offset::new((800.0 - 176.0) / 2.0, (600.0 - 44.0) / 2.0)
         }
 
         fn center() -> Offset {
@@ -1250,99 +1226,66 @@ mod tests {
             Self::top_left() + Offset::new(176.0, 44.0)
         }
 
-        /// The test view is 2x: logical coordinates double into the packet.
-        fn send_at(
-            &mut self,
-            change: PointerChange,
-            kind: PointerDeviceKind,
-            at: Offset,
-            time_stamp: Duration,
-        ) {
-            let delta = match change {
-                PointerChange::Add | PointerChange::Down => Offset::ZERO,
-                _ => at - self.last_position,
-            };
-            self.last_position = at;
-            let mut app = self.cell.borrow_mut();
-            GestureBinding::instance(&mut app).handle_pointer_data_packet(
-                &mut app,
-                PointerDataPacket::new(vec![PointerData {
-                    change,
-                    kind,
-                    time_stamp,
-                    device: 1,
-                    pointer_identifier: 1,
-                    buttons: if matches!(change, PointerChange::Down | PointerChange::Move) {
-                        1
-                    } else {
-                        0
-                    },
-                    physical_x: at.dx() * 2.0,
-                    physical_y: at.dy() * 2.0,
-                    physical_delta_x: delta.dx() * 2.0,
-                    physical_delta_y: delta.dy() * 2.0,
-                    ..PointerData::default()
-                }]),
-            );
-            app.drain_microtasks();
-        }
-
-        fn touch(&mut self, change: PointerChange, at: Offset) {
-            let at_time = self.clock.get() + Duration::from_millis(10);
-            self.clock.set(at_time);
-            self.send_at(change, PointerDeviceKind::Touch, at, at_time);
-        }
-
-        /// Dart's `tester.dragFrom`: down, a move of the default drag slop, the rest, up.
+        /// Dart's `tester.dragFrom(start, Offset(dx, 0))`.
         fn drag_from(&mut self, start: Offset, dx: f64) {
-            const DRAG_SLOP: f64 = 20.0;
-            self.touch(PointerChange::Down, start);
-            if dx.abs() > DRAG_SLOP {
-                self.touch(
-                    PointerChange::Move,
-                    start + Offset::new(DRAG_SLOP.copysign(dx), 0.0),
-                );
-            }
-            self.touch(PointerChange::Move, start + Offset::new(dx, 0.0));
-            self.touch(PointerChange::Up, start + Offset::new(dx, 0.0));
-            self.pump();
+            self.tester.drag_from(start, Offset::new(dx, 0.0), 1);
         }
 
-        /// Dart's `tester.timedDragFrom` at its default 60 Hz: a down at zero, then a move at
-        /// every interval, the first in place, each record after a frame, as Dart's
-        /// `handlePointerEventRecord` pumps before it.
+        /// Dart's `tester.timedDragFrom(start, Offset(dx, 0), duration)` at its default 60 Hz,
+        /// replayed as `handlePointerEventRecord` replays it: an add and a down at zero, then
+        /// a move at every interval, the first in place, and an up at `duration`, each record
+        /// after a frame and the time up to its delay; then a frame.
         fn timed_drag_from(&mut self, start: Offset, dx: f64, duration: Duration) {
             let intervals = (duration.as_micros() as f64 * 60.0 / 1e6) as u32;
-            let base = self.clock.get() + Duration::from_secs(1);
-            self.record_at(base, PointerChange::Down, start);
-            for t in 0..=intervals {
-                let time_stamp = base + duration * t / intervals;
-                let at = start + Offset::new(dx * f64::from(t) / f64::from(intervals), 0.0);
-                self.record_at(time_stamp, PointerChange::Move, at);
+            let time_stamps: Vec<Duration> =
+                (0..=intervals).map(|t| duration * t / intervals).collect();
+            let offsets: Vec<Offset> =
+                std::iter::once(start)
+                    .chain((0..=intervals).map(|t| {
+                        start + Offset::new(dx * f64::from(t) / f64::from(intervals), 0.0)
+                    }))
+                    .collect();
+            let start_time = self.tester.cell.borrow().clock();
+            let mut pointer = TestPointer::touch(1);
+
+            self.before_record(start_time, Duration::ZERO);
+            self.tester.add_pointer(&mut pointer, start);
+            self.tester.send(&pointer, PointerChange::Down);
+            for t in 0..=intervals as usize {
+                self.before_record(start_time, time_stamps[t]);
+                pointer.position = offsets[t + 1];
+                self.tester.send_at(
+                    &pointer,
+                    PointerChange::Move,
+                    offsets[t + 1] - offsets[t],
+                    time_stamps[t],
+                );
             }
-            self.record_at(
-                base + duration,
-                PointerChange::Up,
-                start + Offset::new(dx, 0.0),
-            );
-            self.pump();
+            self.before_record(start_time, duration);
+            self.tester
+                .send_at(&pointer, PointerChange::Up, Offset::ZERO, duration);
+            self.tester.pump();
         }
 
-        /// One record of Dart's `handlePointerEventRecord`: a frame, then the event.
-        fn record_at(&mut self, time_stamp: Duration, change: PointerChange, at: Offset) {
-            self.clock.set(time_stamp);
-            pump(&mut self.cell.borrow_mut(), time_stamp);
-            self.send_at(change, PointerDeviceKind::Touch, at, time_stamp);
+        /// What `handlePointerEventRecord` does before a record `time_delay` after the replay
+        /// began at `start_time`: a frame, then the time until the record is due, with no frame.
+        fn before_record(&mut self, start_time: Duration, time_delay: Duration) {
+            self.tester.pump();
+            let now = self.tester.cell.borrow().clock();
+            if let Some(wait) = time_delay.checked_sub(now - start_time) {
+                self.tester.cell.elapse(wait);
+            }
         }
 
+        /// Dart's `tester.tapAt(at)`.
         fn tap(&mut self, at: Offset) {
-            self.touch(PointerChange::Down, at);
-            self.touch(PointerChange::Up, at);
+            let pointer = self.tester.next_pointer();
+            self.tester.tap_at(at, pointer);
         }
 
         fn render_object(&self) -> AnyRenderObject {
-            let key = self.cell.borrow().get(self.host).slider_key.clone();
-            let app = self.cell.borrow();
+            let key = self.tester.cell.borrow().get(self.host).slider_key.clone();
+            let app = self.tester.cell.borrow();
             let root = key
                 .current_context(&app)
                 .expect("the slider mounted")
@@ -1355,8 +1298,8 @@ mod tests {
         }
 
         fn opacity(&self) -> f64 {
-            let key = self.cell.borrow().get(self.host).slider_key.clone();
-            let app = self.cell.borrow();
+            let key = self.tester.cell.borrow().get(self.host).slider_key.clone();
+            let app = self.tester.cell.borrow();
             let root = key
                 .current_context(&app)
                 .expect("the slider mounted")
@@ -1373,14 +1316,14 @@ mod tests {
 
         fn size(&self) -> Size {
             let object = self.render_object();
-            let app = self.cell.borrow();
+            let app = self.tester.cell.borrow();
             object.as_box().expect("a box").size(&app)
         }
 
         /// The colour of every draw in the view's pictures, in paint order.
         fn drawn(&self) -> Vec<u32> {
             let mut root = self.render_object();
-            let app = self.cell.borrow();
+            let app = self.tester.cell.borrow();
             while let Some(parent) = root.parent(&app) {
                 root = parent;
             }
@@ -1403,7 +1346,7 @@ mod tests {
         }
 
         fn transient_callback_count(&self) -> usize {
-            SchedulerBinding::transient_callback_count(&mut self.cell.borrow_mut())
+            SchedulerBinding::transient_callback_count(&mut self.tester.cell.borrow_mut())
         }
     }
 
@@ -1487,7 +1430,7 @@ mod tests {
             assert_eq!(fixture.value(), 0.0);
             fixture.tap(Fixture::center());
             assert_eq!(fixture.value(), 0.0);
-            fixture.pump();
+            fixture.tester.pump();
             assert_eq!(
                 fixture.transient_callback_count(),
                 0,
@@ -1502,7 +1445,7 @@ mod tests {
         drag_slider(&mut fixture);
         assert_eq!(fixture.heard.borrow().starts.len(), 1);
         assert_eq!(fixture.heard.borrow().ends.len(), 1);
-        fixture.pump();
+        fixture.tester.pump();
         assert_eq!(
             fixture.transient_callback_count(),
             0,
@@ -1520,7 +1463,7 @@ mod tests {
         assert_eq!(fixture.heard.borrow().starts, [0.0]);
         assert_eq!(fixture.value(), final_value);
         assert_eq!(fixture.heard.borrow().ends, [final_value]);
-        fixture.pump();
+        fixture.tester.pump();
         assert_eq!(
             fixture.transient_callback_count(),
             0,
@@ -1538,7 +1481,7 @@ mod tests {
         assert_eq!(fixture.heard.borrow().starts, [0.0]);
         assert_eq!(fixture.value(), final_value);
         assert_eq!(fixture.heard.borrow().ends, [final_value]);
-        fixture.pump();
+        fixture.tester.pump();
         assert_eq!(
             fixture.transient_callback_count(),
             0,
@@ -1548,7 +1491,7 @@ mod tests {
 
     #[test]
     fn hitting_an_edge_plays_haptics_by_drag_speed_on_ios() {
-        let mut fixture = Setup::new().mount();
+        let mut fixture = Setup::new().on(TargetPlatform::IOS).mount();
         assert!(
             fixture.haptics().is_empty(),
             "none when the slider is created"
@@ -1556,7 +1499,7 @@ mod tests {
 
         let thumb_center = Fixture::top_left() + Offset::new(UNIT, UNIT);
         fixture.drag_from(thumb_center, 50.0);
-        fixture.pump();
+        fixture.tester.pump();
         let thumb_center = thumb_center + Offset::new(50.0, 0.0);
         assert!(
             fixture.haptics().is_empty(),
@@ -1584,13 +1527,7 @@ mod tests {
 
     #[test]
     fn hitting_an_edge_plays_no_haptics_off_ios() {
-        for platform in [
-            TargetPlatform::Android,
-            TargetPlatform::Fuchsia,
-            TargetPlatform::Linux,
-            TargetPlatform::MacOS,
-            TargetPlatform::Windows,
-        ] {
+        for &platform in TargetPlatformVariant::all_excluding(&[TargetPlatform::IOS]).platforms() {
             let mut fixture = Setup::new().on(platform).mount();
             fixture.drag_from(Fixture::top_left() + Offset::new(UNIT, UNIT), 1000.0);
             assert_eq!(fixture.value(), 1.0, "{platform:?}");
@@ -1664,8 +1601,14 @@ mod tests {
                 .mount();
             // Every variant is transparent, and a transparent draw is not recorded, so the
             // resolved colour is read where Dart's `paints..rrect(color:)` would find it drawn.
-            let key = fixture.cell.borrow().get(fixture.host).slider_key.clone();
-            let app = fixture.cell.borrow();
+            let key = fixture
+                .tester
+                .cell
+                .borrow()
+                .get(fixture.host)
+                .slider_key
+                .clone();
+            let app = fixture.tester.cell.borrow();
             let render = key
                 .current_context(&app)
                 .and_then(|context| context.find_render_object(&app))
@@ -1719,45 +1662,33 @@ mod tests {
     #[test]
     fn hovering_the_thumb_keeps_the_basic_cursor_off_the_web() {
         let mut fixture = Setup::new().mount();
-        let cursor = |fixture: &Fixture| {
-            let mut app = fixture.cell.borrow_mut();
-            RendererBinding::instance(&mut app)
-                .mouse_tracker(&app)
-                .debug_device_active_cursor(&app, 1)
-        };
-        let at = fixture.clock.get();
-        fixture.send_at(
-            PointerChange::Add,
-            PointerDeviceKind::Mouse,
-            Offset::new(10.0, 10.0),
-            at,
-        );
-        fixture.settle();
-        assert_eq!(cursor(&fixture), Some(SystemMouseCursors::BASIC.into()));
+        let tester = &mut fixture.tester;
+        let mut mouse = TestPointer::mouse(1, 0);
+        tester.add_pointer(&mut mouse, Offset::new(10.0, 10.0));
+        tester.pump_and_settle();
+        assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
 
-        let at = fixture.clock.get();
-        fixture.send_at(
-            PointerChange::Hover,
-            PointerDeviceKind::Mouse,
+        tester.move_to(
+            &mut mouse,
             Fixture::top_left() + Offset::new(15.0, 0.0),
-            at,
+            false,
         );
-        fixture.settle();
-        let expected: MouseCursorRef = if K_IS_WEB {
-            SystemMouseCursors::CLICK.into()
-        } else {
-            SystemMouseCursors::BASIC.into()
-        };
-        assert_eq!(cursor(&fixture), Some(expected));
+        tester.pump_and_settle();
+        assert_eq!(
+            tester.active_cursor(1),
+            if K_IS_WEB {
+                SystemMouseCursors::CLICK.into()
+            } else {
+                SystemMouseCursors::BASIC.into()
+            }
+        );
     }
 
     #[test]
     fn a_slider_squeezed_to_nothing_lays_out_at_zero() {
-        let cell = crate::test_support::test_cell();
-        let key = GlobalKey::new();
-        build(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Center::new().child(
                     SizedBox::shrink().child(
@@ -1765,16 +1696,9 @@ mod tests {
                             .key(key.clone().into()),
                     ),
                 ),
-            )
-            .into_widget(),
-        );
-        let app = cell.borrow();
-        let render = key
-            .current_context(&app)
-            .and_then(|context| context.find_render_object(&app))
-            .and_then(|object| object.as_box())
-            .expect("the slider laid out");
-        assert_eq!(render.size(&app), Size::ZERO);
+            ));
+            assert_eq!(tester.get_size(&key), Size::ZERO);
+        });
     }
 
     #[test]
@@ -1785,10 +1709,10 @@ mod tests {
             fixture.transient_callback_count() > 0,
             "the position animates"
         );
-        fixture.settle();
+        fixture.tester.pump_and_settle();
         assert_eq!(fixture.transient_callback_count(), 0);
         let object = fixture.render_object();
-        let app = fixture.cell.borrow();
+        let app = fixture.tester.cell.borrow();
         let slider = object
             .downcast::<RenderCupertinoSlider>(&app)
             .expect("the slider");

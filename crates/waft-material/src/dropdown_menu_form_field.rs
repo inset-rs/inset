@@ -688,20 +688,19 @@ mod tests {
 
     use std::cell::Cell;
     use std::fmt::Debug;
-    use std::time::Duration;
 
-    use waft_embedder::{Rect, Size, TextAffinity, TextSelection};
+    use waft_embedder::{Size, TextAffinity, TextSelection};
     use waft_widgets::{AnyElement, Form, FormState, GlobalKey, Icon, SizedBox, Text};
+
+    use waft_widgets::testing::{WidgetTester, expect, find, finds_one_widget, test_widgets};
 
     use super::*;
     use crate::icons::Icons;
     use crate::menu_anchor::MenuItemButton;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{
-        WidgetTester, material_app, restorable_material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{material_app, restorable_material_app};
     use crate::text_field::TextField;
-    use crate::tooltip::tests::{m3, tester};
+    use crate::tooltip::tests::m3;
     use waft_widgets::FocusNode;
 
     // ---- Dart's `MenuItem` and `menuEntries` ----
@@ -750,33 +749,27 @@ mod tests {
 
     // ---- finders and gestures ----
 
-    fn only(found: Vec<AnyElement>) -> AnyElement {
-        assert_eq!(found.len(), 1, "one widget found");
-        found[0]
-    }
-
-    fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.get_rect(tester.render_box_of(element))
-    }
-
     fn tap(tester: &mut WidgetTester, element: AnyElement) {
-        let center = rect_of(tester, element).center();
-        tester.tap(center, 1);
+        let center = tester.get_rect(element).center();
+        tester.tap_at(center, 1);
     }
 
     fn pump(tester: &mut WidgetTester) {
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     /// Dart's `findMenuItemButton(label)`: the last `MenuItemButton` showing `label`.
     fn find_menu_item_button(tester: &WidgetTester, label: &str) -> AnyElement {
-        let text = *tester.find_text(label).last().expect("the label");
+        let text = *find::text(label)
+            .evaluate(tester)
+            .last()
+            .expect("the label");
         tester.ancestor_of_type::<MenuItemButton>(text)
     }
 
     /// Dart's `tester.tap(find.byType(DropdownMenu<T>))`.
     fn tap_dropdown_menu<T: 'static>(tester: &mut WidgetTester) {
-        let menu = only(tester.find_by_type::<DropdownMenu<T>>());
+        let menu = tester.element(find::by_type::<DropdownMenu<T>>());
         tap(tester, menu);
     }
 
@@ -798,12 +791,12 @@ mod tests {
     }
 
     fn menu<R>(tester: &WidgetTester, read: impl FnOnce(&DropdownMenu<MenuItem>) -> R) -> R {
-        let menu = only(tester.find_by_type::<DropdownMenu<MenuItem>>());
+        let menu = tester.element(find::by_type::<DropdownMenu<MenuItem>>());
         tester.widget(menu, read)
     }
 
     fn text_field<R>(tester: &WidgetTester, read: impl FnOnce(&TextField) -> R) -> R {
-        let field = only(tester.find_by_type::<TextField>());
+        let field = tester.element(find::by_type::<TextField>());
         tester.widget(field, read)
     }
 
@@ -828,14 +821,13 @@ mod tests {
         default: fn() -> R,
         given: fn() -> R,
     ) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
+        test_widgets(|tester| {
+            pump_field(tester, field());
             // Check default value.
-            assert_eq!(menu(&tester, read), default());
+            assert_eq!(menu(tester, read), default());
 
-            pump_field(&mut tester, configure(field()));
-            assert_eq!(menu(&tester, read), given());
+            pump_field(tester, configure(field()));
+            assert_eq!(menu(tester, read), given());
         });
     }
 
@@ -851,20 +843,22 @@ mod tests {
     // 'Creates an underlying DropdownMenu'
     #[test]
     fn the_field_creates_a_dropdown_menu() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
-            assert_eq!(tester.find_by_type::<DropdownMenu<MenuItem>>().len(), 1);
+        test_widgets(|tester| {
+            pump_field(tester, field());
+            expect(
+                tester,
+                &find::by_type::<DropdownMenu<MenuItem>>(),
+                finds_one_widget(),
+            );
         });
     }
 
     // 'Passes dropdownMenuEntries to underlying DropdownMenu'
     #[test]
     fn the_field_passes_its_entries() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
-            menu(&tester, |menu| {
+        test_widgets(|tester| {
+            pump_field(tester, field());
+            menu(tester, |menu| {
                 assert!(Rc::ptr_eq(&menu.dropdown_menu_entries, &menu_entries()));
             });
         });
@@ -873,13 +867,12 @@ mod tests {
     // 'Dropdown menu can be opened and contains all the items'
     #[test]
     fn the_menu_opens_with_every_item() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
-            tap_dropdown_menu::<MenuItem>(&mut tester);
-            pump(&mut tester);
+        test_widgets(|tester| {
+            pump_field(tester, field());
+            tap_dropdown_menu::<MenuItem>(tester);
+            pump(tester);
             for item in MenuItem::VALUES {
-                find_menu_item_button(&tester, item.label());
+                find_menu_item_button(tester, item.label());
             }
         });
     }
@@ -923,15 +916,14 @@ mod tests {
         ) -> DropdownMenuFormField<MenuItem>,
         read: fn(&DropdownMenu<MenuItem>) -> Option<WidgetRef>,
     ) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
+        test_widgets(|tester| {
+            pump_field(tester, field());
             // Check default value.
-            assert!(menu(&tester, read).is_none());
+            assert!(menu(tester, read).is_none());
 
             let icon = Icon::new(Some(Icons::abc())).into_widget();
-            pump_field(&mut tester, configure(field(), Rc::clone(&icon)));
-            assert!(same(&menu(&tester, read), &icon));
+            pump_field(tester, configure(field(), Rc::clone(&icon)));
+            assert!(same(&menu(tester, read), &icon));
         });
     }
 
@@ -971,20 +963,16 @@ mod tests {
 
     #[test]
     fn the_field_passes_the_trailing_icon_focus_node() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
+        test_widgets(|tester| {
+            pump_field(tester, field());
             assert_eq!(
-                menu(&tester, |menu| menu.trailing_icon_focus_node.clone()),
+                menu(tester, |menu| menu.trailing_icon_focus_node.clone()),
                 None
             );
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-            pump_field(
-                &mut tester,
-                field().trailing_icon_focus_node(focus_node.erase()),
-            );
+            pump_field(tester, field().trailing_icon_focus_node(focus_node.erase()));
             assert_eq!(
-                menu(&tester, |menu| menu.trailing_icon_focus_node.clone()),
+                menu(tester, |menu| menu.trailing_icon_focus_node.clone()),
                 Some(focus_node.erase())
             );
         });
@@ -993,10 +981,9 @@ mod tests {
     // 'Passes label to underlying InputDecoration'
     #[test]
     fn the_field_passes_its_label_to_the_decoration() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
-            text_field(&tester, |text_field| {
+        test_widgets(|tester| {
+            pump_field(tester, field());
+            text_field(tester, |text_field| {
                 assert!(
                     text_field
                         .decoration
@@ -1008,8 +995,8 @@ mod tests {
             });
 
             let label = Text::new("Label").into_widget();
-            pump_field(&mut tester, field().label(Rc::clone(&label)));
-            text_field(&tester, |text_field| {
+            pump_field(tester, field().label(Rc::clone(&label)));
+            text_field(tester, |text_field| {
                 assert!(same(
                     &text_field.decoration.as_ref().expect("a decoration").label,
                     &label
@@ -1023,17 +1010,16 @@ mod tests {
         configure: fn(DropdownMenuFormField<MenuItem>, &str) -> DropdownMenuFormField<MenuItem>,
         read: fn(&InputDecoration) -> Option<String>,
     ) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
-            text_field(&tester, |text_field| {
+        test_widgets(|tester| {
+            pump_field(tester, field());
+            text_field(tester, |text_field| {
                 assert_eq!(
                     read(text_field.decoration.as_ref().expect("a decoration")),
                     None
                 );
             });
-            pump_field(&mut tester, configure(field(), "Hint"));
-            text_field(&tester, |text_field| {
+            pump_field(tester, configure(field(), "Hint"));
+            text_field(tester, |text_field| {
                 assert_eq!(
                     read(text_field.decoration.as_ref().expect("a decoration")).as_deref(),
                     Some("Hint")
@@ -1102,11 +1088,10 @@ mod tests {
     // identity, which `Rc::ptr_eq` compares here.
     #[test]
     fn the_field_passes_its_filter_callback() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field().enable_filter(true));
+        test_widgets(|tester| {
+            pump_field(tester, field().enable_filter(true));
             // Check default value.
-            assert!(menu(&tester, |menu| menu.filter_callback.is_none()));
+            assert!(menu(tester, |menu| menu.filter_callback.is_none()));
 
             let configured = field()
                 .enable_filter(true)
@@ -1116,8 +1101,8 @@ mod tests {
                 .filter_callback
                 .clone()
                 .expect("set above");
-            pump_field(&mut tester, configured);
-            assert!(menu(&tester, |menu| menu
+            pump_field(tester, configured);
+            assert!(menu(tester, |menu| menu
                 .filter_callback
                 .as_ref()
                 .is_some_and(|callback| Rc::ptr_eq(callback, &filter_callback))));
@@ -1127,11 +1112,10 @@ mod tests {
     // 'Passes searchCallback to underlying DropdownMenu'
     #[test]
     fn the_field_passes_its_search_callback() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
+        test_widgets(|tester| {
+            pump_field(tester, field());
             // Check default value.
-            assert!(menu(&tester, |menu| menu.search_callback.is_none()));
+            assert!(menu(tester, |menu| menu.search_callback.is_none()));
 
             let configured = field().search_callback(|_app, _entries, _filter| Some(0));
             let search_callback = configured
@@ -1139,8 +1123,8 @@ mod tests {
                 .search_callback
                 .clone()
                 .expect("set above");
-            pump_field(&mut tester, configured);
-            assert!(menu(&tester, |menu| menu
+            pump_field(tester, configured);
+            assert!(menu(tester, |menu| menu
                 .search_callback
                 .as_ref()
                 .is_some_and(|callback| Rc::ptr_eq(callback, &search_callback))));
@@ -1151,18 +1135,14 @@ mod tests {
     // identity, here by each formatter's.
     #[test]
     fn the_field_passes_its_input_formatters() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
+        test_widgets(|tester| {
+            pump_field(tester, field());
             // Check default value.
-            assert!(menu(&tester, |menu| menu.input_formatters.is_none()));
+            assert!(menu(tester, |menu| menu.input_formatters.is_none()));
 
             let input_formatters: Vec<TextInputFormatterRef> = Vec::new();
-            pump_field(
-                &mut tester,
-                field().input_formatters(input_formatters.clone()),
-            );
-            assert!(menu(&tester, |menu| menu
+            pump_field(tester, field().input_formatters(input_formatters.clone()));
+            assert!(menu(tester, |menu| menu
                 .input_formatters
                 .as_ref()
                 .is_some_and(|formatters| formatters.len()
@@ -1210,14 +1190,13 @@ mod tests {
     // 'Calls the decoration builder to create the InputDecoration'
     #[test]
     fn the_field_decorates_with_its_decoration_builder() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
+        test_widgets(|tester| {
+            pump_field(tester, field());
 
             let decoration_builder_called = Rc::new(Cell::new(false));
             let called = Rc::clone(&decoration_builder_called);
             pump_field(
-                &mut tester,
+                tester,
                 field().decoration_builder(move |_app, _context, _controller| {
                     called.set(true);
                     InputDecoration::new().label_text("labelText")
@@ -1228,7 +1207,7 @@ mod tests {
             assert!(decoration_builder_called.get());
 
             // The decoration label is the one provided by the decoration builder.
-            text_field(&tester, |text_field| {
+            text_field(tester, |text_field| {
                 assert_eq!(
                     text_field
                         .decoration
@@ -1255,21 +1234,20 @@ mod tests {
     // 'Passes controller to underlying DropdownMenu'
     #[test]
     fn the_field_passes_its_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
+        test_widgets(|tester| {
+            pump_field(tester, field());
             let controller = TextEditingController::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyTextEditingController>();
 
             // Check default value.
-            let default = menu(&tester, |menu| menu.controller.clone());
+            let default = menu(tester, |menu| menu.controller.clone());
             // A default controller is created.
             assert!(default.is_some());
             assert_ne!(default, Some(controller.clone()));
 
-            pump_field(&mut tester, field().controller(controller.clone()));
+            pump_field(tester, field().controller(controller.clone()));
             assert_eq!(
-                menu(&tester, |menu| menu.controller.clone()),
+                menu(tester, |menu| menu.controller.clone()),
                 Some(controller)
             );
         });
@@ -1277,14 +1255,13 @@ mod tests {
 
     #[test]
     fn the_field_passes_its_focus_node() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
-            assert_eq!(menu(&tester, |menu| menu.focus_node.clone()), None);
+        test_widgets(|tester| {
+            pump_field(tester, field());
+            assert_eq!(menu(tester, |menu| menu.focus_node.clone()), None);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-            pump_field(&mut tester, field().focus_node(focus_node.erase()));
+            pump_field(tester, field().focus_node(focus_node.erase()));
             assert_eq!(
-                menu(&tester, |menu| menu.focus_node.clone()),
+                menu(tester, |menu| menu.focus_node.clone()),
                 Some(focus_node.erase())
             );
         });
@@ -1372,18 +1349,14 @@ mod tests {
 
     #[test]
     fn the_field_passes_its_menu_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
-            assert_eq!(menu(&tester, |menu| menu.menu_controller.clone()), None);
+        test_widgets(|tester| {
+            pump_field(tester, field());
+            assert_eq!(menu(tester, |menu| menu.menu_controller.clone()), None);
             let menu_controller = waft_widgets::MenuController::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyMenuController>();
-            pump_field(
-                &mut tester,
-                field().menu_controller(menu_controller.clone()),
-            );
+            pump_field(tester, field().menu_controller(menu_controller.clone()));
             assert_eq!(
-                menu(&tester, |menu| menu.menu_controller.clone()),
+                menu(tester, |menu| menu.menu_controller.clone()),
                 Some(menu_controller)
             );
         });
@@ -1391,15 +1364,14 @@ mod tests {
 
     #[test]
     fn the_field_passes_its_restoration_id() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_field(&mut tester, field());
-            assert_eq!(menu(&tester, |menu| menu.restoration_id.clone()), None);
+        test_widgets(|tester| {
+            pump_field(tester, field());
+            assert_eq!(menu(tester, |menu| menu.restoration_id.clone()), None);
 
-            pump_field(&mut tester, field().restoration_id("dropdown_menu"));
-            assert_eq!(tester.find_by_type::<TextField>().len(), 1);
+            pump_field(tester, field().restoration_id("dropdown_menu"));
+            expect(tester, &find::by_type::<TextField>(), finds_one_widget());
             assert_eq!(
-                menu(&tester, |menu| menu.restoration_id.clone()).as_deref(),
+                menu(tester, |menu| menu.restoration_id.clone()).as_deref(),
                 Some("dropdown_menu")
             );
         });
@@ -1416,19 +1388,18 @@ mod tests {
     // 'Field state is correctly updated'
     #[test]
     fn a_selection_updates_the_field_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .initial_selection(MenuItem::MenuItem0),
             );
 
-            select(&mut tester, MenuItem::MenuItem1);
+            select(tester, MenuItem::MenuItem1);
 
-            assert_eq!(field_value(&tester, &field_key), Some(MenuItem::MenuItem1));
+            assert_eq!(field_value(tester, &field_key), Some(MenuItem::MenuItem1));
         });
     }
 
@@ -1442,21 +1413,20 @@ mod tests {
     // 'onSaved callback is called when the field is outside a Form'
     #[test]
     fn saving_a_field_outside_a_form_calls_on_saved() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             let saved_value = Rc::new(Cell::new(Some(MenuItem::MenuItem0)));
             pump_field(
-                &mut tester,
+                tester,
                 saving_field(&saved_value).key(field_key.clone().into()),
             );
 
-            select(&mut tester, MenuItem::MenuItem1);
+            select(tester, MenuItem::MenuItem1);
             assert_eq!(saved_value.get(), Some(MenuItem::MenuItem0));
 
-            let state = field_state(&tester, &field_key);
+            let state = field_state(tester, &field_key);
             state.save(&mut tester.cell.borrow_mut());
-            pump(&mut tester);
+            pump(tester);
 
             assert_eq!(saved_value.get(), Some(MenuItem::MenuItem1));
         });
@@ -1465,8 +1435,7 @@ mod tests {
     // 'onSaved callback is called when the field is inside a Form'
     #[test]
     fn saving_the_form_calls_on_saved() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let saved_value = Rc::new(Cell::new(Some(MenuItem::MenuItem0)));
             let theme = m3(&tester.cell.borrow());
@@ -1477,14 +1446,14 @@ mod tests {
                     .into_widget(),
             ));
 
-            select(&mut tester, MenuItem::MenuItem1);
+            select(tester, MenuItem::MenuItem1);
             assert_eq!(saved_value.get(), Some(MenuItem::MenuItem0));
 
             let form = form_key
                 .current_state::<FormState>(&tester.cell.borrow())
                 .expect("the form's state");
             form.save(&mut tester.cell.borrow_mut());
-            pump(&mut tester);
+            pump(tester);
 
             assert_eq!(saved_value.get(), Some(MenuItem::MenuItem1));
         });
@@ -1493,23 +1462,22 @@ mod tests {
     // 'Field can be reset'
     #[test]
     fn a_reset_restores_the_initial_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             let saved_value = Rc::new(Cell::new(Some(MenuItem::MenuItem0)));
             pump_field(
-                &mut tester,
+                tester,
                 saving_field(&saved_value).key(field_key.clone().into()),
             );
 
-            select(&mut tester, MenuItem::MenuItem1);
-            assert_eq!(field_value(&tester, &field_key), Some(MenuItem::MenuItem1));
+            select(tester, MenuItem::MenuItem1);
+            assert_eq!(field_value(tester, &field_key), Some(MenuItem::MenuItem1));
 
-            let state = field_state(&tester, &field_key);
+            let state = field_state(tester, &field_key);
             state.reset(&mut tester.cell.borrow_mut());
-            pump(&mut tester);
+            pump(tester);
 
-            assert_eq!(field_value(&tester, &field_key), Some(MenuItem::MenuItem0));
+            assert_eq!(field_value(tester, &field_key), Some(MenuItem::MenuItem0));
         });
     }
 
@@ -1524,8 +1492,7 @@ mod tests {
 
     /// 'Inner text field is cleared on reset when initialSelection is null' with the default
     /// controller (`None`) or a custom one.
-    fn assert_a_reset_clears_the_text_field(custom_controller: bool) {
-        let mut tester = tester();
+    fn assert_a_reset_clears_the_text_field(tester: &mut WidgetTester, custom_controller: bool) {
         let field_key = GlobalKey::new();
         let controller = custom_controller.then(|| {
             TextEditingController::new(&mut tester.cell.borrow_mut())
@@ -1535,9 +1502,9 @@ mod tests {
         if let Some(controller) = controller.clone() {
             form_field = form_field.controller(controller);
         }
-        pump_field(&mut tester, form_field);
+        pump_field(tester, form_field);
 
-        let text_field_controller = text_field(&tester, |text_field| text_field.controller.clone())
+        let text_field_controller = text_field(tester, |text_field| text_field.controller.clone())
             .expect("the field's controller");
         if let Some(controller) = controller {
             // Custom controller is correctly passed to the inner TextField.
@@ -1545,19 +1512,19 @@ mod tests {
         }
 
         // Select menuItem1.
-        select(&mut tester, MenuItem::MenuItem1);
-        assert_eq!(field_value(&tester, &field_key), Some(MenuItem::MenuItem1));
+        select(tester, MenuItem::MenuItem1);
+        assert_eq!(field_value(tester, &field_key), Some(MenuItem::MenuItem1));
         assert_eq!(
             text_field_controller.value(&tester.cell.borrow()),
             &collapsed_value("Item 1")
         );
 
         // After reset the text field content is cleared.
-        let state = field_state(&tester, &field_key);
+        let state = field_state(tester, &field_key);
         state.reset(&mut tester.cell.borrow_mut());
-        pump(&mut tester);
+        pump(tester);
 
-        assert_eq!(field_value(&tester, &field_key), None);
+        assert_eq!(field_value(tester, &field_key), None);
         assert_eq!(
             text_field_controller.value(&tester.cell.borrow()),
             &collapsed_value("")
@@ -1567,36 +1534,35 @@ mod tests {
     // 'Inner text field is cleared on reset when initialSelection is null - Default controller'
     #[test]
     fn a_reset_without_an_initial_selection_clears_the_default_controller() {
-        with_main_thread_stack(|| assert_a_reset_clears_the_text_field(false));
+        test_widgets(|tester| assert_a_reset_clears_the_text_field(tester, false));
     }
 
     // 'Inner text field is cleared on reset when initialSelection is null - Custom controller'
     #[test]
     fn a_reset_without_an_initial_selection_clears_a_given_controller() {
-        with_main_thread_stack(|| assert_a_reset_clears_the_text_field(true));
+        test_widgets(|tester| assert_a_reset_clears_the_text_field(tester, true));
     }
 
     // 'isValid and hasError results are correct'
     #[test]
     fn is_valid_and_has_error_follow_the_validator() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .autovalidate_mode(AutovalidateMode::Always),
             );
 
             // No validation error.
-            let state = field_state(&tester, &field_key);
+            let state = field_state(tester, &field_key);
             assert!(state.is_valid(&mut tester.cell.borrow_mut()));
             assert!(!state.has_error(&tester.cell.borrow()));
 
             let validation_error = "Required";
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .autovalidate_mode(AutovalidateMode::Always)
@@ -1604,7 +1570,7 @@ mod tests {
             );
 
             // Validation error.
-            let state = field_state(&tester, &field_key);
+            let state = field_state(tester, &field_key);
             assert!(!state.is_valid(&mut tester.cell.borrow_mut()));
             assert!(state.has_error(&tester.cell.borrow()));
         });
@@ -1613,24 +1579,23 @@ mod tests {
     // 'Validation result is shown as error text'
     #[test]
     fn the_validation_result_shows_as_the_error_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             let validation_error = "Required";
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .autovalidate_mode(AutovalidateMode::Always)
                     .validator(move |_app, _item| Some(validation_error.to_owned())),
             );
 
-            let state = field_state(&tester, &field_key);
+            let state = field_state(tester, &field_key);
             state.validate(&mut tester.cell.borrow_mut());
-            pump(&mut tester);
+            pump(tester);
 
-            assert_eq!(tester.find_text(validation_error).len(), 1);
-            text_field(&tester, |text_field| {
+            expect(tester, &find::text(validation_error), finds_one_widget());
+            text_field(tester, |text_field| {
                 assert_eq!(
                     text_field
                         .decoration
@@ -1647,8 +1612,7 @@ mod tests {
     // 'Validation result is shown as error widget created by errorBuilder'
     #[test]
     fn the_error_builder_builds_the_validation_error() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             let validation_error = "Required";
             let error_key: KeyRef = waft_foundation::UniqueKey::new().into();
@@ -1656,7 +1620,7 @@ mod tests {
             let called = Rc::clone(&error_builder_called);
             let key = error_key.clone();
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .validator(move |_app, _item| Some(validation_error.to_owned()))
@@ -1675,15 +1639,15 @@ mod tests {
                     .count()
             };
             assert!(!error_builder_called.get());
-            assert_eq!(error_found(&tester), 0);
+            assert_eq!(error_found(tester), 0);
 
-            let state = field_state(&tester, &field_key);
+            let state = field_state(tester, &field_key);
             state.validate(&mut tester.cell.borrow_mut());
-            pump(&mut tester);
+            pump(tester);
 
             assert!(error_builder_called.get());
-            assert_eq!(error_found(&tester), 1);
-            text_field(&tester, |text_field| {
+            assert_eq!(error_found(tester), 1);
+            text_field(tester, |text_field| {
                 let error = text_field
                     .decoration
                     .as_ref()
@@ -1699,16 +1663,15 @@ mod tests {
     // 'Initial selection is applied'
     #[test]
     fn the_initial_selection_is_the_field_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .initial_selection(MenuItem::MenuItem0),
             );
-            assert_eq!(field_value(&tester, &field_key), Some(MenuItem::MenuItem0));
+            assert_eq!(field_value(tester, &field_key), Some(MenuItem::MenuItem0));
         });
     }
 
@@ -1716,17 +1679,16 @@ mod tests {
     // in-between'
     #[test]
     fn a_new_initial_selection_applies_before_the_user_selects() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             for item in [MenuItem::MenuItem0, MenuItem::MenuItem1] {
                 pump_field(
-                    &mut tester,
+                    tester,
                     field()
                         .key(field_key.clone().into())
                         .initial_selection(item),
                 );
-                assert_eq!(field_value(&tester, &field_key), Some(item));
+                assert_eq!(field_value(tester, &field_key), Some(item));
             }
         });
     }
@@ -1735,31 +1697,30 @@ mod tests {
     // in-between'
     #[test]
     fn a_new_initial_selection_does_not_replace_the_user_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .initial_selection(MenuItem::MenuItem0),
             );
-            assert_eq!(field_value(&tester, &field_key), Some(MenuItem::MenuItem0));
+            assert_eq!(field_value(tester, &field_key), Some(MenuItem::MenuItem0));
 
             // Select a different item than the initial one.
-            select(&mut tester, MenuItem::MenuItem2);
-            assert_eq!(field_value(&tester, &field_key), Some(MenuItem::MenuItem2));
+            select(tester, MenuItem::MenuItem2);
+            assert_eq!(field_value(tester, &field_key), Some(MenuItem::MenuItem2));
 
             // Update initial selection.
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .initial_selection(MenuItem::MenuItem1),
             );
 
             // The value selected by the user is preserved.
-            assert_eq!(field_value(&tester, &field_key), Some(MenuItem::MenuItem2));
+            assert_eq!(field_value(tester, &field_key), Some(MenuItem::MenuItem2));
         });
     }
 
@@ -1771,7 +1732,6 @@ mod tests {
         field_key: &GlobalKey,
     ) -> WidgetTester {
         let mut tester = WidgetTester::restoring(data);
-        tester.install_platform_fonts();
         let theme = m3(&tester.cell.borrow());
         tester.pump_widget(restorable_material_app(
             "app",
@@ -1791,42 +1751,45 @@ mod tests {
     // 'Selected value is restorable'
     #[test]
     fn the_selected_value_is_restored() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let form_field_state = GlobalKey::new();
             let mut tester = restored(None, &form_field_state);
+            let tester = &mut tester;
             assert_eq!(
-                field_value(&tester, &form_field_state),
+                field_value(tester, &form_field_state),
                 Some(MenuItem::MenuItem0)
             );
 
             // Select a different item than the initial one.
-            select(&mut tester, MenuItem::MenuItem2);
+            select(tester, MenuItem::MenuItem2);
             assert_eq!(
-                field_value(&tester, &form_field_state),
+                field_value(tester, &form_field_state),
                 Some(MenuItem::MenuItem2)
             );
 
             // Needed for restoration data to be updated.
-            pump(&mut tester);
+            pump(tester);
 
             let data = tester.restoration_data();
-            let tester = restored(data.clone(), &form_field_state);
+            let mut tester = restored(data.clone(), &form_field_state);
+            let tester = &mut tester;
             assert_eq!(
-                field_value(&tester, &form_field_state),
+                field_value(tester, &form_field_state),
                 Some(MenuItem::MenuItem2)
             );
 
-            let state = field_state(&tester, &form_field_state);
+            let state = field_state(tester, &form_field_state);
             state.reset(&mut tester.cell.borrow_mut());
             assert_eq!(
-                field_value(&tester, &form_field_state),
+                field_value(tester, &form_field_state),
                 Some(MenuItem::MenuItem0)
             );
 
             let mut tester = restored(data, &form_field_state);
-            pump(&mut tester);
+            let tester = &mut tester;
+            pump(tester);
             assert_eq!(
-                field_value(&tester, &form_field_state),
+                field_value(tester, &form_field_state),
                 Some(MenuItem::MenuItem2)
             );
         });
@@ -1835,18 +1798,17 @@ mod tests {
     // 'onSelect is called exactly once when a selection is made.'
     #[test]
     fn a_selection_calls_on_selected_once() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let on_selected_call_count = Rc::new(Cell::new(0));
             let count = Rc::clone(&on_selected_call_count);
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .initial_selection(MenuItem::MenuItem0)
                     .on_selected(move |_app, _value| count.set(count.get() + 1)),
             );
             // Select a different item than the initial one.
-            select(&mut tester, MenuItem::MenuItem2);
+            select(tester, MenuItem::MenuItem2);
             assert_eq!(on_selected_call_count.get(), 1);
         });
     }
@@ -1854,21 +1816,20 @@ mod tests {
     // 'onSelect is called exactly once when reset'
     #[test]
     fn a_reset_calls_on_selected_once() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             let on_selected_call_count = Rc::new(Cell::new(0));
             let count = Rc::clone(&on_selected_call_count);
             pump_field(
-                &mut tester,
+                tester,
                 field()
                     .key(field_key.clone().into())
                     .on_selected(move |_app, _value| count.set(count.get() + 1)),
             );
 
-            let state = field_state(&tester, &field_key);
+            let state = field_state(tester, &field_key);
             state.reset(&mut tester.cell.borrow_mut());
-            pump(&mut tester);
+            pump(tester);
             assert_eq!(on_selected_call_count.get(), 1);
         });
     }
@@ -1876,8 +1837,7 @@ mod tests {
     // 'DropdownMenuFormField does not crash at zero area'
     #[test]
     fn a_field_at_zero_area_does_not_panic() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,
@@ -1885,7 +1845,7 @@ mod tests {
                     .body(waft_widgets::Center::new().child(SizedBox::shrink().child(field())))
                     .into_widget(),
             ));
-            let form_field = only(tester.find_by_type::<DropdownMenuFormField<MenuItem>>());
+            let form_field = tester.element(find::by_type::<DropdownMenuFormField<MenuItem>>());
             let size = tester.render_box_of(form_field).size(&tester.cell.borrow());
             assert_eq!(size, Size::ZERO);
         });
@@ -1894,8 +1854,7 @@ mod tests {
     // 'Allow null entry to clear selection'
     #[test]
     fn an_entry_with_a_null_value_can_be_selected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = TextEditingController::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyTextEditingController>();
             let select_none_label = "Select none";
@@ -1925,13 +1884,14 @@ mod tests {
             ));
 
             // Open the menu.
-            let form_field = only(tester.find_by_type::<DropdownMenuFormField<Option<String>>>());
-            tap(&mut tester, form_field);
-            pump(&mut tester);
+            let form_field =
+                tester.element(find::by_type::<DropdownMenuFormField<Option<String>>>());
+            tap(tester, form_field);
+            pump(tester);
 
             // Select the 'None' item.
-            let button = find_menu_item_button(&tester, select_none_label);
-            tap(&mut tester, button);
+            let button = find_menu_item_button(tester, select_none_label);
+            tap(tester, button);
             tester.pump_and_settle();
 
             assert_eq!(

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ndk_sys as ffi;
-use waft_embedder::image_codecs::{ImageError, ImageErrorKind};
+use waft_embedder::image_codecs::{AnimationPlays, ImageError, ImageErrorKind};
 
 /// What a decoder reads, held for as long as it reads it.
 #[allow(
@@ -102,6 +102,18 @@ impl ImageDecoder {
     pub(super) fn is_animated(&mut self) -> bool {
         // SAFETY: a decoder that lives.
         unsafe { ffi::AImageDecoder_isAnimated(self.decoder.as_ptr()) }
+    }
+
+    /// How many times an animation plays. The decoder counts the repeats after the first play,
+    /// `ANDROID_IMAGE_DECODER_INFINITE` meaning forever, and a negative count is a failure's code.
+    pub(super) fn plays(&mut self) -> Result<AnimationPlays, ImageError> {
+        // SAFETY: a decoder that lives.
+        let repeats = unsafe { ffi::AImageDecoder_getRepeatCount(self.decoder.as_ptr()) };
+        match u32::try_from(repeats) {
+            Ok(ffi::ANDROID_IMAGE_DECODER_INFINITE) => Ok(AnimationPlays::Forever),
+            Ok(repeats) => Ok(AnimationPlays::Times(repeats.saturating_add(1))),
+            Err(_) => Err(failure(repeats)),
+        }
     }
 
     /// Decodes into RGBA, 8 bits a channel, premultiplied, the decoder's default, in sRGB; set

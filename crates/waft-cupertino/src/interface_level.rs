@@ -137,15 +137,15 @@ mod tests {
 
     use waft_widgets::{Builder, SizedBox};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{build, test_cell};
 
     fn read_under<T: 'static>(
+        tester: &mut WidgetTester,
         wrap: impl FnOnce(WidgetRef) -> WidgetRef,
         read: impl Fn(&mut App, BuildContext) -> T + 'static,
     ) -> T {
-        let cell = test_cell();
-        let app = cell.borrow();
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -155,8 +155,7 @@ mod tests {
             }
         })
         .into_widget();
-        drop(app);
-        build(&cell, wrap(probe));
+        tester.pump_widget(wrap(probe));
         let read = seen.borrow_mut().take();
         read.expect("the probe built")
     }
@@ -167,24 +166,28 @@ mod tests {
 
     #[test]
     fn of_and_maybe_of_read_the_enclosing_level() {
-        let elevated = level(CupertinoUserInterfaceLevelData::Elevated);
-        assert_eq!(
-            read_under(elevated, CupertinoUserInterfaceLevel::of),
-            CupertinoUserInterfaceLevelData::Elevated
-        );
-        let base = level(CupertinoUserInterfaceLevelData::Base);
-        assert_eq!(
-            read_under(base, CupertinoUserInterfaceLevel::maybe_of),
-            Some(CupertinoUserInterfaceLevelData::Base)
-        );
+        test_widgets(|tester| {
+            let elevated = level(CupertinoUserInterfaceLevelData::Elevated);
+            assert_eq!(
+                read_under(tester, elevated, CupertinoUserInterfaceLevel::of),
+                CupertinoUserInterfaceLevelData::Elevated
+            );
+            let base = level(CupertinoUserInterfaceLevelData::Base);
+            assert_eq!(
+                read_under(tester, base, CupertinoUserInterfaceLevel::maybe_of),
+                Some(CupertinoUserInterfaceLevelData::Base)
+            );
+        });
     }
 
     #[test]
     fn maybe_of_is_none_without_an_ancestor() {
-        assert_eq!(
-            read_under(|child| child, CupertinoUserInterfaceLevel::maybe_of),
-            None
-        );
+        test_widgets(|tester| {
+            assert_eq!(
+                read_under(tester, |child| child, CupertinoUserInterfaceLevel::maybe_of),
+                None
+            );
+        });
     }
 
     #[test]
@@ -192,7 +195,9 @@ mod tests {
         expected = "CupertinoUserInterfaceLevel.of() called with a context that does not contain a CupertinoUserInterfaceLevel."
     )]
     fn of_panics_without_an_ancestor() {
-        read_under(|child| child, CupertinoUserInterfaceLevel::of);
+        test_widgets(|tester| {
+            read_under(tester, |child| child, CupertinoUserInterfaceLevel::of);
+        });
     }
 
     #[test]

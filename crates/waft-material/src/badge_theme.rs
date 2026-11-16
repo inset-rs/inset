@@ -257,24 +257,26 @@ impl InheritedWidget for BadgeTheme {
 #[cfg(test)]
 mod tests {
     //! Ported from `test/badge_theme_test.dart`; the `debugFillProperties` cases wait for
-    //! diagnostics, and `hashCode` for `Hash`. The two cases that measure a badge's label give it
-    //! flutter_test's Ahem as [`crate::badge::tests`] does.
+    //! diagnostics, and `hashCode` for `Hash`. The two cases that measure a badge's label read it
+    //! from its `RenderParagraph`, as [`crate::badge::tests`] does.
 
     use waft_embedder::{RRect, Radius, Size};
     use waft_painting::Alignment;
-    use waft_widgets::SizedBox;
+    use waft_widgets::{SizedBox, Text};
+
+    use waft_widgets::testing::{WidgetTester, test_widgets};
 
     use super::*;
     use crate::badge::Badge;
-    use crate::badge::tests::{
-        Seen, add_icon, ahem_label, badge_paints_rrect, badge_rect, rect_of_ahem,
-    };
+    use crate::badge::tests::{add_icon, badge_paints_rrect, badge_rect};
+    use crate::bottom_navigation_bar::tests::paragraph_style;
     use crate::colors::Colors;
+    use crate::drawer_theme::tests::probe;
     use crate::drawer_theme::tests::theme_seen_through_capture;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m3, pump_app, tester};
+    use crate::tooltip::tests::{m3, pump_app};
+    use waft_widgets::testing::find;
 
     const GREEN: Color = Color::new(0xff00ff00);
     const BLACK: Color = Color::new(0xff000000);
@@ -292,19 +294,15 @@ mod tests {
             .offset(Offset::new(24.0, 0.0))
     }
 
-    fn badge_in_scaffold(seen: &Seen) -> WidgetRef {
+    fn badge_in_scaffold() -> WidgetRef {
         Scaffold::new()
-            .body(
-                Badge::new()
-                    .label(ahem_label("1234", seen))
-                    .child(add_icon()),
-            )
+            .body(Badge::new().label(Text::new("1234")).child(add_icon()))
             .into_widget()
     }
 
-    fn assert_badge_uses_the_theme(tester: &crate::test_support::WidgetTester, seen: &Seen) {
+    fn assert_badge_uses_the_theme(tester: &WidgetTester) {
         // text width = 48 = fontSize * 4, text height = fontSize
-        let text_rect = rect_of_ahem(tester, "1234");
+        let text_rect = tester.get_rect(find::text("1234"));
         assert_eq!(text_rect.size(), Size::new(48.0, 12.0));
 
         assert_eq!(text_rect.top_left(), Offset::new(33.0, 2.0));
@@ -313,7 +311,7 @@ mod tests {
         assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
         assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
 
-        let text_style = seen.label_style();
+        let text_style = paragraph_style(tester, "1234");
         assert_eq!(text_style.font_size, Some(12.0));
         assert_eq!(
             text_style.color.as_ref().map(|color| color.color()),
@@ -403,20 +401,18 @@ mod tests {
 
     #[test]
     fn badge_uses_theme_data_badge_theme() {
-        with_main_thread_stack(|| {
-            let seen = Seen::default();
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .badge_theme(badge_theme_data())
                         .build(app)
                 },
-                |_app| badge_in_scaffold(&seen),
+                |_app| badge_in_scaffold(),
             );
 
-            assert_badge_uses_the_theme(&tester, &seen);
+            assert_badge_uses_the_theme(tester);
         });
     }
 
@@ -425,26 +421,23 @@ mod tests {
     // ThemeData.badgeTheme.
     #[test]
     fn badge_uses_badge_theme() {
-        with_main_thread_stack(|| {
-            let seen = Seen::default();
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
-                BadgeTheme::new(badge_theme_data(), badge_in_scaffold(&seen)).into_widget()
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
+                BadgeTheme::new(badge_theme_data(), badge_in_scaffold()).into_widget()
             });
 
-            assert_badge_uses_the_theme(&tester, &seen);
+            assert_badge_uses_the_theme(tester);
         });
     }
 
     #[test]
     fn of_returns_the_theme_data_badge_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = badge_theme_data();
             let theme_data_badge = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .badge_theme(theme_data_badge.clone())
@@ -460,13 +453,12 @@ mod tests {
 
     #[test]
     fn of_returns_the_closest_badge_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let widget_badge = BadgeThemeData::new().small_size(7.0);
             let expected = widget_badge.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .badge_theme(BadgeThemeData::new().small_size(3.0))
@@ -482,13 +474,12 @@ mod tests {
 
     #[test]
     fn a_captured_badge_theme_is_kept_under_another_badge_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let captured = BadgeThemeData::new().small_size(1.0);
             let shadowing = BadgeThemeData::new().small_size(2.0);
 
             let seen = theme_seen_through_capture(
-                &cell,
+                tester,
                 |probe| BadgeTheme::new(captured.clone(), probe).into_widget(),
                 |wrapped| BadgeTheme::new(shadowing.clone(), wrapped).into_widget(),
                 BadgeTheme::of,
@@ -509,9 +500,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_badge_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.badge_theme, BadgeThemeData::new());
 

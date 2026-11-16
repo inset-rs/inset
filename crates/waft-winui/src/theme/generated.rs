@@ -1498,14 +1498,6 @@ pub struct ThemeResources {
     pub tab_view_selected_item_border_brush: [(f64, Color); 2],
     /// `SystemControlBackgroundBaseMediumBrush`.
     pub system_control_background_base_medium_brush: Color,
-    /// `ListViewItemDragThemeOpacity`.
-    pub list_view_item_drag_theme_opacity: f64,
-    /// `ListViewItemReorderThemeOpacity`.
-    pub list_view_item_reorder_theme_opacity: f64,
-    /// `ListViewItemReorderTargetThemeOpacity`.
-    pub list_view_item_reorder_target_theme_opacity: f64,
-    /// `ListViewItemReorderHintThemeOffset`.
-    pub list_view_item_reorder_hint_theme_offset: f64,
     /// `TabViewHeaderPadding`.
     pub tab_view_header_padding: [f64; 4],
     /// `TabViewItemHeaderPadding`.
@@ -1880,8 +1872,6 @@ pub struct ThemeResources {
     pub system_control_highlight_list_low_brush: Color,
     /// `SystemControlHighlightListMediumBrush`.
     pub system_control_highlight_list_medium_brush: Color,
-    /// `ListViewItemDisabledThemeOpacity`.
-    pub list_view_item_disabled_theme_opacity: f64,
     /// `NavigationViewAutoSuggestBoxMargin`.
     pub navigation_view_auto_suggest_box_margin: [f64; 4],
     /// `TopNavigationViewAutoSuggestBoxMargin`.
@@ -2288,12 +2278,8 @@ pub struct ThemeResources {
     pub system_control_highlight_alt_base_medium_brush: Color,
     /// `SystemControlHighlightListAccentLowBrush`.
     pub system_control_highlight_list_accent_low_brush: Color,
-    /// `AppBarThemeMinHeight`.
-    pub app_bar_theme_min_height: f64,
     /// `AppBarButtonContentHeight`.
     pub app_bar_button_content_height: f64,
-    /// `AppBarThemeCompactHeight`.
-    pub app_bar_theme_compact_height: f64,
     /// `AppBarButtonContentViewboxMargin`.
     pub app_bar_button_content_viewbox_margin: [f64; 4],
     /// `AppBarButtonContentViewboxCompactMargin`.
@@ -2326,6 +2312,221 @@ pub struct ThemeResources {
     pub app_bar_button_sub_item_chevron_label_on_right_margin: [f64; 4],
     /// `AppBarButtonSecondarySubItemChevronMargin`.
     pub app_bar_button_secondary_sub_item_chevron_margin: [f64; 4],
+    // `AppBarToggleButton_themeresources.xaml`
+    /// `AppBarToggleButtonBackground`.
+    pub app_bar_toggle_button_background: Color,
+    /// `AppBarToggleButtonBackgroundPointerOver`.
+    pub app_bar_toggle_button_background_pointer_over: Color,
+    /// `AppBarToggleButtonBackgroundPressed`.
+    pub app_bar_toggle_button_background_pressed: Color,
+    /// `AppBarToggleButtonBackgroundDisabled`.
+    pub app_bar_toggle_button_background_disabled: Color,
+    /// `AppBarToggleButtonBackgroundChecked`.
+    pub app_bar_toggle_button_background_checked: Color,
+    /// `AppBarToggleButtonBackgroundCheckedPointerOver`.
+    pub app_bar_toggle_button_background_checked_pointer_over: Color,
+    /// `AppBarToggleButtonBackgroundCheckedPressed`.
+    pub app_bar_toggle_button_background_checked_pressed: Color,
+    /// `AppBarToggleButtonBackgroundCheckedDisabled`.
+    pub app_bar_toggle_button_background_checked_disabled: Color,
+    /// `AppBarToggleButtonBackgroundHighLightOverlay`.
+    pub app_bar_toggle_button_background_high_light_overlay: Color,
+    /// `AppBarToggleButtonBackgroundHighLightOverlayPointerOver`.
+    pub app_bar_toggle_button_background_high_light_overlay_pointer_over: Color,
+    /// `AppBarToggleButtonBackgroundHighLightOverlayPressed`.
+    pub app_bar_toggle_button_background_high_light_overlay_pressed: Color,
+    /// `AppBarToggleButtonBackgroundHighLightOverlayCheckedPointerOver`.
+    pub app_bar_toggle_button_background_high_light_overlay_checked_pointer_over: Color,
+    /// `AppBarToggleButtonBackgroundHighLightOverlayCheckedPressed`.
+    pub app_bar_toggle_button_background_high_light_overlay_checked_pressed: Color,
+    /// `AppBarToggleButtonForeground`.
+    pub app_bar_toggle_button_foreground: Color,
+    /// `AppBarToggleButtonForegroundPointerOver`.
+    pub app_bar_toggle_button_foreground_pointer_over: Color,
+    /// `AppBarToggleButtonForegroundPressed`.
+    pub app_bar_toggle_button_foreground_pressed: Color,
+    /// `AppBarToggleButtonForegroundDisabled`.
+    pub app_bar_toggle_button_foreground_disabled: Color,
+    /// `AppBarToggleButtonForegroundChecked`.
+    pub app_bar_toggle_button_foreground_checked: Color,
+    /// `AppBarToggleButtonForegroundCheckedPointerOver`.
+    pub app_bar_toggle_button_foreground_checked_pointer_over: Color,
+    /// `AppBarToggleButtonForegroundCheckedPressed`.
+    pub app_bar_toggle_button_foreground_checked_pressed: Color,
+    /// `AppBarToggleButtonForegroundCheckedDisabled`.
+    pub app_bar_toggle_button_foreground_checked_disabled: Color,
+    /// `AppBarToggleButtonBorderBrush`.
+    pub app_bar_toggle_button_border_brush: Color,
+    /// `AppBarToggleButtonBorderBrushPointerOver`.
+    pub app_bar_toggle_button_border_brush_pointer_over: Color,
+    /// `AppBarToggleButtonBorderBrushPressed`.
+    pub app_bar_toggle_button_border_brush_pressed: Color,
+    /// `AppBarToggleButtonBorderBrushDisabled`.
+    pub app_bar_toggle_button_border_brush_disabled: Color,
+    /// `AppBarToggleButtonBorderBrushChecked`.
+    pub app_bar_toggle_button_border_brush_checked: [(f64, Color); 2],
+    /// `AppBarToggleButtonBorderBrushCheckedPointerOver`.
+    pub app_bar_toggle_button_border_brush_checked_pointer_over: [(f64, Color); 2],
+    /// `AppBarToggleButtonBorderBrushCheckedPressed`.
+    pub app_bar_toggle_button_border_brush_checked_pressed: Color,
+    /// `AppBarToggleButtonBorderBrushCheckedDisabled`.
+    pub app_bar_toggle_button_border_brush_checked_disabled: Color,
+    /// `AppBarToggleButtonCheckGlyphForeground`.
+    pub app_bar_toggle_button_check_glyph_foreground: Color,
+    /// `AppBarToggleButtonCheckGlyphForegroundPointerOver`.
+    pub app_bar_toggle_button_check_glyph_foreground_pointer_over: Color,
+    /// `AppBarToggleButtonCheckGlyphForegroundPressed`.
+    pub app_bar_toggle_button_check_glyph_foreground_pressed: Color,
+    /// `AppBarToggleButtonCheckGlyphForegroundDisabled`.
+    pub app_bar_toggle_button_check_glyph_foreground_disabled: Color,
+    /// `AppBarToggleButtonCheckGlyphForegroundChecked`.
+    pub app_bar_toggle_button_check_glyph_foreground_checked: Color,
+    /// `AppBarToggleButtonCheckGlyphForegroundCheckedPointerOver`.
+    pub app_bar_toggle_button_check_glyph_foreground_checked_pointer_over: Color,
+    /// `AppBarToggleButtonCheckGlyphForegroundCheckedPressed`.
+    pub app_bar_toggle_button_check_glyph_foreground_checked_pressed: Color,
+    /// `AppBarToggleButtonCheckGlyphForegroundCheckedDisabled`.
+    pub app_bar_toggle_button_check_glyph_foreground_checked_disabled: Color,
+    /// `AppBarToggleButtonOverflowLabelForegroundPointerOver`.
+    pub app_bar_toggle_button_overflow_label_foreground_pointer_over: Color,
+    /// `AppBarToggleButtonOverflowLabelForegroundPressed`.
+    pub app_bar_toggle_button_overflow_label_foreground_pressed: Color,
+    /// `AppBarToggleButtonOverflowLabelForegroundDisabled`.
+    pub app_bar_toggle_button_overflow_label_foreground_disabled: Color,
+    /// `AppBarToggleButtonOverflowLabelForegroundCheckedPointerOver`.
+    pub app_bar_toggle_button_overflow_label_foreground_checked_pointer_over: Color,
+    /// `AppBarToggleButtonOverflowLabelForegroundCheckedPressed`.
+    pub app_bar_toggle_button_overflow_label_foreground_checked_pressed: Color,
+    /// `AppBarToggleButtonOverflowLabelForegroundCheckedDisabled`.
+    pub app_bar_toggle_button_overflow_label_foreground_checked_disabled: Color,
+    /// `AppBarToggleButtonCheckedBackgroundThemeBrush`.
+    pub app_bar_toggle_button_checked_background_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedBorderThemeBrush`.
+    pub app_bar_toggle_button_checked_border_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedDisabledBackgroundThemeBrush`.
+    pub app_bar_toggle_button_checked_disabled_background_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedDisabledBorderThemeBrush`.
+    pub app_bar_toggle_button_checked_disabled_border_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedDisabledForegroundThemeBrush`.
+    pub app_bar_toggle_button_checked_disabled_foreground_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedPointerOverBackgroundThemeBrush`.
+    pub app_bar_toggle_button_checked_pointer_over_background_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedPointerOverBorderThemeBrush`.
+    pub app_bar_toggle_button_checked_pointer_over_border_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedPressedBackgroundThemeBrush`.
+    pub app_bar_toggle_button_checked_pressed_background_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedPressedBorderThemeBrush`.
+    pub app_bar_toggle_button_checked_pressed_border_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedPressedForegroundThemeBrush`.
+    pub app_bar_toggle_button_checked_pressed_foreground_theme_brush: Color,
+    /// `AppBarToggleButtonCheckedForegroundThemeBrush`.
+    pub app_bar_toggle_button_checked_foreground_theme_brush: Color,
+    /// `AppBarToggleButtonPointerOverBackgroundThemeBrush`.
+    pub app_bar_toggle_button_pointer_over_background_theme_brush: Color,
+    /// `AppBarToggleButtonKeyboardAcceleratorTextForeground`.
+    pub app_bar_toggle_button_keyboard_accelerator_text_foreground: Color,
+    /// `AppBarToggleButtonKeyboardAcceleratorTextForegroundPointerOver`.
+    pub app_bar_toggle_button_keyboard_accelerator_text_foreground_pointer_over: Color,
+    /// `AppBarToggleButtonKeyboardAcceleratorTextForegroundPressed`.
+    pub app_bar_toggle_button_keyboard_accelerator_text_foreground_pressed: Color,
+    /// `AppBarToggleButtonKeyboardAcceleratorTextForegroundDisabled`.
+    pub app_bar_toggle_button_keyboard_accelerator_text_foreground_disabled: Color,
+    /// `AppBarToggleButtonKeyboardAcceleratorTextForegroundChecked`.
+    pub app_bar_toggle_button_keyboard_accelerator_text_foreground_checked: Color,
+    /// `AppBarToggleButtonKeyboardAcceleratorTextForegroundCheckedPointerOver`.
+    pub app_bar_toggle_button_keyboard_accelerator_text_foreground_checked_pointer_over: Color,
+    /// `AppBarToggleButtonKeyboardAcceleratorTextForegroundCheckedPressed`.
+    pub app_bar_toggle_button_keyboard_accelerator_text_foreground_checked_pressed: Color,
+    /// `AppBarToggleButtonKeyboardAcceleratorTextForegroundCheckedDisabled`.
+    pub app_bar_toggle_button_keyboard_accelerator_text_foreground_checked_disabled: Color,
+    /// `AppBarToggleButtonBorderThemeThickness`.
+    pub app_bar_toggle_button_border_theme_thickness: [f64; 4],
+    /// `AppBarToggleButtonOverflowTextTouchMargin`.
+    pub app_bar_toggle_button_overflow_text_touch_margin: [f64; 4],
+    /// `AppBarToggleButtonOverflowCheckTouchMargin`.
+    pub app_bar_toggle_button_overflow_check_touch_margin: [f64; 4],
+    /// `AppBarToggleButtonOverflowCheckMargin`.
+    pub app_bar_toggle_button_overflow_check_margin: [f64; 4],
+    /// `AppBarToggleButtonTextLabelMargin`.
+    pub app_bar_toggle_button_text_label_margin: [f64; 4],
+    /// `AppBarToggleButtonTextLabelOnRightMargin`.
+    pub app_bar_toggle_button_text_label_on_right_margin: [f64; 4],
+    /// `AppBarToggleButtonOverflowTextLabelPadding`.
+    pub app_bar_toggle_button_overflow_text_label_padding: [f64; 4],
+    // `AppBarSeparator_themeresources.xaml`
+    /// `AppBarSeparatorForeground`.
+    pub app_bar_separator_foreground: Color,
+    /// `AppBarSeparatorMargin`.
+    pub app_bar_separator_margin: [f64; 4],
+    /// `AppBarOverflowSeparatorMargin`.
+    pub app_bar_overflow_separator_margin: [f64; 4],
+    /// `AppBarSeparatorWidth`.
+    pub app_bar_separator_width: f64,
+    /// `AppBarOverflowSeparatorHeight`.
+    pub app_bar_overflow_separator_height: f64,
+    /// `AppBarSeparatorCornerRadius`.
+    pub app_bar_separator_corner_radius: f64,
+    // `CommandBar_themeresources.xaml`
+    /// `CommandBarBackground`.
+    pub command_bar_background: Color,
+    /// `CommandBarBackgroundOpen`.
+    pub command_bar_background_open: AcrylicBrushResources,
+    /// `CommandBarBorderBrushOpen`.
+    pub command_bar_border_brush_open: Color,
+    /// `CommandBarForeground`.
+    pub command_bar_foreground: Color,
+    /// `CommandBarHighContrastBorder`.
+    pub command_bar_high_contrast_border: Color,
+    /// `CommandBarOverflowPresenterBackground`.
+    pub command_bar_overflow_presenter_background: AcrylicBrushResources,
+    /// `CommandBarOverflowPresenterBorderBrush`.
+    pub command_bar_overflow_presenter_border_brush: Color,
+    /// `CommandBarLightDismissOverlayBackground`.
+    pub command_bar_light_dismiss_overlay_background: Color,
+    /// `SystemControlTransientBorderBrush`.
+    pub system_control_transient_border_brush: Color,
+    /// `SystemControlBackgroundChromeMediumBrush`.
+    pub system_control_background_chrome_medium_brush: Color,
+    /// `AppBarLightDismissOverlayBackground`.
+    pub app_bar_light_dismiss_overlay_background: Color,
+    /// `CommandBarMoreButtonMargin`.
+    pub command_bar_more_button_margin: [f64; 4],
+    /// `AppBarThemeMinimalHeight`.
+    pub app_bar_theme_minimal_height: f64,
+    /// `AppBarExpandButtonCircleDiameter`.
+    pub app_bar_expand_button_circle_diameter: f64,
+    /// `AppBarThemeMinHeight`.
+    pub app_bar_theme_min_height: f64,
+    /// `AppBarThemeCompactHeight`.
+    pub app_bar_theme_compact_height: f64,
+    /// `AppBarEllipsisButtonInnerBorderMargin`.
+    pub app_bar_ellipsis_button_inner_border_margin: [f64; 4],
+    /// `AppBarMoreButtonColumnMinWidth`.
+    pub app_bar_more_button_column_min_width: f64,
+    /// `CommandBarOverflowPresenterMargin`.
+    pub command_bar_overflow_presenter_margin: [f64; 4],
+    /// `CommandBarOverflowMinWidth`.
+    pub command_bar_overflow_min_width: f64,
+    /// `CommandBarOverflowTouchMinWidth`.
+    pub command_bar_overflow_touch_min_width: f64,
+    /// `CommandBarOverflowMaxWidth`.
+    pub command_bar_overflow_max_width: f64,
+    /// `CommandBarOverflowMaxHeight`.
+    pub command_bar_overflow_max_height: f64,
+    /// `CommandBarBorderThicknessOpen`.
+    pub command_bar_border_thickness_open: [f64; 4],
+    /// `CommandBarOverflowPresenterBorderThickness`.
+    pub command_bar_overflow_presenter_border_thickness: [f64; 4],
+    /// `CommandBarOverflowPresenterBorderDownThickness`.
+    pub command_bar_overflow_presenter_border_down_thickness: [f64; 4],
+    /// `CommandBarOverflowPresenterBorderUpThickness`.
+    pub command_bar_overflow_presenter_border_up_thickness: [f64; 4],
+    /// `CommandBarOverflowPresenterBorderPadding`.
+    pub command_bar_overflow_presenter_border_padding: [f64; 4],
+    /// `CommandBarOverflowPresenterBorderDownPadding`.
+    pub command_bar_overflow_presenter_border_down_padding: [f64; 4],
+    /// `CommandBarOverflowPresenterBorderUpPadding`.
+    pub command_bar_overflow_presenter_border_up_padding: [f64; 4],
     // `AcrylicBrush_themeresources.xaml`
     /// `SystemChromeMediumHighColor`.
     pub system_chrome_medium_high_color: Color,
@@ -2403,8 +2604,6 @@ pub struct ThemeResources {
     pub system_control_alt_high_acrylic_window_brush: AcrylicBrushResources,
     /// `SystemControlAltHighAcrylicElementBrush`.
     pub system_control_alt_high_acrylic_element_brush: AcrylicBrushResources,
-    /// `SystemControlTransientBorderBrush`.
-    pub system_control_transient_border_brush: Color,
     /// `AcrylicBackgroundFillColorDefaultBrush`.
     pub acrylic_background_fill_color_default_brush: AcrylicBrushResources,
     /// `AcrylicBackgroundFillColorDefaultInverseBrush`.
@@ -2871,22 +3070,6 @@ pub struct ThemeResources {
     pub split_button_border_brush_checked_divider: Color,
     /// `SplitButtonInAppBarUnfocusedPointerOver`.
     pub split_button_in_app_bar_unfocused_pointer_over: Color,
-    /// `AppBarToggleButtonBackgroundChecked`.
-    pub app_bar_toggle_button_background_checked: Color,
-    /// `AppBarToggleButtonBorderBrushChecked`.
-    pub app_bar_toggle_button_border_brush_checked: Color,
-    /// `AppBarToggleButtonForegroundChecked`.
-    pub app_bar_toggle_button_foreground_checked: Color,
-    /// `AppBarToggleButtonBackgroundCheckedPressed`.
-    pub app_bar_toggle_button_background_checked_pressed: Color,
-    /// `AppBarToggleButtonBorderBrushCheckedPressed`.
-    pub app_bar_toggle_button_border_brush_checked_pressed: Color,
-    /// `AppBarToggleButtonForegroundCheckedPressed`.
-    pub app_bar_toggle_button_foreground_checked_pressed: Color,
-    /// `AppBarToggleButtonBackgroundCheckedPointerOver`.
-    pub app_bar_toggle_button_background_checked_pointer_over: Color,
-    /// `AppBarToggleButtonForegroundCheckedPointerOver`.
-    pub app_bar_toggle_button_foreground_checked_pointer_over: Color,
     /// `SplitButtonPrimaryButtonSize`.
     pub split_button_primary_button_size: f64,
     /// `SplitButtonSecondaryButtonSize`.
@@ -3730,6 +3913,184 @@ pub struct ThemeResources {
     pub table_view_header_cell_padding_compact: [f64; 4],
     /// `TableViewHeaderCellPaddingComfortable`.
     pub table_view_header_cell_padding_comfortable: [f64; 4],
+    // `ListViewItem_themeresources.xaml`
+    /// `ListViewItemBorderBackground`.
+    pub list_view_item_border_background: Color,
+    /// `ListViewItemBackground`.
+    pub list_view_item_background: Color,
+    /// `ListViewItemBackgroundPointerOver`.
+    pub list_view_item_background_pointer_over: Color,
+    /// `ListViewItemBackgroundPressed`.
+    pub list_view_item_background_pressed: Color,
+    /// `ListViewItemBackgroundSelected`.
+    pub list_view_item_background_selected: Color,
+    /// `ListViewItemBackgroundSelectedPointerOver`.
+    pub list_view_item_background_selected_pointer_over: Color,
+    /// `ListViewItemBackgroundSelectedPressed`.
+    pub list_view_item_background_selected_pressed: Color,
+    /// `ListViewItemForegroundPointerOver`.
+    pub list_view_item_foreground_pointer_over: Color,
+    /// `ListViewItemForegroundPressed`.
+    pub list_view_item_foreground_pressed: Color,
+    /// `ListViewItemForegroundSelected`.
+    pub list_view_item_foreground_selected: Color,
+    /// `ListViewItemForegroundSelectedPointerOver`.
+    pub list_view_item_foreground_selected_pointer_over: Color,
+    /// `ListViewItemForegroundSelectedPressed`.
+    pub list_view_item_foreground_selected_pressed: Color,
+    /// `ListViewItemFocusBorderBrush`.
+    pub list_view_item_focus_border_brush: Color,
+    /// `ListViewItemFocusSecondaryBorderBrush`.
+    pub list_view_item_focus_secondary_border_brush: Color,
+    /// `ListViewItemCheckBrush`.
+    pub list_view_item_check_brush: Color,
+    /// `ListViewItemCheckBoxBrush`.
+    pub list_view_item_check_box_brush: Color,
+    /// `ListViewItemDragBackground`.
+    pub list_view_item_drag_background: Color,
+    /// `ListViewItemDragForeground`.
+    pub list_view_item_drag_foreground: Color,
+    /// `ListViewItemPlaceholderBackground`.
+    pub list_view_item_placeholder_background: Color,
+    /// `ListViewItemMultiArrangeOverlayTextBorder`.
+    pub list_view_item_multi_arrange_overlay_text_border: Color,
+    /// `ListViewItemMultiArrangeOverlayTextBackground`.
+    pub list_view_item_multi_arrange_overlay_text_background: Color,
+    /// `ListViewItemCheckHintThemeBrush`.
+    pub list_view_item_check_hint_theme_brush: Color,
+    /// `ListViewItemCheckSelectingThemeBrush`.
+    pub list_view_item_check_selecting_theme_brush: Color,
+    /// `ListViewItemCheckThemeBrush`.
+    pub list_view_item_check_theme_brush: Color,
+    /// `ListViewItemDragBackgroundThemeBrush`.
+    pub list_view_item_drag_background_theme_brush: Color,
+    /// `ListViewItemDragForegroundThemeBrush`.
+    pub list_view_item_drag_foreground_theme_brush: Color,
+    /// `ListViewItemFocusBorderThemeBrush`.
+    pub list_view_item_focus_border_theme_brush: Color,
+    /// `ListViewItemOverlayBackgroundThemeBrush`.
+    pub list_view_item_overlay_background_theme_brush: Color,
+    /// `ListViewItemOverlaySecondaryForegroundThemeBrush`.
+    pub list_view_item_overlay_secondary_foreground_theme_brush: Color,
+    /// `ListViewItemOverlayForegroundThemeBrush`.
+    pub list_view_item_overlay_foreground_theme_brush: Color,
+    /// `ListViewItemPlaceholderBackgroundThemeBrush`.
+    pub list_view_item_placeholder_background_theme_brush: Color,
+    /// `ListViewItemPointerOverBackgroundThemeBrush`.
+    pub list_view_item_pointer_over_background_theme_brush: Color,
+    /// `ListViewItemSelectedBackgroundThemeBrush`.
+    pub list_view_item_selected_background_theme_brush: Color,
+    /// `ListViewItemSelectedForegroundThemeBrush`.
+    pub list_view_item_selected_foreground_theme_brush: Color,
+    /// `ListViewItemSelectedPointerOverBackgroundThemeBrush`.
+    pub list_view_item_selected_pointer_over_background_theme_brush: Color,
+    /// `ListViewItemSelectedPointerOverBorderThemeBrush`.
+    pub list_view_item_selected_pointer_over_border_theme_brush: Color,
+    /// `ListViewItemCheckPressedBrush`.
+    pub list_view_item_check_pressed_brush: Color,
+    /// `ListViewItemCheckDisabledBrush`.
+    pub list_view_item_check_disabled_brush: Color,
+    /// `ListViewItemCheckBoxPointerOverBrush`.
+    pub list_view_item_check_box_pointer_over_brush: Color,
+    /// `ListViewItemCheckBoxPressedBrush`.
+    pub list_view_item_check_box_pressed_brush: Color,
+    /// `ListViewItemCheckBoxDisabledBrush`.
+    pub list_view_item_check_box_disabled_brush: Color,
+    /// `ListViewItemCheckBoxSelectedBrush`.
+    pub list_view_item_check_box_selected_brush: Color,
+    /// `ListViewItemCheckBoxSelectedPointerOverBrush`.
+    pub list_view_item_check_box_selected_pointer_over_brush: Color,
+    /// `ListViewItemCheckBoxSelectedPressedBrush`.
+    pub list_view_item_check_box_selected_pressed_brush: Color,
+    /// `ListViewItemCheckBoxSelectedDisabledBrush`.
+    pub list_view_item_check_box_selected_disabled_brush: Color,
+    /// `ListViewItemCheckBoxBorderBrush`.
+    pub list_view_item_check_box_border_brush: Color,
+    /// `ListViewItemCheckBoxPointerOverBorderBrush`.
+    pub list_view_item_check_box_pointer_over_border_brush: Color,
+    /// `ListViewItemCheckBoxPressedBorderBrush`.
+    pub list_view_item_check_box_pressed_border_brush: Color,
+    /// `ListViewItemCheckBoxDisabledBorderBrush`.
+    pub list_view_item_check_box_disabled_border_brush: Color,
+    /// `ListViewItemBackgroundSelectedDisabled`.
+    pub list_view_item_background_selected_disabled: Color,
+    /// `ListViewItemSelectionIndicatorBrush`.
+    pub list_view_item_selection_indicator_brush: Color,
+    /// `ListViewItemSelectionIndicatorPointerOverBrush`.
+    pub list_view_item_selection_indicator_pointer_over_brush: Color,
+    /// `ListViewItemSelectionIndicatorPressedBrush`.
+    pub list_view_item_selection_indicator_pressed_brush: Color,
+    /// `ListViewItemSelectionIndicatorDisabledBrush`.
+    pub list_view_item_selection_indicator_disabled_brush: Color,
+    /// `ListPickerFlyoutPresenterSelectedItemBackgroundThemeBrush`.
+    pub list_picker_flyout_presenter_selected_item_background_theme_brush: Color,
+    /// `FlyoutBackgroundThemeBrush`.
+    pub flyout_background_theme_brush: Color,
+    /// `CheckBoxBorderThemeThickness`.
+    pub check_box_border_theme_thickness: f64,
+    /// `TextStyleExtraLargeFontSize`.
+    pub text_style_extra_large_font_size: f64,
+    /// `GridViewItemMultiselectBorderThickness`.
+    pub grid_view_item_multiselect_border_thickness: [f64; 4],
+    /// `ListPickerFlyoutPresenterMultiselectCheckBoxMargin`.
+    pub list_picker_flyout_presenter_multiselect_check_box_margin: [f64; 4],
+    /// `ListPickerFlyoutPresenterItemMargin`.
+    pub list_picker_flyout_presenter_item_margin: [f64; 4],
+    /// `ListViewItemContentOffsetX`.
+    pub list_view_item_content_offset_x: f64,
+    /// `ListViewItemDisabledThemeOpacity`.
+    pub list_view_item_disabled_theme_opacity: f64,
+    /// `ListViewItemDragThemeOpacity`.
+    pub list_view_item_drag_theme_opacity: f64,
+    /// `ListViewItemReorderThemeOpacity`.
+    pub list_view_item_reorder_theme_opacity: f64,
+    /// `ListViewItemReorderTargetThemeOpacity`.
+    pub list_view_item_reorder_target_theme_opacity: f64,
+    /// `ListViewItemReorderTargetThemeScale`.
+    pub list_view_item_reorder_target_theme_scale: f64,
+    /// `ListViewItemReorderHintThemeOffset`.
+    pub list_view_item_reorder_hint_theme_offset: f64,
+    /// `ListViewItemSelectedBorderThemeThickness`.
+    pub list_view_item_selected_border_theme_thickness: f64,
+    /// `ListViewItemMinHeight`.
+    pub list_view_item_min_height: f64,
+    /// `ListViewItemCompactSelectedBorderThemeThickness`.
+    pub list_view_item_compact_selected_border_theme_thickness: [f64; 4],
+    /// `ListViewItemCornerRadius`.
+    pub list_view_item_corner_radius: [f64; 4],
+    /// `ListViewItemCheckBoxCornerRadius`.
+    pub list_view_item_check_box_corner_radius: [f64; 4],
+    /// `ListViewItemSelectionIndicatorCornerRadius`.
+    pub list_view_item_selection_indicator_corner_radius: [f64; 4],
+    // `AutoSuggestBox_themeresources.xaml`
+    /// `AutoSuggestBoxSuggestionsListBackground`.
+    pub auto_suggest_box_suggestions_list_background: AcrylicBrushResources,
+    /// `AutoSuggestBoxSuggestionsListBorderBrush`.
+    pub auto_suggest_box_suggestions_list_border_brush: Color,
+    /// `AutoSuggestBoxLightDismissOverlayBackground`.
+    pub auto_suggest_box_light_dismiss_overlay_background: Color,
+    /// `AutoSuggestListMaxHeight`.
+    pub auto_suggest_list_max_height: f64,
+    /// `AutoSuggestListBorderThemeThickness`.
+    pub auto_suggest_list_border_theme_thickness: [f64; 4],
+    /// `AutoSuggestListMargin`.
+    pub auto_suggest_list_margin: [f64; 4],
+    /// `AutoSuggestListPadding`.
+    pub auto_suggest_list_padding: [f64; 4],
+    /// `AutoSuggestBoxTopHeaderMargin`.
+    pub auto_suggest_box_top_header_margin: [f64; 4],
+    /// `AutoSuggestBoxInnerButtonMargin`.
+    pub auto_suggest_box_inner_button_margin: [f64; 4],
+    /// `AutoSuggestBoxDeleteButtonMargin`.
+    pub auto_suggest_box_delete_button_margin: [f64; 4],
+    /// `AutoSuggestBoxQueryButtonPadding`.
+    pub auto_suggest_box_query_button_padding: [f64; 4],
+    /// `AutoSuggestBoxLeftButtonMargin`.
+    pub auto_suggest_box_left_button_margin: f64,
+    /// `AutoSuggestBoxRightButtonMargin`.
+    pub auto_suggest_box_right_button_margin: f64,
+    /// `AutoSuggestBoxIconFontSize`.
+    pub auto_suggest_box_icon_font_size: f64,
 }
 
 impl ThemeResources {
@@ -6328,10 +6689,6 @@ impl ThemeResources {
                 Theme::Light => Color::from_argb(153, 0, 0, 0),
                 Theme::Dark => Color::from_argb(153, 255, 255, 255),
             },
-            list_view_item_drag_theme_opacity: 0.8,
-            list_view_item_reorder_theme_opacity: 0.8,
-            list_view_item_reorder_target_theme_opacity: 0.5,
-            list_view_item_reorder_hint_theme_offset: 10.0,
             tab_view_header_padding: [0.0, 8.0, 0.0, 0.0],
             tab_view_item_header_padding: [8.0, 3.0, 4.0, 3.0],
             tab_view_selected_item_header_padding: [9.0, 3.0, 5.0, 4.0],
@@ -6827,7 +7184,6 @@ impl ThemeResources {
                 Theme::Light => Color::from_argb(51, 0, 0, 0),
                 Theme::Dark => Color::from_argb(51, 255, 255, 255),
             },
-            list_view_item_disabled_theme_opacity: 0.55,
             navigation_view_auto_suggest_box_margin: [16.0, 0.0, 16.0, 0.0],
             top_navigation_view_auto_suggest_box_margin: [4.0, 0.0, 4.0, 0.0],
             pane_toggle_button_height: 36.0,
@@ -7230,8 +7586,8 @@ impl ThemeResources {
             command_bar_flyout_button_background: Color::from_argb(0, 0, 0, 0),
             desktop_acrylic_transparent_brush: Color::from_argb(0, 0, 0, 0),
             command_bar_ellipsis_icon_foreground_disabled: match theme {
-                Theme::Light => Color::from_argb(102, 0, 0, 0),
-                Theme::Dark => Color::from_argb(102, 255, 255, 255),
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
             },
             app_bar_expand_button_theme_width: 48.0,
             command_bar_flyout_app_bar_button_inner_border_margin: [2.0, 2.0, 2.0, 2.0],
@@ -7332,9 +7688,7 @@ impl ThemeResources {
                     color.with_values(Some(color.a * 0.6), None, None, None, None)
                 }
             },
-            app_bar_theme_min_height: 56.0,
             app_bar_button_content_height: 16.0,
-            app_bar_theme_compact_height: 40.0,
             app_bar_button_content_viewbox_margin: [12.0, 16.0, 0.0, 10.0],
             app_bar_button_content_viewbox_compact_margin: [0.0, 12.0, 0.0, 12.0],
             app_bar_button_content_viewbox_collapsed_margin: [0.0, 16.0, 0.0, 2.0],
@@ -7351,6 +7705,359 @@ impl ThemeResources {
             app_bar_button_sub_item_chevron_margin: [-23.0, 20.0, 12.0, 0.0],
             app_bar_button_sub_item_chevron_label_on_right_margin: [-7.0, 20.0, 12.0, 0.0],
             app_bar_button_secondary_sub_item_chevron_margin: [0.0, 0.0, 16.0, 0.0],
+            app_bar_toggle_button_background: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_background_pointer_over: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            app_bar_toggle_button_background_pressed: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            app_bar_toggle_button_background_disabled: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_background_checked: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            app_bar_toggle_button_background_checked_pointer_over: match theme {
+                Theme::Light => {
+                    let color = accent.dark1;
+                    color.with_values(Some(color.a * 0.9), None, None, None, None)
+                }
+                Theme::Dark => {
+                    let color = accent.light2;
+                    color.with_values(Some(color.a * 0.9), None, None, None, None)
+                }
+            },
+            app_bar_toggle_button_background_checked_pressed: match theme {
+                Theme::Light => {
+                    let color = accent.dark1;
+                    color.with_values(Some(color.a * 0.8), None, None, None, None)
+                }
+                Theme::Dark => {
+                    let color = accent.light2;
+                    color.with_values(Some(color.a * 0.8), None, None, None, None)
+                }
+            },
+            app_bar_toggle_button_background_checked_disabled: match theme {
+                Theme::Light => Color::from_argb(55, 0, 0, 0),
+                Theme::Dark => Color::from_argb(40, 255, 255, 255),
+            },
+            app_bar_toggle_button_background_high_light_overlay: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_background_high_light_overlay_pointer_over: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            app_bar_toggle_button_background_high_light_overlay_pressed: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            app_bar_toggle_button_background_high_light_overlay_checked_pointer_over: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            app_bar_toggle_button_background_high_light_overlay_checked_pressed: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            app_bar_toggle_button_foreground: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_foreground_pointer_over: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_foreground_pressed: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            app_bar_toggle_button_foreground_disabled: match theme {
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
+            },
+            app_bar_toggle_button_foreground_checked: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            app_bar_toggle_button_foreground_checked_pointer_over: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            app_bar_toggle_button_foreground_checked_pressed: match theme {
+                Theme::Light => Color::from_argb(179, 255, 255, 255),
+                Theme::Dark => Color::from_argb(128, 0, 0, 0),
+            },
+            app_bar_toggle_button_foreground_checked_disabled: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(135, 255, 255, 255),
+            },
+            app_bar_toggle_button_border_brush: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_border_brush_pointer_over: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_border_brush_pressed: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_border_brush_disabled: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_border_brush_checked: match theme {
+                Theme::Light => [
+                    (0.33, Color::from_argb(102, 0, 0, 0)),
+                    (1.0, Color::from_argb(20, 255, 255, 255)),
+                ],
+                Theme::Dark => [
+                    (0.33, Color::from_argb(35, 0, 0, 0)),
+                    (1.0, Color::from_argb(20, 255, 255, 255)),
+                ],
+            },
+            app_bar_toggle_button_border_brush_checked_pointer_over: match theme {
+                Theme::Light => [
+                    (0.33, Color::from_argb(102, 0, 0, 0)),
+                    (1.0, Color::from_argb(20, 255, 255, 255)),
+                ],
+                Theme::Dark => [
+                    (0.33, Color::from_argb(35, 0, 0, 0)),
+                    (1.0, Color::from_argb(20, 255, 255, 255)),
+                ],
+            },
+            app_bar_toggle_button_border_brush_checked_pressed: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_border_brush_checked_disabled: Color::from_argb(0, 255, 255, 255),
+            app_bar_toggle_button_check_glyph_foreground: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_check_glyph_foreground_pointer_over: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_check_glyph_foreground_pressed: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            app_bar_toggle_button_check_glyph_foreground_disabled: match theme {
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
+            },
+            app_bar_toggle_button_check_glyph_foreground_checked: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            app_bar_toggle_button_check_glyph_foreground_checked_pointer_over: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            app_bar_toggle_button_check_glyph_foreground_checked_pressed: match theme {
+                Theme::Light => Color::from_argb(179, 255, 255, 255),
+                Theme::Dark => Color::from_argb(128, 0, 0, 0),
+            },
+            app_bar_toggle_button_check_glyph_foreground_checked_disabled: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(135, 255, 255, 255),
+            },
+            app_bar_toggle_button_overflow_label_foreground_pointer_over: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_overflow_label_foreground_pressed: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            app_bar_toggle_button_overflow_label_foreground_disabled: match theme {
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
+            },
+            app_bar_toggle_button_overflow_label_foreground_checked_pointer_over: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_overflow_label_foreground_checked_pressed: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            app_bar_toggle_button_overflow_label_foreground_checked_disabled: match theme {
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
+            },
+            app_bar_toggle_button_checked_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_checked_border_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_checked_disabled_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(102, 0, 0, 0),
+                Theme::Dark => Color::from_argb(102, 255, 255, 255),
+            },
+            app_bar_toggle_button_checked_disabled_border_theme_brush: Color::from_argb(0, 0, 0, 0),
+            app_bar_toggle_button_checked_disabled_foreground_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            app_bar_toggle_button_checked_pointer_over_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(153, 0, 0, 0),
+                Theme::Dark => Color::from_argb(153, 255, 255, 255),
+            },
+            app_bar_toggle_button_checked_pointer_over_border_theme_brush: match theme {
+                Theme::Light => Color::from_argb(153, 0, 0, 0),
+                Theme::Dark => Color::from_argb(153, 255, 255, 255),
+            },
+            app_bar_toggle_button_checked_pressed_background_theme_brush: Color::from_argb(
+                0, 0, 0, 0,
+            ),
+            app_bar_toggle_button_checked_pressed_border_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_checked_pressed_foreground_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            app_bar_toggle_button_checked_foreground_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            app_bar_toggle_button_pointer_over_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(61, 0, 0, 0),
+                Theme::Dark => Color::from_argb(33, 255, 255, 255),
+            },
+            app_bar_toggle_button_keyboard_accelerator_text_foreground: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            app_bar_toggle_button_keyboard_accelerator_text_foreground_pointer_over: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            app_bar_toggle_button_keyboard_accelerator_text_foreground_pressed: match theme {
+                Theme::Light => Color::from_argb(114, 0, 0, 0),
+                Theme::Dark => Color::from_argb(135, 255, 255, 255),
+            },
+            app_bar_toggle_button_keyboard_accelerator_text_foreground_disabled: match theme {
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
+            },
+            app_bar_toggle_button_keyboard_accelerator_text_foreground_checked: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            app_bar_toggle_button_keyboard_accelerator_text_foreground_checked_pointer_over:
+                match theme {
+                    Theme::Light => Color::from_argb(158, 0, 0, 0),
+                    Theme::Dark => Color::from_argb(197, 255, 255, 255),
+                },
+            app_bar_toggle_button_keyboard_accelerator_text_foreground_checked_pressed: match theme
+            {
+                Theme::Light => Color::from_argb(114, 0, 0, 0),
+                Theme::Dark => Color::from_argb(135, 255, 255, 255),
+            },
+            app_bar_toggle_button_keyboard_accelerator_text_foreground_checked_disabled: match theme
+            {
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
+            },
+            app_bar_toggle_button_border_theme_thickness: [1.0, 1.0, 1.0, 1.0],
+            app_bar_toggle_button_overflow_text_touch_margin: [0.0, 9.0, 0.0, 12.0],
+            app_bar_toggle_button_overflow_check_touch_margin: [12.0, 10.0, 12.0, 10.0],
+            app_bar_toggle_button_overflow_check_margin: [12.0, 4.0, 12.0, 4.0],
+            app_bar_toggle_button_text_label_margin: [2.0, 0.0, 2.0, 8.0],
+            app_bar_toggle_button_text_label_on_right_margin: [8.0, 16.0, 12.0, 10.0],
+            app_bar_toggle_button_overflow_text_label_padding: [0.0, 5.0, 0.0, 8.0],
+            app_bar_separator_foreground: match theme {
+                Theme::Light => Color::from_argb(15, 0, 0, 0),
+                Theme::Dark => Color::from_argb(21, 255, 255, 255),
+            },
+            app_bar_separator_margin: [2.0, 8.0, 2.0, 8.0],
+            app_bar_overflow_separator_margin: [0.0, 4.0, 0.0, 4.0],
+            app_bar_separator_width: 1.0,
+            app_bar_overflow_separator_height: 1.0,
+            app_bar_separator_corner_radius: 0.5,
+            command_bar_background: Color::from_argb(0, 255, 255, 255),
+            command_bar_background_open: match theme {
+                Theme::Light => AcrylicBrushResources {
+                    tint_color: Color::from_argb(255, 252, 252, 252),
+                    tint_opacity: 0.0,
+                    tint_luminosity_opacity: Some(0.85),
+                    fallback_color: Color::from_argb(255, 249, 249, 249),
+                },
+                Theme::Dark => AcrylicBrushResources {
+                    tint_color: Color::from_argb(255, 44, 44, 44),
+                    tint_opacity: 0.15,
+                    tint_luminosity_opacity: Some(0.96),
+                    fallback_color: Color::from_argb(255, 44, 44, 44),
+                },
+            },
+            command_bar_border_brush_open: match theme {
+                Theme::Light => Color::from_argb(255, 235, 235, 235),
+                Theme::Dark => Color::from_argb(255, 28, 28, 28),
+            },
+            command_bar_foreground: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            command_bar_high_contrast_border: Color::from_argb(0, 255, 255, 255),
+            command_bar_overflow_presenter_background: match theme {
+                Theme::Light => AcrylicBrushResources {
+                    tint_color: Color::from_argb(255, 252, 252, 252),
+                    tint_opacity: 0.0,
+                    tint_luminosity_opacity: Some(0.85),
+                    fallback_color: Color::from_argb(255, 249, 249, 249),
+                },
+                Theme::Dark => AcrylicBrushResources {
+                    tint_color: Color::from_argb(255, 44, 44, 44),
+                    tint_opacity: 0.15,
+                    tint_luminosity_opacity: Some(0.96),
+                    fallback_color: Color::from_argb(255, 44, 44, 44),
+                },
+            },
+            command_bar_overflow_presenter_border_brush: match theme {
+                Theme::Light => {
+                    let color = Color::from_argb(255, 0, 0, 0);
+                    color.with_values(Some(color.a * 0.14), None, None, None, None)
+                }
+                Theme::Dark => {
+                    let color = Color::from_argb(255, 0, 0, 0);
+                    color.with_values(Some(color.a * 0.36), None, None, None, None)
+                }
+            },
+            command_bar_light_dismiss_overlay_background: match theme {
+                Theme::Light => Color::from_argb(153, 255, 255, 255),
+                Theme::Dark => Color::from_argb(153, 0, 0, 0),
+            },
+            system_control_transient_border_brush: match theme {
+                Theme::Light => {
+                    let color = Color::from_argb(255, 0, 0, 0);
+                    color.with_values(Some(color.a * 0.14), None, None, None, None)
+                }
+                Theme::Dark => {
+                    let color = Color::from_argb(255, 0, 0, 0);
+                    color.with_values(Some(color.a * 0.36), None, None, None, None)
+                }
+            },
+            system_control_background_chrome_medium_brush: match theme {
+                Theme::Light => Color::from_argb(255, 230, 230, 230),
+                Theme::Dark => Color::from_argb(255, 31, 31, 31),
+            },
+            app_bar_light_dismiss_overlay_background: match theme {
+                Theme::Light => Color::from_argb(153, 255, 255, 255),
+                Theme::Dark => Color::from_argb(153, 0, 0, 0),
+            },
+            command_bar_more_button_margin: [14.0, 19.0, 14.0, 0.0],
+            app_bar_theme_minimal_height: 24.0,
+            app_bar_expand_button_circle_diameter: 3.0,
+            app_bar_theme_min_height: 64.0,
+            app_bar_theme_compact_height: 48.0,
+            app_bar_ellipsis_button_inner_border_margin: [2.0, 6.0, 6.0, 6.0],
+            app_bar_more_button_column_min_width: 6.0,
+            command_bar_overflow_presenter_margin: [0.0, 4.0, 0.0, 4.0],
+            command_bar_overflow_min_width: 160.0,
+            command_bar_overflow_touch_min_width: 240.0,
+            command_bar_overflow_max_width: 480.0,
+            command_bar_overflow_max_height: 198.0,
+            command_bar_border_thickness_open: [1.0, 1.0, 1.0, 1.0],
+            command_bar_overflow_presenter_border_thickness: [1.0, 1.0, 1.0, 1.0],
+            command_bar_overflow_presenter_border_down_thickness: [0.0, 0.0, 0.0, 1.0],
+            command_bar_overflow_presenter_border_up_thickness: [0.0, 1.0, 0.0, 0.0],
+            command_bar_overflow_presenter_border_padding: [0.0, 0.0, 0.0, 0.0],
+            command_bar_overflow_presenter_border_down_padding: [0.0, 0.0, 0.0, 0.0],
+            command_bar_overflow_presenter_border_up_padding: [0.0, 0.0, 0.0, 0.0],
             system_chrome_medium_high_color: match theme {
                 Theme::Light => Color::from_argb(255, 230, 230, 230),
                 Theme::Dark => Color::from_argb(255, 50, 50, 50),
@@ -7792,16 +8499,6 @@ impl ThemeResources {
                     tint_luminosity_opacity: None,
                     fallback_color: Color::from_argb(255, 0, 0, 0),
                 },
-            },
-            system_control_transient_border_brush: match theme {
-                Theme::Light => {
-                    let color = Color::from_argb(255, 0, 0, 0);
-                    color.with_values(Some(color.a * 0.14), None, None, None, None)
-                }
-                Theme::Dark => {
-                    let color = Color::from_argb(255, 0, 0, 0);
-                    color.with_values(Some(color.a * 0.36), None, None, None, None)
-                }
             },
             acrylic_background_fill_color_default_brush: match theme {
                 Theme::Light => AcrylicBrushResources {
@@ -8571,23 +9268,6 @@ impl ThemeResources {
             split_button_in_app_bar_unfocused_pointer_over: match theme {
                 Theme::Light => Color::from_argb(6, 0, 0, 0),
                 Theme::Dark => Color::from_argb(10, 255, 255, 255),
-            },
-            app_bar_toggle_button_background_checked: accent.base,
-            app_bar_toggle_button_border_brush_checked: Color::from_argb(0, 0, 0, 0),
-            app_bar_toggle_button_foreground_checked: match theme {
-                Theme::Light => Color::from_argb(255, 0, 0, 0),
-                Theme::Dark => Color::from_argb(255, 255, 255, 255),
-            },
-            app_bar_toggle_button_background_checked_pressed: accent.base,
-            app_bar_toggle_button_border_brush_checked_pressed: Color::from_argb(0, 0, 0, 0),
-            app_bar_toggle_button_foreground_checked_pressed: match theme {
-                Theme::Light => Color::from_argb(255, 0, 0, 0),
-                Theme::Dark => Color::from_argb(255, 255, 255, 255),
-            },
-            app_bar_toggle_button_background_checked_pointer_over: accent.base,
-            app_bar_toggle_button_foreground_checked_pointer_over: match theme {
-                Theme::Light => Color::from_argb(255, 0, 0, 0),
-                Theme::Dark => Color::from_argb(255, 255, 255, 255),
             },
             split_button_primary_button_size: 35.0,
             split_button_secondary_button_size: 35.0,
@@ -9683,6 +10363,263 @@ impl ThemeResources {
             table_view_cell_padding_comfortable: [8.0, 8.0, 8.0, 8.0],
             table_view_header_cell_padding_compact: [8.0, 2.0, 8.0, 2.0],
             table_view_header_cell_padding_comfortable: [8.0, 8.0, 8.0, 8.0],
+            list_view_item_border_background: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            list_view_item_background: Color::from_argb(0, 255, 255, 255),
+            list_view_item_background_pointer_over: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            list_view_item_background_pressed: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            list_view_item_background_selected: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            list_view_item_background_selected_pointer_over: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            list_view_item_background_selected_pressed: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            list_view_item_foreground_pointer_over: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_foreground_pressed: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_foreground_selected: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_foreground_selected_pointer_over: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_foreground_selected_pressed: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_focus_border_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_focus_secondary_border_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_check_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            list_view_item_check_box_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(25, 0, 0, 0),
+            },
+            list_view_item_drag_background: Color::from_argb(0, 255, 255, 255),
+            list_view_item_drag_foreground: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            list_view_item_placeholder_background: match theme {
+                Theme::Light => Color::from_argb(81, 0, 0, 0),
+                Theme::Dark => Color::from_argb(63, 255, 255, 255),
+            },
+            list_view_item_multi_arrange_overlay_text_border: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            list_view_item_multi_arrange_overlay_text_background: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_check_hint_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 70, 23, 180),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_check_selecting_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 70, 23, 180),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_check_theme_brush: Color::from_argb(255, 255, 255, 255),
+            list_view_item_drag_background_theme_brush: Color::from_argb(153, 70, 23, 180),
+            list_view_item_drag_foreground_theme_brush: Color::from_argb(255, 255, 255, 255),
+            list_view_item_focus_border_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_overlay_background_theme_brush: Color::from_argb(166, 0, 0, 0),
+            list_view_item_overlay_secondary_foreground_theme_brush: Color::from_argb(
+                153, 255, 255, 255,
+            ),
+            list_view_item_overlay_foreground_theme_brush: Color::from_argb(255, 255, 255, 255),
+            list_view_item_placeholder_background_theme_brush: Color::from_argb(255, 61, 61, 61),
+            list_view_item_pointer_over_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(77, 0, 0, 0),
+                Theme::Dark => Color::from_argb(77, 255, 255, 255),
+            },
+            list_view_item_selected_background_theme_brush: Color::from_argb(255, 70, 23, 180),
+            list_view_item_selected_foreground_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_selected_pointer_over_background_theme_brush: Color::from_argb(
+                255, 95, 55, 190,
+            ),
+            list_view_item_selected_pointer_over_border_theme_brush: Color::from_argb(
+                255, 95, 55, 190,
+            ),
+            list_view_item_check_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(179, 255, 255, 255),
+                Theme::Dark => Color::from_argb(128, 0, 0, 0),
+            },
+            list_view_item_check_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(135, 255, 255, 255),
+            },
+            list_view_item_check_box_pointer_over_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(25, 0, 0, 0),
+            },
+            list_view_item_check_box_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(25, 0, 0, 0),
+            },
+            list_view_item_check_box_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(25, 0, 0, 0),
+            },
+            list_view_item_check_box_selected_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_check_box_selected_pointer_over_brush: match theme {
+                Theme::Light => {
+                    let color = accent.dark1;
+                    color.with_values(Some(color.a * 0.9), None, None, None, None)
+                }
+                Theme::Dark => {
+                    let color = accent.light2;
+                    color.with_values(Some(color.a * 0.9), None, None, None, None)
+                }
+            },
+            list_view_item_check_box_selected_pressed_brush: match theme {
+                Theme::Light => {
+                    let color = accent.dark1;
+                    color.with_values(Some(color.a * 0.8), None, None, None, None)
+                }
+                Theme::Dark => {
+                    let color = accent.light2;
+                    color.with_values(Some(color.a * 0.8), None, None, None, None)
+                }
+            },
+            list_view_item_check_box_selected_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(55, 0, 0, 0),
+                Theme::Dark => Color::from_argb(40, 255, 255, 255),
+            },
+            list_view_item_check_box_border_brush: match theme {
+                Theme::Light => Color::from_argb(114, 0, 0, 0),
+                Theme::Dark => Color::from_argb(139, 255, 255, 255),
+            },
+            list_view_item_check_box_pointer_over_border_brush: match theme {
+                Theme::Light => Color::from_argb(114, 0, 0, 0),
+                Theme::Dark => Color::from_argb(139, 255, 255, 255),
+            },
+            list_view_item_check_box_pressed_border_brush: match theme {
+                Theme::Light => Color::from_argb(114, 0, 0, 0),
+                Theme::Dark => Color::from_argb(139, 255, 255, 255),
+            },
+            list_view_item_check_box_disabled_border_brush: match theme {
+                Theme::Light => Color::from_argb(55, 0, 0, 0),
+                Theme::Dark => Color::from_argb(40, 255, 255, 255),
+            },
+            list_view_item_background_selected_disabled: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            list_view_item_selection_indicator_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_selection_indicator_pointer_over_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_selection_indicator_pressed_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_selection_indicator_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(55, 0, 0, 0),
+                Theme::Dark => Color::from_argb(40, 255, 255, 255),
+            },
+            list_picker_flyout_presenter_selected_item_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(0, 255, 255, 255),
+                Theme::Dark => Color::from_argb(0, 0, 0, 0),
+            },
+            flyout_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            check_box_border_theme_thickness: 2.0,
+            text_style_extra_large_font_size: 25.5,
+            grid_view_item_multiselect_border_thickness: [2.5, 2.5, 2.5, 2.5],
+            list_picker_flyout_presenter_multiselect_check_box_margin: [0.0, 9.5, 0.0, 0.0],
+            list_picker_flyout_presenter_item_margin: [0.0, 0.0, 0.0, 19.0],
+            list_view_item_content_offset_x: -40.5,
+            list_view_item_disabled_theme_opacity: 0.3,
+            list_view_item_drag_theme_opacity: 0.8,
+            list_view_item_reorder_theme_opacity: 0.8,
+            list_view_item_reorder_target_theme_opacity: 0.5,
+            list_view_item_reorder_target_theme_scale: 0.95,
+            list_view_item_reorder_hint_theme_offset: 10.0,
+            list_view_item_selected_border_theme_thickness: 4.0,
+            list_view_item_min_height: 40.0,
+            list_view_item_compact_selected_border_theme_thickness: [4.0, 4.0, 4.0, 4.0],
+            list_view_item_corner_radius: [4.0, 4.0, 4.0, 4.0],
+            list_view_item_check_box_corner_radius: [3.0, 3.0, 3.0, 3.0],
+            list_view_item_selection_indicator_corner_radius: [1.5, 1.5, 1.5, 1.5],
+            auto_suggest_box_suggestions_list_background: match theme {
+                Theme::Light => AcrylicBrushResources {
+                    tint_color: Color::from_argb(255, 252, 252, 252),
+                    tint_opacity: 0.0,
+                    tint_luminosity_opacity: Some(0.85),
+                    fallback_color: Color::from_argb(255, 249, 249, 249),
+                },
+                Theme::Dark => AcrylicBrushResources {
+                    tint_color: Color::from_argb(255, 44, 44, 44),
+                    tint_opacity: 0.15,
+                    tint_luminosity_opacity: Some(0.96),
+                    fallback_color: Color::from_argb(255, 44, 44, 44),
+                },
+            },
+            auto_suggest_box_suggestions_list_border_brush: match theme {
+                Theme::Light => Color::from_argb(15, 0, 0, 0),
+                Theme::Dark => Color::from_argb(51, 0, 0, 0),
+            },
+            auto_suggest_box_light_dismiss_overlay_background: match theme {
+                Theme::Light => Color::from_argb(153, 255, 255, 255),
+                Theme::Dark => Color::from_argb(153, 0, 0, 0),
+            },
+            auto_suggest_list_max_height: 374.0,
+            auto_suggest_list_border_theme_thickness: [1.0, 1.0, 1.0, 1.0],
+            auto_suggest_list_margin: [0.0, 2.0, 0.0, 2.0],
+            auto_suggest_list_padding: [-1.0, 0.0, -1.0, 0.0],
+            auto_suggest_box_top_header_margin: [0.0, 0.0, 0.0, 8.0],
+            auto_suggest_box_inner_button_margin: [1.0, 3.0, 1.0, 3.0],
+            auto_suggest_box_delete_button_margin: [0.0, 4.0, 0.0, 4.0],
+            auto_suggest_box_query_button_padding: [3.0, 2.0, 3.0, 2.0],
+            auto_suggest_box_left_button_margin: 3.0,
+            auto_suggest_box_right_button_margin: 4.0,
+            auto_suggest_box_icon_font_size: 12.0,
         }
     }
 }

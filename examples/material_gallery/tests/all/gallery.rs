@@ -6,34 +6,24 @@
 //! run on, and then on macOS, where `MaterialPageRoute` slides as Cupertino's does and the
 //! scroll views wear desktop scrollbars.
 
-use std::rc::Rc;
 use std::time::Duration;
 
+use material_gallery_lib::pages::cards::EXPANDED_TILE_CHILD;
 use material_gallery_lib::pages::drawers::{DRAWER_HEADER, END_DRAWER_HEADER};
 use material_gallery_lib::pages::messages::{BANNER_TEXT, PERSISTENT_SHEET_TEXT};
 use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
-use waft_embedder::{
-    Brightness, Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind,
-    TargetPlatform,
-};
-use waft_foundation::{AppCell, Handle};
-use waft_gestures::GestureBinding;
+use waft_embedder::{Brightness, Offset, Size, TargetPlatform};
 use waft_material::{
     AppBar, BackButton, Drawer, DrawerButton, DrawerHeader, ElevatedButton, EndDrawerButton,
     FilledButton, IconButton, ListTile, OutlinedButton, Scaffold, SliverAppBar, SnackBar,
-    TextButton, Theme, install_material_icon_font,
+    TextButton, Theme,
 };
-use waft_painting::PaintingBinding;
-use waft_rendering::{
-    AnyRenderObject, RenderAnimatedOpacity, RenderAnimatedOpacityMixin, RenderOpacity,
-    RenderParagraph, RendererBinding,
+use waft_rendering::{RenderAnimatedOpacity, RenderAnimatedOpacityMixin, RenderOpacity};
+use waft_widgets::testing::{
+    Finder, TargetPlatformVariant, WidgetTester, expect, find, finds_nothing, finds_one_widget,
+    finds_widgets, test_widgets_variant,
 };
-use waft_scheduler::SchedulerBinding;
-use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
-use waft_widgets::{
-    AnyElement, GlobalKey, IntoWidget, NavigatorState, RouteRef, Text, WidgetsBinding,
-    downcast_widget, run_app,
-};
+use waft_widgets::{GlobalKey, NavigatorState, RouteRef, Text, Wrap};
 
 /// The window `main.rs` opens, in logical points.
 const VIEW: [f64; 2] = [420.0, 720.0];
@@ -41,417 +31,194 @@ const VIEW: [f64; 2] = [420.0, 720.0];
 /// A phone, and a desktop.
 const PLATFORMS: [TargetPlatform; 2] = [TargetPlatform::Android, TargetPlatform::MacOS];
 
-/// The stack a platform's main thread gives the framework: 8 MiB. A debug build of
-/// `ThemeData` alone takes over 1 MiB of it, and the gallery builds two, which does not fit
-/// the 2 MiB a test thread has.
-const MAIN_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
-
-/// Runs `case` against a fresh gallery on each of [`PLATFORMS`].
+/// Runs `case` against a fresh gallery on each of [`PLATFORMS`], naming the platform it
+/// failed on.
 fn on_each_platform(case: fn(&mut Fixture)) {
-    for platform in PLATFORMS {
-        on_platform(platform, case);
-    }
-}
-
-/// Runs `case` against a fresh gallery on `platform`, on a thread with a main thread's stack,
-/// re-raising its panic with the platform it failed on.
-fn on_platform(platform: TargetPlatform, case: fn(&mut Fixture)) {
-    let joined = std::thread::Builder::new()
-        .name(format!("{platform:?}"))
-        .stack_size(MAIN_THREAD_STACK_SIZE)
-        .spawn(move || case(&mut Fixture::new(platform)))
-        .expect("a thread for the case")
-        .join();
-    if let Err(panic) = joined {
-        eprintln!("the case failed on {platform:?}");
-        std::panic::resume_unwind(panic);
-    }
+    test_widgets_variant(TargetPlatformVariant::new(PLATFORMS), |tester| {
+        case(&mut Fixture::new(tester));
+    });
 }
 
 /// The mounted gallery, plus the key its navigator is reached through.
-struct Fixture {
-    cell: Rc<AppCell>,
+struct Fixture<'t> {
+    tester: &'t mut WidgetTester,
     navigator: GlobalKey,
-    at: Duration,
-    /// Where the last pointer event was, for the next move's delta.
-    last_point: Offset,
 }
 
-impl Fixture {
-    fn new(platform: TargetPlatform) -> Fixture {
-        // A 420x720 view at 1x, so `run_app` finds one to attach to and a logical point is a
-        // physical pixel.
-        let platform = TestPlatform::new()
-            .on(platform)
-            .with_view(Rc::new(TestView::new(VIEW[0], VIEW[1])));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let mut app = cell.borrow_mut();
-        // What the shell does at start-up: the app-wide fonts every paragraph shapes against.
-        PaintingBinding::instance(&mut app).install_fonts(&mut app, |fonts| {
-            fonts.add_source(valo_system_fonts::SystemFonts::load());
-        });
-
+impl<'t> Fixture<'t> {
+    fn new(tester: &'t mut WidgetTester) -> Fixture<'t> {
+        // The window at flutter_test's device pixel ratio.
+        let ratio = tester.device_pixel_ratio();
+        tester
+            .view()
+            .set_physical_size(Size::new(VIEW[0] * ratio, VIEW[1] * ratio));
         let navigator = GlobalKey::new();
-        run_app(
-            &mut app,
-            Gallery::new()
-                .navigator_key(navigator.clone())
-                .into_widget(),
-        );
-        // The same ordering constraint the binary has: `run_app` is what installs the font
-        // collection the icon face is registered into.
-        install_material_icon_font(&mut app);
-        // `run_app` attaches the root widget on the next timer turn, as Dart's `Timer.run` does.
-        drop(app);
-        cell.elapse(Duration::ZERO);
+        tester.pump_widget(Gallery::new().navigator_key(navigator.clone()));
 
-        let mut fixture = Fixture {
-            cell,
-            navigator,
-            at: Duration::ZERO,
-            last_point: Offset::ZERO,
-        };
+        let mut fixture = Fixture { tester, navigator };
         fixture.settle();
         fixture
     }
 
-    /// Pumps a fixed span of frames: 1.5 s, past the longest transition here (Android's page
-    /// transition), and short of a snack bar's four seconds on screen.
-    ///
-    /// Each frame phase ends with the checkpoint the shell runs after every platform event, so
-    /// a continuation awaiting a route's result resumes as it would in the app.
+    /// A second and a half of 20ms frames: past every transition here, and short of a snack
+    /// bar's four seconds on screen. A fixed run rather than `pump_and_settle`, since the
+    /// progress page's indeterminate indicators ask for frames forever.
     fn settle(&mut self) {
         for _ in 0..75 {
-            self.pump(Duration::from_millis(20));
+            self.tester.pump_by(Duration::from_millis(20));
         }
     }
 
-    /// A frame of the app's view `step` after the last.
-    fn pump(&mut self, step: Duration) {
-        self.at += step;
-        let views = [IMPLICIT_VIEW_ID];
-        SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), &views, Some(self.at));
-        self.cell.checkpoint();
-        SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut(), &views);
-        self.cell.checkpoint();
-    }
-
-    fn navigator(&mut self) -> Handle<NavigatorState> {
+    fn navigator(&mut self) -> waft_foundation::Handle<NavigatorState> {
         self.navigator
-            .current_state::<NavigatorState>(&self.cell.borrow_mut())
+            .current_state::<NavigatorState>(&self.tester.cell.borrow_mut())
             .expect("the MaterialApp's navigator is mounted")
     }
 
     /// The same call `GALLERY_ENTRY` makes.
     fn push(&mut self, route: RouteRef) {
         let navigator = self.navigator();
-        navigator.push(&mut self.cell.borrow_mut(), route);
+        navigator.push(&mut self.tester.cell.borrow_mut(), route);
         self.settle();
         self.assert_top_route_settled();
     }
 
+    fn push_entry(&mut self, entry: Entry) {
+        let route = entry_route(&mut self.tester.cell.borrow_mut(), entry);
+        self.push(route);
+    }
+
+    fn push_sub_page(&mut self, entry: Entry, index: usize) {
+        let route = sub_route(&mut self.tester.cell.borrow_mut(), entry, index);
+        self.push(route);
+    }
+
     fn can_pop(&mut self) -> bool {
         let navigator = self.navigator();
-        navigator.can_pop(&self.cell.borrow())
+        navigator.can_pop(&self.tester.cell.borrow())
     }
 
-    /// The mounted elements in tree order: a subtree is visited before its next sibling, so the
-    /// overlay's topmost route comes last.
-    fn elements(&mut self) -> Vec<AnyElement> {
-        let root = {
-            let mut app = self.cell.borrow_mut();
-            WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .expect("a mounted app")
-        };
-        self.subtree(root)
+    /// Taps the middle of the one onstage widget `finder` finds, and lets the app settle.
+    fn tap(&mut self, finder: Finder) {
+        self.tester.tap(finder);
+        self.settle();
     }
 
-    /// `root` and its descendants, in tree order.
-    fn subtree(&mut self, root: AnyElement) -> Vec<AnyElement> {
-        let mut all = Vec::new();
-        let mut stack = vec![root];
-        while let Some(element) = stack.pop() {
-            all.push(element);
-            let mut children = element.children(&self.cell.borrow());
-            children.reverse();
-            stack.extend(children);
-        }
-        all
-    }
-
-    /// Whether any `W` is mounted.
-    fn has<W: 'static>(&mut self) -> bool {
-        let elements = self.elements();
-        elements.into_iter().any(|element| self.is::<W>(element))
-    }
-
-    /// Whether `element` was built from a `W`.
-    fn is<W: 'static>(&self, element: AnyElement) -> bool {
-        downcast_widget::<W>(&**element.widget(&self.cell.borrow())).is_some()
-    }
-
-    /// The last `W` in tree order: the one on the top route, since every route in the stack
-    /// keeps its elements and the overlay builds the top one last.
-    fn last<W: 'static>(&mut self) -> AnyElement {
-        let elements = self.elements();
-        elements
-            .into_iter()
-            .rev()
-            .find(|element| self.is::<W>(*element))
-            .unwrap_or_else(|| panic!("no {} is mounted", std::any::type_name::<W>()))
-    }
-
-    /// The last `W` under `ancestor`.
-    fn last_in<W: 'static>(&mut self, ancestor: AnyElement) -> AnyElement {
-        let elements = self.subtree(ancestor);
-        elements
-            .into_iter()
-            .rev()
-            .find(|element| self.is::<W>(*element))
-            .unwrap_or_else(|| panic!("no {} under {ancestor:?}", std::any::type_name::<W>()))
-    }
-
-    /// The `ListTile` under `ancestor` whose texts include `title`.
-    fn tile_in(&mut self, ancestor: AnyElement, title: &str) -> AnyElement {
-        let tiles: Vec<AnyElement> = self
-            .subtree(ancestor)
-            .into_iter()
-            .filter(|element| self.is::<ListTile>(*element))
-            .collect();
-        tiles
-            .into_iter()
-            .find(|tile| self.texts_in(*tile).iter().any(|text| text == title))
-            .unwrap_or_else(|| panic!("no ListTile reading {title:?} under {ancestor:?}"))
-    }
-
-    /// The first `W` in tree order whose texts include `label`.
-    fn button_reading<W: 'static>(&mut self, label: &str) -> AnyElement {
-        let elements = self.elements();
-        let buttons: Vec<AnyElement> = elements
-            .into_iter()
-            .filter(|element| self.is::<W>(*element))
-            .collect();
-        buttons
-            .into_iter()
-            .find(|button| self.texts_in(*button).iter().any(|text| text == label))
-            .unwrap_or_else(|| panic!("no {} reading {label:?}", std::any::type_name::<W>()))
-    }
-
-    /// The `IconButton` whose tooltip is `tooltip`.
-    fn icon_button_with_tooltip(&mut self, tooltip: &str) -> AnyElement {
-        let elements = self.elements();
-        elements
-            .into_iter()
-            .find(|element| {
-                let app = self.cell.borrow();
-                let widget = element.widget(&app);
-                downcast_widget::<IconButton>(&**widget)
-                    .is_some_and(|button| button.tooltip.as_deref() == Some(tooltip))
-            })
-            .unwrap_or_else(|| panic!("no IconButton with the tooltip {tooltip:?}"))
-    }
-
-    /// The `Text` data under `ancestor`, in tree order.
-    fn texts_in(&mut self, ancestor: AnyElement) -> Vec<String> {
-        let elements = self.subtree(ancestor);
-        elements
-            .into_iter()
-            .filter_map(|element| {
-                downcast_widget::<Text>(&**element.widget(&self.cell.borrow()))
-                    .and_then(|text| text.data.clone())
-            })
-            .collect()
-    }
-
-    /// What the top route's app bar reads: its title, and, for a large `SliverAppBar`, the
-    /// expanded title under it.
-    ///
-    /// A `SliverAppBar` builds an `AppBar`, so this one lookup serves both.
-    fn app_bar_texts(&mut self) -> Vec<String> {
-        let app_bar = self.last::<AppBar>();
-        self.texts_in(app_bar)
-    }
-
-    /// Every render object of the mounted tree, parents before children: the render tree of
-    /// the one view the app shows.
-    fn render_objects(&mut self) -> Vec<AnyRenderObject> {
-        let root = {
-            let mut app = self.cell.borrow_mut();
-            let render_views = RendererBinding::instance(&mut app).render_views(&app);
-            let [render_view] = render_views[..] else {
-                panic!("the app shows one view, not {}", render_views.len());
-            };
-            render_view.as_object()
-        };
-        let mut all = vec![root];
-        let mut visited = 0;
-        while visited < all.len() {
-            let object = all[visited];
-            object.visit_children(&self.cell.borrow(), &mut |child| all.push(child));
-            visited += 1;
-        }
-        all
-    }
-
-    /// The plain text of every paragraph laid out in the view.
-    fn texts(&mut self) -> Vec<String> {
-        self.render_objects()
-            .into_iter()
-            .filter_map(|object| object.downcast::<RenderParagraph>(&self.cell.borrow()))
-            .map(|paragraph| {
-                paragraph
-                    .text(&self.cell.borrow())
-                    .to_plain_text(true, true)
-            })
-            .collect()
-    }
-
-    fn shows(&mut self, text: &str) -> bool {
-        self.texts().iter().any(|shown| shown.contains(text))
-    }
-
-    /// The view-space centre of `element`'s render box.
-    fn center_of(&mut self, element: AnyElement) -> Offset {
-        let app = self.cell.borrow();
-        let object = element
-            .render_object(&app)
-            .and_then(AnyRenderObject::as_box)
-            .unwrap_or_else(|| panic!("{element:?} has no render box"));
-        let size = object.size(&app);
-        let origin = object.local_to_global(&app, Offset::ZERO, None);
-        origin + Offset::new(size.width() / 2.0, size.height() / 2.0)
-    }
-
-    /// The view-space centre of the topmost paragraph reading exactly `text`.
-    fn center_of_text(&mut self, text: &str) -> Offset {
-        let mut elements = self.elements();
-        elements.reverse();
-        for element in elements {
-            let paragraph = element
-                .render_object(&self.cell.borrow())
-                .and_then(|object| object.downcast::<RenderParagraph>(&self.cell.borrow()));
-            let Some(paragraph) = paragraph else {
-                continue;
-            };
-            if paragraph
-                .text(&self.cell.borrow())
-                .to_plain_text(true, true)
-                == text
-            {
-                return self.center_of(element);
-            }
-        }
-        panic!("nothing on screen reads {text:?}; saw {:?}", self.texts())
-    }
-
-    /// Taps the middle of the topmost thing reading `text`.
+    /// Taps the middle of the one onstage `Text` reading `text`.
     fn tap_text(&mut self, text: &str) {
-        let point = self.center_of_text(text);
-        self.tap_at(point);
+        self.tap(find::text(text));
     }
 
-    /// Taps the middle of `element`.
-    fn tap(&mut self, element: AnyElement) {
-        let point = self.center_of(element);
-        self.tap_at(point);
-    }
-
-    fn tap_at(&mut self, point: Offset) {
-        self.send(PointerChange::Down, point);
-        self.at += Duration::from_millis(20);
-        self.send(PointerChange::Up, point);
-        self.settle();
-    }
-
-    /// A finger dragged from `from` by `by`, slowly enough that it ends in no fling.
+    /// Drags a finger from `from` by `by` and lets the app settle. Dart's `dragFrom` stamps
+    /// every move at zero, so the drag ends in no fling.
     fn drag(&mut self, from: Offset, by: Offset) {
-        const STEPS: u32 = 20;
-        self.send(PointerChange::Down, from);
-        for step in 1..=STEPS {
-            self.at += Duration::from_millis(16);
-            let at_point = from + by * (f64::from(step) / f64::from(STEPS));
-            self.send(PointerChange::Move, at_point);
-            self.pump(Duration::ZERO);
-        }
-        // Held still before the lift, so the velocity tracker reads a stop.
-        self.at += Duration::from_millis(200);
-        self.send(PointerChange::Move, from + by);
-        self.send(PointerChange::Up, from + by);
+        self.tester.drag_from(from, by, 1);
         self.settle();
     }
 
-    /// Delivers one touch event at `at_point`, with the delta from the last one the way an
-    /// engine reports it: the converter reads a move's delta from the packet.
-    fn send(&mut self, change: PointerChange, at_point: Offset) {
-        let delta = match change {
-            PointerChange::Move => at_point - self.last_point,
-            _ => Offset::ZERO,
-        };
-        self.last_point = at_point;
-        {
-            let mut app = self.cell.borrow_mut();
-            GestureBinding::instance(&mut app).handle_pointer_data_packet(
-                &mut app,
-                PointerDataPacket::new(vec![PointerData {
-                    change,
-                    kind: PointerDeviceKind::Touch,
-                    time_stamp: self.at,
-                    pointer_identifier: 1,
-                    physical_x: at_point.dx(),
-                    physical_y: at_point.dy(),
-                    physical_delta_x: delta.dx(),
-                    physical_delta_y: delta.dy(),
-                    ..PointerData::default()
-                }]),
-            );
-        }
-        self.cell.checkpoint();
+    /// The `Text` data onstage, in tree order: what a failure reports was on screen.
+    fn texts(&mut self) -> Vec<String> {
+        self.texts_in(find::by_type::<Text>())
+    }
+
+    /// The data of the `Text`s `finder` finds.
+    fn texts_in(&mut self, finder: Finder) -> Vec<String> {
+        let found = finder.evaluate(self.tester);
+        found
+            .into_iter()
+            .filter_map(|text| self.tester.widget(text, |text: &Text| text.data.clone()))
+            .collect()
+    }
+
+    /// Whether a `Text` containing `text` is mounted, onstage or not.
+    fn shows(&mut self, text: &str) -> bool {
+        !find::text_containing(text)
+            .skip_offstage(false)
+            .evaluate(self.tester)
+            .is_empty()
+    }
+
+    /// The global centre of the topmost onstage `Text` reading exactly `text`.
+    fn center_of_text(&mut self, text: &str) -> Offset {
+        self.tester.get_center(find::text(text).last())
+    }
+
+    /// Checks that a `Text` reading exactly `text` is onstage.
+    #[track_caller]
+    fn expect_shown(&mut self, text: &str) {
+        expect(self.tester, &find::text(text), finds_one_widget());
+    }
+
+    /// Checks that no `Text` reading `text` is mounted at all, onstage or not.
+    #[track_caller]
+    fn expect_gone(&mut self, text: &str) {
+        expect(
+            self.tester,
+            &find::text(text).skip_offstage(false),
+            finds_nothing(),
+        );
     }
 
     /// Opens `entry` from its tile on the index and checks the page's app bar wears its title.
     fn open_from_index(&mut self, entry: Entry) {
+        self.scroll_index_to(entry.title());
         self.tap_text(entry.title());
         assert!(self.can_pop(), "the tile pushed {entry:?} over the index");
         self.assert_app_bar_reads(entry.title());
         self.assert_top_route_settled();
     }
 
+    /// Scrolls the index until the tile reading `title` is built and inside the view, below the
+    /// app bar and above the bottom edge: the index is a list longer than the window, so a later
+    /// tile sits below the fold, and one the index was scrolled past sits above it.
+    fn scroll_index_to(&mut self, title: &str) {
+        const TOP: f64 = 80.0;
+        const BOTTOM_MARGIN: f64 = 20.0;
+        // A tile not built yet is searched for down the list first, then back up it.
+        for attempt in 0..40 {
+            let up = if self.texts().iter().any(|shown| shown == title) {
+                let y = self.center_of_text(title).dy();
+                if (TOP..=VIEW[1] - BOTTOM_MARGIN).contains(&y) {
+                    return;
+                }
+                y < TOP
+            } else {
+                attempt >= 20
+            };
+            let by = if up { 240.0 } else { -240.0 };
+            self.drag(
+                Offset::new(VIEW[0] / 2.0, VIEW[1] / 2.0),
+                Offset::new(0.0, by),
+            );
+        }
+        panic!("the index never showed {title:?}; saw {:?}", self.texts());
+    }
+
     /// Leaves the top page by its back button, as a user would: the app bar's leading widget.
     fn go_back(&mut self) {
-        let back = self.last::<BackButton>();
-        self.tap(back);
+        self.tap(find::by_type::<BackButton>());
         self.assert_top_route_settled();
     }
 
     /// Checks that the transition into the top route left it in full view: its app bar spans
     /// the top of the view, and nothing between its scaffold and the view fades it.
     ///
-    /// The text and tap helpers read the render tree whatever its opacity or offset, so a
-    /// transition that settled part-way would pass them.
+    /// The finders skip the routes below the top one, but not a route whose transition settled
+    /// part-way, so this checks the top one's geometry and opacity.
     fn assert_top_route_settled(&mut self) {
-        let app_bar = self.last::<AppBar>();
-        let (top_left, top_right) = {
-            let app = self.cell.borrow();
-            let object = app_bar
-                .render_object(&app)
-                .and_then(AnyRenderObject::as_box)
-                .expect("an AppBar renders a box");
-            let width = object.size(&app).width();
-            (
-                object.local_to_global(&app, Offset::ZERO, None),
-                object.local_to_global(&app, Offset::new(width, 0.0), None),
-            )
-        };
+        let app_bar = find::by_type::<AppBar>();
         assert_eq!(
-            (top_left, top_right),
+            (
+                self.tester.get_top_left(&app_bar),
+                self.tester.get_top_right(&app_bar)
+            ),
             (Offset::ZERO, Offset::new(VIEW[0], 0.0)),
             "the top route's app bar spans the top of the view"
         );
 
-        let scaffold = self.last::<Scaffold>();
-        let app = self.cell.borrow();
-        let mut object = scaffold.render_object(&app);
+        let scaffold = self.tester.render_object(find::by_type::<Scaffold>());
+        let app = self.tester.cell.borrow();
+        let mut object = Some(scaffold);
         while let Some(current) = object {
             let opacity = if let Some(opacity) = current.downcast::<RenderOpacity>(&app) {
                 Some(opacity.opacity(&app))
@@ -470,17 +237,21 @@ impl Fixture {
         }
     }
 
+    /// Checks the top route's app bar reads `title`: its title, or, for a large
+    /// `SliverAppBar`, the expanded title under it too, since a `SliverAppBar` builds an
+    /// `AppBar`.
+    #[track_caller]
     fn assert_app_bar_reads(&mut self, title: &str) {
-        let texts = self.app_bar_texts();
-        assert!(
-            texts.iter().any(|text| text == title),
-            "the top app bar should read {title:?}; it reads {texts:?}"
+        expect(
+            self.tester,
+            &find::descendant(find::by_type::<AppBar>(), find::text(title)),
+            finds_widgets(),
         );
     }
 
     fn brightness(&mut self) -> Brightness {
-        let tile = self.last::<ListTile>();
-        Theme::of(&mut self.cell.borrow_mut(), tile).brightness()
+        let tile = self.tester.element(find::by_type::<ListTile>().first());
+        Theme::of(&mut self.tester.cell.borrow_mut(), tile).brightness()
     }
 }
 
@@ -488,11 +259,12 @@ impl Fixture {
 fn the_index_lists_every_entry() {
     on_each_platform(|fixture| {
         fixture.assert_app_bar_reads("Material Gallery");
-        let texts = fixture.texts();
         for entry in Entry::ALL {
-            assert!(
-                texts.iter().any(|text| text == entry.title()),
-                "the index has no tile for {entry:?}; saw {texts:?}"
+            fixture.scroll_index_to(entry.title());
+            expect(
+                fixture.tester,
+                &find::widget_with_text::<ListTile>(entry.title()),
+                finds_one_widget(),
             );
         }
     });
@@ -518,8 +290,7 @@ fn every_entry_opens_from_its_tile_and_goes_back_with_the_back_button() {
 fn every_entry_opens_by_a_direct_push() {
     on_each_platform(|fixture| {
         for entry in Entry::ALL {
-            let route = entry_route(&mut fixture.cell.borrow_mut(), entry);
-            fixture.push(route);
+            fixture.push_entry(entry);
             fixture.assert_app_bar_reads(entry.title());
             fixture.go_back();
             assert!(!fixture.can_pop(), "{entry:?} came back off");
@@ -532,10 +303,8 @@ fn every_sub_page_builds_and_goes_back() {
     on_each_platform(|fixture| {
         for entry in Entry::ALL {
             for index in 0..entry.sub_page_count() {
-                let route = entry_route(&mut fixture.cell.borrow_mut(), entry);
-                fixture.push(route);
-                let route = sub_route(&mut fixture.cell.borrow_mut(), entry, index);
-                fixture.push(route);
+                fixture.push_entry(entry);
+                fixture.push_sub_page(entry, index);
                 fixture.assert_app_bar_reads(entry.sub_title(index));
                 fixture.go_back();
                 fixture.assert_app_bar_reads(entry.title());
@@ -550,23 +319,25 @@ fn every_sub_page_builds_and_goes_back() {
 #[test]
 fn the_index_drawer_opens_an_entry() {
     on_each_platform(|fixture| {
-        let drawer_button = fixture.last::<DrawerButton>();
-        fixture.tap(drawer_button);
-        assert!(
-            fixture.has::<DrawerHeader>(),
-            "the drawer button opened the drawer"
+        fixture.tap(find::by_type::<DrawerButton>());
+        expect(
+            fixture.tester,
+            &find::by_type::<DrawerHeader>(),
+            finds_one_widget(),
         );
 
-        let drawer = fixture.last::<Drawer>();
-        let tile = fixture.tile_in(drawer, Entry::Lists.title());
-        fixture.tap(tile);
+        fixture.tap(find::descendant(
+            find::by_type::<Drawer>(),
+            find::widget_with_text::<ListTile>(Entry::Lists.title()),
+        ));
         fixture.assert_app_bar_reads(Entry::Lists.title());
         fixture.assert_top_route_settled();
         fixture.go_back();
         assert!(!fixture.can_pop(), "the Lists page came back off");
-        assert!(
-            !fixture.has::<DrawerHeader>(),
-            "the drawer closed before the page was pushed"
+        expect(
+            fixture.tester,
+            &find::by_type::<DrawerHeader>().skip_offstage(false),
+            finds_nothing(),
         );
     });
 }
@@ -581,14 +352,10 @@ fn the_theme_toggle_flips_the_brightness() {
             "the test platform is light, and the app follows it"
         );
 
-        let app_bar = fixture.last::<AppBar>();
-        let toggle = fixture.last_in::<IconButton>(app_bar);
-        fixture.tap(toggle);
+        fixture.tap(find::by_tooltip("Use the dark theme"));
         assert_eq!(fixture.brightness(), Brightness::Dark);
 
-        let app_bar = fixture.last::<AppBar>();
-        let toggle = fixture.last_in::<IconButton>(app_bar);
-        fixture.tap(toggle);
+        fixture.tap(find::by_tooltip("Use the light theme"));
         assert_eq!(fixture.brightness(), Brightness::Light);
     });
 }
@@ -602,18 +369,10 @@ fn the_theme_toggle_flips_the_brightness() {
 fn a_button_reports_its_press() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Buttons);
-        assert!(
-            fixture.shows("Last pressed: \u{2014}"),
-            "nothing pressed yet; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_shown("Last pressed: \u{2014}");
 
         fixture.tap_text("Compose");
-        assert!(
-            fixture.shows("Last pressed: Scaffold FAB"),
-            "the floating action button's on_pressed reached the page; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_shown("Last pressed: Scaffold FAB");
 
         fixture.go_back();
         assert!(!fixture.can_pop());
@@ -628,20 +387,11 @@ fn the_end_drawer_opens_from_the_app_bar_and_closes_from_a_tile() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Drawers);
 
-        let end_drawer_button = fixture.last::<EndDrawerButton>();
-        fixture.tap(end_drawer_button);
-        assert!(
-            fixture.shows(END_DRAWER_HEADER),
-            "the end drawer is open; saw {:?}",
-            fixture.texts()
-        );
+        fixture.tap(find::by_type::<EndDrawerButton>());
+        fixture.expect_shown(END_DRAWER_HEADER);
         fixture.tap_text("Starred only");
-        assert!(
-            !fixture.shows(END_DRAWER_HEADER),
-            "the tile closed the end drawer; saw {:?}",
-            fixture.texts()
-        );
-        assert!(fixture.shows("Chose Starred only"));
+        fixture.expect_gone(END_DRAWER_HEADER);
+        fixture.expect_shown("Chose Starred only");
 
         fixture.go_back();
         assert!(!fixture.can_pop());
@@ -655,32 +405,24 @@ fn the_end_drawer_opens_from_the_app_bar_and_closes_from_a_tile() {
 fn the_start_edge_swipe_opens_the_drawer_or_goes_back() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Drawers);
-        let platform = fixture.cell.borrow().platform().target_platform();
+        let platform = fixture.tester.target_platform();
 
         fixture.drag(Offset::new(4.0, VIEW[1] / 2.0), Offset::new(280.0, 0.0));
         if platform == TargetPlatform::MacOS {
             assert!(!fixture.can_pop(), "the swipe went back to the index");
             return;
         }
-        assert!(
-            fixture.shows(DRAWER_HEADER),
-            "the edge swipe opened the drawer; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_shown(DRAWER_HEADER);
         fixture.tap_text("Outbox");
-        assert!(
-            !fixture.shows(DRAWER_HEADER),
-            "the tile closed the drawer; saw {:?}",
-            fixture.texts()
-        );
-        assert!(fixture.shows("Chose Outbox"));
+        fixture.expect_gone(DRAWER_HEADER);
+        fixture.expect_shown("Chose Outbox");
 
         fixture.go_back();
         assert!(!fixture.can_pop());
     });
 }
 
-/// The close-icon snack bar, the last button of its row, and its close icon, the last button
+/// The close-icon snack bar, the last button of its row, and its close icon, the one button
 /// of the snack bar.
 #[test]
 fn a_snack_bar_shows_and_closes_from_its_icon() {
@@ -688,19 +430,12 @@ fn a_snack_bar_shows_and_closes_from_its_icon() {
         fixture.open_from_index(Entry::Messages);
 
         fixture.tap_text("With close icon");
-        assert!(
-            fixture.shows("A snack bar with a close icon"),
-            "the snack bar is up; saw {:?}",
-            fixture.texts()
-        );
-        let snack_bar = fixture.last::<SnackBar>();
-        let close = fixture.last_in::<IconButton>(snack_bar);
-        fixture.tap(close);
-        assert!(
-            !fixture.shows("A snack bar with a close icon"),
-            "the close icon hid the snack bar; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_shown("A snack bar with a close icon");
+        fixture.tap(find::descendant(
+            find::by_type::<SnackBar>(),
+            find::by_type::<IconButton>(),
+        ));
+        fixture.expect_gone("A snack bar with a close icon");
 
         fixture.go_back();
         assert!(!fixture.can_pop());
@@ -714,17 +449,9 @@ fn a_persistent_bottom_sheet_opens_and_closes() {
         fixture.open_from_index(Entry::Messages);
 
         fixture.tap_text("Persistent sheet");
-        assert!(
-            fixture.shows(PERSISTENT_SHEET_TEXT),
-            "the persistent sheet is up; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_shown(PERSISTENT_SHEET_TEXT);
         fixture.tap_text("Close persistent sheet");
-        assert!(
-            !fixture.shows(PERSISTENT_SHEET_TEXT),
-            "the sheet's button closed it; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_gone(PERSISTENT_SHEET_TEXT);
 
         fixture.go_back();
         assert!(!fixture.can_pop());
@@ -754,11 +481,12 @@ fn scrolling_collapses_the_large_app_bar() {
 
 /// How much of the view the top page's `SliverAppBar` covers.
 fn app_bar_extent(fixture: &mut Fixture) -> f64 {
-    let app_bar = fixture.last::<SliverAppBar>();
-    let app = fixture.cell.borrow();
+    let app_bar = fixture
+        .tester
+        .render_object(find::by_type::<SliverAppBar>());
+    let app = fixture.tester.cell.borrow();
     app_bar
-        .render_object(&app)
-        .and_then(AnyRenderObject::as_sliver)
+        .as_sliver()
         .expect("a SliverAppBar renders a sliver")
         .geometry(&app)
         .paint_extent
@@ -782,33 +510,22 @@ fn the_floating_app_bar_opens_from_the_large_one() {
 fn tapping_a_tile_selects_it() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Lists);
-        assert!(
-            fixture.shows("Selected: Inbox"),
-            "the first mailbox starts selected; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_shown("Selected: Inbox");
 
         fixture.tap_text("Starred");
-        assert!(
-            fixture.shows("Selected: Starred"),
-            "the tile's on_tap reached the page; saw {:?}",
-            fixture.texts()
-        );
-        let selected: Vec<bool> = fixture
-            .elements()
+        fixture.expect_shown("Selected: Starred");
+        let tiles = find::by_type::<ListTile>()
+            .skip_offstage(false)
+            .evaluate(fixture.tester);
+        let selected = tiles
             .into_iter()
-            .filter_map(|element| {
-                let app = fixture.cell.borrow();
-                let widget = element.widget(&app);
-                let tile = downcast_widget::<ListTile>(&**widget)?;
-                Some(tile.selected)
+            .filter(|tile| {
+                fixture
+                    .tester
+                    .widget(*tile, |tile: &ListTile| tile.selected)
             })
-            .collect();
-        assert_eq!(
-            selected.iter().filter(|selected| **selected).count(),
-            1,
-            "one tile is selected"
-        );
+            .count();
+        assert_eq!(selected, 1, "one tile is selected");
 
         fixture.go_back();
         assert!(!fixture.can_pop());
@@ -822,34 +539,32 @@ fn a_banner_shows_and_dismisses() {
         fixture.open_from_index(Entry::Messages);
 
         fixture.tap_text("Show banner");
-        assert!(
-            fixture.shows(BANNER_TEXT),
-            "the banner is up; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_shown(BANNER_TEXT);
         fixture.tap_text("Dismiss");
-        assert!(
-            !fixture.shows(BANNER_TEXT),
-            "its action hid the banner; saw {:?}",
-            fixture.texts()
-        );
+        fixture.expect_gone(BANNER_TEXT);
 
         fixture.go_back();
         assert!(!fixture.can_pop());
     });
 }
 
-/// Taps the common button reading `label` as `W`, and answers what the page's last-pressed
-/// line reads afterwards, if it does not read `expected`.
+/// Taps the `W` reading `label` in the row of common buttons whose first one reads `row`, and
+/// answers what the page's last-pressed line reads afterwards, if it does not read `expected`.
+///
+/// The row narrows the finder: the Filled and Tonal rows each have a `FilledButton` reading
+/// "Icon".
 fn press_common_button<W: 'static>(
     fixture: &mut Fixture,
+    row: &str,
     label: &str,
     expected: &str,
 ) -> Option<String> {
-    let button = fixture.button_reading::<W>(label);
-    fixture.tap(button);
+    fixture.tap(find::descendant(
+        find::widget_with_text::<Wrap>(row),
+        find::widget_with_text::<W>(label),
+    ));
     let pressed = format!("Last pressed: {expected}");
-    if fixture.shows(&pressed) {
+    if !find::text(&pressed).evaluate(fixture.tester).is_empty() {
         return None;
     }
     let shown = fixture
@@ -861,21 +576,20 @@ fn press_common_button<W: 'static>(
 
 /// Every enabled common button on the Buttons page, tapped in the middle as a user would.
 #[test]
-#[ignore = "the Filled and Tonal rows each have a FilledButton reading \"Icon\", and `button_reading` finds the first, so \"Tonal icon\" taps Filled's"]
 fn each_common_button_reports_its_press() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Buttons);
         let missed: Vec<String> = [
-            press_common_button::<ElevatedButton>(fixture, "Elevated", "Elevated"),
-            press_common_button::<ElevatedButton>(fixture, "Icon", "Elevated icon"),
-            press_common_button::<FilledButton>(fixture, "Filled", "Filled"),
-            press_common_button::<FilledButton>(fixture, "Icon", "Filled icon"),
-            press_common_button::<FilledButton>(fixture, "Tonal", "Tonal"),
-            press_common_button::<FilledButton>(fixture, "Icon", "Tonal icon"),
-            press_common_button::<OutlinedButton>(fixture, "Outlined", "Outlined"),
-            press_common_button::<OutlinedButton>(fixture, "Icon", "Outlined icon"),
-            press_common_button::<TextButton>(fixture, "Text", "Text"),
-            press_common_button::<TextButton>(fixture, "Icon", "Text icon"),
+            press_common_button::<ElevatedButton>(fixture, "Elevated", "Elevated", "Elevated"),
+            press_common_button::<ElevatedButton>(fixture, "Elevated", "Icon", "Elevated icon"),
+            press_common_button::<FilledButton>(fixture, "Filled", "Filled", "Filled"),
+            press_common_button::<FilledButton>(fixture, "Filled", "Icon", "Filled icon"),
+            press_common_button::<FilledButton>(fixture, "Tonal", "Tonal", "Tonal"),
+            press_common_button::<FilledButton>(fixture, "Tonal", "Icon", "Tonal icon"),
+            press_common_button::<OutlinedButton>(fixture, "Outlined", "Outlined", "Outlined"),
+            press_common_button::<OutlinedButton>(fixture, "Outlined", "Icon", "Outlined icon"),
+            press_common_button::<TextButton>(fixture, "Text", "Text", "Text"),
+            press_common_button::<TextButton>(fixture, "Text", "Icon", "Text icon"),
         ]
         .into_iter()
         .flatten()
@@ -889,10 +603,15 @@ fn each_common_button_reports_its_press() {
 fn the_first_icon_button_toggles_turn_on() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Buttons);
+        // FlutterTest's square glyphs wrap each row of common buttons onto two runs, which
+        // puts the toggles below the fold: scroll them up, as a finger would.
+        fixture.drag(
+            Offset::new(VIEW[0] / 2.0, VIEW[1] / 2.0),
+            Offset::new(0.0, -VIEW[1] / 4.0),
+        );
         let mut missed = Vec::new();
         for variant in ["Standard", "Filled", "Tonal"] {
-            let toggle = fixture.icon_button_with_tooltip(variant);
-            fixture.tap(toggle);
+            fixture.tap(find::by_tooltip(variant));
             let summary = fixture
                 .texts()
                 .into_iter()
@@ -916,13 +635,8 @@ fn the_first_icon_button_toggles_turn_on() {
 fn the_drawer_opens_from_its_app_bar_action() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Drawers);
-        let drawer_button = fixture.last::<DrawerButton>();
-        fixture.tap(drawer_button);
-        assert!(
-            fixture.shows(DRAWER_HEADER),
-            "the drawer is open; saw {:?}",
-            fixture.texts()
-        );
+        fixture.tap(find::by_type::<DrawerButton>());
+        fixture.expect_shown(DRAWER_HEADER);
     });
 }
 
@@ -930,11 +644,7 @@ fn the_drawer_opens_from_its_app_bar_action() {
 fn assert_messages_button_shows(fixture: &mut Fixture, label: &str, shown: &str) {
     fixture.open_from_index(Entry::Messages);
     fixture.tap_text(label);
-    assert!(
-        fixture.shows(shown),
-        "{label:?} shows {shown:?}; saw {:?}",
-        fixture.texts()
-    );
+    fixture.expect_shown(shown);
 }
 
 #[test]
@@ -962,5 +672,86 @@ fn the_snack_bar_with_an_action_shows_from_its_button() {
 fn the_modal_bottom_sheet_opens_from_its_button() {
     on_each_platform(|fixture| {
         assert_messages_button_shows(fixture, "Modal sheet", "A modal bottom sheet");
+    });
+}
+
+/// A filter chip toggles on a tap, and the page's caption says which are on.
+#[test]
+fn a_filter_chip_toggles_on_a_tap() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Chips);
+        assert!(!fixture.shows("filters on: Coffee"));
+
+        fixture.tap_text("Coffee");
+        assert!(
+            fixture.shows("filters on: Coffee"),
+            "the filter chip reported its selection; saw {:?}",
+            fixture.texts()
+        );
+
+        fixture.tap_text("Coffee");
+        assert!(
+            !fixture.shows("filters on: Coffee"),
+            "a second tap cleared it"
+        );
+    });
+}
+
+/// An alert dialog opens from its button and answers the page with the button it was closed by.
+#[test]
+fn an_alert_dialog_answers_with_its_button() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Dialogs);
+        fixture.tap_text("Alert dialog");
+        assert!(fixture.shows("Discard draft?"), "saw {:?}", fixture.texts());
+
+        fixture.tap_text("Discard");
+        assert!(
+            fixture.shows("Answer: Discard"),
+            "the dialog popped with its answer; saw {:?}",
+            fixture.texts()
+        );
+        assert!(!fixture.shows("Discard draft?"), "the dialog closed");
+    });
+}
+
+/// A collapsed expansion tile opens on a tap and shows its children.
+#[test]
+fn an_expansion_tile_opens_on_a_tap() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Cards);
+        let shown = |fixture: &mut Fixture| {
+            fixture
+                .texts()
+                .iter()
+                .filter(|text| text.as_str() == EXPANDED_TILE_CHILD)
+                .count()
+        };
+        let before = shown(fixture);
+        fixture.tap_text("Collapsed tile");
+        assert_eq!(shown(fixture), before + 1);
+    });
+}
+
+/// The time picker opens in its dial, and OK answers the page with the time it showed.
+#[test]
+fn the_time_picker_opens_and_answers_with_ok() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Pickers);
+        let before = fixture
+            .texts()
+            .into_iter()
+            .find(|text| text.starts_with("Time: "));
+
+        fixture.tap_text("Dial");
+        assert!(fixture.shows("Select time"), "saw {:?}", fixture.texts());
+
+        fixture.tap_text("OK");
+        assert!(!fixture.shows("Select time"), "the dialog closed");
+        let after = fixture
+            .texts()
+            .into_iter()
+            .find(|text| text.starts_with("Time: "));
+        assert_ne!(before, after, "the page's caption took the picked time");
     });
 }

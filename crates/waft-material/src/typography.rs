@@ -2561,6 +2561,7 @@ impl TypographyMaterial2021Builder {
 mod tests {
     use waft_embedder::{Color, TextLeadingDistribution};
     use waft_painting::AnyColor;
+    use waft_widgets::testing::test_widgets;
 
     use super::*;
     use crate::theme_data::ThemeData;
@@ -2813,17 +2814,18 @@ mod tests {
 
     #[test]
     fn default_m3_text_theme_styles_all_use_on_surface() {
-        let cell = crate::test_support::test_cell();
-        let app = cell.borrow();
-        for brightness in [Brightness::Light, Brightness::Dark] {
-            let theme = ThemeData::builder().brightness(brightness).build(&app);
-            for style in styles(&theme.text_theme) {
-                assert_eq!(
-                    self::style(style).color,
-                    color(theme.color_scheme.on_surface)
-                );
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
+            for brightness in [Brightness::Light, Brightness::Dark] {
+                let theme = ThemeData::builder().brightness(brightness).build(&app);
+                for style in styles(&theme.text_theme) {
+                    assert_eq!(
+                        self::style(style).color,
+                        color(theme.color_scheme.on_surface)
+                    );
+                }
             }
-        }
+        });
     }
 
     fn light_scheme() -> ColorScheme {

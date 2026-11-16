@@ -397,6 +397,8 @@ mod tests {
         WidgetState, WidgetStates,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::icons::Icons;
@@ -405,9 +407,29 @@ mod tests {
     use crate::popup_menu::{
         CheckedPopupMenuItem, PopupMenuButton, PopupMenuDivider, PopupMenuEntryRef, PopupMenuItem,
     };
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
+
+    /// Builds `wrap(probe)` and returns what `read` saw at the probe's context.
+    fn probe<T: 'static>(
+        tester: &mut WidgetTester,
+        wrap: impl FnOnce(&App, WidgetRef) -> WidgetRef,
+        read: impl Fn(&mut App, BuildContext) -> T + 'static,
+    ) -> T {
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let probe = waft_widgets::Builder::new({
+            let seen = std::rc::Rc::clone(&seen);
+            move |app, context| {
+                *seen.borrow_mut() = Some(read(app, context));
+                waft_widgets::SizedBox::shrink().into_widget()
+            }
+        })
+        .into_widget();
+        let root = wrap(&tester.cell.borrow(), probe);
+        tester.pump_widget(root);
+        let value = seen.borrow_mut().take();
+        value.expect("the probe built")
+    }
 
     fn cursor_resolver() -> WidgetStatePropertyRef<Option<MouseCursorRef>> {
         <dyn WidgetStateProperty<Option<MouseCursorRef>>>::resolve_with(|states| {
@@ -511,11 +533,6 @@ mod tests {
         assert!(popup_menu_theme.mouse_cursor.is_none());
     }
 
-    fn only(found: Vec<AnyElement>) -> AnyElement {
-        assert_eq!(found.len(), 1, "one widget found");
-        found[0]
-    }
-
     fn element_of(tester: &WidgetTester, key: &GlobalKey) -> AnyElement {
         key.current_context(&tester.cell.borrow())
             .expect("the keyed widget is mounted")
@@ -523,8 +540,8 @@ mod tests {
 
     /// The last `Material` in the tree: the menu's.
     fn menu_material(tester: &WidgetTester) -> AnyElement {
-        *tester
-            .find_by_type::<Material>()
+        *find::by_type::<Material>()
+            .evaluate(tester)
             .last()
             .expect("the menu's Material")
     }
@@ -544,7 +561,7 @@ mod tests {
 
     /// The `n`th `ListTile`'s `title_text_style`.
     fn list_tile_title_text_style(tester: &WidgetTester, last: bool) -> Option<TextStyle> {
-        let tiles = tester.find_by_type::<ListTile>();
+        let tiles = find::by_type::<ListTile>().evaluate(tester);
         let tile = if last { tiles.last() } else { tiles.first() };
         tester.widget(*tile.expect("a ListTile"), |tile: &ListTile| {
             tile.title_text_style.clone()
@@ -552,19 +569,15 @@ mod tests {
     }
 
     fn menu_padding(tester: &WidgetTester) -> Option<EdgeInsetsGeometry> {
-        let scroll_view = only(tester.find_by_type::<SingleChildScrollView>());
+        let scroll_view = tester.element(find::by_type::<SingleChildScrollView>());
         tester.widget(scroll_view, |scroll_view: &SingleChildScrollView| {
             scroll_view.padding
         })
     }
 
-    fn center_of(tester: &WidgetTester, key: &GlobalKey) -> Offset {
-        tester.center_of(key)
-    }
-
     fn icon_color_and_size(tester: &WidgetTester) -> (Option<Color>, Size) {
         let more = Icons::adaptive().more(&tester.cell.borrow());
-        let icon = tester.find_by_icon(&more);
+        let icon = tester.element(find::by_icon(&more).first());
         (
             tester.glyph_style(icon).color.as_deref().copied(),
             tester.get_rect(tester.render_box_of(icon)).size(),
@@ -583,14 +596,14 @@ mod tests {
         over: &GlobalKey,
         down: Option<&GlobalKey>,
     ) -> (MouseCursorRef, Option<MouseCursorRef>) {
-        let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+        let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut gesture, Offset::ZERO);
-        let at = center_of(tester, over);
+        let at = tester.get_center(over);
         tester.move_to(&mut gesture, at, false);
         tester.pump_and_settle();
         let over_cursor = tester.active_cursor(1);
         let down_cursor = down.map(|down| {
-            let at = center_of(tester, down);
+            let at = tester.get_center(down);
             tester.down(&mut gesture, at);
             tester.pump_and_settle();
             tester.active_cursor(1)
@@ -639,8 +652,7 @@ mod tests {
 
     #[test]
     fn passing_no_popup_menu_theme_data_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_button_key = GlobalKey::new();
             let enabled_popup_item_key = GlobalKey::new();
             let disabled_popup_item_key = GlobalKey::new();
@@ -650,7 +662,7 @@ mod tests {
                 disabled_popup_item_key.clone(),
             );
             button_column(
-                &mut tester,
+                tester,
                 m3,
                 true,
                 PopupMenuButton::new(move |_app, _context| {
@@ -667,15 +679,15 @@ mod tests {
 
             // Test default button icon color.
             assert_eq!(
-                icon_color_and_size(&tester).0,
+                icon_color_and_size(tester).0,
                 theme.icon_theme.color.as_deref().copied()
             );
 
-            let at = center_of(&tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
-            let button = menu_material(&tester);
+            let button = menu_material(tester);
             tester.widget(button, |button: &Material| {
                 assert_eq!(button.color, Some(theme.color_scheme.surface_container()));
                 assert_eq!(button.shadow_color, Some(theme.color_scheme.shadow()));
@@ -688,7 +700,7 @@ mod tests {
                 assert_eq!(button.elevation, 3.0);
             });
 
-            let label = item_text_style(&tester, &enabled_popup_item_key);
+            let label = item_text_style(tester, &enabled_popup_item_key);
             assert_eq!(label.font_family.as_deref(), Some("Roboto"));
             assert_eq!(
                 label.color.as_deref().copied(),
@@ -698,17 +710,19 @@ mod tests {
             // Test disabled text color
             #[allow(deprecated)]
             let disabled_color = theme.color_scheme.on_surface.with_opacity(0.38);
-            let label = item_text_style(&tester, &disabled_popup_item_key);
+            let label = item_text_style(tester, &disabled_popup_item_key);
             assert_eq!(label.color.as_deref().copied(), Some(disabled_color));
 
             let top_left_button = tester
-                .get_rect(tester.render_box_of(only(tester.find_by_type::<PopupMenuButton<()>>())))
+                .get_rect(
+                    tester.render_box_of(tester.element(find::by_type::<PopupMenuButton<()>>())),
+                )
                 .top_left();
             let top_left_menu = tester.get_rect(tester.render_box_of(button)).top_left();
             assert_eq!(top_left_menu, top_left_button);
 
             let (over, down) = cursors_over(
-                &mut tester,
+                tester,
                 &disabled_popup_item_key,
                 Some(&enabled_popup_item_key),
             );
@@ -716,14 +730,14 @@ mod tests {
             assert!(*down.expect("pressed") == *cursor(SystemMouseCursors::BASIC));
 
             // Test unchecked CheckedPopupMenuItem label.
-            let title = list_tile_title_text_style(&tester, false);
+            let title = list_tile_title_text_style(tester, false);
             assert_eq!(
                 title.and_then(|style| style.color.as_deref().copied()),
                 Some(theme.color_scheme.on_surface)
             );
 
             // Test checked CheckedPopupMenuItem label.
-            let title = list_tile_title_text_style(&tester, true);
+            let title = list_tile_title_text_style(tester, true);
             assert_eq!(
                 title.and_then(|style| style.color.as_deref().copied()),
                 Some(theme.color_scheme.on_surface)
@@ -731,7 +745,7 @@ mod tests {
 
             // Check popup menu padding.
             assert_eq!(
-                menu_padding(&tester),
+                menu_padding(tester),
                 Some(EdgeInsetsGeometry::symmetric(8.0, 0.0))
             );
         });
@@ -739,8 +753,7 @@ mod tests {
 
     #[test]
     fn popup_menu_uses_values_from_popup_menu_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_menu_theme = popup_menu_theme_m3();
             let popup_button_key = GlobalKey::new();
             let enabled_popup_item_key = GlobalKey::new();
@@ -751,7 +764,7 @@ mod tests {
             );
             let theme = popup_menu_theme.clone();
             button_column(
-                &mut tester,
+                tester,
                 move |app| ThemeData::builder().popup_menu_theme(theme).build(app),
                 false,
                 PopupMenuButton::new(move |_app, _context| {
@@ -775,15 +788,15 @@ mod tests {
             );
 
             assert_eq!(
-                icon_color_and_size(&tester),
+                icon_color_and_size(tester),
                 (popup_menu_theme.icon_color, Size::new(17.0, 17.0))
             );
 
-            let at = center_of(&tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
-            let button = menu_material(&tester);
+            let button = menu_material(tester);
             tester.widget(button, |button: &Material| {
                 assert_eq!(button.color, Some(Colors::ORANGE.primary()));
                 assert_eq!(button.surface_tint_color, Some(Color::new(0xff00ff00)));
@@ -794,19 +807,19 @@ mod tests {
 
             let label_text_style = popup_menu_theme.label_text_style.clone().expect("set");
             assert_eq!(
-                Some(item_text_style(&tester, &enabled_popup_item_key)),
+                Some(item_text_style(tester, &enabled_popup_item_key)),
                 label_text_style.resolve(&enabled())
             );
 
             // Test disabled text color
             assert_eq!(
-                Some(item_text_style(&tester, &disabled_popup_item_key)),
+                Some(item_text_style(tester, &disabled_popup_item_key)),
                 label_text_style.resolve(&disabled())
             );
 
             let mouse_cursor = popup_menu_theme.mouse_cursor.clone().expect("set");
             let (over, down) = cursors_over(
-                &mut tester,
+                tester,
                 &disabled_popup_item_key,
                 Some(&enabled_popup_item_key),
             );
@@ -817,25 +830,24 @@ mod tests {
 
             // Test unchecked CheckedPopupMenuItem label.
             assert_eq!(
-                list_tile_title_text_style(&tester, false),
+                list_tile_title_text_style(tester, false),
                 label_text_style.resolve(&enabled())
             );
 
             // Test checked CheckedPopupMenuItem label.
             assert_eq!(
-                list_tile_title_text_style(&tester, true),
+                list_tile_title_text_style(tester, true),
                 label_text_style.resolve(&enabled())
             );
 
             // Check popup menu padding.
-            assert_eq!(menu_padding(&tester), popup_menu_theme.menu_padding);
+            assert_eq!(menu_padding(tester), popup_menu_theme.menu_padding);
         });
     }
 
     #[test]
     fn popup_menu_widget_properties_take_priority_over_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_menu_theme = popup_menu_theme_m3();
             let popup_button_key = GlobalKey::new();
             let popup_item_key = GlobalKey::new();
@@ -857,7 +869,7 @@ mod tests {
             let item_key = popup_item_key.clone();
             let style = text_style.clone();
             button_column(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .popup_menu_theme(popup_menu_theme)
@@ -900,15 +912,15 @@ mod tests {
             );
 
             assert_eq!(
-                icon_color_and_size(&tester),
+                icon_color_and_size(tester),
                 (Some(icon_color), Size::new(icon_size, icon_size))
             );
 
-            let at = center_of(&tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
-            let button = menu_material(&tester);
+            let button = menu_material(tester);
             tester.widget(button, |button: &Material| {
                 assert_eq!(button.color, Some(color));
                 let shape: ShapeBorderRef = ShapeBorderRef::new(shape);
@@ -918,23 +930,22 @@ mod tests {
                 assert_eq!(button.surface_tint_color, Some(surface_tint_color));
             });
 
-            assert_eq!(item_text_style(&tester, &popup_item_key), text_style);
+            assert_eq!(item_text_style(tester, &popup_item_key), text_style);
 
-            let (over, _) = cursors_over(&mut tester, &popup_item_key, None);
+            let (over, _) = cursors_over(tester, &popup_item_key, None);
             assert!(*over == *cursor(SystemMouseCursors::FORBIDDEN));
 
             // Test CheckedPopupMenuItem label.
-            assert_eq!(list_tile_title_text_style(&tester, false), Some(text_style));
+            assert_eq!(list_tile_title_text_style(tester, false), Some(text_style));
 
             // Check popup menu padding.
-            assert_eq!(menu_padding(&tester), Some(EdgeInsetsGeometry::ZERO));
+            assert_eq!(menu_padding(tester), Some(EdgeInsetsGeometry::ZERO));
         });
     }
 
     #[test]
     fn material2_passing_no_popup_menu_theme_data_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_button_key = GlobalKey::new();
             let enabled_popup_item_key = GlobalKey::new();
             let disabled_popup_item_key = GlobalKey::new();
@@ -944,7 +955,7 @@ mod tests {
                 disabled_popup_item_key.clone(),
             );
             button_column(
-                &mut tester,
+                tester,
                 m2,
                 true,
                 PopupMenuButton::new(move |_app, _context| {
@@ -957,38 +968,40 @@ mod tests {
                 .key(popup_button_key.clone().into()),
             );
 
-            let at = center_of(&tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
-            let button = menu_material(&tester);
+            let button = menu_material(tester);
             tester.widget(button, |button: &Material| {
                 assert_eq!(button.color, None);
                 assert!(button.shape.is_none());
                 assert_eq!(button.elevation, 8.0);
             });
 
-            let enabled_text = item_text_style(&tester, &enabled_popup_item_key);
+            let enabled_text = item_text_style(tester, &enabled_popup_item_key);
             assert_eq!(enabled_text.font_family.as_deref(), Some("Roboto"));
             assert_eq!(
                 enabled_text.color.as_deref().copied(),
                 Some(Color::new(0xdd000000))
             );
 
-            let disabled_text = item_text_style(&tester, &disabled_popup_item_key);
+            let disabled_text = item_text_style(tester, &disabled_popup_item_key);
             assert_eq!(
                 disabled_text.color.as_deref().copied(),
                 Some(theme.disabled_color)
             );
 
             let top_left_button = tester
-                .get_rect(tester.render_box_of(only(tester.find_by_type::<PopupMenuButton<()>>())))
+                .get_rect(
+                    tester.render_box_of(tester.element(find::by_type::<PopupMenuButton<()>>())),
+                )
                 .top_left();
             let top_left_menu = tester.get_rect(tester.render_box_of(button)).top_left();
             assert_eq!(top_left_menu, top_left_button);
 
             let (over, down) = cursors_over(
-                &mut tester,
+                tester,
                 &disabled_popup_item_key,
                 Some(&enabled_popup_item_key),
             );
@@ -997,7 +1010,7 @@ mod tests {
 
             // Check popup menu padding.
             assert_eq!(
-                menu_padding(&tester),
+                menu_padding(tester),
                 Some(EdgeInsetsGeometry::symmetric(8.0, 0.0))
             );
         });
@@ -1005,8 +1018,7 @@ mod tests {
 
     #[test]
     fn material2_popup_menu_uses_values_from_popup_menu_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_menu_theme = popup_menu_theme_m2();
             let popup_button_key = GlobalKey::new();
             let enabled_popup_item_key = GlobalKey::new();
@@ -1017,7 +1029,7 @@ mod tests {
             );
             let theme = popup_menu_theme.clone();
             button_column(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .popup_menu_theme(theme)
@@ -1040,11 +1052,11 @@ mod tests {
                 .key(popup_button_key.clone().into()),
             );
 
-            let at = center_of(&tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
-            let button = menu_material(&tester);
+            let button = menu_material(tester);
             tester.widget(button, |button: &Material| {
                 assert_eq!(button.color, popup_menu_theme.color);
                 assert_eq!(button.shape, popup_menu_theme.shape);
@@ -1052,13 +1064,13 @@ mod tests {
             });
 
             assert_eq!(
-                Some(item_text_style(&tester, &enabled_popup_item_key)),
+                Some(item_text_style(tester, &enabled_popup_item_key)),
                 popup_menu_theme.text_style
             );
 
             let mouse_cursor = popup_menu_theme.mouse_cursor.clone().expect("set");
             let (over, down) = cursors_over(
-                &mut tester,
+                tester,
                 &disabled_popup_item_key,
                 Some(&enabled_popup_item_key),
             );
@@ -1071,8 +1083,7 @@ mod tests {
 
     #[test]
     fn material2_popup_menu_widget_properties_take_priority_over_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_menu_theme = popup_menu_theme_m2();
             let popup_button_key = GlobalKey::new();
             let popup_item_key = GlobalKey::new();
@@ -1094,7 +1105,7 @@ mod tests {
             // Dart's case builds the default theme, Material 3, with the Material 2 popup menu
             // theme.
             button_column(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .popup_menu_theme(popup_menu_theme)
@@ -1119,11 +1130,11 @@ mod tests {
                 .shape(shape),
             );
 
-            let at = center_of(&tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
-            let button = menu_material(&tester);
+            let button = menu_material(tester);
             tester.widget(button, |button: &Material| {
                 assert_eq!(button.color, Some(color));
                 let shape: ShapeBorderRef = ShapeBorderRef::new(shape);
@@ -1133,21 +1144,20 @@ mod tests {
                 assert_eq!(button.surface_tint_color, Some(surface_tint_color));
             });
 
-            assert_eq!(item_text_style(&tester, &popup_item_key), text_style);
+            assert_eq!(item_text_style(tester, &popup_item_key), text_style);
 
-            let (over, _) = cursors_over(&mut tester, &popup_item_key, None);
+            let (over, _) = cursors_over(tester, &popup_item_key, None);
             assert!(*over == *cursor(SystemMouseCursors::FORBIDDEN));
         });
     }
 
     #[test]
     fn of_returns_the_closest_popup_menu_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = crate::test_support::test_cell();
+        test_widgets(|tester| {
             let widget_theme = PopupMenuThemeData::new().elevation(7.0);
             let expected = widget_theme.clone();
-            let seen = crate::test_support::probe(
-                &cell,
+            let seen = probe(
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .popup_menu_theme(PopupMenuThemeData::new().elevation(3.0))
@@ -1162,12 +1172,11 @@ mod tests {
 
     #[test]
     fn of_returns_the_theme_data_popup_menu_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = crate::test_support::test_cell();
+        test_widgets(|tester| {
             let expected = PopupMenuThemeData::new().elevation(3.0);
             let theme_data_theme = expected.clone();
-            let seen = crate::test_support::probe(
-                &cell,
+            let seen = probe(
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .popup_menu_theme(theme_data_theme.clone())

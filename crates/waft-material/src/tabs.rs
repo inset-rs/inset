@@ -4436,21 +4436,21 @@ pub(crate) mod tests {
     //! golden and leak-tracking cases are not ported.
 
     use waft_embedder::{Locale, TargetPlatform};
+    use waft_rendering::testing::RecordedCall;
     use waft_widgets::{AnyElement, DefaultWidgetsLocalizations, Localizations, RichText};
+
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget,
+        test_widgets,
+    };
 
     use super::*;
     use crate::app_bar::AppBar;
     use crate::material_localizations::DefaultMaterialLocalizations;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
     use waft_widgets::ScrollControllerLeaf;
-
-    pub(crate) fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
 
     /// The theme Dart's `ThemeData(useMaterial3: use_material3, tabBarTheme: tab_bar_theme)`
     /// builds.
@@ -4628,46 +4628,29 @@ pub(crate) mod tests {
 
     /// The first element showing `text`: Dart's `find.text(text)`.
     pub(crate) fn text(tester: &WidgetTester, text: &str) -> AnyElement {
-        *tester
-            .find_text(text)
+        *find::text(text)
+            .evaluate(tester)
             .first()
             .unwrap_or_else(|| panic!("a Text showing {text:?}"))
     }
 
-    /// Dart's `tester.getSize(finder)`.
-    pub(crate) fn size_of(tester: &WidgetTester, element: AnyElement) -> Size {
-        let render = tester.render_box_of(element);
-        render.size(&tester.cell.borrow())
-    }
-
-    /// Dart's `tester.getRect(finder)`.
-    pub(crate) fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.get_rect(tester.render_box_of(element))
-    }
-
-    /// Dart's `tester.getCenter(finder)`.
-    pub(crate) fn center_of(tester: &WidgetTester, element: AnyElement) -> Offset {
-        rect_of(tester, element).center()
-    }
-
     /// Dart's `tester.tap(finder)`.
     pub(crate) fn tap(tester: &mut WidgetTester, element: AnyElement) {
-        let center = center_of(tester, element);
-        tester.tap(center, 1);
+        let center = tester.get_center(element);
+        tester.tap_at(center, 1);
     }
 
     /// The only element whose widget is a `W`: Dart's `find.byType(W)` with `findsOneWidget`.
     pub(crate) fn only<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        let found = tester.find_by_type::<W>();
+        let found = find::by_type::<W>().evaluate(tester);
         assert_eq!(found.len(), 1, "one {}", std::any::type_name::<W>());
         found[0]
     }
 
     #[test]
     fn a_tab_with_an_icon_is_as_wide_as_the_icon_and_46_high() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = theme(&tester, None, None);
+        test_widgets(|tester| {
+            let theme = theme(tester, None, None);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -4677,18 +4660,14 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
             ));
-            assert_eq!(
-                size_of(&tester, only::<Tab>(&tester)),
-                Size::new(10.0, 46.0)
-            );
+            assert_eq!(tester.get_size(only::<Tab>(tester)), Size::new(10.0, 46.0));
         });
     }
 
     #[test]
     fn a_tab_with_a_child_is_as_wide_as_the_child_and_46_high() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = theme(&tester, None, None);
+        test_widgets(|tester| {
+            let theme = theme(tester, None, None);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -4698,87 +4677,78 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
             ));
-            assert_eq!(
-                size_of(&tester, only::<Tab>(&tester)),
-                Size::new(10.0, 46.0)
-            );
+            assert_eq!(tester.get_size(only::<Tab>(tester)), Size::new(10.0, 46.0));
         });
     }
 
     #[test]
     fn a_tab_with_text_is_as_wide_as_the_text_and_46_high() {
-        with_main_thread_stack(|| {
-            for material3 in [true, false] {
-                let mut tester = tester();
-                let theme = {
-                    let app = tester.cell.borrow();
-                    ThemeData::builder()
-                        .use_material3(material3)
-                        .font_family("FlutterTest")
-                        .build(&app)
-                };
-                tester.pump_widget(material_app(
-                    theme,
-                    Center::new()
-                        .child(Material::new().child(Tab::new().text("x")))
-                        .into_widget(),
-                ));
-                let paragraph = only::<RichText>(&tester);
-                let render = tester.render_box_of(paragraph);
-                {
-                    let app = tester.cell.borrow();
-                    let paragraph = render
-                        .as_object()
-                        .downcast::<waft_rendering::RenderParagraph>(&app)
-                        .expect("a paragraph");
-                    assert_eq!(
-                        paragraph
-                            .text(&app)
-                            .style()
-                            .and_then(|style| style.font_family.clone())
-                            .as_deref(),
-                        Some("FlutterTest")
-                    );
-                }
-                let expected = if material3 {
-                    Size::new(14.25, 46.0)
-                } else {
-                    Size::new(14.0, 46.0)
-                };
-                assert_eq!(size_of(&tester, only::<Tab>(&tester)), expected);
+        test_widgets(|tester| {
+            let theme = {
+                let app = tester.cell.borrow();
+                ThemeData::builder().font_family("FlutterTest").build(&app)
+            };
+            let material3 = theme.use_material3;
+            tester.pump_widget(material_app(
+                theme,
+                Center::new()
+                    .child(Material::new().child(Tab::new().text("x")))
+                    .into_widget(),
+            ));
+            let paragraph = only::<RichText>(tester);
+            let render = tester.render_box_of(paragraph);
+            {
+                let app = tester.cell.borrow();
+                let paragraph = render
+                    .as_object()
+                    .downcast::<waft_rendering::RenderParagraph>(&app)
+                    .expect("a paragraph");
+                assert_eq!(
+                    paragraph
+                        .text(&app)
+                        .style()
+                        .and_then(|style| style.font_family.clone())
+                        .as_deref(),
+                    Some("FlutterTest")
+                );
             }
+            let expected = if material3 {
+                Size::new(14.25, 46.0)
+            } else {
+                Size::new(14.0, 46.0)
+            };
+            assert_eq!(tester.get_size(only::<Tab>(tester)), expected);
         });
     }
 
     // 'TabBar tap selects tab'.
     #[test]
     fn tapping_a_tab_selects_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tabs = vec!["A", "B", "C"];
 
-            let frame = Frame::new(tabs.clone(), "C").build(&tester);
+            let frame = Frame::new(tabs.clone(), "C").build(tester);
             tester.pump_widget(frame);
-            assert!(!tester.find_text("A").is_empty());
-            assert!(!tester.find_text("B").is_empty());
-            assert!(!tester.find_text("C").is_empty());
-            let controller = default_controller_of(&tester, text(&tester, "A"));
+            expect(tester, &find::text("A"), finds_one_widget());
+            expect(tester, &find::text("B"), finds_one_widget());
+            expect(tester, &find::text("C"), finds_one_widget());
+            let controller = default_controller_of(tester, text(tester, "A"));
             {
                 let app = tester.cell.borrow();
                 assert_eq!(controller.index(&app), 2);
                 assert_eq!(controller.previous_index(&app), 2);
             }
 
-            let frame = Frame::new(tabs.clone(), "C").build(&tester);
+            let frame = Frame::new(tabs.clone(), "C").build(tester);
             tester.pump_widget(frame);
-            let b = text(&tester, "B");
-            tap(&mut tester, b);
-            tester.pump(Duration::ZERO);
+            let b = text(tester, "B");
+            tap(tester, b);
+            tester.pump();
             {
                 let app = tester.cell.borrow();
                 assert!(controller.index_is_changing(&app));
             }
-            tester.pump(Duration::from_secs(1)); // finish the animation
+            tester.pump_by(Duration::from_secs(1)); // finish the animation
             {
                 let app = tester.cell.borrow();
                 assert_eq!(controller.index(&app), 1);
@@ -4786,24 +4756,24 @@ pub(crate) mod tests {
                 assert!(!controller.index_is_changing(&app));
             }
 
-            let frame = Frame::new(tabs.clone(), "C").build(&tester);
+            let frame = Frame::new(tabs.clone(), "C").build(tester);
             tester.pump_widget(frame);
-            let c = text(&tester, "C");
-            tap(&mut tester, c);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            let c = text(tester, "C");
+            tap(tester, c);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
             {
                 let app = tester.cell.borrow();
                 assert_eq!(controller.index(&app), 2);
                 assert_eq!(controller.previous_index(&app), 1);
             }
 
-            let frame = Frame::new(tabs.clone(), "C").build(&tester);
+            let frame = Frame::new(tabs.clone(), "C").build(tester);
             tester.pump_widget(frame);
-            let a = text(&tester, "A");
-            tap(&mut tester, a);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            let a = text(tester, "A");
+            tap(tester, a);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
             {
                 let app = tester.cell.borrow();
                 assert_eq!(controller.index(&app), 0);
@@ -4821,41 +4791,34 @@ pub(crate) mod tests {
         pub(crate) p2: Offset,
     }
 
-    /// Every line `render` and its subtree paint, in order: a stroked path of two points,
-    /// read back from its bounds, which is exact for the horizontal lines the cases draw.
     pub(crate) fn painted_lines(
         tester: &WidgetTester,
         render: AnyRenderObject,
     ) -> Vec<PaintedLine> {
-        use waft_embedder::valo::{Op, PaintStyle as ValoPaintStyle};
-        tester
-            .painted_ops(render)
-            .into_iter()
-            .filter_map(|op| match op {
-                Op::DrawPath { path, paint, .. } => {
-                    let ValoPaintStyle::Stroke(stroke) = paint.style else {
-                        return None;
-                    };
-                    if path.elements().count() != 2 {
-                        return None;
-                    }
-                    let bounds = path.bounds();
-                    Some(PaintedLine {
-                        color: Color::new(argb32(paint.color)),
-                        stroke_width: f64::from(stroke.width),
-                        p1: Offset::new(f64::from(bounds.x), f64::from(bounds.y)),
-                        p2: Offset::new(
-                            f64::from(bounds.x + bounds.width),
-                            f64::from(bounds.y + bounds.height),
-                        ),
-                    })
-                }
+        lines_of(&tester.painted_ops(render))
+    }
+
+    /// The lines among `ops`, as `paints..line` reads them.
+    pub(crate) fn lines_of(ops: &[waft_embedder::valo::Op]) -> Vec<PaintedLine> {
+        ops.iter()
+            .filter_map(|op| match RecordedCall::of(op) {
+                RecordedCall::Line {
+                    p1,
+                    p2,
+                    color,
+                    stroke_width,
+                } => Some(PaintedLine {
+                    color,
+                    stroke_width: stroke_width.expect("a stroked line"),
+                    p1,
+                    p2,
+                }),
                 _ => None,
             })
             .collect()
     }
 
-    fn argb32(color: waft_embedder::valo::Color) -> u32 {
+    pub(crate) fn argb32(color: waft_embedder::valo::Color) -> u32 {
         let channel = |value: f32| (value * 255.0).round() as u32;
         (channel(color.a) << 24)
             | (channel(color.r) << 16)
@@ -4885,8 +4848,8 @@ pub(crate) mod tests {
 
     /// The render box of the first `W`: Dart's `tester.firstRenderObject<RenderBox>(find.byType(W))`.
     pub(crate) fn first_render_box<W: 'static>(tester: &WidgetTester) -> AnyRenderBox {
-        let element = *tester
-            .find_by_type::<W>()
+        let element = *find::by_type::<W>()
+            .evaluate(tester)
             .first()
             .unwrap_or_else(|| panic!("a {}", std::any::type_name::<W>()));
         tester.render_box_of(element)
@@ -4895,8 +4858,7 @@ pub(crate) mod tests {
     // 'Material3 - Scrollable TabBar tap centers selected tab'.
     #[test]
     fn material3_tapping_a_tab_of_a_scrollable_tab_bar_centers_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tabs = vec![
                 "AAAAAA", "BBBBBB", "CCCCCC", "DDDDDD", "EEEEEE", "FFFFFF", "GGGGGG", "HHHHHH",
                 "IIIIII", "JJJJJJ", "KKKKKK", "LLLLLL",
@@ -4905,22 +4867,22 @@ pub(crate) mod tests {
             let mut frame = Frame::new(tabs, "AAAAAA");
             frame.is_scrollable = true;
             frame.tab_bar_key = Some(tab_bar_key.clone());
-            let frame = frame.build(&tester);
+            let frame = frame.build(tester);
             tester.pump_widget(frame);
-            let controller = default_controller_of(&tester, text(&tester, "AAAAAA"));
+            let controller = default_controller_of(tester, text(tester, "AAAAAA"));
             assert_eq!(controller.index(&tester.cell.borrow()), 0);
 
             let tab_bar = tester.render_object(&tab_bar_key).as_box().expect("a box");
             assert_eq!(tab_bar.size(&tester.cell.borrow()).width(), 800.0);
             // The center of the FFFFFF item is to the right of the TabBar's center
-            assert!(center_of(&tester, text(&tester, "FFFFFF")).dx() > 401.0);
+            assert!(tester.get_center(text(tester, "FFFFFF")).dx() > 401.0);
 
-            let f = text(&tester, "FFFFFF");
-            tap(&mut tester, f);
+            let f = text(tester, "FFFFFF");
+            tap(tester, f);
             tester.pump_and_settle();
             assert_eq!(controller.index(&tester.cell.borrow()), 5);
             // The center of the FFFFFF item is now at the TabBar's center
-            let center = center_of(&tester, text(&tester, "FFFFFF")).dx();
+            let center = tester.get_center(text(tester, "FFFFFF")).dx();
             assert!(close(center, 452.0, 1.0), "{center}");
         });
     }
@@ -4928,13 +4890,12 @@ pub(crate) mod tests {
     // 'TabBarView page left and right test'.
     #[test]
     fn dragging_a_tab_bar_view_past_its_width_changes_the_page() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = {
                 let mut app = tester.cell.borrow_mut();
-                TabController::new(&mut app, 0, None, 2, crate::test_support::TestVSync)
+                TabController::new(&mut app, 0, None, 2, waft_widgets::testing::TestVSync)
             };
-            let theme = theme(&tester, None, None);
+            let theme = theme(tester, None, None);
             tester.pump_widget(boilerplate(
                 theme,
                 TextDirection::Ltr,
@@ -4945,61 +4906,60 @@ pub(crate) mod tests {
                 .controller(controller.clone()),
             ));
             let index = |tester: &WidgetTester| controller.index(&tester.cell.borrow());
-            assert_eq!(index(&tester), 0);
+            assert_eq!(index(tester), 0);
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(100.0, 100.0));
-            assert_eq!(index(&tester), 0);
+            assert_eq!(index(tester), 0);
 
             // Drag to the left and right, by less than the TabBarView's width.
             // The selected index (controller.index) should not change.
             tester.move_to(&mut gesture, Offset::new(0.0, 100.0), true);
             tester.move_to(&mut gesture, Offset::new(100.0, 100.0), true);
-            assert_eq!(index(&tester), 0);
-            assert_eq!(tester.find_text("First").len(), 1);
-            assert!(tester.find_text("Second").is_empty());
+            assert_eq!(index(tester), 0);
+            expect(tester, &find::text("First"), finds_one_widget());
+            expect(tester, &find::text("Second"), finds_nothing());
 
             // Drag more than the TabBarView's width to the right. This forces
             // the selected index to change to 1.
             tester.move_to(&mut gesture, Offset::new(-400.0, 100.0), true);
             tester.up(&gesture);
-            tester.pump(Duration::ZERO); // start the scroll animation
-            tester.pump(Duration::from_secs(1)); // finish the scroll animation
-            assert_eq!(index(&tester), 1);
-            assert!(tester.find_text("First").is_empty());
-            assert_eq!(tester.find_text("Second").len(), 1);
+            tester.pump(); // start the scroll animation
+            tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
+            assert_eq!(index(tester), 1);
+            expect(tester, &find::text("First"), finds_nothing());
+            expect(tester, &find::text("Second"), finds_one_widget());
 
-            let mut gesture = WidgetTester::touch(2);
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, Offset::new(100.0, 100.0));
-            assert_eq!(index(&tester), 1);
+            assert_eq!(index(tester), 1);
 
             tester.move_to(&mut gesture, Offset::new(0.0, 100.0), true);
             tester.move_to(&mut gesture, Offset::new(100.0, 100.0), true);
-            assert_eq!(index(&tester), 1);
-            assert!(tester.find_text("First").is_empty());
-            assert_eq!(tester.find_text("Second").len(), 1);
+            assert_eq!(index(tester), 1);
+            expect(tester, &find::text("First"), finds_nothing());
+            expect(tester, &find::text("Second"), finds_one_widget());
 
             // Drag more than the TabBarView's width to the left. This forces
             // the selected index to change back to 0.
             tester.move_to(&mut gesture, Offset::new(600.0, 100.0), true);
             tester.up(&gesture);
-            tester.pump(Duration::ZERO); // start the scroll animation
-            tester.pump(Duration::from_secs(1)); // finish the scroll animation
-            assert_eq!(index(&tester), 0);
-            assert_eq!(tester.find_text("First").len(), 1);
-            assert!(tester.find_text("Second").is_empty());
+            tester.pump(); // start the scroll animation
+            tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
+            assert_eq!(index(tester), 0);
+            expect(tester, &find::text("First"), finds_one_widget());
+            expect(tester, &find::text("Second"), finds_nothing());
         });
     }
 
     // 'TabBar default tab indicator (primary)'.
     #[test]
     fn the_default_primary_indicator_is_a_rounded_label_underline_or_a_tab_line() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = theme(&tester, None, None);
+        test_widgets(|tester| {
+            let theme = theme(tester, None, None);
             let controller = {
                 let mut app = tester.cell.borrow_mut();
-                TabController::new(&mut app, 0, None, 4, crate::test_support::TestVSync)
+                TabController::new(&mut app, 0, None, 4, waft_widgets::testing::TestVSync)
             };
             const INDICATOR_WEIGHT_LABEL: f64 = 3.0;
             const INDICATOR_WEIGHT_TAB: f64 = 2.0;
@@ -5026,7 +4986,7 @@ pub(crate) mod tests {
             // Test default tab indicator (TabBarIndicatorSize.label).
             tester.pump_widget(build_tab(None));
 
-            let tab_bar_box = first_render_box::<TabBar>(&tester);
+            let tab_bar_box = first_render_box::<TabBar>(tester);
             assert_eq!(tab_bar_box.size(&tester.cell.borrow()).height(), 48.0);
 
             // Check tab indicator size and color.
@@ -5040,17 +5000,19 @@ pub(crate) mod tests {
                 waft_embedder::Radius::ZERO,
                 waft_embedder::Radius::ZERO,
             );
-            assert!(tester.paints_rrect(
-                tab_bar_box.as_object(),
-                rrect,
-                Some(theme.color_scheme.primary)
-            ));
+            waft_rendering::testing::assert_paints(
+                &tester.painted_ops(tab_bar_box.as_object()),
+                &[waft_rendering::testing::PaintCall::rrect_at(
+                    rrect,
+                    Some(theme.color_scheme.primary),
+                )],
+            );
 
             // Test default tab indicator (TabBarIndicatorSize.tab).
             tester.pump_widget(build_tab(Some(TabBarIndicatorSize::Tab)));
             tester.pump_and_settle();
 
-            let tab_bar_box = first_render_box::<TabBar>(&tester);
+            let tab_bar_box = first_render_box::<TabBar>(tester);
             assert_eq!(tab_bar_box.size(&tester.cell.borrow()).height(), 48.0);
 
             const INDICATOR_Y: f64 = 48.0 - (INDICATOR_WEIGHT_TAB / 2.0);
@@ -5058,7 +5020,7 @@ pub(crate) mod tests {
             const INDICATOR_RIGHT: f64 = 200.0 - (INDICATOR_WEIGHT_TAB / 2.0);
 
             // Check tab indicator size and color.
-            let lines = painted_lines(&tester, tab_bar_box.as_object());
+            let lines = painted_lines(tester, tab_bar_box.as_object());
             // Divider.
             let divider = lines
                 .iter()
@@ -5096,14 +5058,17 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::material::RenderInkFeatures;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{Drawn, TestVSync, is_same_color_as};
+        use crate::test_support::PaintInspection;
+        use waft_embedder::valo::Op;
+        use waft_rendering::testing::{PaintCall, paints};
+        use waft_widgets::testing::TestVSync;
 
         /// The style of the `Text` showing `text` under a tab's `_TabStyle`: Dart's `getTabText`'s
         /// paragraph's `text.style`.
         fn tab_text_style(tester: &WidgetTester, label: &str) -> TextStyle {
-            let styles = tester.find_by_type::<waft_widgets::Animated<TabStyle>>();
-            let element = tester
-                .find_text(label)
+            let styles = find::by_type::<waft_widgets::Animated<TabStyle>>().evaluate(tester);
+            let element = find::text(label)
+                .evaluate(tester)
                 .into_iter()
                 .find(|element| {
                     let ancestors = tester.ancestors(*element);
@@ -5152,34 +5117,24 @@ pub(crate) mod tests {
             TabController::new(&mut app, 0, None, length, TestVSync)
         }
 
-        /// Whether `drawn` has a rect of `color`: Dart's `paints..rect(color:)`.
-        fn has_rect(drawn: &[Drawn], color: Color) -> bool {
-            drawn
-                .iter()
-                .any(|drawn| matches!(drawn, Drawn::Rect(argb, _) if is_same_color_as(Color::new(*argb), color)))
+        fn has_rect(ops: &[Op], color: Color) -> bool {
+            paints(ops, &[PaintCall::rect(Some(color))]).is_ok()
         }
 
-        /// Whether `drawn` has a rect, then a rect of `color`: Dart's `paints..rect()..rect(color:)`.
-        fn has_rect_then_rect(drawn: &[Drawn], color: Color) -> bool {
-            drawn
-                .iter()
-                .position(|drawn| matches!(drawn, Drawn::Rect(..)))
-                .is_some_and(|first| has_rect(&drawn[first + 1..], color))
+        fn has_rect_then_rect(ops: &[Op], color: Color) -> bool {
+            paints(ops, &[PaintCall::rect(None), PaintCall::rect(Some(color))]).is_ok()
         }
 
-        /// What the first material and its subtree paint: Dart's `paints` on
-        /// `tester.allRenderObjects.firstWhere(_RenderInkFeatures)`.
-        fn first_material_paints(tester: &WidgetTester) -> Vec<Drawn> {
+        fn first_material_paints(tester: &WidgetTester) -> Vec<Op> {
             let render = tester.first::<RenderInkFeatures>();
-            tester.painted(render.as_object())
+            tester.painted_ops(render.as_object())
         }
 
         // 'Tab sizing - icon and text'.
         #[test]
         fn a_tab_with_an_icon_and_text_is_as_wide_as_the_text_and_72_high() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = flutter_test_theme(&tester);
+            test_widgets(|tester| {
+                let theme = flutter_test_theme(tester);
                 let material3 = theme.use_material3;
                 tester.pump_widget(material_app(
                     theme,
@@ -5194,7 +5149,7 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
                 assert_eq!(
-                    rich_text_font_family(&tester).as_deref(),
+                    rich_text_font_family(tester).as_deref(),
                     Some("FlutterTest")
                 );
                 let expected = if material3 {
@@ -5202,16 +5157,15 @@ pub(crate) mod tests {
                 } else {
                     Size::new(14.0, 72.0)
                 };
-                assert_eq!(size_of(&tester, only::<Tab>(&tester)), expected);
+                assert_eq!(tester.get_size(only::<Tab>(tester)), expected);
             });
         }
 
         // 'Tab sizing - icon, iconMargin and text'.
         #[test]
         fn a_tab_with_an_icon_margin_is_as_wide_as_the_icon_and_its_margin() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = flutter_test_theme(&tester);
+            test_widgets(|tester| {
+                let theme = flutter_test_theme(tester);
                 tester.pump_widget(material_app(
                     theme,
                     Center::new()
@@ -5226,22 +5180,18 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
                 assert_eq!(
-                    rich_text_font_family(&tester).as_deref(),
+                    rich_text_font_family(tester).as_deref(),
                     Some("FlutterTest")
                 );
-                assert_eq!(
-                    size_of(&tester, only::<Tab>(&tester)),
-                    Size::new(210.0, 72.0)
-                );
+                assert_eq!(tester.get_size(only::<Tab>(tester)), Size::new(210.0, 72.0));
             });
         }
 
         // 'Tab sizing - icon and child'.
         #[test]
         fn a_tab_with_an_icon_and_a_child_is_as_wide_as_the_child_and_72_high() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = flutter_test_theme(&tester);
+            test_widgets(|tester| {
+                let theme = flutter_test_theme(tester);
                 let material3 = theme.use_material3;
                 tester.pump_widget(material_app(
                     theme,
@@ -5256,7 +5206,7 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
                 assert_eq!(
-                    rich_text_font_family(&tester).as_deref(),
+                    rich_text_font_family(tester).as_deref(),
                     Some("FlutterTest")
                 );
                 let expected = if material3 {
@@ -5264,65 +5214,68 @@ pub(crate) mod tests {
                 } else {
                     Size::new(14.0, 72.0)
                 };
-                assert_eq!(size_of(&tester, only::<Tab>(&tester)), expected);
+                assert_eq!(tester.get_size(only::<Tab>(tester)), expected);
             });
         }
 
         /// Dart's `getIconMargin`: from the bottom of the house icon to the top of the label.
         fn icon_margin(tester: &WidgetTester) -> f64 {
-            let icon_rect = rect_of(tester, tester.find_by_icon(&Icons::house()));
-            let label_rect = rect_of(tester, text(tester, "x"));
+            let icon_rect = tester.get_rect(tester.element(find::by_icon(&Icons::house()).first()));
+            let label_rect = tester.get_rect(text(tester, "x"));
             label_rect.top - icon_rect.bottom
         }
 
         // 'Material2 - Default Tab iconMargin'.
         #[test]
         fn material2_a_tab_icon_has_10_pixels_below_it_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, Some(false), None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, Some(false), None);
                 tester.pump_widget(material_app(
                     theme,
                     Material::new()
                         .child(Tab::new().icon(Icon::new(Some(Icons::house()))).text("x"))
                         .into_widget(),
                 ));
-                assert_eq!(icon_margin(&tester), 10.0);
+                assert_eq!(icon_margin(tester), 10.0);
             });
         }
 
         // 'Material3 - Default Tab iconMargin'.
         #[test]
         fn material3_a_tab_icon_has_2_pixels_below_it_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Material::new()
                         .child(Tab::new().icon(Icon::new(Some(Icons::house()))).text("x"))
                         .into_widget(),
                 ));
-                assert_eq!(icon_margin(&tester), 2.0);
+                assert_eq!(icon_margin(tester), 2.0);
             });
         }
 
-        /// Whether the only `TabBar` paints a line of `color`: Dart's `paints..line(color:)`.
         fn tab_bar_paints_line_of(tester: &WidgetTester, color: Color) -> bool {
             let tab_bar = first_render_box::<TabBar>(tester);
-            painted_lines(tester, tab_bar.as_object())
-                .iter()
-                .any(|line| line.color.to_argb32() == color.to_argb32())
+            paints(
+                &tester.painted_ops(tab_bar.as_object()),
+                &[PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: Some(color),
+                    stroke_width: None,
+                }],
+            )
+            .is_ok()
         }
 
         // 'Tab color - normal'.
         #[test]
         fn a_tab_bar_on_a_material_paints_its_divider_or_its_m2_indicator() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = flutter_test_theme(&tester);
+            test_widgets(|tester| {
+                let theme = flutter_test_theme(tester);
                 let material3 = theme.use_material3;
-                let controller = tab_controller(&tester, 1);
+                let controller = tab_controller(tester, 1);
                 tester.pump_widget(material_app(
                     theme.clone(),
                     Material::new()
@@ -5336,18 +5289,17 @@ pub(crate) mod tests {
                 } else {
                     Colors::BLUE.shade500()
                 };
-                assert!(tab_bar_paints_line_of(&tester, expected));
+                assert!(tab_bar_paints_line_of(tester, expected));
             });
         }
 
         // 'Tab color - match'.
         #[test]
         fn an_m2_indicator_the_color_of_its_material_turns_white() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 let material3 = theme.use_material3;
-                let controller = tab_controller(&tester, 1);
+                let controller = tab_controller(tester, 1);
                 tester.pump_widget(material_app(
                     theme.clone(),
                     Material::new()
@@ -5362,18 +5314,17 @@ pub(crate) mod tests {
                 } else {
                     Colors::WHITE
                 };
-                assert!(tab_bar_paints_line_of(&tester, expected));
+                assert!(tab_bar_paints_line_of(tester, expected));
             });
         }
 
         // 'Tab color - transparency'.
         #[test]
         fn a_tab_bar_on_a_transparent_material_keeps_its_indicator_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 let material3 = theme.use_material3;
-                let controller = tab_controller(&tester, 1);
+                let controller = tab_controller(tester, 1);
                 tester.pump_widget(material_app(
                     theme.clone(),
                     Material::new()
@@ -5388,7 +5339,7 @@ pub(crate) mod tests {
                 } else {
                     Colors::BLUE.shade500()
                 };
-                assert!(tab_bar_paints_line_of(&tester, expected));
+                assert!(tab_bar_paints_line_of(tester, expected));
             });
         }
 
@@ -5400,9 +5351,9 @@ pub(crate) mod tests {
             unselected: &str,
             unselected_color: Color,
         ) {
-            assert_eq!(tester.find_text("A").len(), 1);
-            assert_eq!(tester.find_text("B").len(), 1);
-            assert_eq!(tester.find_text("C").len(), 1);
+            expect(tester, &find::text("A"), finds_one_widget());
+            expect(tester, &find::text("B"), finds_one_widget());
+            expect(tester, &find::text("C"), finds_one_widget());
 
             // Test selected label text style.
             let selected_label = tab_text_style(tester, selected);
@@ -5420,15 +5371,14 @@ pub(crate) mod tests {
         // 'TabBar default selected/unselected label style (primary)'.
         #[test]
         fn a_primary_tab_bar_labels_are_primary_when_selected_and_on_surface_variant_otherwise() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 let mut frame = Frame::new(vec!["A", "B", "C"], "A");
                 frame.use_material3 = Some(theme.use_material3);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
                 assert_label_styles(
-                    &tester,
+                    tester,
                     "A",
                     theme.color_scheme.primary,
                     "C",
@@ -5441,16 +5391,15 @@ pub(crate) mod tests {
         #[test]
         fn a_secondary_tab_bar_labels_are_on_surface_when_selected_and_on_surface_variant_otherwise()
          {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 let mut frame = Frame::new(vec!["A", "B", "C"], "A");
                 frame.secondary_tab_bar = true;
                 frame.use_material3 = Some(theme.use_material3);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
                 assert_label_styles(
-                    &tester,
+                    tester,
                     "A",
                     theme.color_scheme.on_surface,
                     "C",
@@ -5462,15 +5411,14 @@ pub(crate) mod tests {
         // 'Material 3 primary tab indicator has a minimum width of 24dp'.
         #[test]
         fn a_material3_primary_label_indicator_is_at_least_24_wide() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let mut frame = Frame::new(vec!["A", "Medium", "Longer Tab"], "A");
                 frame.use_material3 = Some(true);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
-                let label_box = tester.render_box_of(text(&tester, "A"));
+                let tab_bar_box = first_render_box::<TabBar>(tester);
+                let label_box = tester.render_box_of(text(tester, "A"));
                 let (label_center, tab_bar_height) = {
                     let app = tester.cell.borrow();
                     let label_size = label_box.size(&app);
@@ -5482,7 +5430,7 @@ pub(crate) mod tests {
                         tab_bar_box.size(&app).height(),
                     )
                 };
-                let tab_bar = only::<TabBar>(&tester);
+                let tab_bar = only::<TabBar>(tester);
                 let primary = {
                     let mut app = tester.cell.borrow_mut();
                     Theme::of(&mut app, tab_bar).color_scheme.primary
@@ -5494,27 +5442,28 @@ pub(crate) mod tests {
                     tab_bar_height,
                 );
 
-                assert!(tester.paints_rrect(
-                    tab_bar_box.as_object(),
-                    RRect::from_rect_and_corners(
-                        expected_indicator,
-                        Radius::circular(3.0),
-                        Radius::circular(3.0),
-                        Radius::ZERO,
-                        Radius::ZERO,
-                    ),
-                    Some(primary),
-                ));
+                waft_rendering::testing::assert_paints(
+                    &tester.painted_ops(tab_bar_box.as_object()),
+                    &[waft_rendering::testing::PaintCall::rrect_at(
+                        RRect::from_rect_and_corners(
+                            expected_indicator,
+                            Radius::circular(3.0),
+                            Radius::circular(3.0),
+                            Radius::ZERO,
+                            Radius::ZERO,
+                        ),
+                        Some(primary),
+                    )],
+                );
             });
         }
 
         // 'TabBar default tab indicator (secondary)'.
         #[test]
         fn the_default_secondary_indicator_is_a_tab_wide_line_over_the_divider() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
-                let controller = tab_controller(&tester, 4);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
+                let controller = tab_controller(tester, 4);
                 const INDICATOR_WEIGHT: f64 = 2.0;
 
                 // Test default tab indicator.
@@ -5531,7 +5480,7 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 assert_eq!(tab_bar_box.size(&tester.cell.borrow()).height(), 48.0);
 
                 const INDICATOR_Y: f64 = 48.0 - (INDICATOR_WEIGHT / 2.0);
@@ -5539,7 +5488,7 @@ pub(crate) mod tests {
                 const INDICATOR_RIGHT: f64 = 200.0 - (INDICATOR_WEIGHT / 2.0);
 
                 // Check tab indicator size and color.
-                let lines = painted_lines(&tester, tab_bar_box.as_object());
+                let lines = painted_lines(tester, tab_bar_box.as_object());
                 // Divider.
                 let divider = lines
                     .iter()
@@ -5570,9 +5519,9 @@ pub(crate) mod tests {
             selected_pressed: Color,
             unselected_hovered: Color,
         ) {
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            let selected = center_of(tester, text(tester, "A"));
+            let selected = tester.get_center(text(tester, "A"));
             tester.move_to(&mut gesture, selected, false);
             tester.pump_and_settle();
             assert!(has_rect(&first_material_paints(tester), selected_hovered));
@@ -5586,7 +5535,7 @@ pub(crate) mod tests {
             tester.up(&gesture);
             tester.pump_and_settle();
 
-            let unselected = center_of(tester, text(tester, "B"));
+            let unselected = tester.get_center(text(tester, "B"));
             tester.move_to(&mut gesture, unselected, false);
             tester.pump_and_settle();
             assert!(has_rect(&first_material_paints(tester), unselected_hovered));
@@ -5609,16 +5558,15 @@ pub(crate) mod tests {
         #[test]
         #[allow(deprecated)]
         fn a_primary_tab_overlay_is_primary_on_the_selected_tab_and_on_surface_on_others() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 let mut frame = Frame::new(vec!["A", "B"], "A");
                 frame.use_material3 = Some(theme.use_material3);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
                 let colors = &theme.color_scheme;
                 check_default_overlay(
-                    &mut tester,
+                    tester,
                     colors.primary.with_opacity(0.08),
                     colors.primary.with_opacity(0.1),
                     colors.on_surface.with_opacity(0.08),
@@ -5630,17 +5578,16 @@ pub(crate) mod tests {
         #[test]
         #[allow(deprecated)]
         fn a_secondary_tab_overlay_is_on_surface_on_every_tab() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 let mut frame = Frame::new(vec!["A", "B"], "A");
                 frame.secondary_tab_bar = true;
                 frame.use_material3 = Some(theme.use_material3);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
                 let colors = &theme.color_scheme;
                 check_default_overlay(
-                    &mut tester,
+                    tester,
                     colors.on_surface.with_opacity(0.08),
                     colors.on_surface.with_opacity(0.1),
                     colors.on_surface.with_opacity(0.08),
@@ -5660,24 +5607,23 @@ pub(crate) mod tests {
         // 'Scrollable TabBar tap selects tab'.
         #[test]
         fn tapping_a_tab_of_a_scrollable_tab_bar_selects_it() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let mut frame = Frame::new(vec!["A", "B", "C"], "C");
                 frame.is_scrollable = true;
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("A").len(), 1);
-                assert_eq!(tester.find_text("B").len(), 1);
-                assert_eq!(tester.find_text("C").len(), 1);
-                let controller = default_controller_of(&tester, text(&tester, "A"));
-                assert_eq!(index_of(&tester, controller.handle()), 2);
+                expect(tester, &find::text("A"), finds_one_widget());
+                expect(tester, &find::text("B"), finds_one_widget());
+                expect(tester, &find::text("C"), finds_one_widget());
+                let controller = default_controller_of(tester, text(tester, "A"));
+                assert_eq!(index_of(tester, controller.handle()), 2);
                 assert_eq!(controller.previous_index(&tester.cell.borrow()), 2);
 
                 for (label, index) in [("C", 2), ("B", 1), ("A", 0)] {
-                    let tab = text(&tester, label);
-                    tap(&mut tester, tab);
+                    let tab = text(tester, label);
+                    tap(tester, tab);
                     tester.pump_and_settle();
-                    assert_eq!(index_of(&tester, controller.handle()), index);
+                    assert_eq!(index_of(tester, controller.handle()), index);
                 }
             });
         }
@@ -5685,12 +5631,12 @@ pub(crate) mod tests {
         /// Dart's 'Scrollable TabBar ... tap centers selected tab' cases: tap FFFFFF of twelve
         /// scrollable tabs and find it centred at `expected`.
         fn check_tap_centers_tab(
+            tester: &mut WidgetTester,
             use_material3: Option<bool>,
             padding: Option<EdgeInsetsGeometry>,
             text_direction: TextDirection,
             expected: f64,
         ) {
-            let mut tester = tester();
             let tab_bar_key = GlobalKey::new();
             let mut frame = Frame::new(TWELVE_TABS.to_vec(), "AAAAAA");
             frame.is_scrollable = true;
@@ -5698,14 +5644,14 @@ pub(crate) mod tests {
             frame.padding = padding;
             frame.text_direction = text_direction;
             frame.use_material3 = use_material3;
-            let frame = frame.build(&tester);
+            let frame = frame.build(tester);
             tester.pump_widget(frame);
-            let controller = default_controller_of(&tester, text(&tester, "AAAAAA"));
-            assert_eq!(index_of(&tester, controller.handle()), 0);
+            let controller = default_controller_of(tester, text(tester, "AAAAAA"));
+            assert_eq!(index_of(tester, controller.handle()), 0);
 
             let tab_bar = tester.render_object(&tab_bar_key).as_box().expect("a box");
             assert_eq!(tab_bar.size(&tester.cell.borrow()).width(), 800.0);
-            let center = center_of(&tester, text(&tester, "FFFFFF")).dx();
+            let center = tester.get_center(text(tester, "FFFFFF")).dx();
             match text_direction {
                 // The center of the FFFFFF item is to the right of the TabBar's center
                 TextDirection::Ltr => assert!(center > 401.0, "{center}"),
@@ -5713,12 +5659,12 @@ pub(crate) mod tests {
                 TextDirection::Rtl => assert!(center < 401.0, "{center}"),
             }
 
-            let f = text(&tester, "FFFFFF");
-            tap(&mut tester, f);
+            let f = text(tester, "FFFFFF");
+            tap(tester, f);
             tester.pump_and_settle();
-            assert_eq!(index_of(&tester, controller.handle()), 5);
+            assert_eq!(index_of(tester, controller.handle()), 5);
             // The center of the FFFFFF item is now at the TabBar's center
-            let center = center_of(&tester, text(&tester, "FFFFFF")).dx();
+            let center = tester.get_center(text(tester, "FFFFFF")).dx();
             assert!(close(center, expected, 1.0), "{center}");
         }
 
@@ -5729,16 +5675,17 @@ pub(crate) mod tests {
         // 'Material2 - Scrollable TabBar tap centers selected tab'.
         #[test]
         fn material2_tapping_a_tab_of_a_scrollable_tab_bar_centers_it() {
-            with_main_thread_stack(|| {
-                check_tap_centers_tab(Some(false), None, TextDirection::Ltr, 400.0);
+            test_widgets(|tester| {
+                check_tap_centers_tab(tester, Some(false), None, TextDirection::Ltr, 400.0);
             });
         }
 
         // 'Material2 - Scrollable TabBar, with padding, tap centers selected tab'.
         #[test]
         fn material2_tapping_a_tab_of_a_padded_scrollable_tab_bar_centers_it() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 check_tap_centers_tab(
+                    tester,
                     Some(false),
                     Some(padding_right_30_left_60()),
                     TextDirection::Ltr,
@@ -5750,8 +5697,9 @@ pub(crate) mod tests {
         // 'Material3 - Scrollable TabBar, with padding, tap centers selected tab'.
         #[test]
         fn material3_tapping_a_tab_of_a_padded_scrollable_tab_bar_centers_it() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 check_tap_centers_tab(
+                    tester,
                     None,
                     Some(padding_right_30_left_60()),
                     TextDirection::Ltr,
@@ -5763,8 +5711,9 @@ pub(crate) mod tests {
         // 'Material2 - Scrollable TabBar, with padding and TextDirection.rtl, tap centers selected tab'.
         #[test]
         fn material2_tapping_a_tab_of_a_padded_right_to_left_scrollable_tab_bar_centers_it() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 check_tap_centers_tab(
+                    tester,
                     Some(false),
                     Some(padding_right_30_left_60()),
                     TextDirection::Rtl,
@@ -5776,8 +5725,9 @@ pub(crate) mod tests {
         // 'Material3 - Scrollable TabBar, with padding and TextDirection.rtl, tap centers selected tab'.
         #[test]
         fn material3_tapping_a_tab_of_a_padded_right_to_left_scrollable_tab_bar_centers_it() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 check_tap_centers_tab(
+                    tester,
                     None,
                     Some(padding_right_30_left_60()),
                     TextDirection::Rtl,
@@ -5787,8 +5737,11 @@ pub(crate) mod tests {
         }
 
         /// Dart's 'TabBar can be scrolled independent of the selection' cases.
-        fn check_scrolled_independent_of_selection(use_material3: Option<bool>, start_limit: f64) {
-            let mut tester = tester();
+        fn check_scrolled_independent_of_selection(
+            tester: &mut WidgetTester,
+            use_material3: Option<bool>,
+            start_limit: f64,
+        ) {
             let tabs = vec![
                 "AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF", "GGGG", "HHHH", "IIII", "JJJJ",
                 "KKKK", "LLLL",
@@ -5798,33 +5751,35 @@ pub(crate) mod tests {
             frame.is_scrollable = true;
             frame.tab_bar_key = Some(tab_bar_key.clone());
             frame.use_material3 = use_material3;
-            let frame = frame.build(&tester);
+            let frame = frame.build(tester);
             tester.pump_widget(frame);
-            let controller = default_controller_of(&tester, text(&tester, "AAAA"));
-            assert_eq!(index_of(&tester, controller.handle()), 0);
+            let controller = default_controller_of(tester, text(tester, "AAAA"));
+            assert_eq!(index_of(tester, controller.handle()), 0);
 
             // Fling-scroll the TabBar to the left
-            assert!(center_of(&tester, text(&tester, "HHHH")).dx() < start_limit);
-            let tab_bar_center = tester.center_of(&tab_bar_key);
+            assert!(tester.get_center(text(tester, "HHHH")).dx() < start_limit);
+            let tab_bar_center = tester.get_center(&tab_bar_key);
             tester.fling_from(tab_bar_center, Offset::new(-200.0, 0.0), 10000.0, 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1)); // finish the scroll animation
-            assert!(center_of(&tester, text(&tester, "HHHH")).dx() < 500.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
+            assert!(tester.get_center(text(tester, "HHHH")).dx() < 500.0);
 
             // Scrolling the TabBar doesn't change the selection
-            assert_eq!(index_of(&tester, controller.handle()), 0);
+            assert_eq!(index_of(tester, controller.handle()), 0);
         }
 
         // 'Material2 - TabBar can be scrolled independent of the selection'.
         #[test]
         fn material2_flinging_a_scrollable_tab_bar_keeps_the_selection() {
-            with_main_thread_stack(|| check_scrolled_independent_of_selection(Some(false), 700.0));
+            test_widgets(|tester| {
+                check_scrolled_independent_of_selection(tester, Some(false), 700.0)
+            });
         }
 
         // 'Material3 - TabBar can be scrolled independent of the selection'.
         #[test]
         fn material3_flinging_a_scrollable_tab_bar_keeps_the_selection() {
-            with_main_thread_stack(|| check_scrolled_independent_of_selection(None, 720.0));
+            test_widgets(|tester| check_scrolled_independent_of_selection(tester, None, 720.0));
         }
 
         /// Dart's `TabStateMarker`: a stateful widget whose state carries a `marker`.
@@ -5865,10 +5820,9 @@ pub(crate) mod tests {
         // 'TabBarView maintains state'.
         #[test]
         fn a_tab_bar_view_keeps_the_state_of_the_pages_beside_the_current_one() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["AAAAAA", "BBBBBB", "CCCCCC", "DDDDDD", "EEEEEE"];
-                let theme = super::theme(&tester, None, None);
+                let theme = super::theme(tester, None, None);
                 let builder = |value: &str| {
                     boilerplate(
                         theme.clone(),
@@ -5887,12 +5841,12 @@ pub(crate) mod tests {
                 };
                 // Dart's `find.widgetWithText(TabStateMarker, name, skipOffstage: false)`'s state.
                 let find_state_marker_state = |tester: &WidgetTester, name: &str| {
-                    let marker = tester
-                        .find_by_type::<TabStateMarker>()
+                    let marker = find::by_type::<TabStateMarker>()
+                        .evaluate(tester)
                         .into_iter()
                         .find(|marker| {
-                            tester
-                                .find_text(name)
+                            find::text(name)
+                                .evaluate(tester)
                                 .iter()
                                 .any(|text| tester.ancestors(*text).contains(marker))
                         })
@@ -5904,23 +5858,23 @@ pub(crate) mod tests {
 
                 let mut value = tabs[0];
                 tester.pump_widget(builder(value));
-                let controller = default_controller_of(&tester, text(&tester, "AAAAAA"));
+                let controller = default_controller_of(tester, text(tester, "AAAAAA"));
 
-                let mut gesture = WidgetTester::touch(1);
-                let start = center_of(&tester, text(&tester, tabs[0]));
+                let mut gesture = TestPointer::touch(1);
+                let start = tester.get_center(text(tester, tabs[0]));
                 tester.down(&mut gesture, start);
                 tester.move_to(&mut gesture, start + Offset::new(-600.0, 0.0), true);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert_eq!(value, tabs[0]);
-                let state = find_state_marker_state(&tester, tabs[1]);
+                let state = find_state_marker_state(tester, tabs[1]);
                 tester.cell.borrow_mut().get_mut(state).marker = Some("marked".to_string());
                 tester.up(&gesture);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_secs(1));
-                value = tabs[index_of(&tester, controller.handle())];
+                tester.pump();
+                tester.pump_by(Duration::from_secs(1));
+                value = tabs[index_of(tester, controller.handle())];
                 assert_eq!(value, tabs[1]);
                 tester.pump_widget(builder(value));
-                let state = find_state_marker_state(&tester, tabs[1]);
+                let state = find_state_marker_state(tester, tabs[1]);
                 assert_eq!(
                     tester.cell.borrow().get(state).marker.as_deref(),
                     Some("marked")
@@ -5928,43 +5882,43 @@ pub(crate) mod tests {
 
                 // Move to the third tab.
 
-                let mut gesture = WidgetTester::touch(2);
-                let start = center_of(&tester, text(&tester, tabs[1]));
+                let mut gesture = TestPointer::touch(2);
+                let start = tester.get_center(text(tester, tabs[1]));
                 tester.down(&mut gesture, start);
                 tester.move_to(&mut gesture, start + Offset::new(-600.0, 0.0), true);
                 tester.up(&gesture);
-                tester.pump(Duration::ZERO);
-                let state = find_state_marker_state(&tester, tabs[1]);
+                tester.pump();
+                let state = find_state_marker_state(tester, tabs[1]);
                 assert_eq!(
                     tester.cell.borrow().get(state).marker.as_deref(),
                     Some("marked")
                 );
-                tester.pump(Duration::from_secs(1));
-                value = tabs[index_of(&tester, controller.handle())];
+                tester.pump_by(Duration::from_secs(1));
+                value = tabs[index_of(tester, controller.handle())];
                 assert_eq!(value, tabs[2]);
                 tester.pump_widget(builder(value));
 
                 // The state is now gone.
 
-                assert!(tester.find_onstage_text(tabs[1]).is_empty());
+                expect(tester, &find::text(tabs[1]), finds_nothing());
 
                 // Move back to the second tab.
 
-                let mut gesture = WidgetTester::touch(3);
-                let start = center_of(&tester, text(&tester, tabs[2]));
+                let mut gesture = TestPointer::touch(3);
+                let start = tester.get_center(text(tester, tabs[2]));
                 tester.down(&mut gesture, start);
                 tester.move_to(&mut gesture, start + Offset::new(600.0, 0.0), true);
-                tester.pump(Duration::ZERO);
-                let marker_state = find_state_marker_state(&tester, tabs[1]);
+                tester.pump();
+                let marker_state = find_state_marker_state(tester, tabs[1]);
                 assert_eq!(tester.cell.borrow().get(marker_state).marker, None);
                 tester.cell.borrow_mut().get_mut(marker_state).marker = Some("marked".to_string());
                 tester.up(&gesture);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_secs(1));
-                value = tabs[index_of(&tester, controller.handle())];
+                tester.pump();
+                tester.pump_by(Duration::from_secs(1));
+                value = tabs[index_of(tester, controller.handle())];
                 assert_eq!(value, tabs[1]);
                 tester.pump_widget(builder(value));
-                let state = find_state_marker_state(&tester, tabs[1]);
+                let state = find_state_marker_state(tester, tabs[1]);
                 assert_eq!(
                     tester.cell.borrow().get(state).marker.as_deref(),
                     Some("marked")
@@ -5977,10 +5931,10 @@ pub(crate) mod tests {
         fn pump_left_right_app(tester: &mut WidgetTester) -> Ref<TabController> {
             let app = build_left_right_app(tester, vec!["LEFT", "RIGHT"], "LEFT", true, None);
             tester.pump_widget(app);
-            assert_eq!(tester.find_onstage_text("LEFT").len(), 1);
-            assert_eq!(tester.find_onstage_text("RIGHT").len(), 1);
-            assert_eq!(tester.find_onstage_text("LEFT CHILD").len(), 1);
-            assert!(tester.find_onstage_text("RIGHT CHILD").is_empty());
+            expect(tester, &find::text("LEFT"), finds_one_widget());
+            expect(tester, &find::text("RIGHT"), finds_one_widget());
+            expect(tester, &find::text("LEFT CHILD"), finds_one_widget());
+            expect(tester, &find::text("RIGHT CHILD"), finds_nothing());
 
             let controller = default_controller_of(tester, text(tester, "LEFT"));
             assert_eq!(index_of(tester, controller.handle()), 0);
@@ -5989,11 +5943,11 @@ pub(crate) mod tests {
 
         fn assert_page(tester: &WidgetTester, left: bool) {
             assert_eq!(
-                tester.find_onstage_text("LEFT CHILD").len(),
+                find::text("LEFT CHILD").evaluate(tester).len(),
                 usize::from(left)
             );
             assert_eq!(
-                tester.find_onstage_text("RIGHT CHILD").len(),
+                find::text("RIGHT CHILD").evaluate(tester).len(),
                 usize::from(!left)
             );
         }
@@ -6001,56 +5955,53 @@ pub(crate) mod tests {
         // 'TabBar left/right fling'.
         #[test]
         fn flinging_a_tab_bar_view_left_and_right_switches_its_tab() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = pump_left_right_app(&mut tester);
+            test_widgets(|tester| {
+                let controller = pump_left_right_app(tester);
 
                 // Fling to the left, switch from the 'LEFT' tab to the 'RIGHT'
-                let fling_start = center_of(&tester, text(&tester, "LEFT CHILD"));
+                let fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 tester.fling_from(fling_start, Offset::new(-200.0, 0.0), 10000.0, 1);
                 tester.pump_and_settle();
-                assert_eq!(index_of(&tester, controller.handle()), 1);
-                assert_page(&tester, false);
+                assert_eq!(index_of(tester, controller.handle()), 1);
+                assert_page(tester, false);
 
                 // Fling to the right, switch back to the 'LEFT' tab
-                let fling_start = center_of(&tester, text(&tester, "RIGHT CHILD"));
+                let fling_start = tester.get_center(text(tester, "RIGHT CHILD"));
                 tester.fling_from(fling_start, Offset::new(200.0, 0.0), 10000.0, 2);
                 tester.pump_and_settle();
-                assert_eq!(index_of(&tester, controller.handle()), 0);
-                assert_page(&tester, true);
+                assert_eq!(index_of(tester, controller.handle()), 0);
+                assert_page(tester, true);
             });
         }
 
         // 'TabBar left/right fling reverse (1)'.
         #[test]
         fn flinging_the_first_page_right_keeps_it() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = pump_left_right_app(&mut tester);
+            test_widgets(|tester| {
+                let controller = pump_left_right_app(tester);
 
-                let fling_start = center_of(&tester, text(&tester, "LEFT CHILD"));
+                let fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 tester.fling_from(fling_start, Offset::new(200.0, 0.0), 10000.0, 1);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_secs(1)); // finish the scroll animation
-                assert_eq!(index_of(&tester, controller.handle()), 0);
-                assert_page(&tester, true);
+                tester.pump();
+                tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
+                assert_eq!(index_of(tester, controller.handle()), 0);
+                assert_page(tester, true);
             });
         }
 
         // 'TabBar left/right fling reverse (2)' (the first of the two cases Dart names so).
         #[test]
         fn flinging_the_first_page_left_settles_on_the_second_after_one_second() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = pump_left_right_app(&mut tester);
+            test_widgets(|tester| {
+                let controller = pump_left_right_app(tester);
 
-                let fling_start = center_of(&tester, text(&tester, "LEFT CHILD"));
+                let fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 tester.fling_from(fling_start, Offset::new(-200.0, 0.0), 10000.0, 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 // this is similar to a test above, but that one does many more pumps
-                tester.pump(Duration::from_secs(1)); // finish the scroll animation
-                assert_eq!(index_of(&tester, controller.handle()), 1);
-                assert_page(&tester, false);
+                tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
+                assert_eq!(index_of(tester, controller.handle()), 1);
+                assert_page(tester, false);
             });
         }
 
@@ -6059,21 +6010,20 @@ pub(crate) mod tests {
         // `index > 50` from 0, so never: the gesture is a down and an up.
         #[test]
         fn a_fling_ended_by_reversing_settles_back_on_its_first_page() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = pump_left_right_app(&mut tester);
+            test_widgets(|tester| {
+                let controller = pump_left_right_app(tester);
 
-                let fling_start = center_of(&tester, text(&tester, "LEFT CHILD"));
-                let mut gesture = WidgetTester::touch(1);
+                let fling_start = tester.get_center(text(tester, "LEFT CHILD"));
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, fling_start);
                 // End the fling by reversing direction. This should cause not cause
                 // a change to the selected tab, everything should just settle back to
                 // where it started.
                 tester.up(&gesture);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_secs(1)); // finish the scroll animation
-                assert_eq!(index_of(&tester, controller.handle()), 0);
-                assert_page(&tester, true);
+                tester.pump();
+                tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
+                assert_eq!(index_of(tester, controller.handle()), 0);
+                assert_page(tester, true);
             });
         }
 
@@ -6134,12 +6084,11 @@ pub(crate) mod tests {
         // 'TabController notifies the index to change when left flinging'.
         #[test]
         fn flinging_a_tab_bar_view_left_notifies_the_index_of_the_page_it_lands_on() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["A", "B", "C"];
-                let theme_tester = self::tester();
+                let theme_tester = WidgetTester::on(waft_embedder::TargetPlatform::Android);
                 let tab_controller =
-                    pump_tab_controller_frame(&mut tester, tabs.len(), 2, |controller| {
+                    pump_tab_controller_frame(tester, tabs.len(), 2, |controller| {
                         tab_controller_frame_app(
                             &theme_tester,
                             waft_embedder::TargetPlatform::IOS,
@@ -6148,7 +6097,7 @@ pub(crate) mod tests {
                             controller,
                         )
                     });
-                assert_eq!(index_of(&tester, tab_controller.handle()), 2);
+                assert_eq!(index_of(tester, tab_controller.handle()), 2);
 
                 let notified = Rc::new(RefCell::new(Vec::new()));
                 let notified_in_listener = Rc::clone(&notified);
@@ -6159,7 +6108,7 @@ pub(crate) mod tests {
                         notified_in_listener.borrow_mut().push(listened.index(app));
                     }),
                 );
-                let fling_start = center_of(&tester, text(&tester, "CHILD C"));
+                let fling_start = tester.get_center(text(tester, "CHILD C"));
                 tester.fling_from(fling_start, Offset::new(600.0, 0.0), 10000.0, 1);
                 tester.pump_and_settle();
                 let index_of_b = 1;
@@ -6172,9 +6121,8 @@ pub(crate) mod tests {
         // 'TabBar fling velocity' (a regression test for https://github.com/flutter/flutter/issues/7133).
         #[test]
         fn a_small_slow_fling_of_a_scrollable_tab_bar_keeps_the_second_tab_visible() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     waft_widgets::Align::new()
@@ -6204,11 +6152,11 @@ pub(crate) mod tests {
                 ));
 
                 // After a small slow fling to the left, we expect the second item to still be visible.
-                let start = center_of(&tester, text(&tester, "AAAAAA"));
+                let start = tester.get_center(text(tester, "AAAAAA"));
                 tester.fling_from(start, Offset::new(-25.0, 0.0), 100.0, 1);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_secs(1)); // finish the scroll animation
-                let render = tester.render_box_of(text(&tester, "BBBBBB"));
+                tester.pump();
+                tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
+                let render = tester.render_box_of(text(tester, "BBBBBB"));
                 let app = tester.cell.borrow();
                 assert!(render.local_to_global(&app, Offset::ZERO, None).dx() > 0.0);
             });
@@ -6217,13 +6165,12 @@ pub(crate) mod tests {
         // 'TabController change notification'.
         #[test]
         fn a_tab_controller_notifies_its_listeners_of_taps_and_flings() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["LEFT", "RIGHT"];
-                let app = build_left_right_app(&tester, tabs.to_vec(), "LEFT", true, None);
+                let app = build_left_right_app(tester, tabs.to_vec(), "LEFT", true, None);
                 tester.pump_widget(app);
-                let controller = default_controller_of(&tester, text(&tester, "LEFT"));
-                assert_eq!(index_of(&tester, controller.handle()), 0);
+                let controller = default_controller_of(tester, text(tester, "LEFT"));
+                assert_eq!(index_of(tester, controller.handle()), 0);
 
                 let value = Rc::new(RefCell::new(None::<&'static str>));
                 let value_in_listener = Rc::clone(&value);
@@ -6235,22 +6182,22 @@ pub(crate) mod tests {
                     }),
                 );
 
-                let right = text(&tester, "RIGHT");
-                tap(&mut tester, right);
+                let right = text(tester, "RIGHT");
+                tap(tester, right);
                 tester.pump_and_settle();
                 assert_eq!(*value.borrow(), Some("RIGHT"));
 
-                let left = text(&tester, "LEFT");
-                tap(&mut tester, left);
+                let left = text(tester, "LEFT");
+                tap(tester, left);
                 tester.pump_and_settle();
                 assert_eq!(*value.borrow(), Some("LEFT"));
 
-                let left_fling_start = center_of(&tester, text(&tester, "LEFT CHILD"));
+                let left_fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 tester.fling_from(left_fling_start, Offset::new(-200.0, 0.0), 10000.0, 1);
                 tester.pump_and_settle();
                 assert_eq!(*value.borrow(), Some("RIGHT"));
 
-                let right_fling_start = center_of(&tester, text(&tester, "RIGHT CHILD"));
+                let right_fling_start = tester.get_center(text(tester, "RIGHT CHILD"));
                 tester.fling_from(right_fling_start, Offset::new(200.0, 0.0), 10000.0, 2);
                 tester.pump_and_settle();
                 assert_eq!(*value.borrow(), Some("LEFT"));
@@ -6260,12 +6207,11 @@ pub(crate) mod tests {
         // 'Explicit TabController'.
         #[test]
         fn an_explicit_tab_controller_drives_its_tab_bar_view() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["LEFT", "RIGHT"];
-                let theme_tester = self::tester();
+                let theme_tester = WidgetTester::on(waft_embedder::TargetPlatform::Android);
                 let tab_controller =
-                    pump_tab_controller_frame(&mut tester, tabs.len(), 1, |controller| {
+                    pump_tab_controller_frame(tester, tabs.len(), 1, |controller| {
                         tab_controller_frame_app(
                             &theme_tester,
                             waft_embedder::TargetPlatform::Android,
@@ -6275,9 +6221,9 @@ pub(crate) mod tests {
                         )
                     });
 
-                assert_eq!(tester.find_onstage_text("LEFT").len(), 1);
-                assert_eq!(tester.find_onstage_text("RIGHT").len(), 1);
-                assert_page(&tester, false);
+                expect(tester, &find::text("LEFT"), finds_one_widget());
+                expect(tester, &find::text("RIGHT"), finds_one_widget());
+                assert_page(tester, false);
                 {
                     let app = tester.cell.borrow();
                     assert_eq!(tab_controller.index(&app), 1);
@@ -6289,14 +6235,14 @@ pub(crate) mod tests {
                 }
 
                 tab_controller.set_index(&mut tester.cell.borrow_mut(), 0);
-                tester.pump(Duration::from_millis(500));
-                tester.pump(Duration::from_millis(500));
-                assert_page(&tester, true);
+                tester.pump_by(Duration::from_millis(500));
+                tester.pump_by(Duration::from_millis(500));
+                assert_page(tester, true);
 
                 tab_controller.set_index(&mut tester.cell.borrow_mut(), 1);
-                tester.pump(Duration::from_millis(500));
-                tester.pump(Duration::from_millis(500));
-                assert_page(&tester, false);
+                tester.pump_by(Duration::from_millis(500));
+                tester.pump_by(Duration::from_millis(500));
+                assert_page(tester, false);
             });
         }
 
@@ -6304,12 +6250,11 @@ pub(crate) mod tests {
         // https://github.com/flutter/flutter/pull/7387#pullrequestreview-15630946).
         #[test]
         fn an_animation_listener_that_resets_the_index_wins() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["A", "B", "C"];
-                let theme_tester = self::tester();
+                let theme_tester = WidgetTester::on(waft_embedder::TargetPlatform::Android);
                 let tab_controller =
-                    pump_tab_controller_frame(&mut tester, tabs.len(), 0, |controller| {
+                    pump_tab_controller_frame(tester, tabs.len(), 0, |controller| {
                         tab_controller_frame_app(
                             &theme_tester,
                             waft_embedder::TargetPlatform::Android,
@@ -6354,8 +6299,8 @@ pub(crate) mod tests {
                     Some(Duration::from_millis(200)),
                     Some(Curves::linear()),
                 );
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(300));
+                tester.pump();
+                tester.pump_by(Duration::from_millis(300));
 
                 {
                     let app = tester.cell.borrow();
@@ -6371,14 +6316,13 @@ pub(crate) mod tests {
         // 'TabBar unselectedLabelColor control test'.
         #[test]
         fn the_label_colors_give_the_selected_and_unselected_tabs_their_icon_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = tab_controller(&tester, 2);
+            test_widgets(|tester| {
+                let controller = tab_controller(tester, 2);
                 let first_color = Rc::new(RefCell::new(None::<Color>));
                 let second_color = Rc::new(RefCell::new(None::<Color>));
                 let first = Rc::clone(&first_color);
                 let second = Rc::clone(&second_color);
-                let theme = super::theme(&tester, None, None);
+                let theme = super::theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -6413,8 +6357,7 @@ pub(crate) mod tests {
         // 'TabBar animationDuration sets indicator animation duration'.
         #[test]
         fn a_tab_bar_animates_its_selection_over_the_controllers_animation_duration() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let animation_duration = Duration::from_millis(100);
                 let build = |tester: &WidgetTester| {
                     let mut frame = Frame::new(vec!["A", "B", "C"], "B");
@@ -6422,16 +6365,16 @@ pub(crate) mod tests {
                     frame.build(tester)
                 };
 
-                let frame = build(&tester);
+                let frame = build(tester);
                 tester.pump_widget(frame);
-                let controller = default_controller_of(&tester, text(&tester, "A"));
+                let controller = default_controller_of(tester, text(tester, "A"));
 
-                let a = text(&tester, "A");
-                tap(&mut tester, a);
-                tester.pump(Duration::ZERO);
+                let a = text(tester, "A");
+                tap(tester, a);
+                tester.pump();
                 assert!(controller.index_is_changing(&tester.cell.borrow()));
-                tester.pump(Duration::from_millis(50));
-                tester.pump(animation_duration);
+                tester.pump_by(Duration::from_millis(50));
+                tester.pump_by(animation_duration);
                 {
                     let app = tester.cell.borrow();
                     assert_eq!(controller.index(&app), 0);
@@ -6440,14 +6383,14 @@ pub(crate) mod tests {
                 }
 
                 //Test when index diff is greater than 1
-                let frame = build(&tester);
+                let frame = build(tester);
                 tester.pump_widget(frame);
-                let c = text(&tester, "C");
-                tap(&mut tester, c);
-                tester.pump(Duration::ZERO);
+                let c = text(tester, "C");
+                tap(tester, c);
+                tester.pump();
                 assert!(controller.index_is_changing(&tester.cell.borrow()));
-                tester.pump(Duration::from_millis(50));
-                tester.pump(animation_duration);
+                tester.pump_by(Duration::from_millis(50));
+                tester.pump_by(animation_duration);
                 {
                     let app = tester.cell.borrow();
                     assert_eq!(controller.index(&app), 2);
@@ -6462,9 +6405,8 @@ pub(crate) mod tests {
         // semantics node builds. The semantics tree it made Dart throw on is deferred.
         #[test]
         fn a_tab_whose_icon_is_a_zero_size_image_builds() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = super::theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = super::theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -6475,7 +6417,7 @@ pub(crate) mod tests {
                             .into_widget()]),
                     ),
                 ));
-                assert_eq!(tester.find_onstage_by_type::<Tab>().len(), 1);
+                expect(tester, &find::by_type::<Tab>(), finds_one_widget());
             });
         }
     }
@@ -6484,12 +6426,15 @@ pub(crate) mod tests {
         //! tabs_test.dart cases, part b: `ensureVisible does not move TabViews` through
         //! `Indicator elastic animation`.
 
+        use waft_rendering::testing::{PaintCall, assert_paints};
+
         use super::*;
 
         use waft_foundation::ValueKey;
         use waft_widgets::ScrollableState;
 
-        use crate::test_support::TestVSync;
+        use crate::test_support::PaintInspection;
+        use waft_widgets::testing::TestVSync;
 
         /// Dart's `createTabController(length:, vsync: const TestVSync(), initialIndex:,
         /// animationDuration:)`.
@@ -6579,13 +6524,12 @@ pub(crate) mod tests {
         // 'TabBarView controller sets animation duration'.
         #[test]
         fn a_tab_bar_view_animates_for_its_controller_s_duration() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let animation_duration = Duration::from_millis(100);
                 let tabs = ["A", "B", "C"];
-                let tab_controller = create_tab_controller(&tester, 3, 1, Some(animation_duration));
+                let tab_controller = create_tab_controller(tester, 3, 1, Some(animation_duration));
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     bar_over_view(
                         &tabs,
                         tab_controller.clone(),
@@ -6594,33 +6538,32 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 1);
+                assert_eq!(index(tester, tab_controller.handle()), 1);
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
 
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
-                assert_eq!(pixels(&tester, page_controller.handle()), 400.0);
-                let c = text(&tester, "C");
-                tap(&mut tester, c);
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 400.0);
-                tester.pump(Duration::from_millis(50));
-                tester.pump(animation_duration);
-                assert_eq!(pixels(&tester, page_controller.handle()), 800.0);
+                assert_eq!(pixels(tester, page_controller.handle()), 400.0);
+                let c = text(tester, "C");
+                tap(tester, c);
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 400.0);
+                tester.pump_by(Duration::from_millis(50));
+                tester.pump_by(animation_duration);
+                assert_eq!(pixels(tester, page_controller.handle()), 800.0);
             });
         }
 
         // 'TabBarView animation can be interrupted'.
         #[test]
         fn a_tab_bar_view_animation_can_be_interrupted() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let animation_duration = Duration::from_secs(2);
                 let tabs = ["A", "B", "C"];
-                let tab_controller = create_tab_controller(&tester, 3, 0, Some(animation_duration));
+                let tab_controller = create_tab_controller(tester, 3, 0, Some(animation_duration));
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     bar_over_view(
                         &tabs,
                         tab_controller.clone(),
@@ -6629,30 +6572,30 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 0);
+                assert_eq!(index(tester, tab_controller.handle()), 0);
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
 
-                assert_eq!(pixels(&tester, page_controller.handle()), 0.0);
+                assert_eq!(pixels(tester, page_controller.handle()), 0.0);
 
-                let c = text(&tester, "C");
-                tap(&mut tester, c);
-                tester.pump(Duration::from_millis(10)); // TODO(bleroux): find why this is needed.
+                let c = text(tester, "C");
+                tap(tester, c);
+                tester.pump_by(Duration::from_millis(10)); // TODO(bleroux): find why this is needed.
 
                 // Runs the animation for half of the animation duration.
-                tester.pump(Duration::from_secs(1));
+                tester.pump_by(Duration::from_secs(1));
 
                 // The position should be between page 1 and page 2.
-                let position = pixels(&tester, page_controller.handle());
+                let position = pixels(tester, page_controller.handle());
                 assert!(position > 400.0, "{position}");
                 assert!(position < 800.0, "{position}");
 
                 // Switch to another tab before the end of the animation.
-                let a = text(&tester, "A");
-                tap(&mut tester, a);
-                tester.pump(Duration::from_millis(10)); // TODO(bleroux): find why this is needed.
-                tester.pump(animation_duration);
-                assert_eq!(pixels(&tester, page_controller.handle()), 0.0);
+                let a = text(tester, "A");
+                tap(tester, a);
+                tester.pump_by(Duration::from_millis(10)); // TODO(bleroux): find why this is needed.
+                tester.pump_by(animation_duration);
+                assert_eq!(pixels(tester, page_controller.handle()), 0.0);
 
                 tester.pump_and_settle(); // Finish the animation.
             });
@@ -6661,13 +6604,12 @@ pub(crate) mod tests {
         // 'TabBarView viewportFraction sets PageView viewport fraction'.
         #[test]
         fn a_tab_bar_view_gives_its_page_view_its_viewport_fraction() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["A", "B", "C"];
                 let tab_controller =
-                    create_tab_controller(&tester, 3, 1, Some(Duration::from_millis(100)));
+                    create_tab_controller(tester, 3, 1, Some(Duration::from_millis(100)));
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     bar_over_view(
                         &tabs,
                         tab_controller.clone(),
@@ -6676,11 +6618,11 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 1);
+                assert_eq!(index(tester, tab_controller.handle()), 1);
 
                 // The TabView was initialized with viewportFraction as 0.8
                 // So it's expected the PageView inside would obtain the same viewportFraction
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
                 assert_eq!(
                     page_controller.viewport_fraction(&tester.cell.borrow()),
                     0.8
@@ -6691,13 +6633,12 @@ pub(crate) mod tests {
         // 'TabBarView viewportFraction is 1 by default'.
         #[test]
         fn a_tab_bar_view_s_viewport_fraction_is_1_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["A", "B", "C"];
                 let tab_controller =
-                    create_tab_controller(&tester, 3, 1, Some(Duration::from_millis(100)));
+                    create_tab_controller(tester, 3, 1, Some(Duration::from_millis(100)));
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     bar_over_view(
                         &tabs,
                         tab_controller.clone(),
@@ -6706,11 +6647,11 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 1);
+                assert_eq!(index(tester, tab_controller.handle()), 1);
 
                 // The TabView was initialized with default viewportFraction
                 // So it's expected the PageView inside would obtain the value 1
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
                 assert_eq!(
                     page_controller.viewport_fraction(&tester.cell.borrow()),
                     1.0
@@ -6721,8 +6662,7 @@ pub(crate) mod tests {
         // 'TabBarView viewportFraction can be updated'.
         #[test]
         fn a_tab_bar_view_s_viewport_fraction_can_be_updated() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["A", "B", "C"];
                 let build_frame = |tester: &WidgetTester, viewport_fraction: f64| {
                     let controller = create_tab_controller(tester, 3, 1, None);
@@ -6736,15 +6676,15 @@ pub(crate) mod tests {
                     )
                 };
 
-                let frame = build_frame(&tester, 0.8);
+                let frame = build_frame(tester, 0.8);
                 tester.pump_widget(frame);
-                let controller = page_controller(&tester);
+                let controller = page_controller(tester);
                 assert_eq!(controller.viewport_fraction(&tester.cell.borrow()), 0.8);
 
                 // Rebuild with a different viewport fraction.
-                let frame = build_frame(&tester, 0.5);
+                let frame = build_frame(tester, 0.5);
                 tester.pump_widget(frame);
-                let controller = page_controller(&tester);
+                let controller = page_controller(tester);
                 assert_eq!(controller.viewport_fraction(&tester.cell.borrow()), 0.5);
             });
         }
@@ -6752,8 +6692,7 @@ pub(crate) mod tests {
         // 'TabBarView has clipBehavior Clip.hardEdge by default'.
         #[test]
         fn a_tab_bar_view_clips_hard_edge_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = || {
                     vec![
                         Text::new("First").into_widget(),
@@ -6761,12 +6700,12 @@ pub(crate) mod tests {
                     ]
                 };
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     DefaultTabController::new(2, TabBarView::new(tabs())),
                 );
                 tester.pump_widget(frame);
                 let clip_behavior = tester
-                    .widget(only::<TabBarView>(&tester), |view: &TabBarView| {
+                    .widget(only::<TabBarView>(tester), |view: &TabBarView| {
                         view.clip_behavior
                     });
                 assert_eq!(clip_behavior, Clip::HardEdge);
@@ -6776,18 +6715,17 @@ pub(crate) mod tests {
         // 'TabBarView sets clipBehavior correctly'.
         #[test]
         fn a_tab_bar_view_gives_its_page_view_its_clip_behavior() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = vec![
                     Text::new("First").into_widget(),
                     Text::new("Second").into_widget(),
                 ];
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     DefaultTabController::new(2, TabBarView::new(tabs).clip_behavior(Clip::None)),
                 );
                 tester.pump_widget(frame);
-                let clip_behavior = tester.widget(only::<PageView>(&tester), |view: &PageView| {
+                let clip_behavior = tester.widget(only::<PageView>(tester), |view: &PageView| {
                     view.clip_behavior
                 });
                 assert_eq!(clip_behavior, Clip::None);
@@ -6812,27 +6750,26 @@ pub(crate) mod tests {
         // 'TabBar tap skips indicator animation when disabled in controller'.
         #[test]
         fn a_tap_moves_the_indicator_at_once_when_the_controller_does_not_animate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = vec!["A", "B"];
                 let indicator_color = Color::new(0xFFFF0000);
                 let mut frame = Frame::new(tabs, "A");
                 frame.use_material3 = Some(false);
                 frame.indicator_color = Some(indicator_color);
                 frame.animation_duration = Some(Duration::ZERO);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
 
-                let render = first_render_box::<TabBar>(&tester);
-                let indicator_rect0 = recorded_indicator_rect(&tester, render, indicator_color);
+                let render = first_render_box::<TabBar>(tester);
+                let indicator_rect0 = recorded_indicator_rect(tester, render, indicator_color);
                 assert_eq!(indicator_rect0.left, 0.0);
                 assert_eq!(indicator_rect0.width(), 400.0);
                 assert_eq!(indicator_rect0.height(), 2.0);
 
-                let b = text(&tester, "B");
-                tap(&mut tester, b);
-                tester.pump(Duration::ZERO);
-                let indicator_rect2 = recorded_indicator_rect(&tester, render, indicator_color);
+                let b = text(tester, "B");
+                tap(tester, b);
+                tester.pump();
+                let indicator_rect2 = recorded_indicator_rect(tester, render, indicator_color);
                 assert_eq!(indicator_rect2.left, 400.0);
                 assert_eq!(indicator_rect2.width(), 400.0);
                 assert_eq!(indicator_rect2.height(), 2.0);
@@ -6842,21 +6779,20 @@ pub(crate) mod tests {
         // 'TabBar tap changes index instantly when animation is disabled in controller'.
         #[test]
         fn a_tap_changes_the_index_at_once_when_the_controller_does_not_animate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = vec!["A", "B", "C"];
                 let frame = |tester: &WidgetTester| {
                     let mut frame = Frame::new(tabs.clone(), "B");
                     frame.animation_duration = Some(Duration::ZERO);
                     frame.build(tester)
                 };
-                let built = frame(&tester);
+                let built = frame(tester);
                 tester.pump_widget(built);
-                let controller = default_controller_of(&tester, text(&tester, "A"));
+                let controller = default_controller_of(tester, text(tester, "A"));
 
-                let a = text(&tester, "A");
-                tap(&mut tester, a);
-                tester.pump(Duration::ZERO);
+                let a = text(tester, "A");
+                tap(tester, a);
+                tester.pump();
                 {
                     let app = tester.cell.borrow();
                     assert_eq!(controller.index(&app), 0);
@@ -6865,11 +6801,11 @@ pub(crate) mod tests {
                 }
 
                 //Test when index diff is greater than 1
-                let built = frame(&tester);
+                let built = frame(tester);
                 tester.pump_widget(built);
-                let c = text(&tester, "C");
-                tap(&mut tester, c);
-                tester.pump(Duration::ZERO);
+                let c = text(tester, "C");
+                tap(tester, c);
+                tester.pump();
                 {
                     let app = tester.cell.borrow();
                     assert_eq!(controller.index(&app), 2);
@@ -6882,15 +6818,14 @@ pub(crate) mod tests {
         // 'Scrollable TabBar does not have overscroll indicator'.
         #[test]
         fn a_scrollable_tab_bar_has_no_overscroll_indicator() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let mut frame = Frame::new(vec!["A", "B", "C"], "A");
                 frame.is_scrollable = true;
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
                 assert!(
-                    tester
-                        .find_onstage_by_type::<waft_widgets::GlowingOverscrollIndicator>()
+                    find::by_type::<waft_widgets::GlowingOverscrollIndicator>()
+                        .evaluate(tester)
                         .is_empty()
                 );
             });
@@ -6899,8 +6834,7 @@ pub(crate) mod tests {
         // 'TabBar should not throw when animation is disabled in controller'.
         #[test]
         fn tabs_added_to_a_tab_bar_whose_controller_does_not_animate_can_be_selected() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let mut tabs = vec!["A"];
 
                 let build_with_tab_bar_view = |tester: &WidgetTester, tabs: &[&'static str]| {
@@ -6924,22 +6858,22 @@ pub(crate) mod tests {
                     )
                 };
 
-                let frame = build_with_tab_bar_view(&tester, &tabs);
+                let frame = build_with_tab_bar_view(tester, &tabs);
                 tester.pump_widget(frame);
-                let controller = default_controller_of(&tester, text(&tester, "A"));
-                assert_eq!(index(&tester, controller.handle()), 0);
+                let controller = default_controller_of(tester, text(tester, "A"));
+                assert_eq!(index(tester, controller.handle()), 0);
 
                 tabs.push("B");
-                let frame = build_with_tab_bar_view(&tester, &tabs);
+                let frame = build_with_tab_bar_view(tester, &tabs);
                 tester.pump_widget(frame);
                 tabs.push("C");
-                let frame = build_with_tab_bar_view(&tester, &tabs);
+                let frame = build_with_tab_bar_view(tester, &tabs);
                 tester.pump_widget(frame);
-                let c = text(&tester, "C");
-                tap(&mut tester, c);
+                let c = text(tester, "C");
+                tap(tester, c);
                 tester.pump_and_settle();
-                let controller = default_controller_of(&tester, text(&tester, "A"));
-                assert_eq!(index(&tester, controller.handle()), 2);
+                let controller = default_controller_of(tester, text(tester, "A"));
+                assert_eq!(index(tester, controller.handle()), 2);
             });
         }
 
@@ -6964,72 +6898,64 @@ pub(crate) mod tests {
             tab_controller
         }
 
-        fn tap_text(tester: &mut WidgetTester, label: &str) {
-            let element = text(tester, label);
-            tap(tester, element);
-        }
-
         // 'TabBarView skips animation when disabled in controller'.
         #[test]
         fn a_tab_bar_view_jumps_when_its_controller_does_not_animate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = pump_unanimated_tabs(&mut tester, &["A", "B", "C"], 1);
+            test_widgets(|tester| {
+                let tab_controller = pump_unanimated_tabs(tester, &["A", "B", "C"], 1);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 1);
+                assert_eq!(index(tester, tab_controller.handle()), 1);
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
 
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
-                assert_eq!(pixels(&tester, page_controller.handle()), 400.0);
-                tap_text(&mut tester, "C");
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 800.0);
+                assert_eq!(pixels(tester, page_controller.handle()), 400.0);
+                tester.tap(find::text("C"));
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 800.0);
             });
         }
 
         // 'TabBarView skips animation when disabled in controller - skip tabs'.
         #[test]
         fn a_tab_bar_view_jumps_over_tabs_when_its_controller_does_not_animate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = pump_unanimated_tabs(&mut tester, &["A", "B", "C"], 0);
+            test_widgets(|tester| {
+                let tab_controller = pump_unanimated_tabs(tester, &["A", "B", "C"], 0);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 0);
+                assert_eq!(index(tester, tab_controller.handle()), 0);
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
 
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
-                assert_eq!(pixels(&tester, page_controller.handle()), 0.0);
-                tap_text(&mut tester, "C");
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 800.0);
+                assert_eq!(pixels(tester, page_controller.handle()), 0.0);
+                tester.tap(find::text("C"));
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 800.0);
             });
         }
 
         // 'TabBarView skips animation when disabled in controller - skip tabs twice'.
         #[test]
         fn a_tab_bar_view_jumps_over_tabs_twice_when_its_controller_does_not_animate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = pump_unanimated_tabs(&mut tester, &["A", "B", "C"], 0);
+            test_widgets(|tester| {
+                let tab_controller = pump_unanimated_tabs(tester, &["A", "B", "C"], 0);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 0);
+                assert_eq!(index(tester, tab_controller.handle()), 0);
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
 
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
-                assert_eq!(pixels(&tester, page_controller.handle()), 0.0);
-                tap_text(&mut tester, "C");
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 800.0);
+                assert_eq!(pixels(tester, page_controller.handle()), 0.0);
+                tester.tap(find::text("C"));
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 800.0);
 
-                tap_text(&mut tester, "A");
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 0.0);
+                tester.tap(find::text("A"));
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 0.0);
             });
         }
 
@@ -7037,74 +6963,71 @@ pub(crate) mod tests {
         #[test]
         fn a_tab_bar_view_jumps_over_tabs_then_to_neighbours_when_its_controller_does_not_animate()
         {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = pump_unanimated_tabs(&mut tester, &["A", "B", "C"], 0);
+            test_widgets(|tester| {
+                let tab_controller = pump_unanimated_tabs(tester, &["A", "B", "C"], 0);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 0);
+                assert_eq!(index(tester, tab_controller.handle()), 0);
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
 
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
-                assert_eq!(pixels(&tester, page_controller.handle()), 0.0);
-                tap_text(&mut tester, "C");
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 800.0);
+                assert_eq!(pixels(tester, page_controller.handle()), 0.0);
+                tester.tap(find::text("C"));
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 800.0);
 
-                tap_text(&mut tester, "B");
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 400.0);
+                tester.tap(find::text("B"));
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 400.0);
 
-                tap_text(&mut tester, "A");
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 0.0);
+                tester.tap(find::text("A"));
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 0.0);
             });
         }
 
         // 'TabBarView skips animation when disabled in controller - two tabs'.
         #[test]
         fn a_two_tab_bar_view_jumps_when_its_controller_does_not_animate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = pump_unanimated_tabs(&mut tester, &["A", "B"], 0);
+            test_widgets(|tester| {
+                let tab_controller = pump_unanimated_tabs(tester, &["A", "B"], 0);
 
-                assert_eq!(index(&tester, tab_controller.handle()), 0);
+                assert_eq!(index(tester, tab_controller.handle()), 0);
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
 
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
-                assert_eq!(pixels(&tester, page_controller.handle()), 0.0);
-                tap_text(&mut tester, "B");
-                tester.pump(Duration::ZERO);
-                assert_eq!(pixels(&tester, page_controller.handle()), 400.0);
+                assert_eq!(pixels(tester, page_controller.handle()), 0.0);
+                tester.tap(find::text("B"));
+                tester.pump();
+                assert_eq!(pixels(tester, page_controller.handle()), 400.0);
             });
         }
 
         // 'TabBar tap animates the selection indicator'.
         #[test]
         fn a_tap_animates_the_selection_indicator() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // This is a regression test for https://github.com/flutter/flutter/issues/7479
-                let mut tester = tester();
                 let indicator_color = Color::new(0xFFFF0000);
                 let mut frame = Frame::new(vec!["A", "B"], "A");
                 frame.use_material3 = Some(false);
                 frame.indicator_color = Some(indicator_color);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
 
-                let render = first_render_box::<TabBar>(&tester);
-                let indicator_rect0 = recorded_indicator_rect(&tester, render, indicator_color);
+                let render = first_render_box::<TabBar>(tester);
+                let indicator_rect0 = recorded_indicator_rect(tester, render, indicator_color);
                 assert_eq!(indicator_rect0.left, 0.0);
                 assert_eq!(indicator_rect0.width(), 400.0);
                 assert_eq!(indicator_rect0.height(), 2.0);
 
-                tap_text(&mut tester, "B");
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(50));
-                let indicator_rect1 = recorded_indicator_rect(&tester, render, indicator_color);
+                tester.tap(find::text("B"));
+                tester.pump();
+                tester.pump_by(Duration::from_millis(50));
+                let indicator_rect1 = recorded_indicator_rect(tester, render, indicator_color);
                 assert!(
                     indicator_rect1.left > indicator_rect0.left,
                     "{indicator_rect1:?}"
@@ -7112,8 +7035,8 @@ pub(crate) mod tests {
                 assert!(indicator_rect1.right < 800.0, "{indicator_rect1:?}");
                 assert_eq!(indicator_rect1.height(), 2.0);
 
-                tester.pump(Duration::from_millis(300));
-                let indicator_rect2 = recorded_indicator_rect(&tester, render, indicator_color);
+                tester.pump_by(Duration::from_millis(300));
+                let indicator_rect2 = recorded_indicator_rect(tester, render, indicator_color);
                 assert_eq!(indicator_rect2.left, 400.0);
                 assert_eq!(indicator_rect2.width(), 400.0);
                 assert_eq!(indicator_rect2.height(), 2.0);
@@ -7123,11 +7046,10 @@ pub(crate) mod tests {
         // 'TabBarView child disposed during animation'.
         #[test]
         fn a_replaced_tab_bar_stops_listening_to_the_controller() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // This is a regression test for this patch:
                 // https://github.com/flutter/flutter/pull/9015
-                let mut tester = tester();
-                let controller = create_tab_controller(&tester, 2, 0, None);
+                let controller = create_tab_controller(tester, 2, 0, None);
 
                 let build_frame = |tester: &WidgetTester| {
                     boilerplate_ltr(
@@ -7138,16 +7060,16 @@ pub(crate) mod tests {
                     )
                 };
 
-                let frame = build_frame(&tester);
+                let frame = build_frame(tester);
                 tester.pump_widget(frame);
 
                 // The original TabBar will be disposed. The controller should no
                 // longer have any listeners from the original TabBar.
-                let frame = build_frame(&tester);
+                let frame = build_frame(tester);
                 tester.pump_widget(frame);
 
                 controller.set_index(&mut tester.cell.borrow_mut(), 1);
-                tester.pump(Duration::from_millis(300));
+                tester.pump_by(Duration::from_millis(300));
             });
         }
 
@@ -7244,71 +7166,69 @@ pub(crate) mod tests {
         // 'TabBarView children can be updated during animation to an adjacent tab'.
         #[test]
         fn tab_bar_view_children_can_be_updated_while_it_animates_to_an_adjacent_tab() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/107399
-                let mut tester = tester();
                 let log = Rc::new(RefCell::new(Vec::new()));
 
                 let initial_marker = "before";
-                let frame = build_frame_with_marker(&tester, &log, initial_marker);
+                let frame = build_frame_with_marker(tester, &log, initial_marker);
                 tester.pump_widget(frame);
                 assert_eq!(*log.borrow(), ["init: 0"]);
-                assert_eq!(tester.find_onstage_text("0-before").len(), 1);
+                expect(tester, &find::text("0-before"), finds_one_widget());
 
                 // Select the second tab and wait until the transition starts
-                tap_text(&mut tester, "B");
-                tester.pump(Duration::from_millis(100));
+                tester.tap(find::text("B"));
+                tester.pump_by(Duration::from_millis(100));
 
                 // Check that both TabBody's are instantiated while the transition is animating
-                tester.pump(Duration::from_millis(400));
+                tester.pump_by(Duration::from_millis(400));
                 assert_eq!(*log.borrow(), ["init: 0", "init: 1"]);
 
                 // Update the TabBody's states while the transition is animating
                 let updated_marker = "after";
-                let frame = build_frame_with_marker(&tester, &log, updated_marker);
+                let frame = build_frame_with_marker(tester, &log, updated_marker);
                 tester.pump_widget(frame);
 
                 // Wait until the transition ends
                 tester.pump_and_settle();
 
                 // The TabBody state of the second TabBar should have been updated
-                assert!(tester.find_onstage_text("1-before").is_empty());
-                assert_eq!(tester.find_onstage_text("1-after").len(), 1);
+                expect(tester, &find::text("1-before"), finds_nothing());
+                expect(tester, &find::text("1-after"), finds_one_widget());
             });
         }
 
         // 'TabBarView children can be updated during animation to a non adjacent tab'.
         #[test]
         fn tab_bar_view_children_can_be_updated_while_it_animates_to_a_non_adjacent_tab() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Rc::new(RefCell::new(Vec::new()));
 
                 let initial_marker = "before";
-                let frame = build_frame_with_marker(&tester, &log, initial_marker);
+                let frame = build_frame_with_marker(tester, &log, initial_marker);
                 tester.pump_widget(frame);
                 assert_eq!(*log.borrow(), ["init: 0"]);
-                assert_eq!(tester.find_onstage_text("0-before").len(), 1);
+                expect(tester, &find::text("0-before"), finds_one_widget());
 
                 // Select the third tab and wait until the transition starts
-                tap_text(&mut tester, "C");
-                tester.pump(Duration::from_millis(100));
+                tester.tap(find::text("C"));
+                tester.pump_by(Duration::from_millis(100));
 
                 // Check that both TabBody's are instantiated while the transition is animating
-                tester.pump(Duration::from_millis(400));
+                tester.pump_by(Duration::from_millis(400));
                 assert_eq!(*log.borrow(), ["init: 0", "init: 2"]);
 
                 // Update the TabBody's states while the transition is animating
                 let updated_marker = "after";
-                let frame = build_frame_with_marker(&tester, &log, updated_marker);
+                let frame = build_frame_with_marker(tester, &log, updated_marker);
                 tester.pump_widget(frame);
 
                 // Wait until the transition ends
                 tester.pump_and_settle();
 
                 // The TabBody state of the third TabBar should have been updated
-                assert!(tester.find_onstage_text("2-before").is_empty());
-                assert_eq!(tester.find_onstage_text("2-after").len(), 1);
+                expect(tester, &find::text("2-before"), finds_nothing());
+                expect(tester, &find::text("2-after"), finds_one_widget());
             });
         }
 
@@ -7361,27 +7281,25 @@ pub(crate) mod tests {
         // 'TabBarView scrolls end close to a new page'.
         #[test]
         fn a_tab_bar_view_scrolled_close_to_a_page_selects_it() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // This is a regression test for https://github.com/flutter/flutter/issues/9375
-                let mut tester = tester();
-                let tab_controller = create_tab_controller(&tester, 3, 1, None);
+                let tab_controller = create_tab_controller(tester, 3, 1, None);
                 tester.pump_widget(centered_tab_bar_view(
                     TabBarView::new(numbered_pages(3)).controller(tab_controller.clone()),
                 ));
-                check_jumps_close_to_a_new_page(&mut tester, tab_controller.handle());
+                check_jumps_close_to_a_new_page(tester, tab_controller.handle());
             });
         }
 
         // 'On going TabBarView animation can be interrupted by a new animation'.
         #[test]
         fn an_ongoing_tab_bar_view_animation_can_be_interrupted_by_a_new_one() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // This is a regression test for https://github.com/flutter/flutter/issues/132293.
-                let mut tester = tester();
                 let tabs = ["A", "B", "C"];
-                let tab_controller = create_tab_controller(&tester, 3, 0, None);
+                let tab_controller = create_tab_controller(tester, 3, 0, None);
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     bar_over_view(
                         &tabs,
                         tab_controller.clone(),
@@ -7391,35 +7309,34 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
 
                 // First page is visible.
-                assert_eq!(index(&tester, tab_controller.handle()), 0);
-                assert_eq!(tester.find_onstage_text("0").len(), 1);
-                assert!(tester.find_onstage_text("1").is_empty());
+                assert_eq!(index(tester, tab_controller.handle()), 0);
+                expect(tester, &find::text("0"), finds_one_widget());
+                expect(tester, &find::text("1"), finds_nothing());
 
                 // Animate to the second page.
                 tab_controller.animate_to(&mut tester.cell.borrow_mut(), 1, None, None);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(300));
+                tester.pump();
+                tester.pump_by(Duration::from_millis(300));
 
                 // Animate back to the first page before the previous animation ends.
                 tab_controller.animate_to(&mut tester.cell.borrow_mut(), 0, None, None);
                 tester.pump_and_settle();
 
                 // First page should be visible.
-                assert_eq!(index(&tester, tab_controller.handle()), 0);
-                assert_eq!(tester.find_onstage_text("0").len(), 1);
-                assert!(tester.find_onstage_text("1").is_empty());
+                assert_eq!(index(tester, tab_controller.handle()), 0);
+                expect(tester, &find::text("0"), finds_one_widget());
+                expect(tester, &find::text("1"), finds_nothing());
             });
         }
 
         // 'Can switch to non-neighboring tab in nested TabBarView without crashing'.
         #[test]
         fn a_tab_bar_view_with_a_nested_tab_bar_view_switches_to_a_non_neighbouring_tab() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // This is a regression test for https://github.com/flutter/flutter/issues/18756
-                let mut tester = tester();
-                let main_tab_controller = create_tab_controller(&tester, 4, 0, None);
-                let nested_tab_controller = create_tab_controller(&tester, 2, 0, None);
-                let theme = theme(&tester, None, None);
+                let main_tab_controller = create_tab_controller(tester, 4, 0, None);
+                let nested_tab_controller = create_tab_controller(tester, 2, 0, None);
+                let theme = theme(tester, None, None);
                 let add_tab = |label: &str| {
                     Tab::new()
                         .icon(waft_widgets::Icon::new(Some(crate::icons::Icons::add())))
@@ -7469,14 +7386,14 @@ pub(crate) mod tests {
                 ));
 
                 // expect first tab to be selected
-                assert_eq!(index(&tester, main_tab_controller.handle()), 0);
+                assert_eq!(index(tester, main_tab_controller.handle()), 0);
 
                 // tap on third tab
-                tap_text(&mut tester, "C");
+                tester.tap(find::text("C"));
                 tester.pump_and_settle();
 
                 // expect third tab to be selected without exceptions
-                assert_eq!(index(&tester, main_tab_controller.handle()), 2);
+                assert_eq!(index(tester, main_tab_controller.handle()), 2);
             });
         }
 
@@ -7545,12 +7462,11 @@ pub(crate) mod tests {
         // 'TabBarView can warp when child is kept alive and contains ink'.
         #[test]
         fn a_tab_bar_view_warps_past_a_kept_alive_page_with_ink() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/57662.
-                let mut tester = tester();
-                let controller = create_tab_controller(&tester, 3, 0, None);
+                let controller = create_tab_controller(tester, 3, 0, None);
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBarView::new([
                         Text::new("Page 1").into_widget(),
                         Text::new("Page 2").into_widget(),
@@ -7563,19 +7479,19 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                assert_eq!(index(&tester, controller.handle()), 0);
-                assert_eq!(tester.find_onstage_text("Page 1").len(), 1);
-                assert!(tester.find_onstage_text("Page 3").is_empty());
+                assert_eq!(index(tester, controller.handle()), 0);
+                expect(tester, &find::text("Page 1"), finds_one_widget());
+                expect(tester, &find::text("Page 3"), finds_nothing());
 
                 controller.set_index(&mut tester.cell.borrow_mut(), 2);
                 tester.pump_and_settle();
-                assert!(tester.find_onstage_text("Page 1").is_empty());
-                assert_eq!(tester.find_onstage_text("Page 3").len(), 1);
+                expect(tester, &find::text("Page 1"), finds_nothing());
+                expect(tester, &find::text("Page 3"), finds_one_widget());
 
                 controller.set_index(&mut tester.cell.borrow_mut(), 0);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_onstage_text("Page 1").len(), 1);
-                assert!(tester.find_onstage_text("Page 3").is_empty());
+                expect(tester, &find::text("Page 1"), finds_one_widget());
+                expect(tester, &find::text("Page 3"), finds_nothing());
             });
         }
 
@@ -7617,15 +7533,14 @@ pub(crate) mod tests {
         // 'TabBarView scrolls end close to a new page with custom physics'.
         #[test]
         fn a_tab_bar_view_with_custom_physics_scrolled_close_to_a_page_selects_it() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = create_tab_controller(&tester, 3, 1, None);
+            test_widgets(|tester| {
+                let tab_controller = create_tab_controller(tester, 3, 1, None);
                 tester.pump_widget(centered_tab_bar_view(
                     TabBarView::new(numbered_pages(3))
                         .controller(tab_controller.clone())
                         .physics(Rc::new(TabBarTestScrollPhysics::default())),
                 ));
-                check_jumps_close_to_a_new_page(&mut tester, tab_controller.handle());
+                check_jumps_close_to_a_new_page(tester, tab_controller.handle());
             });
         }
 
@@ -7639,11 +7554,10 @@ pub(crate) mod tests {
         // 'TabBar accepts custom physics'.
         #[test]
         fn a_tab_bar_keeps_the_physics_it_is_given() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = create_tab_controller(&tester, 20, 19, None);
+            test_widgets(|tester| {
+                let controller = create_tab_controller(tester, 20, 19, None);
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(numbered_tabs(20))
                         .is_scrollable(true)
                         .controller(controller)
@@ -7651,7 +7565,7 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                let physics = tester.widget(only::<TabBar>(&tester), |tab_bar: &TabBar| {
+                let physics = tester.widget(only::<TabBar>(tester), |tab_bar: &TabBar| {
                     tab_bar.physics.clone().expect("given physics")
                 });
                 // Dart's `TabMockScrollMetrics` is a fake the physics never reads.
@@ -7698,13 +7612,12 @@ pub(crate) mod tests {
         // 'TabBar accepts external TabBarScrollController'.
         #[test]
         fn a_tab_bar_scrolls_with_an_external_tab_bar_scroll_controller() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_bar_controller = create_tab_controller(&tester, 6, 5, None);
-                let tab_scroll_controller = new_tab_bar_scroll_controller(&tester);
+            test_widgets(|tester| {
+                let tab_bar_controller = create_tab_controller(tester, 6, 5, None);
+                let tab_scroll_controller = new_tab_bar_scroll_controller(tester);
 
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(numbered_tabs(6))
                         .is_scrollable(true)
                         .controller(tab_bar_controller)
@@ -7713,23 +7626,22 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
 
                 tab_scroll_controller.jump_to(&mut tester.cell.borrow_mut(), 50.0);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
-                assert_eq!(scrollable_pixels(&tester), 50.0);
+                assert_eq!(scrollable_pixels(tester), 50.0);
             });
         }
 
         // 'TabBar attaches state to internal TabBarScrollController in didUpdateWidget'.
         #[test]
         fn a_tab_bar_moving_to_its_internal_scroll_controller_keeps_its_pixels() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_bar_controller = create_tab_controller(&tester, 6, 5, None);
-                let tab_scroll_controller = new_tab_bar_scroll_controller(&tester);
+            test_widgets(|tester| {
+                let tab_bar_controller = create_tab_controller(tester, 6, 5, None);
+                let tab_scroll_controller = new_tab_bar_scroll_controller(tester);
 
                 // Attach to the external controller.
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(numbered_tabs(6))
                         .is_scrollable(true)
                         .controller(tab_bar_controller.clone())
@@ -7737,11 +7649,11 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                let old_pixels = scrollable_pixels(&tester);
+                let old_pixels = scrollable_pixels(tester);
 
                 // Trigger didUpdateWidget for the change to the internal controller.
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(numbered_tabs(6))
                         .is_scrollable(true)
                         .controller(tab_bar_controller),
@@ -7750,9 +7662,9 @@ pub(crate) mod tests {
 
                 // Creating the new scroll position should not throw.
                 // The pixels of the new position should be the same as before the update.
-                assert_eq!(scrollable_pixels(&tester), old_pixels);
+                assert_eq!(scrollable_pixels(tester), old_pixels);
                 assert!(check_has_tab_bar_state_asserts(
-                    &tester,
+                    tester,
                     tab_scroll_controller.handle()
                 ));
             });
@@ -7761,25 +7673,24 @@ pub(crate) mod tests {
         // 'TabBar attaches state to external TabBarScrollController in didUpdateWidget'.
         #[test]
         fn a_tab_bar_moving_to_an_external_scroll_controller_keeps_its_pixels() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_bar_controller = create_tab_controller(&tester, 6, 5, None);
-                let tab_scroll_controller = new_tab_bar_scroll_controller(&tester);
+            test_widgets(|tester| {
+                let tab_bar_controller = create_tab_controller(tester, 6, 5, None);
+                let tab_scroll_controller = new_tab_bar_scroll_controller(tester);
 
                 // Attach to the internal controller.
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(numbered_tabs(6))
                         .is_scrollable(true)
                         .controller(tab_bar_controller.clone()),
                 );
                 tester.pump_widget(frame);
 
-                let old_pixels = scrollable_pixels(&tester);
+                let old_pixels = scrollable_pixels(tester);
 
                 // Trigger didUpdateWidget for the change to the external controller.
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(numbered_tabs(6))
                         .is_scrollable(true)
                         .controller(tab_bar_controller)
@@ -7789,7 +7700,7 @@ pub(crate) mod tests {
 
                 // Creating the new scroll position should not throw.
                 // The pixels of the new position should be the same as before the update.
-                assert_eq!(scrollable_pixels(&tester), old_pixels);
+                assert_eq!(scrollable_pixels(tester), old_pixels);
 
                 // This should not throw, since the tab bar is attached to the external controller.
                 assert!(tab_scroll_controller.debug_check_has_tab_bar_state(&tester.cell.borrow()));
@@ -7806,14 +7717,13 @@ pub(crate) mod tests {
         // 'TabBar correctly detaches old external TabBarScrollController when switched to a new one'.
         #[test]
         fn a_tab_bar_detaches_the_external_scroll_controller_it_is_switched_from() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = create_tab_controller(&tester, 10, 0, None);
-                let controller_a = new_tab_bar_scroll_controller(&tester);
-                let controller_b = new_tab_bar_scroll_controller(&tester);
+            test_widgets(|tester| {
+                let tab_controller = create_tab_controller(tester, 10, 0, None);
+                let controller_a = new_tab_bar_scroll_controller(tester);
+                let controller_b = new_tab_bar_scroll_controller(tester);
 
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(tabs_numbered_from_zero(10))
                         .is_scrollable(true)
                         .controller(tab_controller.clone())
@@ -7823,13 +7733,13 @@ pub(crate) mod tests {
 
                 assert!(controller_a.debug_check_has_tab_bar_state(&tester.cell.borrow()));
                 assert!(check_has_tab_bar_state_asserts(
-                    &tester,
+                    tester,
                     controller_b.handle()
                 ));
 
                 // Switch to controllerB
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(tabs_numbered_from_zero(10))
                         .is_scrollable(true)
                         .controller(tab_controller)
@@ -7839,7 +7749,7 @@ pub(crate) mod tests {
 
                 assert!(controller_b.debug_check_has_tab_bar_state(&tester.cell.borrow()));
                 assert!(check_has_tab_bar_state_asserts(
-                    &tester,
+                    tester,
                     controller_a.handle()
                 ));
             });
@@ -7848,13 +7758,12 @@ pub(crate) mod tests {
         // 'TabBar correctly detaches external TabBarScrollController when disposed'.
         #[test]
         fn a_disposed_tab_bar_detaches_its_external_scroll_controller() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = create_tab_controller(&tester, 10, 0, None);
-                let controller = new_tab_bar_scroll_controller(&tester);
+            test_widgets(|tester| {
+                let tab_controller = create_tab_controller(tester, 10, 0, None);
+                let controller = new_tab_bar_scroll_controller(tester);
 
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(tabs_numbered_from_zero(10))
                         .is_scrollable(true)
                         .controller(tab_controller)
@@ -7865,13 +7774,10 @@ pub(crate) mod tests {
                 assert!(controller.debug_check_has_tab_bar_state(&tester.cell.borrow()));
 
                 // Dispose the TabBar by pumping a different widget
-                let frame = boilerplate_ltr(&tester, SizedBox::shrink());
+                let frame = boilerplate_ltr(tester, SizedBox::shrink());
                 tester.pump_widget(frame);
 
-                assert!(check_has_tab_bar_state_asserts(
-                    &tester,
-                    controller.handle()
-                ));
+                assert!(check_has_tab_bar_state_asserts(tester, controller.handle()));
             });
         }
 
@@ -7896,41 +7802,39 @@ pub(crate) mod tests {
         // 'TabBar can be wrapped with RawScrollbar'.
         #[test]
         fn a_tab_bar_can_be_wrapped_in_a_raw_scrollbar() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/124608
-                let mut tester = tester();
-                pump_tab_bar_in_raw_scrollbar(&mut tester);
+                pump_tab_bar_in_raw_scrollbar(tester);
             });
         }
 
         // 'TabBar can show scrollbar on hover'.
         #[test]
         fn a_tab_bar_in_a_raw_scrollbar_shows_the_scrollbar_on_hover() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/124608
-                let mut tester = tester();
-                pump_tab_bar_in_raw_scrollbar(&mut tester);
+                pump_tab_bar_in_raw_scrollbar(tester);
 
-                let tab1 = tester.find_onstage_text("TAB #1");
+                let tab1 = find::text("TAB #1").evaluate(tester);
                 assert_eq!(tab1.len(), 1);
 
                 // Hover over the tab bar and verify that the scrollbar is shown.
-                let mut gesture = WidgetTester::mouse(1, 0);
+                let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
-                let center = center_of(&tester, tab1[0]);
+                let center = tester.get_center(tab1[0]);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
 
                 // Dart's `paints` on the scrollbar records its whole subtree, repaint boundaries and
                 // the ink of the materials in it included. Here that is the scrollbar's foreground
                 // `CustomPaint`, under its repaint boundary, and the ink of each material under it.
-                let scrollbar = only::<waft_widgets::RawScrollbar>(&tester);
+                let scrollbar = only::<waft_widgets::RawScrollbar>(tester);
                 let custom_paint = *tester
                     .descendants_of_type::<CustomPaint>(scrollbar)
                     .first()
                     .expect("the scrollbar's CustomPaint");
                 let painter = tester.render_box_of(custom_paint);
-                let mut drawn = tester.painted(painter.as_object());
+                let mut ops = tester.painted_ops(painter.as_object());
                 let scrollbar_render = tester.render_box_of(scrollbar).as_object();
                 for material in tester.all::<crate::material::RenderInkFeatures>() {
                     let under_scrollbar = {
@@ -7951,27 +7855,21 @@ pub(crate) mod tests {
                             &mut canvas,
                             Offset::ZERO,
                         );
-                        drawn.extend(crate::test_support::Drawn::draws(&canvas.build()));
+                        ops.extend(canvas.build().ops().iter().cloned());
                     }
                 }
-                assert!(
-                    drawn
-                        .iter()
-                        .any(|drawn| matches!(drawn, crate::test_support::Drawn::Rect(..))),
-                    "the scrollbar paints a rect: {drawn:?}"
-                );
+                assert_paints(&ops, &[PaintCall::rect(None)]);
             });
         }
 
         // 'Scrollable TabBar with a non-zero TabController initialIndex'.
         #[test]
         fn a_scrollable_tab_bar_shows_a_non_zero_initial_index_right_justified() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // This is a regression test for https://github.com/flutter/flutter/issues/9374
-                let mut tester = tester();
-                let controller = create_tab_controller(&tester, 20, 19, None);
+                let controller = create_tab_controller(tester, 20, 19, None);
                 let frame = boilerplate_ltr(
-                    &tester,
+                    tester,
                     TabBar::new(numbered_tabs(20))
                         .is_scrollable(true)
                         .controller(controller),
@@ -7979,7 +7877,7 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
 
                 // The initialIndex tab should be visible and right justified
-                let label = tester.find_onstage_text("TAB #19");
+                let label = find::text("TAB #19").evaluate(tester);
                 assert_eq!(label.len(), 1);
 
                 // Tabs have a minimum width of 72.0 and 'TAB #19' is wider than
@@ -7987,7 +7885,7 @@ pub(crate) mod tests {
                 let tab_right = 800.0 - K_TAB_LABEL_PADDING.right;
 
                 let tab = tester.ancestor_of_type::<Tab>(label[0]);
-                let right = rect_of(&tester, tab).right;
+                let right = tester.get_rect(tab).right;
                 // Dart's `moreOrLessEquals` epsilon is 1e-10; the global rect goes through valo's f32
                 // `Matrix4` at a scroll offset near 1725, which rounds it to about 1e-4.
                 assert!(close(right, tab_right, 1e-4), "{right}");
@@ -8022,8 +7920,7 @@ pub(crate) mod tests {
         // 'Indicator elastic animation'.
         #[test]
         fn the_label_indicator_stretches_elastically_as_the_offset_changes() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WIDTH: f64 = 50.0;
                 let tabs = (0..4).map(|index| {
                     Tab::new()
@@ -8031,50 +7928,54 @@ pub(crate) mod tests {
                         .child(SizedBox::new().width(INDICATOR_WIDTH))
                         .into_widget()
                 });
-                let controller = create_tab_controller(&tester, 4, 0, None);
-                let theme = theme(&tester, None, None);
+                let controller = create_tab_controller(tester, 4, 0, None);
+                let theme = theme(tester, None, None);
                 let inner = boilerplate_ltr(
-                    &tester,
+                    tester,
                     waft_widgets::Container::new()
                         .alignment(AlignmentGeometry::TOP_LEFT)
                         .child(TabBar::new(tabs).controller(controller.clone())),
                 );
                 tester.pump_widget(material_app(theme, inner));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 let height = tab_bar_box.size(&tester.cell.borrow()).height();
                 assert_eq!(height, 48.0);
 
                 let from_rect = Rect::from_ltrb(75.0, 0.0, 125.0, 48.0);
                 let mut to_rect = Rect::from_ltrb(75.0, 0.0, 125.0, 48.0);
                 let paints = |tester: &WidgetTester, rrect| {
-                    tester.paints_rrect(tab_bar_box.as_object(), rrect, None)
+                    waft_rendering::testing::paints(
+                        &tester.painted_ops(tab_bar_box.as_object()),
+                        &[waft_rendering::testing::PaintCall::rrect_at(rrect, None)],
+                    )
+                    .is_ok()
                 };
                 assert!(paints(
-                    &tester,
+                    tester,
                     tab_indicator_rrect_elastic_animation(height, from_rect, to_rect, 0.0)
                 ));
 
                 controller.set_offset(&mut tester.cell.borrow_mut(), 0.2);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 to_rect = Rect::from_ltrb(275.0, 0.0, 325.0, 48.0);
                 assert!(paints(
-                    &tester,
+                    tester,
                     tab_indicator_rrect_elastic_animation(height, from_rect, to_rect, 0.2)
                 ));
 
                 controller.set_offset(&mut tester.cell.borrow_mut(), 0.5);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert!(paints(
-                    &tester,
+                    tester,
                     tab_indicator_rrect_elastic_animation(height, from_rect, to_rect, 0.5)
                 ));
 
                 controller.set_offset(&mut tester.cell.borrow_mut(), 1.0);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 // When the animation is completed, no stretch is applied.
                 assert!(paints(
-                    &tester,
+                    tester,
                     tab_indicator_rrect_elastic_animation(height, from_rect, to_rect, 1.0)
                 ));
             });
@@ -8083,9 +7984,8 @@ pub(crate) mod tests {
         // 'ensureVisible does not move TabViews'.
         #[test]
         fn ensure_visible_does_not_move_tab_views() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = create_tab_controller(&tester, 3, 0, None);
+            test_widgets(|tester| {
+                let controller = create_tab_controller(tester, 3, 0, None);
 
                 let pages = (0..3).map(|page_index| {
                     waft_widgets::ListView::new()
@@ -8118,10 +8018,10 @@ pub(crate) mod tests {
                 );
 
                 let found = |tester: &WidgetTester, name: &str| {
-                    tester.find_onstage_by_key(&key(name)).len()
+                    find::by_key(key(name)).evaluate(tester).len()
                 };
                 let ensure_visible = |tester: &mut WidgetTester, name: &str| {
-                    let element = tester.find_onstage_by_key(&key(name))[0];
+                    let element = tester.element(find::by_key(key(name)));
                     let mut app = tester.cell.borrow_mut();
                     drop(waft_widgets::Scrollable::ensure_visible(
                         &mut app,
@@ -8133,36 +8033,36 @@ pub(crate) mod tests {
                     ));
                 };
 
-                assert_eq!(found(&tester, "list_0"), 1);
-                assert_eq!(found(&tester, "list_1"), 0);
-                assert_eq!(found(&tester, "0_25_2"), 1);
-                assert_eq!(found(&tester, "1_25_2"), 0);
-                assert_eq!(found(&tester, "1_25_0"), 0);
+                assert_eq!(found(tester, "list_0"), 1);
+                assert_eq!(found(tester, "list_1"), 0);
+                assert_eq!(found(tester, "0_25_2"), 1);
+                assert_eq!(found(tester, "1_25_2"), 0);
+                assert_eq!(found(tester, "1_25_0"), 0);
 
-                ensure_visible(&mut tester, "0_25_2");
+                ensure_visible(tester, "0_25_2");
                 tester.pump_and_settle();
-                assert_eq!(found(&tester, "0_25_2"), 1);
-                assert_eq!(found(&tester, "1_25_2"), 0);
-                assert_eq!(found(&tester, "1_25_0"), 0);
+                assert_eq!(found(tester, "0_25_2"), 1);
+                assert_eq!(found(tester, "1_25_2"), 0);
+                assert_eq!(found(tester, "1_25_0"), 0);
 
                 controller.set_index(&mut tester.cell.borrow_mut(), 1);
                 tester.pump_and_settle();
 
-                assert_eq!(found(&tester, "list_0"), 0);
-                assert_eq!(found(&tester, "list_1"), 1);
-                ensure_visible(&mut tester, "1_25_2");
+                assert_eq!(found(tester, "list_0"), 0);
+                assert_eq!(found(tester, "list_1"), 1);
+                ensure_visible(tester, "1_25_2");
                 tester.pump_and_settle();
 
-                assert_eq!(found(&tester, "0_25_2"), 0);
-                assert_eq!(found(&tester, "1_25_2"), 1);
-                assert_eq!(found(&tester, "1_25_0"), 1);
+                assert_eq!(found(tester, "0_25_2"), 0);
+                assert_eq!(found(tester, "1_25_2"), 1);
+                assert_eq!(found(tester, "1_25_0"), 1);
 
-                ensure_visible(&mut tester, "1_25_0");
+                ensure_visible(tester, "1_25_0");
                 tester.pump_and_settle();
 
-                assert_eq!(found(&tester, "0_25_2"), 0);
-                assert_eq!(found(&tester, "1_25_2"), 1);
-                assert_eq!(found(&tester, "1_25_0"), 1);
+                assert_eq!(found(tester, "0_25_2"), 0);
+                assert_eq!(found(tester, "1_25_2"), 1);
+                assert_eq!(found(tester, "1_25_0"), 1);
             });
         }
     }
@@ -8178,7 +8078,9 @@ pub(crate) mod tests {
 
         use waft_painting::EdgeInsets;
 
-        use crate::test_support::{Drawn, TestVSync};
+        use waft_embedder::valo::Op;
+        use waft_rendering::testing::{PaintCall, assert_paints, paints};
+        use waft_widgets::testing::TestVSync;
 
         /// Dart's `createTabController(length:, vsync: const TestVSync())`.
         fn new_controller(tester: &WidgetTester, length: usize) -> Ref<TabController> {
@@ -8223,82 +8125,10 @@ pub(crate) mod tests {
             tester.get_rect(tester.render_object(key).as_box().expect("a render box"))
         }
 
-        /// The pictures `render` and its subtree record, painted at the origin, the ones in nested
-        /// layers (a scroll view's clip) included: Dart's `paints` records what a pushed layer paints
-        /// on its one canvas.
-        fn deep_pictures(
-            tester: &WidgetTester,
-            render: AnyRenderObject,
-        ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
-            use waft_rendering::ContainerLayer;
-            fn collect(
-                app: &App,
-                layer: waft_rendering::AnyContainerLayer,
-                pictures: &mut Vec<std::sync::Arc<waft_embedder::Picture>>,
-            ) {
-                let mut child = layer.first_child(app);
-                while let Some(current) = child {
-                    if let Some(picture) = app
-                        .handle::<waft_rendering::PictureLayer>(current.id())
-                        .and_then(|picture| picture.picture(app))
-                    {
-                        pictures.push(std::sync::Arc::clone(picture));
-                    } else if let Some(container) = current.as_container_layer() {
-                        collect(app, container, pictures);
-                    }
-                    child = current.next_sibling(app);
-                }
-            }
-            let mut app = tester.cell.borrow_mut();
-            let layer = waft_rendering::OffsetLayer::new(&mut app, Offset::ZERO);
-            let container = layer.as_container_layer();
-            let bounds = render.paint_bounds(&app);
-            let mut context = PaintingContext::new(container, bounds);
-            context.paint_child(&mut app, render, Offset::ZERO);
-            context.stop_recording_if_needed(&mut app);
-            let mut pictures = Vec::new();
-            collect(&app, container, &mut pictures);
-            pictures
-        }
-
-        /// The lines of [`deep_pictures`], as `painted_lines` reads them.
         fn deep_lines(tester: &WidgetTester, render: AnyRenderObject) -> Vec<PaintedLine> {
-            use waft_embedder::valo::{Op, PaintStyle as ValoPaintStyle};
-            deep_pictures(tester, render)
-                .iter()
-                .flat_map(|picture| waft_embedder::flattened_ops(picture))
-                .filter_map(|op| match op {
-                    Op::DrawPath { path, paint, .. } => {
-                        let ValoPaintStyle::Stroke(stroke) = paint.style else {
-                            return None;
-                        };
-                        if path.elements().count() != 2 {
-                            return None;
-                        }
-                        let bounds = path.bounds();
-                        let channel = |value: f32| (value * 255.0).round() as u32;
-                        let color = paint.color;
-                        Some(PaintedLine {
-                            color: Color::new(
-                                (channel(color.a) << 24)
-                                    | (channel(color.r) << 16)
-                                    | (channel(color.g) << 8)
-                                    | channel(color.b),
-                            ),
-                            stroke_width: f64::from(stroke.width),
-                            p1: Offset::new(f64::from(bounds.x), f64::from(bounds.y)),
-                            p2: Offset::new(
-                                f64::from(bounds.x + bounds.width),
-                                f64::from(bounds.y + bounds.height),
-                            ),
-                        })
-                    }
-                    _ => None,
-                })
-                .collect()
+            lines_of(&tester.painted_ops_deep(render))
         }
 
-        /// Dart's `paints..line(color:, strokeWidth:, p1:, p2:)`, `color` left out when `None`.
         fn paints_line(
             tester: &WidgetTester,
             render: AnyRenderBox,
@@ -8307,40 +8137,35 @@ pub(crate) mod tests {
             p1: Offset,
             p2: Offset,
         ) -> bool {
-            let lines = deep_lines(tester, render.as_object());
-            let found = lines.iter().any(|line| {
-                color.is_none_or(|color| line.color.to_argb32() == color.to_argb32())
-                    && line.stroke_width == stroke_width
-                    && line.p1 == p1
-                    && line.p2 == p2
-            });
-            if !found {
-                eprintln!("lines painted: {lines:?}");
+            let result = paints(
+                &tester.painted_ops_deep(render.as_object()),
+                &[PaintCall::Line {
+                    p1: Some(p1),
+                    p2: Some(p2),
+                    color,
+                    stroke_width: Some(stroke_width),
+                }],
+            );
+            if let Err(mismatch) = &result {
+                eprintln!("{mismatch}");
             }
-            found
+            result.is_ok()
         }
 
-        /// What [`deep_pictures`] draws, reduced.
-        fn deep_painted(tester: &WidgetTester, render: AnyRenderObject) -> Vec<Drawn> {
-            deep_pictures(tester, render)
-                .iter()
-                .flat_map(|picture| Drawn::draws(picture))
-                .collect()
-        }
-
-        /// Dart's `paints..rect(rect:, color:)`.
         fn paints_rect(
             tester: &WidgetTester,
             render: AnyRenderBox,
             rect: Rect,
             color: Color,
         ) -> bool {
-            let painted = deep_painted(tester, render.as_object());
-            let found = painted.contains(&Drawn::Rect(color.to_argb32(), rect));
-            if !found {
-                eprintln!("painted: {painted:?}");
+            let result = paints(
+                &tester.painted_ops_deep(render.as_object()),
+                &[PaintCall::rect_at(rect, Some(color))],
+            );
+            if let Err(mismatch) = &result {
+                eprintln!("{mismatch}");
             }
-            found
+            result.is_ok()
         }
 
         fn tab_bar_height(tester: &WidgetTester) -> f64 {
@@ -8374,14 +8199,13 @@ pub(crate) mod tests {
         // 'TabBar with indicatorWeight, indicatorPadding (LTR)'.
         #[test]
         fn a_tab_bar_underline_takes_its_weight_and_padding_left_to_right() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_COLOR: Color = Color::new(0xFF00FF00);
                 const INDICATOR_WEIGHT: f64 = 8.0;
                 const PAD_LEFT: f64 = 8.0;
                 const PAD_RIGHT: f64 = 4.0;
-                let controller = new_controller(&tester, 4);
-                let theme = theme(&tester, Some(false), None);
+                let controller = new_controller(tester, 4);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -8396,14 +8220,14 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
-                assert_eq!(tab_bar_height(&tester), 54.0); // 54 = _kTabHeight(46) + indicatorWeight(8.0)
+                let tab_bar_box = first_render_box::<TabBar>(tester);
+                assert_eq!(tab_bar_height(tester), 54.0); // 54 = _kTabHeight(46) + indicatorWeight(8.0)
 
                 const INDICATOR_Y: f64 = 54.0 - INDICATOR_WEIGHT / 2.0;
                 let indicator_left = PAD_LEFT + INDICATOR_WEIGHT / 2.0;
                 let indicator_right = 200.0 - (PAD_RIGHT + INDICATOR_WEIGHT / 2.0);
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Some(INDICATOR_COLOR),
                     INDICATOR_WEIGHT,
@@ -8412,13 +8236,13 @@ pub(crate) mod tests {
                 ));
 
                 // Select tab 3
-                set_index(&tester, controller.handle(), 3);
+                set_index(tester, controller.handle(), 3);
                 tester.pump_and_settle();
 
                 let indicator_left = 600.0 + PAD_LEFT + INDICATOR_WEIGHT / 2.0;
                 let indicator_right = 800.0 - (PAD_RIGHT + INDICATOR_WEIGHT / 2.0);
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Some(INDICATOR_COLOR),
                     INDICATOR_WEIGHT,
@@ -8431,14 +8255,13 @@ pub(crate) mod tests {
         // 'TabBar with indicatorWeight, indicatorPadding (RTL)'.
         #[test]
         fn a_tab_bar_underline_takes_its_weight_and_padding_right_to_left() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_COLOR: Color = Color::new(0xFF00FF00);
                 const INDICATOR_WEIGHT: f64 = 8.0;
                 const PAD_LEFT: f64 = 8.0;
                 const PAD_RIGHT: f64 = 4.0;
-                let controller = new_controller(&tester, 4);
-                let theme = theme(&tester, Some(false), None);
+                let controller = new_controller(tester, 4);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Rtl,
@@ -8453,15 +8276,15 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
-                assert_eq!(tab_bar_height(&tester), 54.0); // 54 = _kTabHeight(46) + indicatorWeight(8.0)
-                assert_eq!(tab_bar_size(&tester).width(), 800.0);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
+                assert_eq!(tab_bar_height(tester), 54.0); // 54 = _kTabHeight(46) + indicatorWeight(8.0)
+                assert_eq!(tab_bar_size(tester).width(), 800.0);
 
                 const INDICATOR_Y: f64 = 54.0 - INDICATOR_WEIGHT / 2.0;
                 let indicator_left = 600.0 + PAD_LEFT + INDICATOR_WEIGHT / 2.0;
                 let indicator_right = 800.0 - PAD_RIGHT - INDICATOR_WEIGHT / 2.0;
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Some(INDICATOR_COLOR),
                     INDICATOR_WEIGHT,
@@ -8470,13 +8293,13 @@ pub(crate) mod tests {
                 ));
 
                 // Select tab 3
-                set_index(&tester, controller.handle(), 3);
+                set_index(tester, controller.handle(), 3);
                 tester.pump_and_settle();
 
                 let indicator_left = PAD_LEFT + INDICATOR_WEIGHT / 2.0;
                 let indicator_right = 200.0 - PAD_RIGHT - INDICATOR_WEIGHT / 2.0;
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Some(INDICATOR_COLOR),
                     INDICATOR_WEIGHT,
@@ -8489,9 +8312,8 @@ pub(crate) mod tests {
         // 'TabBar changes indicator attributes'.
         #[test]
         fn a_rebuilt_tab_bar_paints_its_new_indicator_attributes() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester, 4);
+            test_widgets(|tester| {
+                let controller = new_controller(tester, 4);
                 let build_frame = |tester: &WidgetTester,
                                    indicator_color: Color,
                                    indicator_weight: f64,
@@ -8516,7 +8338,7 @@ pub(crate) mod tests {
                 let (indicator_color, indicator_weight, pad_left, pad_right) =
                     (Color::new(0xFF00FF00), 8.0, 8.0, 4.0);
                 let frame = build_frame(
-                    &tester,
+                    tester,
                     indicator_color,
                     indicator_weight,
                     pad_left,
@@ -8524,14 +8346,14 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
-                assert_eq!(tab_bar_height(&tester), 54.0); // 54 = _kTabHeight(46) + indicatorWeight(8.0)
+                let tab_bar_box = first_render_box::<TabBar>(tester);
+                assert_eq!(tab_bar_height(tester), 54.0); // 54 = _kTabHeight(46) + indicatorWeight(8.0)
 
                 let indicator_y = 54.0 - indicator_weight / 2.0;
                 let indicator_left = pad_left + indicator_weight / 2.0;
                 let indicator_right = 200.0 - (pad_right + indicator_weight / 2.0);
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Some(indicator_color),
                     indicator_weight,
@@ -8542,7 +8364,7 @@ pub(crate) mod tests {
                 let (indicator_color, indicator_weight, pad_left, pad_right) =
                     (Color::new(0xFF0000FF), 4.0, 4.0, 8.0);
                 let frame = build_frame(
-                    &tester,
+                    tester,
                     indicator_color,
                     indicator_weight,
                     pad_left,
@@ -8556,7 +8378,7 @@ pub(crate) mod tests {
                 let indicator_left = pad_left + indicator_weight / 2.0;
                 let indicator_right = 200.0 - (pad_right + indicator_weight / 2.0);
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Some(indicator_color),
                     indicator_weight,
@@ -8598,12 +8420,11 @@ pub(crate) mod tests {
         // 'TabBar with directional indicatorPadding (LTR)'.
         #[test]
         fn a_directional_indicator_padding_starts_on_the_left_left_to_right() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let (keys, tabs) = sized_tabs(&[(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)]);
                 const INDICATOR_WEIGHT: f64 = 2.0; // the default
-                let controller = new_controller(&tester, 3);
-                let theme = theme(&tester, Some(false), None);
+                let controller = new_controller(tester, 3);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -8615,12 +8436,12 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 const TAB_BAR_HEIGHT: f64 = 50.0 + INDICATOR_WEIGHT; // 50 = max tab height
-                assert_eq!(tab_bar_height(&tester), TAB_BAR_HEIGHT);
+                assert_eq!(tab_bar_height(tester), TAB_BAR_HEIGHT);
 
                 let (_, _, tab_bottom) = assert_three_tab_rects(
-                    &tester,
+                    tester,
                     [&keys[0], &keys[1], &keys[2]],
                     [(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)],
                     TAB_BAR_HEIGHT,
@@ -8634,7 +8455,7 @@ pub(crate) mod tests {
                 let indicator_right = 130.0 + LABEL_HORIZONTAL - INDICATOR_WEIGHT / 2.0;
                 let indicator_y = tab_bottom + INDICATOR_WEIGHT / 2.0;
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -8647,12 +8468,11 @@ pub(crate) mod tests {
         // 'TabBar with directional indicatorPadding (RTL)'.
         #[test]
         fn a_directional_indicator_padding_starts_on_the_right_right_to_left() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let (keys, tabs) = sized_tabs(&[(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)]);
                 const INDICATOR_WEIGHT: f64 = 2.0; // the default
-                let controller = new_controller(&tester, 3);
-                let theme = theme(&tester, Some(false), None);
+                let controller = new_controller(tester, 3);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Rtl,
@@ -8664,12 +8484,12 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 const TAB_BAR_HEIGHT: f64 = 50.0 + INDICATOR_WEIGHT; // 50 = max tab height
-                assert_eq!(tab_bar_height(&tester), TAB_BAR_HEIGHT);
+                assert_eq!(tab_bar_height(tester), TAB_BAR_HEIGHT);
 
                 let (tab_left, tab_right, _) = assert_three_tab_rects(
-                    &tester,
+                    tester,
                     [&keys[2], &keys[1], &keys[0]],
                     [(150.0, 50.0), (140.0, 40.0), (130.0, 30.0)],
                     TAB_BAR_HEIGHT,
@@ -8683,7 +8503,7 @@ pub(crate) mod tests {
                 let indicator_right = tab_right + LABEL_LEFT - INDICATOR_WEIGHT / 2.0 - 100.0;
                 const INDICATOR_Y: f64 = 50.0 + INDICATOR_WEIGHT / 2.0;
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -8717,16 +8537,15 @@ pub(crate) mod tests {
         // 'TabBar with custom indicator and indicatorPadding(LTR)'.
         #[test]
         fn a_custom_indicator_is_inset_by_its_padding_left_to_right() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_COLOR: Color = Color::new(0xFF00FF00);
                 const PAD_TOP: f64 = 10.0;
                 const PAD_BOTTOM: f64 = 12.0;
                 const PAD_LEFT: f64 = 8.0;
                 const PAD_RIGHT: f64 = 4.0;
-                let controller = new_controller(&tester, 4);
+                let controller = new_controller(tester, 4);
                 let frame = custom_indicator_frame(
-                    &tester,
+                    tester,
                     TextDirection::Ltr,
                     controller.clone(),
                     INDICATOR_COLOR,
@@ -8734,25 +8553,25 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
-                assert_eq!(tab_bar_height(&tester), 48.0);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
+                assert_eq!(tab_bar_height(tester), 48.0);
                 // 48 = _kTabHeight(46) + indicatorWeight(2.0) ~default
 
                 const INDICATOR_BOTTOM: f64 = 48.0 - PAD_BOTTOM;
                 const INDICATOR_TOP: f64 = PAD_TOP;
                 assert!(paints_rect(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Rect::from_ltrb(PAD_LEFT, INDICATOR_TOP, 200.0 - PAD_RIGHT, INDICATOR_BOTTOM),
                     INDICATOR_COLOR,
                 ));
 
                 // Select tab 3
-                set_index(&tester, controller.handle(), 3);
+                set_index(tester, controller.handle(), 3);
                 tester.pump_and_settle();
 
                 assert!(paints_rect(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Rect::from_ltrb(
                         600.0 + PAD_LEFT,
@@ -8768,16 +8587,15 @@ pub(crate) mod tests {
         // 'TabBar with custom indicator and indicatorPadding (RTL)'.
         #[test]
         fn a_custom_indicator_is_inset_by_its_padding_right_to_left() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_COLOR: Color = Color::new(0xFF00FF00);
                 const PAD_TOP: f64 = 10.0;
                 const PAD_BOTTOM: f64 = 12.0;
                 const PAD_LEFT: f64 = 8.0;
                 const PAD_RIGHT: f64 = 4.0;
-                let controller = new_controller(&tester, 4);
+                let controller = new_controller(tester, 4);
                 let frame = custom_indicator_frame(
-                    &tester,
+                    tester,
                     TextDirection::Rtl,
                     controller.clone(),
                     INDICATOR_COLOR,
@@ -8785,14 +8603,14 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
-                assert_eq!(tab_bar_height(&tester), 48.0);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
+                assert_eq!(tab_bar_height(tester), 48.0);
                 // 48 = _kTabHeight(46) + indicatorWeight(2.0) ~default
-                assert_eq!(tab_bar_size(&tester).width(), 800.0);
+                assert_eq!(tab_bar_size(tester).width(), 800.0);
                 const INDICATOR_BOTTOM: f64 = 48.0 - PAD_BOTTOM;
                 const INDICATOR_TOP: f64 = PAD_TOP;
                 assert!(paints_rect(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Rect::from_ltrb(
                         600.0 + PAD_LEFT,
@@ -8804,11 +8622,11 @@ pub(crate) mod tests {
                 ));
 
                 // Select tab 3
-                set_index(&tester, controller.handle(), 3);
+                set_index(tester, controller.handle(), 3);
                 tester.pump_and_settle();
 
                 assert!(paints_rect(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Rect::from_ltrb(PAD_LEFT, INDICATOR_TOP, 200.0 - PAD_RIGHT, INDICATOR_BOTTOM),
                     INDICATOR_COLOR,
@@ -8819,8 +8637,7 @@ pub(crate) mod tests {
         // 'TabBar accepts indicatorWeight: 0 when the indicator comes from TabBarThemeData'.
         #[test]
         fn a_zero_indicator_weight_is_accepted_with_a_themed_indicator() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_COLOR: Color = Color::new(0xFF00FF00);
                 let build_frame = |tester: &WidgetTester, secondary: bool| {
                     let tabs = vec![
@@ -8850,21 +8667,21 @@ pub(crate) mod tests {
                 };
 
                 // Primary TabBar: no assertion is thrown and the themed indicator is painted.
-                let frame = build_frame(&tester, false);
+                let frame = build_frame(tester, false);
                 tester.pump_widget(frame);
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 // 46 = _kTabHeight(46) with no weight added by the zero indicatorWeight.
-                assert_eq!(tab_bar_height(&tester), 46.0);
+                assert_eq!(tab_bar_height(tester), 46.0);
                 assert!(paints_rect(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Rect::from_ltrb(0.0, 0.0, 400.0, 46.0),
                     INDICATOR_COLOR,
                 ));
 
                 // Secondary TabBar: also accepts a zero indicatorWeight with a themed indicator.
-                let frame = build_frame(&tester, true);
+                let frame = build_frame(tester, true);
                 tester.pump_widget(frame);
             });
         }
@@ -8872,9 +8689,8 @@ pub(crate) mod tests {
         // 'TabBar accepts indicatorWeight: 0 when the indicator is provided on the widget'.
         #[test]
         fn a_zero_indicator_weight_is_accepted_with_an_indicator_on_the_widget() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -8894,10 +8710,11 @@ pub(crate) mod tests {
         // 'TabBar throws indicatorWeight: 0 with the default underline indicator'.
         #[test]
         fn a_zero_indicator_weight_panics_with_the_default_underline() {
-            with_main_thread_stack(|| {
-                for secondary in [false, true] {
-                    let mut tester = tester();
-                    let theme = theme(&tester, None, None);
+            // Dart pumps both bars into one tester and takes each exception; here the panic
+            // unwinds the frame, so each bar gets a tester of its own.
+            for secondary in [false, true] {
+                test_widgets(|tester| {
+                    let theme = theme(tester, None, None);
                     let tabs = vec![
                         Tab::new().text("A").into_widget(),
                         Tab::new().text("B").into_widget(),
@@ -8919,8 +8736,8 @@ pub(crate) mod tests {
                         message.contains("Invalid indicatorWeight for TabBar."),
                         "{message}"
                     );
-                }
-            });
+                });
+            }
         }
 
         /// The custom indicator cases' scrollable tab bar of three sized tabs with a directional
@@ -8949,8 +8766,7 @@ pub(crate) mod tests {
         // 'TabBar with custom indicator - directional indicatorPadding (LTR)'.
         #[test]
         fn a_custom_indicator_takes_a_directional_padding_left_to_right() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let (keys, tabs) = sized_tabs(&[(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)]);
                 const INDICATOR_COLOR: Color = Color::new(0xFF00FF00);
                 const PAD_TOP: f64 = 10.0;
@@ -8958,9 +8774,9 @@ pub(crate) mod tests {
                 const PAD_START: f64 = 8.0;
                 const PAD_END: f64 = 4.0;
                 const INDICATOR_WEIGHT: f64 = 2.0; // the default
-                let controller = new_controller(&tester, 3);
+                let controller = new_controller(tester, 3);
                 let frame = custom_directional_frame(
-                    &tester,
+                    tester,
                     TextDirection::Ltr,
                     controller.clone(),
                     tabs,
@@ -8968,12 +8784,12 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 const TAB_BAR_HEIGHT: f64 = 50.0 + INDICATOR_WEIGHT; // 50 = max tab height
-                assert_eq!(tab_bar_height(&tester), TAB_BAR_HEIGHT);
+                assert_eq!(tab_bar_height(tester), TAB_BAR_HEIGHT);
 
                 assert_three_tab_rects(
-                    &tester,
+                    tester,
                     [&keys[0], &keys[1], &keys[2]],
                     [(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)],
                     TAB_BAR_HEIGHT,
@@ -8985,7 +8801,7 @@ pub(crate) mod tests {
                 // Tab 0 selected, indicator padding resolves to left: 8.0, right: 4.0
                 let indicator_right = 130.0 + LABEL_HORIZONTAL - PAD_END;
                 assert!(paints_rect(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Rect::from_ltrb(
                         PAD_START,
@@ -9001,8 +8817,7 @@ pub(crate) mod tests {
         // 'TabBar with custom indicator - directional indicatorPadding (RTL)'.
         #[test]
         fn a_custom_indicator_takes_a_directional_padding_right_to_left() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let (keys, tabs) = sized_tabs(&[(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)]);
                 const INDICATOR_COLOR: Color = Color::new(0xFF00FF00);
                 const PAD_TOP: f64 = 10.0;
@@ -9010,9 +8825,9 @@ pub(crate) mod tests {
                 const PAD_START: f64 = 8.0;
                 const PAD_END: f64 = 4.0;
                 const INDICATOR_WEIGHT: f64 = 2.0; // the default
-                let controller = new_controller(&tester, 3);
+                let controller = new_controller(tester, 3);
                 let frame = custom_directional_frame(
-                    &tester,
+                    tester,
                     TextDirection::Rtl,
                     controller.clone(),
                     tabs,
@@ -9020,12 +8835,12 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(frame);
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 const TAB_BAR_HEIGHT: f64 = 50.0 + INDICATOR_WEIGHT; // 50 = max tab height
-                assert_eq!(tab_bar_height(&tester), TAB_BAR_HEIGHT);
+                assert_eq!(tab_bar_height(tester), TAB_BAR_HEIGHT);
 
                 let (tab_left, tab_right, _) = assert_three_tab_rects(
-                    &tester,
+                    tester,
                     [&keys[2], &keys[1], &keys[0]],
                     [(150.0, 50.0), (140.0, 40.0), (130.0, 30.0)],
                     TAB_BAR_HEIGHT,
@@ -9038,7 +8853,7 @@ pub(crate) mod tests {
                 let indicator_left = tab_left - LABEL_LEFT + PAD_END;
                 let indicator_right = tab_right + LABEL_LEFT - PAD_START;
                 assert!(paints_rect(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     Rect::from_ltrb(
                         indicator_left,
@@ -9054,13 +8869,12 @@ pub(crate) mod tests {
         // 'TabBar with padding isScrollable: false'.
         #[test]
         fn a_fixed_tab_bar_is_inset_by_its_padding() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WEIGHT: f64 = 2.0; // default indicator weight
                 let padding = EdgeInsets::only(3.0, 7.0, 5.0, 3.0);
                 let (keys, tabs) = sized_tabs(&[(f64::INFINITY, 30.0), (f64::INFINITY, 40.0)]);
-                let controller = new_controller(&tester, 2);
-                let theme = theme(&tester, None, None);
+                let controller = new_controller(tester, 2);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -9072,7 +8886,7 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_size = tab_bar_size(&tester);
+                let tab_bar_size = tab_bar_size(tester);
                 let tab_bar_height = 40.0 + INDICATOR_WEIGHT + padding.top + padding.bottom; // 40 = max tab height
                 assert_eq!(tab_bar_size.height(), tab_bar_height);
 
@@ -9085,7 +8899,7 @@ pub(crate) mod tests {
                     - 30.0)
                     / 2.0;
                 let tab_rect = Rect::from_ltrb(tab_left, tab_top, tab_right, tab_top + 30.0);
-                assert_eq!(rect_of_key(&tester, &keys[0]), tab_rect);
+                assert_eq!(rect_of_key(tester, &keys[0]), tab_rect);
 
                 // Tab1 height = 40
                 let tab_left = tab_right;
@@ -9094,7 +8908,7 @@ pub(crate) mod tests {
                     - 40.0)
                     / 2.0;
                 let tab_rect = Rect::from_ltrb(tab_left, tab_top, tab_right, tab_top + 40.0);
-                assert_eq!(rect_of_key(&tester, &keys[1]), tab_rect);
+                assert_eq!(rect_of_key(tester, &keys[1]), tab_rect);
 
                 tab_right += padding.right;
                 assert_eq!(tab_bar_size.width(), tab_right);
@@ -9104,15 +8918,14 @@ pub(crate) mod tests {
         // 'Material3 - TabBar with padding isScrollable: true'.
         #[test]
         fn material3_a_scrollable_tab_bar_is_inset_by_its_padding_past_the_start_offset() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WEIGHT: f64 = 2.0; // default indicator weight
                 let padding = EdgeInsets::only(3.0, 7.0, 5.0, 3.0);
                 const TAB_START_OFFSET: f64 = 52.0;
                 let sizes = [(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)];
                 let (keys, tabs) = sized_tabs(&sizes);
-                let controller = new_controller(&tester, 3);
-                let theme = theme(&tester, None, None);
+                let controller = new_controller(tester, 3);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -9125,7 +8938,7 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_size = tab_bar_size(&tester);
+                let tab_bar_size = tab_bar_size(tester);
                 let tab_bar_height = 50.0 + INDICATOR_WEIGHT + padding.top + padding.bottom; // 50 = max tab height
                 assert_eq!(tab_bar_size.height(), tab_bar_height);
 
@@ -9141,7 +8954,7 @@ pub(crate) mod tests {
                         - height)
                         / 2.0;
                     let tab_rect = Rect::from_ltrb(tab_left, tab_top, tab_right, tab_top + height);
-                    assert_eq!(rect_of_key(&tester, &keys[index]), tab_rect);
+                    assert_eq!(rect_of_key(tester, &keys[index]), tab_rect);
                 }
 
                 tab_right += padding.right;
@@ -9153,14 +8966,13 @@ pub(crate) mod tests {
         // 'TabBar with labelPadding'.
         #[test]
         fn a_label_padding_spaces_the_tabs_and_the_indicator_follows_it() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WEIGHT: f64 = 2.0; // default indicator weight
                 let label_padding = EdgeInsets::only(3.0, 0.0, 7.0, 0.0);
                 let indicator_padding = label_padding;
                 let (keys, tabs) = sized_tabs(&[(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)]);
-                let controller = new_controller(&tester, 3);
-                let theme = theme(&tester, Some(false), None);
+                let controller = new_controller(tester, 3);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -9173,12 +8985,12 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 const TAB_BAR_HEIGHT: f64 = 50.0 + INDICATOR_WEIGHT; // 50 = max tab height
-                assert_eq!(tab_bar_height(&tester), TAB_BAR_HEIGHT);
+                assert_eq!(tab_bar_height(tester), TAB_BAR_HEIGHT);
 
                 let (_, _, tab_bottom) = assert_three_tab_rects(
-                    &tester,
+                    tester,
                     [&keys[0], &keys[1], &keys[2]],
                     [(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)],
                     TAB_BAR_HEIGHT,
@@ -9194,7 +9006,7 @@ pub(crate) mod tests {
                     - INDICATOR_WEIGHT / 2.0;
                 let indicator_y = tab_bottom + INDICATOR_WEIGHT / 2.0;
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -9207,14 +9019,13 @@ pub(crate) mod tests {
         // 'TabBar with labelPadding(TabBarIndicatorSize.label)'.
         #[test]
         fn a_label_sized_indicator_sits_inside_the_label_padding() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WEIGHT: f64 = 2.0; // default indicator weight
                 let label_padding = EdgeInsets::only(7.0, 0.0, 4.0, 0.0);
                 let indicator_padding = EdgeInsets::only(3.0, 0.0, 7.0, 0.0);
                 let (keys, tabs) = sized_tabs(&[(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)]);
-                let controller = new_controller(&tester, 3);
-                let theme = theme(&tester, Some(false), None);
+                let controller = new_controller(tester, 3);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -9228,12 +9039,12 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 const TAB_BAR_HEIGHT: f64 = 50.0 + INDICATOR_WEIGHT; // 50 = max tab height
-                assert_eq!(tab_bar_height(&tester), TAB_BAR_HEIGHT);
+                assert_eq!(tab_bar_height(tester), TAB_BAR_HEIGHT);
 
                 let (_, _, tab_bottom) = assert_three_tab_rects(
-                    &tester,
+                    tester,
                     [&keys[0], &keys[1], &keys[2]],
                     [(130.0, 30.0), (140.0, 40.0), (150.0, 50.0)],
                     TAB_BAR_HEIGHT,
@@ -9249,7 +9060,7 @@ pub(crate) mod tests {
                     label_padding.left + 130.0 - indicator_padding.right - INDICATOR_WEIGHT / 2.0;
                 let indicator_y = tab_bottom + INDICATOR_WEIGHT / 2.0;
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -9262,14 +9073,13 @@ pub(crate) mod tests {
         // 'Overflowing RTL tab bar'.
         #[test]
         fn an_overflowing_right_to_left_tab_bar_paints_its_indicator_from_the_far_right() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // For convenience padded width of each tab will equal 100:
                 // 68 + kTabLabelPadding.horizontal(32)
                 let (_, tabs) = sized_tabs(&[(68.0, 40.0); 100]);
-                let controller = new_controller(&tester, 100);
+                let controller = new_controller(tester, 100);
                 const INDICATOR_WEIGHT: f64 = 2.0; // the default
-                let theme = theme(&tester, Some(false), None);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Rtl,
@@ -9280,14 +9090,14 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 const TAB_BAR_HEIGHT: f64 = 40.0 + INDICATOR_WEIGHT; // 40 = tab height
-                assert_eq!(tab_bar_height(&tester), TAB_BAR_HEIGHT);
+                assert_eq!(tab_bar_height(tester), TAB_BAR_HEIGHT);
 
                 // Tab 0 out of 100 selected
                 const INDICATOR_Y: f64 = 40.0 + INDICATOR_WEIGHT / 2.0;
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -9304,13 +9114,13 @@ pub(crate) mod tests {
                         Some(Curves::linear()),
                     );
                 }
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(500));
+                tester.pump();
+                tester.pump_by(Duration::from_millis(500));
 
                 // In RTL, the elastic tab animation expands the width of the tab with a negative offset
                 // when jumping from the first tab to the last tab in a scrollable tab bar.
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -9318,11 +9128,11 @@ pub(crate) mod tests {
                     Offset::new(5049.0, INDICATOR_Y),
                 ));
 
-                tester.pump(Duration::from_millis(501));
+                tester.pump_by(Duration::from_millis(501));
 
                 // Tab 99 out of 100 selected, appears on the far left because RTL.
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -9335,11 +9145,10 @@ pub(crate) mod tests {
         // 'Tab indicator animation test'.
         #[test]
         fn the_indicator_animates_between_tabs_and_retargets_mid_animation() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WEIGHT: f64 = 8.0;
-                let controller = new_controller(&tester, 4);
-                let theme = theme(&tester, Some(false), None);
+                let controller = new_controller(tester, 4);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -9350,7 +9159,7 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 let indicator_at = |tester: &WidgetTester, left: f64, right: f64| {
                     const INDICATOR_Y: f64 = 54.0 - INDICATOR_WEIGHT / 2.0;
                     paints_line(
@@ -9373,23 +9182,23 @@ pub(crate) mod tests {
                 };
 
                 // Initial indicator position.
-                assert!(indicator_at(&tester, 0.0, 200.0));
+                assert!(indicator_at(tester, 0.0, 200.0));
 
                 // Select tab 1.
-                animate_to(&tester, 1);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(500));
-                assert!(indicator_at(&tester, 100.0, 300.0));
+                animate_to(tester, 1);
+                tester.pump();
+                tester.pump_by(Duration::from_millis(500));
+                assert!(indicator_at(tester, 100.0, 300.0));
 
                 // Select tab 2 when animation is running.
-                animate_to(&tester, 2);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(500));
-                assert!(indicator_at(&tester, 250.0, 450.0));
+                animate_to(tester, 2);
+                tester.pump();
+                tester.pump_by(Duration::from_millis(500));
+                assert!(indicator_at(tester, 250.0, 450.0));
 
                 // Final indicator position.
                 tester.pump_and_settle();
-                assert!(indicator_at(&tester, 400.0, 600.0));
+                assert!(indicator_at(tester, 400.0, 600.0));
             });
         }
 
@@ -9406,10 +9215,9 @@ pub(crate) mod tests {
         // 'TabBar etc with zero tabs'.
         #[test]
         fn a_tab_bar_and_view_with_no_tabs_lay_out_and_ignore_flings() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester, 0);
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let controller = new_controller(tester, 0);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -9421,20 +9229,20 @@ pub(crate) mod tests {
 
                 assert_eq!(controller.index(&tester.cell.borrow()), 0);
                 assert_eq!(
-                    size_of(&tester, only::<TabBar>(&tester)),
+                    tester.get_size(only::<TabBar>(tester)),
                     Size::new(800.0, 48.0)
                 );
                 assert_eq!(
-                    size_of(&tester, only::<TabBarView>(&tester)),
+                    tester.get_size(only::<TabBarView>(tester)),
                     Size::new(800.0, 600.0 - 48.0)
                 );
 
                 // A fling in the TabBar or TabBarView, shouldn't do anything.
-                let bar = center_of(&tester, only::<TabBar>(&tester));
+                let bar = tester.get_center(only::<TabBar>(tester));
                 tester.fling_from(bar, Offset::new(-100.0, 0.0), 5000.0, 1);
                 tester.pump_and_settle();
 
-                let view = center_of(&tester, only::<TabBarView>(&tester));
+                let view = tester.get_center(only::<TabBarView>(tester));
                 tester.fling_from(view, Offset::new(100.0, 0.0), 5000.0, 2);
                 tester.pump_and_settle();
 
@@ -9445,10 +9253,9 @@ pub(crate) mod tests {
         // 'TabBar etc with one tab'.
         #[test]
         fn a_tab_bar_and_view_with_one_tab_center_it_and_ignore_flings() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester, 1);
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let controller = new_controller(tester, 1);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -9461,56 +9268,56 @@ pub(crate) mod tests {
                 ));
 
                 assert_eq!(controller.index(&tester.cell.borrow()), 0);
-                assert_eq!(tester.find_text("TAB").len(), 1);
-                assert_eq!(tester.find_text("PAGE").len(), 1);
+                expect(tester, &find::text("TAB"), finds_one_widget());
+                expect(tester, &find::text("PAGE"), finds_one_widget());
                 assert_eq!(
-                    size_of(&tester, only::<TabBar>(&tester)),
+                    tester.get_size(only::<TabBar>(tester)),
                     Size::new(800.0, 48.0)
                 );
                 assert_eq!(
-                    size_of(&tester, only::<TabBarView>(&tester)),
+                    tester.get_size(only::<TabBarView>(tester)),
                     Size::new(800.0, 600.0 - 48.0)
                 );
 
                 // The one tab should be center vis the app's width (800).
                 let tab_rect = |tester: &WidgetTester| {
-                    let tab = tester.ancestor_of_type::<Tab>(text(tester, "TAB"));
-                    rect_of(tester, tab)
+                    let tab = tester
+                        .element(find::ancestor(find::text("TAB"), find::by_type::<Tab>()).first());
+                    tester.get_rect(tab)
                 };
-                let tab_left = tab_rect(&tester).left;
-                let tab_right = tab_rect(&tester).right;
+                let tab_left = tab_rect(tester).left;
+                let tab_right = tab_rect(tester).right;
                 // To the precision of the f32 transform `local_to_global` maps through.
                 let tab_center = tab_left + (tab_right - tab_left) / 2.0;
                 assert!(close(tab_center, 400.0, 1e-4), "{tab_center}");
 
                 // A fling in the TabBar or TabBarView, shouldn't move the tab.
-                let bar = center_of(&tester, only::<TabBar>(&tester));
+                let bar = tester.get_center(only::<TabBar>(tester));
                 tester.fling_from(bar, Offset::new(-100.0, 0.0), 5000.0, 1);
-                tester.pump(Duration::from_millis(50));
-                assert_eq!(tab_rect(&tester).left, tab_left);
-                assert_eq!(tab_rect(&tester).right, tab_right);
+                tester.pump_by(Duration::from_millis(50));
+                assert_eq!(tab_rect(tester).left, tab_left);
+                assert_eq!(tab_rect(tester).right, tab_right);
                 tester.pump_and_settle();
 
-                let view = center_of(&tester, only::<TabBarView>(&tester));
+                let view = tester.get_center(only::<TabBarView>(tester));
                 tester.fling_from(view, Offset::new(100.0, 0.0), 5000.0, 2);
-                tester.pump(Duration::from_millis(50));
-                assert_eq!(tab_rect(&tester).left, tab_left);
-                assert_eq!(tab_rect(&tester).right, tab_right);
+                tester.pump_by(Duration::from_millis(50));
+                assert_eq!(tab_rect(tester).left, tab_left);
+                assert_eq!(tab_rect(tester).right, tab_right);
                 tester.pump_and_settle();
 
                 assert_eq!(controller.index(&tester.cell.borrow()), 0);
-                assert_eq!(tester.find_text("TAB").len(), 1);
-                assert_eq!(tester.find_text("PAGE").len(), 1);
+                expect(tester, &find::text("TAB"), finds_one_widget());
+                expect(tester, &find::text("PAGE"), finds_one_widget());
             });
         }
 
         // 'can tap on indicator at very bottom of TabBar to switch tabs'.
         #[test]
         fn a_tap_on_the_indicator_at_the_bottom_of_a_tab_switches_to_it() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester, 2);
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let controller = new_controller(tester, 2);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -9531,9 +9338,9 @@ pub(crate) mod tests {
 
                 assert_eq!(controller.index(&tester.cell.borrow()), 0);
 
-                let bottom_right = rect_of(&tester, only::<TabBar>(&tester)).bottom_right()
-                    - Offset::new(1.0, 1.0);
-                let mut gesture = WidgetTester::touch(1);
+                let bottom_right =
+                    tester.get_rect(only::<TabBar>(tester)).bottom_right() - Offset::new(1.0, 1.0);
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, bottom_right);
                 tester.up(&gesture);
                 tester.pump_and_settle();
@@ -9545,8 +9352,7 @@ pub(crate) mod tests {
         // 'can be notified of TabBar onTap behavior'.
         #[test]
         fn on_tap_reports_the_tapped_tab_even_when_the_index_does_not_change() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tab_index = Rc::new(Cell::new(-1_i64));
                 let tabs = ["A", "B", "C"];
                 let controller = {
@@ -9568,63 +9374,63 @@ pub(crate) mod tests {
                 let previous_index =
                     |tester: &WidgetTester| controller.previous_index(&tester.cell.borrow());
 
-                let frame = build_frame(&tester);
+                let frame = build_frame(tester);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("A").len(), 1);
-                assert_eq!(tester.find_text("B").len(), 1);
-                assert_eq!(tester.find_text("C").len(), 1);
-                assert_eq!(index(&tester), 2);
+                expect(tester, &find::text("A"), finds_one_widget());
+                expect(tester, &find::text("B"), finds_one_widget());
+                expect(tester, &find::text("C"), finds_one_widget());
+                assert_eq!(index(tester), 2);
                 assert_eq!(tab_index.get(), -1); // no tap so far so tabIndex should reflect that
 
                 // Verify whether the [onTap] notification works when the [TabBar] animates.
-                let frame = build_frame(&tester);
+                let frame = build_frame(tester);
                 tester.pump_widget(frame);
-                let b = text(&tester, "B");
-                tap(&mut tester, b);
-                tester.pump(Duration::ZERO);
+                let b = text(tester, "B");
+                tap(tester, b);
+                tester.pump();
                 assert!(controller.index_is_changing(&tester.cell.borrow()));
                 tester.pump_and_settle();
-                assert_eq!(index(&tester), 1);
-                assert_eq!(previous_index(&tester), 2);
+                assert_eq!(index(tester), 1);
+                assert_eq!(previous_index(tester), 2);
                 assert!(!controller.index_is_changing(&tester.cell.borrow()));
-                assert_eq!(tab_index.get(), index(&tester) as i64);
+                assert_eq!(tab_index.get(), index(tester) as i64);
 
                 tab_index.set(-1);
 
-                let frame = build_frame(&tester);
+                let frame = build_frame(tester);
                 tester.pump_widget(frame);
-                let c = text(&tester, "C");
-                tap(&mut tester, c);
-                tester.pump(Duration::ZERO);
+                let c = text(tester, "C");
+                tap(tester, c);
+                tester.pump();
                 tester.pump_and_settle();
-                assert_eq!(index(&tester), 2);
-                assert_eq!(previous_index(&tester), 1);
-                assert_eq!(tab_index.get(), index(&tester) as i64);
+                assert_eq!(index(tester), 2);
+                assert_eq!(previous_index(tester), 1);
+                assert_eq!(tab_index.get(), index(tester) as i64);
 
                 tab_index.set(-1);
 
-                let frame = build_frame(&tester);
+                let frame = build_frame(tester);
                 tester.pump_widget(frame);
-                let a = text(&tester, "A");
-                tap(&mut tester, a);
-                tester.pump(Duration::ZERO);
+                let a = text(tester, "A");
+                tap(tester, a);
+                tester.pump();
                 tester.pump_and_settle();
-                assert_eq!(index(&tester), 0);
-                assert_eq!(previous_index(&tester), 2);
-                assert_eq!(tab_index.get(), index(&tester) as i64);
+                assert_eq!(index(tester), 0);
+                assert_eq!(previous_index(tester), 2);
+                assert_eq!(tab_index.get(), index(tester) as i64);
 
                 tab_index.set(-1);
 
                 // Verify whether [onTap] is called even when the [TabController] does
                 // not change.
-                let current_controller_index = index(&tester);
-                let frame = build_frame(&tester);
+                let current_controller_index = index(tester);
+                let frame = build_frame(tester);
                 tester.pump_widget(frame);
-                let a = text(&tester, "A");
-                tap(&mut tester, a);
-                tester.pump(Duration::ZERO);
+                let a = text(tester, "A");
+                tap(tester, a);
+                tester.pump();
                 tester.pump_and_settle();
-                assert_eq!(index(&tester), current_controller_index); // controller has not changed
+                assert_eq!(index(tester), current_controller_index); // controller has not changed
                 assert_eq!(tab_index.get(), 0);
             });
         }
@@ -9664,8 +9470,7 @@ pub(crate) mod tests {
         #[test]
         fn a_hovered_tab_shows_the_tab_bars_mouse_cursor_or_a_click_cursor() {
             use waft_services::{MouseCursorRef, SystemMouseCursors};
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build = |tester: &WidgetTester, mouse_cursor: Option<MouseCursorRef>| {
                     let theme = theme(tester, None, None);
                     let mut tab_bar =
@@ -9686,20 +9491,20 @@ pub(crate) mod tests {
                         .into_widget(),
                     )
                 };
-                let frame = build(&tester, Some(SystemMouseCursors::TEXT.into()));
+                let frame = build(tester, Some(SystemMouseCursors::TEXT.into()));
                 tester.pump_widget(frame);
 
-                let mut mouse = WidgetTester::mouse(1, 0);
-                let first_tab = tester.find_by_type::<Tab>()[0];
-                let center = center_of(&tester, first_tab);
+                let mut mouse = TestPointer::mouse(1, 0);
+                let first_tab = find::by_type::<Tab>().evaluate(tester)[0];
+                let center = tester.get_center(first_tab);
                 tester.add_pointer(&mut mouse, center);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 let text_cursor: MouseCursorRef = SystemMouseCursors::TEXT.into();
                 assert!(*tester.active_cursor(1) == *text_cursor);
 
                 // Test default cursor
-                let frame = build(&tester, None);
+                let frame = build(tester, None);
                 tester.pump_widget(frame);
                 let click: MouseCursorRef = SystemMouseCursors::CLICK.into();
                 assert!(*tester.active_cursor(1) == *click);
@@ -9725,25 +9530,24 @@ pub(crate) mod tests {
         // 'TabController changes'.
         #[test]
         fn a_tab_bar_given_a_new_controller_follows_the_new_one() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller1 = new_controller(&tester, 2);
-                let controller2 = new_controller(&tester, 2);
+            test_widgets(|tester| {
+                let controller1 = new_controller(tester, 2);
+                let controller2 = new_controller(tester, 2);
 
-                let frame = left_right_tab_bar(&tester, controller1.clone());
+                let frame = left_right_tab_bar(tester, controller1.clone());
                 tester.pump_widget(frame);
-                let frame = left_right_tab_bar(&tester, controller2.clone());
+                let frame = left_right_tab_bar(tester, controller2.clone());
                 tester.pump_widget(frame);
                 assert_eq!(controller1.index(&tester.cell.borrow()), 0);
                 assert_eq!(controller2.index(&tester.cell.borrow()), 0);
 
                 const INDICATOR_WEIGHT: f64 = 2.0;
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
-                assert_eq!(tab_bar_height(&tester), 48.0); // 48 = _kTabHeight(46) + indicatorWeight(2.0)
+                let tab_bar_box = first_render_box::<TabBar>(tester);
+                assert_eq!(tab_bar_height(tester), 48.0); // 48 = _kTabHeight(46) + indicatorWeight(2.0)
 
                 const INDICATOR_Y: f64 = 48.0 - INDICATOR_WEIGHT / 2.0;
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -9751,8 +9555,8 @@ pub(crate) mod tests {
                     Offset::new(400.0 - INDICATOR_WEIGHT / 2.0, INDICATOR_Y), // 400 = screen_width / 2
                 ));
 
-                let right = text(&tester, "RIGHT");
-                tap(&mut tester, right);
+                let right = text(tester, "RIGHT");
+                tap(tester, right);
                 tester.pump_and_settle();
                 assert_eq!(controller1.index(&tester.cell.borrow()), 0);
                 assert_eq!(controller2.index(&tester.cell.borrow()), 1);
@@ -9760,7 +9564,7 @@ pub(crate) mod tests {
                 // Verify that the TabBar's _IndicatorPainter is now listening to
                 // tabController2.
                 assert!(paints_line(
-                    &tester,
+                    tester,
                     tab_bar_box,
                     None,
                     INDICATOR_WEIGHT,
@@ -9773,8 +9577,7 @@ pub(crate) mod tests {
         // 'TabController changes while flinging'.
         #[test]
         fn a_controller_replaced_while_flinging_is_followed_by_the_next_fling() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build_frame = |tester: &WidgetTester, controller: Ref<TabController>| {
                     let theme = {
                         let app = tester.cell.borrow();
@@ -9810,20 +9613,20 @@ pub(crate) mod tests {
                     )
                 };
 
-                let controller1 = new_controller(&tester, 2);
-                let controller2 = new_controller(&tester, 3);
+                let controller1 = new_controller(tester, 2);
+                let controller2 = new_controller(tester, 3);
                 assert_eq!(controller1.index(&tester.cell.borrow()), 0);
                 assert_eq!(controller2.index(&tester.cell.borrow()), 0);
 
-                let frame = build_frame(&tester, controller1.clone());
+                let frame = build_frame(tester, controller1.clone());
                 tester.pump_widget(frame);
-                let fling_start = center_of(&tester, text(&tester, "CHILD A"));
+                let fling_start = tester.get_center(text(tester, "CHILD A"));
                 tester.fling_from(fling_start, Offset::new(-200.0, 0.0), 10000.0, 1);
-                tester.pump(Duration::from_millis(10)); // start the fling animation
+                tester.pump_by(Duration::from_millis(10)); // start the fling animation
 
-                tester.pump(Duration::from_millis(10));
+                tester.pump_by(Duration::from_millis(10));
 
-                let frame = build_frame(&tester, controller2.clone()); // replace controller
+                let frame = build_frame(tester, controller2.clone()); // replace controller
                 tester.pump_widget(frame);
                 tester.fling_from(fling_start, Offset::new(-200.0, 0.0), 10000.0, 2);
                 tester.pump_and_settle(); // finish the fling animation
@@ -9836,8 +9639,7 @@ pub(crate) mod tests {
         // 'TabController changes with different initialIndex'.
         #[test]
         fn a_new_controller_with_the_last_tab_selected_scrolls_it_into_view() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let last_tab_key = GlobalKey::new();
                 let build_frame = |tester: &WidgetTester, length: usize| {
                     let controller = {
@@ -9863,17 +9665,17 @@ pub(crate) mod tests {
                     (controller, frame)
                 };
 
-                let (controller, frame) = build_frame(&tester, 10);
+                let (controller, frame) = build_frame(tester, 10);
                 tester.pump_widget(frame);
                 assert_eq!(controller.index(&tester.cell.borrow()), 9);
-                assert_eq!(tester.center_of(&last_tab_key).dx(), 750.0);
+                assert_eq!(tester.get_center(&last_tab_key).dx(), 750.0);
 
                 // Rebuild with a new controller with more tabs and last tab selected.
                 // Last tab should be visible and on the right of the window.
-                let (controller, frame) = build_frame(&tester, 15);
+                let (controller, frame) = build_frame(tester, 15);
                 tester.pump_widget(frame);
                 assert_eq!(controller.index(&tester.cell.borrow()), 14);
-                assert_eq!(tester.center_of(&last_tab_key).dx(), 750.0);
+                assert_eq!(tester.get_center(&last_tab_key).dx(), 750.0);
             });
         }
 
@@ -9914,8 +9716,7 @@ pub(crate) mod tests {
         // 'DefaultTabController changes does not recreate PageController'.
         #[test]
         fn a_default_tab_controller_with_a_new_length_keeps_the_page_controller() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build_frame = |tester: &WidgetTester, length: usize| {
                     let theme = theme(tester, None, None);
                     boilerplate(
@@ -9942,18 +9743,18 @@ pub(crate) mod tests {
                     })
                 };
 
-                let frame = build_frame(&tester, 15);
+                let frame = build_frame(tester, 15);
                 tester.pump_widget(frame);
-                let page_controller1 = page_controller(&tester);
-                let tab_controller = default_controller_of(&tester, text(&tester, "Page 14"));
+                let page_controller1 = page_controller(tester);
+                let tab_controller = default_controller_of(tester, text(tester, "Page 14"));
                 assert_eq!(tab_controller.index(&tester.cell.borrow()), 14);
                 assert_eq!(page_controller1.page(&tester.cell.borrow()), Some(14.0));
 
                 // Rebuild with a new default tab controller with more tabs.
-                let frame = build_frame(&tester, 10);
+                let frame = build_frame(tester, 10);
                 tester.pump_widget(frame);
-                let page_controller2 = page_controller(&tester);
-                let tab_controller = default_controller_of(&tester, text(&tester, "Page 9"));
+                let page_controller2 = page_controller(tester);
+                let tab_controller = default_controller_of(tester, text(tester, "Page 9"));
                 assert_eq!(tab_controller.index(&tester.cell.borrow()), 9);
                 assert_eq!(page_controller2.page(&tester.cell.borrow()), Some(9.0));
 
@@ -9964,10 +9765,9 @@ pub(crate) mod tests {
         // 'Do not throw when switching between a scrollable TabBar and a non-scrollable TabBar'.
         #[test]
         fn switching_between_a_scrollable_and_a_fixed_tab_bar_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller1 = new_controller(&tester, 2);
-                let controller2 = new_controller(&tester, 2);
+            test_widgets(|tester| {
+                let controller1 = new_controller(tester, 2);
+                let controller2 = new_controller(tester, 2);
                 let build_frame = |tester: &WidgetTester, controller, is_scrollable| {
                     let theme = theme(tester, None, None);
                     boilerplate(
@@ -9985,17 +9785,17 @@ pub(crate) mod tests {
                 };
 
                 // Show both controllers once.
-                let frame = build_frame(&tester, controller1.clone(), false);
+                let frame = build_frame(tester, controller1.clone(), false);
                 tester.pump_widget(frame);
-                let frame = build_frame(&tester, controller2.clone(), true);
+                let frame = build_frame(tester, controller2.clone(), true);
                 tester.pump_widget(frame);
 
                 // Switch back to the first controller.
-                let frame = build_frame(&tester, controller1, false);
+                let frame = build_frame(tester, controller1, false);
                 tester.pump_widget(frame);
 
                 // Switch back to the second controller.
-                let frame = build_frame(&tester, controller2, true);
+                let frame = build_frame(tester, controller2, true);
                 tester.pump_widget(frame);
             });
         }
@@ -10003,9 +9803,8 @@ pub(crate) mod tests {
         // 'Default tab indicator color is white in M2 and surfaceVariant in M3'.
         #[test]
         fn the_default_indicator_line_is_white_in_material2_and_outline_variant_in_material3() {
-            with_main_thread_stack(|| {
-                for material3 in [true, false] {
-                    let mut tester = tester();
+            for material3 in [true, false] {
+                test_widgets(|tester| {
                     let theme = {
                         let app = tester.cell.borrow();
                         ThemeData::builder()
@@ -10014,38 +9813,37 @@ pub(crate) mod tests {
                             .build(&app)
                     };
                     let frame = build_left_right_app(
-                        &tester,
+                        tester,
                         vec!["LEFT", "RIGHT"],
                         "LEFT",
                         true,
                         Some(theme.clone()),
                     );
                     tester.pump_widget(frame);
-                    let tab_bar_box = first_render_box::<TabBar>(&tester);
+                    let tab_bar_box = first_render_box::<TabBar>(tester);
                     let color = if material3 {
                         theme.color_scheme.outline_variant()
                     } else {
                         Colors::WHITE
                     };
-                    let lines = deep_lines(&tester, tab_bar_box.as_object());
+                    let lines = deep_lines(tester, tab_bar_box.as_object());
                     assert!(
                         lines
                             .iter()
                             .any(|line| line.color.to_argb32() == color.to_argb32()),
                         "{lines:?}"
                     );
-                }
-            });
+                });
+            }
         }
 
         // 'Tab indicator color should not be adjusted when disable [automaticIndicatorColorAdjustment]'.
         #[test]
         fn the_indicator_color_is_not_adjusted_without_automatic_adjustment() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Dart's theme is Material 3, the default, so only its Material 3 colour is
                 // checked: in Material 2 the default indicator is white already
                 // (`TabsDefaultsM2`), adjusted or not.
-                let mut tester = tester();
                 let theme = {
                     let app = tester.cell.borrow();
                     ThemeData::builder()
@@ -10053,16 +9851,16 @@ pub(crate) mod tests {
                         .build(&app)
                 };
                 let frame = build_left_right_app(
-                    &tester,
+                    tester,
                     vec!["LEFT", "RIGHT"],
                     "LEFT",
                     false,
                     Some(theme.clone()),
                 );
                 tester.pump_widget(frame);
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 let color = theme.color_scheme.outline_variant();
-                let lines = deep_lines(&tester, tab_bar_box.as_object());
+                let lines = deep_lines(tester, tab_bar_box.as_object());
                 assert!(
                     lines
                         .iter()
@@ -10091,7 +9889,6 @@ pub(crate) mod tests {
                 .on(TargetPlatform::Android)
                 .with_haptics(Rc::clone(&feedback) as Rc<dyn waft_embedder::Haptics>);
             let tester = WidgetTester::with_platform(platform);
-            tester.install_platform_fonts();
             (tester, feedback)
         }
 
@@ -10101,21 +9898,22 @@ pub(crate) mod tests {
         // ink_well.rs's feedback cases.
         #[test]
         fn tab_feedback_is_enabled_by_default() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let (mut tester, feedback) = feedback_tester();
-                let theme = theme(&tester, None, None);
+                let tester = &mut tester;
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
                     DefaultTabController::new(1, TabBar::new([Tab::new().text("A").into_widget()])),
                 ));
-                let ink_well = only::<InkWell>(&tester);
-                tap(&mut tester, ink_well);
-                tester.pump(Duration::from_secs(1));
+                let ink_well = only::<InkWell>(tester);
+                tap(tester, ink_well);
+                tester.pump_by(Duration::from_secs(1));
                 assert_eq!(feedback.haptics.borrow().len(), 0);
 
-                tap(&mut tester, ink_well);
-                tester.pump(Duration::from_secs(1));
+                tap(tester, ink_well);
+                tester.pump_by(Duration::from_secs(1));
                 assert_eq!(feedback.haptics.borrow().len(), 0);
             });
         }
@@ -10123,9 +9921,10 @@ pub(crate) mod tests {
         // 'Tab feedback is disabled'.
         #[test]
         fn tab_feedback_can_be_disabled() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let (mut tester, feedback) = feedback_tester();
-                let theme = theme(&tester, None, None);
+                let tester = &mut tester;
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -10134,14 +9933,14 @@ pub(crate) mod tests {
                         TabBar::new([Tab::new().text("A").into_widget()]).enable_feedback(false),
                     ),
                 ));
-                let ink_well = only::<InkWell>(&tester);
-                tap(&mut tester, ink_well);
-                tester.pump(Duration::from_secs(1));
+                let ink_well = only::<InkWell>(tester);
+                tap(tester, ink_well);
+                tester.pump_by(Duration::from_secs(1));
                 assert_eq!(feedback.haptics.borrow().len(), 0);
 
-                let center = center_of(&tester, ink_well);
-                tester.long_press(center, 1);
-                tester.pump(Duration::from_secs(1));
+                let center = tester.get_center(ink_well);
+                tester.long_press_at(center, 1);
+                tester.pump_by(Duration::from_secs(1));
                 assert_eq!(feedback.haptics.borrow().len(), 0);
             });
         }
@@ -10159,19 +9958,16 @@ pub(crate) mod tests {
             })
         }
 
-        /// What the first material's ink features render object and its subtree paint: Dart's
-        /// `paints` on `allRenderObjects.firstWhere(_RenderInkFeatures)`.
-        fn ink_features_painted(tester: &WidgetTester) -> Vec<Drawn> {
+        fn ink_features_painted(tester: &WidgetTester) -> Vec<Op> {
             let ink_features = tester.first::<crate::material::RenderInkFeatures>();
-            deep_painted(tester, ink_features.as_object())
+            tester.painted_ops_deep(ink_features.as_object())
         }
 
         // "Tab's ink well changes color on hover with Tab overlayColor".
         #[test]
         fn a_hovered_tab_paints_the_overlay_colors_hovered_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -10181,18 +9977,18 @@ pub(crate) mod tests {
                             .overlay_color(hover_pressed_overlay(Color::new(0xf00fffff))),
                     ),
                 ));
-                let mut mouse = WidgetTester::mouse(1, 0);
+                let mut mouse = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut mouse, Offset::ZERO);
-                let center = center_of(&tester, only::<Tab>(&tester));
+                let center = tester.get_center(only::<Tab>(tester));
                 tester.move_to(&mut mouse, center, false);
                 tester.pump_and_settle();
-                let painted = ink_features_painted(&tester);
-                assert!(
-                    painted.contains(&Drawn::Rect(
-                        0xff00ff00,
-                        Rect::from_ltrb(0.0, 276.0, 800.0, 324.0)
-                    )),
-                    "{painted:?}"
+                let painted = ink_features_painted(tester);
+                assert_paints(
+                    &painted,
+                    &[PaintCall::rect_at(
+                        Rect::from_ltrb(0.0, 276.0, 800.0, 324.0),
+                        Some(Color::new(0xff00ff00)),
+                    )],
                 );
             });
         }
@@ -10233,23 +10029,22 @@ pub(crate) mod tests {
         // 'Skipping tabs with global key does not crash'.
         #[test]
         fn skipping_to_a_far_tab_whose_pages_have_global_keys_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["Tab1", "Tab2", "Tab3", "Tab4"];
-                let controller = new_controller(&tester, tabs.len());
+                let controller = new_controller(tester, tabs.len());
                 let children = ["1", "2", "3", "4"]
                     .map(|page| Text::new(page).key(GlobalKey::new().into()).into_widget())
                     .to_vec();
-                let frame = skipping_app(&tester, controller.clone(), &tabs, children);
+                let frame = skipping_app(tester, controller.clone(), &tabs, children);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("1").len(), 1);
-                assert!(tester.find_text("4").is_empty());
-                let tab4 = text(&tester, "Tab4");
-                tap(&mut tester, tab4);
+                expect(tester, &find::text("1"), finds_one_widget());
+                expect(tester, &find::text("4"), finds_nothing());
+                let tab4 = text(tester, "Tab4");
+                tap(tester, tab4);
                 tester.pump_and_settle();
                 assert_eq!(controller.index(&tester.cell.borrow()), 3);
-                assert_eq!(tester.find_text("4").len(), 1);
-                assert!(tester.find_text("1").is_empty());
+                expect(tester, &find::text("4"), finds_one_widget());
+                expect(tester, &find::text("1"), finds_nothing());
             });
         }
 
@@ -10324,11 +10119,10 @@ pub(crate) mod tests {
         // 'Skipping tabs with a KeepAlive child works'.
         #[test]
         fn skipping_past_a_kept_alive_page_keeps_it() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/11895
-                let mut tester = tester();
                 let tabs = ["Tab1", "Tab2", "Tab3", "Tab4", "Tab5"];
-                let controller = new_controller(&tester, tabs.len());
+                let controller = new_controller(tester, tabs.len());
                 let children = vec![
                     TabAlwaysKeepAliveWidget {
                         key: Some(waft_foundation::UniqueKey::new().into()),
@@ -10339,32 +10133,35 @@ pub(crate) mod tests {
                     Text::new("4").into_widget(),
                     Text::new("5").into_widget(),
                 ];
-                let frame = skipping_app(&tester, controller.clone(), &tabs, children);
+                let frame = skipping_app(tester, controller.clone(), &tabs, children);
                 tester.pump_widget(frame);
                 assert_eq!(
-                    tester
-                        .find_onstage_text(TabAlwaysKeepAliveWidget::TEXT)
+                    find::text(TabAlwaysKeepAliveWidget::TEXT)
+                        .evaluate(tester)
                         .len(),
                     1
                 );
-                assert!(tester.find_onstage_text("4").is_empty());
-                let tab4 = text(&tester, "Tab4");
-                tap(&mut tester, tab4);
+                expect(tester, &find::text("4"), finds_nothing());
+                let tab4 = text(tester, "Tab4");
+                tap(tester, tab4);
                 tester.pump_and_settle();
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert_eq!(controller.index(&tester.cell.borrow()), 3);
-                assert_eq!(tester.find_text(TabAlwaysKeepAliveWidget::TEXT).len(), 1);
-                assert_eq!(tester.find_onstage_text("4").len(), 1);
+                expect(
+                    tester,
+                    &find::text(TabAlwaysKeepAliveWidget::TEXT).skip_offstage(false),
+                    finds_one_widget(),
+                );
+                expect(tester, &find::text("4"), finds_one_widget());
             });
         }
 
         // 'tabbar does not scroll when viewport dimensions initially change from zero to non-zero'.
         #[test]
         fn a_scrollable_tab_bar_whose_viewport_grows_from_zero_does_not_animate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = ["NEW MEXICO", "GABBA", "HEY"];
-                let controller = new_controller(&tester, tabs.len());
+                let controller = new_controller(tester, tabs.len());
                 let build_test_widget = |tester: &WidgetTester, width: f64, height: f64| {
                     let theme = theme(tester, None, None);
                     material_app(
@@ -10409,10 +10206,10 @@ pub(crate) mod tests {
                     )
                 };
 
-                let frame = build_test_widget(&tester, 0.0, 0.0);
+                let frame = build_test_widget(tester, 0.0, 0.0);
                 tester.pump_widget(frame);
 
-                let frame = build_test_widget(&tester, 300.0, 400.0);
+                let frame = build_test_widget(tester, 300.0, 400.0);
                 tester.pump_widget(frame);
 
                 let has_running_animations =
@@ -10425,8 +10222,7 @@ pub(crate) mod tests {
         // 'Number of tabs can be updated dynamically'.
         #[test]
         fn the_number_of_tabs_can_change_and_the_selection_follows() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let key = GlobalKey::new();
                 let build_tabs = |tester: &WidgetTester, tabs: &[&str]| {
                     let theme = theme(tester, None, None);
@@ -10450,24 +10246,24 @@ pub(crate) mod tests {
                     )
                 };
 
-                let frame = build_tabs(&tester, &["A", "B", "C"]);
+                let frame = build_tabs(tester, &["A", "B", "C"]);
                 tester.pump_widget(frame);
-                let b = text(&tester, "B");
-                tap(&mut tester, b);
-                tester.pump(Duration::ZERO);
-                assert_eq!(controller_state(&tester), (0, 1, 3));
+                let b = text(tester, "B");
+                tap(tester, b);
+                tester.pump();
+                assert_eq!(controller_state(tester), (0, 1, 3));
 
-                let frame = build_tabs(&tester, &["A", "B"]);
+                let frame = build_tabs(tester, &["A", "B"]);
                 tester.pump_widget(frame);
-                assert_eq!(controller_state(&tester), (0, 1, 2));
+                assert_eq!(controller_state(tester), (0, 1, 2));
 
-                let frame = build_tabs(&tester, &["A"]);
+                let frame = build_tabs(tester, &["A"]);
                 tester.pump_widget(frame);
-                assert_eq!(controller_state(&tester), (1, 0, 1));
+                assert_eq!(controller_state(tester), (1, 0, 1));
 
-                let frame = build_tabs(&tester, &["A", "B"]);
+                let frame = build_tabs(tester, &["A", "B"]);
                 tester.pump_widget(frame);
-                assert_eq!(controller_state(&tester), (1, 0, 2));
+                assert_eq!(controller_state(tester), (1, 0, 2));
             });
         }
     }
@@ -10475,6 +10271,8 @@ pub(crate) mod tests {
     mod label_colors_lengths_and_alignments {
         //! tabs_test.dart cases, part d: from 'TabBar with one tab has correct color' through
         //! 'Material3 - Scrollable TabBar without a divider does not expand to full width'.
+        use waft_embedder::valo::Op;
+        use waft_rendering::testing::{PaintCall, paints};
 
         use std::cell::{Cell, RefCell};
         use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -10484,8 +10282,9 @@ pub(crate) mod tests {
         use super::*;
         use crate::icon_button::IconButton;
         use crate::icons::Icons;
-        use crate::test_support::TestVSync;
+        use crate::test_support::PaintInspection;
         use crate::text_button::TextButton;
+        use waft_widgets::testing::TestVSync;
 
         /// Dart's `createTabController(length:, vsync: const TestVSync())`.
         fn create_tab_controller(tester: &WidgetTester, length: usize) -> Ref<TabController> {
@@ -10545,19 +10344,19 @@ pub(crate) mod tests {
 
         /// Dart's `find.byKey(key)` tapped at its centre.
         fn tap_key(tester: &mut WidgetTester, key: &GlobalKey) {
-            let center = tester.center_of(key);
-            tester.tap(center, 1);
+            let center = tester.get_center(key);
+            tester.tap_at(center, 1);
         }
 
         /// Dart's `find.widgetWithIcon(Tab, icon)`.
         fn tab_with_icon(tester: &WidgetTester, icon: &waft_widgets::IconData) -> AnyElement {
-            let icon = tester.find_by_icon(icon);
+            let icon = tester.element(find::by_icon(icon).first());
             tester.ancestor_of_type::<Tab>(icon)
         }
 
         /// Dart's `find.widgetWithText(W, text).first`: the nearest `W` above the text.
         fn nearest_with_text<W: 'static>(tester: &WidgetTester, label: &str) -> AnyElement {
-            tester.ancestor_of_type::<W>(text(tester, label))
+            tester.element(find::ancestor(find::text(label), find::by_type::<W>()).first())
         }
 
         /// The `PageController` of the only `PageView`: Dart's
@@ -10642,12 +10441,11 @@ pub(crate) mod tests {
         // 'TabBar with one tab has correct color'.
         #[test]
         fn a_tab_bar_with_one_tab_gives_it_the_selected_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const SELECTED_TAB_COLOR: Color = Color::new(0x00000001);
                 const UNSELECTED_TAB_COLOR: Color = Color::new(0x00000002);
 
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -10659,7 +10457,7 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                assert_eq!(icon_color(&tester, "A"), Some(SELECTED_TAB_COLOR));
+                assert_eq!(icon_color(tester, "A"), Some(SELECTED_TAB_COLOR));
             });
         }
 
@@ -10677,8 +10475,7 @@ pub(crate) mod tests {
         // 'TabBar.labelColor resolves material states'.
         #[test]
         fn a_widget_state_label_color_resolves_per_tab_selection() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB1: &str = "Tab 1";
                 const TAB2: &str = "Tab 2";
                 const SELECTED_COLOR: Color = Color::new(0xff00ff00);
@@ -10686,7 +10483,7 @@ pub(crate) mod tests {
                 let label_color = selected_state_color(SELECTED_COLOR, UNSELECTED_COLOR);
 
                 // Test labelColor correctly resolves material states.
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -10697,14 +10494,14 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                assert_eq!(icon_color(&tester, TAB1), Some(SELECTED_COLOR));
-                assert_eq!(icon_color(&tester, TAB2), Some(UNSELECTED_COLOR));
+                assert_eq!(icon_color(tester, TAB1), Some(SELECTED_COLOR));
+                assert_eq!(icon_color(tester, TAB2), Some(UNSELECTED_COLOR));
                 assert_eq!(
-                    style_color(&paragraph_style(&tester, TAB1)),
+                    style_color(&paragraph_style(tester, TAB1)),
                     Some(SELECTED_COLOR)
                 );
                 assert_eq!(
-                    style_color(&paragraph_style(&tester, TAB2)),
+                    style_color(&paragraph_style(tester, TAB2)),
                     Some(UNSELECTED_COLOR)
                 );
             });
@@ -10713,8 +10510,7 @@ pub(crate) mod tests {
         // 'labelColor & unselectedLabelColor override material state labelColor'.
         #[test]
         fn plain_label_colors_replace_a_widget_state_label_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB1: &str = "Tab 1";
                 const TAB2: &str = "Tab 2";
                 const SELECTED_STATE_COLOR: Color = Color::new(0xff00ff00);
@@ -10743,32 +10539,32 @@ pub(crate) mod tests {
                 };
 
                 // Test material state label color.
-                let frame = build_tab_bar(&tester, true);
+                let frame = build_tab_bar(tester, true);
                 tester.pump_widget(frame);
 
-                assert_eq!(icon_color(&tester, TAB1), Some(SELECTED_STATE_COLOR));
-                assert_eq!(icon_color(&tester, TAB2), Some(UNSELECTED_STATE_COLOR));
+                assert_eq!(icon_color(tester, TAB1), Some(SELECTED_STATE_COLOR));
+                assert_eq!(icon_color(tester, TAB2), Some(UNSELECTED_STATE_COLOR));
                 assert_eq!(
-                    style_color(&paragraph_style(&tester, TAB1)),
+                    style_color(&paragraph_style(tester, TAB1)),
                     Some(SELECTED_STATE_COLOR)
                 );
                 assert_eq!(
-                    style_color(&paragraph_style(&tester, TAB2)),
+                    style_color(&paragraph_style(tester, TAB2)),
                     Some(UNSELECTED_STATE_COLOR)
                 );
 
                 // Test labelColor & unselectedLabelColor override material state labelColor.
-                let frame = build_tab_bar(&tester, false);
+                let frame = build_tab_bar(tester, false);
                 tester.pump_widget(frame);
 
-                assert_eq!(icon_color(&tester, TAB1), Some(SELECTED_COLOR));
-                assert_eq!(icon_color(&tester, TAB2), Some(UNSELECTED_COLOR));
+                assert_eq!(icon_color(tester, TAB1), Some(SELECTED_COLOR));
+                assert_eq!(icon_color(tester, TAB2), Some(UNSELECTED_COLOR));
                 assert_eq!(
-                    style_color(&paragraph_style(&tester, TAB1)),
+                    style_color(&paragraph_style(tester, TAB1)),
                     Some(SELECTED_COLOR)
                 );
                 assert_eq!(
-                    style_color(&paragraph_style(&tester, TAB2)),
+                    style_color(&paragraph_style(tester, TAB2)),
                     Some(UNSELECTED_COLOR)
                 );
             });
@@ -10778,11 +10574,10 @@ pub(crate) mod tests {
         // 'Replacing the tabController after disposing the old one'.
         #[test]
         fn a_tab_bar_takes_a_new_controller_after_the_old_one_is_disposed() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = Rc::new(RefCell::new(create_tab_controller(&tester, 2)));
+            test_widgets(|tester| {
+                let controller = Rc::new(RefCell::new(create_tab_controller(tester, 2)));
 
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 let shown = Rc::clone(&controller);
                 tester.pump_widget(material_app(
                     theme,
@@ -10828,21 +10623,21 @@ pub(crate) mod tests {
                     assert_eq!(controller.borrow().index(&app), 0);
                     assert_eq!(controller.borrow().length(&app), 2);
                 }
-                assert_eq!(tester.find_text("Tab0").len(), 1);
-                assert_eq!(tester.find_text("Tab1").len(), 1);
-                assert!(tester.find_text("Tab2").is_empty());
+                expect(tester, &find::text("Tab0"), finds_one_widget());
+                expect(tester, &find::text("Tab1"), finds_one_widget());
+                expect(tester, &find::text("Tab2"), finds_nothing());
 
-                let button = text(&tester, "Change TabController length");
-                tap(&mut tester, button);
+                let button = text(tester, "Change TabController length");
+                tap(tester, button);
                 tester.pump_and_settle();
                 {
                     let app = tester.cell.borrow();
                     assert_eq!(controller.borrow().index(&app), 0);
                     assert_eq!(controller.borrow().length(&app), 3);
                 }
-                assert_eq!(tester.find_text("Tab0").len(), 1);
-                assert_eq!(tester.find_text("Tab1").len(), 1);
-                assert_eq!(tester.find_text("Tab2").len(), 1);
+                expect(tester, &find::text("Tab0"), finds_one_widget());
+                expect(tester, &find::text("Tab1"), finds_one_widget());
+                expect(tester, &find::text("Tab2"), finds_one_widget());
             });
         }
 
@@ -10942,24 +10737,23 @@ pub(crate) mod tests {
         // 'DefaultTabController should allow for a length of zero'.
         #[test]
         fn a_default_tab_controller_can_have_no_tabs() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let add_key = GlobalKey::new();
                 let delete_key = GlobalKey::new();
-                let app = zero_length_app(&tester, add_key.clone(), delete_key.clone(), false);
+                let app = zero_length_app(tester, add_key.clone(), delete_key.clone(), false);
                 tester.pump_widget(app);
 
                 // Initializes with zero tabs properly
-                assert_eq!(tester.find_text("No tabs").len(), 1);
-                tap_key(&mut tester, &add_key);
+                expect(tester, &find::text("No tabs"), finds_one_widget());
+                tap_key(tester, &add_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert_eq!(tester.find_text("Tab 1's view").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 1's view"), finds_one_widget());
 
                 // Dynamically updates to zero tabs properly
-                tap_key(&mut tester, &delete_key);
+                tap_key(tester, &delete_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("No tabs").len(), 1);
+                expect(tester, &find::text("No tabs"), finds_one_widget());
             });
         }
 
@@ -11050,33 +10844,31 @@ pub(crate) mod tests {
         // 'DefaultTabController should allow dynamic length of tabs'.
         #[test]
         fn a_default_tab_controller_follows_a_changing_number_of_tabs() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let add_key = GlobalKey::new();
                 let remove_key = GlobalKey::new();
                 let titles = Rc::new(RefCell::new(Vec::new()));
-                let app =
-                    add_remove_app(&tester, titles, None, add_key.clone(), remove_key.clone());
+                let app = add_remove_app(tester, titles, None, add_key.clone(), remove_key.clone());
                 tester.pump_widget(app);
 
-                assert!(tester.find_text("Tab 1").is_empty());
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_nothing());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
 
-                tap_key(&mut tester, &add_key); // +1
+                tap_key(tester, &add_key); // +1
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
 
-                tap_key(&mut tester, &add_key); // +2
+                tap_key(tester, &add_key); // +2
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert_eq!(tester.find_text("Tab 2").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 2"), finds_one_widget());
 
-                tap_key(&mut tester, &remove_key); // -2
-                tap_key(&mut tester, &remove_key); // -1
+                tap_key(tester, &remove_key); // -2
+                tap_key(tester, &remove_key); // -1
                 tester.pump_and_settle();
-                assert!(tester.find_text("Tab 1").is_empty());
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_nothing());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
             });
         }
 
@@ -11084,14 +10876,13 @@ pub(crate) mod tests {
         // 'TabBar - updating to and from zero tabs'.
         #[test]
         fn a_tab_bar_goes_to_and_from_no_tabs_with_new_controllers() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let add_key = GlobalKey::new();
                 let remove_key = GlobalKey::new();
                 let titles = Rc::new(RefCell::new(Vec::new()));
-                let controller = Rc::new(RefCell::new(create_tab_controller(&tester, 0)));
+                let controller = Rc::new(RefCell::new(create_tab_controller(tester, 0)));
                 let app = add_remove_app(
-                    &tester,
+                    tester,
                     titles,
                     Some(controller),
                     add_key.clone(),
@@ -11099,15 +10890,15 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(app);
 
-                assert!(tester.find_text("Tab 1").is_empty());
-                assert_eq!(tester.find_text("Add tab").len(), 1);
-                tap_key(&mut tester, &add_key);
+                expect(tester, &find::text("Tab 1"), finds_nothing());
+                expect(tester, &find::text("Add tab"), finds_one_widget());
+                tap_key(tester, &add_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
 
-                tap_key(&mut tester, &remove_key);
+                tap_key(tester, &remove_key);
                 tester.pump_and_settle();
-                assert!(tester.find_text("Tab 1").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_nothing());
             });
         }
 
@@ -11170,13 +10961,12 @@ pub(crate) mod tests {
         // here it is made with `TestVSync`, which ticks the same frames.
         #[test]
         fn setting_the_index_moves_the_indicator_at_once() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_COLOR: Color = Color::new(0xFFFF0000);
-                let tab_controller = create_tab_controller(&tester, 3);
+                let tab_controller = create_tab_controller(tester, 3);
                 let tabs = || ["A", "B", "C"].map(|text| Tab::new().text(text).into_widget());
 
-                let theme = theme(&tester, Some(false), None);
+                let theme = theme(tester, Some(false), None);
                 tester.pump_widget(material_app(
                     theme,
                     scaffold_with_tab_bar(
@@ -11195,14 +10985,14 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar = tester.render_box_of(only::<TabBar>(&tester)).as_object();
+                let tab_bar = tester.render_box_of(only::<TabBar>(tester)).as_object();
                 let expected_indicator_left = Rc::new(Cell::new(indicator_left(
                     &mut tester.cell.borrow_mut(),
                     tab_bar,
                     INDICATOR_COLOR,
                 )));
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
                 let expected = Rc::clone(&expected_indicator_left);
                 // Whenever TabBarView scrolls due to changing TabController's index,
                 // check if indicator stays idle in its expectedIndicatorLeft
@@ -11242,9 +11032,8 @@ pub(crate) mod tests {
         // 'Setting BouncingScrollPhysics on TabBarView does not include ClampingScrollPhysics'.
         #[test]
         fn bouncing_physics_on_a_tab_bar_view_leave_out_clamping_physics() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     DefaultTabController::new(
@@ -11261,7 +11050,7 @@ pub(crate) mod tests {
                     .into_widget(),
                 ));
 
-                let physics = tester.widget(only::<PageView>(&tester), |page_view: &PageView| {
+                let physics = tester.widget(only::<PageView>(tester), |page_view: &PageView| {
                     page_view
                         .physics
                         .clone()
@@ -11281,9 +11070,8 @@ pub(crate) mod tests {
         // 'TabController.offset changes reflect labelColor'.
         #[test]
         fn the_controller_offset_lerps_the_label_colors() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = create_tab_controller(&tester, 2);
+            test_widgets(|tester| {
+                let controller = create_tab_controller(tester, 2);
                 let first_color: Rc<Cell<Option<Color>>> = Rc::new(Cell::new(None));
                 let second_color: Rc<Cell<Option<Color>>> = Rc::new(Cell::new(None));
 
@@ -11322,7 +11110,7 @@ pub(crate) mod tests {
                         assert_eq!(second_color.get(), Some(unselected_color));
 
                         controller.set_offset(&mut tester.cell.borrow_mut(), 0.6);
-                        tester.pump(Duration::ZERO);
+                        tester.pump();
 
                         assert_eq!(
                             first_color.get(),
@@ -11334,19 +11122,19 @@ pub(crate) mod tests {
                         );
 
                         controller.set_index(&mut tester.cell.borrow_mut(), 1);
-                        tester.pump(Duration::ZERO);
+                        tester.pump();
 
                         assert_eq!(first_color.get(), Some(unselected_color));
                         assert_eq!(second_color.get(), Some(selected_color));
 
                         controller.set_offset(&mut tester.cell.borrow_mut(), 0.6);
-                        tester.pump(Duration::ZERO);
+                        tester.pump();
 
                         assert_eq!(first_color.get(), Some(unselected_color));
                         assert_eq!(second_color.get(), Some(selected_color));
 
                         controller.set_offset(&mut tester.cell.borrow_mut(), -0.6);
-                        tester.pump(Duration::ZERO);
+                        tester.pump();
 
                         assert_eq!(
                             first_color.get(),
@@ -11358,26 +11146,25 @@ pub(crate) mod tests {
                         );
                     };
 
-                let frame = build_tab_bar(&tester, false);
+                let frame = build_tab_bar(tester, false);
                 tester.pump_widget(frame);
-                test_label_color(&mut tester, Colors::WHITE, Colors::BLACK);
+                test_label_color(tester, Colors::WHITE, Colors::BLACK);
 
                 // reset
                 controller.set_index(&mut tester.cell.borrow_mut(), 0);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
-                let frame = build_tab_bar(&tester, true);
+                let frame = build_tab_bar(tester, true);
                 tester.pump_widget(frame);
-                test_label_color(&mut tester, Colors::WHITE, Colors::TRANSPARENT);
+                test_label_color(tester, Colors::WHITE, Colors::TRANSPARENT);
             });
         }
 
         // 'No crash on dispose'.
         #[test]
         fn tapping_a_tab_while_its_view_disposes_pages_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 let icon = |icon: waft_widgets::IconData| {
                     waft_widgets::Icon::new(Some(icon)).into_widget()
                 };
@@ -11408,9 +11195,9 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
                 ));
-                let bike = tester.find_by_icon(&Icons::directions_bike());
+                let bike = tester.element(find::by_icon(&Icons::directions_bike()).first());
                 // No crash on dispose.
-                let tapped = catch_unwind(AssertUnwindSafe(|| tap(&mut tester, bike)));
+                let tapped = catch_unwind(AssertUnwindSafe(|| tap(tester, bike)));
                 assert!(tapped.is_ok());
             });
         }
@@ -11419,9 +11206,8 @@ pub(crate) mod tests {
         // interrupts ballistic scroll".
         #[test]
         fn the_controller_animation_follows_the_page_when_a_touch_interrupts_a_ballistic_scroll() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let tab_controller = create_tab_controller(&tester, 3);
+            test_widgets(|tester| {
+                let tab_controller = create_tab_controller(tester, 3);
 
                 tester.pump_widget(
                     Directionality::new(
@@ -11440,7 +11226,7 @@ pub(crate) mod tests {
                     .into_widget(),
                 );
 
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
                 {
                     let app = tester.cell.borrow();
                     let position = page_controller.position(&app);
@@ -11449,7 +11235,7 @@ pub(crate) mod tests {
                 }
 
                 page_controller.jump_to(&mut tester.cell.borrow_mut(), 300.0);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 let animation_value = |tester: &WidgetTester| {
                     let app = tester.cell.borrow();
                     tab_controller
@@ -11458,18 +11244,18 @@ pub(crate) mod tests {
                         .value(&app)
                 };
                 assert_eq!(
-                    Some(animation_value(&tester)),
+                    Some(animation_value(tester)),
                     page_controller.page(&tester.cell.borrow())
                 );
 
                 // Touch TabBarView while ballistic scrolling is happening and
                 // check if tabController's animation value properly follows page value.
-                let center = center_of(&tester, only::<PageView>(&tester));
-                let mut gesture = WidgetTester::touch(1);
+                let center = tester.get_center(only::<PageView>(tester));
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, center);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert_eq!(
-                    Some(animation_value(&tester)),
+                    Some(animation_value(tester)),
                     page_controller.page(&tester.cell.borrow())
                 );
 
@@ -11483,10 +11269,9 @@ pub(crate) mod tests {
         // 'Does not instantiate intermediate tabs during animation'.
         #[test]
         fn skipping_to_a_distant_tab_builds_no_page_in_between() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Rc::new(RefCell::new(Vec::new()));
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     DefaultTabController::new(
@@ -11512,16 +11297,16 @@ pub(crate) mod tests {
                     .into_widget(),
                 ));
 
-                assert_eq!(tester.find_text("0").len(), 1);
-                assert!(tester.find_text("3").is_empty());
+                expect(tester, &find::text("0"), finds_one_widget());
+                expect(tester, &find::text("3"), finds_nothing());
                 assert_eq!(*log.borrow(), vec!["init: 0"]);
 
-                let boat = text(&tester, "boat");
-                tap(&mut tester, boat);
+                let boat = text(tester, "boat");
+                tap(tester, boat);
                 tester.pump_and_settle();
 
-                assert!(tester.find_text("0").is_empty());
-                assert_eq!(tester.find_text("3").len(), 1);
+                expect(tester, &find::text("0"), finds_nothing());
+                expect(tester, &find::text("3"), finds_one_widget());
 
                 // No other tab got instantiated during the animation.
                 assert_eq!(*log.borrow(), vec!["init: 0", "init: 3", "dispose: 0"]);
@@ -11534,10 +11319,9 @@ pub(crate) mod tests {
         // length".
         #[test]
         fn removing_the_selected_last_tab_moves_the_animation_to_the_new_last_tab() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs = Rc::new(RefCell::new(vec!["A", "B", "C"]));
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     StatefulBuilder::new(move |_app, _context, set_state| {
@@ -11576,7 +11360,7 @@ pub(crate) mod tests {
 
                 let get_controller =
                     |tester: &WidgetTester| default_controller_of(tester, text(tester, "B"));
-                let controller = get_controller(&tester);
+                let controller = get_controller(tester);
 
                 controller.animate_to(
                     &mut tester.cell.borrow_mut(),
@@ -11584,21 +11368,21 @@ pub(crate) mod tests {
                     Some(Duration::from_millis(200)),
                     Some(Curves::linear()),
                 );
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(300));
+                tester.pump();
+                tester.pump_by(Duration::from_millis(300));
 
-                let controller = get_controller(&tester);
+                let controller = get_controller(tester);
                 {
                     let app = tester.cell.borrow();
                     assert_eq!(controller.index(&app), 2);
                     assert_eq!(controller.animation(&app).expect("live").value(&app), 2.0);
                 }
 
-                let remove = text(&tester, "Remove Last Tab");
-                tap(&mut tester, remove);
+                let remove = text(tester, "Remove Last Tab");
+                tap(tester, remove);
                 tester.pump_and_settle();
 
-                let controller = get_controller(&tester);
+                let controller = get_controller(tester);
                 let app = tester.cell.borrow();
                 assert_eq!(controller.index(&app), 1);
                 assert_eq!(controller.animation(&app).expect("live").value(&app), 1.0);
@@ -11608,9 +11392,8 @@ pub(crate) mod tests {
         // 'Tab preferredSize gives correct value'.
         #[test]
         fn a_tab_prefers_46_high_or_72_with_an_icon_and_text() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Material::new()
@@ -11633,15 +11416,15 @@ pub(crate) mod tests {
                     tester.widget(element, |tab: &Tab| tab.preferred_size().size())
                 };
                 assert_eq!(
-                    preferred(tab_with_icon(&tester, &Icons::message())),
+                    preferred(tab_with_icon(tester, &Icons::message())),
                     Size::from_height(46.0)
                 );
                 assert_eq!(
-                    preferred(nearest_with_text::<Tab>(&tester, "Two")),
+                    preferred(nearest_with_text::<Tab>(tester, "Two")),
                     Size::from_height(46.0)
                 );
                 assert_eq!(
-                    preferred(nearest_with_text::<Tab>(&tester, "Three")),
+                    preferred(nearest_with_text::<Tab>(tester, "Three")),
                     Size::from_height(72.0)
                 );
             });
@@ -11659,9 +11442,8 @@ pub(crate) mod tests {
         // 'TabBar preferredSize gives correct value when there are both icon and text in tabs'.
         #[test]
         fn a_tab_bar_with_an_icon_and_text_tab_prefers_74_high() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     DefaultTabController::new(
@@ -11685,7 +11467,7 @@ pub(crate) mod tests {
                 ));
 
                 assert_eq!(
-                    tab_bar_preferred_size(&tester, "car"),
+                    tab_bar_preferred_size(tester, "car"),
                     Size::from_height(74.0)
                 );
             });
@@ -11694,9 +11476,8 @@ pub(crate) mod tests {
         // 'TabBar preferredSize gives correct value when there is only icon or text in tabs'.
         #[test]
         fn a_tab_bar_of_icon_or_text_tabs_prefers_48_high() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     DefaultTabController::new(
@@ -11721,7 +11502,7 @@ pub(crate) mod tests {
                 ));
 
                 assert_eq!(
-                    tab_bar_preferred_size(&tester, "car"),
+                    tab_bar_preferred_size(tester, "car"),
                     Size::from_height(48.0)
                 );
             });
@@ -11763,13 +11544,12 @@ pub(crate) mod tests {
         // 'Tabs are given uniform padding in case of few tabs having both text and icon'.
         #[test]
         fn text_tabs_beside_an_icon_and_text_tab_get_vertical_padding() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let expected_padding_adjusted = EdgeInsetsGeometry::symmetric(13.0, 16.0);
                 let expected_padding_default = EdgeInsetsGeometry::symmetric(0.0, 16.0);
 
-                let theme = theme(&tester, None, None);
-                let [tab_one, tab_two, tab_three] = uniform_paddings(&mut tester, theme, None);
+                let theme = theme(tester, None, None);
+                let [tab_one, tab_two, tab_three] = uniform_paddings(tester, theme, None);
 
                 assert_eq!(tab_one, expected_padding_default);
                 assert_eq!(tab_two, expected_padding_adjusted);
@@ -11780,15 +11560,14 @@ pub(crate) mod tests {
         // 'Tabs are given uniform padding when labelPadding is given'.
         #[test]
         fn text_tabs_beside_an_icon_and_text_tab_add_vertical_padding_to_the_label_padding() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let label_padding = EdgeInsetsGeometry::symmetric(10.0, 20.0);
                 let expected_padding_adjusted = EdgeInsetsGeometry::symmetric(23.0, 20.0);
                 let expected_padding_default = EdgeInsetsGeometry::symmetric(10.0, 20.0);
 
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 let [tab_one, tab_two, tab_three] =
-                    uniform_paddings(&mut tester, theme, Some(label_padding));
+                    uniform_paddings(tester, theme, Some(label_padding));
 
                 assert_eq!(tab_one, expected_padding_default);
                 assert_eq!(tab_two, expected_padding_adjusted);
@@ -11799,18 +11578,17 @@ pub(crate) mod tests {
         // 'Tabs are given uniform padding TabBarTheme.labelPadding is given'.
         #[test]
         fn text_tabs_beside_an_icon_and_text_tab_add_vertical_padding_to_the_theme_label_padding() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let label_padding = EdgeInsetsGeometry::symmetric(15.0, 20.0);
                 let expected_padding_adjusted = EdgeInsetsGeometry::symmetric(28.0, 20.0);
                 let expected_padding_default = EdgeInsetsGeometry::symmetric(15.0, 20.0);
 
                 let theme = theme(
-                    &tester,
+                    tester,
                     None,
                     Some(TabBarThemeData::new().label_padding(label_padding)),
                 );
-                let [tab_one, tab_two, tab_three] = uniform_paddings(&mut tester, theme, None);
+                let [tab_one, tab_two, tab_three] = uniform_paddings(tester, theme, None);
 
                 assert_eq!(tab_one, expected_padding_default);
                 assert_eq!(tab_two, expected_padding_adjusted);
@@ -11821,9 +11599,8 @@ pub(crate) mod tests {
         // 'Change tab bar height'.
         #[test]
         fn every_kind_of_tab_takes_the_height_it_is_given() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, Some(false), None);
+            test_widgets(|tester| {
+                let theme = theme(tester, Some(false), None);
                 let style = TextStyle::new().font_size(25.0);
                 tester.pump_widget(material_app(
                     theme,
@@ -11852,10 +11629,10 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
                 ));
-                let first_tab = tab_with_icon(&tester, &Icons::check());
-                let sec_tab = nearest_with_text::<Tab>(&tester, "2 - OK");
-                let third_tab = tab_with_icon(&tester, &Icons::done());
-                let fourth_tab = nearest_with_text::<Tab>(&tester, "4 - OK");
+                let first_tab = tab_with_icon(tester, &Icons::check());
+                let sec_tab = nearest_with_text::<Tab>(tester, "2 - OK");
+                let third_tab = tab_with_icon(tester, &Icons::done());
+                let fourth_tab = nearest_with_text::<Tab>(tester, "4 - OK");
                 assert_eq!(
                     tester.widget(first_tab, |tab: &Tab| tab.preferred_size().size().height()),
                     85.0
@@ -11869,9 +11646,8 @@ pub(crate) mod tests {
         // 'Change tab bar height 2'.
         #[test]
         fn an_icon_and_text_tab_takes_the_height_it_is_given() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     DefaultTabController::new(
@@ -11888,7 +11664,7 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
                 ));
-                let first_tab = tab_with_icon(&tester, &Icons::check());
+                let first_tab = tab_with_icon(tester, &Icons::check());
                 assert_eq!(tester.widget(first_tab, |tab: &Tab| tab.height), Some(85.0));
             });
         }
@@ -11930,17 +11706,16 @@ pub(crate) mod tests {
         // index.'
         #[test]
         fn a_new_controller_returns_the_tab_bar_and_its_view_to_the_new_index() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller1 = create_tab_controller(&tester, 3);
-                let controller2 = create_tab_controller(&tester, 2);
-                let controller3 = create_tab_controller(&tester, 3);
+            test_widgets(|tester| {
+                let controller1 = create_tab_controller(tester, 3);
+                let controller2 = create_tab_controller(tester, 2);
+                let controller3 = create_tab_controller(tester, 3);
 
-                let frame = controller_swap_frame(&tester, controller1.clone(), true);
+                let frame = controller_swap_frame(tester, controller1.clone(), true);
                 tester.pump_widget(frame);
-                let page_controller = page_controller(&tester);
-                let three = text(&tester, "three");
-                tap(&mut tester, three);
+                let page_controller = page_controller(tester);
+                let three = text(tester, "three");
+                tap(tester, three);
                 tester.pump_and_settle();
                 {
                     let app = tester.cell.borrow();
@@ -11949,7 +11724,7 @@ pub(crate) mod tests {
                 }
 
                 // Change TabController from 3 items to 2.
-                let frame = controller_swap_frame(&tester, controller2.clone(), false);
+                let frame = controller_swap_frame(tester, controller2.clone(), false);
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
                 {
@@ -11959,7 +11734,7 @@ pub(crate) mod tests {
                 }
 
                 // Change TabController from 2 items to 3.
-                let frame = controller_swap_frame(&tester, controller3.clone(), true);
+                let frame = controller_swap_frame(tester, controller3.clone(), true);
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
                 {
@@ -11968,8 +11743,8 @@ pub(crate) mod tests {
                     assert_eq!(page_controller.page(&app), Some(0.0));
                 }
 
-                let three = text(&tester, "three");
-                tap(&mut tester, three);
+                let three = text(tester, "three");
+                tap(tester, three);
                 tester.pump_and_settle();
 
                 let app = tester.cell.borrow();
@@ -11982,39 +11757,38 @@ pub(crate) mod tests {
         // 'Do not crash when the new TabController.index is longer than the old length.'
         #[test]
         fn going_back_to_a_controller_whose_index_the_other_lacked_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller1 = create_tab_controller(&tester, 3);
-                let controller2 = create_tab_controller(&tester, 2);
+            test_widgets(|tester| {
+                let controller1 = create_tab_controller(tester, 3);
+                let controller2 = create_tab_controller(tester, 2);
 
-                let frame = controller_swap_frame(&tester, controller1.clone(), true);
+                let frame = controller_swap_frame(tester, controller1.clone(), true);
                 tester.pump_widget(frame);
-                let three = text(&tester, "three");
-                tap(&mut tester, three);
+                let three = text(tester, "three");
+                tap(tester, three);
                 tester.pump_and_settle();
                 {
-                    let page_controller = page_controller(&tester);
+                    let page_controller = page_controller(tester);
                     let app = tester.cell.borrow();
                     assert_eq!(controller1.index(&app), 2);
                     assert_eq!(page_controller.page(&app), Some(2.0));
                 }
 
                 // Change TabController from controller1 to controller2.
-                let frame = controller_swap_frame(&tester, controller2.clone(), false);
+                let frame = controller_swap_frame(tester, controller2.clone(), false);
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
                 {
-                    let page_controller = page_controller(&tester);
+                    let page_controller = page_controller(tester);
                     let app = tester.cell.borrow();
                     assert_eq!(controller2.index(&app), 0);
                     assert_eq!(page_controller.page(&app), Some(0.0));
                 }
 
                 // Change TabController back to 'controller1' whose index is 2.
-                let frame = controller_swap_frame(&tester, controller1.clone(), true);
+                let frame = controller_swap_frame(tester, controller1.clone(), true);
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
-                let page_controller = page_controller(&tester);
+                let page_controller = page_controller(tester);
                 let app = tester.cell.borrow();
                 assert_eq!(controller1.index(&app), 2);
                 assert_eq!(page_controller.page(&app), Some(2.0));
@@ -12039,8 +11813,7 @@ pub(crate) mod tests {
         // 'TabBar InkWell splashFactory and overlayColor'.
         #[test]
         fn the_tab_ink_wells_take_the_splash_factory_and_overlay_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let splash_factory = crate::no_splash::NoSplash::splash_factory();
                 let overlay_color: WidgetStatePropertyRef<Option<Color>> =
                     <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|_states| {
@@ -12056,7 +11829,7 @@ pub(crate) mod tests {
 
                 // TabBarTheme splashFactory and overlayColor
                 let theme_with_tab_bar = theme(
-                    &tester,
+                    tester,
                     None,
                     Some(
                         TabBarThemeData::new()
@@ -12073,7 +11846,7 @@ pub(crate) mod tests {
                     .into_widget(),
                 ));
 
-                let (splash, overlay) = ink_well_splash_and_overlay(&tester);
+                let (splash, overlay) = ink_well_splash_and_overlay(tester);
                 assert!(Rc::ptr_eq(
                     &splash.expect("a splash factory"),
                     &splash_factory
@@ -12084,7 +11857,7 @@ pub(crate) mod tests {
                 ));
 
                 // TabBar splashFactory and overlayColor
-                let default_theme = theme(&tester, None, None);
+                let default_theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     default_theme,
                     DefaultTabController::new(
@@ -12100,7 +11873,7 @@ pub(crate) mod tests {
                     .into_widget(),
                 ));
                 tester.pump_and_settle(); // theme animation
-                let (splash, overlay) = ink_well_splash_and_overlay(&tester);
+                let (splash, overlay) = ink_well_splash_and_overlay(tester);
                 assert!(Rc::ptr_eq(
                     &splash.expect("a splash factory"),
                     &splash_factory
@@ -12115,11 +11888,10 @@ pub(crate) mod tests {
         // 'splashBorderRadius is passed to InkWell.borderRadius'.
         #[test]
         fn the_splash_border_radius_rounds_the_tab_hover_highlight() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const HOVER_COLOR: Color = Color::new(0xfff44336);
                 const RADIUS: f64 = 20.0;
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -12140,21 +11912,23 @@ pub(crate) mod tests {
                     ),
                 ));
                 tester.pump_and_settle();
-                let mut gesture = WidgetTester::mouse(1, 0);
-                let center = center_of(&tester, only::<Tab>(&tester));
+                let mut gesture = TestPointer::mouse(1, 0);
+                let center = tester.get_center(only::<Tab>(tester));
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
                 let object = tester.first::<crate::material::RenderInkFeatures>();
-                let ink_well_rect = rect_of(&tester, only::<InkWell>(&tester));
-                assert!(tester.paints_rrect(
-                    object.as_object(),
-                    waft_embedder::RRect::from_rect_and_radius(
-                        ink_well_rect,
-                        waft_embedder::Radius::circular(RADIUS),
-                    ),
-                    Some(HOVER_COLOR),
-                ));
+                let ink_well_rect = tester.get_rect(only::<InkWell>(tester));
+                waft_rendering::testing::assert_paints(
+                    &tester.painted_ops(object.as_object()),
+                    &[waft_rendering::testing::PaintCall::rrect_at(
+                        waft_embedder::RRect::from_rect_and_radius(
+                            ink_well_rect,
+                            waft_embedder::Radius::circular(RADIUS),
+                        ),
+                        Some(HOVER_COLOR),
+                    )],
+                );
             });
         }
 
@@ -12162,10 +11936,9 @@ pub(crate) mod tests {
         // 'No crash if TabBar build called before didUpdateWidget with SliverAppBar'.
         #[test]
         fn a_sliver_app_bar_tab_bar_gaining_its_first_tab_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let tabs: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     StatefulBuilder::new(move |_app, _context, set_state| {
@@ -12202,18 +11975,18 @@ pub(crate) mod tests {
                 ));
 
                 // Initializes with zero tabs.
-                assert!(tester.find_text("Tab 1").is_empty());
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_nothing());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
 
                 // No crash after tabs added.
-                let add = text(&tester, "Add Tab");
+                let add = text(tester, "Add Tab");
                 let added = catch_unwind(AssertUnwindSafe(|| {
-                    tap(&mut tester, add);
+                    tap(tester, add);
                     tester.pump_and_settle();
                 }));
                 assert!(added.is_ok());
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
             });
         }
 
@@ -12222,24 +11995,23 @@ pub(crate) mod tests {
         // layout) of the same frame'.
         #[test]
         fn a_tab_bar_view_built_in_layout_follows_a_controller_built_earlier_in_the_frame() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let add_key = GlobalKey::new();
                 let delete_key = GlobalKey::new();
-                let app = zero_length_app(&tester, add_key.clone(), delete_key.clone(), true);
+                let app = zero_length_app(tester, add_key.clone(), delete_key.clone(), true);
                 tester.pump_widget(app);
 
                 // Initializes with zero tabs properly
-                assert_eq!(tester.find_text("No tabs").len(), 1);
-                tap_key(&mut tester, &add_key);
+                expect(tester, &find::text("No tabs"), finds_one_widget());
+                tap_key(tester, &add_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert_eq!(tester.find_text("Tab 1's view").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 1's view"), finds_one_widget());
 
                 // Dynamically updates to zero tabs properly
-                tap_key(&mut tester, &delete_key);
+                tap_key(tester, &delete_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("No tabs").len(), 1);
+                expect(tester, &find::text("No tabs"), finds_one_widget());
             });
         }
 
@@ -12255,11 +12027,10 @@ pub(crate) mod tests {
         // "Throw if the controller's length mismatch the tabs count".
         #[test]
         fn a_controller_longer_than_the_tabs_panics() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 let exception = pump_and_take_exception(
-                    &mut tester,
+                    tester,
                     material_app(
                         theme,
                         DefaultTabController::new(
@@ -12284,14 +12055,13 @@ pub(crate) mod tests {
         // "Throw if the controller's length mismatch the TabBarView‘s children count".
         #[test]
         fn a_tab_bar_view_with_more_children_than_the_controller_panics() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 let icon = |icon: waft_widgets::IconData| {
                     waft_widgets::Icon::new(Some(icon)).into_widget()
                 };
                 let exception = pump_and_take_exception(
-                    &mut tester,
+                    tester,
                     material_app(
                         theme,
                         DefaultTabController::new(
@@ -12320,18 +12090,13 @@ pub(crate) mod tests {
             });
         }
 
-        /// Whether `drawn` has a rect of `color`: Dart's `paints..rect(color: color)`.
-        fn paints_rect_of(drawn: &[crate::test_support::Drawn], color: Color) -> bool {
-            drawn.iter().any(|drawn| {
-                matches!(drawn, crate::test_support::Drawn::Rect(argb, _)
-                    if crate::test_support::is_same_color_as(Color::new(*argb), color))
-            })
+        fn paints_rect_of(ops: &[Op], color: Color) -> bool {
+            paints(ops, &[PaintCall::rect(Some(color))]).is_ok()
         }
 
-        /// What the first ink-features render object and its subtree paint.
-        fn ink_features_painted(tester: &WidgetTester) -> Vec<crate::test_support::Drawn> {
+        fn ink_features_painted(tester: &WidgetTester) -> Vec<Op> {
             let ink_features = tester.first::<crate::material::RenderInkFeatures>();
-            tester.painted(ink_features.as_object())
+            tester.painted_ops_deep(ink_features.as_object())
         }
 
         #[allow(deprecated)]
@@ -12342,38 +12107,40 @@ pub(crate) mod tests {
         // 'Tab has correct selected/unselected hover color'.
         #[test]
         fn an_unselected_and_a_selected_tab_hover_in_different_colors() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 tester.set_highlight_strategy(
                     waft_widgets::FocusHighlightStrategy::AlwaysTraditional,
                 );
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 let mut frame = Frame::new(vec!["A", "B", "C"], "C");
                 frame.use_material3 = Some(theme.use_material3);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
 
                 tester.pump_and_settle();
                 let unselected = with_opacity(theme.color_scheme.on_surface, 0.08);
                 let selected = with_opacity(theme.color_scheme.primary, 0.08);
-                assert!(!paints_rect_of(&ink_features_painted(&tester), unselected));
-                assert!(!paints_rect_of(&ink_features_painted(&tester), selected));
+                assert!(!paints_rect_of(&ink_features_painted(tester), unselected));
+                assert!(!paints_rect_of(&ink_features_painted(tester), selected));
 
                 // Start hovering unselected tab.
-                let mut gesture = WidgetTester::mouse(1, 0);
+                let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
-                let first = tester.find_by_type::<Tab>()[0];
-                let first_center = center_of(&tester, first);
+                let first = find::by_type::<Tab>().evaluate(tester)[0];
+                let first_center = tester.get_center(first);
                 tester.move_to(&mut gesture, first_center, false);
                 tester.pump_and_settle();
-                assert!(paints_rect_of(&ink_features_painted(&tester), unselected));
+                assert!(paints_rect_of(&ink_features_painted(tester), unselected));
 
                 // Start hovering selected tab.
-                let last = *tester.find_by_type::<Tab>().last().expect("tabs");
-                let last_center = center_of(&tester, last);
+                let last = *find::by_type::<Tab>()
+                    .evaluate(tester)
+                    .last()
+                    .expect("tabs");
+                let last_center = tester.get_center(last);
                 tester.move_to(&mut gesture, last_center, false);
                 tester.pump_and_settle();
-                assert!(paints_rect_of(&ink_features_painted(&tester), selected));
+                assert!(paints_rect_of(&ink_features_painted(tester), selected));
             });
         }
 
@@ -12390,73 +12157,71 @@ pub(crate) mod tests {
         // 'Tab has correct selected/unselected focus color'.
         #[test]
         fn an_unselected_and_a_selected_tab_focus_in_different_colors() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 tester.set_highlight_strategy(
                     waft_widgets::FocusHighlightStrategy::AlwaysTraditional,
                 );
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 let mut frame = Frame::new(vec!["A", "B", "C"], "B");
                 frame.use_material3 = Some(theme.use_material3);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(material_app(theme.clone(), frame));
 
                 tester.pump_and_settle();
                 let unselected = with_opacity(theme.color_scheme.on_surface, 0.1);
                 let selected = with_opacity(theme.color_scheme.primary, 0.1);
-                assert!(!paints_rect_of(&ink_features_painted(&tester), unselected));
-                assert!(!paints_rect_of(&ink_features_painted(&tester), selected));
+                assert!(!paints_rect_of(&ink_features_painted(tester), unselected));
+                assert!(!paints_rect_of(&ink_features_painted(tester), selected));
 
                 tester.send_key_event(
                     waft_services::PhysicalKeyboardKey::TAB,
                     waft_services::LogicalKeyboardKey::TAB,
                 );
                 tester.pump_and_settle();
-                assert!(primary_focus_has_primary_focus(&tester));
-                assert!(paints_rect_of(&ink_features_painted(&tester), unselected));
+                assert!(primary_focus_has_primary_focus(tester));
+                assert!(paints_rect_of(&ink_features_painted(tester), unselected));
 
                 tester.send_key_event(
                     waft_services::PhysicalKeyboardKey::TAB,
                     waft_services::LogicalKeyboardKey::TAB,
                 );
                 tester.pump_and_settle();
-                assert!(primary_focus_has_primary_focus(&tester));
-                assert!(paints_rect_of(&ink_features_painted(&tester), selected));
+                assert!(primary_focus_has_primary_focus(tester));
+                assert!(paints_rect_of(&ink_features_painted(tester), selected));
             });
         }
 
         // 'Tab has correct selected/unselected pressed color'.
         #[test]
         fn pressing_an_unselected_or_a_selected_tab_highlights_in_the_primary_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 let mut frame = Frame::new(vec!["A", "B", "C"], "B");
                 frame.use_material3 = Some(theme.use_material3);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(material_app(theme.clone(), frame));
 
                 tester.pump_and_settle();
                 let pressed = with_opacity(theme.color_scheme.primary, 0.1);
-                assert!(!paints_rect_of(&ink_features_painted(&tester), pressed));
+                assert!(!paints_rect_of(&ink_features_painted(tester), pressed));
 
                 // Press unselected tab.
-                let mut gesture = WidgetTester::touch(1);
-                let a = center_of(&tester, text(&tester, "A"));
+                let mut gesture = TestPointer::touch(1);
+                let a = tester.get_center(text(tester, "A"));
                 tester.down(&mut gesture, a);
                 tester.pump_and_settle(); // Let the press highlight animation finish.
-                assert!(paints_rect_of(&ink_features_painted(&tester), pressed));
+                assert!(paints_rect_of(&ink_features_painted(tester), pressed));
 
                 // Release pressed gesture.
                 tester.up(&gesture);
                 tester.pump_and_settle();
 
                 // Press selected tab.
-                let mut gesture = WidgetTester::touch(2);
-                let b = center_of(&tester, text(&tester, "B"));
+                let mut gesture = TestPointer::touch(2);
+                let b = tester.get_center(text(tester, "B"));
                 tester.down(&mut gesture, b);
                 tester.pump_and_settle(); // Let the press highlight animation finish.
-                assert!(paints_rect_of(&ink_features_painted(&tester), pressed));
+                assert!(paints_rect_of(&ink_features_painted(tester), pressed));
             });
         }
 
@@ -12472,27 +12237,26 @@ pub(crate) mod tests {
 
         /// The rects of the first and the last `Tab`.
         fn first_and_last_tab_rects(tester: &WidgetTester) -> (Rect, Rect) {
-            let tabs = tester.find_by_type::<Tab>();
+            let tabs = find::by_type::<Tab>().evaluate(tester);
             (
-                rect_of(tester, tabs[0]),
-                rect_of(tester, *tabs.last().expect("tabs")),
+                tester.get_rect(tabs[0]),
+                tester.get_rect(*tabs.last().expect("tabs")),
             )
         }
 
         // 'Material3 - Default TabAlignment'.
         #[test]
         fn material3_tabs_fill_a_fixed_tab_bar_and_start_offset_in_a_scrollable_one() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB_START_OFFSET: f64 = 52.0;
                 let padding = K_TAB_LABEL_PADDING;
 
                 // Test default TabAlignment when isScrollable is false.
-                let frame = Frame::new(vec!["A", "B"], "B").build(&tester);
+                let frame = Frame::new(vec!["A", "B"], "B").build(tester);
                 tester.pump_widget(frame);
 
-                let tab_bar = rect_of(&tester, only::<TabBar>(&tester));
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should fill the width of the TabBar.
                 let tab_one_left = ((tab_bar.width() / 2.0) - tab_one_rect.width()) / 2.0;
@@ -12514,10 +12278,10 @@ pub(crate) mod tests {
                 // Test default TabAlignment when isScrollable is true.
                 let mut frame = Frame::new(vec!["A", "B"], "B");
                 frame.is_scrollable = true;
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
 
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should be aligned to the start of the TabBar.
                 let tab_one_left = padding.left + TAB_START_OFFSET;
@@ -12559,17 +12323,14 @@ pub(crate) mod tests {
         // 'TabAlignment.fill only supports non-scrollable tab bar'.
         #[test]
         fn fill_alignment_panics_on_a_scrollable_tab_bar() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Test TabAlignment.fill with non-scrollable tab bar.
-                let mut tester = tester();
-                assert_eq!(
-                    alignment_exception(&mut tester, TabAlignment::Fill, false),
-                    None
-                );
+                assert_eq!(alignment_exception(tester, TabAlignment::Fill, false), None);
 
                 // Test TabAlignment.fill with scrollable tab bar.
-                let mut tester = super::tester();
-                let exception = alignment_exception(&mut tester, TabAlignment::Fill, true)
+                let mut fresh = WidgetTester::on(waft_embedder::TargetPlatform::Android);
+                let tester = &mut fresh;
+                let exception = alignment_exception(tester, TabAlignment::Fill, true)
                     .expect("the alignment assert fails");
                 assert!(
                     exception.contains("is only valid for non-scrollable tab bars"),
@@ -12581,15 +12342,15 @@ pub(crate) mod tests {
         // 'TabAlignment.start & TabAlignment.startOffset only supports scrollable tab bar'.
         #[test]
         fn start_alignments_panic_on_a_fixed_tab_bar() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 for alignment in [TabAlignment::Start, TabAlignment::StartOffset] {
                     // Test the alignment with scrollable tab bar.
-                    let mut tester = tester();
-                    assert_eq!(alignment_exception(&mut tester, alignment, true), None);
+                    assert_eq!(alignment_exception(tester, alignment, true), None);
 
                     // Test the alignment with non-scrollable tab bar.
-                    let mut tester = super::tester();
-                    let exception = alignment_exception(&mut tester, alignment, false)
+                    let mut fresh = WidgetTester::on(waft_embedder::TargetPlatform::Android);
+                    let tester = &mut fresh;
+                    let exception = alignment_exception(tester, alignment, false)
                         .expect("the alignment assert fails");
                     assert!(
                         exception.contains("is only valid for scrollable tab bars"),
@@ -12616,16 +12377,15 @@ pub(crate) mod tests {
         // 'Material3 - TabAlignment updates tabs alignment (non-scrollable TabBar)'.
         #[test]
         fn material3_center_alignment_packs_the_tabs_of_a_fixed_tab_bar() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let padding = K_TAB_LABEL_PADDING;
 
                 // Test TabAlignment.fill (default) when isScrollable is false.
-                let frame = alignment_frame(&tester, false, None, TextDirection::Ltr);
+                let frame = alignment_frame(tester, false, None, TextDirection::Ltr);
                 tester.pump_widget(frame);
 
                 const AVAILABLE_WIDTH: f64 = 800.0;
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // By defaults tabs should fill the width of the TabBar.
                 let tab_one_left = ((AVAILABLE_WIDTH / 2.0) - tab_one_rect.width()) / 2.0;
@@ -12636,7 +12396,7 @@ pub(crate) mod tests {
 
                 // Test TabAlignment.center when isScrollable is false.
                 let frame = alignment_frame(
-                    &tester,
+                    tester,
                     false,
                     Some(TabAlignment::Center),
                     TextDirection::Ltr,
@@ -12644,7 +12404,7 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
 
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should not fill the width of the TabBar.
                 let tab_one_left = padding.left;
@@ -12660,17 +12420,16 @@ pub(crate) mod tests {
         // 'Material3 - TabAlignment updates tabs alignment (scrollable TabBar)'.
         #[test]
         fn material3_alignments_place_the_tabs_of_a_scrollable_tab_bar() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB_START_OFFSET: f64 = 52.0;
                 let padding = K_TAB_LABEL_PADDING;
 
                 // Test TabAlignment.startOffset (default) when isScrollable is true.
-                let frame = alignment_frame(&tester, true, None, TextDirection::Ltr);
+                let frame = alignment_frame(tester, true, None, TextDirection::Ltr);
                 tester.pump_widget(frame);
 
-                let tab_bar = rect_of(&tester, only::<TabBar>(&tester));
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // By default tabs should be aligned to the start of the TabBar with
                 // an horizontal offset of 52.0 pixels.
@@ -12685,11 +12444,11 @@ pub(crate) mod tests {
 
                 // Test TabAlignment.start when isScrollable is true.
                 let frame =
-                    alignment_frame(&tester, true, Some(TabAlignment::Start), TextDirection::Ltr);
+                    alignment_frame(tester, true, Some(TabAlignment::Start), TextDirection::Ltr);
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
 
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should be aligned to the start of the TabBar.
                 let tab_one_left = padding.left;
@@ -12701,16 +12460,12 @@ pub(crate) mod tests {
                 assert_f32_eq(tab_two_rect.right, tab_two_right);
 
                 // Test TabAlignment.center when isScrollable is true.
-                let frame = alignment_frame(
-                    &tester,
-                    true,
-                    Some(TabAlignment::Center),
-                    TextDirection::Ltr,
-                );
+                let frame =
+                    alignment_frame(tester, true, Some(TabAlignment::Center), TextDirection::Ltr);
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
 
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should be centered in the TabBar.
                 let tab_one_left = (tab_bar.width() / 2.0) - tab_one_rect.width() - padding.right;
@@ -12720,7 +12475,7 @@ pub(crate) mod tests {
 
                 // Test TabAlignment.startOffset when isScrollable is true.
                 let frame = alignment_frame(
-                    &tester,
+                    tester,
                     true,
                     Some(TabAlignment::StartOffset),
                     TextDirection::Ltr,
@@ -12728,7 +12483,7 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
 
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should be aligned to the start of the TabBar with an
                 // horizontal offset of 52.0 pixels.
@@ -12746,17 +12501,16 @@ pub(crate) mod tests {
         // 'Material3 - TabAlignment.start & TabAlignment.startOffset respects TextDirection.rtl'.
         #[test]
         fn material3_start_alignments_start_from_the_right_in_rtl() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB_START_OFFSET: f64 = 52.0;
                 let padding = K_TAB_LABEL_PADDING;
 
                 // Test TabAlignment.startOffset (default) when isScrollable is true.
-                let frame = alignment_frame(&tester, true, None, TextDirection::Rtl);
+                let frame = alignment_frame(tester, true, None, TextDirection::Rtl);
                 tester.pump_widget(frame);
 
-                let tab_bar = rect_of(&tester, only::<TabBar>(&tester));
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should be aligned to the start of the TabBar with an
                 // horizontal offset of 52.0 pixels.
@@ -12772,11 +12526,11 @@ pub(crate) mod tests {
 
                 // Test TabAlignment.start when isScrollable is true.
                 let frame =
-                    alignment_frame(&tester, true, Some(TabAlignment::Start), TextDirection::Rtl);
+                    alignment_frame(tester, true, Some(TabAlignment::Start), TextDirection::Rtl);
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
 
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should be aligned to the start of the TabBar.
                 let tab_one_right = tab_bar.width() - padding.right;
@@ -12790,7 +12544,7 @@ pub(crate) mod tests {
 
                 // Test TabAlignment.startOffset when isScrollable is true.
                 let frame = alignment_frame(
-                    &tester,
+                    tester,
                     true,
                     Some(TabAlignment::StartOffset),
                     TextDirection::Rtl,
@@ -12798,7 +12552,7 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
 
-                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(&tester);
+                let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should be aligned to the start of the TabBar with an
                 // horizontal offset of 52.0 pixels.
@@ -12817,15 +12571,14 @@ pub(crate) mod tests {
         // 'Material3 - TabBar inherits the dividerColor of TabBarTheme'.
         #[test]
         fn material3_the_indicator_painter_takes_the_theme_divider_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let divider_color = Colors::YELLOW.primary();
                 let theme = theme(
-                    &tester,
+                    tester,
                     None,
                     Some(TabBarThemeData::new().divider_color(divider_color)),
                 );
-                let controller = create_tab_controller(&tester, 3);
+                let controller = create_tab_controller(tester, 3);
                 tester.pump_widget(material_app(
                     theme,
                     scaffold_with_tab_bar(
@@ -12840,8 +12593,8 @@ pub(crate) mod tests {
                 ));
 
                 // Test painter's divider color.
-                let paint = *tester
-                    .find_by_type::<CustomPaint>()
+                let paint = *find::by_type::<CustomPaint>()
+                    .evaluate(tester)
                     .last()
                     .expect("a CustomPaint");
                 let painter_divider_color = tester.widget(paint, |paint: &CustomPaint| {
@@ -12860,11 +12613,10 @@ pub(crate) mod tests {
         // 'Divider can be constrained'.
         #[test]
         fn the_divider_of_a_constrained_scrollable_tab_bar_is_as_wide_as_the_tab_bar() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let divider_color = Colors::YELLOW.primary();
                 let theme = theme(
-                    &tester,
+                    tester,
                     None,
                     Some(TabBarThemeData::new().divider_color(divider_color)),
                 );
@@ -12893,18 +12645,17 @@ pub(crate) mod tests {
                 ));
 
                 // Test tab bar width.
-                assert_eq!(size_of(&tester, only::<TabBar>(&tester)).width(), 360.0);
+                assert_eq!(tester.get_size(only::<TabBar>(tester)).width(), 360.0);
                 // Test divider width.
-                let divider = tester.find_by_type::<CustomPaint>()[1];
-                assert_eq!(size_of(&tester, divider).width(), 360.0);
+                let divider = find::by_type::<CustomPaint>().evaluate(tester)[1];
+                assert_eq!(tester.get_size(divider).width(), 360.0);
             });
         }
 
         // 'TabBar labels use colors from labelStyle & unselectedLabelStyle'.
         #[test]
         fn labels_take_their_colors_from_the_label_styles() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB1: &str = "Tab 1";
                 const TAB2: &str = "Tab 2";
                 let label_style = TextStyle::new()
@@ -12915,7 +12666,7 @@ pub(crate) mod tests {
                     .font_style(waft_embedder::FontStyle::Italic);
 
                 // Test tab bar with labelStyle & unselectedLabelStyle.
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -12930,16 +12681,16 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let selected_text_style = paragraph_style(&tester, TAB1);
-                let unselected_text_style = paragraph_style(&tester, TAB2);
+                let selected_text_style = paragraph_style(tester, TAB1);
+                let unselected_text_style = paragraph_style(tester, TAB2);
 
                 // Selected tab should use the labelStyle color.
-                assert_eq!(icon_color(&tester, TAB1), style_color(&label_style));
+                assert_eq!(icon_color(tester, TAB1), style_color(&label_style));
                 assert_eq!(style_color(&selected_text_style), style_color(&label_style));
                 assert_eq!(selected_text_style.font_style, label_style.font_style);
                 // Unselected tab should use the unselectedLabelStyle color.
                 assert_eq!(
-                    icon_color(&tester, TAB2),
+                    icon_color(tester, TAB2),
                     style_color(&unselected_label_style)
                 );
                 assert_eq!(
@@ -12956,8 +12707,7 @@ pub(crate) mod tests {
         // 'labelColor & unselectedLabelColor override labelStyle & unselectedLabelStyle colors'.
         #[test]
         fn label_colors_override_the_label_style_colors() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB1: &str = "Tab 1";
                 const TAB2: &str = "Tab 2";
                 const LABEL_COLOR: Color = Color::new(0xfff00000);
@@ -12989,19 +12739,19 @@ pub(crate) mod tests {
                 };
 
                 // Test tab bar with labelStyle & unselectedLabelStyle.
-                let frame = build_tab_bar(&tester, None);
+                let frame = build_tab_bar(tester, None);
                 tester.pump_widget(frame);
 
-                let selected_text_style = paragraph_style(&tester, TAB1);
-                let unselected_text_style = paragraph_style(&tester, TAB2);
+                let selected_text_style = paragraph_style(tester, TAB1);
+                let unselected_text_style = paragraph_style(tester, TAB2);
 
                 // Selected tab should use labelStyle color.
-                assert_eq!(icon_color(&tester, TAB1), style_color(&label_style));
+                assert_eq!(icon_color(tester, TAB1), style_color(&label_style));
                 assert_eq!(style_color(&selected_text_style), style_color(&label_style));
                 assert_eq!(selected_text_style.font_style, label_style.font_style);
                 // Unselected tab should use unselectedLabelStyle color.
                 assert_eq!(
-                    icon_color(&tester, TAB2),
+                    icon_color(tester, TAB2),
                     style_color(&unselected_label_style)
                 );
                 assert_eq!(
@@ -13014,19 +12764,19 @@ pub(crate) mod tests {
                 );
 
                 // Update tab bar with labelColor & unselectedLabelColor.
-                let frame = build_tab_bar(&tester, Some((LABEL_COLOR, UNSELECTED_LABEL_COLOR)));
+                let frame = build_tab_bar(tester, Some((LABEL_COLOR, UNSELECTED_LABEL_COLOR)));
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
 
-                let selected_text_style = paragraph_style(&tester, TAB1);
-                let unselected_text_style = paragraph_style(&tester, TAB2);
+                let selected_text_style = paragraph_style(tester, TAB1);
+                let unselected_text_style = paragraph_style(tester, TAB2);
 
                 // Selected tab should use the labelColor.
-                assert_eq!(icon_color(&tester, TAB1), Some(LABEL_COLOR));
+                assert_eq!(icon_color(tester, TAB1), Some(LABEL_COLOR));
                 assert_eq!(style_color(&selected_text_style), Some(LABEL_COLOR));
                 assert_eq!(selected_text_style.font_style, label_style.font_style);
                 // Unselected tab should use the unselectedLabelColor.
-                assert_eq!(icon_color(&tester, TAB2), Some(UNSELECTED_LABEL_COLOR));
+                assert_eq!(icon_color(tester, TAB2), Some(UNSELECTED_LABEL_COLOR));
                 assert_eq!(
                     style_color(&unselected_text_style),
                     Some(UNSELECTED_LABEL_COLOR)
@@ -13042,8 +12792,7 @@ pub(crate) mod tests {
         // 'Material3 - Scrollable TabBar without a divider does not expand to full width'.
         #[test]
         fn material3_a_scrollable_tab_bar_without_a_divider_shrinks_to_its_tabs() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build_tab_bar =
                     |tester: &WidgetTester,
                      divider_height: Option<f64>,
@@ -13064,9 +12813,9 @@ pub(crate) mod tests {
                         )
                     };
                 let mut width_with = |divider_height: Option<f64>, tab_alignment: TabAlignment| {
-                    let frame = build_tab_bar(&tester, divider_height, tab_alignment);
+                    let frame = build_tab_bar(tester, divider_height, tab_alignment);
                     tester.pump_widget(frame);
-                    size_of(&tester, only::<TabBar>(&tester)).width()
+                    tester.get_size(only::<TabBar>(tester)).width()
                 };
 
                 // Test default tab bar width when there is a divider and tabAlignment
@@ -13102,9 +12851,9 @@ pub(crate) mod tests {
         use std::cell::{Cell, RefCell};
         use waft_painting::Decoration;
 
-        use waft_embedder::{RRect, Radius, TargetPlatform};
+        use waft_embedder::{RRect, Radius};
         use waft_painting::EdgeInsets;
-        use waft_test::TestPlatform;
+
         use waft_widgets::{
             AnyElement, Focus, Icon, MediaQueryData, PreferredSizeWidgetRef, UnfocusDisposition,
         };
@@ -13113,8 +12862,9 @@ pub(crate) mod tests {
         use crate::app_bar::AppBar;
         use crate::icons::Icons;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{TestVSync, WidgetTester, material_app, with_main_thread_stack};
+        use crate::test_support::{PaintInspection, material_app};
         use crate::theme_data::ThemeData;
+        use waft_widgets::testing::TestVSync;
 
         /// Dart's `tester.renderObject<RenderParagraph>(find.text(text)).text.style!`.
         fn paragraph_style(tester: &WidgetTester, value: &str) -> TextStyle {
@@ -13151,7 +12901,7 @@ pub(crate) mod tests {
 
         /// The tabs' elements, in order: Dart's `find.byType(Tab)`.
         fn tabs_of(tester: &WidgetTester) -> Vec<AnyElement> {
-            tester.find_by_type::<Tab>()
+            find::by_type::<Tab>().evaluate(tester)
         }
 
         /// Dart's `RRect.fromLTRBAndCorners(left, top, right, bottom, topLeft: 3, topRight: 3)`.
@@ -13192,7 +12942,11 @@ pub(crate) mod tests {
 
         /// Dart's `expect(find.byType(TabBar), paints..rrect(rrect: rrect))`.
         fn paints_rrect(tester: &WidgetTester, rrect: RRect) -> bool {
-            tester.paints_rrect(indicator_paint(tester), rrect, None)
+            waft_rendering::testing::paints(
+                &tester.painted_ops(indicator_paint(tester)),
+                &[waft_rendering::testing::PaintCall::rrect_at(rrect, None)],
+            )
+            .is_ok()
         }
 
         /// [`paints_rrect`] with the rrect's edges within `epsilon` of what is painted.
@@ -13287,16 +13041,15 @@ pub(crate) mod tests {
         // 'TabBar default selected/unselected text style'.
         #[test]
         fn material2_labels_take_the_primary_text_themes_body_large_and_70_percent_unselected() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = m2(&tester);
+            test_widgets(|tester| {
+                let theme = m2(tester);
                 let mut frame = Frame::new(vec!["A", "B", "C"], "A");
                 frame.use_material3 = Some(false);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("A").len(), 1);
-                assert_eq!(tester.find_text("B").len(), 1);
-                assert_eq!(tester.find_text("C").len(), 1);
+                expect(tester, &find::text("A"), finds_one_widget());
+                expect(tester, &find::text("B"), finds_one_widget());
+                expect(tester, &find::text("C"), finds_one_widget());
 
                 let body_large_color = theme
                     .primary_text_theme
@@ -13306,17 +13059,17 @@ pub(crate) mod tests {
                     .expect("a color");
 
                 // Test selected label text style.
-                let selected = paragraph_style(&tester, "A");
+                let selected = paragraph_style(tester, "A");
                 assert_eq!(selected.font_family.as_deref(), Some("Roboto"));
                 assert_eq!(selected.font_size, Some(14.0));
-                assert_eq!(paragraph_color(&tester, "A"), Some(body_large_color));
+                assert_eq!(paragraph_color(tester, "A"), Some(body_large_color));
 
                 // Test unselected label text style.
-                let unselected = paragraph_style(&tester, "C");
+                let unselected = paragraph_style(tester, "C");
                 assert_eq!(unselected.font_family.as_deref(), Some("Roboto"));
                 assert_eq!(unselected.font_size, Some(14.0));
                 assert_eq!(
-                    paragraph_color(&tester, "C"),
+                    paragraph_color(tester, "C"),
                     Some(body_large_color.with_alpha(0xB2)) // 70% alpha,
                 );
             });
@@ -13325,24 +13078,23 @@ pub(crate) mod tests {
         // 'TabBar default unselectedLabelColor inherits labelColor with 70% opacity'.
         #[test]
         fn material2_the_unselected_label_color_is_the_label_color_at_70_percent() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const LABEL_COLOR: Color = Color::new(0xff0000ff);
                 let mut frame = Frame::new(vec!["A", "B", "C"], "A");
                 frame.use_material3 = Some(false);
                 frame.tab_bar_theme = Some(TabBarThemeData::new().label_color(LABEL_COLOR));
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("A").len(), 1);
-                assert_eq!(tester.find_text("B").len(), 1);
-                assert_eq!(tester.find_text("C").len(), 1);
+                expect(tester, &find::text("A"), finds_one_widget());
+                expect(tester, &find::text("B"), finds_one_widget());
+                expect(tester, &find::text("C"), finds_one_widget());
 
                 // Test selected label color.
-                assert_eq!(paragraph_color(&tester, "A"), Some(LABEL_COLOR));
+                assert_eq!(paragraph_color(tester, "A"), Some(LABEL_COLOR));
 
                 // Test unselected label color.
                 assert_eq!(
-                    paragraph_color(&tester, "C"),
+                    paragraph_color(tester, "C"),
                     Some(LABEL_COLOR.with_alpha(0xB2)) // 70% alpha,
                 );
             });
@@ -13351,17 +13103,16 @@ pub(crate) mod tests {
         // 'Material2 - Default TabAlignment'.
         #[test]
         fn material2_tabs_fill_a_fixed_tab_bar_and_start_a_scrollable_one() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let mut frame = Frame::new(vec!["A", "B"], "B");
                 frame.use_material3 = Some(false);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
 
-                let tab_bar = rect_of(&tester, only::<TabBar>(&tester));
-                let tabs = tabs_of(&tester);
-                let tab_one_rect = rect_of(&tester, tabs[0]);
-                let tab_two_rect = rect_of(&tester, tabs[1]);
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
+                let tabs = tabs_of(tester);
+                let tab_one_rect = tester.get_rect(tabs[0]);
+                let tab_two_rect = tester.get_rect(tabs[1]);
 
                 // Tabs should fill the width of the TabBar.
                 let tab_one_left = ((tab_bar.width() / 2.0) - tab_one_rect.width()) / 2.0;
@@ -13374,12 +13125,12 @@ pub(crate) mod tests {
                 let mut frame = Frame::new(vec!["A", "B"], "B");
                 frame.use_material3 = Some(false);
                 frame.is_scrollable = true;
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(frame);
 
-                let tabs = tabs_of(&tester);
-                let tab_one_rect = rect_of(&tester, tabs[0]);
-                let tab_two_rect = rect_of(&tester, tabs[1]);
+                let tabs = tabs_of(tester);
+                let tab_one_rect = tester.get_rect(tabs[0]);
+                let tab_two_rect = tester.get_rect(tabs[1]);
 
                 // Tabs should be aligned to the start of the TabBar.
                 let padding =
@@ -13394,10 +13145,9 @@ pub(crate) mod tests {
         }
 
         fn material2_default_indicator(secondary: bool) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = m2(&tester);
-                let controller = controller(&tester, 4);
+            test_widgets(|tester| {
+                let theme = m2(tester);
+                let controller = controller(tester, 4);
                 let tabs =
                     (0..4).map(|index| Tab::new().text(format!("Tab {index}")).into_widget());
                 let tab_bar = if secondary {
@@ -13411,7 +13161,7 @@ pub(crate) mod tests {
                     boilerplate(theme.clone(), TextDirection::Ltr, top_left(tab_bar)),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 assert_eq!(tab_bar_box.size(&tester.cell.borrow()).height(), 48.0);
 
                 const INDICATOR_WEIGHT: f64 = 2.0;
@@ -13421,7 +13171,7 @@ pub(crate) mod tests {
 
                 #[allow(deprecated)]
                 let indicator_color = theme.indicator_color;
-                let lines = painted_lines(&tester, tab_bar_box.as_object());
+                let lines = painted_lines(tester, tab_bar_box.as_object());
                 assert!(
                     lines.iter().any(|line| is_line(
                         line,
@@ -13450,8 +13200,7 @@ pub(crate) mod tests {
         // 'Material2 - TabBar with padding isScrollable: true'.
         #[test]
         fn material2_a_scrollable_tab_bar_insets_its_tabs_by_its_padding() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WEIGHT: f64 = 2.0; // default indicator weight
                 let padding = EdgeInsets::only(3.0, 7.0, 5.0, 3.0);
                 let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
@@ -13472,8 +13221,8 @@ pub(crate) mod tests {
                         .height(50.0)
                         .into_widget(),
                 ];
-                let controller = controller(&tester, tabs.len());
-                let theme = m2(&tester);
+                let controller = controller(tester, tabs.len());
+                let theme = m2(tester);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -13486,7 +13235,7 @@ pub(crate) mod tests {
                     ),
                 ));
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 let tab_bar_height = 50.0 + INDICATOR_WEIGHT + padding.top + padding.bottom; // 50 = max tab height
                 assert_eq!(
                     tab_bar_box.size(&tester.cell.borrow()).height(),
@@ -13505,7 +13254,7 @@ pub(crate) mod tests {
                         / 2.0;
                 let mut tab_bottom = tab_top + 30.0;
                 assert_eq!(
-                    key_rect(&tester, &keys[0]),
+                    key_rect(tester, &keys[0]),
                     Rect::from_ltrb(tab_left, tab_top, tab_right, tab_bottom)
                 );
 
@@ -13517,7 +13266,7 @@ pub(crate) mod tests {
                     / 2.0;
                 tab_bottom = tab_top + 40.0;
                 assert_eq!(
-                    key_rect(&tester, &keys[1]),
+                    key_rect(tester, &keys[1]),
                     Rect::from_ltrb(tab_left, tab_top, tab_right, tab_bottom)
                 );
 
@@ -13529,7 +13278,7 @@ pub(crate) mod tests {
                     / 2.0;
                 tab_bottom = tab_top + 50.0;
                 assert_eq!(
-                    key_rect(&tester, &keys[2]),
+                    key_rect(tester, &keys[2]),
                     Rect::from_ltrb(tab_left, tab_top, tab_right, tab_bottom)
                 );
 
@@ -13541,18 +13290,17 @@ pub(crate) mod tests {
         // 'Material2 - TabAlignment updates tabs alignment (non-scrollable TabBar)'.
         #[test]
         fn material2_tab_alignment_center_stops_fixed_tabs_filling_the_tab_bar() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = m2(&tester);
+            test_widgets(|tester| {
+                let theme = m2(tester);
 
                 // Test TabAlignment.fill (default) when isScrollable is false.
-                let frame = Frame::new(vec!["A", "B"], "B").build(&tester);
+                let frame = Frame::new(vec!["A", "B"], "B").build(tester);
                 tester.pump_widget(material_app(theme.clone(), frame));
 
-                let tab_bar = rect_of(&tester, only::<TabBar>(&tester));
-                let tabs = tabs_of(&tester);
-                let tab_one_rect = rect_of(&tester, tabs[0]);
-                let tab_two_rect = rect_of(&tester, tabs[1]);
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
+                let tabs = tabs_of(tester);
+                let tab_one_rect = tester.get_rect(tabs[0]);
+                let tab_two_rect = tester.get_rect(tabs[1]);
 
                 // Within f32: global positions go through valo's f32 matrices (waft-gestures'
                 // `Matrix4` entry), where Dart's are f64 and compare within 1e-10.
@@ -13568,13 +13316,13 @@ pub(crate) mod tests {
                 // Test TabAlignment.center when isScrollable is false.
                 let mut frame = Frame::new(vec!["A", "B"], "B");
                 frame.tab_alignment = Some(TabAlignment::Center);
-                let frame = frame.build(&tester);
+                let frame = frame.build(tester);
                 tester.pump_widget(material_app(theme, frame));
                 tester.pump_and_settle();
 
-                let tabs = tabs_of(&tester);
-                let tab_one_rect = rect_of(&tester, tabs[0]);
-                let tab_two_rect = rect_of(&tester, tabs[1]);
+                let tabs = tabs_of(tester);
+                let tab_one_rect = tester.get_rect(tabs[0]);
+                let tab_two_rect = tester.get_rect(tabs[1]);
 
                 // Tabs should not fill the width of the TabBar.
                 let padding =
@@ -13593,8 +13341,7 @@ pub(crate) mod tests {
         // 'does not crash if switching to a newly added tab'.
         #[test]
         fn switching_to_a_newly_added_tab_shows_its_view() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build_tabs = |tester: &WidgetTester, tab_count: usize| {
                     let theme = theme(tester, None, None);
                     boilerplate(
@@ -13622,25 +13369,25 @@ pub(crate) mod tests {
                     )
                 };
 
-                let widget = build_tabs(&tester, 1);
+                let widget = build_tabs(tester, 1);
                 tester.pump_widget(widget);
-                assert_eq!(tabs_of(&tester).len(), 1);
+                assert_eq!(tabs_of(tester).len(), 1);
 
-                let widget = build_tabs(&tester, 2);
+                let widget = build_tabs(tester, 2);
                 tester.pump_widget(widget);
-                assert_eq!(tabs_of(&tester).len(), 2);
+                assert_eq!(tabs_of(tester).len(), 2);
 
-                let widget = build_tabs(&tester, 3);
+                let widget = build_tabs(tester, 3);
                 tester.pump_widget(widget);
-                assert_eq!(tabs_of(&tester).len(), 3);
+                assert_eq!(tabs_of(tester).len(), 3);
 
-                assert_eq!(tester.find_onstage_text("View 0").len(), 1);
-                assert!(tester.find_onstage_text("View 2").is_empty());
-                let tab_2 = text(&tester, "Tab 2");
-                tap(&mut tester, tab_2);
+                expect(tester, &find::text("View 0"), finds_one_widget());
+                expect(tester, &find::text("View 2"), finds_nothing());
+                let tab_2 = text(tester, "Tab 2");
+                tap(tester, tab_2);
                 tester.pump_and_settle();
-                assert!(tester.find_onstage_text("View 0").is_empty());
-                assert_eq!(tester.find_onstage_text("View 2").len(), 1);
+                expect(tester, &find::text("View 0"), finds_nothing());
+                expect(tester, &find::text("View 2"), finds_one_widget());
             });
         }
 
@@ -13700,8 +13447,7 @@ pub(crate) mod tests {
         // 'Tab indicator painter image configuration'.
         #[test]
         fn the_indicator_paints_with_its_size_the_text_direction_and_the_device_pixel_ratio() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let decoration = TestIndicatorDecoration::default();
 
                 let build_tabs =
@@ -13728,7 +13474,7 @@ pub(crate) mod tests {
                         )
                     };
 
-                let widget = build_tabs(&tester, TextDirection::Ltr, 1.0);
+                let widget = build_tabs(tester, TextDirection::Ltr, 1.0);
                 tester.pump_widget(widget);
 
                 let last = |decoration: &TestIndicatorDecoration| {
@@ -13748,7 +13494,7 @@ pub(crate) mod tests {
                 assert_eq!(config.text_direction, Some(TextDirection::Ltr));
                 assert_eq!(config.device_pixel_ratio, Some(1.0));
 
-                let widget = build_tabs(&tester, TextDirection::Rtl, 2.33);
+                let widget = build_tabs(tester, TextDirection::Rtl, 2.33);
                 tester.pump_widget(widget);
 
                 let config = last(&decoration);
@@ -13763,8 +13509,7 @@ pub(crate) mod tests {
         // 'TabBar.textScaler overrides tab label text scale, textScaleFactor = noScaling, 1.75, 2.0'.
         #[test]
         fn the_text_scaler_of_a_tab_bar_overrides_the_ambient_one() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build_tabs = |tester: &WidgetTester, text_scaler: TextScaler| {
                     let theme = theme(tester, None, None);
                     material_app(
@@ -13785,24 +13530,24 @@ pub(crate) mod tests {
                     )
                 };
 
-                let widget = build_tabs(&tester, TextScaler::NO_SCALING);
+                let widget = build_tabs(tester, TextScaler::NO_SCALING);
                 tester.pump_widget(widget);
                 assert_eq!(
-                    size_of(&tester, text(&tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(70.5, 20.0)
                 );
 
-                let widget = build_tabs(&tester, TextScaler::linear(1.75));
+                let widget = build_tabs(tester, TextScaler::linear(1.75));
                 tester.pump_widget(widget);
                 assert_eq!(
-                    size_of(&tester, text(&tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(123.0, 35.0)
                 );
 
-                let widget = build_tabs(&tester, TextScaler::linear(2.0));
+                let widget = build_tabs(tester, TextScaler::linear(2.0));
                 tester.pump_widget(widget);
                 assert_eq!(
-                    size_of(&tester, text(&tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(140.5, 40.0)
                 );
             });
@@ -13851,25 +13596,24 @@ pub(crate) mod tests {
         // 'Scrollable TabBar does not jitter in the middle position'.
         #[test]
         fn a_scrollable_tab_bar_follows_a_dragged_tab_bar_view_without_jitter_in_the_middle() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let widget = twenty_scrollable_tabs(&tester, 10);
+            test_widgets(|tester| {
+                let widget = twenty_scrollable_tabs(tester, 10);
                 tester.pump_widget(widget);
 
-                assert_eq!(tester.find_onstage_text("Page 10").len(), 1);
-                assert!(tester.find_onstage_text("Page 11").is_empty());
-                let pixels = scroll_view_pixels(&tester);
+                expect(tester, &find::text("Page 10"), finds_one_widget());
+                expect(tester, &find::text("Page 11"), finds_nothing());
+                let pixels = scroll_view_pixels(tester);
                 assert!(close(pixels, 683.2, 0.1), "{pixels}");
 
                 // Drag the TabBarView to the left.
-                let view = center_of(&tester, only::<TabBarView>(&tester));
+                let view = tester.get_center(only::<TabBarView>(tester));
                 tester.drag_from(view, Offset::new(-800.0, 0.0), 1);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(200));
+                tester.pump();
+                tester.pump_by(Duration::from_millis(200));
 
-                assert!(tester.find_onstage_text("Page 10").is_empty());
-                assert_eq!(tester.find_onstage_text("Page 11").len(), 1);
-                let pixels = scroll_view_pixels(&tester);
+                expect(tester, &find::text("Page 10"), finds_nothing());
+                expect(tester, &find::text("Page 11"), finds_one_widget());
+                let pixels = scroll_view_pixels(tester);
                 assert!(close(pixels, 799.8, 0.1), "{pixels}");
             });
         }
@@ -13877,48 +13621,46 @@ pub(crate) mod tests {
         // 'Scrollable TabBar does not jitter when the tab bar reaches the start'.
         #[test]
         fn a_scrollable_tab_bar_follows_a_dragged_tab_bar_view_without_jitter_at_the_start() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let widget = twenty_scrollable_tabs(&tester, 4);
+            test_widgets(|tester| {
+                let widget = twenty_scrollable_tabs(tester, 4);
                 tester.pump_widget(widget);
 
-                assert_eq!(tester.find_onstage_text("Page 4").len(), 1);
-                assert!(tester.find_onstage_text("Page 3").is_empty());
-                let pixels = scroll_view_pixels(&tester);
+                expect(tester, &find::text("Page 4"), finds_one_widget());
+                expect(tester, &find::text("Page 3"), finds_nothing());
+                let pixels = scroll_view_pixels(tester);
                 assert!(close(pixels, 61.25, 0.1), "{pixels}");
 
                 // Drag the TabBarView to the right.
-                let start = center_of(&tester, text(&tester, "Page 4"));
-                let mut gesture = WidgetTester::touch(1);
+                let start = tester.get_center(text(tester, "Page 4"));
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, start);
                 tester.move_to(&mut gesture, start + Offset::new(600.0, 0.0), true);
                 tester.up(&gesture);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(500));
+                tester.pump();
+                tester.pump_by(Duration::from_millis(500));
 
-                assert_eq!(tester.find_onstage_text("Page 4").len(), 1);
-                assert_eq!(tester.find_onstage_text("Page 3").len(), 1);
-                let pixels = scroll_view_pixels(&tester);
+                expect(tester, &find::text("Page 4"), finds_one_widget());
+                expect(tester, &find::text("Page 3"), finds_one_widget());
+                let pixels = scroll_view_pixels(tester);
                 assert!(close(pixels, 0.2, 0.1), "{pixels}");
 
                 tester.pump_and_settle();
-                assert!(tester.find_onstage_text("Page 4").is_empty());
-                assert_eq!(tester.find_onstage_text("Page 3").len(), 1);
-                assert_eq!(scroll_view_pixels(&tester), 0.0);
+                expect(tester, &find::text("Page 4"), finds_nothing());
+                expect(tester, &find::text("Page 3"), finds_one_widget());
+                assert_eq!(scroll_view_pixels(tester), 0.0);
             });
         }
 
         // 'Scrollable TabBar with transparent divider expands to full width'.
         #[test]
         fn a_scrollable_tab_bar_with_a_transparent_divider_is_as_wide_as_its_parent() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 for tab_alignment in [
                     TabAlignment::StartOffset,
                     TabAlignment::Start,
                     TabAlignment::Center,
                 ] {
-                    let theme = theme(&tester, None, None);
+                    let theme = theme(tester, None, None);
                     tester.pump_widget(boilerplate(
                         theme,
                         TextDirection::Ltr,
@@ -13931,7 +13673,7 @@ pub(crate) mod tests {
                         )),
                     ));
                     assert_eq!(
-                        size_of(&tester, only::<TabBar>(&tester)).width(),
+                        tester.get_size(only::<TabBar>(tester)).width(),
                         800.0,
                         "{tab_alignment:?}"
                     );
@@ -13942,10 +13684,9 @@ pub(crate) mod tests {
         // 'TabBar.indicatorAnimation can customize tab indicator animation'.
         #[test]
         fn the_indicator_animation_of_a_tab_bar_moves_the_indicator_linearly_or_elastically() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WIDTH: f64 = 50.0;
-                let controller = controller(&tester, 4);
+                let controller = controller(tester, 4);
                 let build_tab =
                     |tester: &WidgetTester, indicator_animation: TabIndicatorAnimation| {
                         let theme = theme(tester, None, None);
@@ -13970,21 +13711,21 @@ pub(crate) mod tests {
                     };
 
                 // Test tab indicator animation with TabIndicatorAnimation.linear.
-                let widget = build_tab(&tester, TabIndicatorAnimation::Linear);
+                let widget = build_tab(tester, TabIndicatorAnimation::Linear);
                 tester.pump_widget(widget);
 
                 // Idle at tab 0.
                 assert!(paints_rrect(
-                    &tester,
+                    tester,
                     indicator_rrect(75.0, 45.0, 125.0, 48.0)
                 ));
 
                 // Start moving tab indicator.
                 controller.set_offset(&mut tester.cell.borrow_mut(), 0.2);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 assert!(paints_rrect(
-                    &tester,
+                    tester,
                     indicator_rrect(115.0, 45.0, 165.0, 48.0)
                 ));
 
@@ -13992,11 +13733,11 @@ pub(crate) mod tests {
                 controller.set_offset(&mut tester.cell.borrow_mut(), 0.0);
 
                 // Test tab indicator animation with TabIndicatorAnimation.elastic.
-                let widget = build_tab(&tester, TabIndicatorAnimation::Elastic);
+                let widget = build_tab(tester, TabIndicatorAnimation::Elastic);
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
 
-                let tab_bar_height = first_render_box::<TabBar>(&tester)
+                let tab_bar_height = first_render_box::<TabBar>(tester)
                     .size(&tester.cell.borrow())
                     .height();
 
@@ -14005,7 +13746,7 @@ pub(crate) mod tests {
                 let from_rect = Rect::from_ltrb(75.0, 0.0, 125.0, 48.0);
                 let to_rect = Rect::from_ltrb(75.0, 0.0, 125.0, 48.0);
                 assert!(paints_rrect(
-                    &tester,
+                    tester,
                     tab_indicator_rrect_elastic_animation(
                         tab_bar_height,
                         current_rect,
@@ -14016,10 +13757,10 @@ pub(crate) mod tests {
                 ));
 
                 controller.set_offset(&mut tester.cell.borrow_mut(), 0.2);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 let to_rect = Rect::from_ltrb(275.0, 0.0, 325.0, 48.0);
                 assert!(paints_rrect(
-                    &tester,
+                    tester,
                     tab_indicator_rrect_elastic_animation(
                         tab_bar_height,
                         current_rect,
@@ -14034,8 +13775,7 @@ pub(crate) mod tests {
         // 'Tabs icon respects ambient icon theme'.
         #[test]
         fn tab_icons_take_the_ambient_icon_theme_except_the_selected_ones_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let icon_theme = IconThemeData::new()
                     .color(Color::new(0xffff0000))
                     .size(38.0);
@@ -14064,7 +13804,7 @@ pub(crate) mod tests {
                 ));
 
                 let icon_color = |tester: &WidgetTester, icon| {
-                    let element = tester.find_by_icon(icon);
+                    let element = tester.element(find::by_icon(icon).first());
                     tester
                         .glyph_style(element)
                         .color
@@ -14074,21 +13814,21 @@ pub(crate) mod tests {
 
                 // The iconTheme color isn't applied to the selected icon.
                 assert_eq!(
-                    icon_color(&tester, &selected_icon),
+                    icon_color(tester, &selected_icon),
                     Some(theme.color_scheme.primary)
                 );
                 // The iconTheme color is applied to the unselected icon.
                 assert_eq!(
-                    icon_color(&tester, &unselected_icon),
+                    icon_color(tester, &unselected_icon),
                     theme.icon_theme.color.as_ref().map(AnyColor::color)
                 );
 
                 // Both selected and unselected icons should have the iconTheme size.
                 let size = theme.icon_theme.size.expect("a size");
-                let selected = tester.find_by_icon(&selected_icon);
-                assert_eq!(size_of(&tester, selected), Size::new(size, size));
-                let unselected = tester.find_by_icon(&unselected_icon);
-                assert_eq!(size_of(&tester, unselected), Size::new(size, size));
+                let selected = tester.element(find::by_icon(&selected_icon).first());
+                assert_eq!(tester.get_size(selected), Size::new(size, size));
+                let unselected = tester.element(find::by_icon(&unselected_icon).first());
+                assert_eq!(tester.get_size(unselected), Size::new(size, size));
             });
         }
 
@@ -14139,7 +13879,7 @@ pub(crate) mod tests {
         }
 
         fn tab_rect(tester: &WidgetTester, index: usize) -> Rect {
-            rect_of(tester, tabs_of(tester)[index])
+            tester.get_rect(tabs_of(tester)[index])
         }
 
         /// The cases on a fixed tab bar: the indicator at two points of the animation to tab 2, kept
@@ -14149,22 +13889,21 @@ pub(crate) mod tests {
             indicator_animation: TabIndicatorAnimation,
             steps: [(f64, f64); 2],
         ) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_overflow_tab_bar(&mut tester, text_direction, indicator_animation, false);
+            test_widgets(|tester| {
+                pump_overflow_tab_bar(tester, text_direction, indicator_animation, false);
 
-                tap_tab(&mut tester, 2);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(100));
+                tap_tab(tester, 2);
+                tester.pump();
+                tester.pump_by(Duration::from_millis(100));
 
-                let label_rect = tab_rect(&tester, 2);
+                let label_rect = tab_rect(tester, 2);
                 for (step, (indicator_left, indicator_right)) in steps.into_iter().enumerate() {
                     if step == 1 {
-                        tester.pump(Duration::from_millis(100));
+                        tester.pump_by(Duration::from_millis(100));
                     }
                     assert!(
                         paints_rrect(
-                            &tester,
+                            tester,
                             indicator_rrect(indicator_left, 45.0, indicator_right, 48.0)
                         ),
                         "step {step}"
@@ -14176,10 +13915,10 @@ pub(crate) mod tests {
                 }
 
                 // Let the animation complete.
-                tester.pump(Duration::from_millis(200));
+                tester.pump_by(Duration::from_millis(200));
 
                 assert!(paints_rrect(
-                    &tester,
+                    tester,
                     indicator_rrect(label_rect.left, 45.0, label_rect.right, 48.0)
                 ));
             });
@@ -14260,26 +13999,25 @@ pub(crate) mod tests {
             indicator_animation: TabIndicatorAnimation,
             steps: [(f64, f64, Edge); 3],
         ) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_overflow_tab_bar(&mut tester, text_direction, indicator_animation, true);
+            test_widgets(|tester| {
+                pump_overflow_tab_bar(tester, text_direction, indicator_animation, true);
 
-                tap_tab(&mut tester, 2);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(100));
+                tap_tab(tester, 2);
+                tester.pump();
+                tester.pump_by(Duration::from_millis(100));
 
                 for (step, (indicator_left, indicator_right, edge)) in steps.into_iter().enumerate()
                 {
                     match step {
-                        1 => tester.pump(Duration::from_millis(100)),
+                        1 => tester.pump_by(Duration::from_millis(100)),
                         // Let the animation complete.
-                        2 => tester.pump(Duration::from_millis(200)),
+                        2 => tester.pump_by(Duration::from_millis(200)),
                         _ => {}
                     }
-                    let label_rect = tab_rect(&tester, 2);
+                    let label_rect = tab_rect(tester, 2);
                     assert!(
                         paints_rrect_within(
-                            &tester,
+                            tester,
                             indicator_rrect(indicator_left, 45.0, indicator_right, 48.0),
                             1e-3
                         ),
@@ -14406,10 +14144,9 @@ pub(crate) mod tests {
         /// The skipping cases: tab 2, the last tab, then tab 1, each halfway and then settled on the
         /// label.
         fn skipping_case(indicator_animation: TabIndicatorAnimation, halfway: [(f64, f64); 3]) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester, 10);
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let controller = controller(tester, 10);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(boilerplate(
                     theme,
                     TextDirection::Ltr,
@@ -14426,33 +14163,33 @@ pub(crate) mod tests {
                 for (step, (indicator_left, indicator_right)) in halfway.into_iter().enumerate() {
                     let index = match step {
                         0 => {
-                            tap_tab(&mut tester, 2);
+                            tap_tab(tester, 2);
                             2
                         }
                         1 => {
-                            tap_last_tab(&mut tester);
+                            tap_last_tab(tester);
                             9
                         }
                         _ => {
-                            tap_tab(&mut tester, 1);
+                            tap_tab(tester, 1);
                             1
                         }
                     };
-                    tester.pump(Duration::ZERO);
-                    tester.pump(Duration::from_millis(200));
+                    tester.pump();
+                    tester.pump_by(Duration::from_millis(200));
                     assert!(
                         paints_rrect(
-                            &tester,
+                            tester,
                             indicator_rrect(indicator_left, 45.0, indicator_right, 48.0)
                         ),
                         "step {step}"
                     );
 
                     tester.pump_and_settle();
-                    let label_rect = tab_rect(&tester, index);
+                    let label_rect = tab_rect(tester, index);
                     assert!(
                         paints_rrect(
-                            &tester,
+                            tester,
                             indicator_rrect(label_rect.left, 45.0, label_rect.right, 48.0)
                         ),
                         "step {step} settled"
@@ -14515,8 +14252,7 @@ pub(crate) mod tests {
         // 'onHover is triggered when mouse pointer is over a tab'.
         #[test]
         fn on_hover_reports_a_pointer_entering_and_leaving_each_tab() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let hover_events: Rc<RefCell<Vec<(bool, usize)>>> = Rc::default();
                 let tab_bar = |secondary: bool| {
                     let events = Rc::clone(&hover_events);
@@ -14529,35 +14265,35 @@ pub(crate) mod tests {
                     .on_hover(move |_app, value, index| events.borrow_mut().push((value, index)))
                 };
 
-                let widget = three_tab_app(&tester, tab_bar(false));
+                let widget = three_tab_app(tester, tab_bar(false));
                 tester.pump_widget(widget);
                 assert!(hover_events.borrow().is_empty());
 
                 // Hover over the first tab.
-                let mut gesture = WidgetTester::mouse(1, 0);
+                let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 let mut expected = Vec::new();
                 for secondary in [false, true] {
                     if secondary {
                         hover_events.borrow_mut().clear();
                         expected.clear();
-                        let widget = three_tab_app(&tester, tab_bar(true));
+                        let widget = three_tab_app(tester, tab_bar(true));
                         tester.pump_widget(widget);
                         assert!(hover_events.borrow().is_empty());
                     }
                     for (index, label) in ["Tab 1", "Tab 2", "Tab 3"].into_iter().enumerate() {
-                        let at = center_of(&tester, text(&tester, label));
+                        let at = tester.get_center(text(tester, label));
                         tester.move_to(&mut gesture, at, false);
-                        tester.pump(Duration::ZERO);
+                        tester.pump();
                         if index > 0 {
                             expected.push((false, index - 1));
                         }
                         expected.push((true, index));
                         assert_eq!(*hover_events.borrow(), expected);
                     }
-                    let at = center_of(&tester, only::<TabBarView>(&tester));
+                    let at = tester.get_center(only::<TabBarView>(tester));
                     tester.move_to(&mut gesture, at, false);
-                    tester.pump(Duration::ZERO);
+                    tester.pump();
                     expected.push((false, 2));
                     assert_eq!(*hover_events.borrow(), expected);
                 }
@@ -14567,8 +14303,7 @@ pub(crate) mod tests {
         // 'onFocusChange is triggered when tabs gain and lose focus'.
         #[test]
         fn on_focus_change_reports_each_tab_gaining_and_losing_focus() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let focus_events: Rc<RefCell<Vec<(bool, usize)>>> = Rc::default();
                 let tab_bar = |secondary: bool| {
                     let events = Rc::clone(&focus_events);
@@ -14585,20 +14320,20 @@ pub(crate) mod tests {
 
                 for secondary in [false, true] {
                     focus_events.borrow_mut().clear();
-                    let widget = three_tab_app(&tester, tab_bar(secondary));
+                    let widget = three_tab_app(tester, tab_bar(secondary));
                     tester.pump_widget(widget);
                     assert!(focus_events.borrow().is_empty());
 
                     let mut expected = Vec::new();
                     let mut node = None;
                     for (index, label) in ["Tab 1", "Tab 2", "Tab 3"].into_iter().enumerate() {
-                        let tab_element = text(&tester, label);
+                        let tab_element = text(tester, label);
                         let focus_node = {
                             let mut app = tester.cell.borrow_mut();
                             Focus::of(&mut app, tab_element, false, false)
                         };
                         focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-                        tester.pump(Duration::ZERO);
+                        tester.pump();
                         if index > 0 {
                             expected.push((false, index - 1));
                         }
@@ -14610,7 +14345,7 @@ pub(crate) mod tests {
                     assert!(node.has_focus(&mut tester.cell.borrow_mut()));
 
                     node.unfocus(&mut tester.cell.borrow_mut(), UnfocusDisposition::Scope);
-                    tester.pump(Duration::ZERO);
+                    tester.pump();
 
                     assert!(!node.has_focus(&mut tester.cell.borrow_mut()));
                     expected.push((false, 2));
@@ -14622,11 +14357,10 @@ pub(crate) mod tests {
         // 'Ink features are painted on inner Material'.
         #[test]
         fn a_tab_bars_ink_features_are_painted_on_its_own_material() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 use crate::material::{AnyMaterialInkController, RenderInkFeatures};
 
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Material::new()
@@ -14643,9 +14377,9 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
 
-                assert_eq!(tester.find_by_type::<Material>().len(), 2);
+                expect(tester, &find::by_type::<Material>(), finds_n_widgets(2));
 
-                let tab_bar = only::<TabBar>(&tester);
+                let tab_bar = only::<TabBar>(tester);
                 let semantics = *tester
                     .descendants_of_type::<Semantics>(tab_bar)
                     .first()
@@ -14667,27 +14401,26 @@ pub(crate) mod tests {
                         .debug_ink_features(&tester.cell.borrow())
                         .map(|features| features.len())
                 };
-                assert_eq!(ink_features(&tester, outer_material), None);
-                assert_eq!(ink_features(&tester, inner_material), None);
+                assert_eq!(ink_features(tester, outer_material), None);
+                assert_eq!(ink_features(tester, inner_material), None);
 
                 // Hover over the first tab to trigger the ink highlight.
-                let mut gesture = WidgetTester::mouse(1, 0);
-                let at = center_of(&tester, text(&tester, "Tab 1"));
+                let mut gesture = TestPointer::mouse(1, 0);
+                let at = tester.get_center(text(tester, "Tab 1"));
                 tester.add_pointer(&mut gesture, at);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 // Only the inner Material should have ink features.
-                assert_eq!(ink_features(&tester, outer_material), None);
-                assert_eq!(ink_features(&tester, inner_material), Some(1));
+                assert_eq!(ink_features(tester, outer_material), None);
+                assert_eq!(ink_features(tester, inner_material), Some(1));
             });
         }
 
         // 'Tab can have children with other semantics roles'.
         #[test]
         fn a_tab_child_can_have_its_own_semantics_role() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Material::new()
@@ -14706,39 +14439,26 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(tabs_of(&tester).len(), 1);
+                assert_eq!(tabs_of(tester).len(), 1);
             });
-        }
-
-        /// A tester whose view has no area: Dart's `tester.view.physicalSize = Size.zero`.
-        fn zero_area_tester() -> WidgetTester {
-            let tester = WidgetTester::with_physical_size(
-                TestPlatform::new().on(TargetPlatform::Android),
-                Size::ZERO,
-            );
-            tester.install_platform_fonts();
-            tester
         }
 
         // 'TabPageSelector does not crash at zero area'.
         #[test]
         fn a_tab_page_selector_animates_at_zero_area() {
-            with_main_thread_stack(|| {
-                let mut tester = zero_area_tester();
-                let controller = controller(&tester, 2);
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::ZERO);
+                let controller = controller(tester, 2);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Center::new()
                         .child(TabPageSelector::new().controller(controller.clone()))
                         .into_widget(),
                 ));
-                assert_eq!(
-                    size_of(&tester, only::<TabPageSelector>(&tester)),
-                    Size::ZERO
-                );
+                assert_eq!(tester.get_size(only::<TabPageSelector>(tester)), Size::ZERO);
                 controller.animate_to(&mut tester.cell.borrow_mut(), 1, None, None);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 tester.pump_and_settle();
             });
         }
@@ -14746,10 +14466,10 @@ pub(crate) mod tests {
         // 'TabBarView does not crash at zero area'.
         #[test]
         fn a_tab_bar_view_animates_at_zero_area() {
-            with_main_thread_stack(|| {
-                let mut tester = zero_area_tester();
-                let controller = controller(&tester, 2);
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::ZERO);
+                let controller = controller(tester, 2);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Center::new()
@@ -14762,9 +14482,9 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(size_of(&tester, only::<TabBarView>(&tester)), Size::ZERO);
+                assert_eq!(tester.get_size(only::<TabBarView>(tester)), Size::ZERO);
                 controller.animate_to(&mut tester.cell.borrow_mut(), 1, None, None);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 tester.pump_and_settle();
             });
         }
@@ -14772,9 +14492,8 @@ pub(crate) mod tests {
         // 'TabPageSelectorIndicator does not crash at zero area'.
         #[test]
         fn a_tab_page_selector_indicator_builds_at_zero_area() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Center::new()
@@ -14786,7 +14505,7 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
                 assert_eq!(
-                    size_of(&tester, only::<TabPageSelectorIndicator>(&tester)),
+                    tester.get_size(only::<TabPageSelectorIndicator>(tester)),
                     Size::ZERO
                 );
             });
@@ -14795,9 +14514,8 @@ pub(crate) mod tests {
         // 'DefaultTabController does not crash at zero area'.
         #[test]
         fn a_default_tab_controller_builds_at_zero_area() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Center::new()
@@ -14807,7 +14525,7 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
                 assert_eq!(
-                    size_of(&tester, only::<DefaultTabController>(&tester)),
+                    tester.get_size(only::<DefaultTabController>(tester)),
                     Size::ZERO
                 );
             });
@@ -14816,9 +14534,8 @@ pub(crate) mod tests {
         // 'Tab does not crash at zero area'.
         #[test]
         fn a_tab_builds_at_zero_area() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Scaffold::new()
@@ -14828,17 +14545,17 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(size_of(&tester, only::<Tab>(&tester)), Size::ZERO);
+                assert_eq!(tester.get_size(only::<Tab>(tester)), Size::ZERO);
             });
         }
 
         // 'TabBar does not crash at zero area'.
         #[test]
         fn a_tab_bar_animates_at_zero_area() {
-            with_main_thread_stack(|| {
-                let mut tester = zero_area_tester();
-                let controller = controller(&tester, 2);
-                let theme = theme(&tester, None, None);
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::ZERO);
+                let controller = controller(tester, 2);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     Center::new()
@@ -14851,9 +14568,9 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(size_of(&tester, only::<TabBar>(&tester)), Size::ZERO);
+                assert_eq!(tester.get_size(only::<TabBar>(tester)), Size::ZERO);
                 controller.animate_to(&mut tester.cell.borrow_mut(), 1, None, None);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 tester.pump_and_settle();
             });
         }
@@ -14945,10 +14662,9 @@ pub(crate) mod tests {
         // 'TabBar indicator image should be rendered at initialIndex for the first time'.
         #[test]
         fn an_indicator_whose_image_loads_later_repaints_on_the_initial_tab() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let decoration = TabBarAsyncImageIndicatorDecoration::default();
-                let theme = theme(&tester, None, None);
+                let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
                     theme,
                     DefaultTabController::new(
@@ -14973,7 +14689,7 @@ pub(crate) mod tests {
 
                 // Pump with duration to allow the event queue (async image load simulation) to complete.
                 decoration.run_pending(&mut tester.cell.borrow_mut());
-                tester.pump(Duration::from_millis(1));
+                tester.pump_by(Duration::from_millis(1));
 
                 // After async image loads, the indicator should be repainted.
                 // This verifies that the markNeedsPaint callback properly triggers a repaint.
@@ -14984,8 +14700,8 @@ pub(crate) mod tests {
 
                 // Verify the indicator repaints when switching tabs.
                 let initial_paint_count = decoration.paint_count.get();
-                let two = text(&tester, "Two");
-                tap(&mut tester, two);
+                let two = text(tester, "Two");
+                tap(tester, two);
                 tester.pump_and_settle();
 
                 assert!(

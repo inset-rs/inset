@@ -339,24 +339,20 @@ impl StatelessWidget for SpellCheckSuggestionsToolbarContainer {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{Size, TargetPlatform};
+    use waft_embedder::Size;
     use waft_widgets::Center;
+
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
     // Vertical position at which to anchor the toolbar for testing.
     const K_ANCHOR: f64 = 200.0;
     // Amount for toolbar to overlap bottom padding for testing.
     const K_TEST_TOOLBAR_OVERLAP: f64 = 10.0;
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
 
     /// Builds test button items for each of the suggestions provided.
     fn build_suggestion_buttons(suggestions: &[&str]) -> Vec<ContextMenuButtonItem> {
@@ -393,49 +389,46 @@ mod tests {
 
     /// Dart's `tester.getTopLeft(findSpellCheckSuggestionsToolbar()).dy`.
     fn toolbar_y(tester: &WidgetTester) -> f64 {
-        let containers = tester.find_by_type::<SpellCheckSuggestionsToolbarContainer>();
+        let containers = find::by_type::<SpellCheckSuggestionsToolbarContainer>().evaluate(tester);
         assert_eq!(containers.len(), 1);
-        tester.global_rect(tester.render_box_of(containers[0])).top
+        tester.get_rect(containers[0]).top
     }
 
     #[test]
     fn positions_toolbar_below_anchor_when_it_fits_above_bottom_view_padding() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // We expect the toolbar to be positioned right below the anchor with padding
             // accounted for.
-            let mut tester = tester();
             pump_toolbar(
-                &mut tester,
+                tester,
                 Offset::new(0.0, K_ANCHOR),
                 &["hello", "yellow", "yell"],
             );
-            assert_eq!(toolbar_y(&tester), K_ANCHOR);
+            assert_eq!(toolbar_y(tester), K_ANCHOR);
         });
     }
 
     #[test]
     fn re_positions_toolbar_higher_below_anchor_when_it_does_not_fit_above_bottom_view_padding() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // We expect the toolbar to be positioned _kTestToolbarOverlap pixels above the
             // anchor.
             let expected_toolbar_y = K_ANCHOR - K_TEST_TOOLBAR_OVERLAP;
-            let mut tester = tester();
             pump_toolbar(
-                &mut tester,
+                tester,
                 Offset::new(0.0, K_ANCHOR - K_TEST_TOOLBAR_OVERLAP),
                 &["hello", "yellow", "yell"],
             );
-            assert_eq!(toolbar_y(&tester), expected_toolbar_y);
+            assert_eq!(toolbar_y(tester), expected_toolbar_y);
         });
     }
 
     /// Dart's `more than three suggestions throws an error`, its first half: three build.
     #[test]
     fn three_suggestions_build() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_toolbar(
-                &mut tester,
+                tester,
                 Offset::new(0.0, K_ANCHOR - K_TEST_TOOLBAR_OVERLAP),
                 &["hello", "yellow", "yell"],
             );
@@ -454,8 +447,7 @@ mod tests {
 
     #[test]
     fn spell_check_suggestions_toolbar_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = {
                 let app = tester.cell.borrow();
                 material_app(
@@ -469,7 +461,7 @@ mod tests {
                 )
             };
             tester.pump_widget(root);
-            let toolbars = tester.find_by_type::<SpellCheckSuggestionsToolbar>();
+            let toolbars = find::by_type::<SpellCheckSuggestionsToolbar>().evaluate(tester);
             let render = tester.render_box_of(toolbars[0]);
             assert_eq!(render.size(&tester.cell.borrow()), Size::ZERO);
         });

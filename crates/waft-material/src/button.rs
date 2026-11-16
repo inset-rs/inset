@@ -987,23 +987,22 @@ mod tests {
     use std::any::Any;
     use std::cell::Cell;
 
-    use waft_embedder::{Rect, TargetPlatform, TextDirection};
+    use waft_embedder::{Rect, TextDirection};
     use waft_gestures::{GestureBinding, HitTestResult};
     use waft_rendering::BoxHitTestEntry;
     use waft_services::SystemMouseCursors;
     use waft_widgets::{
         Actions, ActivateIntent, Builder, ColoredBox, Column, CrossAxisAlignment, Directionality,
         FocusHighlightStrategy, FocusManager, FocusNode, FocusScope, GlobalKey, MouseRegion,
-        SizedBox,
+        SizedBox, Text,
     };
 
-    use super::*;
-    use crate::test_support::{Drawn, WidgetTester, with_main_thread_stack};
-    use crate::theme_data::ThemeData;
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
+    use super::*;
+    use crate::test_support::{PaintInspection, path_like};
+    use crate::theme_data::ThemeData;
+    use waft_rendering::testing::RecordedCall;
 
     fn noop() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
@@ -1034,14 +1033,9 @@ mod tests {
         FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
-    /// Dart's `Text(text)` as its tests lay it out, in the Ahem font whose glyphs are 14
-    /// pixels square. The test platform has no Ahem, so a box of its size stands in, which a
-    /// pointer hits as it hits a paragraph.
-    fn label(text: &str) -> SizedBox {
-        SizedBox::new()
-            .width(14.0 * text.chars().count() as f64)
-            .height(14.0)
-            .child(ColoredBox::new(Color::new(0x00000000)))
+    /// Dart's `Text(text)`.
+    fn label(text: &str) -> Text {
+        Text::new(text)
     }
 
     fn red_square() -> SizedBox {
@@ -1054,10 +1048,10 @@ mod tests {
     /// The colors of the rects the first material's ink features draw.
     fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
         tester
-            .ink_drawn()
+            .ink_calls()
             .into_iter()
             .filter_map(|drawn| match drawn {
-                Drawn::Rect(color, _) => Some(color),
+                RecordedCall::Rect { color, .. } => Some(color.to_argb32()),
                 _ => None,
             })
             .collect()
@@ -1066,11 +1060,10 @@ mod tests {
     /// The colors and bounds of the circles (paths) the first material's ink features draw.
     fn ink_circles(tester: &WidgetTester) -> Vec<(u32, Rect)> {
         tester
-            .ink_drawn()
+            .ink_calls()
             .into_iter()
-            .filter_map(|drawn| match drawn {
-                Drawn::Path(color, bounds) => Some((color, bounds)),
-                _ => None,
+            .filter_map(|drawn| {
+                path_like(&drawn).map(|(color, bounds)| (color.to_argb32(), bounds))
             })
             .collect()
     }
@@ -1105,14 +1098,6 @@ mod tests {
         })
     }
 
-    fn size_of(tester: &WidgetTester, key: &GlobalKey) -> Size {
-        tester
-            .render_object(key)
-            .as_box()
-            .expect("a render box")
-            .size(&tester.cell.borrow())
-    }
-
     fn rect_of(tester: &WidgetTester, key: &GlobalKey) -> Rect {
         let render_box = tester.render_object(key).as_box().expect("a render box");
         let app = tester.cell.borrow();
@@ -1122,12 +1107,11 @@ mod tests {
 
     #[test]
     fn raw_material_button_responds_when_tapped() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pressed = Rc::new(Cell::new(false));
             let splash_color = Color::new(0xff00ff00);
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Center::new().child(
                     RawMaterialButton::new(Some(Listener::new({
                         let pressed = Rc::clone(&pressed);
@@ -1138,13 +1122,13 @@ mod tests {
                 ),
             ));
 
-            tester.tap(center_of_view(), 1);
-            tester.pump(Duration::from_millis(10));
+            tester.tap_at(center_of_view(), 1);
+            tester.pump_by(Duration::from_millis(10));
             // valo records no circle of radius 0, which the splash has until its first
             // frame after this one; by then it has begun to fade.
-            tester.pump(Duration::from_millis(16));
+            tester.pump_by(Duration::from_millis(16));
 
-            assert!(has_splash(&tester, 0x00ff00));
+            assert!(has_splash(tester, 0x00ff00));
 
             tester.pump_and_settle();
 
@@ -1156,13 +1140,12 @@ mod tests {
     /// button, where the focused `Shortcuts` would invoke it.
     #[test]
     fn raw_material_button_responds_to_shortcut_when_activated() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pressed = Rc::new(Cell::new(false));
             let inner: Rc<Cell<Option<BuildContext>>> = Rc::default();
-            let focus_node = focus_node(&tester);
+            let focus_node = focus_node(tester);
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Center::new().child(
                     RawMaterialButton::new(Some(Listener::new({
                         let pressed = Rc::clone(&pressed);
@@ -1180,17 +1163,17 @@ mod tests {
                 ),
             ));
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let context = inner.get().expect("built");
 
             for _ in 0..2 {
                 pressed.set(false);
                 Actions::invoke(&mut tester.cell.borrow_mut(), context, &ActivateIntent);
-                tester.pump(Duration::from_millis(10));
+                tester.pump_by(Duration::from_millis(10));
                 // valo records no circle of radius 0, which the splash has until its first
                 // frame after this one.
-                tester.pump(Duration::from_millis(16));
-                assert!(has_splash(&tester, 0x00ff00));
+                tester.pump_by(Duration::from_millis(16));
+                assert!(has_splash(tester, 0x00ff00));
                 tester.pump_and_settle();
                 assert!(pressed.get());
             }
@@ -1199,8 +1182,7 @@ mod tests {
 
     #[test]
     fn material_tap_target_size_padded_expands_hit_test_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pressed = Rc::new(Cell::new(0));
             tester.pump_widget(ltr(RawMaterialButton::new(Some(Listener::new({
                 let pressed = Rc::clone(&pressed);
@@ -1210,17 +1192,16 @@ mod tests {
             .material_tap_target_size(MaterialTapTargetSize::Padded)
             .child(label("+"))));
 
-            tester.tap(Offset::new(40.0, 400.0), 1);
+            tester.tap_at(Offset::new(40.0, 400.0), 1);
 
             assert_eq!(pressed.get(), 1);
         });
     }
 
-    fn splash_case(at: impl Fn(Offset) -> Offset) -> Vec<(u32, Rect)> {
-        let mut tester = tester();
+    fn splash_case(tester: &mut WidgetTester, at: impl Fn(Offset) -> Offset) -> Vec<(u32, Rect)> {
         let splash_color = Color::new(0xAA0000FF);
         tester.pump_widget(m2_ltr(
-            &tester,
+            tester,
             Center::new().child(
                 RawMaterialButton::new(noop())
                     .material_tap_target_size(MaterialTapTargetSize::Padded)
@@ -1230,19 +1211,19 @@ mod tests {
                     .child(SizedBox::new()),
             ),
         ));
-        let mut gesture = WidgetTester::touch(1);
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, at(center_of_view()));
-        tester.pump(Duration::ZERO); // start gesture
-        tester.pump(Duration::from_millis(200)); // wait for splash to be well under way
-        let circles = ink_circles(&tester);
+        tester.pump(); // start gesture
+        tester.pump_by(Duration::from_millis(200)); // wait for splash to be well under way
+        let circles = ink_circles(tester);
         tester.up(&gesture);
         circles
     }
 
     #[test]
     fn ink_splash_from_center_tap_originates_in_correct_location() {
-        with_main_thread_stack(|| {
-            let circles = splash_case(|center| center);
+        test_widgets(|tester| {
+            let circles = splash_case(tester, |center| center);
             // centered in material button.
             assert!(
                 circles.iter().any(|(color, bounds)| *color == 0xAA0000FF
@@ -1254,9 +1235,9 @@ mod tests {
 
     #[test]
     fn ink_splash_from_tap_above_material_originates_in_correct_location() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // The top center of the button's 88x36 material, which is centered in the view.
-            let circles = splash_case(|center| center - Offset::new(0.0, 18.0));
+            let circles = splash_case(tester, |center| center - Offset::new(0.0, 18.0));
             // paints above material
             assert!(
                 circles.iter().any(|(color, bounds)| *color == 0xAA0000FF
@@ -1272,12 +1253,11 @@ mod tests {
     /// check the position is in bounds.
     #[test]
     fn a_tap_in_the_padding_around_the_material_reaches_the_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let pressed = Rc::new(Cell::new(0));
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Center::new().child(
                     RawMaterialButton::new(Some(Listener::new({
                         let pressed = Rc::clone(&pressed);
@@ -1289,20 +1269,19 @@ mod tests {
                     .child(label("+")),
                 ),
             ));
-            assert_eq!(size_of(&tester, &key), Size::new(48.0, 48.0));
+            assert_eq!(tester.get_size(&key), Size::new(48.0, 48.0));
 
-            tester.tap(center_of_view() + Offset::new(20.0, 0.0), 1);
+            tester.tap_at(center_of_view() + Offset::new(20.0, 0.0), 1);
             assert_eq!(pressed.get(), 1);
         });
     }
 
     #[test]
     fn off_center_child_is_hit_testable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Column::new().children([RawMaterialButton::new(noop())
                     .material_tap_target_size(MaterialTapTargetSize::Padded)
                     .child(
@@ -1318,17 +1297,16 @@ mod tests {
                     )
                     .into_widget()]),
             ));
-            assert!(is_hit_testable(&tester, &key));
+            assert!(is_hit_testable(tester, &key));
         });
     }
 
     #[test]
     fn smaller_child_is_hit_testable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Column::new().children([RawMaterialButton::new(noop())
                     .material_tap_target_size(MaterialTapTargetSize::Padded)
                     .child(
@@ -1340,17 +1318,16 @@ mod tests {
                     )
                     .into_widget()]),
             ));
-            assert!(is_hit_testable(&tester, &key));
+            assert!(is_hit_testable(tester, &key));
         });
     }
 
     #[test]
     fn raw_material_button_can_be_expanded_by_parent_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Column::new()
                     .cross_axis_alignment(CrossAxisAlignment::Stretch)
                     .children([RawMaterialButton::new(noop())
@@ -1359,20 +1336,19 @@ mod tests {
                         .into_widget()]),
             ));
 
-            assert_eq!(size_of(&tester, &key), Size::new(800.0, 48.0));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 48.0));
         });
     }
 
     #[test]
     fn raw_material_button_handles_focus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let focus_color = Color::new(0xff00ff00);
 
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Center::new().child(
                     RawMaterialButton::new(noop())
                         .focus_node(focus_node.clone())
@@ -1380,22 +1356,21 @@ mod tests {
                         .child(red_square()),
                 ),
             ));
-            assert!(!ink_rect_colors(&tester).contains(&0xff00ff00));
+            assert!(!ink_rect_colors(tester).contains(&0xff00ff00));
 
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
 
-            assert!(ink_rect_colors(&tester).contains(&0xff00ff00));
+            assert!(ink_rect_colors(tester).contains(&0xff00ff00));
         });
     }
 
     #[test]
     fn raw_material_button_loses_focus_when_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Center::new().child(
                     RawMaterialButton::new(noop())
                         .autofocus(true)
@@ -1404,11 +1379,11 @@ mod tests {
                 ),
             ));
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
 
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Center::new().child(
                     RawMaterialButton::new(None)
                         .focus_node(focus_node.clone())
@@ -1416,19 +1391,18 @@ mod tests {
                 ),
             ));
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
         });
     }
 
     #[test]
     fn disabled_raw_material_button_cant_be_traversed_to() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node1 = focus_node(&tester);
-            let focus_node2 = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node1 = focus_node(tester);
+            let focus_node2 = focus_node(tester);
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 FocusScope::new(
                     Center::new().child(
                         Column::new().children([
@@ -1446,13 +1420,13 @@ mod tests {
                     ),
                 ),
             ));
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(focus_node1.has_primary_focus(&tester.cell.borrow()));
             assert!(!focus_node2.has_primary_focus(&tester.cell.borrow()));
 
             assert!(!focus_node1.next_focus(&mut tester.cell.borrow_mut()));
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(focus_node1.has_primary_focus(&tester.cell.borrow()));
             assert!(!focus_node2.has_primary_focus(&tester.cell.borrow()));
@@ -1461,14 +1435,13 @@ mod tests {
 
     #[test]
     fn raw_material_button_handles_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let hover_color = Color::new(0xff00ff00);
 
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Center::new().child(
                     RawMaterialButton::new(noop())
                         .key(key.clone().into())
@@ -1477,22 +1450,21 @@ mod tests {
                         .child(red_square()),
                 ),
             ));
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
-            assert!(!ink_rect_colors(&tester).contains(&0xff00ff00));
+            assert!(!ink_rect_colors(tester).contains(&0xff00ff00));
 
-            tester.move_to(&mut mouse, tester.center_of(&key), false);
+            tester.move_to(&mut mouse, tester.get_center(&key), false);
             tester.pump_and_settle();
 
-            assert!(ink_rect_colors(&tester).contains(&0xff00ff00));
+            assert!(ink_rect_colors(tester).contains(&0xff00ff00));
         });
     }
 
     #[test]
     fn raw_material_button_on_pressed_and_on_long_press_callbacks_are_correctly_called_when_non_null()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let was_pressed = Rc::new(Cell::new(false));
             let was_pressed_listener = || {
@@ -1515,25 +1487,24 @@ mod tests {
 
             // onPressed not null, onLongPress null.
             was_pressed.set(false);
-            assert!(build_frame(&mut tester, Some(was_pressed_listener()), None));
-            tester.tap(tester.center_of(&key), 1);
+            assert!(build_frame(tester, Some(was_pressed_listener()), None));
+            tester.tap_at(tester.get_center(&key), 1);
             assert!(was_pressed.get());
 
             // onPressed null, onLongPress not null.
             was_pressed.set(false);
-            assert!(build_frame(&mut tester, None, Some(was_pressed_listener())));
-            tester.long_press(tester.center_of(&key), 2);
+            assert!(build_frame(tester, None, Some(was_pressed_listener())));
+            tester.long_press_at(tester.get_center(&key), 2);
             assert!(was_pressed.get());
 
             // onPressed null, onLongPress null.
-            assert!(!build_frame(&mut tester, None, None));
+            assert!(!build_frame(tester, None, None));
         });
     }
 
     #[test]
     fn raw_material_button_on_pressed_and_on_long_press_callbacks_are_distinctly_recognized() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let did_press_button = Rc::new(Cell::new(false));
             let did_long_press_button = Rc::new(Cell::new(false));
@@ -1549,19 +1520,18 @@ mod tests {
             .child(label("button"))));
 
             assert!(!did_press_button.get());
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert!(did_press_button.get());
 
             assert!(!did_long_press_button.get());
-            tester.long_press(tester.center_of(&key), 2);
+            tester.long_press_at(tester.get_center(&key), 2);
             assert!(did_long_press_button.get());
         });
     }
 
     #[test]
     fn raw_material_button_responds_to_density_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let child_key = GlobalKey::new();
 
@@ -1597,51 +1567,51 @@ mod tests {
                     );
                 };
 
-            build_test(&mut tester, VisualDensity::STANDARD, false);
+            build_test(tester, VisualDensity::STANDARD, false);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(100.0, 100.0));
+            assert_eq!(tester.get_size(&key), Size::new(100.0, 100.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
             );
 
-            build_test(&mut tester, VisualDensity::new(3.0, 3.0), false);
+            build_test(tester, VisualDensity::new(3.0, 3.0), false);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(124.0, 124.0));
+            assert_eq!(tester.get_size(&key), Size::new(124.0, 124.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
             );
 
-            build_test(&mut tester, VisualDensity::new(-3.0, -3.0), false);
+            build_test(tester, VisualDensity::new(-3.0, -3.0), false);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(100.0, 100.0));
+            assert_eq!(tester.get_size(&key), Size::new(100.0, 100.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
             );
 
-            build_test(&mut tester, VisualDensity::STANDARD, true);
+            build_test(tester, VisualDensity::STANDARD, true);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(88.0, 48.0));
+            assert_eq!(tester.get_size(&key), Size::new(88.0, 48.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
             );
 
-            build_test(&mut tester, VisualDensity::new(3.0, 3.0), true);
+            build_test(tester, VisualDensity::new(3.0, 3.0), true);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(100.0, 60.0));
+            assert_eq!(tester.get_size(&key), Size::new(100.0, 60.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
             );
 
-            build_test(&mut tester, VisualDensity::new(-3.0, -3.0), true);
+            build_test(tester, VisualDensity::new(-3.0, -3.0), true);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(76.0, 36.0));
+            assert_eq!(tester.get_size(&key), Size::new(76.0, 36.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
             );
         });
@@ -1657,8 +1627,7 @@ mod tests {
 
     #[test]
     fn raw_material_button_changes_mouse_cursor_as_expected_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let in_region = |child: RawMaterialButton| {
                 ltr(MouseRegion::new()
                     .cursor(SystemMouseCursors::FORBIDDEN.into())
@@ -1667,21 +1636,21 @@ mod tests {
             tester.pump_widget(in_region(
                 RawMaterialButton::new(noop()).mouse_cursor(SystemMouseCursors::TEXT.into()),
             ));
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let text: MouseCursorRef = SystemMouseCursors::TEXT.into();
-            assert!(*active_cursor(&tester) == *text);
+            assert!(*active_cursor(tester) == *text);
 
             // Test default cursor
             tester.pump_widget(in_region(RawMaterialButton::new(noop())));
             let basic: MouseCursorRef = SystemMouseCursors::BASIC.into();
-            assert!(*active_cursor(&tester) == *basic);
+            assert!(*active_cursor(tester) == *basic);
 
             // Test default cursor when disabled
             tester.pump_widget(in_region(RawMaterialButton::new(None)));
-            assert!(*active_cursor(&tester) == *basic);
+            assert!(*active_cursor(tester) == *basic);
         });
     }
 
@@ -1718,17 +1687,16 @@ mod tests {
 
     #[test]
     fn raw_material_button_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(m2_ltr(
-                &tester,
+                tester,
                 Center::new().child(
                     SizedBox::shrink()
                         .child(RawMaterialButton::new(noop()).key(key.clone().into())),
                 ),
             ));
-            assert_eq!(size_of(&tester, &key), Size::ZERO);
+            assert_eq!(tester.get_size(&key), Size::ZERO);
         });
     }
 }

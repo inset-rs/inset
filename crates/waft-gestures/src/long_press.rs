@@ -801,11 +801,12 @@ impl LongPressGestureRecognizer {
     }
 
     fn check_long_press_end(self: Handle<Self>, app: &mut App, event: &PointerEvent) {
+        let now = app.clock();
         let estimate = app
             .get(self)
             .velocity_tracker
             .as_ref()
-            .and_then(VelocityTracker::get_velocity_estimate);
+            .and_then(|tracker| tracker.get_velocity_estimate(now));
         let velocity = match estimate {
             None => Velocity::ZERO,
             Some(estimate) => Velocity::new(estimate.pixels_per_second),
@@ -992,13 +993,14 @@ impl PrimaryPointerLeaf for LongPressGestureRecognizer {
 
     fn handle_primary_pointer(self: Handle<Self>, app: &mut App, event: PointerEvent) {
         if !event.synthesized() {
+            let now = app.clock();
             if let PointerEvent::Down(down) = &event {
                 app.get_mut(self).velocity_tracker = Some(VelocityTracker::with_kind(down.kind));
                 app.get_mut(self)
                     .velocity_tracker
                     .as_mut()
                     .unwrap()
-                    .add_position(down.time_stamp, down.local_position());
+                    .add_position(now, down.time_stamp, down.local_position());
             }
             if let PointerEvent::Move(moved) = &event {
                 debug_assert!(app.get(self).velocity_tracker.is_some());
@@ -1006,7 +1008,7 @@ impl PrimaryPointerLeaf for LongPressGestureRecognizer {
                     .velocity_tracker
                     .as_mut()
                     .unwrap()
-                    .add_position(moved.time_stamp, moved.local_position());
+                    .add_position(now, moved.time_stamp, moved.local_position());
             }
         }
 

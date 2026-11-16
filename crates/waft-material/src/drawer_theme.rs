@@ -279,14 +279,35 @@ pub(crate) mod tests {
     use std::rc::Rc;
     use waft_painting::ShapeBorder;
 
-    use waft_foundation::AppCell;
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
     use waft_widgets::{Builder, SizedBox};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
-    use crate::test_support::{build, probe, test_cell, with_main_thread_stack};
     use crate::theme_data::ThemeData;
+
+    /// Builds `wrap(probe)` and returns what `read` saw at the probe's context.
+    pub(crate) fn probe<T: 'static>(
+        tester: &mut WidgetTester,
+        wrap: impl FnOnce(&App, WidgetRef) -> WidgetRef,
+        read: impl Fn(&mut App, BuildContext) -> T + 'static,
+    ) -> T {
+        let seen = Rc::new(RefCell::new(None));
+        let probe = Builder::new({
+            let seen = Rc::clone(&seen);
+            move |app, context| {
+                *seen.borrow_mut() = Some(read(app, context));
+                SizedBox::shrink().into_widget()
+            }
+        })
+        .into_widget();
+        let root = wrap(&tester.cell.borrow(), probe);
+        tester.pump_widget(root);
+        let value = seen.borrow_mut().take();
+        value.expect("the probe built")
+    }
 
     /// What `read` sees at a probe that is wrapped, by `<dyn InheritedTheme>::capture`, in the
     /// inherited themes above a first probe, and then built under `shadowed_by`.
@@ -295,7 +316,7 @@ pub(crate) mod tests {
     /// puts above the first probe: the wrapped probe sees that theme, not the one
     /// `shadowed_by` puts above it.
     pub(crate) fn theme_seen_through_capture<T: 'static>(
-        cell: &AppCell,
+        tester: &mut WidgetTester,
         captured_under: impl FnOnce(WidgetRef) -> WidgetRef,
         shadowed_by: impl FnOnce(WidgetRef) -> WidgetRef,
         read: impl Fn(&mut App, BuildContext) -> T + 'static,
@@ -311,10 +332,10 @@ pub(crate) mod tests {
             }
         })
         .into_widget();
-        build(cell, captured_under(capturing_probe));
+        tester.pump_widget(captured_under(capturing_probe));
         let captured = captured.borrow_mut().take().expect("the probe built");
         probe(
-            cell,
+            tester,
             |_, reading_probe| shadowed_by(captured.wrap(reading_probe)),
             read,
         )
@@ -408,13 +429,12 @@ pub(crate) mod tests {
 
     #[test]
     fn of_returns_the_theme_data_drawer_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = DrawerThemeData::new().width(280.0).elevation(3.0);
             let theme_data_drawer = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .drawer_theme(theme_data_drawer.clone())
@@ -430,13 +450,12 @@ pub(crate) mod tests {
 
     #[test]
     fn of_returns_the_closest_drawer_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let widget_drawer = DrawerThemeData::new().width(100.0);
             let expected = widget_drawer.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .drawer_theme(DrawerThemeData::new().width(280.0))
@@ -453,13 +472,12 @@ pub(crate) mod tests {
 
     #[test]
     fn a_captured_drawer_theme_is_kept_under_another_drawer_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let captured = DrawerThemeData::new().width(111.0);
             let shadowing = DrawerThemeData::new().width(222.0);
 
             let seen = theme_seen_through_capture(
-                &cell,
+                tester,
                 |probe| DrawerTheme::new(captured.clone(), probe).into_widget(),
                 |wrapped| DrawerTheme::new(shadowing.clone(), wrapped).into_widget(),
                 DrawerTheme::of,
@@ -480,9 +498,8 @@ pub(crate) mod tests {
 
     #[test]
     fn theme_data_holds_the_drawer_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.drawer_theme, DrawerThemeData::new());
 

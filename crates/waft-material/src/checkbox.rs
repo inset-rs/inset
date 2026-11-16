@@ -1431,10 +1431,9 @@ impl CheckboxThemeDataGetters for CheckboxDefaultsM2 {
 #[allow(deprecated)]
 pub(crate) mod tests {
     use std::rc::Rc;
-    use std::sync::Arc;
     use waft_widgets::AnyFocusNode;
 
-    use waft_embedder::valo::{Op, Path};
+    use waft_embedder::valo::Op;
     use waft_embedder::{PointerChange, RRect};
     use waft_foundation::K_IS_WEB;
     use waft_rendering::{
@@ -1446,21 +1445,17 @@ pub(crate) mod tests {
         StatefulBuilder,
     };
 
+    use waft_rendering::testing::{CanvasMethod, PaintCall, PaintedStyle, RecordedCall, draws};
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::material::Material;
-    use crate::test_support::{TestPointer, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
     pub(crate) use crate::tooltip::tests::{m2, m3};
-
-    pub(crate) fn tester() -> WidgetTester {
-        tester_on(TargetPlatform::Android)
-    }
-
-    pub(crate) fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
 
     /// A callback that ignores the value it is handed: Dart's `(bool? value) {}`.
     pub(crate) fn ignore() -> Option<ValueChanged<Option<bool>>> {
@@ -1508,16 +1503,14 @@ pub(crate) mod tests {
 
     /// Dart's `find.byType(Checkbox)`, which expects one.
     pub(crate) fn checkbox_element(tester: &WidgetTester) -> AnyElement {
-        let checkboxes = tester.find_by_type::<Checkbox>();
+        let checkboxes = find::by_type::<Checkbox>().evaluate(tester);
         assert_eq!(checkboxes.len(), 1, "one Checkbox");
         checkboxes[0]
     }
 
     /// Dart's `tester.getCenter(find.byType(Checkbox))`.
     pub(crate) fn checkbox_center(tester: &WidgetTester) -> Offset {
-        tester
-            .global_rect(tester.render_box_of(checkbox_element(tester)))
-            .center()
+        tester.get_rect(checkbox_element(tester)).center()
     }
 
     /// Dart's `tester.getSize(find.byType(Checkbox))`.
@@ -1554,187 +1547,24 @@ pub(crate) mod tests {
         canvas.build().ops().to_vec()
     }
 
-    /// One op the checkbox's painter records, reduced to what Dart's `paints` matchers compare.
-    ///
-    /// A draw with a transparent paint is not recorded at all, so Dart's
-    /// `rrect(color: Colors.transparent)` has no entry: the case asserts that no other fill is
-    /// drawn instead.
-    #[derive(Clone, Debug, PartialEq)]
-    pub(crate) enum Drawn {
-        /// A filled oval (Dart's `circle`): its colour as `0xAARRGGBB` and its bounds.
-        Circle(u32, Rect),
-        /// Any other filled path (Dart's `rrect`): its colour and its bounds.
-        Fill(u32, Rect),
-        /// A filled ring (Dart's `drrect`): its colour and its even-odd path.
-        Ring(u32, Arc<Path>),
-        /// A stroked path (Dart's `path`, and `line` when its bounds have no height): its
-        /// colour, its stroke width and the path's bounds.
-        Stroke(u32, f32, Rect),
+    /// Dart's `expect(renderer, paints..a..b)` on what the checkbox's painter draws.
+    pub(crate) fn assert_paints(tester: &WidgetTester, expected: &[PaintCall]) {
+        waft_rendering::testing::assert_paints(&ops(tester), expected);
     }
 
-    fn argb(color: waft_embedder::valo::Color) -> u32 {
-        let channel = |value: f32| (value * 255.0).round() as u32;
-        (channel(color.a) << 24)
-            | (channel(color.r) << 16)
-            | (channel(color.g) << 8)
-            | channel(color.b)
-    }
-
-    fn rect_of(rect: waft_embedder::valo::Rect) -> Rect {
-        Rect::from_ltwh(
-            f64::from(rect.x),
-            f64::from(rect.y),
-            f64::from(rect.width),
-            f64::from(rect.height),
-        )
-    }
-
-    impl Drawn {
-        fn of(op: &Op) -> Option<Drawn> {
-            let Op::DrawPath {
-                paint,
-                path,
-                fill_rule,
-                content_bounds,
-                ..
-            } = op
-            else {
-                return None;
-            };
-            Some(match &paint.style {
-                PaintStyle::Stroke(stroke) => {
-                    Drawn::Stroke(argb(paint.color), stroke.width, rect_of(path.bounds()))
-                }
-                PaintStyle::Fill if *fill_rule == FillRule::EvenOdd => {
-                    Drawn::Ring(argb(paint.color), Arc::clone(path))
-                }
-                PaintStyle::Fill if path.as_oval().is_some() => {
-                    Drawn::Circle(argb(paint.color), rect_of(*content_bounds))
-                }
-                PaintStyle::Fill => Drawn::Fill(argb(paint.color), rect_of(*content_bounds)),
-            })
-        }
-    }
-
-    /// What the checkbox's painter draws, in paint order.
-    pub(crate) fn drawn(tester: &WidgetTester) -> Vec<Drawn> {
-        ops(tester).iter().filter_map(Drawn::of).collect()
-    }
-
-    /// One call of Dart's `paints` matcher.
-    #[derive(Debug)]
-    pub(crate) enum Paints {
-        /// `circle(color:)`.
-        Circle(Color),
-        /// `circle(color:, radius:)`.
-        CircleRadius(Color, f64),
-        /// `circle(x:, y:)`.
-        CircleAt(Offset),
-        /// `rrect(color:)`: the box's fill.
-        Rrect(Color),
-        /// `path(color:)`: the check mark.
-        Path(Color),
-        /// `path(color:, style: PaintingStyle.stroke, strokeWidth:)`.
-        PathStroke(Color, f32),
-        /// `path(strokeWidth:)` or `line(strokeWidth:)`.
-        StrokeWidth(f32),
-        /// `line()`: the dash.
-        Line,
-        /// `line(strokeWidth:)`.
-        LineWidth(f32),
-        /// `drrect(color:)`: the border.
-        Ring(Color),
-        /// `drrect(color:, outer:, inner:)`.
-        RingAt(Color, RRect, RRect),
-        /// `drrect(outer:, inner:)`: a ring of any colour.
-        RingShape(RRect, RRect),
-    }
-
-    /// The ring `RoundedRectangleBorder.paint` draws between `outer` and `inner`.
-    fn ring_path(outer: RRect, inner: RRect) -> Arc<Path> {
-        let mut canvas = Canvas::new();
-        waft_painting::draw_drrect(
-            &mut canvas,
-            outer,
-            inner,
-            &Paint::from_color(Color::new(0xFF000000).into()),
-        );
-        match &canvas.build().ops()[0] {
-            Op::DrawPath { path, .. } => Arc::clone(path),
-            _ => panic!("draw_drrect records a path"),
-        }
-    }
-
-    impl Paints {
-        fn matches(&self, drawn: &Drawn) -> bool {
-            match (self, drawn) {
-                (Paints::Circle(color), Drawn::Circle(c, bounds)) => {
-                    *c == color.to_argb32() && bounds.width() == bounds.height()
-                }
-                (Paints::CircleRadius(color, radius), Drawn::Circle(c, bounds)) => {
-                    *c == color.to_argb32()
-                        && bounds.width() == bounds.height()
-                        && (bounds.width() - radius * 2.0).abs() < 1e-3
-                }
-                (Paints::CircleAt(center), Drawn::Circle(_, bounds)) => {
-                    (bounds.center() - *center).distance() < 1e-3
-                }
-                (Paints::Rrect(color), Drawn::Fill(c, bounds)) => {
-                    *c == color.to_argb32() && bounds.width() <= K_EDGE_SIZE + 1e-3
-                }
-                (Paints::Path(color), Drawn::Stroke(c, _, bounds)) => {
-                    *c == color.to_argb32() && bounds.height() > 0.0
-                }
-                (Paints::PathStroke(color, width), Drawn::Stroke(c, w, bounds)) => {
-                    *c == color.to_argb32() && w == width && bounds.height() > 0.0
-                }
-                (Paints::StrokeWidth(width), Drawn::Stroke(_, w, _)) => w == width,
-                (Paints::Line, Drawn::Stroke(_, _, bounds)) => bounds.height() == 0.0,
-                (Paints::LineWidth(width), Drawn::Stroke(_, w, bounds)) => {
-                    w == width && bounds.height() == 0.0
-                }
-                (Paints::Ring(color), Drawn::Ring(c, _)) => *c == color.to_argb32(),
-                (Paints::RingAt(color, outer, inner), Drawn::Ring(c, path)) => {
-                    *c == color.to_argb32() && *path == ring_path(*outer, *inner)
-                }
-                (Paints::RingShape(outer, inner), Drawn::Ring(_, path)) => {
-                    *path == ring_path(*outer, *inner)
-                }
-                _ => false,
-            }
-        }
-    }
-
-    /// Dart's `expect(renderer, paints..a..b)`: the calls are drawn in this order, others
-    /// between them allowed.
-    pub(crate) fn paints(tester: &WidgetTester, expected: &[Paints]) -> bool {
-        let drawn = drawn(tester);
-        let mut rest = drawn.iter();
-        expected
-            .iter()
-            .all(|expected| rest.by_ref().any(|drawn| expected.matches(drawn)))
-    }
-
-    pub(crate) fn assert_paints(tester: &WidgetTester, expected: &[Paints]) {
+    /// Dart's `expect(renderer, isNot(paints..a..b))`.
+    pub(crate) fn assert_does_not_paint(tester: &WidgetTester, expected: &[PaintCall]) {
+        let ops = ops(tester);
         assert!(
-            paints(tester, expected),
-            "expected {expected:?} in {:?}",
-            drawn(tester)
-        );
-    }
-
-    pub(crate) fn assert_does_not_paint(tester: &WidgetTester, expected: &[Paints]) {
-        assert!(
-            !paints(tester, expected),
-            "did not expect {expected:?} in {:?}",
-            drawn(tester)
+            waft_rendering::testing::paints(&ops, expected).is_err(),
+            "did not expect the pattern in {ops:?}"
         );
     }
 
     /// Dart's `startGesture(center)`: a touch held down on the checkbox.
     pub(crate) fn press(tester: &mut WidgetTester, pointer: i64) -> TestPointer {
         let center = checkbox_center(tester);
-        let mut touch = WidgetTester::touch(pointer);
+        let mut touch = TestPointer::touch(pointer);
         tester.down(&mut touch, center);
         touch
     }
@@ -1742,7 +1572,7 @@ pub(crate) mod tests {
     /// Dart's `createGesture(kind: mouse)`, `addPointer()` and `moveTo(center)`.
     pub(crate) fn hover(tester: &mut WidgetTester) -> TestPointer {
         let center = checkbox_center(tester);
-        let mut mouse = WidgetTester::mouse(1, 0);
+        let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, center, false);
         mouse
@@ -1766,14 +1596,13 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_size_is_configurable_by_theme_data_material_tap_target_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (size, expected) in [
                 (MaterialTapTargetSize::Padded, 48.0),
                 (MaterialTapTargetSize::ShrinkWrap, 40.0),
             ] {
                 pump_checkbox(
-                    &mut tester,
+                    tester,
                     |app| {
                         ThemeData::new(app)
                             .copy_with()
@@ -1784,27 +1613,26 @@ pub(crate) mod tests {
                 );
                 // `MaterialApp` animates to the new theme, which Dart's bare `Theme` does not.
                 tester.pump_and_settle();
-                assert_eq!(checkbox_size(&tester), Size::new(expected, expected));
+                assert_eq!(checkbox_size(tester), Size::new(expected, expected));
             }
         });
     }
 
     #[test]
     fn checkbox_tristate_true() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(std::cell::Cell::new(None));
             let host = stateful(Rc::clone(&value), |checkbox| checkbox.tristate(true));
-            pump_checkbox(&mut tester, m3, |_| host);
+            pump_checkbox(tester, m3, |_| host);
             let shown = |tester: &WidgetTester| {
                 tester.widget(checkbox_element(tester), |checkbox: &Checkbox| {
                     checkbox.value
                 })
             };
-            assert_eq!(shown(&tester), None);
+            assert_eq!(shown(tester), None);
             for expected in [Some(false), Some(true), None] {
-                let center = checkbox_center(&tester);
-                tester.tap(center, 1);
+                let center = checkbox_center(tester);
+                tester.tap_at(center, 1);
                 tester.pump_and_settle();
                 assert_eq!(value.get(), expected);
             }
@@ -1812,8 +1640,7 @@ pub(crate) mod tests {
     }
 
     fn tristate_rendering(theme: fn(&App) -> ThemeData) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = theme(&tester.cell.borrow()).color_scheme.clone();
             let use_material3 = theme(&tester.cell.borrow()).use_material3;
             let (fill, check) = if use_material3 {
@@ -1829,33 +1656,62 @@ pub(crate) mod tests {
             };
             let assert_empty = |tester: &WidgetTester| {
                 // The transparent fill is not recorded: the ring is the first draw.
-                assert!(
-                    matches!(drawn(tester).first(), Some(Drawn::Ring(..))),
-                    "{:?}",
-                    drawn(tester)
+                assert_eq!(
+                    draws(&ops(tester)).first().map(CanvasMethod::of),
+                    Some(CanvasMethod::DrawDRRect)
                 );
                 // null is rendered as a line (a "dash")
-                assert_does_not_paint(tester, &[Paints::Line]);
+                assert_does_not_paint(
+                    tester,
+                    &[PaintCall::Line {
+                        p1: None,
+                        p2: None,
+                        color: None,
+                        stroke_width: None,
+                    }],
+                );
             };
 
-            frame(&mut tester, Some(false));
-            assert_empty(&tester);
+            frame(tester, Some(false));
+            assert_empty(tester);
 
-            frame(&mut tester, Some(true));
+            frame(tester, Some(true));
             // checkmark is rendered as a path
-            assert_paints(&tester, &[Paints::Rrect(fill), Paints::Path(check)]);
+            assert_paints(
+                tester,
+                &[PaintCall::rrect(Some(fill)), PaintCall::path(Some(check))],
+            );
 
-            frame(&mut tester, Some(false));
-            assert_empty(&tester);
+            frame(tester, Some(false));
+            assert_empty(tester);
 
-            frame(&mut tester, None);
-            assert_paints(&tester, &[Paints::Line]);
+            frame(tester, None);
+            assert_paints(
+                tester,
+                &[PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: None,
+                    stroke_width: None,
+                }],
+            );
 
-            frame(&mut tester, Some(true));
-            assert_paints(&tester, &[Paints::Rrect(fill), Paints::Path(check)]);
+            frame(tester, Some(true));
+            assert_paints(
+                tester,
+                &[PaintCall::rrect(Some(fill)), PaintCall::path(Some(check))],
+            );
 
-            frame(&mut tester, None);
-            assert_paints(&tester, &[Paints::Line]);
+            frame(tester, None);
+            assert_paints(
+                tester,
+                &[PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: None,
+                    stroke_width: None,
+                }],
+            );
         });
     }
 
@@ -1870,8 +1726,7 @@ pub(crate) mod tests {
     }
 
     fn color_rendering(use_material3: bool, border_color: Color) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme =
                 move |app: &App| ThemeData::builder().use_material3(use_material3).build(app);
             let frame = |tester: &mut WidgetTester,
@@ -1889,18 +1744,24 @@ pub(crate) mod tests {
 
             // paints's color is 0xFFFFFFFF (default color)
             let check_color = Color::new(0xFFFFFFFF);
-            frame(&mut tester, &theme, None, Some(check_color));
+            frame(tester, &theme, None, Some(check_color));
             assert_paints(
-                &tester,
-                &[Paints::Rrect(border_color), Paints::Path(check_color)],
+                tester,
+                &[
+                    PaintCall::rrect(Some(border_color)),
+                    PaintCall::path(Some(check_color)),
+                ],
             );
 
             // paints's color is 0xFF000000 (params)
             let check_color = Color::new(0xFF000000);
-            frame(&mut tester, &theme, None, Some(check_color));
+            frame(tester, &theme, None, Some(check_color));
             assert_paints(
-                &tester,
-                &[Paints::Rrect(border_color), Paints::Path(check_color)],
+                tester,
+                &[
+                    PaintCall::rrect(Some(border_color)),
+                    PaintCall::path(Some(check_color)),
+                ],
             );
 
             // paints's color is 0xFF00FF00 (theme)
@@ -1913,12 +1774,12 @@ pub(crate) mod tests {
                 };
                 theme(app).copy_with().color_scheme(color_scheme).build()
             };
-            frame(&mut tester, &themed, None, None);
-            assert_paints(&tester, &[Paints::Rrect(active_color)]);
+            frame(tester, &themed, None, None);
+            assert_paints(tester, &[PaintCall::rrect(Some(active_color))]);
 
             let active_color = Color::new(0xFF000000);
-            frame(&mut tester, &theme, Some(active_color), None);
-            assert_paints(&tester, &[Paints::Rrect(active_color)]);
+            frame(tester, &theme, Some(active_color), None);
+            assert_paints(tester, &[PaintCall::rrect(Some(active_color))]);
         });
     }
 
@@ -1954,46 +1815,45 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_checkbox_is_focusable_and_has_correct_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let node = focus_node(&tester);
+        test_widgets(|tester| {
+            let node = focus_node(tester);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
-            focus_frame(&mut tester, m2, Some(true), true, node.clone());
-            assert!(has_primary_focus(&tester, node.handle()));
+            focus_frame(tester, m2, Some(true), true, node.clone());
+            assert!(has_primary_focus(tester, node.handle()));
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::Rrect(Color::new(0xff2196f3)),
-                    Paints::Path(Colors::WHITE),
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::rrect(Some(Color::new(0xff2196f3))),
+                    PaintCall::path(Some(Colors::WHITE)),
                 ],
             );
 
             // Check the false value.
-            focus_frame(&mut tester, m2, Some(false), true, node.clone());
-            assert!(has_primary_focus(&tester, node.handle()));
+            focus_frame(tester, m2, Some(false), true, node.clone());
+            assert!(has_primary_focus(tester, node.handle()));
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::RingAt(
-                        Color::new(0x8a000000),
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 1.0),
                         rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                        Some(Color::new(0x8a000000)),
                     ),
                 ],
             );
 
             // Check what happens when disabled.
-            focus_frame(&mut tester, m2, Some(false), false, node.clone());
-            assert!(!has_primary_focus(&tester, node.handle()));
+            focus_frame(tester, m2, Some(false), false, node.clone());
+            assert!(!has_primary_focus(tester, node.handle()));
             assert_paints(
-                &tester,
-                &[Paints::RingAt(
-                    Color::new(0x61000000),
+                tester,
+                &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 1.0),
                     rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                    Some(Color::new(0x61000000)),
                 )],
             );
         });
@@ -2001,47 +1861,46 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_checkbox_is_focusable_and_has_correct_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = m3(&tester.cell.borrow()).color_scheme.clone();
-            let node = focus_node(&tester);
+            let node = focus_node(tester);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
-            focus_frame(&mut tester, m3, Some(true), true, node.clone());
-            assert!(has_primary_focus(&tester, node.handle()));
+            focus_frame(tester, m3, Some(true), true, node.clone());
+            assert!(has_primary_focus(tester, node.handle()));
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::Rrect(colors.primary),
-                    Paints::Path(colors.on_primary),
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::rrect(Some(colors.primary)),
+                    PaintCall::path(Some(colors.on_primary)),
                 ],
             );
 
             // Check the false value.
-            focus_frame(&mut tester, m3, Some(false), true, node.clone());
-            assert!(has_primary_focus(&tester, node.handle()));
+            focus_frame(tester, m3, Some(false), true, node.clone());
+            assert!(has_primary_focus(tester, node.handle()));
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::RingAt(
-                        colors.on_surface,
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                         rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                        Some(colors.on_surface),
                     ),
                 ],
             );
 
             // Check what happens when disabled.
-            focus_frame(&mut tester, m3, Some(false), false, node.clone());
-            assert!(!has_primary_focus(&tester, node.handle()));
+            focus_frame(tester, m3, Some(false), false, node.clone());
+            assert!(!has_primary_focus(tester, node.handle()));
             assert_paints(
-                &tester,
-                &[Paints::RingAt(
-                    colors.on_surface.with_opacity(0.38),
+                tester,
+                &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                     rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                    Some(colors.on_surface.with_opacity(0.38)),
                 )],
             );
         });
@@ -2049,11 +1908,10 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_with_splash_radius_set() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const SPLASH_RADIUS: f64 = 30.0;
-            pump_checkbox(&mut tester, m3, |_| {
+            pump_checkbox(tester, m3, |_| {
                 Checkbox::new(Some(false), ignore())
                     .focus_color(orange())
                     .autofocus(true)
@@ -2061,26 +1919,43 @@ pub(crate) mod tests {
                     .into_widget()
             });
             tester.pump_and_settle();
-            assert_paints(&tester, &[Paints::CircleRadius(orange(), SPLASH_RADIUS)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(orange()),
+                    style: None,
+                }],
+            );
         });
     }
 
     #[test]
     fn checkbox_starts_the_splash_in_center_even_when_tap_is_on_the_corner() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_checkbox(&mut tester, m3, |_| {
+        test_widgets(|tester| {
+            pump_checkbox(tester, m3, |_| {
                 Checkbox::new(Some(false), ignore()).into_widget()
             });
-            let rect = tester.global_rect(tester.render_box_of(checkbox_element(&tester)));
+            let rect = tester.get_rect(checkbox_element(tester));
             let checkbox_center_local = rect.center() - rect.top_left();
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, rect.top_left());
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Wait for the splash to be drawn, but not long enough for it to animate towards
             // the center, since we want to catch it in its starting position.
-            tester.pump(Duration::from_millis(1));
-            assert_paints(&tester, &[Paints::CircleAt(checkbox_center_local)]);
+            tester.pump_by(Duration::from_millis(1));
+            assert_paints(
+                tester,
+                &[PaintCall::Circle {
+                    x: Some((checkbox_center_local).dx()),
+                    y: Some((checkbox_center_local).dy()),
+                    radius: None,
+                    color: None,
+                    style: None,
+                }],
+            );
 
             // Finish gesture to release resources.
             tester.up(&gesture);
@@ -2089,8 +1964,7 @@ pub(crate) mod tests {
     }
 
     fn hover_color_case(theme: fn(&App) -> ThemeData) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let data = theme(&tester.cell.borrow());
             let colors = data.color_scheme.clone();
@@ -2108,40 +1982,58 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
             };
 
-            frame(&mut tester, true);
+            frame(tester, true);
             assert_paints(
-                &tester,
-                &[Paints::Rrect(fill), Paints::PathStroke(check, 2.0)],
+                tester,
+                &[
+                    PaintCall::rrect(Some(fill)),
+                    PaintCall::Path {
+                        color: Some(check),
+                        style: Some(PaintedStyle::Stroke(Some(2.0))),
+                        includes: vec![],
+                        excludes: vec![],
+                    },
+                ],
             );
 
             // Start hovering
-            let center = checkbox_center(&tester);
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let center = checkbox_center(tester);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
 
-            frame(&mut tester, true);
+            frame(tester, true);
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::Rrect(fill),
-                    Paints::PathStroke(check, 2.0),
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::rrect(Some(fill)),
+                    PaintCall::Path {
+                        color: Some(check),
+                        style: Some(PaintedStyle::Stroke(Some(2.0))),
+                        includes: vec![],
+                        excludes: vec![],
+                    },
                 ],
             );
 
             // Check what happens when disabled.
-            frame(&mut tester, false);
+            frame(tester, false);
             let (disabled_fill, disabled_check) = if data.use_material3 {
                 (colors.on_surface.with_opacity(0.38), colors.surface)
             } else {
                 (Color::new(0x61000000), Color::new(0xffffffff))
             };
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Rrect(disabled_fill),
-                    Paints::PathStroke(disabled_check, 2.0),
+                    PaintCall::rrect(Some(disabled_fill)),
+                    PaintCall::Path {
+                        color: Some(disabled_check),
+                        style: Some(PaintedStyle::Stroke(Some(2.0))),
+                        includes: vec![],
+                        excludes: vec![],
+                    },
                 ],
             );
             tester.send(&gesture, PointerChange::Remove);
@@ -2160,14 +2052,13 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_can_be_toggled_by_keyboard_shortcuts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = Rc::new(std::cell::Cell::new(Some(true)));
             let host = stateful(Rc::clone(&value), |checkbox| {
                 checkbox.focus_color(orange()).autofocus(true)
             });
-            pump_checkbox(&mut tester, m3, |_| host);
+            pump_checkbox(tester, m3, |_| host);
             tester.pump_and_settle();
             tester.send_key_event(PhysicalKeyboardKey::ENTER, LogicalKeyboardKey::ENTER);
             tester.pump_and_settle();
@@ -2187,10 +2078,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_checkbox_visual_density_cannot_be_overridden_by_theme_data_visual_density() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_checkbox(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::new(app)
                         .copy_with()
@@ -2200,7 +2090,7 @@ pub(crate) mod tests {
                 |_| Checkbox::new(Some(true), ignore()).into_widget(),
             );
             tester.pump_and_settle();
-            assert_eq!(checkbox_size(&tester), Size::new(48.0, 48.0));
+            assert_eq!(checkbox_size(tester), Size::new(48.0, 48.0));
         });
     }
 
@@ -2212,27 +2102,21 @@ pub(crate) mod tests {
             TargetPlatform::MacOS,
             TargetPlatform::Windows,
         ] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                pump_checkbox(&mut tester, m3, |_| {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                pump_checkbox(tester, m3, |_| {
                     Checkbox::new(Some(true), ignore())
                         .material_tap_target_size(MaterialTapTargetSize::Padded)
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert_eq!(
-                    checkbox_size(&tester),
-                    Size::new(48.0, 48.0),
-                    "{platform:?}"
-                );
+                assert_eq!(checkbox_size(tester), Size::new(48.0, 48.0), "{platform:?}");
             });
         }
     }
 
     #[test]
     fn checkbox_responds_to_density_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (visual_density, expected) in [
                 (None, Size::new(48.0, 48.0)),
                 (Some(VisualDensity::STANDARD), Size::new(48.0, 48.0)),
@@ -2241,21 +2125,20 @@ pub(crate) mod tests {
                 (Some(VisualDensity::new(-3.0, -3.0)), Size::new(36.0, 36.0)),
                 (Some(VisualDensity::new(3.0, -3.0)), Size::new(60.0, 36.0)),
             ] {
-                pump_checkbox(&mut tester, m3, move |_| {
+                pump_checkbox(tester, m3, move |_| {
                     let mut checkbox = Checkbox::new(Some(true), ignore());
                     checkbox.visual_density = visual_density;
                     checkbox.into_widget()
                 });
                 tester.pump_and_settle();
-                assert_eq!(checkbox_size(&tester), expected, "{visual_density:?}");
+                assert_eq!(checkbox_size(tester), expected, "{visual_density:?}");
             }
         });
     }
 
     #[test]
     fn checkbox_stops_hover_animation_when_removed_from_the_tree() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = |app: &App| {
                 ThemeData::builder()
                     .material_tap_target_size(MaterialTapTargetSize::Padded)
@@ -2263,20 +2146,20 @@ pub(crate) mod tests {
             };
             let value = Rc::new(std::cell::Cell::new(Some(true)));
             let host = stateful(Rc::clone(&value), |checkbox| checkbox);
-            pump_checkbox(&mut tester, theme, |_| host);
+            pump_checkbox(tester, theme, |_| host);
 
-            let checkbox_center = checkbox_center(&tester);
-            let mut test_gesture = WidgetTester::mouse(1, 0);
+            let checkbox_center = checkbox_center(tester);
+            let mut test_gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut test_gesture, Offset::ZERO);
             tester.move_to(&mut test_gesture, checkbox_center, false);
 
-            tester.pump(Duration::ZERO); // start animation
+            tester.pump(); // start animation
             // hover animation duration is 50 ms. It is half-way.
-            tester.pump(Duration::from_millis(25));
+            tester.pump_by(Duration::from_millis(25));
 
             // Hover animation should not trigger an exception when the checkbox is removed
             // before the hover animation should complete.
-            pump_checkbox(&mut tester, theme, |_| Container::new().into_widget());
+            pump_checkbox(tester, theme, |_| Container::new().into_widget());
 
             tester.send(&test_gesture, PointerChange::Remove);
         });
@@ -2298,8 +2181,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_changes_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = |tester: &mut WidgetTester, checkbox: Checkbox| {
                 let root = {
                     let app = tester.cell.borrow();
@@ -2325,17 +2207,17 @@ pub(crate) mod tests {
 
             // Test Checkbox() constructor
             frame(
-                &mut tester,
+                tester,
                 Checkbox::new(Some(true), ignore()).mouse_cursor(SystemMouseCursors::TEXT.into()),
             );
-            let center = checkbox_center(&tester);
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let center = checkbox_center(tester);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
 
             // Test default cursor
-            frame(&mut tester, Checkbox::new(Some(true), ignore()));
+            frame(tester, Checkbox::new(Some(true), ignore()));
             let expected: MouseCursorRef = if K_IS_WEB {
                 SystemMouseCursors::CLICK.into()
             } else {
@@ -2344,12 +2226,12 @@ pub(crate) mod tests {
             assert_eq!(Some(tester.active_cursor(1)), Some(expected));
 
             // Test default cursor when disabled
-            frame(&mut tester, Checkbox::new(Some(true), None));
+            frame(tester, Checkbox::new(Some(true), None));
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
 
             // Test cursor when tristate
             frame(
-                &mut tester,
+                tester,
                 Checkbox::new(None, None)
                     .tristate(true)
                     .mouse_cursor(selected_grab_mouse_cursor()),
@@ -2363,8 +2245,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_fill_color_resolves_in_enabled_disabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const ACTIVE_ENABLED_FILL_COLOR: Color = Color::new(0xFF000001);
             const ACTIVE_DISABLED_FILL_COLOR: Color = Color::new(0xFF000002);
             let fill_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
@@ -2378,22 +2259,21 @@ pub(crate) mod tests {
                 (false, ACTIVE_DISABLED_FILL_COLOR),
             ] {
                 let fill_color = Rc::clone(&fill_color);
-                pump_checkbox(&mut tester, m3, move |_| {
+                pump_checkbox(tester, m3, move |_| {
                     Checkbox::new(Some(true), if enabled { ignore() } else { None })
                         .fill_color(fill_color)
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert_paints(&tester, &[Paints::Rrect(expected)]);
+                assert_paints(tester, &[PaintCall::rrect(Some(expected))]);
             }
         });
     }
 
     #[test]
     fn checkbox_fill_color_resolves_in_hovered_focused_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let node = focus_node(&tester);
+        test_widgets(|tester| {
+            let node = focus_node(tester);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const HOVERED_FILL_COLOR: Color = Color::new(0xFF000001);
             const FOCUSED_FILL_COLOR: Color = Color::new(0xFF000002);
@@ -2406,7 +2286,7 @@ pub(crate) mod tests {
                 }
                 Some(Colors::TRANSPARENT)
             });
-            pump_checkbox(&mut tester, m3, {
+            pump_checkbox(tester, m3, {
                 let node = node.clone();
                 move |_| {
                     Checkbox::new(Some(true), ignore())
@@ -2417,21 +2297,20 @@ pub(crate) mod tests {
                 }
             });
             tester.pump_and_settle();
-            assert!(has_primary_focus(&tester, node.handle()));
-            assert_paints(&tester, &[Paints::Rrect(FOCUSED_FILL_COLOR)]);
+            assert!(has_primary_focus(tester, node.handle()));
+            assert_paints(tester, &[PaintCall::rrect(Some(FOCUSED_FILL_COLOR))]);
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_paints(&tester, &[Paints::Rrect(HOVERED_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(HOVERED_FILL_COLOR))]);
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn checkbox_respects_shape_and_side() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let rounded_rectangle_border = RoundedRectangleBorder::new(
                 BorderSide::NONE,
                 BorderRadiusGeometry::all(Radius::circular(5.0)),
@@ -2442,7 +2321,7 @@ pub(crate) mod tests {
                 ..BorderSide::default()
             };
             let border = rounded_rectangle_border;
-            pump_checkbox(&mut tester, m3, move |_| {
+            pump_checkbox(tester, m3, move |_| {
                 Checkbox::new(Some(false), ignore())
                     .shape(border)
                     .side(side)
@@ -2450,17 +2329,17 @@ pub(crate) mod tests {
             });
             tester.pump_and_settle();
 
-            tester.widget(checkbox_element(&tester), |checkbox: &Checkbox| {
+            tester.widget(checkbox_element(tester), |checkbox: &Checkbox| {
                 let shape: &dyn ShapeBorder = checkbox.shape.as_deref().expect("a shape");
                 assert!(shape == &rounded_rectangle_border as &dyn ShapeBorder);
                 assert_eq!(checkbox.side, Some(AnyBorderSide::new(side)));
             });
             assert_paints(
-                &tester,
-                &[Paints::RingAt(
-                    Color::new(0xfff44336),
+                tester,
+                &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 5.0),
                     rrect(19.0, 19.0, 29.0, 29.0, 1.0),
+                    Some(Color::new(0xfff44336)),
                 )],
             );
         });
@@ -2512,42 +2391,41 @@ pub(crate) mod tests {
         focused: fn(&ThemeData) -> Color,
         hovered: fn(&ThemeData) -> Color,
     ) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let node = focus_node(&tester);
+        test_widgets(|tester| {
+            let node = focus_node(tester);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let data = theme(&tester.cell.borrow());
 
             overlay_frame(
-                &mut tester,
+                tester,
                 theme,
                 |checkbox| checkbox,
                 false,
                 false,
                 node.clone(),
             );
-            let gesture1 = press(&mut tester, 1);
+            let gesture1 = press(tester, 1);
             tester.pump_and_settle();
             // Default inactive pressed Checkbox should have overlay color from default
             // fillColor
-            assert_paints(&tester, &[Paints::Circle(inactive_pressed(&data))]);
+            assert_paints(tester, &[PaintCall::circle(Some(inactive_pressed(&data)))]);
 
             overlay_frame(
-                &mut tester,
+                tester,
                 theme,
                 |checkbox| checkbox,
                 true,
                 false,
                 node.clone(),
             );
-            let gesture2 = press(&mut tester, 2);
+            let gesture2 = press(tester, 2);
             tester.pump_and_settle();
             // Default active pressed Checkbox should have overlay color from default fillColor
-            assert_paints(&tester, &[Paints::Circle(active_pressed(&data))]);
+            assert_paints(tester, &[PaintCall::circle(Some(active_pressed(&data)))]);
 
-            reset(&mut tester);
+            reset(tester);
             overlay_frame(
-                &mut tester,
+                tester,
                 theme,
                 |checkbox| checkbox,
                 false,
@@ -2555,26 +2433,26 @@ pub(crate) mod tests {
                 node.clone(),
             );
             tester.pump_and_settle();
-            assert!(has_primary_focus(&tester, node.handle()));
+            assert!(has_primary_focus(tester, node.handle()));
             // Focused Checkbox should use default focused overlay color
-            assert_paints(&tester, &[Paints::Circle(focused(&data))]);
+            assert_paints(tester, &[PaintCall::circle(Some(focused(&data)))]);
 
-            reset(&mut tester);
+            reset(tester);
             overlay_frame(
-                &mut tester,
+                tester,
                 theme,
                 |checkbox| checkbox,
                 false,
                 false,
                 node.clone(),
             );
-            let gesture3 = hover(&mut tester);
+            let gesture3 = hover(tester);
             tester.pump_and_settle();
             // Hovered Checkbox should use default hovered overlay color
-            assert_paints(&tester, &[Paints::Circle(hovered(&data))]);
+            assert_paints(tester, &[PaintCall::circle(Some(hovered(&data)))]);
 
             // Finish gestures to release resources.
-            finish_gestures(&mut tester, &[&gesture1, &gesture2]);
+            finish_gestures(tester, &[&gesture1, &gesture2]);
             tester.send(&gesture3, PointerChange::Remove);
         });
     }
@@ -2612,9 +2490,8 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_overlay_color_resolves_in_active_pressed_focused_hovered_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let node = focus_node(&tester);
+        test_widgets(|tester| {
+            let node = focus_node(tester);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
             const FILL_COLOR: Color = Color::new(0xFF000000);
@@ -2667,81 +2544,104 @@ pub(crate) mod tests {
                     );
                 };
 
-            frame(&mut tester, false, false, false);
-            let gesture1 = press(&mut tester, 1);
+            frame(tester, false, false, false);
+            let gesture1 = press(tester, 1);
             tester.pump_and_settle();
             // Default inactive pressed Checkbox should have overlay color from fillColor
             assert_paints(
-                &tester,
-                &[Paints::CircleRadius(
-                    FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA),
-                    SPLASH_RADIUS,
-                )],
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA)),
+                    style: None,
+                }],
             );
 
-            frame(&mut tester, true, false, false);
-            let gesture2 = press(&mut tester, 2);
+            frame(tester, true, false, false);
+            let gesture2 = press(tester, 2);
             tester.pump_and_settle();
             // Default active pressed Checkbox should have overlay color from fillColor
             assert_paints(
-                &tester,
-                &[Paints::CircleRadius(
-                    FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA),
-                    SPLASH_RADIUS,
-                )],
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA)),
+                    style: None,
+                }],
             );
 
-            frame(&mut tester, false, false, true);
-            let gesture3 = press(&mut tester, 3);
+            frame(tester, false, false, true);
+            let gesture3 = press(tester, 3);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                &[Paints::CircleRadius(
-                    INACTIVE_PRESSED_OVERLAY_COLOR,
-                    SPLASH_RADIUS,
-                )],
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(INACTIVE_PRESSED_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
-            frame(&mut tester, true, false, true);
-            let gesture4 = press(&mut tester, 4);
+            frame(tester, true, false, true);
+            let gesture4 = press(tester, 4);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                &[Paints::CircleRadius(
-                    ACTIVE_PRESSED_OVERLAY_COLOR,
-                    SPLASH_RADIUS,
-                )],
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(ACTIVE_PRESSED_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
-            reset(&mut tester);
-            frame(&mut tester, false, true, true);
+            reset(tester);
+            frame(tester, false, true, true);
             tester.pump_and_settle();
-            assert!(has_primary_focus(&tester, node.handle()));
+            assert!(has_primary_focus(tester, node.handle()));
             // Focused Checkbox should use overlay color over focusColor
             assert_paints(
-                &tester,
-                &[Paints::CircleRadius(FOCUS_OVERLAY_COLOR, SPLASH_RADIUS)],
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(FOCUS_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             // Start hovering
-            let gesture5 = hover(&mut tester);
+            let gesture5 = hover(tester);
             tester.pump_and_settle();
             // Hovered Checkbox should use overlay color over hoverColor
             assert_paints(
-                &tester,
-                &[Paints::CircleRadius(HOVER_OVERLAY_COLOR, SPLASH_RADIUS)],
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(HOVER_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             // Finish gestures to release resources.
-            finish_gestures(&mut tester, &[&gesture1, &gesture2, &gesture3, &gesture4]);
+            finish_gestures(tester, &[&gesture1, &gesture2, &gesture3, &gesture4]);
             tester.send(&gesture5, PointerChange::Remove);
         });
     }
 
     #[test]
     fn tristate_checkbox_overlay_color_resolves_in_pressed_active_inactive_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const ACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000001);
             const INACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000002);
             const SPLASH_RADIUS: f64 = 24.0;
@@ -2771,15 +2671,18 @@ pub(crate) mod tests {
             tester.pump_widget(root);
 
             // The checkbox is inactive.
-            let mut gesture = press(&mut tester, 1);
+            let mut gesture = press(tester, 1);
             tester.pump_and_settle();
             assert_eq!(value.get(), Some(false));
             assert_paints(
-                &tester,
-                &[Paints::CircleRadius(
-                    INACTIVE_PRESSED_OVERLAY_COLOR,
-                    SPLASH_RADIUS,
-                )],
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(INACTIVE_PRESSED_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             for (pointer, expected_value, expected_color) in [
@@ -2791,12 +2694,18 @@ pub(crate) mod tests {
                 (4, Some(false), INACTIVE_PRESSED_OVERLAY_COLOR),
             ] {
                 tester.up(&gesture);
-                gesture = press(&mut tester, pointer);
+                gesture = press(tester, pointer);
                 tester.pump_and_settle();
                 assert_eq!(value.get(), expected_value);
                 assert_paints(
-                    &tester,
-                    &[Paints::CircleRadius(expected_color, SPLASH_RADIUS)],
+                    tester,
+                    &[PaintCall::Circle {
+                        x: None,
+                        y: None,
+                        radius: Some(SPLASH_RADIUS),
+                        color: Some(expected_color),
+                        style: None,
+                    }],
                 );
             }
 
@@ -2806,17 +2715,16 @@ pub(crate) mod tests {
 
     #[test]
     fn do_not_crash_when_widget_disappears_while_pointer_is_down() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_checkbox(&mut tester, m3, |_| {
+        test_widgets(|tester| {
+            pump_checkbox(tester, m3, |_| {
                 Checkbox::new(Some(true), ignore()).into_widget()
             });
             // Put a pointer down on the screen.
-            let gesture = press(&mut tester, 1);
-            tester.pump(Duration::ZERO);
+            let gesture = press(tester, 1);
+            tester.pump();
             // While the pointer is down, the widget disappears.
-            pump_checkbox(&mut tester, m3, |_| Container::new().into_widget());
-            assert!(tester.find_by_type::<Checkbox>().is_empty());
+            pump_checkbox(tester, m3, |_| Container::new().into_widget());
+            expect(tester, &find::by_type::<Checkbox>(), finds_nothing());
             // Release pointer after widget disappeared.
             tester.up(&gesture);
         });
@@ -2824,8 +2732,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_border_side_side_only_applies_when_unselected_in_m2() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const BORDER_COLOR: Color = Color::new(0xfff44336);
             const ACTIVE_COLOR: Color = Color::new(0xff123456);
             let side = BorderSide {
@@ -2846,33 +2753,32 @@ pub(crate) mod tests {
             let expect_border = |tester: &WidgetTester| {
                 assert_paints(
                     tester,
-                    &[Paints::RingAt(
-                        BORDER_COLOR,
+                    &[PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 1.0),
                         rrect(19.0, 19.0, 29.0, 29.0, 0.0),
+                        Some(BORDER_COLOR),
                     )],
                 );
             };
 
             // Checkbox is unselected, so the specified BorderSide appears.
-            frame(&mut tester, Some(false), true);
-            expect_border(&tester);
-            frame(&mut tester, Some(false), false);
-            expect_border(&tester);
+            frame(tester, Some(false), true);
+            expect_border(tester);
+            frame(tester, Some(false), false);
+            expect_border(tester);
 
             // Checkbox is selected/indeterminate, so the specified BorderSide is transparent,
             // which is not recorded.
             for value in [Some(true), None] {
-                frame(&mut tester, value, true);
-                assert_does_not_paint(&tester, &[Paints::Ring(BORDER_COLOR)]);
-                assert_paints(&tester, &[Paints::Rrect(ACTIVE_COLOR)]); // checkbox fill
+                frame(tester, value, true);
+                assert_does_not_paint(tester, &[PaintCall::drrect(Some(BORDER_COLOR))]);
+                assert_paints(tester, &[PaintCall::rrect(Some(ACTIVE_COLOR))]); // checkbox fill
             }
         });
     }
 
     fn widget_state_border_side_case(theme: fn(&App) -> ThemeData, radius: f64) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const BORDER_COLOR: Color = Color::new(0xfff44336);
             let side = BorderSide {
                 width: 4.0,
@@ -2885,7 +2791,7 @@ pub(crate) mod tests {
                 (Some(true), true),
                 (None, true),
             ] {
-                pump_checkbox(&mut tester, theme, move |_| {
+                pump_checkbox(tester, theme, move |_| {
                     Checkbox::new(value, if enabled { ignore() } else { None })
                         .tristate(value.is_none())
                         .side(WidgetStateBorderSide::resolve_with(move |_| Some(side)))
@@ -2893,11 +2799,11 @@ pub(crate) mod tests {
                 });
                 tester.pump_and_settle();
                 assert_paints(
-                    &tester,
-                    &[Paints::RingAt(
-                        BORDER_COLOR,
+                    tester,
+                    &[PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, radius),
                         rrect(19.0, 19.0, 29.0, 29.0, 0.0),
+                        Some(BORDER_COLOR),
                     )],
                 );
             }
@@ -2916,8 +2822,7 @@ pub(crate) mod tests {
 
     #[test]
     fn disabled_checkbox_shows_tooltip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const LONG_PRESS_TOOLTIP: &str = "long press tooltip";
             const TAP_TOOLTIP: &str = "tap tooltip";
             let frame = |tester: &mut WidgetTester, tooltip: crate::tooltip::Tooltip| {
@@ -2928,56 +2833,55 @@ pub(crate) mod tests {
                 );
             };
             let tooltip_center = |tester: &WidgetTester| {
-                let tooltip = tester.find_by_type::<crate::tooltip::Tooltip>()[0];
-                tester.global_rect(tester.render_box_of(tooltip)).center()
+                let tooltip = find::by_type::<crate::tooltip::Tooltip>().evaluate(tester)[0];
+                tester.get_rect(tooltip).center()
             };
             frame(
-                &mut tester,
+                tester,
                 crate::tooltip::Tooltip::new().message(LONG_PRESS_TOOLTIP),
             );
 
             // Default tooltip shows up after long pressed.
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
-            let center = tooltip_center(&tester);
-            tester.tap(center, 1);
-            tester.pump(Duration::from_millis(10));
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            let center = tooltip_center(tester);
+            tester.tap_at(center, 1);
+            tester.pump_by(Duration::from_millis(10));
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
-            let mut gesture_long_press = WidgetTester::touch(2);
+            let mut gesture_long_press = TestPointer::touch(2);
             tester.down(&mut gesture_long_press, center);
-            tester.pump(Duration::ZERO);
-            tester.pump(waft_gestures::K_LONG_PRESS_TIMEOUT);
+            tester.pump();
+            tester.pump_by(waft_gestures::K_LONG_PRESS_TIMEOUT);
             tester.up(&gesture_long_press);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(tester.find_text(LONG_PRESS_TOOLTIP).len(), 1);
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_one_widget());
 
             // Tooltip shows up after tapping when set triggerMode to TooltipTriggerMode.tap.
             frame(
-                &mut tester,
+                tester,
                 crate::tooltip::Tooltip::new()
                     .trigger_mode(waft_widgets::TooltipTriggerMode::Tap)
                     .message(TAP_TOOLTIP),
             );
 
-            tester.pump(Duration::from_secs(24 * 60 * 60));
+            tester.pump_by(Duration::from_secs(24 * 60 * 60));
             tester.pump_and_settle();
-            assert!(tester.find_text(TAP_TOOLTIP).is_empty());
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(TAP_TOOLTIP), finds_nothing());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
-            let center = tooltip_center(&tester);
-            tester.tap(center, 3);
-            tester.pump(Duration::from_millis(10));
-            assert_eq!(tester.find_text(TAP_TOOLTIP).len(), 1);
+            let center = tooltip_center(tester);
+            tester.tap_at(center, 3);
+            tester.pump_by(Duration::from_millis(10));
+            expect(tester, &find::text(TAP_TOOLTIP), finds_one_widget());
         });
     }
 
     #[test]
     fn material3_checkbox_has_default_error_color_when_is_error_is_set_to_true() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let node = focus_node(&tester);
+        test_widgets(|tester| {
+            let node = focus_node(tester);
             let colors = m3(&tester.cell.borrow()).color_scheme.clone();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = Rc::new(std::cell::Cell::new(Some(true)));
@@ -2996,58 +2900,60 @@ pub(crate) mod tests {
             };
 
             // Focused
-            frame(&mut tester, true);
-            assert!(has_primary_focus(&tester, node.handle()));
+            frame(tester, true);
+            assert!(has_primary_focus(tester, node.handle()));
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Circle(colors.error.with_opacity(0.1)),
-                    Paints::Rrect(colors.error),
-                    Paints::Path(colors.on_error),
+                    PaintCall::circle(Some(colors.error.with_opacity(0.1))),
+                    PaintCall::rrect(Some(colors.error)),
+                    PaintCall::path(Some(colors.on_error)),
                 ],
             );
 
             // Default color
-            reset(&mut tester);
-            frame(&mut tester, false);
-            assert!(!has_primary_focus(&tester, node.handle()));
+            reset(tester);
+            frame(tester, false);
+            assert!(!has_primary_focus(tester, node.handle()));
             assert_paints(
-                &tester,
-                &[Paints::Rrect(colors.error), Paints::Path(colors.on_error)],
+                tester,
+                &[
+                    PaintCall::rrect(Some(colors.error)),
+                    PaintCall::path(Some(colors.on_error)),
+                ],
             );
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Circle(colors.error.with_opacity(0.08)),
-                    Paints::Rrect(colors.error),
+                    PaintCall::circle(Some(colors.error.with_opacity(0.08))),
+                    PaintCall::rrect(Some(colors.error)),
                 ],
             );
 
             // Start pressing
-            let gesture_long_press = press(&mut tester, 2);
-            tester.pump(Duration::ZERO);
+            let gesture_long_press = press(tester, 2);
+            tester.pump();
             assert_paints(
-                &tester,
+                tester,
                 &[
-                    Paints::Circle(colors.error.with_opacity(0.1)),
-                    Paints::Rrect(colors.error),
+                    PaintCall::circle(Some(colors.error.with_opacity(0.1))),
+                    PaintCall::rrect(Some(colors.error)),
                 ],
             );
             tester.up(&gesture_long_press);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn material3_checkbox_widget_state_border_side_applies_in_error_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let node = focus_node(&tester);
+        test_widgets(|tester| {
+            let node = focus_node(tester);
             const BORDER_COLOR: Color = Color::new(0xffffeb3b);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = Rc::new(std::cell::Cell::new(Some(false)));
@@ -3081,62 +2987,62 @@ pub(crate) mod tests {
             let expect_border = |tester: &WidgetTester| {
                 assert_paints(
                     tester,
-                    &[Paints::RingAt(
-                        BORDER_COLOR,
+                    &[PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                         rrect(19.0, 19.0, 29.0, 29.0, 0.0),
+                        Some(BORDER_COLOR),
                     )],
                 );
             };
 
-            frame(&mut tester, true);
-            expect_border(&tester);
+            frame(tester, true);
+            expect_border(tester);
 
             // Focused
-            frame(&mut tester, true);
-            assert!(has_primary_focus(&tester, node.handle()));
-            expect_border(&tester);
+            frame(tester, true);
+            assert!(has_primary_focus(tester, node.handle()));
+            expect_border(tester);
 
             // Default color
-            reset(&mut tester);
-            frame(&mut tester, false);
-            assert!(!has_primary_focus(&tester, node.handle()));
-            expect_border(&tester);
+            reset(tester);
+            frame(tester, false);
+            assert!(!has_primary_focus(tester, node.handle()));
+            expect_border(tester);
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            expect_border(&tester);
+            expect_border(tester);
 
             // Start pressing
-            let gesture_long_press = press(&mut tester, 2);
-            tester.pump(Duration::ZERO);
-            expect_border(&tester);
+            let gesture_long_press = press(tester, 2);
+            tester.pump();
+            expect_border(tester);
             tester.up(&gesture_long_press);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn material3_checkbox_has_correct_default_shape() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_checkbox(&mut tester, m3, |_| {
+        test_widgets(|tester| {
+            pump_checkbox(tester, m3, |_| {
                 Checkbox::new(Some(false), ignore()).into_widget()
             });
             tester.pump_and_settle();
 
             let expected_shape = m3(&tester.cell.borrow()).checkbox_theme.shape;
             assert!(expected_shape.is_none());
-            tester.widget(checkbox_element(&tester), |checkbox: &Checkbox| {
+            tester.widget(checkbox_element(tester), |checkbox: &Checkbox| {
                 assert!(checkbox.shape.is_none());
             });
             assert_paints(
-                &tester,
-                &[Paints::RingShape(
+                tester,
+                &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                     rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                    None,
                 )],
             );
         });
@@ -3144,8 +3050,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_adaptive_shows_the_correct_platform_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = |tester: &mut WidgetTester, platform: TargetPlatform| {
                 pump_checkbox(
                     tester,
@@ -3156,11 +3061,11 @@ pub(crate) mod tests {
             };
 
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-                frame(&mut tester, platform);
-                assert_eq!(
-                    tester.find_by_type::<CupertinoCheckbox>().len(),
-                    1,
-                    "{platform:?}"
+                frame(tester, platform);
+                expect(
+                    tester,
+                    &find::by_type::<CupertinoCheckbox>(),
+                    finds_one_widget(),
                 );
             }
 
@@ -3170,9 +3075,11 @@ pub(crate) mod tests {
                 TargetPlatform::Linux,
                 TargetPlatform::Windows,
             ] {
-                frame(&mut tester, platform);
+                frame(tester, platform);
                 assert!(
-                    tester.find_by_type::<CupertinoCheckbox>().is_empty(),
+                    find::by_type::<CupertinoCheckbox>()
+                        .evaluate(tester)
+                        .is_empty(),
                     "{platform:?}"
                 );
             }
@@ -3182,8 +3089,7 @@ pub(crate) mod tests {
     #[test]
     fn checkbox_adaptive_respects_checkbox_mouse_cursor_on_ios_macos() {
         for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let frame = |tester: &mut WidgetTester, mouse_cursor: Option<MouseCursorRef>| {
                     let root = {
                         let app = tester.cell.borrow();
@@ -3197,12 +3103,12 @@ pub(crate) mod tests {
                     tester.pump_widget(root);
                 };
 
-                frame(&mut tester, None);
-                let cupertino = tester.find_by_type::<CupertinoCheckbox>()[0];
-                let center = tester.global_rect(tester.render_box_of(cupertino)).center();
-                let mut gesture = WidgetTester::mouse(1, 0);
+                frame(tester, None);
+                let cupertino = find::by_type::<CupertinoCheckbox>().evaluate(tester)[0];
+                let center = tester.get_rect(cupertino).center();
+                let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, center);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 tester.move_to(&mut gesture, center, false);
                 let expected: MouseCursorRef = if K_IS_WEB {
                     SystemMouseCursors::CLICK.into()
@@ -3216,7 +3122,7 @@ pub(crate) mod tests {
                 );
 
                 // Test mouse cursor can be configured.
-                frame(&mut tester, Some(SystemMouseCursors::CLICK.into()));
+                frame(tester, Some(SystemMouseCursors::CLICK.into()));
                 assert_eq!(
                     tester.active_cursor(1),
                     SystemMouseCursors::CLICK.into(),
@@ -3224,7 +3130,7 @@ pub(crate) mod tests {
                 );
 
                 // Test Checkbox.adaptive can resolve a WidgetStateMouseCursor.
-                frame(&mut tester, Some(selected_grab_mouse_cursor()));
+                frame(tester, Some(selected_grab_mouse_cursor()));
                 assert_eq!(
                     tester.active_cursor(1),
                     SystemMouseCursors::GRAB.into(),
@@ -3241,8 +3147,7 @@ pub(crate) mod tests {
         enabled_border: fn(&ThemeData) -> Color,
         disabled_border: fn(&ThemeData) -> Color,
     ) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let data = theme(&tester.cell.borrow());
             const ACTIVE_BACKGROUND_COLOR: Color = Color::new(0xff123456);
             const INACTIVE_BACKGROUND_COLOR: Color = Color::new(0xff654321);
@@ -3264,13 +3169,13 @@ pub(crate) mod tests {
 
             // Checkbox is unselected, so the default BorderSide appears and fillColor is
             // checkbox's background color.
-            frame(&mut tester, true);
-            assert_paints(&tester, &[Paints::Ring(enabled_border(&data))]);
-            assert_paints(&tester, &[Paints::Rrect(INACTIVE_BACKGROUND_COLOR)]);
+            frame(tester, true);
+            assert_paints(tester, &[PaintCall::drrect(Some(enabled_border(&data)))]);
+            assert_paints(tester, &[PaintCall::rrect(Some(INACTIVE_BACKGROUND_COLOR))]);
 
-            frame(&mut tester, false);
-            assert_paints(&tester, &[Paints::Ring(disabled_border(&data))]);
-            assert_paints(&tester, &[Paints::Rrect(INACTIVE_BACKGROUND_COLOR)]);
+            frame(tester, false);
+            assert_paints(tester, &[PaintCall::drrect(Some(disabled_border(&data)))]);
+            assert_paints(tester, &[PaintCall::rrect(Some(INACTIVE_BACKGROUND_COLOR))]);
         });
     }
 
@@ -3294,8 +3199,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_renders_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(
                 crate::app::MaterialApp::new()
                     .home(Center::new().child(waft_widgets::SizedBox::shrink().child(
@@ -3326,10 +3230,14 @@ pub(crate) mod tests {
 
     /// Dart's `_paintedCheckBounds`: the bounds of the check mark path.
     fn painted_check_bounds(tester: &WidgetTester) -> Rect {
-        drawn(tester)
-            .into_iter()
-            .find_map(|drawn| match drawn {
-                Drawn::Stroke(_, _, bounds) => Some(bounds),
+        ops(tester)
+            .iter()
+            .find_map(|op| match RecordedCall::of(op) {
+                RecordedCall::Path {
+                    bounds,
+                    stroke_width: Some(_),
+                    ..
+                } => Some(bounds),
                 _ => None,
             })
             .expect("No check mark was painted.")
@@ -3337,10 +3245,10 @@ pub(crate) mod tests {
 
     /// Dart's `_paintedDashLength`: the length of the indeterminate dash.
     fn painted_dash_length(tester: &WidgetTester) -> f64 {
-        drawn(tester)
-            .into_iter()
-            .find_map(|drawn| match drawn {
-                Drawn::Stroke(_, _, bounds) if bounds.height() == 0.0 => Some(bounds.width()),
+        ops(tester)
+            .iter()
+            .find_map(|op| match RecordedCall::of(op) {
+                RecordedCall::Line { p1, p2, .. } => Some((p2.dx() - p1.dx()).abs()),
                 _ => None,
             })
             .expect("No indeterminate dash was painted.")
@@ -3348,10 +3256,9 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_mark_insets_defaults_to_null() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pad_frame(&mut tester, Some(true), None, false);
-            tester.widget(checkbox_element(&tester), |checkbox: &Checkbox| {
+        test_widgets(|tester| {
+            pad_frame(tester, Some(true), None, false);
+            tester.widget(checkbox_element(tester), |checkbox: &Checkbox| {
                 assert_eq!(checkbox.mark_insets, None);
             });
         });
@@ -3359,60 +3266,84 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_with_no_mark_insets_paints_the_check_at_full_stroke_width() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pad_frame(&mut tester, Some(true), None, false);
+        test_widgets(|tester| {
+            pad_frame(tester, Some(true), None, false);
             tester.pump_and_settle();
             // default: scale == 1.0, so strokeWidth stays at _kStrokeWidth (2.0)
-            assert_paints(&tester, &[Paints::StrokeWidth(2.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(2.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
         });
     }
 
     #[test]
     fn checkbox_mark_insets_shrinks_the_check_mark_and_its_stroke() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pad_frame(&mut tester, Some(true), Some(EdgeInsets::all(4.5)), false);
+        test_widgets(|tester| {
+            pad_frame(tester, Some(true), Some(EdgeInsets::all(4.5)), false);
             tester.pump_and_settle();
             // inner = 18 - 9 = 9, scale = 9/18 = 0.5, strokeWidth = 2.0 * 0.5 = 1.0
-            assert_paints(&tester, &[Paints::StrokeWidth(1.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(1.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
         });
     }
 
     #[test]
     fn checkbox_mark_insets_shrinks_the_indeterminate_dash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pad_frame(&mut tester, None, Some(EdgeInsets::all(4.5)), true);
+        test_widgets(|tester| {
+            pad_frame(tester, None, Some(EdgeInsets::all(4.5)), true);
             tester.pump_and_settle();
-            assert_paints(&tester, &[Paints::LineWidth(1.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: None,
+                    stroke_width: Some(1.0),
+                }],
+            );
         });
     }
 
     #[test]
     fn checkbox_mark_insets_larger_than_the_box_collapses_the_mark_without_crashing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pad_frame(&mut tester, Some(true), Some(EdgeInsets::all(9.0)), false);
+        test_widgets(|tester| {
+            pad_frame(tester, Some(true), Some(EdgeInsets::all(9.0)), false);
             tester.pump_and_settle();
             // mark collapsed away
             assert!(
-                !drawn(&tester)
-                    .iter()
-                    .any(|drawn| matches!(drawn, Drawn::Stroke(..))),
+                !ops(tester).iter().any(|op| matches!(
+                    RecordedCall::of(op),
+                    RecordedCall::Line { .. }
+                        | RecordedCall::Path {
+                            stroke_width: Some(_),
+                            ..
+                        }
+                )),
                 "{:?}",
-                drawn(&tester)
+                ops(tester)
             );
         });
     }
 
     #[test]
     fn checkbox_mark_insets_keeps_the_check_mark_proportional_with_asymmetric_insets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pad_frame(&mut tester, Some(true), None, false);
+        test_widgets(|tester| {
+            pad_frame(tester, Some(true), None, false);
             tester.pump_and_settle();
-            let uninset = painted_check_bounds(&tester);
+            let uninset = painted_check_bounds(tester);
             let aspect = uninset.width() / uninset.height();
 
             // Each of these leaves a different amount of room on each axis. The mark
@@ -3423,9 +3354,9 @@ pub(crate) mod tests {
                 EdgeInsets::only(0.0, 0.0, 4.5, 0.0),
                 EdgeInsets::symmetric(0.0, 6.0),
             ] {
-                pad_frame(&mut tester, Some(true), Some(mark_insets), false);
+                pad_frame(tester, Some(true), Some(mark_insets), false);
                 tester.pump_and_settle();
-                let inset = painted_check_bounds(&tester);
+                let inset = painted_check_bounds(tester);
                 assert!(
                     (inset.width() / inset.height() - aspect).abs() <= 0.001,
                     "check mark was distorted by {mark_insets:?}"
@@ -3438,22 +3369,21 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_mark_insets_centers_a_half_size_mark_in_the_right_half_of_the_box() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pad_frame(&mut tester, Some(true), None, false);
+        test_widgets(|tester| {
+            pad_frame(tester, Some(true), None, false);
             tester.pump_and_settle();
-            let uninset = painted_check_bounds(&tester);
+            let uninset = painted_check_bounds(tester);
             // The 18x18 box is centered in the checkbox's render box.
-            let box_origin = checkbox_size(&tester).center(Offset::ZERO) - Offset::new(9.0, 9.0);
+            let box_origin = checkbox_size(tester).center(Offset::ZERO) - Offset::new(9.0, 9.0);
 
             pad_frame(
-                &mut tester,
+                tester,
                 Some(true),
                 Some(EdgeInsets::only(9.0, 0.0, 0.0, 0.0)),
                 false,
             );
             tester.pump_and_settle();
-            let inset = painted_check_bounds(&tester);
+            let inset = painted_check_bounds(tester);
 
             // The remaining space is 9x18, so the mark is drawn in a 9x9 square at
             // (9, 4.5) within the box: half size, vertically centered.
@@ -3472,22 +3402,21 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_mark_insets_shrinks_the_indeterminate_dash_by_the_smaller_inset() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pad_frame(&mut tester, None, None, true);
+        test_widgets(|tester| {
+            pad_frame(tester, None, None, true);
             tester.pump_and_settle();
-            let uninset = painted_dash_length(&tester);
+            let uninset = painted_dash_length(tester);
 
             // Only the horizontal axis is inset, but the dash still scales by half,
             // matching the check mark rather than stretching to the inner width.
             pad_frame(
-                &mut tester,
+                tester,
                 None,
                 Some(EdgeInsets::only(9.0, 0.0, 0.0, 0.0)),
                 true,
             );
             tester.pump_and_settle();
-            assert!((painted_dash_length(&tester) - uninset / 2.0).abs() <= 0.001);
+            assert!((painted_dash_length(tester) - uninset / 2.0).abs() <= 0.001);
         });
     }
 
@@ -3514,31 +3443,45 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_mark_insets_falls_back_to_checkbox_theme_data_mark_insets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_with_theme_mark_insets(
-                &mut tester,
+                tester,
                 EdgeInsets::all(4.5),
                 Checkbox::new(Some(true), ignore()),
             );
             tester.pump_and_settle();
             // theme markInsets applied
-            assert_paints(&tester, &[Paints::StrokeWidth(1.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(1.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
         });
     }
 
     #[test]
     fn checkbox_mark_insets_overrides_checkbox_theme_data_mark_insets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_with_theme_mark_insets(
-                &mut tester,
+                tester,
                 EdgeInsets::ZERO,
                 Checkbox::new(Some(true), ignore()).mark_insets(EdgeInsets::all(4.5)),
             );
             tester.pump_and_settle();
             // widget value wins
-            assert_paints(&tester, &[Paints::StrokeWidth(1.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(1.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
         });
     }
 }

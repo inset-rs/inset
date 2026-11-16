@@ -816,20 +816,21 @@ mod tests {
         Builder, Center, Container, GlobalKey, Icon, IconThemeData, Padding, Text, WidgetBuilder,
     };
 
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::dialog::tests::{
-        dialog_material, last_barrier_color, material_from_dialog, open, placeholder, rect_of,
-        rect_of_key, tap_text, text_style_in_dialog,
+        dialog_material, last_barrier_color, material_from_dialog, open, placeholder, rect_of_key,
+        text_style_in_dialog,
     };
     use crate::dialog::{AlertDialog, Dialog, SimpleDialog, show_dialog};
     use crate::elevated_button::ElevatedButton;
     use crate::icons::Icons;
     use crate::material::Material;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::tester;
 
     /// Dart's `_appWithDialog(tester, dialog, theme:, dialogTheme:)`.
     fn app_with_dialog<K>(
@@ -890,7 +891,7 @@ mod tests {
 
     /// Dart's `_getMaterialAlertDialog(tester)`.
     fn material_alert_dialog<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let dialog = tester.find_by_type::<AlertDialog>()[0];
+        let dialog = find::by_type::<AlertDialog>().evaluate(tester)[0];
         let material = tester.descendants_of_type::<Material>(dialog)[0];
         tester.widget::<Material, R>(material, read)
     }
@@ -898,7 +899,7 @@ mod tests {
     /// Dart's `_getIconRenderObject(tester, icon).text.style?.color`.
     fn icon_color(tester: &WidgetTester, icon: &waft_widgets::IconData) -> Option<Color> {
         tester
-            .glyph_style(tester.find_by_icon(icon))
+            .glyph_style(tester.element(find::by_icon(icon).first()))
             .color
             .map(|color| color.color())
     }
@@ -911,7 +912,7 @@ mod tests {
     }
 
     fn dialog_bottom_left(tester: &WidgetTester) -> Offset {
-        rect_of(tester, dialog_material(tester)).bottom_left()
+        tester.get_rect(dialog_material(tester)).bottom_left()
     }
 
     #[test]
@@ -1018,7 +1019,7 @@ mod tests {
         assert_eq!(text_color(tester, "Content"), Some(Color::new(0xff000000)));
         assert_eq!(last_barrier_color(tester), theme.barrier_color);
 
-        let cancel = tester.find_by_icon(&Icons::cancel());
+        let cancel = tester.element(find::by_icon(&Icons::cancel()).first());
         let padding = tester.ancestor_of_type::<Padding>(cancel);
         assert_eq!(
             tester.widget::<Padding, _>(padding, |padding| padding.padding),
@@ -1028,24 +1029,22 @@ mod tests {
 
     #[test]
     fn local_dialog_theme_data_overrides_dialog_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             app_with_dialog(
-                &mut tester,
+                tester,
                 icon_title_content_dialog(),
                 m3,
                 Some(local_dialog_theme()),
             );
-            open(&mut tester);
+            open(tester);
 
-            expect_local_theme(&tester);
+            expect_local_theme(tester);
         });
     }
 
     #[test]
     fn local_dialog_theme_data_overrides_global_dialog_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let global_dialog_theme = DialogThemeData::new()
                 .background_color(Color::new(0xff654321))
                 .elevation(7.0)
@@ -1064,14 +1063,14 @@ mod tests {
                 .inset_padding(EdgeInsets::all(35.0))
                 .clip_behavior(Clip::HardEdge);
             app_with_dialog(
-                &mut tester,
+                tester,
                 icon_title_content_dialog(),
                 with_dialog_theme(global_dialog_theme),
                 Some(local_dialog_theme()),
             );
-            open(&mut tester);
+            open(tester);
 
-            expect_local_theme(&tester);
+            expect_local_theme(tester);
         });
     }
 
@@ -1081,19 +1080,18 @@ mod tests {
 
     #[test]
     fn dialog_background_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_color = Colors::PINK.primary();
             app_with_dialog(
-                &mut tester,
+                tester,
                 title_dialog(),
                 with_dialog_theme(DialogThemeData::new().background_color(custom_color)),
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                material_alert_dialog(&tester, |material| material.color),
+                material_alert_dialog(tester, |material| material.color),
                 Some(custom_color)
             );
         });
@@ -1101,13 +1099,12 @@ mod tests {
 
     #[test]
     fn custom_dialog_elevation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_elevation = 12.0;
             let shadow_color = Color::new(0xFF000001);
             let surface_tint_color = Color::new(0xFF000002);
             app_with_dialog(
-                &mut tester,
+                tester,
                 title_dialog(),
                 with_dialog_theme(
                     DialogThemeData::new()
@@ -1117,9 +1114,9 @@ mod tests {
                 ),
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
-            material_alert_dialog(&tester, |material| {
+            material_alert_dialog(tester, |material| {
                 assert_eq!(material.elevation, custom_elevation);
                 assert_eq!(material.shadow_color, Some(shadow_color));
                 assert_eq!(material.surface_tint_color, Some(surface_tint_color));
@@ -1129,21 +1126,20 @@ mod tests {
 
     #[test]
     fn custom_dialog_shape() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_border = RoundedRectangleBorder::new(
                 BorderSide::NONE,
                 BorderRadiusGeometry::all(Radius::circular(16.0)),
             );
             app_with_dialog(
-                &mut tester,
+                tester,
                 title_dialog(),
                 with_dialog_theme(DialogThemeData::new().shape(custom_border)),
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
-            material_alert_dialog(&tester, |material| {
+            material_alert_dialog(tester, |material| {
                 assert_eq!(
                     material.shape.as_deref(),
                     Some(&custom_border as &dyn ShapeBorder)
@@ -1154,41 +1150,44 @@ mod tests {
 
     #[test]
     fn custom_dialog_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             app_with_dialog(
-                &mut tester,
+                tester,
                 title_dialog(),
                 with_dialog_theme(DialogThemeData::new().alignment(AlignmentGeometry::BOTTOM_LEFT)),
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
-            let bottom_left = dialog_bottom_left(&tester);
+            let bottom_left = dialog_bottom_left(tester);
             assert_eq!(bottom_left.dx(), 40.0);
             assert_eq!(bottom_left.dy(), 576.0);
         });
     }
 
-    fn alignment_takes_priority(theme: impl FnOnce(&App) -> ThemeData, dy: f64) {
-        let mut tester = tester();
+    fn alignment_takes_priority(
+        tester: &mut WidgetTester,
+        theme: impl FnOnce(&App) -> ThemeData,
+        dy: f64,
+    ) {
         app_with_dialog(
-            &mut tester,
+            tester,
             title_dialog().alignment(AlignmentGeometry::Alignment(Alignment::TOP_RIGHT)),
             theme,
             None,
         );
-        open(&mut tester);
+        open(tester);
 
-        let bottom_left = dialog_bottom_left(&tester);
+        let bottom_left = dialog_bottom_left(tester);
         assert_eq!(bottom_left.dx(), 480.0);
         assert_eq!(bottom_left.dy(), dy);
     }
 
     #[test]
     fn material3_dialog_alignment_takes_priority_over_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             alignment_takes_priority(
+                tester,
                 with_dialog_theme(DialogThemeData::new().alignment(AlignmentGeometry::BOTTOM_LEFT)),
                 124.0,
             );
@@ -1197,8 +1196,9 @@ mod tests {
 
     #[test]
     fn material2_dialog_alignment_takes_priority_over_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             alignment_takes_priority(
+                tester,
                 m2_with_dialog_theme(
                     DialogThemeData::new().alignment(AlignmentGeometry::BOTTOM_LEFT),
                 ),
@@ -1215,15 +1215,14 @@ mod tests {
 
     #[test]
     fn custom_icon_color_constructor_param_highest_preference() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (icon_color_, dialog_theme_color, icon_theme_color) = (
                 Colors::PINK.primary(),
                 Colors::GREEN.primary(),
                 Colors::YELLOW.primary(),
             );
             app_with_dialog(
-                &mut tester,
+                tester,
                 icon_dialog().icon_color(icon_color_),
                 move |app| {
                     ThemeData::builder()
@@ -1233,20 +1232,19 @@ mod tests {
                 },
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(icon_color(&tester, &Icons::ac_unit()), Some(icon_color_));
+            assert_eq!(icon_color(tester, &Icons::ac_unit()), Some(icon_color_));
         });
     }
 
     #[test]
     fn custom_icon_color_dialog_theme_preference_over_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (dialog_theme_color, icon_theme_color) =
                 (Colors::GREEN.primary(), Colors::YELLOW.primary());
             app_with_dialog(
-                &mut tester,
+                tester,
                 icon_dialog(),
                 move |app| {
                     ThemeData::builder()
@@ -1256,10 +1254,10 @@ mod tests {
                 },
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                icon_color(&tester, &Icons::ac_unit()),
+                icon_color(tester, &Icons::ac_unit()),
                 Some(dialog_theme_color)
             );
         });
@@ -1267,23 +1265,21 @@ mod tests {
 
     #[test]
     fn material3_custom_icon_color_theme_lowest_preference() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let secondary = m3(&tester.cell.borrow()).color_scheme.secondary;
-            app_with_dialog(&mut tester, icon_dialog(), m3, None);
-            open(&mut tester);
+            app_with_dialog(tester, icon_dialog(), m3, None);
+            open(tester);
 
-            assert_eq!(icon_color(&tester, &Icons::ac_unit()), Some(secondary));
+            assert_eq!(icon_color(tester, &Icons::ac_unit()), Some(secondary));
         });
     }
 
     #[test]
     fn material2_custom_icon_color_theme_lowest_preference() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_theme_color = Colors::YELLOW.primary();
             app_with_dialog(
-                &mut tester,
+                tester,
                 icon_dialog(),
                 move |app| {
                     ThemeData::builder()
@@ -1293,10 +1289,10 @@ mod tests {
                 },
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                icon_color(&tester, &Icons::ac_unit()),
+                icon_color(tester, &Icons::ac_unit()),
                 Some(icon_theme_color)
             );
         });
@@ -1309,16 +1305,16 @@ mod tests {
     /// The text style cases: `dialog` shows `text`, and its style is `expected` whole, or
     /// only its color where `color_only`.
     fn expect_text_style<K>(
+        tester: &mut WidgetTester,
         dialog: impl IntoWidget<K>,
         theme: impl FnOnce(&App) -> ThemeData,
         text: &str,
         color_only: bool,
     ) {
-        let mut tester = tester();
-        app_with_dialog(&mut tester, dialog, theme, None);
-        open(&mut tester);
+        app_with_dialog(tester, dialog, theme, None);
+        open(tester);
 
-        let style = text_style_in_dialog(&tester, text);
+        let style = text_style_in_dialog(tester, text);
         if color_only {
             assert_eq!(style.and_then(|style| style.color), pink().color);
         } else {
@@ -1328,8 +1324,9 @@ mod tests {
 
     #[test]
     fn custom_title_text_style_constructor_param() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 AlertDialog::new()
                     .title(Text::new("Title"))
                     .title_text_style(pink())
@@ -1343,8 +1340,9 @@ mod tests {
 
     #[test]
     fn custom_title_text_style_dialog_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 title_dialog(),
                 with_dialog_theme(DialogThemeData::new().title_text_style(pink())),
                 "Title",
@@ -1355,8 +1353,9 @@ mod tests {
 
     #[test]
     fn material3_custom_title_text_style_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 AlertDialog::new().title(Text::new("Title")),
                 |app| {
                     ThemeData::builder()
@@ -1371,8 +1370,9 @@ mod tests {
 
     #[test]
     fn material2_custom_title_text_style_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 AlertDialog::new().title(Text::new("Title")),
                 |app| {
                     ThemeData::builder()
@@ -1388,8 +1388,9 @@ mod tests {
 
     #[test]
     fn simple_dialog_custom_title_text_style_constructor_param() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 SimpleDialog::new()
                     .title(Text::new("Title"))
                     .title_text_style(pink()),
@@ -1402,8 +1403,9 @@ mod tests {
 
     #[test]
     fn simple_dialog_custom_title_text_style_dialog_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 SimpleDialog::new().title(Text::new("Title")),
                 with_dialog_theme(DialogThemeData::new().title_text_style(pink())),
                 "Title",
@@ -1414,8 +1416,9 @@ mod tests {
 
     #[test]
     fn simple_dialog_custom_title_text_style_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 SimpleDialog::new().title(Text::new("Title")),
                 |app| {
                     ThemeData::builder()
@@ -1430,8 +1433,9 @@ mod tests {
 
     #[test]
     fn custom_content_text_style_constructor_param() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 AlertDialog::new()
                     .content(Text::new("Content"))
                     .content_text_style(pink())
@@ -1445,8 +1449,9 @@ mod tests {
 
     #[test]
     fn custom_content_text_style_dialog_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 AlertDialog::new().content(Text::new("Content")).actions([]),
                 with_dialog_theme(DialogThemeData::new().content_text_style(pink())),
                 "Content",
@@ -1457,8 +1462,9 @@ mod tests {
 
     #[test]
     fn material3_custom_content_text_style_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 AlertDialog::new().content(Text::new("Content")),
                 |app| {
                     ThemeData::builder()
@@ -1473,8 +1479,9 @@ mod tests {
 
     #[test]
     fn material2_custom_content_text_style_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_text_style(
+                tester,
                 AlertDialog::new().content(Text::new("Content")),
                 |app| {
                     ThemeData::builder()
@@ -1490,40 +1497,38 @@ mod tests {
 
     #[test]
     fn custom_barrier_color_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let barrier_color = Colors::BLUE.primary();
             app_with_dialog(
-                &mut tester,
+                tester,
                 SimpleDialog::new(),
                 with_dialog_theme(DialogThemeData::new().barrier_color(barrier_color)),
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(last_barrier_color(&tester), Some(barrier_color));
+            assert_eq!(last_barrier_color(tester), Some(barrier_color));
         });
     }
 
     #[test]
     fn dialog_theme_inset_padding_updates_dialog_inset_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             // The default testing screen (800, 600)
             let screen_rect = Rect::from_ltrb(0.0, 0.0, 800.0, 600.0);
             let inset_padding = EdgeInsets::from_ltrb(10.0, 15.0, 20.0, 25.0);
             app_with_dialog(
-                &mut tester,
+                tester,
                 Dialog::new().child(placeholder(&key)),
                 with_dialog_theme(DialogThemeData::new().inset_padding(inset_padding)),
                 None,
             );
-            tap_text(&mut tester, "X");
-            tester.pump(std::time::Duration::ZERO);
+            tester.tap(find::text("X"));
+            tester.pump_by(std::time::Duration::ZERO);
 
             assert_eq!(
-                rect_of_key(&tester, &key),
+                rect_of_key(tester, &key),
                 Rect::from_ltrb(
                     screen_rect.left + inset_padding.left,
                     screen_rect.top + inset_padding.top,
@@ -1534,19 +1539,23 @@ mod tests {
         });
     }
 
-    fn clip_of_dialog(theme: impl FnOnce(&App) -> ThemeData, dialog: Dialog) -> Clip {
-        let mut tester = tester();
-        app_with_dialog(&mut tester, dialog, theme, None);
-        open(&mut tester);
-        material_from_dialog(&tester, |material| material.clip_behavior)
+    fn clip_of_dialog(
+        tester: &mut WidgetTester,
+        theme: impl FnOnce(&App) -> ThemeData,
+        dialog: Dialog,
+    ) -> Clip {
+        app_with_dialog(tester, dialog, theme, None);
+        open(tester);
+        material_from_dialog(tester, |material| material.clip_behavior)
     }
 
     #[test]
     fn dialog_theme_clip_behavior_updates_the_dialogs_clip_behavior() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             assert_eq!(
                 clip_of_dialog(
+                    tester,
                     with_dialog_theme(DialogThemeData::new().clip_behavior(Clip::HardEdge)),
                     Dialog::new().child(placeholder(&key)),
                 ),
@@ -1557,10 +1566,11 @@ mod tests {
 
     #[test]
     fn dialog_clip_behavior_takes_priority_over_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             assert_eq!(
                 clip_of_dialog(
+                    tester,
                     with_dialog_theme(DialogThemeData::new().clip_behavior(Clip::HardEdge)),
                     Dialog::new()
                         .clip_behavior(Clip::AntiAlias)
@@ -1573,10 +1583,11 @@ mod tests {
 
     #[test]
     fn material2_dialog_clip_behavior_takes_priority_over_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             assert_eq!(
                 clip_of_dialog(
+                    tester,
                     m2_with_dialog_theme(DialogThemeData::new().clip_behavior(Clip::HardEdge)),
                     Dialog::new()
                         .clip_behavior(Clip::AntiAlias)
@@ -1589,12 +1600,11 @@ mod tests {
 
     #[test]
     fn dialog_theme_data_constraints_is_respected_if_dialog_constraints_is_null() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme_constraints = BoxConstraints::new().max_width(500.0).max_height(500.0);
             let key = GlobalKey::new();
             app_with_dialog(
-                &mut tester,
+                tester,
                 Dialog::new().child(
                     waft_widgets::SizedBox::expand().child(
                         Container::new()
@@ -1609,7 +1619,7 @@ mod tests {
                 ),
                 None,
             );
-            open(&mut tester);
+            open(tester);
 
             // Verify that the dialog respects the constraints from the theme
             let render_box = tester.render_object(&key).as_box().expect("a render box");
@@ -1688,8 +1698,7 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_dialog_theme() {
-        with_main_thread_stack(|| {
-            let tester = tester();
+        test_widgets(|tester| {
             let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.dialog_theme, DialogThemeData::new());

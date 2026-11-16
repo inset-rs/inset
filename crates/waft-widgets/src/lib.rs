@@ -10,6 +10,8 @@ mod media;
 mod multi_view_app;
 #[cfg(test)]
 mod test_harness;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing;
 mod view;
 mod widgets;
 mod window;
@@ -103,6 +105,7 @@ pub use widgets::navigation_toolbar::*;
 pub use widgets::navigator::*;
 pub use widgets::navigator_pop_handler::*;
 pub use widgets::notification_listener::*;
+pub use widgets::orientation_builder::*;
 pub use widgets::overflow_bar::*;
 pub use widgets::overlay::*;
 pub use widgets::overscroll_indicator::*;

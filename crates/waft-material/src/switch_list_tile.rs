@@ -643,7 +643,6 @@ impl StatelessWidget for SwitchListTile {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::time::Duration;
 
     use waft_embedder::{Offset, PointerChange, Size, TargetPlatform, TextDirection};
     use waft_painting::{AlignmentGeometry, EdgeInsets, EdgeInsetsDirectional};
@@ -653,47 +652,50 @@ mod tests {
         StatefulBuilder, Text, WidgetStateProperty, downcast_widget,
     };
 
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_one_widget, test_widgets,
+    };
+
     use super::*;
     use crate::checkbox_list_tile::tests::{
         IS_THREE_LINE_FRAMES, check_control_is_skipped_by_traversal,
         check_default_horizontal_title_gap, check_horizontal_title_gap_0,
         check_horizontal_title_gap_with_visual_density, check_min_leading_width_60,
         check_min_tile_height, check_min_vertical_padding_80, check_on_focus_change,
-        expected_three_line_rects, focus_of, has_primary_focus, ink_rect_colors,
-        ink_well_custom_border, ink_well_enable_feedback, is_three_line_rects, nth,
-        pump_in_material, pump_wrapped, rect_of, right_rounded_border, text_center,
+        expected_three_line_rects, focus_of, has_primary_focus, ink_well_custom_border,
+        ink_well_enable_feedback, is_three_line_rects, nth, pump_in_material, pump_wrapped,
+        rect_of, right_rounded_border, text_center,
     };
     use crate::colors::Colors;
     use crate::constants::K_RADIAL_REACTION_ALPHA;
     use crate::icons::Icons;
-    use crate::list_tile::tests::{m2, m3, text_rect};
+    use crate::list_tile::tests::{m2, m3};
     use crate::list_tile_theme::ListTileThemeData;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::switch::tests::{Drawn, c, circles, drawn, hover, ignore, press, tap};
+    use crate::switch::tests::{
+        c, circles, color_of, drawn, glyph_origins, hover, ignore, press, stroke_of, tap,
+    };
     use crate::switch_theme::SwitchThemeData;
-    use crate::test_support::{AhemText, WidgetTester, with_main_thread_stack};
+    use crate::test_support::PaintInspection;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{pump_app, tester};
+    use crate::tooltip::tests::pump_app;
 
     /// The colour of the last thing the switch draws: its thumb.
     fn thumb(tester: &WidgetTester) -> Option<u32> {
-        drawn(tester).last().and_then(Drawn::color)
+        drawn(tester).last().and_then(color_of)
     }
 
     /// The colour of the first thing the switch draws: its track.
     fn track(tester: &WidgetTester) -> Option<u32> {
-        drawn(tester).first().and_then(Drawn::color)
+        drawn(tester).first().and_then(color_of)
     }
 
     /// The colours of the outlines the switch strokes.
     fn strokes(tester: &WidgetTester) -> Vec<u32> {
         drawn(tester)
-            .into_iter()
-            .filter_map(|drawn| match drawn {
-                Drawn::Stroke(color, ..) => Some(color),
-                _ => None,
-            })
+            .iter()
+            .filter_map(|drawn| stroke_of(drawn).map(|(color, ..)| color))
             .collect()
     }
 
@@ -765,32 +767,30 @@ mod tests {
 
     #[test]
     fn switch_list_tile_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log = Rc::new(RefCell::new(Vec::new()));
             let on_changed: ValueChanged<bool> = {
                 let log = Rc::clone(&log);
                 Rc::new(move |_app, value| log.borrow_mut().push(Some(value)))
             };
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 SwitchListTile::new(true, Some(on_changed))
                     .title(Text::new("Hello"))
                     .into_widget()
             });
-            let hello = text_center(&tester, "Hello");
-            tester.tap(hello, 1);
+            let hello = text_center(tester, "Hello");
+            tester.tap_at(hello, 1);
             log.borrow_mut().push(None);
-            tap(&mut tester);
+            tap(tester);
             assert_eq!(*log.borrow(), [Some(false), None, Some(false)]);
         });
     }
 
     #[test]
     fn material2_switch_list_tile_has_the_right_colors() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::switch::tests::{M2_SHADOWS, colors};
 
-            let mut tester = tester();
             let value = Rc::new(Cell::new(false));
             let host = stateful_tile(&value, |tile| {
                 tile.active_color(Colors::RED.shade500())
@@ -815,14 +815,14 @@ mod tests {
                 |track: Color, thumb: Color| [&[c(track)][..], &M2_SHADOWS, &[c(thumb)]].concat();
             tester.pump_widget(root);
             assert_eq!(
-                colors(&drawn(&tester)),
+                colors(&drawn(tester)),
                 sequence(Colors::BLUE.shade500(), Colors::YELLOW.shade500())
             );
 
-            tap(&mut tester);
+            tap(tester);
             tester.pump_and_settle();
             assert_eq!(
-                colors(&drawn(&tester)),
+                colors(&drawn(tester)),
                 sequence(Colors::GREEN.shade500(), Colors::RED.shade500())
             );
         });
@@ -830,8 +830,7 @@ mod tests {
 
     #[test]
     fn material3_switch_list_tile_has_the_right_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(false));
             let host = stateful_tile(&value, |tile| {
                 tile.active_color(Colors::RED.shade500())
@@ -851,20 +850,19 @@ mod tests {
                 .into_widget()
             };
             tester.pump_widget(root);
-            assert_eq!(track(&tester), Some(c(Colors::BLUE.shade500())));
-            assert_eq!(thumb(&tester), Some(c(Colors::YELLOW.shade500())));
+            assert_eq!(track(tester), Some(c(Colors::BLUE.shade500())));
+            assert_eq!(thumb(tester), Some(c(Colors::YELLOW.shade500())));
 
-            tap(&mut tester);
+            tap(tester);
             tester.pump_and_settle();
-            assert_eq!(track(&tester), Some(c(Colors::GREEN.shade500())));
-            assert_eq!(thumb(&tester), Some(c(Colors::RED.shade500())));
+            assert_eq!(track(tester), Some(c(Colors::GREEN.shade500())));
+            assert_eq!(thumb(tester), Some(c(Colors::RED.shade500())));
         });
     }
 
     #[test]
     fn switch_list_tile_adaptive_only_uses_material_switch() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(false));
             for platform in [
                 TargetPlatform::IOS,
@@ -892,20 +890,20 @@ mod tests {
                     .into_widget()
                 };
                 pump_app(
-                    &mut tester,
+                    tester,
                     move |app| ThemeData::builder().platform(platform).build(app),
                     |_app| host,
                 );
                 assert!(
-                    tester
-                        .find_by_type::<waft_cupertino::CupertinoSwitch>()
+                    find::by_type::<waft_cupertino::CupertinoSwitch>()
+                        .evaluate(tester)
                         .is_empty()
                 );
-                assert_eq!(tester.find_by_type::<Switch>().len(), 1);
+                expect(tester, &find::by_type::<Switch>(), finds_one_widget());
                 assert!(!value.get(), "on {platform:?}");
 
-                let at = rect_of::<SwitchListTile>(&tester, 0).center();
-                tester.tap(at, 1);
+                let at = rect_of::<SwitchListTile>(tester, 0).center();
+                tester.tap_at(at, 1);
                 assert!(value.get(), "on {platform:?}");
             }
         });
@@ -913,9 +911,8 @@ mod tests {
 
     #[test]
     fn switch_list_tile_content_padding() {
-        with_main_thread_stack(|| {
-            let frame = |text_direction: TextDirection| {
-                let mut tester = tester();
+        test_widgets(|tester| {
+            let frame = |tester: &mut WidgetTester, text_direction: TextDirection| {
                 let theme = m3(&tester.cell.borrow());
                 tester.pump_widget(crate::list_tile::tests::bare(
                     theme,
@@ -929,31 +926,29 @@ mod tests {
                                         .content_padding(EdgeInsetsDirectional::only(
                                             10.0, 30.0, 20.0, 40.0,
                                         ))
-                                        .secondary(AhemText::new("L"))
-                                        .title(AhemText::new("title")),
+                                        .secondary(Text::new("L"))
+                                        .title(Text::new("title")),
                                 ),
                         ),
                     ),
                 ));
-                tester
             };
 
-            let tester = frame(TextDirection::Ltr);
-            assert_eq!(text_rect(&tester, "L").left, 10.0); // contentPadding.start = 10
-            assert_eq!(rect_of::<Switch>(&tester, 0).right, 780.0); // 800 - contentPadding.end
+            frame(tester, TextDirection::Ltr);
+            assert_eq!(tester.get_rect(find::text("L")).left, 10.0); // contentPadding.start = 10
+            assert_eq!(rect_of::<Switch>(tester, 0).right, 780.0); // 800 - contentPadding.end
 
-            let tester = frame(TextDirection::Rtl);
-            assert_eq!(rect_of::<Switch>(&tester, 0).left, 20.0); // contentPadding.end = 20
-            assert_eq!(text_rect(&tester, "L").right, 790.0); // 800 - contentPadding.start
+            frame(tester, TextDirection::Rtl);
+            assert_eq!(rect_of::<Switch>(tester, 0).left, 20.0); // contentPadding.end = 20
+            assert_eq!(tester.get_rect(find::text("L")).right, 790.0); // 800 - contentPadding.start
         });
     }
 
     #[test]
     fn switch_list_tile_forwards_states_controller_to_list_tile() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = WidgetStatesController::new(&mut tester.cell.borrow_mut(), None);
-            pump_in_material(&mut tester, m3, |_app| {
+            pump_in_material(tester, m3, |_app| {
                 ListView::new()
                     .children([SwitchListTile::new(true, ignore())
                         .title(Text::new("Switch"))
@@ -961,7 +956,7 @@ mod tests {
                         .into_widget()])
                     .into_widget()
             });
-            let forwarded = tester.widget(nth::<ListTile>(&tester, 0), |tile: &ListTile| {
+            let forwarded = tester.widget(nth::<ListTile>(tester, 0), |tile: &ListTile| {
                 tile.states_controller.clone()
             });
             assert_eq!(forwarded, Some(controller));
@@ -970,12 +965,11 @@ mod tests {
 
     #[test]
     fn switch_list_tile_can_autofocus_unless_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child_key = GlobalKey::new();
             for (on_changed, focused) in [(ignore(), true), (None, false)] {
                 let key = child_key.clone();
-                pump_in_material(&mut tester, m3, move |_app| {
+                pump_in_material(tester, m3, move |_app| {
                     ListView::new()
                         .children([SwitchListTile::new(true, on_changed)
                             .title(Text::new("A").key(key.into()))
@@ -983,9 +977,9 @@ mod tests {
                             .into_widget()])
                         .into_widget()
                 });
-                tester.pump(Duration::ZERO);
-                let node = focus_of(&tester, &child_key);
-                assert_eq!(has_primary_focus(&tester, node), focused);
+                tester.pump();
+                let node = focus_of(tester, &child_key);
+                assert_eq!(has_primary_focus(tester, node), focused);
             }
         });
     }
@@ -1017,16 +1011,15 @@ mod tests {
 
     #[test]
     fn switch_list_tile_control_affinity_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_in_material(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_in_material(tester, m3, |_app| {
                 info_tile()
                     .control_affinity(ListTileControlAffinity::Leading)
                     .into_widget()
             });
             // When controlAffinity is ListTileControlAffinity.leading, the position of
             // Switch is at leading edge and SwitchListTile.secondary at trailing edge.
-            let (leading, trailing) = slots(&tester);
+            let (leading, trailing) = slots(tester);
             assert!(is_excluded_switch(&leading));
             assert!(is_icon(&trailing));
         });
@@ -1034,13 +1027,12 @@ mod tests {
 
     #[test]
     fn switch_list_tile_control_affinity_default_value_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_in_material(&mut tester, m3, |_app| info_tile().into_widget());
+        test_widgets(|tester| {
+            pump_in_material(tester, m3, |_app| info_tile().into_widget());
             // By default, value of controlAffinity is ListTileControlAffinity.platform,
             // where the position of SwitchListTile.secondary is at leading edge and Switch
             // at trailing edge. This also covers test for ListTileControlAffinity.trailing.
-            let (leading, trailing) = slots(&tester);
+            let (leading, trailing) = slots(tester);
             assert!(is_excluded_switch(&trailing));
             assert!(is_icon(&leading));
         });
@@ -1048,25 +1040,23 @@ mod tests {
 
     #[test]
     fn switch_list_tile_respects_shape() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_in_material(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_in_material(tester, m3, |_app| {
                 SwitchListTile::new(true, None)
                     .title(Text::new("Title"))
                     .shape(ShapeBorderRef::new(right_rounded_border()))
                     .into_widget()
             });
             let shape: ShapeBorderRef = ShapeBorderRef::new(right_rounded_border());
-            assert!(ink_well_custom_border(&tester).as_deref() == Some(&*shape));
+            assert!(ink_well_custom_border(tester).as_deref() == Some(&*shape));
         });
     }
 
     #[test]
     fn switch_list_tile_respects_tile_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tile_color = Colors::RED.shade500();
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         SwitchListTile::new(false, None)
@@ -1075,16 +1065,18 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(&tester).contains(&tile_color.to_argb32()));
+            waft_rendering::testing::assert_paints(
+                tester.ink_list().ops(),
+                &[waft_rendering::testing::PaintCall::rect(Some(tile_color))],
+            );
         });
     }
 
     #[test]
     fn switch_list_tile_respects_selected_tile_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_tile_color = Colors::GREEN.shade500();
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         SwitchListTile::new(false, None)
@@ -1094,20 +1086,24 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(&tester).contains(&selected_tile_color.to_argb32()));
+            waft_rendering::testing::assert_paints(
+                tester.ink_list().ops(),
+                &[waft_rendering::testing::PaintCall::rect(Some(
+                    selected_tile_color,
+                ))],
+            );
         });
     }
 
     #[test]
     fn switch_list_tile_selected_item_text_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/pull/76909
-            let mut tester = tester();
             const ACTIVE_COLOR: Color = Color::new(0xff00ff00);
             // Dart pumps the same frame twice, `activeColor` given and `thumbColor` not.
             for _ in 0..2 {
                 pump_app(
-                    &mut tester,
+                    tester,
                     |app| {
                         ThemeData::builder()
                             .switch_theme(SwitchThemeData::new().thumb_color(
@@ -1135,9 +1131,8 @@ mod tests {
 
     #[test]
     fn switch_list_tile_respects_visual_density() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         SwitchListTile::new(false, ignore())
@@ -1148,7 +1143,7 @@ mod tests {
             });
             tester.pump_and_settle();
             assert_eq!(
-                rect_of::<SwitchListTile>(&tester, 0).size(),
+                rect_of::<SwitchListTile>(tester, 0).size(),
                 Size::new(800.0, 56.0)
             );
         });
@@ -1156,31 +1151,30 @@ mod tests {
 
     #[test]
     fn switch_list_tile_respects_focus_node() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child_key = GlobalKey::new();
             let key = child_key.clone();
-            pump_wrapped(&mut tester, move |_app| {
+            pump_wrapped(tester, move |_app| {
                 Center::new()
                     .child(
                         SwitchListTile::new(false, ignore()).title(Text::new("A").key(key.into())),
                     )
                     .into_widget()
             });
-            tester.pump(Duration::ZERO);
-            let tile_node = focus_of(&tester, &child_key);
+            tester.pump();
+            let tile_node = focus_of(tester, &child_key);
             tile_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO); // Let the focus take effect.
-            let node = focus_of(&tester, &child_key);
-            assert!(has_primary_focus(&tester, node));
-            assert!(has_primary_focus(&tester, tile_node));
+            tester.pump(); // Let the focus take effect.
+            let node = focus_of(tester, &child_key);
+            assert!(has_primary_focus(tester, node));
+            assert!(has_primary_focus(tester, tile_node));
         });
     }
 
     #[test]
     fn switch_list_tile_on_focus_change_callback() {
-        with_main_thread_stack(|| {
-            check_on_focus_change(|node, on_focus_change| {
+        test_widgets(|tester| {
+            check_on_focus_change(tester, |node, on_focus_change| {
                 SwitchListTile::new(true, ignore())
                     .focus_node(node)
                     .on_focus_change(on_focus_change)
@@ -1191,8 +1185,8 @@ mod tests {
 
     #[test]
     fn switch_list_tile_adaptive_on_focus_change_callback() {
-        with_main_thread_stack(|| {
-            check_on_focus_change(|node, on_focus_change| {
+        test_widgets(|tester| {
+            check_on_focus_change(tester, |node, on_focus_change| {
                 SwitchListTile::adaptive(true, ignore())
                     .focus_node(node)
                     .on_focus_change(on_focus_change)
@@ -1203,29 +1197,27 @@ mod tests {
 
     #[test]
     fn switch_list_tile_respects_enable_feedback() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for enable_feedback in [false, true] {
-                pump_wrapped(&mut tester, |_app| {
+                pump_wrapped(tester, |_app| {
                     Center::new()
                         .child(
                             SwitchListTile::new(false, ignore()).enable_feedback(enable_feedback),
                         )
                         .into_widget()
                 });
-                assert_eq!(ink_well_enable_feedback(&tester), enable_feedback);
+                assert_eq!(ink_well_enable_feedback(tester), enable_feedback);
             }
         });
     }
 
     #[test]
     fn switch_list_tile_respects_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let orange = Colors::ORANGE.shade500();
             let tile_key = key.clone();
-            pump_wrapped(&mut tester, move |_app| {
+            pump_wrapped(tester, move |_app| {
                 Center::new()
                     .child(
                         SizedBox::new().width(500.0).height(100.0).child(
@@ -1241,10 +1233,10 @@ mod tests {
             });
 
             // Start hovering
-            let mut gesture = WidgetTester::mouse(1, 0);
-            let center = tester.center_of(&key);
+            let mut gesture = TestPointer::mouse(1, 0);
+            let center = tester.get_center(&key);
             tester.add_pointer(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.pump_and_settle();
             // Dart's `Material.of(tester.element(find.byKey(key)))`: the white material, inside
             // the one `wrap` gives.
@@ -1255,56 +1247,54 @@ mod tests {
                 &mut canvas,
                 Offset::ZERO,
             );
-            assert!(crate::test_support::Drawn::draws(&canvas.build()).contains(
-                &crate::test_support::Drawn::Rect(
-                    orange.to_argb32(),
-                    waft_embedder::Rect::from_ltrb(0.0, 0.0, 500.0, 100.0)
-                )
-            ));
+            waft_rendering::testing::assert_paints(
+                canvas.build().ops(),
+                &[waft_rendering::testing::PaintCall::rect_at(
+                    waft_embedder::Rect::from_ltrb(0.0, 0.0, 500.0, 100.0),
+                    Some(orange),
+                )],
+            );
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn material2_switch_list_tile_respects_thumb_color_in_active_enabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let thumb_color = state_colors(STATE_COLORS);
             for ((enabled, selected), expected) in STATE_FRAMES.into_iter().zip(STATE_COLORS) {
                 let thumb_color = Rc::clone(&thumb_color);
-                pump_in_material(&mut tester, m2, move |_app| {
+                pump_in_material(tester, m2, move |_app| {
                     SwitchListTile::new(selected, if enabled { ignore() } else { None })
                         .thumb_color(thumb_color)
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert_eq!(thumb(&tester), Some(c(expected)), "{enabled} {selected}");
+                assert_eq!(thumb(tester), Some(c(expected)), "{enabled} {selected}");
             }
         });
     }
 
     #[test]
     fn material3_switch_list_tile_respects_thumb_color_in_active_enabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let thumb_color = state_colors(STATE_COLORS);
             for ((enabled, selected), expected) in STATE_FRAMES.into_iter().zip(STATE_COLORS) {
                 let thumb_color = Rc::clone(&thumb_color);
-                pump_in_material(&mut tester, m3, move |_app| {
+                pump_in_material(tester, m3, move |_app| {
                     SwitchListTile::new(selected, if enabled { ignore() } else { None })
                         .thumb_color(thumb_color)
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert_eq!(thumb(&tester), Some(c(expected)), "{enabled} {selected}");
+                assert_eq!(thumb(tester), Some(c(expected)), "{enabled} {selected}");
             }
         });
     }
 
     #[test]
     fn material2_switch_list_tile_respects_thumb_color_in_hovered_pressed_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const HOVERED_THUMB_COLOR: Color = Color::new(0xFF4CAF50);
             const PRESSED_THUMB_COLOR: Color = Color::new(0xFFF44336);
@@ -1317,7 +1307,7 @@ mod tests {
                     Colors::TRANSPARENT
                 })
             });
-            pump_in_material(&mut tester, m2, |_app| {
+            pump_in_material(tester, m2, |_app| {
                 SwitchListTile::new(false, ignore())
                     .thumb_color(thumb_color)
                     .into_widget()
@@ -1325,14 +1315,14 @@ mod tests {
             tester.pump_and_settle();
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_eq!(thumb(&tester), Some(c(HOVERED_THUMB_COLOR)));
+            assert_eq!(thumb(tester), Some(c(HOVERED_THUMB_COLOR)));
 
             // On pressed state
-            let touch = press(&mut tester);
+            let touch = press(tester);
             tester.pump_and_settle();
-            assert_eq!(thumb(&tester), Some(c(PRESSED_THUMB_COLOR)));
+            assert_eq!(thumb(tester), Some(c(PRESSED_THUMB_COLOR)));
             tester.up(&touch);
             tester.send(&gesture, PointerChange::Remove);
         });
@@ -1340,8 +1330,7 @@ mod tests {
 
     #[test]
     fn material3_switch_list_tile_respects_thumb_color_in_hovered_pressed_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const HOVERED_THUMB_COLOR: Color = Color::new(0xFF4CAF50);
             const PRESSED_THUMB_COLOR: Color = Color::new(0xFFF44336);
@@ -1354,7 +1343,7 @@ mod tests {
                     Colors::TRANSPARENT
                 })
             });
-            pump_in_material(&mut tester, m3, |_app| {
+            pump_in_material(tester, m3, |_app| {
                 SwitchListTile::new(false, ignore())
                     .thumb_color(thumb_color)
                     .into_widget()
@@ -1362,14 +1351,14 @@ mod tests {
             tester.pump_and_settle();
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_eq!(thumb(&tester), Some(c(HOVERED_THUMB_COLOR)));
+            assert_eq!(thumb(tester), Some(c(HOVERED_THUMB_COLOR)));
 
             // On pressed state
-            let touch = press(&mut tester);
+            let touch = press(tester);
             tester.pump_and_settle();
-            assert_eq!(thumb(&tester), Some(c(PRESSED_THUMB_COLOR)));
+            assert_eq!(thumb(tester), Some(c(PRESSED_THUMB_COLOR)));
             tester.up(&touch);
             tester.send(&gesture, PointerChange::Remove);
         });
@@ -1377,14 +1366,13 @@ mod tests {
 
     #[test]
     fn switch_list_tile_respects_track_color_in_active_enabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let track_color = state_colors(STATE_COLORS);
             for (index, ((enabled, selected), expected)) in
                 STATE_FRAMES.into_iter().zip(STATE_COLORS).enumerate()
             {
                 let track_color = Rc::clone(&track_color);
-                pump_wrapped(&mut tester, move |_app| {
+                pump_wrapped(tester, move |_app| {
                     SwitchListTile::new(selected, if enabled { ignore() } else { None })
                         .track_color(track_color)
                         .into_widget()
@@ -1392,18 +1380,17 @@ mod tests {
                 if index > 0 {
                     tester.pump_and_settle();
                 }
-                assert_eq!(track(&tester), Some(c(expected)), "{enabled} {selected}");
+                assert_eq!(track(tester), Some(c(expected)), "{enabled} {selected}");
             }
         });
     }
 
     #[test]
     fn switch_list_tile_respects_track_color_in_hovered_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const HOVERED_TRACK_COLOR: Color = Color::new(0xFF4CAF50);
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 SwitchListTile::new(false, ignore())
                     .track_color(hovered_colors(HOVERED_TRACK_COLOR))
                     .into_widget()
@@ -1411,17 +1398,16 @@ mod tests {
             tester.pump_and_settle();
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_eq!(track(&tester), Some(c(HOVERED_TRACK_COLOR)));
+            assert_eq!(track(tester), Some(c(HOVERED_TRACK_COLOR)));
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn switch_list_tile_respects_thumb_icon_m3() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
             let active_icon = Rc::new(Icon::new(Some(Icons::check())));
             let inactive_icon = Rc::new(Icon::new(Some(Icons::close())));
@@ -1433,11 +1419,12 @@ mod tests {
                     inactive_icon.clone()
                 })
             };
-            let mut frame = |active: bool,
-                             active_icon: Option<Rc<Icon>>,
-                             inactive_icon: Option<Rc<Icon>>| {
+            let frame = |tester: &mut WidgetTester,
+                         active: bool,
+                         active_icon: Option<Rc<Icon>>,
+                         inactive_icon: Option<Rc<Icon>>| {
                 let thumb_icon = thumb_icon(active_icon, inactive_icon);
-                pump_app(&mut tester, m3, |app| {
+                pump_app(tester, m3, |app| {
                     let theme = m3(app);
                     crate::list_tile::tests::bare(
                         theme,
@@ -1447,7 +1434,7 @@ mod tests {
                 });
                 tester.pump_and_settle();
                 let resolved = |states: &WidgetStates| {
-                    tester.widget(nth::<Switch>(&tester, 0), |switch: &Switch| {
+                    tester.widget(nth::<Switch>(tester, 0), |switch: &Switch| {
                         switch
                             .thumb_icon
                             .as_ref()
@@ -1455,13 +1442,7 @@ mod tests {
                     })
                 };
                 let selected: WidgetStates = [WidgetState::Selected].into_iter().collect();
-                let glyphs: Vec<(f64, f64)> = drawn(&tester)
-                    .into_iter()
-                    .filter_map(|drawn| match drawn {
-                        Drawn::Glyphs(left, top) => Some((left, top)),
-                        _ => None,
-                    })
-                    .collect();
+                let glyphs: Vec<(f64, f64)> = glyph_origins(&drawn(tester));
                 (resolved(&selected), resolved(&WidgetStates::new()), glyphs)
             };
             // The glyph's ink is inside the 16x16 icon square Dart paints its paragraph at.
@@ -1471,48 +1452,53 @@ mod tests {
             };
 
             // active icon shows when switch is on.
-            let (selected, _, glyphs) = frame(true, Some(Rc::clone(&active_icon)), None);
+            let (selected, _, glyphs) = frame(tester, true, Some(Rc::clone(&active_icon)), None);
             assert!(same(selected, &active_icon));
             assert!(inside(&glyphs, 32.0, 12.0), "{glyphs:?}");
 
             // inactive icon shows when switch is off.
-            let (_, unselected, glyphs) = frame(false, None, Some(Rc::clone(&inactive_icon)));
+            let (_, unselected, glyphs) =
+                frame(tester, false, None, Some(Rc::clone(&inactive_icon)));
             assert!(same(unselected, &inactive_icon));
             assert!(inside(&glyphs, 12.0, 12.0), "{glyphs:?}");
 
             // active icon doesn't show when switch is off.
-            let (selected, _, glyphs) = frame(false, Some(Rc::clone(&active_icon)), None);
+            let (selected, _, glyphs) = frame(tester, false, Some(Rc::clone(&active_icon)), None);
             assert!(same(selected, &active_icon));
             assert_eq!(glyphs, []);
 
             // inactive icon doesn't show when switch is on.
-            let (_, unselected, glyphs) = frame(true, None, Some(Rc::clone(&inactive_icon)));
+            let (_, unselected, glyphs) =
+                frame(tester, true, None, Some(Rc::clone(&inactive_icon)));
             assert!(same(unselected, &inactive_icon));
             assert_eq!(glyphs, []);
 
             // without icon
-            let (_, _, glyphs) = frame(false, None, None);
+            let (_, _, glyphs) = frame(tester, false, None, None);
             assert_eq!(glyphs, []);
         });
     }
 
-    fn check_material_tap_target_size(theme: fn(&App) -> ThemeData, width: f64) {
-        let mut tester = tester();
+    fn check_material_tap_target_size(
+        tester: &mut WidgetTester,
+        theme: fn(&App) -> ThemeData,
+        width: f64,
+    ) {
         for (size, height) in [
             (MaterialTapTargetSize::Padded, 48.0),
             (MaterialTapTargetSize::ShrinkWrap, 40.0),
         ] {
-            pump_in_material(&mut tester, theme, move |_app| {
+            pump_in_material(tester, theme, move |_app| {
                 SwitchListTile::new(false, ignore())
                     .material_tap_target_size(size)
                     .into_widget()
             });
-            let given = tester.widget(nth::<Switch>(&tester, 0), |switch: &Switch| {
+            let given = tester.widget(nth::<Switch>(tester, 0), |switch: &Switch| {
                 switch.material_tap_target_size
             });
             assert_eq!(given, Some(size));
             assert_eq!(
-                rect_of::<Switch>(&tester, 0).size(),
+                rect_of::<Switch>(tester, 0).size(),
                 Size::new(width, height)
             );
         }
@@ -1520,24 +1506,23 @@ mod tests {
 
     #[test]
     fn material2_switch_list_tile_respects_material_tap_target_size() {
-        with_main_thread_stack(|| check_material_tap_target_size(m2, 59.0));
+        test_widgets(|tester| check_material_tap_target_size(tester, m2, 59.0));
     }
 
     #[test]
     fn material3_switch_list_tile_respects_material_tap_target_size() {
-        with_main_thread_stack(|| check_material_tap_target_size(m3, 60.0));
+        test_widgets(|tester| check_material_tap_target_size(tester, m3, 60.0));
     }
 
     #[test]
     fn material2_switch_list_tile_adaptive_respects_apply_cupertino_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
                 for (apply_cupertino_theme, expected) in
                     [(true, 0xFF2196F3_u32), (false, 0xFF34C759)]
                 {
                     pump_in_material(
-                        &mut tester,
+                        tester,
                         move |app| {
                             ThemeData::builder()
                                 .use_material3(false)
@@ -1551,13 +1536,13 @@ mod tests {
                         },
                     );
                     tester.pump_and_settle();
-                    assert_eq!(tester.find_by_type::<Switch>().len(), 1);
+                    expect(tester, &find::by_type::<Switch>(), finds_one_widget());
                     assert!(
-                        drawn(&tester)
+                        drawn(tester)
                             .iter()
-                            .any(|drawn| drawn.color() == Some(expected)),
+                            .any(|drawn| color_of(drawn) == Some(expected)),
                         "{platform:?} {apply_cupertino_theme}: {:?}",
-                        drawn(&tester)
+                        drawn(tester)
                     );
                 }
             }
@@ -1566,14 +1551,13 @@ mod tests {
 
     #[test]
     fn material3_switch_list_tile_adaptive_respects_apply_cupertino_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
                 for (apply_cupertino_theme, expected) in
                     [(true, 0xFF6750A4_u32), (false, 0xFF34C759)]
                 {
                     pump_in_material(
-                        &mut tester,
+                        tester,
                         move |app| ThemeData::builder().platform(platform).build(app),
                         move |_app| {
                             SwitchListTile::adaptive(true, ignore())
@@ -1582,13 +1566,13 @@ mod tests {
                         },
                     );
                     tester.pump_and_settle();
-                    assert_eq!(tester.find_by_type::<Switch>().len(), 1);
+                    expect(tester, &find::by_type::<Switch>(), finds_one_widget());
                     assert!(
-                        drawn(&tester)
+                        drawn(tester)
                             .iter()
-                            .any(|drawn| drawn.color() == Some(expected)),
+                            .any(|drawn| color_of(drawn) == Some(expected)),
                         "{platform:?} {apply_cupertino_theme}: {:?}",
-                        drawn(&tester)
+                        drawn(tester)
                     );
                 }
             }
@@ -1597,15 +1581,14 @@ mod tests {
 
     #[test]
     fn switch_list_tile_passes_the_value_of_drag_start_behavior_to_switch() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for drag_start_behavior in [DragStartBehavior::Start, DragStartBehavior::Down] {
-                pump_wrapped(&mut tester, move |_app| {
+                pump_wrapped(tester, move |_app| {
                     SwitchListTile::new(false, ignore())
                         .drag_start_behavior(drag_start_behavior)
                         .into_widget()
                 });
-                let given = tester.widget(nth::<Switch>(&tester, 0), |switch: &Switch| {
+                let given = tester.widget(nth::<Switch>(tester, 0), |switch: &Switch| {
                     switch.drag_start_behavior
                 });
                 assert_eq!(given, drag_start_behavior);
@@ -1615,27 +1598,26 @@ mod tests {
 
     #[test]
     fn switch_on_switch_list_tile_changes_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test SwitchListTile.adaptive() constructor
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 SwitchListTile::adaptive(false, ignore())
                     .mouse_cursor(MouseCursorRef::from(SystemMouseCursors::TEXT))
                     .into_widget()
             });
-            let mut gesture = WidgetTester::mouse(1, 0);
-            let center = rect_of::<Switch>(&tester, 0).center();
+            let mut gesture = TestPointer::mouse(1, 0);
+            let center = rect_of::<Switch>(tester, 0).center();
             tester.add_pointer(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
 
             // Test SwitchListTile() constructor
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 SwitchListTile::new(false, ignore())
                     .mouse_cursor(MouseCursorRef::from(SystemMouseCursors::FORBIDDEN))
                     .into_widget()
             });
-            let center = rect_of::<Switch>(&tester, 0).center();
+            let center = rect_of::<Switch>(tester, 0).center();
             tester.move_to(&mut gesture, center, false);
             assert_eq!(
                 tester.active_cursor(1),
@@ -1643,13 +1625,13 @@ mod tests {
             );
 
             // Test default cursor
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 SwitchListTile::new(false, ignore()).into_widget()
             });
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::CLICK.into());
 
             // Test default cursor when disabled
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 SwitchListTile::new(false, None).into_widget()
             });
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
@@ -1659,27 +1641,25 @@ mod tests {
 
     #[test]
     fn switch_with_splash_radius_set() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const SPLASH_RADIUS: f64 = 35.0;
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 SwitchListTile::new(false, ignore())
                     .splash_radius(SPLASH_RADIUS)
                     .into_widget()
             });
             tester.pump_and_settle();
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            assert!(!circles(&drawn(&tester), SPLASH_RADIUS).is_empty());
+            assert!(!circles(&drawn(tester), SPLASH_RADIUS).is_empty());
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn the_overlay_color_for_the_thumb_of_the_switch_resolves_in_active_pressed_hovered_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const ACTIVE_THUMB_COLOR: Color = Color::new(0xFF000000);
             const INACTIVE_THUMB_COLOR: Color = Color::new(0xFF000010);
@@ -1733,11 +1713,11 @@ mod tests {
                 (false, true, INACTIVE_PRESSED_OVERLAY_COLOR),
                 (true, true, ACTIVE_PRESSED_OVERLAY_COLOR),
             ] {
-                frame(&mut tester, active, use_overlay);
-                let touch = press(&mut tester);
+                frame(tester, active, use_overlay);
+                let touch = press(tester);
                 tester.pump_and_settle();
                 assert_eq!(
-                    circles(&drawn(&tester), crate::constants::K_RADIAL_REACTION_RADIUS),
+                    circles(&drawn(tester), crate::constants::K_RADIAL_REACTION_RADIUS),
                     [c(expected)],
                     "active {active}, overlay {use_overlay}"
                 );
@@ -1745,14 +1725,14 @@ mod tests {
                 tester.pump_and_settle();
             }
 
-            frame(&mut tester, false, true);
+            frame(tester, false, true);
             tester.pump_and_settle();
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
             assert_eq!(
-                circles(&drawn(&tester), crate::constants::K_RADIAL_REACTION_RADIUS),
+                circles(&drawn(tester), crate::constants::K_RADIAL_REACTION_RADIUS),
                 [c(HOVER_OVERLAY_COLOR)]
             );
             tester.send(&gesture, PointerChange::Remove);
@@ -1761,30 +1741,32 @@ mod tests {
 
     #[test]
     fn switch_list_tile_respects_track_outline_color_in_active_enabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let track_outline_color = state_colors(STATE_COLORS);
             for ((enabled, selected), expected) in STATE_FRAMES.into_iter().zip(STATE_COLORS) {
                 let track_outline_color = Rc::clone(&track_outline_color);
-                pump_wrapped(&mut tester, move |_app| {
+                pump_wrapped(tester, move |_app| {
                     SwitchListTile::new(selected, if enabled { ignore() } else { None })
                         .track_outline_color(track_outline_color)
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert!(matches!(drawn(&tester).first(), Some(Drawn::Fill(..))));
-                assert_eq!(strokes(&tester), [c(expected)], "{enabled} {selected}");
+                assert!(
+                    drawn(tester)
+                        .first()
+                        .is_some_and(|op| stroke_of(op).is_none() && color_of(op).is_some())
+                );
+                assert_eq!(strokes(tester), [c(expected)], "{enabled} {selected}");
             }
         });
     }
 
     #[test]
     fn switch_list_tile_respects_track_outline_color_in_hovered_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const HOVERED_TRACK_COLOR: Color = Color::new(0xFF4CAF50);
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 SwitchListTile::new(false, ignore())
                     .track_outline_color(hovered_colors(HOVERED_TRACK_COLOR))
                     .into_widget()
@@ -1792,17 +1774,17 @@ mod tests {
             tester.pump_and_settle();
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_eq!(strokes(&tester), [c(HOVERED_TRACK_COLOR)]);
+            assert_eq!(strokes(tester), [c(HOVERED_TRACK_COLOR)]);
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn switch_list_tile_control_widget_should_not_request_focus_on_traversal() {
-        with_main_thread_stack(|| {
-            check_control_is_skipped_by_traversal(|title| {
+        test_widgets(|tester| {
+            check_control_is_skipped_by_traversal(tester, |title| {
                 let mut tile = SwitchListTile::new(true, ignore());
                 tile.title = Some(title);
                 tile.into_widget()
@@ -1812,21 +1794,23 @@ mod tests {
 
     #[test]
     fn switch_list_tile_uses_list_tile_theme_control_affinity() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (control_affinity, expected) in [
                 (ListTileControlAffinity::Leading, Offset::new(92.0, 16.0)),
                 (ListTileControlAffinity::Trailing, Offset::new(16.0, 16.0)),
                 (ListTileControlAffinity::Platform, Offset::new(16.0, 16.0)),
             ] {
-                let mut tester = tester();
-                pump_in_material(&mut tester, m3, |_app| {
+                pump_in_material(tester, m3, |_app| {
                     ListTileTheme::new(
-                        SwitchListTile::new(true, ignore()).title(AhemText::new("SwitchListTile")),
+                        SwitchListTile::new(true, ignore()).title(Text::new("SwitchListTile")),
                     )
                     .data(ListTileThemeData::new().control_affinity(control_affinity))
                     .into_widget()
                 });
-                assert_eq!(text_rect(&tester, "SwitchListTile").top_left(), expected);
+                assert_eq!(
+                    tester.get_rect(find::text("SwitchListTile")).top_left(),
+                    expected
+                );
             }
         });
     }
@@ -1848,17 +1832,19 @@ mod tests {
         is_three_line: Option<bool>,
         subtitle: &str,
     ) -> WidgetRef {
-        let mut tile = tile
-            .title(AhemText::new("A"))
-            .subtitle(AhemText::new(subtitle));
+        let mut tile = tile.title(Text::new("A")).subtitle(Text::new(subtitle));
         tile.is_three_line = is_three_line;
         tile.into_widget()
     }
 
-    fn check_is_three_line(platform: TargetPlatform, tile: fn(Option<bool>, &str) -> WidgetRef) {
+    fn check_is_three_line(
+        tester: &mut WidgetTester,
+        platform: TargetPlatform,
+        tile: fn(Option<bool>, &str) -> WidgetRef,
+    ) {
         for (frame, three_line) in IS_THREE_LINE_FRAMES {
             assert_eq!(
-                is_three_line_rects::<Switch, SwitchListTile>(platform, frame, tile),
+                is_three_line_rects::<Switch, SwitchListTile>(tester, platform, frame, tile),
                 expected_three_line_rects(
                     three_line,
                     800.0 - 60.0 - 24.0,
@@ -1872,18 +1858,22 @@ mod tests {
 
     #[test]
     fn switch_list_tile_is_three_line() {
-        with_main_thread_stack(|| check_is_three_line(TargetPlatform::Android, three_line_tile));
+        test_widgets(|tester| {
+            check_is_three_line(tester, TargetPlatform::Android, three_line_tile)
+        });
     }
 
     #[test]
     fn switch_list_tile_adaptive_is_three_line() {
-        with_main_thread_stack(|| {
-            check_is_three_line(TargetPlatform::IOS, adaptive_three_line_tile)
+        test_widgets(|tester| {
+            check_is_three_line(tester, TargetPlatform::IOS, adaptive_three_line_tile)
         });
     }
 
-    fn check_active_thumb_color(make: fn(bool, Option<ValueChanged<bool>>) -> SwitchListTile) {
-        let mut tester = tester();
+    fn check_active_thumb_color(
+        tester: &mut WidgetTester,
+        make: fn(bool, Option<ValueChanged<bool>>) -> SwitchListTile,
+    ) {
         let root = {
             let app = tester.cell.borrow();
             crate::list_tile::tests::bare(
@@ -1899,26 +1889,25 @@ mod tests {
             )
         };
         tester.pump_widget(root);
-        assert_eq!(track(&tester), Some(c(Colors::GREEN.shade500())));
-        assert_eq!(thumb(&tester), Some(c(Colors::YELLOW.shade500())));
+        assert_eq!(track(tester), Some(c(Colors::GREEN.shade500())));
+        assert_eq!(thumb(tester), Some(c(Colors::YELLOW.shade500())));
         assert_eq!(tester.text_color("title"), Colors::YELLOW.shade500());
     }
 
     #[test]
     fn material3_switch_list_tile_active_thumb_color() {
-        with_main_thread_stack(|| check_active_thumb_color(SwitchListTile::new));
+        test_widgets(|tester| check_active_thumb_color(tester, SwitchListTile::new));
     }
 
     #[test]
     fn material3_switch_list_tile_adaptive_active_thumb_color() {
-        with_main_thread_stack(|| check_active_thumb_color(SwitchListTile::adaptive));
+        test_widgets(|tester| check_active_thumb_color(tester, SwitchListTile::adaptive));
     }
 
     #[test]
     fn switch_list_tile_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .body(
                         Center::new()
@@ -1926,20 +1915,20 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert_eq!(rect_of::<SwitchListTile>(&tester, 0).size(), Size::ZERO);
+            assert_eq!(rect_of::<SwitchListTile>(tester, 0).size(), Size::ZERO);
         });
     }
 
     fn leading_title_tile() -> SwitchListTile {
         SwitchListTile::new(true, ignore())
             .control_affinity(ListTileControlAffinity::Leading)
-            .title(AhemText::new("title"))
+            .title(Text::new("title"))
     }
 
     #[test]
     fn switch_list_tile_horizontal_title_gap_0() {
-        with_main_thread_stack(|| {
-            check_horizontal_title_gap_0([76.0, 724.0], |gap| {
+        test_widgets(|tester| {
+            check_horizontal_title_gap_0(tester, [76.0, 724.0], |gap| {
                 let mut tile = leading_title_tile();
                 tile.horizontal_title_gap = gap;
                 tile.into_widget()
@@ -1949,8 +1938,8 @@ mod tests {
 
     #[test]
     fn switch_list_tile_default_horizontal_title_gap_and_min_leading_width() {
-        with_main_thread_stack(|| {
-            check_default_horizontal_title_gap([92.0, 708.0], || {
+        test_widgets(|tester| {
+            check_default_horizontal_title_gap(tester, [92.0, 708.0], || {
                 leading_title_tile().into_widget()
             });
         });
@@ -1958,8 +1947,8 @@ mod tests {
 
     #[test]
     fn switch_list_tile_horizontal_title_gap_with_visual_density() {
-        with_main_thread_stack(|| {
-            check_horizontal_title_gap_with_visual_density(78.0, || {
+        test_widgets(|tester| {
+            check_horizontal_title_gap_with_visual_density(tester, 78.0, || {
                 leading_title_tile()
                     .visual_density(VisualDensity::new(VisualDensity::MINIMUM_DENSITY, 0.0))
                     .horizontal_title_gap(10.0)
@@ -1969,31 +1958,31 @@ mod tests {
     }
 
     fn min_vertical_padding_tile(padding: Option<f64>) -> WidgetRef {
-        let mut tile = SwitchListTile::new(true, ignore()).title(AhemText::new("title"));
+        let mut tile = SwitchListTile::new(true, ignore()).title(Text::new("title"));
         tile.min_vertical_padding = padding;
         tile.into_widget()
     }
 
     #[test]
     fn switch_list_tile_min_vertical_padding_80_material_3() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // 80 + 80 + 24(Title) = 184
-            check_min_vertical_padding_80(m3, 184.0, min_vertical_padding_tile);
+            check_min_vertical_padding_80(tester, m3, 184.0, min_vertical_padding_tile);
         });
     }
 
     #[test]
     fn switch_list_tile_min_vertical_padding_80_material_2() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // 80 + 80 + 16(Title) = 176
-            check_min_vertical_padding_80(m2, 176.0, min_vertical_padding_tile);
+            check_min_vertical_padding_80(tester, m2, 176.0, min_vertical_padding_tile);
         });
     }
 
     #[test]
     fn switch_list_tile_min_leading_width_60() {
-        with_main_thread_stack(|| {
-            check_min_leading_width_60(|width| {
+        test_widgets(|tester| {
+            check_min_leading_width_60(tester, |width| {
                 let mut tile = leading_title_tile();
                 tile.min_leading_width = width;
                 tile.into_widget()
@@ -2003,8 +1992,8 @@ mod tests {
 
     #[test]
     fn switch_list_tile_min_tile_height() {
-        with_main_thread_stack(|| {
-            check_min_tile_height(|min_tile_height| {
+        test_widgets(|tester| {
+            check_min_tile_height(tester, |min_tile_height| {
                 let mut tile = SwitchListTile::new(true, ignore());
                 tile.min_tile_height = min_tile_height;
                 tile.into_widget()

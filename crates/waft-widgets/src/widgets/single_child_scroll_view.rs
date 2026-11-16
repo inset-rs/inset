@@ -1072,7 +1072,6 @@ impl RenderAbstractViewport for RenderSingleChildViewport {
 #[cfg(test)]
 mod tests {
     use std::any::Any;
-    use waft_foundation::AppCell;
 
     use waft_embedder::{SceneBuilder, Size, TextDirection, valo::Op};
     use waft_gestures::{HitTestEntry, HitTestResult};
@@ -1080,25 +1079,26 @@ mod tests {
     use waft_rendering::{BoxHitTestEntry, RenderPadding};
 
     use super::*;
-    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_cell, binding_mount, binding_pump};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Directionality, Listener, SizedBox};
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
 
+    const VIEW_WIDTH: f64 = WidgetTester::SIZE.width();
+    const VIEW_HEIGHT: f64 = WidgetTester::SIZE.height();
     const CONTENT_WIDTH: f64 = 100.0;
-    const CONTENT_HEIGHT: f64 = 500.0;
-    /// The height of the target inside the content, and the space above it.
+    /// Longer than the view is wide and high.
+    const CONTENT_HEIGHT: f64 = 1000.0;
+    /// The height of the target inside the content, and the space above it, which puts the
+    /// target below the view at scroll offset zero.
     const TARGET_EXTENT: f64 = 50.0;
-    const LEADING_EXTENT: f64 = 300.0;
+    const LEADING_EXTENT: f64 = 700.0;
 
     /// The tree every test mounts: a text direction and a media query, which a `Scrollable`
     /// reads for its gesture settings.
     fn wrap<K>(child: impl IntoWidget<K>) -> WidgetRef {
-        let query: WidgetRef = MediaQuery::new(
-            MediaQueryData::new().size(Size::new(VIEW_WIDTH, VIEW_HEIGHT)),
-            child,
-        )
-        .into_widget();
+        let query: WidgetRef =
+            MediaQuery::new(MediaQueryData::new().size(WidgetTester::SIZE), child).into_widget();
         Directionality::new(TextDirection::Ltr, query).into_widget()
     }
 
@@ -1136,17 +1136,11 @@ mod tests {
     }
 
     fn mount(
-        cell: &AppCell,
+        tester: &mut WidgetTester,
         view: SingleChildScrollView,
     ) -> RenderHandle<RenderSingleChildViewport> {
-        binding_mount(cell, wrap(view));
-        let mut app = cell.borrow_mut();
-        let root = crate::binding::WidgetsBinding::instance(&mut app)
-            .root_element(&app)
-            .expect("a mounted root element")
-            .find_render_object(&app)
-            .expect("a mounted view has a render object");
-        find::<RenderSingleChildViewport>(&app, root).expect("a RenderSingleChildViewport")
+        tester.pump_widget(wrap(view));
+        tester.first::<RenderSingleChildViewport>()
     }
 
     /// The offset the viewport paints its content at.
@@ -1193,160 +1187,169 @@ mod tests {
 
     #[test]
     fn a_vertical_view_gives_its_child_unbounded_height_and_keeps_the_viewport_height() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::default(&mut app);
-        drop(app);
-        let viewport = mount(
-            &cell,
-            SingleChildScrollView::new()
-                .controller(controller.erase())
-                .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
-        );
-        let app = cell.borrow();
+        test_widgets(|tester| {
+            let controller = tester.update(ScrollController::default);
+            let viewport = mount(
+                tester,
+                SingleChildScrollView::new()
+                    .controller(controller.erase())
+                    .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
+            );
+            let app = tester.cell.borrow();
 
-        let child = viewport.child(&app).expect("the content");
-        assert_eq!(child.size(&app), Size::new(CONTENT_WIDTH, CONTENT_HEIGHT));
-        assert_eq!(viewport.size(&app), Size::new(CONTENT_WIDTH, VIEW_HEIGHT));
-        assert_eq!(
-            controller.position(&app).max_scroll_extent(&app),
-            CONTENT_HEIGHT - VIEW_HEIGHT
-        );
+            // The view's constraints are tight, as flutter_test's are, so the cross axis is
+            // the view's width.
+            let child = viewport.child(&app).expect("the content");
+            assert_eq!(child.size(&app), Size::new(VIEW_WIDTH, CONTENT_HEIGHT));
+            assert_eq!(viewport.size(&app), WidgetTester::SIZE);
+            assert_eq!(
+                controller.position(&app).max_scroll_extent(&app),
+                CONTENT_HEIGHT - VIEW_HEIGHT
+            );
+        });
     }
 
     #[test]
     fn a_horizontal_view_gives_its_child_unbounded_width_and_keeps_the_viewport_width() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::default(&mut app);
-        drop(app);
-        let viewport = mount(
-            &cell,
-            SingleChildScrollView::new()
-                .scroll_direction(Axis::Horizontal)
-                .controller(controller.erase())
-                .child(SizedBox::new().width(CONTENT_HEIGHT).height(CONTENT_WIDTH)),
-        );
-        let app = cell.borrow();
+        test_widgets(|tester| {
+            let controller = tester.update(ScrollController::default);
+            let viewport = mount(
+                tester,
+                SingleChildScrollView::new()
+                    .scroll_direction(Axis::Horizontal)
+                    .controller(controller.erase())
+                    .child(SizedBox::new().width(CONTENT_HEIGHT).height(CONTENT_WIDTH)),
+            );
+            let app = tester.cell.borrow();
 
-        let child = viewport.child(&app).expect("the content");
-        assert_eq!(child.size(&app), Size::new(CONTENT_HEIGHT, CONTENT_WIDTH));
-        assert_eq!(viewport.size(&app), Size::new(VIEW_WIDTH, CONTENT_WIDTH));
-        assert_eq!(
-            controller.position(&app).max_scroll_extent(&app),
-            CONTENT_HEIGHT - VIEW_WIDTH
-        );
+            // The view's constraints are tight, as flutter_test's are, so the cross axis is
+            // the view's height.
+            let child = viewport.child(&app).expect("the content");
+            assert_eq!(child.size(&app), Size::new(CONTENT_HEIGHT, VIEW_HEIGHT));
+            assert_eq!(viewport.size(&app), WidgetTester::SIZE);
+            assert_eq!(
+                controller.position(&app).max_scroll_extent(&app),
+                CONTENT_HEIGHT - VIEW_WIDTH
+            );
+        });
     }
 
     #[test]
     fn the_content_offset_follows_the_controller() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::default(&mut app);
-        drop(app);
-        let viewport = mount(
-            &cell,
-            SingleChildScrollView::new()
-                .controller(controller.erase())
-                .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(content_offset(&app, viewport), Offset::ZERO);
+        test_widgets(|tester| {
+            let controller = tester.update(ScrollController::default);
+            let viewport = mount(
+                tester,
+                SingleChildScrollView::new()
+                    .controller(controller.erase())
+                    .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
+            );
+            assert_eq!(
+                content_offset(&tester.cell.borrow(), viewport),
+                Offset::ZERO
+            );
 
-        controller.jump_to(&mut app, 120.0);
-        binding_pump(&mut app, Duration::ZERO);
-        assert_eq!(content_offset(&app, viewport), Offset::new(0.0, -120.0));
+            tester.update(|app| controller.jump_to(app, 120.0));
+            tester.pump();
+            assert_eq!(
+                content_offset(&tester.cell.borrow(), viewport),
+                Offset::new(0.0, -120.0)
+            );
+        });
     }
 
     #[test]
     fn a_reversed_view_starts_at_the_end_of_its_content() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::default(&mut app);
-        drop(app);
-        let viewport = mount(
-            &cell,
-            SingleChildScrollView::new()
-                .reverse(true)
-                .controller(controller.erase())
-                .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let controller = tester.update(ScrollController::default);
+            let viewport = mount(
+                tester,
+                SingleChildScrollView::new()
+                    .reverse(true)
+                    .controller(controller.erase())
+                    .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
+            );
+            {
+                let app = tester.cell.borrow();
+                assert_eq!(viewport.axis_direction(&app), AxisDirection::Up);
+                // At scroll offset zero the content's trailing edge sits on the viewport's.
+                assert_eq!(
+                    content_offset(&app, viewport),
+                    Offset::new(0.0, VIEW_HEIGHT - CONTENT_HEIGHT)
+                );
+            }
 
-        assert_eq!(viewport.axis_direction(&app), AxisDirection::Up);
-        // At scroll offset zero the content's trailing edge sits on the viewport's.
-        assert_eq!(
-            content_offset(&app, viewport),
-            Offset::new(0.0, VIEW_HEIGHT - CONTENT_HEIGHT)
-        );
-
-        controller.jump_to(&mut app, 120.0);
-        binding_pump(&mut app, Duration::ZERO);
-        assert_eq!(
-            content_offset(&app, viewport),
-            Offset::new(0.0, VIEW_HEIGHT - CONTENT_HEIGHT + 120.0)
-        );
+            tester.update(|app| controller.jump_to(app, 120.0));
+            tester.pump();
+            assert_eq!(
+                content_offset(&tester.cell.borrow(), viewport),
+                Offset::new(0.0, VIEW_HEIGHT - CONTENT_HEIGHT + 120.0)
+            );
+        });
     }
 
     #[test]
     fn get_offset_to_reveal_answers_the_offset_that_brings_a_descendant_to_an_edge() {
-        let cell = binding_cell();
-        let viewport = mount(&cell, SingleChildScrollView::new().child(tall_content()));
-        let app = cell.borrow();
-        let padding = find::<RenderPadding>(&app, viewport.as_object()).expect("the padding");
-        let target = padding.child(&app).expect("the target").as_object();
+        test_widgets(|tester| {
+            let viewport = mount(tester, SingleChildScrollView::new().child(tall_content()));
+            let app = tester.cell.borrow();
+            let padding = find::<RenderPadding>(&app, viewport.as_object()).expect("the padding");
+            let target = padding.child(&app).expect("the target").as_object();
 
-        let leading = viewport.get_offset_to_reveal(&app, target, 0.0, None, None);
-        assert_eq!(leading.offset, LEADING_EXTENT);
-        assert_eq!(
-            leading.rect,
-            Rect::from_ltwh(0.0, 0.0, CONTENT_WIDTH, TARGET_EXTENT)
-        );
+            // The view's tight constraints make the target as wide as the view.
+            let leading = viewport.get_offset_to_reveal(&app, target, 0.0, None, None);
+            assert_eq!(leading.offset, LEADING_EXTENT);
+            assert_eq!(
+                leading.rect,
+                Rect::from_ltwh(0.0, 0.0, VIEW_WIDTH, TARGET_EXTENT)
+            );
 
-        let trailing = viewport.get_offset_to_reveal(&app, target, 1.0, None, None);
-        assert_eq!(
-            trailing.offset,
-            LEADING_EXTENT - (VIEW_HEIGHT - TARGET_EXTENT)
-        );
-        assert_eq!(
-            trailing.rect,
-            Rect::from_ltwh(
-                0.0,
-                VIEW_HEIGHT - TARGET_EXTENT,
-                CONTENT_WIDTH,
-                TARGET_EXTENT
-            )
-        );
+            let trailing = viewport.get_offset_to_reveal(&app, target, 1.0, None, None);
+            assert_eq!(
+                trailing.offset,
+                LEADING_EXTENT - (VIEW_HEIGHT - TARGET_EXTENT)
+            );
+            assert_eq!(
+                trailing.rect,
+                Rect::from_ltwh(0.0, VIEW_HEIGHT - TARGET_EXTENT, VIEW_WIDTH, TARGET_EXTENT)
+            );
+        });
     }
 
     #[test]
     fn a_hit_test_reaches_the_content_through_the_scroll_offset() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::default(&mut app);
-        drop(app);
-        let viewport = mount(
-            &cell,
-            SingleChildScrollView::new()
-                .controller(controller.erase())
-                .child(tall_content()),
-        );
-        let mut app = cell.borrow_mut();
-        let padding = find::<RenderPadding>(&app, viewport.as_object()).expect("the padding");
-        let target = padding.child(&app).expect("the target");
+        test_widgets(|tester| {
+            let controller = tester.update(ScrollController::default);
+            let viewport = mount(
+                tester,
+                SingleChildScrollView::new()
+                    .controller(controller.erase())
+                    .child(tall_content()),
+            );
+            let target = {
+                let app = tester.cell.borrow();
+                let padding =
+                    find::<RenderPadding>(&app, viewport.as_object()).expect("the padding");
+                padding.child(&app).expect("the target")
+            };
 
-        let near_the_top = Offset::new(50.0, 10.0);
-        assert!(
-            !hit_boxes(&mut app, viewport, near_the_top).contains(&target),
-            "the target is scrolled out of view"
-        );
+            let near_the_top = Offset::new(50.0, 10.0);
+            assert!(
+                !tester
+                    .update(|app| hit_boxes(app, viewport, near_the_top))
+                    .contains(&target),
+                "the target is scrolled out of view"
+            );
 
-        controller.jump_to(&mut app, LEADING_EXTENT);
-        binding_pump(&mut app, Duration::ZERO);
-        assert!(
-            hit_boxes(&mut app, viewport, near_the_top).contains(&target),
-            "scrolling the target to the leading edge puts it under the pointer"
-        );
+            tester.update(|app| controller.jump_to(app, LEADING_EXTENT));
+            tester.pump();
+            assert!(
+                tester
+                    .update(|app| hit_boxes(app, viewport, near_the_top))
+                    .contains(&target),
+                "scrolling the target to the leading edge puts it under the pointer"
+            );
+        });
     }
 
     /// Content that paints, so a clip around it reaches the scene: valo drops a scope that
@@ -1362,44 +1365,46 @@ mod tests {
 
     #[test]
     fn overflowing_content_is_clipped_unless_the_clip_behavior_says_otherwise() {
-        let cell = binding_cell();
-        let viewport = mount(
-            &cell,
-            SingleChildScrollView::new().child(painted(CONTENT_WIDTH, CONTENT_HEIGHT)),
-        );
-        let mut app = cell.borrow_mut();
-        let ops = scene_ops(&mut app, viewport);
-        assert!(
-            ops.iter().any(|op| matches!(op, Op::ClipPath { .. })),
-            "content taller than the viewport is clipped: {ops:?}"
-        );
+        test_widgets(|tester| {
+            let viewport = mount(
+                tester,
+                SingleChildScrollView::new().child(painted(CONTENT_WIDTH, CONTENT_HEIGHT)),
+            );
+            let ops = tester.update(|app| scene_ops(app, viewport));
+            assert!(
+                ops.iter().any(|op| matches!(op, Op::ClipPath { .. })),
+                "content taller than the viewport is clipped: {ops:?}"
+            );
+        });
 
-        let cell = binding_cell();
-        let viewport = mount(
-            &cell,
-            SingleChildScrollView::new()
-                .clip_behavior(Clip::None)
-                .child(painted(CONTENT_WIDTH, CONTENT_HEIGHT)),
-        );
-        let mut app = cell.borrow_mut();
-        assert!(
-            !scene_ops(&mut app, viewport)
-                .iter()
-                .any(|op| matches!(op, Op::ClipPath { .. })),
-            "Clip::None paints the content unclipped"
-        );
+        test_widgets(|tester| {
+            let viewport = mount(
+                tester,
+                SingleChildScrollView::new()
+                    .clip_behavior(Clip::None)
+                    .child(painted(CONTENT_WIDTH, CONTENT_HEIGHT)),
+            );
+            assert!(
+                !tester
+                    .update(|app| scene_ops(app, viewport))
+                    .iter()
+                    .any(|op| matches!(op, Op::ClipPath { .. })),
+                "Clip::None paints the content unclipped"
+            );
+        });
 
-        let cell = binding_cell();
-        let viewport = mount(
-            &cell,
-            SingleChildScrollView::new().child(painted(CONTENT_WIDTH, VIEW_HEIGHT)),
-        );
-        let mut app = cell.borrow_mut();
-        assert!(
-            !scene_ops(&mut app, viewport)
-                .iter()
-                .any(|op| matches!(op, Op::ClipPath { .. })),
-            "content that fits needs no clip"
-        );
+        test_widgets(|tester| {
+            let viewport = mount(
+                tester,
+                SingleChildScrollView::new().child(painted(CONTENT_WIDTH, VIEW_HEIGHT)),
+            );
+            assert!(
+                !tester
+                    .update(|app| scene_ops(app, viewport))
+                    .iter()
+                    .any(|op| matches!(op, Op::ClipPath { .. })),
+                "content that fits needs no clip"
+            );
+        });
     }
 }

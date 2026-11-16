@@ -1982,6 +1982,50 @@ where
         }
     }
 
+    /// Dart's `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren`: the children whose
+    /// layout offset falls in the sliver's painted window, which a kept-alive child's does not.
+    fn debug_visit_onstage_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        let Some(sliver) = self
+            .as_element()
+            .render_object(app)
+            .and_then(|render| render.as_sliver())
+        else {
+            return;
+        };
+        let constraints = sliver.constraints(app);
+        let children: Vec<AnyElement> = app
+            .get(self)
+            .child_elements
+            .values()
+            .map(|child| child.expect("no child slot is empty outside a rebuild"))
+            .collect();
+        for child in children {
+            let Some(render) = child.render_object(app) else {
+                continue;
+            };
+            let paint_bounds = render.paint_bounds(app);
+            let item_extent = match constraints.axis() {
+                waft_painting::Axis::Horizontal => paint_bounds.width(),
+                waft_painting::Axis::Vertical => paint_bounds.height(),
+            };
+            let onstage = render
+                .parent_data(app)
+                .and_then(|data| data.part::<waft_rendering::SliverMultiBoxAdaptorParentData>())
+                .and_then(|data| data.layout_offset())
+                .is_some_and(|layout_offset| {
+                    layout_offset < constraints.scroll_offset + constraints.remaining_paint_extent
+                        && layout_offset + item_extent > constraints.scroll_offset
+                });
+            if onstage {
+                visitor(child);
+            }
+        }
+    }
+
     fn insert_render_object_child(
         self: Handle<Self>,
         app: &mut App,

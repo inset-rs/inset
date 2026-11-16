@@ -4230,72 +4230,17 @@ pub fn show_general_dialog(
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use waft_foundation::AppCell;
 
-    use waft_embedder::{Offset, PointerDeviceKind, TargetPlatform, TextDirection};
-    use waft_gestures::{GestureBinding, PointerDownEvent, PointerEvent, PointerUpEvent};
+    use waft_embedder::{Offset, TextDirection};
     use waft_painting::AlignmentGeometry;
-    use waft_test::{TestPlatform, TestView};
 
     use super::*;
-    use crate::binding::run_app;
     use crate::framework::{IntoWidget, StatelessWidget};
-    use crate::test_harness::pump_every_view;
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Align, Directionality, SizedBox};
     use crate::widgets::navigator::{NavigatorState, RouteSettings};
     use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::pop_scope::PopScope;
-    use waft_test::{assert_no_new_objects, object_snapshot};
-
-    const VIEW_WIDTH: f64 = 300.0;
-    const VIEW_HEIGHT: f64 = 200.0;
-
-    /// An [`App`] with a single view; the navigator needs a binding for its global keys.
-    fn app_with_view() -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView::new(VIEW_WIDTH, VIEW_HEIGHT)));
-        AppCell::with_platform(Rc::new(platform))
-    }
-
-    fn mount(cell: &AppCell, child: WidgetRef) {
-        run_app(&mut cell.borrow_mut(), child);
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-    }
-
-    /// Runs frames until every route transition has settled.
-    fn settle(app: &mut App, from: Duration) -> Duration {
-        let mut at = from;
-        for _ in 0..40 {
-            at += Duration::from_millis(20);
-            pump_every_view(app, at);
-        }
-        at
-    }
-
-    fn tap_at(app: &mut App, position: Offset) {
-        GestureBinding::instance(app).handle_pointer_event(
-            app,
-            PointerEvent::Down(PointerDownEvent {
-                pointer: 1,
-                position,
-                kind: PointerDeviceKind::Touch,
-                ..PointerDownEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-        GestureBinding::instance(app).handle_pointer_event(
-            app,
-            PointerEvent::Up(PointerUpEvent {
-                pointer: 1,
-                position,
-                kind: PointerDeviceKind::Touch,
-                ..PointerUpEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-    }
 
     /// A page whose content is a 10x10 box in the top-left corner, so a tap in the middle of
     /// the view falls through to whatever is below it.
@@ -4332,9 +4277,19 @@ mod tests {
         .into_widget()
     }
 
-    fn state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
-        key.current_state::<NavigatorState>(app)
+    fn state(key: &GlobalKey, tester: &WidgetTester) -> Handle<NavigatorState> {
+        key.current_state::<NavigatorState>(&tester.cell.borrow())
             .expect("a mounted navigator")
+    }
+
+    /// A navigator whose initial route is a plain page named "/", pumped and settled.
+    fn mount_navigator(tester: &mut WidgetTester, key: &GlobalKey) -> Handle<NavigatorState> {
+        tester.pump_widget(navigator(key, |app, _settings| {
+            Some(page_route(app, None, "/").into_erased())
+        }));
+        let navigator_state = state(key, tester);
+        tester.pump_and_settle();
+        navigator_state
     }
 
     /// A stateless widget that runs `read` on every build.
@@ -4368,147 +4323,142 @@ mod tests {
 
     #[test]
     fn pushing_a_page_route_runs_its_transition_to_completion_and_popping_runs_it_back() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").into_erased())
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let navigator_state = mount_navigator(tester, &key);
 
-        let pushed: RouteRef = page_route(&mut app, None, "second").into_erased();
-        navigator_state.push(&mut app, pushed.clone());
-        pump_every_view(&mut app, at);
-        let animation = pushed
-            .as_transition_route(&app)
-            .expect("a page route is a transition route")
-            .animation(&app)
-            .expect("an installed route");
-        assert!(animation.value(&app) < 1.0, "the transition starts at 0");
+            let pushed: RouteRef =
+                tester.update(|app| page_route(app, None, "second").into_erased());
+            tester.update(|app| navigator_state.push(app, pushed.clone()));
+            tester.pump();
+            let animation = {
+                let app = tester.cell.borrow();
+                let animation = pushed
+                    .as_transition_route(&app)
+                    .expect("a page route is a transition route")
+                    .animation(&app)
+                    .expect("an installed route");
+                assert!(animation.value(&app) < 1.0, "the transition starts at 0");
+                animation
+            };
 
-        let at = settle(&mut app, at);
-        assert_eq!(animation.value(&app), 1.0);
-        assert!(pushed.is_current(&app));
-        assert!(!pushed.is_first(&app));
+            tester.pump_and_settle();
+            {
+                let app = tester.cell.borrow();
+                assert_eq!(animation.value(&app), 1.0);
+                assert!(pushed.is_current(&app));
+                assert!(!pushed.is_first(&app));
+            }
 
-        let popped = Rc::new(Cell::new(false));
-        pushed.popped(&app).then(&mut app, {
-            let popped = Rc::clone(&popped);
-            move |_app, _result| popped.set(true)
+            let popped = Rc::new(Cell::new(false));
+            tester.update(|app| {
+                pushed.popped(app).then(app, {
+                    let popped = Rc::clone(&popped);
+                    move |_app, _result| popped.set(true)
+                });
+                navigator_state.pop(app, None);
+                app.drain_microtasks();
+            });
+            assert!(popped.get(), "the popped future resolves at once");
+
+            tester.pump_and_settle();
+            assert_eq!(animation.value(&tester.cell.borrow()), 0.0);
         });
-        navigator_state.pop(&mut app, None);
-        app.drain_microtasks();
-        assert!(popped.get(), "the popped future resolves at once");
-
-        settle(&mut app, at);
-        assert_eq!(animation.value(&app), 0.0);
     }
 
     #[test]
     fn modal_route_of_reports_is_current_and_is_first() {
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let key = GlobalKey::new();
-        let seen: Rc<RefCell<Vec<(bool, bool)>>> = Rc::new(RefCell::new(Vec::new()));
-        let watcher = probe({
-            let seen = Rc::clone(&seen);
-            move |app, context| {
-                let route = AnyModalRoute::of(app, context).expect("a modal route");
-                let is_current = route.as_route().is_current(app);
-                let is_first = route.as_route().is_first(app);
-                seen.borrow_mut().push((is_current, is_first));
-            }
-        });
-        drop(app);
-        mount(
-            &cell,
-            navigator(&key, move |app, _settings| {
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let seen: Rc<RefCell<Vec<(bool, bool)>>> = Rc::new(RefCell::new(Vec::new()));
+            let watcher = probe({
+                let seen = Rc::clone(&seen);
+                move |app, context| {
+                    let route = AnyModalRoute::of(app, context).expect("a modal route");
+                    let is_current = route.as_route().is_current(app);
+                    let is_first = route.as_route().is_first(app);
+                    seen.borrow_mut().push((is_current, is_first));
+                }
+            });
+            tester.pump_widget(navigator(&key, move |app, _settings| {
                 Some(page_route(app, Some(watcher.clone()), "/").into_erased())
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        assert_eq!(seen.borrow().last().copied(), Some((true, true)));
+            }));
+            let navigator_state = state(&key, tester);
+            tester.pump_and_settle();
+            assert_eq!(seen.borrow().last().copied(), Some((true, true)));
 
-        let second: RouteRef = page_route(&mut app, None, "second").into_erased();
-        navigator_state.push(&mut app, second);
-        settle(&mut app, at);
-        assert_eq!(
-            seen.borrow().last().copied(),
-            Some((false, true)),
-            "the first route is no longer current once another is pushed"
-        );
+            tester.update(|app| {
+                let second: RouteRef = page_route(app, None, "second").into_erased();
+                navigator_state.push(app, second);
+            });
+            tester.pump_and_settle();
+            assert_eq!(
+                seen.borrow().last().copied(),
+                Some((false, true)),
+                "the first route is no longer current once another is pushed"
+            );
+        });
     }
 
     #[test]
     fn a_pop_scope_with_can_pop_false_blocks_maybe_pop() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        let blocked = Rc::new(Cell::new(false));
-        let scope = PopScope::new(SizedBox::new())
-            .can_pop(false)
-            .on_pop_invoked_with_result({
-                let blocked = Rc::clone(&blocked);
-                Rc::new(move |_app, did_pop, _result| blocked.set(!did_pop))
-            })
-            .into_widget();
-        mount(
-            &cell,
-            navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").into_erased())
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let blocked = Rc::new(Cell::new(false));
+            let scope = PopScope::new(SizedBox::new())
+                .can_pop(false)
+                .on_pop_invoked_with_result({
+                    let blocked = Rc::clone(&blocked);
+                    Rc::new(move |_app, did_pop, _result| blocked.set(!did_pop))
+                })
+                .into_widget();
+            let navigator_state = mount_navigator(tester, &key);
 
-        let second: RouteRef = page_route(&mut app, Some(scope), "second").into_erased();
-        navigator_state.push(&mut app, second.clone());
-        let at = settle(&mut app, at);
-        assert!(second.is_current(&app));
+            let second: RouteRef =
+                tester.update(|app| page_route(app, Some(scope), "second").into_erased());
+            tester.update(|app| navigator_state.push(app, second.clone()));
+            tester.pump_and_settle();
+            assert!(second.is_current(&tester.cell.borrow()));
 
-        assert!(
-            navigator_state.maybe_pop(&mut app, None),
-            "the pop is handled — by being refused — rather than bubbling"
-        );
-        settle(&mut app, at);
-        assert!(second.is_current(&app), "the route is still on top");
-        assert!(blocked.get(), "the pop was reported as not having happened");
+            assert!(
+                tester.update(|app| navigator_state.maybe_pop(app, None)),
+                "the pop is handled — by being refused — rather than bubbling"
+            );
+            tester.pump_and_settle();
+            assert!(
+                second.is_current(&tester.cell.borrow()),
+                "the route is still on top"
+            );
+            assert!(blocked.get(), "the pop was reported as not having happened");
+        });
     }
 
     #[test]
     fn tapping_the_barrier_dismisses_a_dismissible_popup_route() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").into_erased())
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let navigator_state = mount_navigator(tester, &key);
 
-        let dialog: RouteRef = RawDialogRoute::new(&mut app, corner_page(None))
-            .barrier_dismissible(&mut app, true)
-            .barrier_label(&mut app, "dismiss".to_string())
-            .into_erased();
-        navigator_state.push(&mut app, dialog.clone());
-        let at = settle(&mut app, at);
-        assert!(dialog.is_current(&app));
+            let dialog: RouteRef = tester.update(|app| {
+                RawDialogRoute::new(app, corner_page(None))
+                    .barrier_dismissible(app, true)
+                    .barrier_label(app, "dismiss".to_string())
+                    .into_erased()
+            });
+            tester.update(|app| navigator_state.push(app, dialog.clone()));
+            tester.pump_and_settle();
+            assert!(dialog.is_current(&tester.cell.borrow()));
 
-        // The dialog's own content is the 10x10 box in the corner, so the middle of the view
-        // is the barrier.
-        tap_at(&mut app, Offset::new(150.0, 100.0));
-        pump_every_view(&mut app, at);
-        settle(&mut app, at);
-        assert!(!dialog.is_active(&app), "the barrier popped the dialog");
+            // The dialog's own content is the 10x10 box in the corner, so a tap away from it
+            // is on the barrier.
+            tester.tap_at(Offset::new(150.0, 100.0), 1);
+            tester.pump();
+            tester.pump_and_settle();
+            assert!(
+                !dialog.is_active(&tester.cell.borrow()),
+                "the barrier popped the dialog"
+            );
+        });
     }
 
     /// Not a Dart case: Dart's collector frees the tweens and the colour animation each build
@@ -4516,70 +4466,54 @@ mod tests {
     /// replace.
     #[test]
     fn rebuilding_a_coloured_barrier_leaves_no_new_arena_objects() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").into_erased())
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        let dialog = RawDialogRoute::new(&mut app, corner_page(None))
-            .barrier_color(&mut app, Some(Color::new(0x80000000)));
-        navigator_state.push(&mut app, dialog.clone().into_erased());
-        let mut at = settle(&mut app, at);
-        let rebuild_barrier = |app: &mut App, at: &mut Duration| {
-            ModalRoute::changed_internal_state(dialog.handle(), app);
-            *at += Duration::from_millis(20);
-            pump_every_view(app, *at);
-        };
-        rebuild_barrier(&mut app, &mut at);
-        drop(app);
-        cell.checkpoint();
-
-        let snapshot = object_snapshot(&cell.borrow());
-        rebuild_barrier(&mut cell.borrow_mut(), &mut at);
-        cell.checkpoint();
-        assert_no_new_objects(&cell.borrow(), &snapshot);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let navigator_state = mount_navigator(tester, &key);
+            let dialog = tester.update(|app| {
+                RawDialogRoute::new(app, corner_page(None))
+                    .barrier_color(app, Some(Color::new(0x80000000)))
+            });
+            tester.update(|app| navigator_state.push(app, dialog.clone().into_erased()));
+            tester.pump_and_settle();
+            tester.assert_leaves_nothing_behind(|tester| {
+                tester.update(|app| ModalRoute::changed_internal_state(dialog.handle(), app));
+                tester.pump_by(Duration::from_millis(20));
+            });
+        });
     }
 
     /// Not a Dart case: Dart's collector frees a popped route, and what its barrier drove, once
     /// nothing reaches it; here the checkpoint after its entry goes frees it.
     #[test]
     fn a_popped_route_is_freed_once_its_entry_goes() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").into_erased())
-            }),
-        );
-        let dialog = {
-            let mut app = cell.borrow_mut();
-            let navigator_state = state(&key, &mut app);
-            let at = settle(&mut app, Duration::ZERO);
-            let dialog = RawDialogRoute::new(&mut app, corner_page(None))
-                .barrier_color(&mut app, Some(Color::new(0x80000000)));
-            let named = dialog.handle();
-            navigator_state.push(&mut app, dialog.into_erased());
-            let at = settle(&mut app, at);
-            navigator_state.pop(&mut app, None);
-            settle(&mut app, at);
-            assert!(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let navigator_state = mount_navigator(tester, &key);
+            let dialog = {
+                let dialog = tester.update(|app| {
+                    RawDialogRoute::new(app, corner_page(None))
+                        .barrier_color(app, Some(Color::new(0x80000000)))
+                });
+                let named = dialog.handle();
+                tester.update(|app| navigator_state.push(app, dialog.clone().into_erased()));
+                tester.pump_and_settle();
+                tester.update(|app| navigator_state.pop(app, None));
+                tester.pump_and_settle();
+                assert!(
+                    named
+                        .transition_route_data(&tester.cell.borrow())
+                        .transition_completer
+                        .is_completed(),
+                    "the route is disposed"
+                );
                 named
-                    .transition_route_data(&app)
-                    .transition_completer
-                    .is_completed(),
-                "the route is disposed"
+            };
+            tester.cell.checkpoint();
+            assert!(
+                !tester.cell.borrow().contains(dialog),
+                "the popped route is freed"
             );
-            named
-        };
-        cell.checkpoint();
-        assert!(!cell.borrow().contains(dialog), "the popped route is freed");
+        });
     }
 
     /// Dart's 'secondary animation is kDismissed after train hopping finishes and pop', with
@@ -4589,177 +4523,172 @@ mod tests {
     /// once it is done with, as Dart's collector would.
     #[test]
     fn a_finished_train_hop_leaves_the_secondary_animation_on_the_new_route_and_frees_it() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").into_erased())
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let navigator_state = mount_navigator(tester, &key);
 
-        let one = page_route(&mut app, None, "one");
-        let one_route = one.handle();
-        navigator_state.push(&mut app, one.into_erased());
-        let at = settle(&mut app, at);
-        let secondary_parent = |app: &App| {
-            one_route
-                .transition_route_data(app)
-                .secondary_animation
-                .parent(app)
-        };
-        let dismissed = k_always_dismissed_animation(&mut app).handle();
-        assert_eq!(secondary_parent(&app), Some(dismissed));
+            let one = tester.update(|app| page_route(app, None, "one"));
+            let one_route = one.handle();
+            tester.update(|app| navigator_state.push(app, one.into_erased()));
+            tester.pump_and_settle();
+            let secondary_parent = |tester: &WidgetTester| {
+                let app = tester.cell.borrow();
+                one_route
+                    .transition_route_data(&app)
+                    .secondary_animation
+                    .parent(&app)
+            };
+            let dismissed = tester.update(|app| k_always_dismissed_animation(app).handle());
+            assert_eq!(secondary_parent(tester), Some(dismissed));
 
-        let two: RouteRef = page_route(&mut app, None, "two").into_erased();
-        navigator_state.push(&mut app, two.clone());
-        pump_every_view(&mut app, at);
-        let at = at + Duration::from_millis(100);
-        pump_every_view(&mut app, at);
-        let two_animation = two
-            .as_transition_route(&app)
-            .and_then(|route| route.underlying_animation(&app));
-        assert_eq!(secondary_parent(&app), two_animation);
+            let two: RouteRef = tester.update(|app| page_route(app, None, "two").into_erased());
+            tester.update(|app| navigator_state.push(app, two.clone()));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100));
+            let two_animation = {
+                let app = tester.cell.borrow();
+                two.as_transition_route(&app)
+                    .and_then(|route| route.underlying_animation(&app))
+            };
+            assert_eq!(secondary_parent(tester), two_animation);
 
-        let three: RouteRef = page_route(&mut app, None, "three").into_erased();
-        navigator_state.push_replacement(&mut app, three.clone(), None);
-        pump_every_view(&mut app, at);
-        let at = at + Duration::from_millis(1);
-        pump_every_view(&mut app, at);
-        let hopper = secondary_parent(&app)
-            .and_then(|parent| parent.downcast::<TrainHoppingAnimation>(&app))
-            .expect("the secondary animation hops trains");
-        assert_eq!(app.get(hopper).current_train(), two_animation);
+            let three: RouteRef = tester.update(|app| page_route(app, None, "three").into_erased());
+            tester.update(|app| navigator_state.push_replacement(app, three.clone(), None));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(1));
+            let hopper = {
+                let app = tester.cell.borrow();
+                let hopper = one_route
+                    .transition_route_data(&app)
+                    .secondary_animation
+                    .parent(&app)
+                    .and_then(|parent| parent.downcast::<TrainHoppingAnimation>(&app))
+                    .expect("the secondary animation hops trains");
+                assert_eq!(app.get(hopper).current_train(), two_animation);
+                hopper
+            };
 
-        let at = settle(&mut app, at);
-        let three_animation = three
-            .as_transition_route(&app)
-            .and_then(|route| route.underlying_animation(&app));
-        assert_eq!(secondary_parent(&app), three_animation);
-        drop(app);
-        cell.checkpoint();
-        assert!(
-            !cell.borrow().contains(hopper),
-            "the finished hop's animation is freed"
-        );
+            tester.pump_and_settle();
+            let three_animation = {
+                let app = tester.cell.borrow();
+                three
+                    .as_transition_route(&app)
+                    .and_then(|route| route.underlying_animation(&app))
+            };
+            assert_eq!(secondary_parent(tester), three_animation);
+            tester.cell.checkpoint();
+            assert!(
+                !tester.cell.borrow().contains(hopper),
+                "the finished hop's animation is freed"
+            );
 
-        let mut app = cell.borrow_mut();
-        navigator_state.pop(&mut app, None);
-        settle(&mut app, at);
-        assert_eq!(secondary_parent(&app), Some(dismissed));
+            tester.update(|app| navigator_state.pop(app, None));
+            tester.pump_and_settle();
+            assert_eq!(secondary_parent(tester), Some(dismissed));
+        });
     }
 
     #[test]
     fn a_non_dismissible_barrier_keeps_the_route() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").into_erased())
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let navigator_state = mount_navigator(tester, &key);
 
-        let dialog: RouteRef = RawDialogRoute::new(&mut app, corner_page(None))
-            .barrier_dismissible(&mut app, false)
-            .into_erased();
-        navigator_state.push(&mut app, dialog.clone());
-        let at = settle(&mut app, at);
+            let dialog: RouteRef = tester.update(|app| {
+                RawDialogRoute::new(app, corner_page(None))
+                    .barrier_dismissible(app, false)
+                    .into_erased()
+            });
+            tester.update(|app| navigator_state.push(app, dialog.clone()));
+            tester.pump_and_settle();
 
-        tap_at(&mut app, Offset::new(150.0, 100.0));
-        pump_every_view(&mut app, at);
-        settle(&mut app, at);
-        assert!(dialog.is_current(&app), "the tap did nothing");
+            tester.tap_at(Offset::new(150.0, 100.0), 1);
+            tester.pump();
+            tester.pump_and_settle();
+            assert!(
+                dialog.is_current(&tester.cell.borrow()),
+                "the tap did nothing"
+            );
+        });
     }
 
     #[test]
     fn local_history_entries_are_popped_before_the_route() {
-        let cell = app_with_view();
-        let key = GlobalKey::new();
-        mount(
-            &cell,
-            navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").into_erased())
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let navigator_state = mount_navigator(tester, &key);
 
-        let second = page_route(&mut app, None, "second");
-        navigator_state.push(&mut app, second.clone().into_erased());
-        let at = settle(&mut app, at);
+            let second = tester.update(|app| page_route(app, None, "second"));
+            tester.update(|app| navigator_state.push(app, second.clone().into_erased()));
+            tester.pump_and_settle();
 
-        let removed = Rc::new(Cell::new(false));
-        let entry = LocalHistoryEntry::new(&mut app).on_remove(&mut app, {
-            let removed = Rc::clone(&removed);
-            Listener::new(move |_app| removed.set(true))
+            let removed = Rc::new(Cell::new(false));
+            tester.update(|app| {
+                let entry = LocalHistoryEntry::new(app).on_remove(app, {
+                    let removed = Rc::clone(&removed);
+                    Listener::new(move |_app| removed.set(true))
+                });
+                LocalHistoryRoute::add_local_history_entry(second.handle(), app, entry);
+                assert!(Route::will_handle_pop_internally(second.handle(), app));
+                navigator_state.pop(app, None);
+            });
+            tester.pump();
+            assert!(removed.get(), "the local history entry was removed");
+            assert!(
+                second.as_route().is_current(&tester.cell.borrow()),
+                "the route itself is still on top"
+            );
+
+            tester.update(|app| navigator_state.pop(app, None));
+            tester.pump_and_settle();
+            assert!(
+                !second.as_route().is_active(&tester.cell.borrow()),
+                "the route popped next"
+            );
         });
-        LocalHistoryRoute::add_local_history_entry(second.handle(), &mut app, entry);
-        assert!(Route::will_handle_pop_internally(second.handle(), &app));
+    }
 
-        navigator_state.pop(&mut app, None);
-        pump_every_view(&mut app, at);
-        assert!(removed.get(), "the local history entry was removed");
-        assert!(
-            second.as_route().is_current(&app),
-            "the route itself is still on top"
-        );
+    struct Watcher {
+        pushed: Cell<usize>,
+        pushed_next: Cell<usize>,
+        popped: Cell<usize>,
+        popped_next: Cell<usize>,
+    }
 
-        navigator_state.pop(&mut app, None);
-        settle(&mut app, at);
-        assert!(!second.as_route().is_active(&app), "the route popped next");
+    impl RouteAwareObject for Watcher {
+        fn did_push(self: Handle<Self>, app: &mut App) {
+            let count = app.get(self).pushed.get();
+            app.get(self).pushed.set(count + 1);
+        }
+
+        fn did_push_next(self: Handle<Self>, app: &mut App) {
+            let count = app.get(self).pushed_next.get();
+            app.get(self).pushed_next.set(count + 1);
+        }
+
+        fn did_pop(self: Handle<Self>, app: &mut App) {
+            let count = app.get(self).popped.get();
+            app.get(self).popped.set(count + 1);
+        }
+
+        fn did_pop_next(self: Handle<Self>, app: &mut App) {
+            let count = app.get(self).popped_next.get();
+            app.get(self).popped_next.set(count + 1);
+        }
     }
 
     #[test]
     fn a_route_observer_notifies_its_route_aware() {
-        struct Watcher {
-            pushed: Cell<usize>,
-            pushed_next: Cell<usize>,
-            popped: Cell<usize>,
-            popped_next: Cell<usize>,
-        }
-
-        impl RouteAwareObject for Watcher {
-            fn did_push(self: Handle<Self>, app: &mut App) {
-                let count = app.get(self).pushed.get();
-                app.get(self).pushed.set(count + 1);
-            }
-
-            fn did_push_next(self: Handle<Self>, app: &mut App) {
-                let count = app.get(self).pushed_next.get();
-                app.get(self).pushed_next.set(count + 1);
-            }
-
-            fn did_pop(self: Handle<Self>, app: &mut App) {
-                let count = app.get(self).popped.get();
-                app.get(self).popped.set(count + 1);
-            }
-
-            fn did_pop_next(self: Handle<Self>, app: &mut App) {
-                let count = app.get(self).popped_next.get();
-                app.get(self).popped_next.set(count + 1);
-            }
-        }
-
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let observer = RouteObserver::new(
-            &mut app,
-            Rc::new(|app, route: AnyRoute| route.as_page_route(app).is_some()),
-        );
-        let initial: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
-        drop(app);
-        mount(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let observer = tester.update(|app| {
+                RouteObserver::new(
+                    app,
+                    Rc::new(|app, route: AnyRoute| route.as_page_route(app).is_some()),
+                )
+            });
+            let initial: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new()
                     .key(key.clone().into())
@@ -4772,31 +4701,34 @@ mod tests {
                         }
                     })
                     .observers(vec![observer.erase()]),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+            ));
+            let navigator_state = state(&key, tester);
+            tester.pump_and_settle();
 
-        let first = initial.get().expect("the initial route");
-        let watcher = app.create(Watcher {
-            pushed: Cell::new(0),
-            pushed_next: Cell::new(0),
-            popped: Cell::new(0),
-            popped_next: Cell::new(0),
+            let first = initial.get().expect("the initial route");
+            let watcher = tester.update(|app| {
+                app.create(Watcher {
+                    pushed: Cell::new(0),
+                    pushed_next: Cell::new(0),
+                    popped: Cell::new(0),
+                    popped_next: Cell::new(0),
+                })
+            });
+            tester.update(|app| observer.subscribe(app, Rc::new(watcher.handle()), first));
+            assert_eq!(tester.cell.borrow().get(&watcher).pushed.get(), 1);
+
+            tester.update(|app| {
+                let second: RouteRef = page_route(app, None, "second").into_erased();
+                navigator_state.push(app, second);
+            });
+            tester.pump_and_settle();
+            assert_eq!(tester.cell.borrow().get(&watcher).pushed_next.get(), 1);
+
+            tester.update(|app| navigator_state.pop(app, None));
+            tester.pump_and_settle();
+            let app = tester.cell.borrow();
+            assert_eq!(app.get(&watcher).popped_next.get(), 1);
+            assert_eq!(app.get(&watcher).popped.get(), 0);
         });
-        observer.subscribe(&mut app, Rc::new(watcher.handle()), first);
-        assert_eq!(app.get(&watcher).pushed.get(), 1);
-
-        let second: RouteRef = page_route(&mut app, None, "second").into_erased();
-        navigator_state.push(&mut app, second);
-        let at = settle(&mut app, at);
-        assert_eq!(app.get(&watcher).pushed_next.get(), 1);
-
-        navigator_state.pop(&mut app, None);
-        settle(&mut app, at);
-        assert_eq!(app.get(&watcher).popped_next.get(), 1);
-        assert_eq!(app.get(&watcher).popped.get(), 0);
     }
 }

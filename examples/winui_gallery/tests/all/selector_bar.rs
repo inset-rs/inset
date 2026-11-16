@@ -1,5 +1,5 @@
-//! SelectorBar's single selection by click and keys, its tab stop, and the pill under the
-//! selected view.
+//! SelectorBar's single selection by click and keys, its tab stop, the pill under the selected
+//! view, and an item's child taking the item's foreground.
 
 use crate::common::Fixture;
 use std::{
@@ -9,7 +9,8 @@ use std::{
 };
 use waft_embedder::{Offset, PointerChange, TextDirection};
 use waft_foundation::{App, Handle};
-use waft_rendering::CrossAxisAlignment;
+use waft_painting::AnyColor;
+use waft_rendering::{CrossAxisAlignment, RenderParagraph};
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
     PhysicalKeyboardKey as Physical,
@@ -19,6 +20,8 @@ use waft_winui::*;
 
 const VIEWS: [&str; 4] = ["Recent", "Shared", "Favorites", "Archived"];
 const DISABLED: usize = 1;
+/// The view shown by a child rather than a text.
+const CHILD: usize = 3;
 
 #[derive(Debug, Default)]
 struct Probe {
@@ -59,7 +62,14 @@ impl State for OwnerState {
         let items = VIEWS
             .iter()
             .enumerate()
-            .map(|(index, name)| SelectorBarItem::new(*name, *name).is_enabled(index != DISABLED))
+            .map(|(index, name)| {
+                let item = if index == CHILD {
+                    SelectorBarItem::with_child(*name, Text::new(*name))
+                } else {
+                    SelectorBarItem::new(*name, *name)
+                };
+                item.is_enabled(index != DISABLED)
+            })
             .collect();
         let bar = SelectorBar::new(items, app.get(self).selected, move |app, picked| {
             probe.asked.borrow_mut().push(picked);
@@ -155,6 +165,18 @@ fn pill_under(f: &Fixture, text: &str) -> bool {
     })
 }
 
+/// The colour the text reading `text` is drawn in.
+fn text_color(f: &Fixture, text: &str) -> Option<AnyColor> {
+    let elements = f.elements();
+    let app = f.cell.borrow();
+    elements.into_iter().find_map(|element| {
+        let object = element.render_object(&app)?;
+        let paragraph = object.downcast::<RenderParagraph>(&app)?;
+        let span = paragraph.text(&app);
+        (span.to_plain_text(true, true) == text).then(|| span.style()?.color.clone())?
+    })
+}
+
 fn settle(f: &mut Fixture) {
     for _ in 0..12 {
         f.frame_after(Duration::from_millis(20));
@@ -228,4 +250,25 @@ fn left_and_right_follow_the_reading_direction() {
     key(&mut f, Physical::TAB, Key::TAB);
     key(&mut f, Physical::ARROW_LEFT, Key::ARROW_LEFT);
     assert_eq!(*probe.asked.borrow(), [Some(3)]);
+}
+
+#[test]
+fn a_child_takes_its_items_foreground_and_the_selected_one_once_selected() {
+    let r = ThemeResources::new(Theme::Light, AccentPalette::default());
+    let (mut f, _) = fixture(Some(0), TextDirection::Ltr);
+    settle(&mut f);
+    let child = f.find(VIEWS[CHILD]);
+    f.send_mouse(PointerChange::Hover, child, 0);
+    settle(&mut f);
+    assert_eq!(
+        text_color(&f, VIEWS[CHILD]),
+        Some(r.selector_bar_item_foreground_pointer_over.into())
+    );
+    f.send_mouse(PointerChange::Hover, Offset::new(590.0, 190.0), 0);
+    tap(&mut f, VIEWS[CHILD]);
+    settle(&mut f);
+    assert_eq!(
+        text_color(&f, VIEWS[CHILD]),
+        Some(r.selector_bar_item_foreground_selected.into())
+    );
 }

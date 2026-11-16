@@ -225,9 +225,11 @@ mod tests {
     use waft_painting::AnyColor;
     use waft_widgets::{Builder, SizedBox};
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
-    use crate::test_support::{build, probe, test_cell, with_main_thread_stack};
+    use crate::test_support::probe;
     use crate::theme_data::ThemeData;
 
     fn any(color: Color) -> AnyColor {
@@ -303,7 +305,7 @@ mod tests {
 
     #[test]
     fn text_selection_theme_overrides_default_selection_style() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const THEME_SELECTION_COLOR: Color = Color::new(0xffaabbcc);
             const THEME_CURSOR_COLOR: Color = Color::new(0x00ccbbaa);
             const DEFAULT_SELECTION_COLOR: Color = Color::new(0xffaa1111);
@@ -332,8 +334,7 @@ mod tests {
                 .cursor_color(DEFAULT_CURSOR_COLOR)
                 .into_widget();
 
-            let cell = test_cell();
-            build(&cell, root);
+            tester.pump_widget(root);
 
             let style = outer.borrow_mut().take().expect("the outer probe built");
             assert_eq!(style.selection_color, Some(any(DEFAULT_SELECTION_COLOR)));
@@ -346,15 +347,14 @@ mod tests {
 
     #[test]
     fn of_returns_the_theme_data_text_selection_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let theme_data_selection = TextSelectionThemeData::new()
                 .cursor_color(Color::new(0xffaabbcc))
                 .selection_handle_color(Color::new(0x00ccbbaa));
             let expected = theme_data_selection.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .text_selection_theme(theme_data_selection.clone())
@@ -370,8 +370,7 @@ mod tests {
 
     #[test]
     fn of_returns_the_closest_text_selection_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let widget_selection = TextSelectionThemeData::new()
                 .cursor_color(Color::new(0xffddeeff))
                 .selection_color(Color::new(0x44444444))
@@ -379,7 +378,7 @@ mod tests {
             let expected = widget_selection.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .text_selection_theme(

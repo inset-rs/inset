@@ -1521,39 +1521,19 @@ impl RenderBox for RenderSegmentedControl {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use waft_foundation::AppCell;
 
-    use waft_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-    use waft_gestures::GestureBinding;
     use waft_services::{
         HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
     };
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
     use waft_widgets::{GlobalKey, SizedBox, WidgetsBinding};
 
     use super::*;
-    use crate::test_support::{build, pump};
 
     const SELECTED: Color = Color::from_argb(255, 0, 255, 0);
     const UNSELECTED: Color = Color::from_argb(255, 0, 0, 255);
     const PRESSED: Color = Color::from_argb(255, 255, 0, 0);
     const BORDER: Color = Color::from_argb(255, 0, 0, 0);
-
-    /// The test view is 2x: logical coordinates double into the packet.
-    fn send(app: &mut App, change: PointerChange, at: Offset, time: Duration) {
-        GestureBinding::instance(app).handle_pointer_data_packet(
-            app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Touch,
-                time_stamp: time,
-                pointer_identifier: 1,
-                physical_x: at.dx() * 2.0,
-                physical_y: at.dy() * 2.0,
-                ..PointerData::default()
-            }]),
-        );
-        app.drain_microtasks();
-    }
 
     /// A host that owns the group value, as a Dart caller's `StatefulWidget` does.
     #[derive(Debug)]
@@ -1618,8 +1598,8 @@ mod tests {
         }
     }
 
-    struct Mounted {
-        cell: Rc<AppCell>,
+    struct Mounted<'t> {
+        tester: &'t mut WidgetTester,
         binding: Handle<WidgetsBinding>,
         host: Handle<HostState>,
         control: Handle<SegmentedControlState<u32>>,
@@ -1639,64 +1619,61 @@ mod tests {
         found
     }
 
-    impl Mounted {
+    impl Mounted<'_> {
         fn render(&self) -> RenderHandle<RenderSegmentedControl> {
             let root = self
                 .binding
-                .root_element(&self.cell.borrow())
+                .root_element(&self.tester.cell.borrow())
                 .expect("a mounted root element")
-                .find_render_object(&self.cell.borrow())
+                .find_render_object(&self.tester.cell.borrow())
                 .expect("a mounted view has a render object");
-            find::<RenderSegmentedControl>(&self.cell.borrow(), root)
+            find::<RenderSegmentedControl>(&self.tester.cell.borrow(), root)
                 .expect("the control's render object")
         }
 
         fn segments(&self) -> Vec<AnyRenderBox> {
-            self.render().children_as_list(&self.cell.borrow())
+            self.render().children_as_list(&self.tester.cell.borrow())
         }
 
         fn segment_offset(&self, index: usize) -> Offset {
             self.segments()[index]
                 .as_object()
-                .parent_data_of::<SegmentedControlContainerBoxParentData>(&self.cell.borrow())
+                .parent_data_of::<SegmentedControlContainerBoxParentData>(
+                    &self.tester.cell.borrow(),
+                )
                 .offset()
         }
 
         /// The centre of a segment in the view's coordinate system.
         fn segment_center(&self, index: usize) -> Offset {
             let child = self.segments()[index];
-            let size = child.size(&self.cell.borrow());
+            let size = child.size(&self.tester.cell.borrow());
             let local =
                 self.segment_offset(index) + Offset::new(size.width() / 2.0, size.height() / 2.0);
             self.render()
                 .as_box()
-                .local_to_global(&self.cell.borrow(), local, None)
+                .local_to_global(&self.tester.cell.borrow(), local, None)
         }
 
         fn backgrounds(&self) -> Vec<Color> {
-            self.render().background_colors(&self.cell.borrow())
-        }
-
-        fn settle(&mut self, at: Duration) {
-            pump(&mut self.cell.borrow_mut(), at);
+            self.render().background_colors(&self.tester.cell.borrow())
         }
     }
 
-    fn mount(disabled: Vec<u32>, text_direction: TextDirection) -> Mounted {
-        let cell = crate::test_support::test_cell();
+    fn mount(
+        tester: &mut WidgetTester,
+        disabled: Vec<u32>,
+        text_direction: TextDirection,
+    ) -> Mounted<'_> {
         let changes: Rc<RefCell<Vec<u32>>> = Rc::default();
         let host_key = GlobalKey::new();
-        build(
-            &cell,
-            Host {
-                key: Some(host_key.clone().into()),
-                changes: Rc::clone(&changes),
-                disabled,
-                text_direction,
-            }
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        tester.pump_widget(Host {
+            key: Some(host_key.clone().into()),
+            changes: Rc::clone(&changes),
+            disabled,
+            text_direction,
+        });
+        let mut app = tester.cell.borrow_mut();
         let host = host_key
             .current_state::<HostState>(&app)
             .expect("the host mounted");
@@ -1709,7 +1686,7 @@ mod tests {
         let binding = WidgetsBinding::instance(&mut app);
         drop(app);
         Mounted {
-            cell,
+            tester,
             binding,
             host,
             control,
@@ -1719,165 +1696,168 @@ mod tests {
 
     #[test]
     fn every_segment_takes_the_same_width_under_a_tight_parent() {
-        let mounted = mount(Vec::new(), TextDirection::Ltr);
-        let widths: Vec<f64> = mounted
-            .segments()
-            .iter()
-            .map(|child| child.size(&mounted.cell.borrow()).width())
-            .collect();
-        let expected = (400.0 - 32.0) / 3.0;
-        assert_eq!(widths, vec![expected; 3]);
-        assert_eq!(
-            mounted.render().size(&mounted.cell.borrow()),
-            Size::new(400.0 - 32.0, K_MIN_SEGMENTED_CONTROL_HEIGHT),
-            "the control is as tall as the minimum and as wide as the padded view"
-        );
-        assert_eq!(
-            mounted.segment_offset(1),
-            Offset::new(expected, 0.0),
-            "segments sit next to each other"
-        );
+        test_widgets(|tester| {
+            let mounted = mount(tester, Vec::new(), TextDirection::Ltr);
+            let widths: Vec<f64> = mounted
+                .segments()
+                .iter()
+                .map(|child| child.size(&mounted.tester.cell.borrow()).width())
+                .collect();
+            let expected = (800.0 - 32.0) / 3.0;
+            assert_eq!(widths, vec![expected; 3]);
+            assert_eq!(
+                mounted.render().size(&mounted.tester.cell.borrow()),
+                Size::new(800.0 - 32.0, K_MIN_SEGMENTED_CONTROL_HEIGHT),
+                "the control is as tall as the minimum and as wide as the padded view"
+            );
+            assert_eq!(
+                mounted.segment_offset(1),
+                Offset::new(expected, 0.0),
+                "segments sit next to each other"
+            );
+        });
     }
 
     #[test]
     fn the_selected_segment_takes_the_selected_colour() {
-        let mut mounted = mount(Vec::new(), TextDirection::Ltr);
-        assert_eq!(
-            mounted.backgrounds(),
-            vec![SELECTED, UNSELECTED, UNSELECTED]
-        );
-        assert_eq!(
-            mounted.render().border_color(&mounted.cell.borrow()),
-            BORDER
-        );
+        test_widgets(|tester| {
+            let mounted = mount(tester, Vec::new(), TextDirection::Ltr);
+            assert_eq!(
+                mounted.backgrounds(),
+                vec![SELECTED, UNSELECTED, UNSELECTED]
+            );
+            assert_eq!(
+                mounted.render().border_color(&mounted.tester.cell.borrow()),
+                BORDER
+            );
 
-        let tap = mounted.segment_center(1);
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Down,
-            tap,
-            Duration::ZERO,
-        );
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Up,
-            tap,
-            Duration::from_millis(10),
-        );
-        assert_eq!(*mounted.changes.borrow(), [1], "the second segment's key");
+            let tap = mounted.segment_center(1);
+            mounted.tester.tap_at(tap, 1);
+            assert_eq!(*mounted.changes.borrow(), [1], "the second segment's key");
 
-        mounted.settle(Duration::from_millis(20));
-        mounted.settle(Duration::from_millis(400));
-        assert_eq!(mounted.cell.borrow().get(mounted.host).group_value, 1);
-        assert_eq!(
-            mounted.backgrounds(),
-            vec![UNSELECTED, SELECTED, UNSELECTED],
-            "the colours follow the selection once the fade ends"
-        );
+            mounted.tester.pump_by(Duration::from_millis(20));
+            mounted.tester.pump_by(Duration::from_millis(380));
+            assert_eq!(
+                mounted.tester.cell.borrow().get(mounted.host).group_value,
+                1
+            );
+            assert_eq!(
+                mounted.backgrounds(),
+                vec![UNSELECTED, SELECTED, UNSELECTED],
+                "the colours follow the selection once the fade ends"
+            );
+        });
     }
 
     #[test]
     fn a_disabled_segment_ignores_a_tap() {
-        let mounted = mount(vec![2], TextDirection::Ltr);
-        let tap = mounted.segment_center(2);
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Down,
-            tap,
-            Duration::ZERO,
-        );
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Up,
-            tap,
-            Duration::from_millis(10),
-        );
-        assert!(
-            mounted.changes.borrow().is_empty(),
-            "a disabled segment reports nothing"
-        );
-        assert_eq!(mounted.cell.borrow().get(mounted.host).group_value, 0);
+        test_widgets(|tester| {
+            let mounted = mount(tester, vec![2], TextDirection::Ltr);
+            let tap = mounted.segment_center(2);
+            mounted.tester.tap_at(tap, 1);
+            assert!(
+                mounted.changes.borrow().is_empty(),
+                "a disabled segment reports nothing"
+            );
+            assert_eq!(
+                mounted.tester.cell.borrow().get(mounted.host).group_value,
+                0
+            );
+        });
     }
 
     #[test]
     fn a_held_segment_takes_the_pressed_colour() {
-        let mut mounted = mount(Vec::new(), TextDirection::Ltr);
-        let tap = mounted.segment_center(1);
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Down,
-            tap,
-            Duration::ZERO,
-        );
-        mounted.settle(Duration::from_millis(10));
-        assert_eq!(
-            mounted.cell.borrow().get(mounted.control).pressed_key,
-            Some(1),
-            "the segment under the finger is the pressed key"
-        );
-        assert_eq!(mounted.backgrounds(), vec![SELECTED, PRESSED, UNSELECTED]);
+        test_widgets(|tester| {
+            let mounted = mount(tester, Vec::new(), TextDirection::Ltr);
+            let tap = mounted.segment_center(1);
+            let mut touch = TestPointer::touch(1);
+            mounted.tester.down(&mut touch, tap);
+            mounted.tester.pump_by(Duration::from_millis(10));
+            assert_eq!(
+                mounted
+                    .tester
+                    .cell
+                    .borrow()
+                    .get(mounted.control)
+                    .pressed_key,
+                Some(1),
+                "the segment under the finger is the pressed key"
+            );
+            assert_eq!(mounted.backgrounds(), vec![SELECTED, PRESSED, UNSELECTED]);
 
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Cancel,
-            tap,
-            Duration::from_millis(20),
-        );
-        mounted.settle(Duration::from_millis(30));
-        assert_eq!(mounted.cell.borrow().get(mounted.control).pressed_key, None);
-        assert_eq!(
-            mounted.backgrounds(),
-            vec![SELECTED, UNSELECTED, UNSELECTED]
-        );
+            mounted.tester.cancel(&touch);
+            mounted.tester.pump_by(Duration::from_millis(20));
+            assert_eq!(
+                mounted
+                    .tester
+                    .cell
+                    .borrow()
+                    .get(mounted.control)
+                    .pressed_key,
+                None
+            );
+            assert_eq!(
+                mounted.backgrounds(),
+                vec![SELECTED, UNSELECTED, UNSELECTED]
+            );
+        });
     }
 
     #[test]
     fn a_right_to_left_control_rounds_the_rightmost_segment_first() {
-        let mounted = mount(Vec::new(), TextDirection::Rtl);
-        let width = (400.0 - 32.0) / 3.0;
-        assert_eq!(
-            mounted.segment_offset(0),
-            Offset::new(2.0 * width, 0.0),
-            "the first child is laid out on the right"
-        );
-        assert_eq!(mounted.segment_offset(2), Offset::new(0.0, 0.0));
-        let leftmost = mounted.segments()[2]
-            .as_object()
-            .parent_data_of::<SegmentedControlContainerBoxParentData>(&mounted.cell.borrow())
-            .surrounding_rect
-            .expect("laid out");
-        assert_eq!(leftmost.tl_radius_x, 3.0, "the leftmost corner is rounded");
-        assert_eq!(leftmost.tr_radius_x, 0.0);
+        test_widgets(|tester| {
+            let mounted = mount(tester, Vec::new(), TextDirection::Rtl);
+            let width = (800.0 - 32.0) / 3.0;
+            assert_eq!(
+                mounted.segment_offset(0),
+                Offset::new(2.0 * width, 0.0),
+                "the first child is laid out on the right"
+            );
+            assert_eq!(mounted.segment_offset(2), Offset::new(0.0, 0.0));
+            let leftmost = mounted.segments()[2]
+                .as_object()
+                .parent_data_of::<SegmentedControlContainerBoxParentData>(
+                    &mounted.tester.cell.borrow(),
+                )
+                .surrounding_rect
+                .expect("laid out");
+            assert_eq!(leftmost.tl_radius_x, 3.0, "the leftmost corner is rounded");
+            assert_eq!(leftmost.tr_radius_x, 0.0);
+        });
     }
 
     #[test]
     fn an_arrow_key_selects_the_next_segment_through_the_radio_group() {
-        let mounted = mount(Vec::new(), TextDirection::Ltr);
-        let key = mounted
-            .cell
-            .borrow()
-            .get(mounted.control)
-            .segment_keys
-            .get(&0)
-            .cloned()
-            .expect("a key for the first segment");
-        let first = key
-            .current_state::<SegmentButtonState<u32>>(&mounted.cell.borrow_mut())
-            .expect("the segment mounted");
-        first.request_focus(&mut mounted.cell.borrow_mut());
-        mounted.cell.borrow_mut().drain_microtasks();
+        test_widgets(|tester| {
+            let mounted = mount(tester, Vec::new(), TextDirection::Ltr);
+            let key = mounted
+                .tester
+                .cell
+                .borrow()
+                .get(mounted.control)
+                .segment_keys
+                .get(&0)
+                .cloned()
+                .expect("a key for the first segment");
+            let first = key
+                .current_state::<SegmentButtonState<u32>>(&mounted.tester.cell.borrow_mut())
+                .expect("the segment mounted");
+            first.request_focus(&mut mounted.tester.cell.borrow_mut());
+            mounted.tester.cell.borrow_mut().drain_microtasks();
 
-        let keyboard = HardwareKeyboard::instance(&mut mounted.cell.borrow_mut());
-        let arrow_right = KeyEvent::Down(KeyDownEvent::new(
-            PhysicalKeyboardKey::ARROW_RIGHT,
-            LogicalKeyboardKey::ARROW_RIGHT,
-            Duration::ZERO,
-        ));
-        assert!(
-            keyboard.handle_key_event(&mut mounted.cell.borrow_mut(), &arrow_right),
-            "the radio group handled the arrow key"
-        );
-        mounted.cell.borrow_mut().drain_microtasks();
-        assert_eq!(*mounted.changes.borrow(), [1]);
+            let keyboard = HardwareKeyboard::instance(&mut mounted.tester.cell.borrow_mut());
+            let arrow_right = KeyEvent::Down(KeyDownEvent::new(
+                PhysicalKeyboardKey::ARROW_RIGHT,
+                LogicalKeyboardKey::ARROW_RIGHT,
+                Duration::ZERO,
+            ));
+            assert!(
+                keyboard.handle_key_event(&mut mounted.tester.cell.borrow_mut(), &arrow_right),
+                "the radio group handled the arrow key"
+            );
+            mounted.tester.cell.borrow_mut().drain_microtasks();
+            assert_eq!(*mounted.changes.borrow(), [1]);
+        });
     }
 }

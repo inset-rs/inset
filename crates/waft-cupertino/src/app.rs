@@ -813,51 +813,20 @@ impl ScrollBehavior for CupertinoScrollBehavior {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::time::Duration;
-    use waft_foundation::AppCell;
 
     use waft_embedder::Color;
-    use waft_painting::PaintingBinding;
     use waft_test::TestPlatform;
+    use waft_widgets::testing::{
+        Finder, TargetPlatformVariant, WidgetTester, expect, find, finds_widgets, test_widgets,
+        test_widgets_variant,
+    };
     use waft_widgets::{
-        AnyElement, AnyModalRoute, Localizations, Navigator, ScrollController, ScrollControllerRef,
-        SizedBox, StatelessWidget, WidgetsBinding, WidgetsLocalizations, downcast_widget,
+        AnyModalRoute, Localizations, Navigator, ScrollController, ScrollControllerRef, SizedBox,
+        StatelessWidget, WidgetsLocalizations, downcast_widget,
     };
 
     use super::*;
     use crate::localizations::CupertinoLocalizations;
-    use crate::test_support::{build, test_view};
-
-    /// An app on `target_platform`, over the shared test view.
-    fn app_of(target_platform: TargetPlatform) -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(target_platform)
-            .with_view(test_view());
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
-        drop(app);
-        cell
-    }
-
-    /// What the shell does at start-up: the app-wide fonts, which the debug banner needs.
-    fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
-    }
-
-    /// Runs frames until the route transitions have settled.
-    fn settle(app: &mut App) {
-        let mut at = Duration::ZERO;
-        for _ in 0..40 {
-            at += Duration::from_millis(20);
-            crate::test_support::pump(app, at);
-        }
-    }
 
     /// A leaf that is easy to find in the element tree.
     #[derive(Debug)]
@@ -878,34 +847,15 @@ mod tests {
         })
     }
 
-    fn root_element(app: &mut App) -> AnyElement {
-        WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("a mounted app")
-    }
-
-    /// Every element of the mounted tree, parents before children.
-    fn descendants(app: &App, root: AnyElement) -> Vec<AnyElement> {
-        let mut all = vec![root];
-        let mut visited = 0;
-        while visited < all.len() {
-            let element = all[visited];
-            element.visit_children(app, &mut |child| all.push(child));
-            visited += 1;
-        }
-        all
-    }
-
-    fn has_widget<W: 'static>(app: &App, root: AnyElement) -> bool {
-        descendants(app, root)
-            .into_iter()
-            .any(|element| downcast_widget::<W>(&**element.widget(app)).is_some())
+    /// Dart's `find.byType(W, skipOffstage: false)`.
+    fn built<W: 'static>() -> Finder {
+        find::by_type::<W>().skip_offstage(false)
     }
 
     /// Mounts `configure(CupertinoApp::new())` and settles its route transitions.
-    fn mount(cell: &AppCell, configure: impl FnOnce(CupertinoApp) -> CupertinoApp) {
-        build(cell, configure(CupertinoApp::new()).into_widget());
-        settle(&mut cell.borrow_mut());
+    fn mount(tester: &mut WidgetTester, configure: impl FnOnce(CupertinoApp) -> CupertinoApp) {
+        tester.pump_widget(configure(CupertinoApp::new()));
+        tester.pump_and_settle();
     }
 
     /// The route the home page of a mounted app sits in.
@@ -919,61 +869,63 @@ mod tests {
 
     #[test]
     fn an_app_with_a_home_wraps_it_in_the_cupertino_chrome_and_a_navigator() {
-        let cell = app_of(TargetPlatform::IOS);
-        mount(&cell, |cupertino_app| cupertino_app.home(Marker));
-        let mut app = cell.borrow_mut();
-        let root = root_element(&mut app);
-        assert!(has_widget::<ScrollConfiguration>(&app, root));
-        assert!(has_widget::<CupertinoUserInterfaceLevel>(&app, root));
-        assert!(has_widget::<CupertinoTheme>(&app, root));
-        assert!(has_widget::<HeroControllerScope>(&app, root));
-        assert!(has_widget::<WidgetsApp>(&app, root));
-        assert!(has_widget::<Navigator>(&app, root));
-        assert!(
-            has_widget::<Marker>(&app, root),
-            "the home route shows home"
-        );
+        test_widgets(|tester| {
+            mount(tester, |cupertino_app| cupertino_app.home(Marker));
+            expect(tester, &built::<ScrollConfiguration>(), finds_widgets());
+            expect(
+                tester,
+                &built::<CupertinoUserInterfaceLevel>(),
+                finds_widgets(),
+            );
+            expect(tester, &built::<CupertinoTheme>(), finds_widgets());
+            expect(tester, &built::<HeroControllerScope>(), finds_widgets());
+            expect(tester, &built::<WidgetsApp>(), finds_widgets());
+            expect(tester, &built::<Navigator>(), finds_widgets());
+            // The home route shows home.
+            expect(tester, &built::<Marker>(), finds_widgets());
+        });
     }
 
     #[test]
     fn the_home_route_reads_the_cupertino_and_widgets_localizations() {
-        let cell = app_of(TargetPlatform::IOS);
-        let home = Rc::new(Cell::new(None));
-        let builder = context_page(&home);
-        mount(&cell, |cupertino_app| {
-            cupertino_app.home(Builder::new(move |app, context| builder(app, context)))
+        test_widgets(|tester| {
+            let home = Rc::new(Cell::new(None));
+            let builder = context_page(&home);
+            mount(tester, |cupertino_app| {
+                cupertino_app.home(Builder::new(move |app, context| builder(app, context)))
+            });
+            let mut app = tester.cell.borrow_mut();
+            let context = home.get().expect("the home page built");
+            assert_eq!(
+                <dyn CupertinoLocalizations>::of(&mut app, context).alert_dialog_label(),
+                "Alert",
+                "the Cupertino delegate is supplied"
+            );
+            assert!(
+                Localizations::of::<dyn WidgetsLocalizations>(&mut app, context).is_some(),
+                "the widgets delegate the WidgetsApp appends is still there"
+            );
         });
-        let mut app = cell.borrow_mut();
-        let context = home.get().expect("the home page built");
-        assert_eq!(
-            <dyn CupertinoLocalizations>::of(&mut app, context).alert_dialog_label(),
-            "Alert",
-            "the Cupertino delegate is supplied"
-        );
-        assert!(
-            Localizations::of::<dyn WidgetsLocalizations>(&mut app, context).is_some(),
-            "the widgets delegate the WidgetsApp appends is still there"
-        );
     }
 
     #[test]
     fn the_home_route_reads_the_theme_the_app_was_given() {
-        const PRIMARY: Color = Color::new(0xFF00FF00);
-
-        let cell = app_of(TargetPlatform::IOS);
-        let home = Rc::new(Cell::new(None));
-        let builder = context_page(&home);
-        mount(&cell, |cupertino_app| {
-            cupertino_app
-                .theme(CupertinoThemeData::new().with_primary_color(PRIMARY))
-                .home(Builder::new(move |app, context| builder(app, context)))
+        test_widgets(|tester| {
+            const PRIMARY: Color = Color::new(0xFF00FF00);
+            let home = Rc::new(Cell::new(None));
+            let builder = context_page(&home);
+            mount(tester, |cupertino_app| {
+                cupertino_app
+                    .theme(CupertinoThemeData::new().with_primary_color(PRIMARY))
+                    .home(Builder::new(move |app, context| builder(app, context)))
+            });
+            let mut app = tester.cell.borrow_mut();
+            let context = home.get().expect("the home page built");
+            assert_eq!(
+                CupertinoTheme::of(&mut app, context).primary_color(),
+                AnyColor::new(PRIMARY)
+            );
         });
-        let mut app = cell.borrow_mut();
-        let context = home.get().expect("the home page built");
-        assert_eq!(
-            CupertinoTheme::of(&mut app, context).primary_color(),
-            AnyColor::new(PRIMARY)
-        );
     }
 
     /// `app_test.dart`: "Cursor color is resolved when CupertinoThemeData.brightness is null",
@@ -981,15 +933,11 @@ mod tests {
     /// dark platform where Dart sets `debugBrightnessOverride`.
     #[test]
     fn the_app_sets_a_default_selection_style_from_its_resolved_primary_color() {
-        let platform = waft_test::TestPlatform::new()
-            .on(TargetPlatform::IOS)
-            .with_brightness(Brightness::Dark)
-            .with_view(test_view());
-        let cell = AppCell::with_platform(Rc::new(platform));
-        install_fonts(&mut cell.borrow_mut());
+        let tester =
+            &mut WidgetTester::with_platform(TestPlatform::new().with_brightness(Brightness::Dark));
         let home = Rc::new(Cell::new(None));
         let builder = context_page(&home);
-        mount(&cell, |cupertino_app| {
+        mount(tester, |cupertino_app| {
             cupertino_app
                 .theme(
                     CupertinoThemeData::new()
@@ -997,7 +945,7 @@ mod tests {
                 )
                 .home(Builder::new(move |app, context| builder(app, context)))
         });
-        let mut app = cell.borrow_mut();
+        let mut app = tester.cell.borrow_mut();
         let context = home.get().expect("the home page built");
         let style = DefaultSelectionStyle::of(&mut app, context);
         let dark_orange = crate::colors::CupertinoColors::ACTIVE_ORANGE
@@ -1018,151 +966,137 @@ mod tests {
 
     #[test]
     fn the_route_the_home_page_sits_in_is_a_cupertino_page_route() {
-        let cell = app_of(TargetPlatform::IOS);
-        let home = Rc::new(Cell::new(None));
-        let builder = context_page(&home);
-        mount(&cell, |cupertino_app| {
-            cupertino_app.home(Builder::new(move |app, context| builder(app, context)))
+        test_widgets(|tester| {
+            let home = Rc::new(Cell::new(None));
+            let builder = context_page(&home);
+            mount(tester, |cupertino_app| {
+                cupertino_app.home(Builder::new(move |app, context| builder(app, context)))
+            });
+            let mut app = tester.cell.borrow_mut();
+            let context = home.get().expect("the home page built");
+            home_route(&mut app, context);
         });
-        let mut app = cell.borrow_mut();
-        let context = home.get().expect("the home page built");
-        home_route(&mut app, context);
     }
 
     #[test]
     fn a_routes_table_entry_becomes_a_cupertino_page_route() {
-        let cell = app_of(TargetPlatform::IOS);
-        let home = Rc::new(Cell::new(None));
-        mount(&cell, |cupertino_app| {
-            cupertino_app.routes([(String::from("/"), context_page(&home))])
+        test_widgets(|tester| {
+            let home = Rc::new(Cell::new(None));
+            mount(tester, |cupertino_app| {
+                cupertino_app.routes([(String::from("/"), context_page(&home))])
+            });
+            let mut app = tester.cell.borrow_mut();
+            let context = home.get().expect("the default route built");
+            home_route(&mut app, context);
         });
-        let mut app = cell.borrow_mut();
-        let context = home.get().expect("the default route built");
-        home_route(&mut app, context);
     }
 
     #[test]
     fn on_generate_route_supplies_a_route_the_table_does_not_have() {
-        let cell = app_of(TargetPlatform::IOS);
-        let generated = Rc::new(Cell::new(None));
-        let details = Rc::new(Cell::new(None));
-        let asked_for = Rc::clone(&generated);
-        let details_page = context_page(&details);
-        mount(&cell, |cupertino_app| {
-            cupertino_app
-                .home(SizedBox::expand())
-                .initial_route("/details")
-                .on_generate_route(move |app, settings| {
-                    asked_for.set(settings.name.clone());
-                    let builder = Rc::clone(&details_page);
-                    let route = CupertinoPageRoute::new(app, builder);
-                    Some(route.into_erased())
-                })
+        test_widgets(|tester| {
+            let generated = Rc::new(Cell::new(None));
+            let details = Rc::new(Cell::new(None));
+            let asked_for = Rc::clone(&generated);
+            let details_page = context_page(&details);
+            mount(tester, |cupertino_app| {
+                cupertino_app
+                    .home(SizedBox::expand())
+                    .initial_route("/details")
+                    .on_generate_route(move |app, settings| {
+                        asked_for.set(settings.name.clone());
+                        let builder = Rc::clone(&details_page);
+                        let route = CupertinoPageRoute::new(app, builder);
+                        Some(route.into_erased())
+                    })
+            });
+            assert_eq!(generated.take().as_deref(), Some("/details"));
+            assert!(details.get().is_some(), "the generated route is shown");
         });
-        assert_eq!(generated.take().as_deref(), Some("/details"));
-        assert!(details.get().is_some(), "the generated route is shown");
     }
 
     #[test]
     fn the_scrollbar_is_built_on_desktop_platforms_only() {
-        for platform in [
-            TargetPlatform::Linux,
-            TargetPlatform::MacOS,
-            TargetPlatform::Windows,
-        ] {
-            let (cell, context) = app_with_context(platform);
-            let mut app = cell.borrow_mut();
+        test_widgets_variant(TargetPlatformVariant::desktop(), |tester| {
+            let context = app_with_context(tester);
+            let mut app = tester.cell.borrow_mut();
             assert!(
                 is_cupertino_scrollbar(&mut app, context),
-                "{platform:?} gets a CupertinoScrollbar"
+                "a desktop platform gets a CupertinoScrollbar"
             );
-        }
-        for platform in [
-            TargetPlatform::Android,
-            TargetPlatform::Fuchsia,
-            TargetPlatform::IOS,
-        ] {
-            let (cell, context) = app_with_context(platform);
-            let mut app = cell.borrow_mut();
+        });
+        test_widgets_variant(TargetPlatformVariant::mobile(), |tester| {
+            let context = app_with_context(tester);
+            let mut app = tester.cell.borrow_mut();
             assert!(
                 !is_cupertino_scrollbar(&mut app, context),
-                "{platform:?} keeps the bare child"
+                "a mobile platform keeps the bare child"
             );
-        }
+        });
     }
 
     #[test]
     fn the_physics_bounce_everywhere_and_decelerate_fast_on_macos() {
-        for platform in [
-            TargetPlatform::Android,
-            TargetPlatform::Fuchsia,
-            TargetPlatform::IOS,
-            TargetPlatform::Linux,
-            TargetPlatform::Windows,
-        ] {
-            let (cell, context) = app_with_context(platform);
-            let mut app = cell.borrow_mut();
+        test_widgets_variant(TargetPlatformVariant::all(), |tester| {
+            let context = app_with_context(tester);
+            let platform = tester.target_platform();
+            let mut app = tester.cell.borrow_mut();
             let physics = CupertinoScrollBehavior::new().get_scroll_physics(&mut app, context);
             let bouncing = physics
                 .as_any()
                 .downcast_ref::<BouncingScrollPhysics>()
                 .unwrap_or_else(|| panic!("{platform:?} bounces"));
-            assert_eq!(bouncing.deceleration_rate, ScrollDecelerationRate::Normal);
-            assert!(
-                bouncing.parent.is_none(),
-                "no RangeMaintainingScrollPhysics"
-            );
-        }
-        let (cell, context) = app_with_context(TargetPlatform::MacOS);
-        let mut app = cell.borrow_mut();
-        let physics = CupertinoScrollBehavior::new().get_scroll_physics(&mut app, context);
-        let bouncing = physics
-            .as_any()
-            .downcast_ref::<BouncingScrollPhysics>()
-            .expect("macOS bounces");
-        assert_eq!(bouncing.deceleration_rate, ScrollDecelerationRate::Fast);
+            let deceleration_rate = match platform {
+                TargetPlatform::MacOS => ScrollDecelerationRate::Fast,
+                _ => ScrollDecelerationRate::Normal,
+            };
+            assert_eq!(bouncing.deceleration_rate, deceleration_rate);
+            if platform != TargetPlatform::MacOS {
+                assert!(
+                    bouncing.parent.is_none(),
+                    "no RangeMaintainingScrollPhysics"
+                );
+            }
+        });
     }
 
     #[test]
     fn the_multitouch_drag_strategy_averages_the_boundary_pointers() {
-        let (cell, context) = app_with_context(TargetPlatform::Android);
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            CupertinoScrollBehavior::new().get_multitouch_drag_strategy(&mut app, context),
-            MultitouchDragStrategy::AverageBoundaryPointers
-        );
+        test_widgets(|tester| {
+            let context = app_with_context(tester);
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                CupertinoScrollBehavior::new().get_multitouch_drag_strategy(&mut app, context),
+                MultitouchDragStrategy::AverageBoundaryPointers
+            );
+        });
     }
 
     #[test]
     fn no_overscroll_indicator_is_ever_built() {
-        let (cell, context) = app_with_context(TargetPlatform::Android);
-        let mut app = cell.borrow_mut();
-        let child: WidgetRef = SizedBox::new().into_widget();
-        let details = ScrollableDetails::vertical(false);
-        let decorated = CupertinoScrollBehavior::new().build_overscroll_indicator(
-            &mut app,
-            context,
-            child.clone(),
-            &details,
-        );
-        assert!(Rc::ptr_eq(&decorated, &child));
+        test_widgets(|tester| {
+            let context = app_with_context(tester);
+            let mut app = tester.cell.borrow_mut();
+            let child: WidgetRef = SizedBox::new().into_widget();
+            let details = ScrollableDetails::vertical(false);
+            let decorated = CupertinoScrollBehavior::new().build_overscroll_indicator(
+                &mut app,
+                context,
+                child.clone(),
+                &details,
+            );
+            assert!(Rc::ptr_eq(&decorated, &child));
+        });
     }
 
-    /// An app on `platform` with one mounted build context to resolve against.
-    fn app_with_context(platform: TargetPlatform) -> (Rc<AppCell>, BuildContext) {
-        let cell = app_of(platform);
+    /// One mounted build context to resolve against.
+    fn app_with_context(tester: &mut WidgetTester) -> BuildContext {
         let seen = Rc::new(Cell::new(None));
         let sink = Rc::clone(&seen);
-        build(
-            &cell,
-            Builder::new(move |_app, context| {
-                sink.set(Some(context));
-                SizedBox::new().into_widget()
-            })
-            .into_widget(),
-        );
-        let context = seen.get().expect("the builder ran");
-        (cell, context)
+        tester.pump_widget(Builder::new(move |_app, context| {
+            sink.set(Some(context));
+            SizedBox::new().into_widget()
+        }));
+        seen.get().expect("the builder ran")
     }
 
     fn is_cupertino_scrollbar(app: &mut App, context: BuildContext) -> bool {

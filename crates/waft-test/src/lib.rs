@@ -59,6 +59,6 @@ pub use opener::{MockOpener, Opened};
 pub use platform::{TestDispatcher, TestPlatform};
 pub use test_font_manager::TestFontSource;
 pub use time_zone::TestTimeZone;
-pub use view::{IMPLICIT_VIEW_ID, TestView};
+pub use view::{IMPLICIT_VIEW_ID, MetricsListener, TestView};
 pub use view_host::{TestViewHost, TextInputCall};
 pub use windows::{TestWindow, TestWindows};

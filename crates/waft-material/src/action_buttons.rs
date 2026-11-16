@@ -513,20 +513,16 @@ mod tests {
         SizedBox, Text, WidgetStatePropertyAll,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::drawer::Drawer;
     use crate::material::Material;
     use crate::scaffold::{Scaffold, ScaffoldState};
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        tester
-    }
 
     fn pump_app(tester: &mut WidgetTester, home: WidgetRef) {
         let root = {
@@ -545,13 +541,12 @@ mod tests {
     }
 
     fn tap(tester: &mut WidgetTester, element: AnyElement) {
-        let render = tester.render_box_of(element);
-        let center = tester.global_rect(render).center();
-        tester.tap(center, 1);
+        let center = tester.get_center(element);
+        tester.tap_at(center, 1);
     }
 
     fn only<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        let found = tester.find_by_type::<W>();
+        let found = find::by_type::<W>().evaluate(tester);
         assert_eq!(found.len(), 1);
         found[0]
     }
@@ -570,7 +565,7 @@ mod tests {
     /// The colour of the glyph the button's `Icon` paints: Dart's `tester.firstWidget<RichText>(
     /// find.descendant(of: find.byType(Button), matching: find.byType(RichText))).text.style!.color`.
     fn glyph_color(tester: &WidgetTester) -> Option<Color> {
-        let icon = tester.find_by_type::<Icon>()[0];
+        let icon = find::by_type::<Icon>().evaluate(tester)[0];
         tester
             .glyph_style(icon)
             .color
@@ -603,52 +598,50 @@ mod tests {
     }
 
     /// The tester, on the page `next` builds above the home page.
-    fn on_next_page(next: impl Fn() -> WidgetRef + 'static) -> (WidgetTester, Home) {
-        let mut tester = tester();
+    fn on_next_page(tester: &mut WidgetTester, next: impl Fn() -> WidgetRef + 'static) -> Home {
         let home = Home::default();
-        pump_app(&mut tester, home.page());
-        home.push(&tester, next);
+        pump_app(tester, home.page());
+        home.push(tester, next);
         tester.pump_and_settle();
-        (tester, home)
+        home
     }
 
     fn on_home(tester: &WidgetTester) -> bool {
-        !tester.find_onstage_text("Home").is_empty()
+        !find::text("Home").evaluate(tester).is_empty()
     }
 
     // 'BackButton control test'
     #[test]
     fn a_back_button_pops_the_route() {
-        with_main_thread_stack(|| {
-            let (mut tester, _home) =
-                on_next_page(|| material(Center::new().child(BackButton::new())));
+        test_widgets(|tester| {
+            let _home = on_next_page(tester, || material(Center::new().child(BackButton::new())));
 
-            let button = only::<BackButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<BackButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_text("Home").len(), 1);
+            assert_eq!(find::text("Home").evaluate(tester).len(), 1);
         });
     }
 
     // 'BackButton onPressed overrides default pop behavior'
     #[test]
     fn a_back_buttons_on_pressed_overrides_the_pop() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let calls = Rc::new(Cell::new(0));
-            let (mut tester, _home) = on_next_page({
+            let _home = on_next_page(tester, {
                 let calls = Rc::clone(&calls);
                 move || material(Center::new().child(BackButton::new().on_pressed(counter(&calls))))
             });
 
-            assert!(!on_home(&tester)); // Start off on the second page.
+            assert!(!on_home(tester)); // Start off on the second page.
             assert_eq!(calls.get(), 0);
-            let button = only::<BackButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<BackButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
             // We're still on the second page.
-            assert!(!on_home(&tester));
+            assert!(!on_home(tester));
             // But the custom callback is called.
             assert_eq!(calls.get(), 1);
         });
@@ -657,22 +650,22 @@ mod tests {
     // 'CloseButton onPressed overrides default pop behavior'
     #[test]
     fn a_close_buttons_on_pressed_overrides_the_pop() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let calls = Rc::new(Cell::new(0));
-            let (mut tester, _home) = on_next_page({
+            let _home = on_next_page(tester, {
                 let calls = Rc::clone(&calls);
                 move || {
                     material(Center::new().child(CloseButton::new().on_pressed(counter(&calls))))
                 }
             });
 
-            assert!(!on_home(&tester));
+            assert!(!on_home(tester));
             assert_eq!(calls.get(), 0);
-            let button = only::<CloseButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<CloseButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
-            assert!(!on_home(&tester));
+            assert!(!on_home(tester));
             assert_eq!(calls.get(), 1);
         });
     }
@@ -680,22 +673,21 @@ mod tests {
     // The default pop of 'BackButton control test', for the close button.
     #[test]
     fn a_close_button_pops_the_route() {
-        with_main_thread_stack(|| {
-            let (mut tester, _home) =
-                on_next_page(|| material(Center::new().child(CloseButton::new())));
+        test_widgets(|tester| {
+            let _home = on_next_page(tester, || material(Center::new().child(CloseButton::new())));
 
-            let button = only::<CloseButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<CloseButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_text("Home").len(), 1);
+            assert_eq!(find::text("Home").evaluate(tester).len(), 1);
         });
     }
 
     /// The icons of the `Icon`s the tester found, in tree order.
     fn icons(tester: &WidgetTester) -> Vec<Option<IconData>> {
-        tester
-            .find_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .map(|element| tester.widget(element, |icon: &Icon| icon.icon.clone()))
             .collect()
@@ -727,11 +719,10 @@ mod tests {
     // 'BackButton icon'
     #[test]
     fn a_back_button_icon_is_the_ios_arrow_on_ios_and_macos() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            icon_on_each_platform(&mut tester, || BackButtonIcon::new().into_widget());
+        test_widgets(|tester| {
+            icon_on_each_platform(tester, || BackButtonIcon::new().into_widget());
 
-            let [android, ios, linux, macos, windows] = &icons(&tester)[..] else {
+            let [android, ios, linux, macos, windows] = &icons(tester)[..] else {
                 panic!("one icon for each platform");
             };
             assert_eq!(ios == android, K_IS_WEB);
@@ -745,11 +736,10 @@ mod tests {
     // 'DrawerButton icon'
     #[test]
     fn a_drawer_button_icon_is_the_same_on_every_platform() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            icon_on_each_platform(&mut tester, || DrawerButtonIcon::new().into_widget());
+        test_widgets(|tester| {
+            icon_on_each_platform(tester, || DrawerButtonIcon::new().into_widget());
 
-            let icons = icons(&tester);
+            let icons = icons(tester);
             assert!(icons.iter().all(|icon| *icon == icons[0]));
             assert_eq!(icons[0], Some(Icons::menu()));
         });
@@ -758,14 +748,13 @@ mod tests {
     // The platform choice of `CloseButtonIcon` and `EndDrawerButtonIcon`.
     #[test]
     fn a_close_icon_and_an_end_drawer_icon_are_the_same_on_every_platform() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            icon_on_each_platform(&mut tester, || CloseButtonIcon::new().into_widget());
-            let close_icons = icons(&tester);
+        test_widgets(|tester| {
+            icon_on_each_platform(tester, || CloseButtonIcon::new().into_widget());
+            let close_icons = icons(tester);
             assert!(close_icons.iter().all(|icon| *icon == Some(Icons::close())));
 
-            icon_on_each_platform(&mut tester, || EndDrawerButtonIcon::new().into_widget());
-            let end_drawer_icons = icons(&tester);
+            icon_on_each_platform(tester, || EndDrawerButtonIcon::new().into_widget());
+            let end_drawer_icons = icons(tester);
             assert!(
                 end_drawer_icons
                     .iter()
@@ -778,18 +767,17 @@ mod tests {
     // 'Back', 'Close' and 'Open navigation menu'.
     #[test]
     fn each_action_button_gives_its_icon_button_the_localized_tooltip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let buttons: Vec<WidgetRef> = vec![
                 BackButton::new().into_widget(),
                 CloseButton::new().into_widget(),
                 DrawerButton::new().into_widget(),
                 EndDrawerButton::new().into_widget(),
             ];
-            pump_app(&mut tester, material(Column::new().children(buttons)));
+            pump_app(tester, material(Column::new().children(buttons)));
 
-            let tooltips: Vec<Option<String>> = tester
-                .find_by_type::<IconButton>()
+            let tooltips: Vec<Option<String>> = find::by_type::<IconButton>()
+                .evaluate(tester)
                 .into_iter()
                 .map(|element| tester.widget(element, |button: &IconButton| button.tooltip.clone()))
                 .collect();
@@ -808,18 +796,17 @@ mod tests {
     // The keys that mark a standard component, which each button gives its `IconButton`.
     #[test]
     fn action_buttons_mark_their_icon_button_as_a_standard_component() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let buttons: Vec<WidgetRef> = vec![
                 BackButton::new().into_widget(),
                 CloseButton::new().into_widget(),
                 DrawerButton::new().into_widget(),
                 EndDrawerButton::new().into_widget(),
             ];
-            pump_app(&mut tester, material(Column::new().children(buttons)));
+            pump_app(tester, material(Column::new().children(buttons)));
 
-            let keys: Vec<Option<KeyRef>> = tester
-                .find_by_type::<IconButton>()
+            let keys: Vec<Option<KeyRef>> = find::by_type::<IconButton>()
+                .evaluate(tester)
                 .into_iter()
                 .map(|element| tester.widget(element, |button: &IconButton| button.key.clone()))
                 .collect();
@@ -836,18 +823,17 @@ mod tests {
     }
 
     /// Dart's `MaterialApp(home: Material(child: button))` with the glyph colour read back.
-    fn glyph_color_of<K>(button: impl IntoWidget<K>) -> Option<Color> {
-        let mut tester = tester();
-        pump_app(&mut tester, material(button));
-        glyph_color(&tester)
+    fn glyph_color_of<K>(tester: &mut WidgetTester, button: impl IntoWidget<K>) -> Option<Color> {
+        pump_app(tester, material(button));
+        glyph_color(tester)
     }
 
     // 'BackButton color'
     #[test]
     fn a_back_buttons_color_colors_its_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                glyph_color_of(BackButton::new().color(Colors::RED.primary())),
+                glyph_color_of(tester, BackButton::new().color(Colors::RED.primary())),
                 Some(Colors::RED.primary())
             );
         });
@@ -856,9 +842,9 @@ mod tests {
     // 'BackButton color with ButtonStyle'
     #[test]
     fn a_back_buttons_style_icon_color_colors_its_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                glyph_color_of(BackButton::new().style(red_icon_color())),
+                glyph_color_of(tester, BackButton::new().style(red_icon_color())),
                 Some(Colors::RED.primary())
             );
         });
@@ -867,9 +853,10 @@ mod tests {
     // 'BackButton.style.iconColor parameter overrides BackButton.color'
     #[test]
     fn a_back_buttons_style_icon_color_overrides_its_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
                 glyph_color_of(
+                    tester,
                     BackButton::new()
                         .color(Colors::GREEN.primary())
                         .style(red_icon_color())
@@ -882,9 +869,9 @@ mod tests {
     // 'CloseButton color'
     #[test]
     fn a_close_buttons_color_colors_its_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                glyph_color_of(CloseButton::new().color(Colors::RED.primary())),
+                glyph_color_of(tester, CloseButton::new().color(Colors::RED.primary())),
                 Some(Colors::RED.primary())
             );
         });
@@ -893,9 +880,9 @@ mod tests {
     // 'CloseButton color with ButtonStyle'
     #[test]
     fn a_close_buttons_style_icon_color_colors_its_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                glyph_color_of(CloseButton::new().style(red_icon_color())),
+                glyph_color_of(tester, CloseButton::new().style(red_icon_color())),
                 Some(Colors::RED.primary())
             );
         });
@@ -904,9 +891,10 @@ mod tests {
     // 'CloseButton.style.iconColor parameter overrides CloseButton.color'
     #[test]
     fn a_close_buttons_style_icon_color_overrides_its_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
                 glyph_color_of(
+                    tester,
                     CloseButton::new()
                         .color(Colors::GREEN.primary())
                         .style(red_icon_color())
@@ -919,9 +907,9 @@ mod tests {
     // 'DrawerButton color'
     #[test]
     fn a_drawer_buttons_color_colors_its_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                glyph_color_of(DrawerButton::new().color(Colors::RED.primary())),
+                glyph_color_of(tester, DrawerButton::new().color(Colors::RED.primary())),
                 Some(Colors::RED.primary())
             );
         });
@@ -930,9 +918,9 @@ mod tests {
     // 'DrawerButton color with ButtonStyle'
     #[test]
     fn a_drawer_buttons_style_icon_color_colors_its_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                glyph_color_of(DrawerButton::new().style(red_icon_color())),
+                glyph_color_of(tester, DrawerButton::new().style(red_icon_color())),
                 Some(Colors::RED.primary())
             );
         });
@@ -941,9 +929,9 @@ mod tests {
     // 'EndDrawerButton color'
     #[test]
     fn an_end_drawer_buttons_color_colors_its_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                glyph_color_of(EndDrawerButton::new().color(Colors::RED.primary())),
+                glyph_color_of(tester, EndDrawerButton::new().color(Colors::RED.primary())),
                 Some(Colors::RED.primary())
             );
         });
@@ -952,9 +940,9 @@ mod tests {
     // 'EndDrawerButton color with ButtonStyle'
     #[test]
     fn an_end_drawer_buttons_style_icon_color_colors_its_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                glyph_color_of(EndDrawerButton::new().style(red_icon_color())),
+                glyph_color_of(tester, EndDrawerButton::new().style(red_icon_color())),
                 Some(Colors::RED.primary())
             );
         });
@@ -963,71 +951,68 @@ mod tests {
     // 'DrawerButton control test'
     #[test]
     fn a_drawer_button_opens_the_drawer() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             app_scaffold(
-                &mut tester,
+                tester,
                 Scaffold::new()
                     .body(DrawerButton::new())
                     .drawer(Drawer::new()),
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
 
-            let button = only::<DrawerButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<DrawerButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_by_type::<Drawer>().len(), 1);
+            assert_eq!(find::by_type::<Drawer>().evaluate(tester).len(), 1);
         });
     }
 
     // 'EndDrawerButton control test'
     #[test]
     fn an_end_drawer_button_opens_the_end_drawer() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             app_scaffold(
-                &mut tester,
+                tester,
                 Scaffold::new()
                     .body(EndDrawerButton::new())
                     .end_drawer(Drawer::new()),
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
 
-            let button = only::<EndDrawerButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<EndDrawerButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_by_type::<Drawer>().len(), 1);
+            assert_eq!(find::by_type::<Drawer>().evaluate(tester).len(), 1);
         });
     }
 
     // 'DrawerButton onPressed overrides default end drawer open behaviour'
     #[test]
     fn a_drawer_buttons_on_pressed_overrides_opening_the_drawer() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let calls = Rc::new(Cell::new(0));
-            let mut tester = tester();
             app_scaffold(
-                &mut tester,
+                tester,
                 Scaffold::new()
                     .body(Center::new().child(DrawerButton::new().on_pressed(counter(&calls))))
                     .drawer(Drawer::new()),
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
             assert_eq!(calls.get(), 0);
-            let button = only::<DrawerButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<DrawerButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
             // Drawer is still closed
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
             // The custom callback is called.
             assert_eq!(calls.get(), 1);
         });
@@ -1036,24 +1021,23 @@ mod tests {
     // 'EndDrawerButton onPressed overrides default end drawer open behaviour'
     #[test]
     fn an_end_drawer_buttons_on_pressed_overrides_opening_the_end_drawer() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let calls = Rc::new(Cell::new(0));
-            let mut tester = tester();
             app_scaffold(
-                &mut tester,
+                tester,
                 Scaffold::new()
                     .body(Center::new().child(EndDrawerButton::new().on_pressed(counter(&calls))))
                     .end_drawer(Drawer::new()),
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
             assert_eq!(calls.get(), 0);
-            let button = only::<EndDrawerButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<EndDrawerButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
             assert_eq!(calls.get(), 1);
         });
     }
@@ -1080,18 +1064,17 @@ mod tests {
     // The `openDrawer` each drawer button calls, against the scaffold's state.
     #[test]
     fn a_drawer_button_opens_only_the_drawer() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let state = scaffold_with_both_drawers(
-                &mut tester,
+                tester,
                 vec![
                     EndDrawerButton::new().into_widget(),
                     DrawerButton::new().into_widget(),
                 ],
             );
 
-            let button = only::<DrawerButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<DrawerButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
             assert!(state.is_drawer_open(&tester.cell.borrow()));
@@ -1102,18 +1085,17 @@ mod tests {
     // The `openEndDrawer` each drawer button calls, against the scaffold's state.
     #[test]
     fn an_end_drawer_button_opens_only_the_end_drawer() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let state = scaffold_with_both_drawers(
-                &mut tester,
+                tester,
                 vec![
                     DrawerButton::new().into_widget(),
                     EndDrawerButton::new().into_widget(),
                 ],
             );
 
-            let button = only::<EndDrawerButton>(&tester);
-            tap(&mut tester, button);
+            let button = only::<EndDrawerButton>(tester);
+            tap(tester, button);
             tester.pump_and_settle();
 
             assert!(!state.is_drawer_open(&tester.cell.borrow()));
@@ -1122,25 +1104,26 @@ mod tests {
     }
 
     /// Dart's `MaterialApp(home: Center(child: SizedBox.shrink(child: Scaffold(body: button))))`.
-    fn size_at_zero_area<W: 'static, K>(button: impl IntoWidget<K>) -> Size {
-        let mut tester = tester();
+    fn size_at_zero_area<W: 'static, K>(
+        tester: &mut WidgetTester,
+        button: impl IntoWidget<K>,
+    ) -> Size {
         pump_app(
-            &mut tester,
+            tester,
             Center::new()
                 .child(SizedBox::shrink().child(Scaffold::new().body(button)))
                 .into_widget(),
         );
-        let element = only::<W>(&tester);
-        let render = tester.render_box_of(element);
-        render.size(&tester.cell.borrow())
+        let element = only::<W>(tester);
+        tester.get_size(element)
     }
 
     // 'EndDrawerButton does not crash at zero area'
     #[test]
     fn an_end_drawer_button_has_no_size_at_zero_area() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                size_at_zero_area::<EndDrawerButton, _>(EndDrawerButton::new()),
+                size_at_zero_area::<EndDrawerButton, _>(tester, EndDrawerButton::new()),
                 Size::ZERO
             );
         });
@@ -1149,9 +1132,9 @@ mod tests {
     // 'CloseButton does not crash at zero area'
     #[test]
     fn a_close_button_has_no_size_at_zero_area() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                size_at_zero_area::<CloseButton, _>(CloseButton::new()),
+                size_at_zero_area::<CloseButton, _>(tester, CloseButton::new()),
                 Size::ZERO
             );
         });
@@ -1160,9 +1143,9 @@ mod tests {
     // 'DrawerButton does not crash at zero area'
     #[test]
     fn a_drawer_button_has_no_size_at_zero_area() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                size_at_zero_area::<DrawerButton, _>(DrawerButton::new()),
+                size_at_zero_area::<DrawerButton, _>(tester, DrawerButton::new()),
                 Size::ZERO
             );
         });
@@ -1171,32 +1154,31 @@ mod tests {
     // 'BackButton renders at zero area'
     #[test]
     fn a_back_button_icon_is_empty_at_zero_area() {
-        with_main_thread_stack(|| {
-            let _ = size_at_zero_area::<BackButton, _>(BackButton::new());
-            let mut tester = tester();
+        test_widgets(|tester| {
+            let _ = size_at_zero_area::<BackButton, _>(tester, BackButton::new());
             pump_app(
-                &mut tester,
+                tester,
                 Center::new()
                     .child(SizedBox::shrink().child(Scaffold::new().body(BackButton::new())))
                     .into_widget(),
             );
-            let icon = only::<BackButtonIcon>(&tester);
-            let render = tester.render_box_of(icon);
-            let size = render.size(&tester.cell.borrow());
+            let icon = only::<BackButtonIcon>(tester);
+            let size = tester.get_size(icon);
             assert!(size.is_empty());
         });
     }
 
     /// The cursor under a mouse the tester moved onto the centre of the button.
-    fn cursor_over<W: 'static, K>(button: impl IntoWidget<K>) -> MouseCursorRef {
-        let mut tester = tester();
-        pump_app(&mut tester, material(button));
-        let mut mouse = WidgetTester::mouse(1, 0);
+    fn cursor_over<W: 'static, K>(
+        tester: &mut WidgetTester,
+        button: impl IntoWidget<K>,
+    ) -> MouseCursorRef {
+        pump_app(tester, material(button));
+        let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, Offset::new(1000.0, 1000.0));
-        let render = tester.render_box_of(only::<W>(&tester));
-        let center = tester.global_rect(render).center();
+        let center = tester.get_center(only::<W>(tester));
         tester.move_to(&mut mouse, center, false);
-        tester.pump(std::time::Duration::ZERO);
+        tester.pump_by(std::time::Duration::ZERO);
         tester.active_cursor(1)
     }
 
@@ -1216,33 +1198,38 @@ mod tests {
     // 'BackButton has expected default mouse cursor on hover'
     #[test]
     fn a_back_button_has_the_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            assert!(*cursor_over::<BackButton, _>(BackButton::new()) == *default_cursor());
+        test_widgets(|tester| {
+            assert!(*cursor_over::<BackButton, _>(tester, BackButton::new()) == *default_cursor());
         });
     }
 
     // 'CloseButton has expected default mouse cursor on hover'
     #[test]
     fn a_close_button_has_the_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            assert!(*cursor_over::<CloseButton, _>(CloseButton::new()) == *default_cursor());
+        test_widgets(|tester| {
+            assert!(
+                *cursor_over::<CloseButton, _>(tester, CloseButton::new()) == *default_cursor()
+            );
         });
     }
 
     // 'DrawerButton has expected default mouse cursor on hover'
     #[test]
     fn a_drawer_button_has_the_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            assert!(*cursor_over::<DrawerButton, _>(DrawerButton::new()) == *default_cursor());
+        test_widgets(|tester| {
+            assert!(
+                *cursor_over::<DrawerButton, _>(tester, DrawerButton::new()) == *default_cursor()
+            );
         });
     }
 
     // 'EndDrawerButton has expected default mouse cursor on hover'
     #[test]
     fn an_end_drawer_button_has_the_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert!(
-                *cursor_over::<EndDrawerButton, _>(EndDrawerButton::new()) == *default_cursor()
+                *cursor_over::<EndDrawerButton, _>(tester, EndDrawerButton::new())
+                    == *default_cursor()
             );
         });
     }
@@ -1250,10 +1237,10 @@ mod tests {
     // 'BackButton has expected mouse cursor when explicitly configured'
     #[test]
     fn a_back_button_uses_the_mouse_cursor_its_style_gives() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let cell: MouseCursorRef = SystemMouseCursors::CELL.into();
             assert!(
-                *cursor_over::<BackButton, _>(BackButton::new().style(cell_cursor_style()))
+                *cursor_over::<BackButton, _>(tester, BackButton::new().style(cell_cursor_style()))
                     == *cell
             );
         });
@@ -1262,11 +1249,13 @@ mod tests {
     // 'CloseButton has expected mouse cursor when explicitly configured'
     #[test]
     fn a_close_button_uses_the_mouse_cursor_its_style_gives() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let cell: MouseCursorRef = SystemMouseCursors::CELL.into();
             assert!(
-                *cursor_over::<CloseButton, _>(CloseButton::new().style(cell_cursor_style()))
-                    == *cell
+                *cursor_over::<CloseButton, _>(
+                    tester,
+                    CloseButton::new().style(cell_cursor_style())
+                ) == *cell
             );
         });
     }
@@ -1274,11 +1263,13 @@ mod tests {
     // 'DrawerButton has expected mouse cursor when explicitly configured'
     #[test]
     fn a_drawer_button_uses_the_mouse_cursor_its_style_gives() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let cell: MouseCursorRef = SystemMouseCursors::CELL.into();
             assert!(
-                *cursor_over::<DrawerButton, _>(DrawerButton::new().style(cell_cursor_style()))
-                    == *cell
+                *cursor_over::<DrawerButton, _>(
+                    tester,
+                    DrawerButton::new().style(cell_cursor_style())
+                ) == *cell
             );
         });
     }
@@ -1286,10 +1277,11 @@ mod tests {
     // 'EndDrawerButton has expected mouse cursor when explicitly configured'
     #[test]
     fn an_end_drawer_button_uses_the_mouse_cursor_its_style_gives() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let cell: MouseCursorRef = SystemMouseCursors::CELL.into();
             assert!(
                 *cursor_over::<EndDrawerButton, _>(
+                    tester,
                     EndDrawerButton::new().style(cell_cursor_style())
                 ) == *cell
             );

@@ -3090,48 +3090,36 @@ mod tests {
         MediaQueryData, RouteSettings, SizedBox, Text,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, assert_f32_equals, expect, find,
+        finds_one_widget, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::material_localizations::DefaultMaterialLocalizations;
     use crate::page::MaterialPageRoute;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester, tester_on};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// Dart's `PopupMenuItem<T>(value: value, child: Text(text))`.
     fn item<T: Clone + PartialEq + 'static>(value: T, text: &str) -> PopupMenuEntryRef<T> {
         PopupMenuEntryRef::new(PopupMenuItem::new(Some(Text::new(text))).value(value))
     }
 
-    fn only(found: Vec<AnyElement>) -> AnyElement {
-        assert_eq!(found.len(), 1, "one widget found");
-        found[0]
-    }
-
-    /// Dart's `tester.getRect(find.text(text))`.
-    fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        tester.get_rect(tester.render_box_of(only(tester.find_onstage_text(text))))
-    }
-
     /// Dart's `find.text(text)` with `findsOneWidget` or `findsNothing`.
     fn shows(tester: &WidgetTester, text: &str) -> bool {
-        !tester.find_onstage_text(text).is_empty()
-    }
-
-    /// Dart's `tester.tap(find.text(text))`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let center = text_rect(tester, text).center();
-        tester.tap(center, 1);
+        !find::text(text).evaluate(tester).is_empty()
     }
 
     /// Dart's `tester.tap(find.byKey(key))`.
     fn tap_key(tester: &mut WidgetTester, key: &GlobalKey) {
-        let center = tester.center_of(key);
-        tester.tap(center, 1);
+        let center = tester.get_center(key);
+        tester.tap_at(center, 1);
     }
 
     /// Dart's `tester.getRect(find.byType(T))` of the only one.
     fn rect_of<W: 'static>(tester: &WidgetTester) -> Rect {
-        tester.get_rect(tester.render_box_of(only(tester.find_onstage_by_type::<W>())))
+        tester.get_rect(tester.render_box_of(tester.element(find::by_type::<W>())))
     }
 
     /// Dart's `tester.getRect(find.byKey(key))`.
@@ -3203,8 +3191,7 @@ mod tests {
 
     #[test]
     fn navigator_push_works_within_a_popup_menu_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let target_key = GlobalKey::new();
             let key = target_key.clone();
             let root = {
@@ -3239,27 +3226,26 @@ mod tests {
             };
             tester.pump_widget(root);
 
-            tap_key(&mut tester, &target_key);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1)); // finish the menu animation
+            tap_key(tester, &target_key);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1)); // finish the menu animation
 
-            assert!(shows(&tester, "One"));
-            assert!(!shows(&tester, "Next"));
+            assert!(shows(tester, "One"));
+            assert!(!shows(tester, "Next"));
 
-            tap_text(&mut tester, "One");
-            tester.pump(Duration::ZERO); // return the future
-            tester.pump(Duration::ZERO); // start the navigation
-            tester.pump(Duration::from_secs(1)); // end the navigation
+            tester.tap(find::text("One"));
+            tester.pump(); // return the future
+            tester.pump(); // start the navigation
+            tester.pump_by(Duration::from_secs(1)); // end the navigation
 
-            assert!(!shows(&tester, "One"));
-            assert!(shows(&tester, "Next"));
+            assert!(!shows(tester, "One"));
+            assert!(shows(tester, "Next"));
         });
     }
 
     #[test]
     fn popup_menu_button_calls_on_opened_callback_when_the_menu_is_opened() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (opens, on_opened) = counter();
             let popup_context = Rc::new(Cell::new(None));
             let no_items_key = GlobalKey::new();
@@ -3271,7 +3257,7 @@ mod tests {
                 with_callback_key.clone(),
             );
             let saved = Rc::clone(&popup_context);
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Material::new()
                     .child(Column::new().children(vec![
                         PopupMenuButton::<i32>::new(|_app, _context| Vec::new())
@@ -3293,40 +3279,36 @@ mod tests {
             });
 
             // Make sure callback is not called when the menu is not shown
-            tap_key(&mut tester, &no_items_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &no_items_key);
+            tester.pump();
             assert_eq!(opens.get(), 0);
 
             // Make sure everything works if no callback is provided
-            tap_key(&mut tester, &no_callback_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &no_callback_key);
+            tester.pump();
             assert_eq!(opens.get(), 0);
 
             // Close the opened menu
-            pop(
-                &mut tester,
-                popup_context.get().expect("the item builder ran"),
-            );
-            tester.pump(Duration::ZERO);
+            pop(tester, popup_context.get().expect("the item builder ran"));
+            tester.pump();
 
             // Make sure callback is called when the button is tapped
-            tap_key(&mut tester, &with_callback_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &with_callback_key);
+            tester.pump();
             assert_eq!(opens.get(), 1);
         });
     }
 
     #[test]
     fn popup_menu_button_calls_on_canceled_callback_when_an_item_is_not_selected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (cancels, on_canceled) = counter();
             let popup_context = Rc::new(Cell::new(None));
             let no_callback_key = GlobalKey::new();
             let with_callback_key = GlobalKey::new();
             let (a, b) = (no_callback_key.clone(), with_callback_key.clone());
             let saved = Rc::clone(&popup_context);
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Material::new()
                     .child(Column::new().children(vec![
                         PopupMenuButton::new(|_app, _context| vec![item(1, "Tap me please!")])
@@ -3344,37 +3326,34 @@ mod tests {
             });
 
             // Make sure everything works if no callback is provided
-            tap_key(&mut tester, &no_callback_key);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
-            tester.tap(Offset::ZERO, 1);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &no_callback_key);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.tap_at(Offset::ZERO, 1);
+            tester.pump();
             assert_eq!(cancels.get(), 0);
 
             // Make sure callback is called when a non-selection tap occurs
-            tap_key(&mut tester, &with_callback_key);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
-            tester.tap(Offset::ZERO, 1);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &with_callback_key);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.tap_at(Offset::ZERO, 1);
+            tester.pump();
             assert_eq!(cancels.get(), 1);
 
             // Make sure callback is called when back navigation occurs
-            tap_key(&mut tester, &with_callback_key);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
-            pop(
-                &mut tester,
-                popup_context.get().expect("the item builder ran"),
-            );
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &with_callback_key);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            pop(tester, popup_context.get().expect("the item builder ran"));
+            tester.pump();
             assert_eq!(cancels.get(), 2);
         });
     }
 
     /// Dart's `find.widgetWithText(W, text)`: the `W` nearest above the `Text` showing `text`.
     fn widget_with_text<W: 'static>(tester: &WidgetTester, text: &str) -> AnyElement {
-        tester.ancestor_of_type::<W>(only(tester.find_onstage_text(text)))
+        tester.ancestor_of_type::<W>(tester.element(find::text(text)))
     }
 
     /// Dart's `tester.getRect(find.widgetWithText(W, text))`.
@@ -3382,31 +3361,8 @@ mod tests {
         tester.get_rect(tester.render_box_of(widget_with_text::<W>(tester, text)))
     }
 
-    /// Dart's `expect(actual, expected)` on positions that went through a render object's
-    /// transform: `Matrix4` is valo's f32 matrix, so they carry f32 rounding that Dart's f64
-    /// has not, and nothing more.
-    fn assert_near(actual: f64, expected: f64) {
-        assert!(near(actual, expected), "{actual} is not {expected}");
-    }
-
     fn near(actual: f64, expected: f64) -> bool {
         (actual - expected).abs() <= f64::from(f32::EPSILON) * expected.abs().max(1.0)
-    }
-
-    fn assert_rect_near(actual: Rect, expected: Rect) {
-        for (actual, expected) in [
-            (actual.left, expected.left),
-            (actual.top, expected.top),
-            (actual.right, expected.right),
-            (actual.bottom, expected.bottom),
-        ] {
-            assert_near(actual, expected);
-        }
-    }
-
-    fn assert_offset_near(actual: Offset, expected: Offset) {
-        assert_near(actual.dx(), expected.dx());
-        assert_near(actual.dy(), expected.dy());
     }
 
     /// Dart's `MaterialApp(home: Scaffold(body: Center(child: button)))`.
@@ -3428,8 +3384,7 @@ mod tests {
     #[test]
     fn disabled_popup_menu_button_will_not_call_item_builder_on_opened_on_selected_or_on_canceled()
     {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_button_key = GlobalKey::new();
             let item_builder_called = Rc::new(Cell::new(false));
             let on_opened_called = Rc::new(Cell::new(false));
@@ -3475,14 +3430,14 @@ mod tests {
                 });
             };
 
-            build_app(&mut tester);
+            build_app(tester);
 
             for directional in [false, true] {
                 if directional {
                     // Test again, with directional navigation mode and after focusing the
                     // button.
-                    build_app(&mut tester);
-                    let context = context_of(&tester, &popup_button_key);
+                    build_app(tester);
+                    let context = context_of(tester, &popup_button_key);
                     let mut app = tester.cell.borrow_mut();
                     let node = waft_widgets::Focus::of(&mut app, context, false, false);
                     node.request_focus(&mut app, None);
@@ -3491,18 +3446,18 @@ mod tests {
                 }
 
                 // Try to bring up the popup menu and select the first item from it
-                tap_key(&mut tester, &popup_button_key);
+                tap_key(tester, &popup_button_key);
                 tester.pump_and_settle();
-                tap_key(&mut tester, &popup_button_key);
+                tap_key(tester, &popup_button_key);
                 tester.pump_and_settle();
                 assert!(!item_builder_called.get());
                 assert!(!on_opened_called.get());
                 assert!(!on_selected_called.get());
 
                 // Try to bring up the popup menu and tap outside it to cancel the menu
-                tap_key(&mut tester, &popup_button_key);
+                tap_key(tester, &popup_button_key);
                 tester.pump_and_settle();
-                tester.tap(Offset::ZERO, 1);
+                tester.tap_at(Offset::ZERO, 1);
                 tester.pump_and_settle();
                 assert!(!item_builder_called.get());
                 assert!(!on_opened_called.get());
@@ -3513,11 +3468,13 @@ mod tests {
 
     /// Dart's 'disabled PopupMenuButton is not focusable' and 'Disabled PopupMenuButton is
     /// focusable with directional navigation'.
-    fn disabled_button_takes_focus(navigation_mode: Option<NavigationMode>) -> bool {
-        let mut tester = tester();
+    fn disabled_button_takes_focus(
+        tester: &mut WidgetTester,
+        navigation_mode: Option<NavigationMode>,
+    ) -> bool {
         let child_key = GlobalKey::new();
         let key = child_key.clone();
-        pump_app(&mut tester, m3, move |_app| {
+        pump_app(tester, m3, move |_app| {
             Builder::new(move |app, context| {
                 let button = Material::new().child(Column::new().children(vec![
                     PopupMenuButton::new(|_app, _context| vec![item(1, "Tap me please!")])
@@ -3539,35 +3496,35 @@ mod tests {
             })
             .into_widget()
         });
-        let context = context_of(&tester, &child_key);
+        let context = context_of(tester, &child_key);
         let node = {
             let mut app = tester.cell.borrow_mut();
             let node = waft_widgets::Focus::of(&mut app, context, false, false);
             node.request_focus(&mut app, None);
             node
         };
-        tester.pump(Duration::ZERO);
+        tester.pump();
         node.has_primary_focus(&tester.cell.borrow())
     }
 
     #[test]
     fn disabled_popup_menu_button_is_not_focusable() {
-        with_main_thread_stack(|| assert!(!disabled_button_takes_focus(None)));
+        test_widgets(|tester| assert!(!disabled_button_takes_focus(tester, None)));
     }
 
     #[test]
     fn disabled_popup_menu_button_is_focusable_with_directional_navigation() {
-        with_main_thread_stack(|| {
-            assert!(disabled_button_takes_focus(Some(
-                NavigationMode::Directional
-            )));
+        test_widgets(|tester| {
+            assert!(disabled_button_takes_focus(
+                tester,
+                Some(NavigationMode::Directional)
+            ));
         });
     }
 
     #[test]
     fn popup_menu_item_on_tap_callback_is_called_when_defined() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let counters = Rc::new(RefCell::new([0, 0]));
             let taps = Rc::clone(&counters);
             tester.pump_widget(test_app(TextDirection::Ltr, move || {
@@ -3603,9 +3560,9 @@ mod tests {
                 ("Second option", [2, 1]),
                 ("Option without onTap", [2, 1]),
             ] {
-                tap_text(&mut tester, "Actions");
+                tester.tap(find::text("Actions"));
                 tester.pump_and_settle();
-                tap_text(&mut tester, option);
+                tester.tap(find::text(option));
                 tester.pump_and_settle();
                 assert_eq!(*counters.borrow(), expected);
             }
@@ -3614,8 +3571,7 @@ mod tests {
 
     #[test]
     fn popup_menu_item_can_have_both_on_tap_and_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let counters = Rc::new(RefCell::new([0, 0]));
             let selected: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
             let (taps, chosen) = (Rc::clone(&counters), Rc::clone(&selected));
@@ -3655,9 +3611,9 @@ mod tests {
                 ("Second option", [2, 1], "second"),
                 ("Option without onTap", [2, 1], "third"),
             ] {
-                tap_text(&mut tester, "Actions");
+                tester.tap(find::text("Actions"));
                 tester.pump_and_settle();
-                tap_text(&mut tester, option);
+                tester.tap(find::text(option));
                 tester.pump_and_settle();
                 assert_eq!(*counters.borrow(), expected);
                 assert_eq!(selected.borrow().as_deref(), Some(value));
@@ -3667,8 +3623,7 @@ mod tests {
 
     #[test]
     fn popup_menu_item_is_only_focusable_when_enabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_button_key = GlobalKey::new();
             let child_key = GlobalKey::new();
             let item_builder_called = Rc::new(Cell::new(false));
@@ -3702,11 +3657,11 @@ mod tests {
                 waft_widgets::Focus::of(&mut tester.cell.borrow_mut(), context, false, false)
             };
 
-            build(&mut tester, true);
+            build(tester, true);
             // Open the popup to build and show the menu contents.
-            tap_key(&mut tester, &popup_button_key);
+            tap_key(tester, &popup_button_key);
             tester.pump_and_settle();
-            let node = child_node(&tester);
+            let node = child_node(tester);
             // Now that the contents are shown, request focus on the child text.
             node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
@@ -3717,17 +3672,17 @@ mod tests {
             item_builder_called.set(false);
 
             // Close the popup.
-            tap_key(&mut tester, &popup_button_key);
+            tap_key(tester, &popup_button_key);
             tester.pump_and_settle();
 
-            build(&mut tester, false);
+            build(tester, false);
             tester.pump_and_settle();
             // Open the popup again to rebuild the contents with enabled == false.
-            tap_key(&mut tester, &popup_button_key);
+            tap_key(tester, &popup_button_key);
             tester.pump_and_settle();
 
             assert!(item_builder_called.get());
-            let node = child_node(&tester);
+            let node = child_node(tester);
             assert!(!node.has_primary_focus(&tester.cell.borrow()));
         });
     }
@@ -3760,16 +3715,16 @@ mod tests {
                 )
                 .into_widget()
         }));
-        tap_text(tester, "XXX");
-        tester.pump(Duration::ZERO);
+        tester.tap(find::text("XXX"));
+        tester.pump();
 
         let mut rect = rect_of::<PopupMenu<i32>>(tester);
-        assert_rect_near(rect, start_rect);
+        assert_f32_equals(rect, start_rect);
         let mut done_vertically = false;
         let mut vertical_stage = 0; // 0=down, 1=up, 2=done
         let mut done_horizontally = false;
         loop {
-            tester.pump(Duration::from_millis(20));
+            tester.pump_by(Duration::from_millis(20));
             let new_rect = rect_of::<PopupMenu<i32>>(tester);
             if then_up {
                 match vertical_stage {
@@ -3778,26 +3733,26 @@ mod tests {
                         assert!(new_rect.bottom >= rect.bottom);
                     }
                     0 => {
-                        assert_near(new_rect.top, rect.top);
+                        assert_f32_equals(new_rect.top, rect.top);
                         assert!(new_rect.bottom > rect.bottom);
                     }
                     1 if near(new_rect.top, rect.top) => {
                         vertical_stage = 2;
-                        assert_near(new_rect.bottom, rect.bottom);
+                        assert_f32_equals(new_rect.bottom, rect.bottom);
                     }
                     1 => {
                         assert!(new_rect.top < rect.top);
-                        assert_near(new_rect.bottom, rect.bottom);
+                        assert_f32_equals(new_rect.bottom, rect.bottom);
                     }
                     _ => {
-                        assert_near(new_rect.bottom, rect.bottom);
-                        assert_near(new_rect.top, rect.top);
+                        assert_f32_equals(new_rect.bottom, rect.bottom);
+                        assert_f32_equals(new_rect.top, rect.top);
                     }
                 }
             } else {
-                assert_near(new_rect.top, rect.top);
+                assert_f32_equals(new_rect.top, rect.top);
                 if done_vertically {
-                    assert_near(new_rect.bottom, rect.bottom);
+                    assert_f32_equals(new_rect.bottom, rect.bottom);
                 } else if near(new_rect.bottom, rect.bottom) {
                     done_vertically = true;
                 } else {
@@ -3806,9 +3761,9 @@ mod tests {
             }
             match growth_direction {
                 TextDirection::Rtl => {
-                    assert_near(new_rect.right, rect.right);
+                    assert_f32_equals(new_rect.right, rect.right);
                     if done_horizontally {
-                        assert_near(new_rect.left, rect.left);
+                        assert_f32_equals(new_rect.left, rect.left);
                     } else if near(new_rect.left, rect.left) {
                         done_horizontally = true;
                     } else {
@@ -3816,9 +3771,9 @@ mod tests {
                     }
                 }
                 TextDirection::Ltr => {
-                    assert_near(new_rect.left, rect.left);
+                    assert_f32_equals(new_rect.left, rect.left);
                     if done_horizontally {
-                        assert_near(new_rect.right, rect.right);
+                        assert_f32_equals(new_rect.right, rect.right);
                     } else if near(new_rect.right, rect.right) {
                         done_horizontally = true;
                     } else {
@@ -3836,8 +3791,7 @@ mod tests {
     #[test]
     fn popup_menu_positioning() {
         use TextDirection::{Ltr, Rtl};
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let cases = [
                 (Ltr, AlignmentGeometry::TOP_RIGHT, Rtl, 792.0, 8.0, false),
                 (Rtl, AlignmentGeometry::TOP_RIGHT, Rtl, 792.0, 8.0, false),
@@ -3902,7 +3856,7 @@ mod tests {
             ];
             for (text_direction, alignment, growth_direction, x, y, then_up) in cases {
                 test_positioning(
-                    &mut tester,
+                    tester,
                     text_direction,
                     alignment,
                     growth_direction,
@@ -3915,8 +3869,7 @@ mod tests {
 
     #[test]
     fn popup_menu_offset_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_menu_button = |offset: Offset| {
                 Material::new()
                     .child(
@@ -3939,39 +3892,39 @@ mod tests {
             };
             let icon_button_center = |tester: &WidgetTester| {
                 tester
-                    .get_rect(tester.render_box_of(only(tester.find_by_type::<IconButton>())))
+                    .get_rect(tester.render_box_of(tester.element(find::by_type::<IconButton>())))
                     .center()
             };
 
             // Popup a menu without any offset.
-            in_scaffold(&mut tester, build_menu_button(Offset::ZERO));
+            in_scaffold(tester, build_menu_button(Offset::ZERO));
 
             // Popup the menu.
-            let center = icon_button_center(&tester);
-            tester.tap(center, 1);
+            let center = icon_button_center(tester);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // Initial state, the menu start at Offset(8.0, 8.0), the 8 pixels is edge padding
             // when offset.dx < 8.0.
-            assert_offset_near(
-                rect_of::<PopupMenu<i32>>(&tester).top_left(),
+            assert_f32_equals(
+                rect_of::<PopupMenu<i32>>(tester).top_left(),
                 Offset::new(8.0, 8.0),
             );
 
             // Collapse the menu.
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // Popup a new menu with Offset(50.0, 50.0).
-            in_scaffold(&mut tester, build_menu_button(Offset::new(50.0, 50.0)));
+            in_scaffold(tester, build_menu_button(Offset::new(50.0, 50.0)));
 
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // This time the menu should start at Offset(50.0, 50.0), the padding only added
             // when offset.dx < 8.0.
-            assert_offset_near(
-                rect_of::<PopupMenu<i32>>(&tester).top_left(),
+            assert_f32_equals(
+                rect_of::<PopupMenu<i32>>(tester).top_left(),
                 Offset::new(50.0, 50.0),
             );
         });
@@ -3980,11 +3933,10 @@ mod tests {
     #[test]
     fn popup_menu_button_popup_menu_divider() {
         // Regression test for https://github.com/flutter/flutter/issues/27072
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_value: Rc<RefCell<String>> = Rc::default();
             let chosen = Rc::clone(&selected_value);
-            centered_in_scaffold(&mut tester, m3, move || {
+            centered_in_scaffold(tester, m3, move || {
                 PopupMenuButton::new(|_app, _context| {
                     vec![
                         item("1".to_owned(), "1"),
@@ -3999,13 +3951,17 @@ mod tests {
             });
 
             for value in ["1", "2"] {
-                tap_text(&mut tester, "Menu Button");
+                tester.tap(find::text("Menu Button"));
                 tester.pump_and_settle();
-                assert!(shows(&tester, "1"));
-                assert_eq!(tester.find_onstage_by_type::<PopupMenuDivider>().len(), 1);
-                assert!(shows(&tester, "2"));
+                assert!(shows(tester, "1"));
+                expect(
+                    tester,
+                    &find::by_type::<PopupMenuDivider>(),
+                    finds_one_widget(),
+                );
+                assert!(shows(tester, "2"));
 
-                tap_text(&mut tester, value);
+                tester.tap(find::text(value));
                 tester.pump_and_settle();
                 assert_eq!(*selected_value.borrow(), value);
             }
@@ -4014,11 +3970,10 @@ mod tests {
 
     #[test]
     fn popup_menu_item_child_height_is_a_minimum_child_is_vertically_centered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_menu_button_key = GlobalKey::new();
             let key = popup_menu_button_key.clone();
-            centered_in_scaffold(&mut tester, m3, move || {
+            centered_in_scaffold(tester, m3, move || {
                 PopupMenuButton::new(|_app, _context| {
                     vec![
                         // This menu item's height will be 48 because the default minimum height
@@ -4057,7 +4012,7 @@ mod tests {
             });
 
             // Show the menu
-            tap_key(&mut tester, &popup_menu_button_key);
+            tap_key(tester, &popup_menu_button_key);
             tester.pump_and_settle();
 
             // The menu items and their InkWells should have the expected vertical size
@@ -4068,20 +4023,20 @@ mod tests {
                 ("Item 3", 100.0),
             ] {
                 assert_eq!(
-                    rect_with_text::<PopupMenuItem<String>>(&tester, text).height(),
+                    rect_with_text::<PopupMenuItem<String>>(tester, text).height(),
                     height
                 );
-                assert_eq!(rect_with_text::<InkWell>(&tester, text).height(), height);
+                assert_eq!(rect_with_text::<InkWell>(tester, text).height(), height);
             }
 
             // Menu item children which whose height is less than the PopupMenuItem
             // are vertically centered.
             for text in ["Item 0", "Item 2"] {
-                assert_near(
-                    rect_with_text::<PopupMenuItem<String>>(&tester, text)
+                assert_f32_equals(
+                    rect_with_text::<PopupMenuItem<String>>(tester, text)
                         .center()
                         .dy(),
-                    text_rect(&tester, text).center().dy(),
+                    tester.get_rect(find::text(text)).center().dy(),
                 );
             }
         });
@@ -4125,7 +4080,7 @@ mod tests {
 
     /// Dart's padding of the `ConstrainedBox` whose child is a `Padding`, above `text`.
     fn item_padding_of<W: 'static>(tester: &WidgetTester, text: &str) -> EdgeInsetsGeometry {
-        let text_element = only(tester.find_onstage_text(text));
+        let text_element = tester.element(find::text(text));
         let item = tester.ancestor_of_type::<W>(text_element);
         let constrained = tester
             .descendants_of_type::<ConstrainedBox>(item)
@@ -4150,7 +4105,7 @@ mod tests {
 
     /// Dart's `tester.widget<SingleChildScrollView>(find.byType(SingleChildScrollView)).padding`.
     fn menu_padding(tester: &WidgetTester) -> Option<EdgeInsetsGeometry> {
-        let scroll_view = only(tester.find_by_type::<SingleChildScrollView>());
+        let scroll_view = tester.element(find::by_type::<SingleChildScrollView>());
         tester.widget(scroll_view, |scroll_view: &SingleChildScrollView| {
             scroll_view.padding
         })
@@ -4158,22 +4113,21 @@ mod tests {
 
     #[test]
     fn material3_popup_menu_item_default_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            keyed_text_button(&mut tester, m3, &key, disabled_and_enabled_items);
+            keyed_text_button(tester, m3, &key, disabled_and_enabled_items);
 
             // Show the menu.
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             // Dart's `paddingFor` reads 'Item 0' for both.
             assert_eq!(
-                nearest_padding_of(&tester, "Item 0"),
+                nearest_padding_of(tester, "Item 0"),
                 EdgeInsetsGeometry::symmetric(0.0, 12.0)
             );
             assert_eq!(
-                nearest_padding_of(&tester, "Item 0"),
+                nearest_padding_of(tester, "Item 0"),
                 EdgeInsetsGeometry::symmetric(0.0, 12.0)
             );
         });
@@ -4181,21 +4135,20 @@ mod tests {
 
     #[test]
     fn material2_popup_menu_item_default_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            keyed_text_button(&mut tester, m2, &key, disabled_and_enabled_items);
+            keyed_text_button(tester, m2, &key, disabled_and_enabled_items);
 
             // Show the menu.
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             assert_eq!(
-                nearest_padding_of(&tester, "Item 0"),
+                nearest_padding_of(tester, "Item 0"),
                 EdgeInsetsGeometry::symmetric(0.0, 16.0)
             );
             assert_eq!(
-                nearest_padding_of(&tester, "Item 0"),
+                nearest_padding_of(tester, "Item 0"),
                 EdgeInsetsGeometry::symmetric(0.0, 16.0)
             );
         });
@@ -4203,38 +4156,36 @@ mod tests {
 
     /// Dart's 'PopupMenu default padding' and the second 'Material2 - PopupMenuItem default
     /// padding'.
-    fn default_menu_padding(theme: fn(&App) -> ThemeData) {
-        let mut tester = tester();
+    fn default_menu_padding(tester: &mut WidgetTester, theme: fn(&App) -> ThemeData) {
         let key = GlobalKey::new();
-        keyed_text_button(&mut tester, theme, &key, disabled_and_enabled_items);
+        keyed_text_button(tester, theme, &key, disabled_and_enabled_items);
 
         // Show the menu.
-        tap_key(&mut tester, &key);
-        tester.pump(Duration::from_millis(300));
+        tap_key(tester, &key);
+        tester.pump_by(Duration::from_millis(300));
 
         // Check popup menu padding.
         assert_eq!(
-            menu_padding(&tester),
+            menu_padding(tester),
             Some(EdgeInsetsGeometry::symmetric(8.0, 0.0))
         );
     }
 
     #[test]
     fn popup_menu_default_padding() {
-        with_main_thread_stack(|| default_menu_padding(m3));
+        test_widgets(|tester| default_menu_padding(tester, m3));
     }
 
     #[test]
     fn material2_popup_menu_default_padding() {
-        with_main_thread_stack(|| default_menu_padding(m2));
+        test_widgets(|tester| default_menu_padding(tester, m2));
     }
 
     #[test]
     fn popup_menu_item_custom_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            keyed_text_button(&mut tester, m2, &key, || {
+            keyed_text_button(tester, m2, &key, || {
                 let custom = |text: &str, padding: EdgeInsets, height: Option<f64>| {
                     let item = PopupMenuItem::new(Some(Text::new(text)))
                         .padding(padding)
@@ -4253,7 +4204,7 @@ mod tests {
             });
 
             // Show the menu
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             // The menu items and their InkWells should have the expected vertical size
@@ -4265,7 +4216,7 @@ mod tests {
                 ("Item 3", 100.0), // Height value of 100, since child (16) + padding (40) < 100
             ] {
                 assert_eq!(
-                    rect_with_text::<PopupMenuItem<String>>(&tester, text).height(),
+                    rect_with_text::<PopupMenuItem<String>>(tester, text).height(),
                     height,
                     "{text}"
                 );
@@ -4278,7 +4229,7 @@ mod tests {
                 ("Item 3", EdgeInsetsGeometry::all(20.0)),
             ] {
                 assert_eq!(
-                    item_padding_of::<PopupMenuItem<String>>(&tester, text),
+                    item_padding_of::<PopupMenuItem<String>>(tester, text),
                     padding
                 );
             }
@@ -4287,10 +4238,9 @@ mod tests {
 
     #[test]
     fn checked_popup_menu_item_child_height_is_a_minimum_child_is_vertically_centered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            keyed_text_button(&mut tester, m3, &key, || {
+            keyed_text_button(tester, m3, &key, || {
                 let checked = |text: &str, value: &str, height: Option<f64>, child: SizedBox| {
                     let item = CheckedPopupMenuItem::new()
                         .checked(true)
@@ -4323,7 +4273,7 @@ mod tests {
             });
 
             // Show the menu
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             // The menu items and their InkWells should have the expected vertical size
@@ -4334,7 +4284,7 @@ mod tests {
                 ("Item 3", 100.0),
             ] {
                 assert_eq!(
-                    rect_with_text::<CheckedPopupMenuItem<String>>(&tester, text).height(),
+                    rect_with_text::<CheckedPopupMenuItem<String>>(tester, text).height(),
                     height,
                     "{text}"
                 );
@@ -4342,7 +4292,7 @@ mod tests {
                 // InkWell, which wins in the gesture arena over the child's InkWell and
                 // is the one of interest.
                 let ink_wells: Vec<AnyElement> = tester
-                    .ancestors(only(tester.find_onstage_text(text)))
+                    .ancestors(tester.element(find::text(text)))
                     .into_iter()
                     .filter(|ancestor| {
                         waft_widgets::downcast_widget::<InkWell>(
@@ -4363,11 +4313,11 @@ mod tests {
             // Menu item children which whose height is less than the PopupMenuItem
             // are vertically centered.
             for text in ["Item 0", "Item 2"] {
-                assert_near(
-                    rect_with_text::<CheckedPopupMenuItem<String>>(&tester, text)
+                assert_f32_equals(
+                    rect_with_text::<CheckedPopupMenuItem<String>>(tester, text)
                         .center()
                         .dy(),
-                    text_rect(&tester, text).center().dy(),
+                    tester.get_rect(find::text(text)).center().dy(),
                 );
             }
         });
@@ -4375,10 +4325,9 @@ mod tests {
 
     #[test]
     fn checked_popup_menu_item_custom_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            keyed_text_button(&mut tester, m3, &key, || {
+            keyed_text_button(tester, m3, &key, || {
                 let custom = |text: &str, padding: EdgeInsets, height: Option<f64>| {
                     let item = CheckedPopupMenuItem::new()
                         .padding(padding)
@@ -4398,7 +4347,7 @@ mod tests {
             });
 
             // Show the menu
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             // The menu items and their InkWells should have the expected vertical size
@@ -4410,7 +4359,7 @@ mod tests {
                 ("Item 3", 100.0), // Height value of 100, since child (56) + padding (40) < 100
             ] {
                 assert_eq!(
-                    rect_with_text::<CheckedPopupMenuItem<String>>(&tester, text).height(),
+                    rect_with_text::<CheckedPopupMenuItem<String>>(tester, text).height(),
                     height,
                     "{text}"
                 );
@@ -4423,7 +4372,7 @@ mod tests {
                 ("Item 3", EdgeInsetsGeometry::all(20.0)),
             ] {
                 assert_eq!(
-                    item_padding_of::<CheckedPopupMenuItem<String>>(&tester, text),
+                    item_padding_of::<CheckedPopupMenuItem<String>>(tester, text),
                     padding
                 );
             }
@@ -4432,8 +4381,7 @@ mod tests {
 
     #[test]
     fn update_popup_menu_item_layout_while_the_menu_is_visible() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let build_frame =
                 |tester: &mut WidgetTester, text_direction: TextDirection, font_size: f64| {
@@ -4480,41 +4428,41 @@ mod tests {
                 };
 
             // Show the menu
-            build_frame(&mut tester, TextDirection::Ltr, 24.0);
-            tap_key(&mut tester, &key);
+            build_frame(tester, TextDirection::Ltr, 24.0);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             // The menu items should have their default heights and horizontal alignment.
             for text in ["Item 0", "Item 1"] {
                 assert_eq!(
-                    rect_with_text::<PopupMenuItem<String>>(&tester, text).height(),
+                    rect_with_text::<PopupMenuItem<String>>(tester, text).height(),
                     48.0
                 );
-                assert_near(text_rect(&tester, text).left, 24.0);
+                assert_f32_equals(tester.get_rect(find::text(text)).left, 24.0);
             }
 
             // While the menu is up, change its font size to 64 (default is 16).
-            build_frame(&mut tester, TextDirection::Ltr, 64.0);
+            build_frame(tester, TextDirection::Ltr, 64.0);
             tester.pump_and_settle(); // Theme changes are animated.
             for text in ["Item 0", "Item 1"] {
                 assert_eq!(
-                    rect_with_text::<PopupMenuItem<String>>(&tester, text).height(),
+                    rect_with_text::<PopupMenuItem<String>>(tester, text).height(),
                     128.0
                 );
-                assert_eq!(text_rect(&tester, text).height(), 128.0);
-                assert_near(text_rect(&tester, text).left, 24.0);
+                assert_eq!(tester.get_rect(find::text(text)).height(), 128.0);
+                assert_f32_equals(tester.get_rect(find::text(text)).left, 24.0);
             }
 
             // While the menu is up, change the textDirection to rtl. Now menu items
             // will be aligned right.
-            build_frame(&mut tester, TextDirection::Rtl, 24.0);
+            build_frame(tester, TextDirection::Rtl, 24.0);
             tester.pump_and_settle(); // Theme changes are animated.
             for text in ["Item 0", "Item 1"] {
                 assert_eq!(
-                    rect_with_text::<PopupMenuItem<String>>(&tester, text).height(),
+                    rect_with_text::<PopupMenuItem<String>>(tester, text).height(),
                     48.0
                 );
-                assert_near(text_rect(&tester, text).left, 72.0);
+                assert_f32_equals(tester.get_rect(find::text(text)).left, 72.0);
             }
         });
     }
@@ -4529,9 +4477,11 @@ mod tests {
     }
 
     /// Dart's 'PopupMenuButton default tooltip' and 'custom tooltip'.
-    fn three_buttons_tooltips(tooltip: Option<&'static str>) -> Vec<Option<String>> {
-        let mut tester = tester();
-        pump_app(&mut tester, m3, move |_app| {
+    fn three_buttons_tooltips(
+        tester: &mut WidgetTester,
+        tooltip: Option<&'static str>,
+    ) -> Vec<Option<String>> {
+        pump_app(tester, m3, move |_app| {
             let with_tooltip = |button: PopupMenuButton<i32>| match tooltip {
                 Some(tooltip) => button.tooltip(tooltip),
                 None => button,
@@ -4553,8 +4503,8 @@ mod tests {
                 ]))
                 .into_widget()
         });
-        tester
-            .find_by_type::<Tooltip>()
+        find::by_type::<Tooltip>()
+            .evaluate(tester)
             .into_iter()
             .map(|tooltip| tester.widget(tooltip, |tooltip: &Tooltip| tooltip.message.clone()))
             .collect()
@@ -4562,19 +4512,22 @@ mod tests {
 
     #[test]
     fn popup_menu_button_default_tooltip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // The default tooltip is defined as [MaterialLocalizations.showMenuTooltip]
             // and it is used when no tooltip is provided.
             let expected = DefaultMaterialLocalizations.show_menu_tooltip();
-            assert_eq!(three_buttons_tooltips(None), vec![Some(expected); 3]);
+            assert_eq!(
+                three_buttons_tooltips(tester, None),
+                vec![Some(expected); 3]
+            );
         });
     }
 
     #[test]
     fn popup_menu_button_custom_tooltip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                three_buttons_tooltips(Some("Test tooltip")),
+                three_buttons_tooltips(tester, Some("Test tooltip")),
                 vec![Some("Test tooltip".to_owned()); 3]
             );
         });
@@ -4582,9 +4535,8 @@ mod tests {
 
     #[test]
     fn allow_widget_for_popup_menu_button_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Material::new()
                     .child(
                         PopupMenuButton::new(|_app, _context| vec![item(1, "Tap me please!")])
@@ -4594,19 +4546,22 @@ mod tests {
                     .into_widget()
             });
 
-            assert_eq!(tester.find_onstage_text("PopupMenuButton icon").len(), 1);
+            expect(
+                tester,
+                &find::text("PopupMenuButton icon"),
+                finds_one_widget(),
+            );
         });
     }
 
     /// Dart's 'showMenu uses nested navigator by default' and 'uses root navigator if
     /// useRootNavigator is true': whether the menu's route is the nested navigator's, which
     /// Dart's `MenuObserver`s count.
-    fn menu_is_in_nested_navigator(use_root_navigator: bool) -> bool {
-        let mut tester = tester();
+    fn menu_is_in_nested_navigator(tester: &mut WidgetTester, use_root_navigator: bool) -> bool {
         let nested_key = GlobalKey::new();
         let button_key = GlobalKey::new();
         let (nested, button) = (nested_key.clone(), button_key.clone());
-        pump_app(&mut tester, m3, move |_app| {
+        pump_app(tester, m3, move |_app| {
             Navigator::new()
                 .key(nested.into())
                 .on_generate_route(move |app, _settings| {
@@ -4650,10 +4605,10 @@ mod tests {
         });
 
         // Open the dialog.
-        tap_key(&mut tester, &button_key);
-        tester.pump(Duration::ZERO);
+        tap_key(tester, &button_key);
+        tester.pump();
 
-        let menu = only(tester.find_by_type::<PopupMenu<i32>>());
+        let menu = tester.element(find::by_type::<PopupMenu<i32>>());
         let nested = nested_key
             .current_context(&tester.cell.borrow())
             .expect("the nested navigator is mounted");
@@ -4662,21 +4617,20 @@ mod tests {
 
     #[test]
     fn show_menu_uses_nested_navigator_by_default() {
-        with_main_thread_stack(|| assert!(menu_is_in_nested_navigator(false)));
+        test_widgets(|tester| assert!(menu_is_in_nested_navigator(tester, false)));
     }
 
     #[test]
     fn show_menu_uses_root_navigator_if_use_root_navigator_is_true() {
-        with_main_thread_stack(|| assert!(!menu_is_in_nested_navigator(true)));
+        test_widgets(|tester| assert!(!menu_is_in_nested_navigator(tester, true)));
     }
 
     #[test]
     fn popup_menu_button_calling_show_button_menu_manually() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let global_key = GlobalKey::new();
             let key = global_key.clone();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Material::new()
                     .child(Column::new().children(vec![
                         PopupMenuButton::new(|_app, _context| vec![item(1, "Tap me please!")])
@@ -4686,7 +4640,7 @@ mod tests {
                     .into_widget()
             });
 
-            assert!(!shows(&tester, "Tap me please!"));
+            assert!(!shows(tester, "Tap me please!"));
 
             let state = global_key
                 .current_state::<PopupMenuButtonState<i32>>(&tester.cell.borrow())
@@ -4696,7 +4650,7 @@ mod tests {
             // we have to first wait for the tester to settle.
             tester.pump_and_settle();
 
-            assert!(shows(&tester, "Tap me please!"));
+            assert!(shows(tester, "Tap me please!"));
         });
     }
 
@@ -4728,11 +4682,10 @@ mod tests {
 
     #[test]
     fn popup_menu_button_has_expected_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let button_key = key.clone();
-            centered_in_scaffold(&mut tester, m3, move || {
+            centered_in_scaffold(tester, m3, move || {
                 PopupMenuButton::new(|_app, _context| {
                     vec![item("a".to_owned(), "A"), item("b".to_owned(), "B")]
                 })
@@ -4740,10 +4693,10 @@ mod tests {
                 .into_widget()
             });
 
-            let mut gesture = WidgetTester::mouse(1, 0);
-            let center = tester.center_of(&key);
+            let mut gesture = TestPointer::mouse(1, 0);
+            let center = tester.get_center(&key);
             tester.add_pointer(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let basic: MouseCursorRef = waft_services::SystemMouseCursors::BASIC.into();
             assert!(*tester.active_cursor(1) == *basic);
@@ -4776,12 +4729,14 @@ mod tests {
     /// Dart's 'PopupMenuItem changes mouse cursor when hovered' and 'CheckedPopupMenuItem
     /// changes mouse cursor when hovered': the cursor of an item with a text cursor, of one
     /// with none, and of a disabled one.
-    fn item_cursors(item: impl Fn(&GlobalKey, Option<MouseCursorRef>, bool) -> WidgetRef) {
-        let mut tester = tester();
+    fn item_cursors(
+        tester: &mut WidgetTester,
+        item: impl Fn(&GlobalKey, Option<MouseCursorRef>, bool) -> WidgetRef,
+    ) {
         let key = GlobalKey::new();
         let cursor = |name: waft_services::SystemMouseCursor| -> MouseCursorRef { name.into() };
         item_under_forbidden_cursor(
-            &mut tester,
+            tester,
             item(
                 &key,
                 Some(cursor(waft_services::SystemMouseCursors::TEXT)),
@@ -4789,26 +4744,26 @@ mod tests {
             ),
         );
 
-        let mut gesture = WidgetTester::mouse(1, 0);
-        let center = tester.center_of(&key);
+        let mut gesture = TestPointer::mouse(1, 0);
+        let center = tester.get_center(&key);
         tester.add_pointer(&mut gesture, center);
-        tester.pump(Duration::ZERO);
+        tester.pump();
 
         assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::TEXT));
 
         // Test default cursor
-        item_under_forbidden_cursor(&mut tester, item(&key, None, true));
+        item_under_forbidden_cursor(tester, item(&key, None, true));
         assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::BASIC));
 
         // Test default cursor when disabled
-        item_under_forbidden_cursor(&mut tester, item(&key, None, false));
+        item_under_forbidden_cursor(tester, item(&key, None, false));
         assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::BASIC));
     }
 
     #[test]
     fn popup_menu_item_changes_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            item_cursors(|key, mouse_cursor, enabled| {
+        test_widgets(|tester| {
+            item_cursors(tester, |key, mouse_cursor, enabled| {
                 let item = PopupMenuItem::new(Some(Container::new()))
                     .key(key.clone().into())
                     .value(1)
@@ -4824,8 +4779,8 @@ mod tests {
 
     #[test]
     fn checked_popup_menu_item_changes_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            item_cursors(|key, mouse_cursor, enabled| {
+        test_widgets(|tester| {
+            item_cursors(tester, |key, mouse_cursor, enabled| {
                 let item = CheckedPopupMenuItem::new()
                     .key(key.clone().into())
                     .value(1)
@@ -4842,8 +4797,7 @@ mod tests {
 
     #[test]
     fn popup_menu_in_app_bar_does_not_overlap_with_the_status_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let status_bar_height = 24.0;
             let first_item_key = GlobalKey::new();
             let selected_value = Rc::new(Cell::new(1));
@@ -4883,7 +4837,7 @@ mod tests {
             })
             .into_widget();
             app_under_media_query(
-                &mut tester,
+                tester,
                 m3,
                 MediaQueryData::new().padding(EdgeInsets::only(0.0, status_bar_height, 0.0, 0.0)),
                 home,
@@ -4891,30 +4845,29 @@ mod tests {
 
             let more_vert = || {
                 let icon = Icons::more_vert();
-                let element = tester.find_by_icon(&icon);
+                let element = tester.element(find::by_icon(&icon).first());
                 tester.get_rect(tester.render_box_of(element)).center()
             };
             let center = more_vert();
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // Tap third item.
-            tap_text(&mut tester, "Item 3");
+            tester.tap(find::text("Item 3"));
             tester.pump_and_settle();
 
             // Open popupMenu again.
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // Check whether the first item is not overlapping with status bar.
-            assert!(rect_of_key(&tester, &first_item_key).top > status_bar_height);
+            assert!(rect_of_key(tester, &first_item_key).top > status_bar_height);
         });
     }
 
     #[test]
     fn vertically_long_popup_menu_does_not_overlap_with_the_status_bar_and_bottom_notch() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let window_padding_top = 44.0;
             let window_padding_bottom = 34.0;
             let home = crate::scaffold::Scaffold::new()
@@ -4929,7 +4882,7 @@ mod tests {
                 )
                 .into_widget();
             app_under_media_query(
-                &mut tester,
+                tester,
                 m3,
                 MediaQueryData::new().padding(EdgeInsets::only(
                     0.0,
@@ -4940,13 +4893,13 @@ mod tests {
                 home,
             );
 
-            tap_text(&mut tester, "Show Menu");
+            tester.tap(find::text("Show Menu"));
             tester.pump_and_settle();
 
-            let menu = scroll_view_rect(&tester);
-            assert_near(menu.top, window_padding_top + 8.0);
+            let menu = scroll_view_rect(tester);
+            assert_f32_equals(menu.top, window_padding_top + 8.0);
             // Screen height is 600.
-            assert_near(menu.bottom, 600.0 - window_padding_bottom - 8.0);
+            assert_f32_equals(menu.bottom, 600.0 - window_padding_bottom - 8.0);
         });
     }
 
@@ -4981,27 +4934,26 @@ mod tests {
 
     #[test]
     fn popup_menu_position_test_when_have_unsafe_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             unsafe_area_frame(
-                &mut tester,
+                tester,
                 EdgeInsets::only(0.0, 32.0, 0.0, 32.0),
                 &button_key,
                 || vec![item(1, "-1-"), item(2, "-2-")],
             );
 
-            tap_key(&mut tester, &button_key);
+            tap_key(tester, &button_key);
             tester.pump_and_settle();
 
-            let button = rect_of_key(&tester, &button_key).top_right();
-            assert_offset_near(button, Offset::new(800.0, 32.0)); // The topPadding is 32.0.
+            let button = rect_of_key(tester, &button_key).top_right();
+            assert_f32_equals(button, Offset::new(800.0, 32.0)); // The topPadding is 32.0.
 
-            let popup_menu = scroll_view_rect(&tester).top_right();
+            let popup_menu = scroll_view_rect(tester).top_right();
 
             // The menu should be positioned directly next to the top of the button.
             // The 8.0 pixels is [_kMenuScreenPadding].
-            assert_offset_near(
+            assert_f32_equals(
                 popup_menu,
                 Offset::new(button.dx() - 8.0, button.dy() + 8.0),
             );
@@ -5011,13 +4963,12 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/82874
     #[test]
     fn popup_menu_position_test_when_have_unsafe_area_left_right_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let padding = EdgeInsets::only(300.0, 32.0, 310.0, 64.0);
             let media_query_padding: Rc<Cell<Option<EdgeInsets>>> = Rc::default();
             let seen = Rc::clone(&media_query_padding);
-            unsafe_area_frame(&mut tester, padding, &button_key, move || {
+            unsafe_area_frame(tester, padding, &button_key, move || {
                 let seen = Rc::clone(&seen);
                 vec![
                     PopupMenuEntryRef::new(
@@ -5032,22 +4983,22 @@ mod tests {
                 ]
             });
 
-            tap_key(&mut tester, &button_key);
+            tap_key(tester, &button_key);
             tester.pump_and_settle();
 
-            let button = rect_of_key(&tester, &button_key).top_right();
+            let button = rect_of_key(tester, &button_key).top_right();
             // The topPadding is 32.0.
-            assert_offset_near(button, Offset::new(800.0 - padding.right, padding.top));
+            assert_f32_equals(button, Offset::new(800.0 - padding.right, padding.top));
 
-            let menu = scroll_view_rect(&tester);
+            let menu = scroll_view_rect(tester);
 
             // The menu should be positioned directly next to the top of the button.
             // The 8.0 pixels is [_kMenuScreenPadding].
-            assert_offset_near(
+            assert_f32_equals(
                 menu.top_right(),
                 Offset::new(800.0 - padding.right - 8.0, padding.top + 8.0),
             );
-            assert_offset_near(
+            assert_f32_equals(
                 menu.top_left(),
                 Offset::new(padding.left + 8.0, padding.top + 8.0),
             );
@@ -5064,8 +5015,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/163477
     #[test]
     fn popup_menus_overlay_can_be_rebuilt_even_when_the_button_is_unmounted() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let set_state: Rc<RefCell<Option<waft_widgets::StateSetter>>> = Rc::default();
             let show_button = Rc::new(Cell::new(true));
@@ -5118,18 +5068,18 @@ mod tests {
             tester.pump_widget(widget(Size::new(500.0, 500.0)));
 
             // Tap the button to show the menu
-            tap_key(&mut tester, &button_key);
+            tap_key(tester, &button_key);
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("ACTION").len(), 1);
-            assert!(context_of_maybe(&tester, &button_key).is_some());
+            expect(tester, &find::text("ACTION"), finds_one_widget());
+            assert!(context_of_maybe(tester, &button_key).is_some());
 
             // Hide the button. The menu still shows since it's placed on a separate route.
             let setter = set_state.borrow().clone().expect("built");
             let flag = Rc::clone(&show_button);
             setter(&mut tester.cell.borrow_mut(), &mut |_app| flag.set(false));
-            tester.pump(Duration::ZERO);
-            assert_eq!(tester.find_onstage_text("ACTION").len(), 1);
-            assert!(context_of_maybe(&tester, &button_key).is_none());
+            tester.pump();
+            expect(tester, &find::text("ACTION"), finds_one_widget());
+            assert!(context_of_maybe(tester, &button_key).is_none());
 
             // Resize the view, causing the menu to rebuild. Before the fix, this
             // rebuild would lead to a crash, because it relies on context of the button,
@@ -5189,13 +5139,13 @@ mod tests {
             }
         }
 
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let feedback = Rc::new(FeedbackTester::default());
             let platform = waft_test::TestPlatform::new()
                 .on(waft_embedder::TargetPlatform::Android)
                 .with_haptics(Rc::clone(&feedback) as Rc<dyn waft_embedder::Haptics>);
             let mut tester = WidgetTester::with_platform(platform);
-            tester.install_platform_fonts();
+            let tester = &mut tester;
             for (widget_enable_feedback, theme_enable_feedback, expected) in [
                 // PopupMenuButton with enabled feedback.
                 (Some(true), None, true),
@@ -5208,7 +5158,7 @@ mod tests {
                 // PopupMenu enableFeedback property overrides PopupMenuButtonTheme.
                 (Some(false), Some(true), false),
             ] {
-                pump_app(&mut tester, m3, move |_app| {
+                pump_app(tester, m3, move |_app| {
                     let mut theme = PopupMenuThemeData::new();
                     theme.enable_feedback = theme_enable_feedback;
                     let mut button = PopupMenuButton::new(|_app, _context| vec![item(1, "One")])
@@ -5218,16 +5168,16 @@ mod tests {
                         .body(PopupMenuTheme::new(theme, button))
                         .into_widget()
                 });
-                let ink_well = only(tester.find_by_type::<InkWell>());
+                let ink_well = tester.element(find::by_type::<InkWell>());
                 assert_eq!(
                     tester.widget(ink_well, |ink_well: &InkWell| ink_well
                         .ink_response
                         .enable_feedback),
                     expected
                 );
-                tap_text(&mut tester, "Show Menu");
+                tester.tap(find::text("Show Menu"));
                 tester.pump_and_settle();
-                assert!(shows(&tester, "One"));
+                assert!(shows(tester, "One"));
                 assert!(feedback.haptics.borrow().is_empty());
                 tester.pump_widget(Container::new().into_widget());
             }
@@ -5236,11 +5186,10 @@ mod tests {
 
     #[test]
     fn can_customize_popup_menu_button_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_color = Color::new(0xffffff00);
             let icon_size = 29.5;
-            centered_in_scaffold(&mut tester, m3, move || {
+            centered_in_scaffold(tester, m3, move || {
                 PopupMenuButton::new(|_app, _context| vec![item("value".to_owned(), "child")])
                     .icon_color(icon_color)
                     .icon_size(icon_size)
@@ -5248,7 +5197,7 @@ mod tests {
             });
 
             let more = Icons::adaptive().more(&tester.cell.borrow());
-            let icon = tester.find_by_icon(&more);
+            let icon = tester.element(find::by_icon(&more).first());
             assert_eq!(
                 tester.glyph_style(icon).color.as_deref().copied(),
                 Some(icon_color)
@@ -5262,11 +5211,10 @@ mod tests {
 
     #[test]
     fn does_not_crash_in_small_overlay() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let navigator = GlobalKey::new();
             let key = navigator.clone();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 let navigator = key.clone();
                 crate::scaffold::Scaffold::new()
                     .body(Column::new().children(vec![
@@ -5306,20 +5254,19 @@ mod tests {
                     .into_widget()
             });
 
-            tap_text(&mut tester, "press");
+            tester.tap(find::text("press"));
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("foo").len(), 1);
+            expect(tester, &find::text("foo"), finds_one_widget());
         });
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/80869
     #[test]
     fn the_menu_position_test_in_the_scrollable_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let key = button_key.clone();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 crate::scaffold::Scaffold::new()
                     .body(
                         SingleChildScrollView::new().child(Column::new().children(vec![
@@ -5339,48 +5286,47 @@ mod tests {
                     .into_widget()
             });
             let menu_top_left = |tester: &WidgetTester| {
-                let scroll_views = tester.find_onstage_by_type::<SingleChildScrollView>();
+                let scroll_views = find::by_type::<SingleChildScrollView>().evaluate(tester);
                 let last = *scroll_views.last().expect("the menu's scroll view");
                 tester.get_rect(tester.render_box_of(last)).top_left()
             };
 
             // Open the menu.
-            tap_key(&mut tester, &button_key);
+            tap_key(tester, &button_key);
             tester.pump_and_settle();
 
-            let button = rect_of_key(&tester, &button_key).top_left();
-            assert_offset_near(button, Offset::new(0.0, 100.0));
+            let button = rect_of_key(tester, &button_key).top_left();
+            assert_f32_equals(button, Offset::new(0.0, 100.0));
 
             // The menu should be positioned directly next to the top of the button.
             // The 8.0 pixels is [_kMenuScreenPadding].
-            assert_offset_near(menu_top_left(&tester), Offset::new(8.0, 100.0));
+            assert_f32_equals(menu_top_left(tester), Offset::new(8.0, 100.0));
 
             // Close the menu.
-            tap_key(&mut tester, &button_key);
+            tap_key(tester, &button_key);
             tester.pump_and_settle();
 
             // Scroll a little bit.
-            let scroll_view = only(tester.find_onstage_by_type::<SingleChildScrollView>());
+            let scroll_view = tester.element(find::by_type::<SingleChildScrollView>());
             let start = tester.get_rect(tester.render_box_of(scroll_view)).center();
             tester.drag_from(start, Offset::new(0.0, -50.0), 1);
 
-            let button = rect_of_key(&tester, &button_key).top_left();
-            assert_offset_near(button, Offset::new(0.0, 50.0));
+            let button = rect_of_key(tester, &button_key).top_left();
+            assert_f32_equals(button, Offset::new(0.0, 50.0));
 
             // Open the menu again.
-            tap_key(&mut tester, &button_key);
+            tap_key(tester, &button_key);
             tester.pump_and_settle();
 
             // The menu should be positioned directly next to the top of the button.
             // The 8.0 pixels is [_kMenuScreenPadding].
-            assert_offset_near(menu_top_left(&tester), Offset::new(8.0, 50.0));
+            assert_f32_equals(menu_top_left(tester), Offset::new(8.0, 50.0));
         });
     }
 
     #[test]
     fn popup_menu_button_custom_splash_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_frame_without_child =
                 |tester: &mut WidgetTester, splash_radius: Option<f64>| {
                     centered_in_scaffold(tester, m2, move || {
@@ -5402,41 +5348,40 @@ mod tests {
                 });
             };
             let ink_response_radius = |tester: &WidgetTester| {
-                let ink_response = only(tester.find_by_type::<crate::ink_well::InkResponse>());
+                let ink_response = tester.element(find::by_type::<crate::ink_well::InkResponse>());
                 tester.widget(
                     ink_response,
                     |ink_response: &crate::ink_well::InkResponse| ink_response.radius,
                 )
             };
             let ink_well_radius = |tester: &WidgetTester| {
-                let ink_well = only(tester.find_by_type::<InkWell>());
+                let ink_well = tester.element(find::by_type::<InkWell>());
                 tester.widget(ink_well, |ink_well: &InkWell| ink_well.ink_response.radius)
             };
 
-            build_frame_without_child(&mut tester, None);
+            build_frame_without_child(tester, None);
             assert_eq!(
-                ink_response_radius(&tester),
+                ink_response_radius(tester),
                 Some(Material::DEFAULT_SPLASH_RADIUS)
             );
-            build_frame_with_child(&mut tester, None);
-            assert_eq!(ink_well_radius(&tester), None);
+            build_frame_with_child(tester, None);
+            assert_eq!(ink_well_radius(tester), None);
 
             let test_splash_radius = 50.0;
 
-            build_frame_without_child(&mut tester, Some(test_splash_radius));
-            assert_eq!(ink_response_radius(&tester), Some(test_splash_radius));
-            build_frame_with_child(&mut tester, Some(test_splash_radius));
-            assert_eq!(ink_well_radius(&tester), Some(test_splash_radius));
+            build_frame_without_child(tester, Some(test_splash_radius));
+            assert_eq!(ink_response_radius(tester), Some(test_splash_radius));
+            build_frame_with_child(tester, Some(test_splash_radius));
+            assert_eq!(ink_well_radius(tester), Some(test_splash_radius));
         });
     }
 
     #[test]
     fn can_override_menu_size_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let button_key = key.clone();
-            centered_in_scaffold(&mut tester, m3, move || {
+            centered_in_scaffold(tester, m3, move || {
                 PopupMenuButton::new(|_app, _context| vec![item("value".to_owned(), "Item 0")])
                     .key(button_key.into())
                     .constraints(BoxConstraints::new().min_width(500.0))
@@ -5444,10 +5389,10 @@ mod tests {
             });
 
             // Show the menu
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
-            let item = rect_with_text::<PopupMenuItem<String>>(&tester, "Item 0");
+            let item = rect_with_text::<PopupMenuItem<String>>(tester, "Item 0");
             assert_eq!(item.height(), 48.0);
             assert_eq!(item.width(), 500.0);
         });
@@ -5455,8 +5400,7 @@ mod tests {
 
     #[test]
     fn can_change_menu_position_and_offset() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_menu_button = |position: Option<PopupMenuPosition>, offset: Offset| {
                 let button = PopupMenuButton::new(|_app, _context| {
                     vec![PopupMenuEntryRef::new(
@@ -5495,31 +5439,30 @@ mod tests {
                 ),
             ] {
                 let button = build_menu_button(position, offset);
-                pump_app(&mut tester, m3, move |_app| {
+                pump_app(tester, m3, move |_app| {
                     crate::scaffold::Scaffold::new()
                         .body(Material::new().child(button))
                         .into_widget()
                 });
 
                 // Open the popup menu.
-                let icon_button = only(tester.find_by_type::<IconButton>());
+                let icon_button = tester.element(find::by_type::<IconButton>());
                 let center = tester.get_rect(tester.render_box_of(icon_button)).center();
-                tester.tap(center, 1);
+                tester.tap_at(center, 1);
                 tester.pump_and_settle();
 
-                assert_offset_near(rect_of::<PopupMenu<i32>>(&tester).top_left(), expected);
+                assert_f32_equals(rect_of::<PopupMenu<i32>>(tester).top_left(), expected);
 
                 // Close the popup menu.
-                tester.tap(Offset::ZERO, 1);
-                tester.pump(Duration::ZERO);
+                tester.tap_at(Offset::ZERO, 1);
+                tester.pump();
             }
         });
     }
 
     #[test]
     fn popup_menu_button_icon_inherits_icon_themes_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_popup_menu = |tester: &mut WidgetTester,
                                     theme_icon_size: Option<f64>,
                                     icon_size: Option<f64>| {
@@ -5540,39 +5483,38 @@ mod tests {
                 );
             };
             let icon_size = |tester: &WidgetTester| {
-                let icon = tester.find_by_icon(&Icons::more_vert());
+                let icon = tester.element(find::by_icon(&Icons::more_vert()).first());
                 tester.get_rect(tester.render_box_of(icon)).size()
             };
 
             // Popup menu with default icon size.
-            build_popup_menu(&mut tester, None, None);
+            build_popup_menu(tester, None, None);
             // Default PopupMenuButton icon size is 24.0.
-            assert_eq!(icon_size(&tester), Size::new(24.0, 24.0));
+            assert_eq!(icon_size(tester), Size::new(24.0, 24.0));
 
             // Popup menu with custom theme icon size.
-            build_popup_menu(&mut tester, Some(30.0), None);
+            build_popup_menu(tester, Some(30.0), None);
             tester.pump_and_settle();
             // PopupMenuButton icon inherits IconTheme's size.
-            assert_eq!(icon_size(&tester), Size::new(30.0, 30.0));
+            assert_eq!(icon_size(tester), Size::new(30.0, 30.0));
 
             // Popup menu with custom icon size.
-            build_popup_menu(&mut tester, Some(30.0), Some(50.0));
+            build_popup_menu(tester, Some(30.0), Some(50.0));
             tester.pump_and_settle();
             // PopupMenuButton icon size overrides IconTheme's size.
-            assert_eq!(icon_size(&tester), Size::new(50.0, 50.0));
+            assert_eq!(icon_size(tester), Size::new(50.0, 50.0));
         });
     }
 
     #[test]
     fn popup_menu_clip_behavior() {
         // Regression test for https://github.com/flutter/flutter/issues/107215
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_button_key = GlobalKey::new();
             let radius = 20.0;
             for clip_behavior in [Clip::None, Clip::HardEdge] {
                 let key = popup_button_key.clone();
-                centered_in_scaffold(&mut tester, m3, move || {
+                centered_in_scaffold(tester, m3, move || {
                     PopupMenuButton::new(|_app, _context| vec![item("value".to_owned(), "Item 0")])
                         .key(key.into())
                         .shape(waft_painting::RoundedRectangleBorder::new(
@@ -5584,10 +5526,10 @@ mod tests {
                 });
 
                 // Open the popup to build and show the menu contents.
-                tap_key(&mut tester, &popup_button_key);
+                tap_key(tester, &popup_button_key);
                 tester.pump_and_settle();
 
-                let materials = tester.find_by_type::<Material>();
+                let materials = find::by_type::<Material>().evaluate(tester);
                 let material = *materials.last().expect("the menu's Material");
                 assert_eq!(
                     tester.widget(material, |material: &Material| material.clip_behavior),
@@ -5595,7 +5537,7 @@ mod tests {
                 );
 
                 // Close the popup menu.
-                tester.tap(Offset::ZERO, 1);
+                tester.tap_at(Offset::ZERO, 1);
                 tester.pump_and_settle();
             }
         });
@@ -5606,7 +5548,7 @@ mod tests {
         use crate::scrollbar::Scrollbar;
         use crate::scrollbar::tests::painted;
         use crate::scrollbar_theme::{ScrollbarTheme, ScrollbarThemeData};
-        use crate::test_support::Drawn;
+        use waft_rendering::testing::{PaintCall, assert_paints};
 
         fn menu_button(key: &GlobalKey) -> PopupMenuButton<()> {
             PopupMenuButton::new(|_app, _context| {
@@ -5620,12 +5562,10 @@ mod tests {
         /// Dart's `expect(find.byType(Scrollbar), findsOneWidget)` and
         /// `expect(find.byType(Scrollbar), paints..rrect(color: thumb))`.
         fn expect_one_scrollbar_painting(tester: &WidgetTester, thumb: u32) {
-            only(tester.find_by_type::<Scrollbar>());
-            assert!(
-                painted(tester)
-                    .iter()
-                    .any(|drawn| matches!(drawn, Drawn::Path(color, _) if *color == thumb)),
-                "the scrollbar paints a {thumb:#x} rrect"
+            tester.element(find::by_type::<Scrollbar>());
+            assert_paints(
+                &painted(tester),
+                &[PaintCall::rrect(Some(Color::new(thumb)))],
             );
         }
 
@@ -5634,8 +5574,7 @@ mod tests {
             TargetPlatform::MacOS,
             TargetPlatform::Windows,
         ] {
-            with_main_thread_stack(move || {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let popup_button_key = GlobalKey::new();
                 let scrollbar_theme = ScrollbarThemeData::new()
                     .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
@@ -5651,20 +5590,20 @@ mod tests {
                 };
 
                 let key = popup_button_key.clone();
-                pump_app(&mut tester, theme(scrollbar_theme.clone()), move |_app| {
+                pump_app(tester, theme(scrollbar_theme.clone()), move |_app| {
                     Material::new()
                         .child(Column::new().children([menu_button(&key).into_widget()]))
                         .into_widget()
                 });
 
-                tap_key(&mut tester, &popup_button_key);
+                tap_key(tester, &popup_button_key);
                 tester.pump_and_settle();
 
                 // Test Scrollbar thumb color.
-                expect_one_scrollbar_painting(&tester, 0xffff0000);
+                expect_one_scrollbar_painting(tester, 0xffff0000);
 
                 // Close the menu.
-                tester.tap(Offset::new(20.0, 20.0), 1);
+                tester.tap_at(Offset::new(20.0, 20.0), 1);
                 tester.pump_and_settle();
 
                 // Test local ScrollbarTheme overrides global ScrollbarTheme.
@@ -5672,29 +5611,28 @@ mod tests {
                 let local_theme = scrollbar_theme.copy_with().thumb_color(
                     <dyn WidgetStateProperty<Option<Color>>>::all(Some(Color::new(0xff0000ff))),
                 );
-                pump_app(&mut tester, theme(scrollbar_theme), move |_app| {
+                pump_app(tester, theme(scrollbar_theme), move |_app| {
                     Material::new()
                         .child(Column::new().children([
                             ScrollbarTheme::new(local_theme, menu_button(&key)).into_widget(),
                         ]))
                         .into_widget()
                 });
-                tap_key(&mut tester, &popup_button_key);
+                tap_key(tester, &popup_button_key);
                 tester.pump_and_settle();
 
                 // Scrollbar thumb color should be updated.
-                expect_one_scrollbar_painting(&tester, 0xff0000ff);
+                expect_one_scrollbar_painting(tester, 0xff0000ff);
             });
         }
     }
 
     #[test]
     fn uses_closed_loop_focus_traversal() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_button_key = GlobalKey::new();
             let key = popup_button_key.clone();
-            centered_in_scaffold(&mut tester, m3, move || {
+            centered_in_scaffold(tester, m3, move || {
                 PopupMenuButton::new(|_app, _context| {
                     vec![item("a".to_owned(), "A"), item("b".to_owned(), "B")]
                 })
@@ -5703,11 +5641,11 @@ mod tests {
             });
 
             // Open the popup to build and show the menu contents.
-            tap_key(&mut tester, &popup_button_key);
+            tap_key(tester, &popup_button_key);
             tester.pump_and_settle();
 
             let node = |tester: &WidgetTester, text: &str| {
-                let element = only(tester.find_onstage_text(text));
+                let element = tester.element(find::text(text));
                 waft_widgets::Focus::of(&mut tester.cell.borrow_mut(), element, false, false)
             };
             let invoke = |tester: &mut WidgetTester, intent: &dyn waft_widgets::Intent| {
@@ -5718,7 +5656,7 @@ mod tests {
                         .expect("a focused node with a context");
                     waft_widgets::Actions::invoke(&mut app, context, intent)
                 };
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 result
                     .and_then(|result| result.downcast_ref::<bool>().copied())
                     .expect("the focus actions answer whether focus moved")
@@ -5728,11 +5666,11 @@ mod tests {
             };
 
             // Start at A
-            let a = node(&tester, "A");
+            let a = node(tester, "A");
             a.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester, "A"));
-            assert!(!has_focus(&tester, "B"));
+            tester.pump();
+            assert!(has_focus(tester, "A"));
+            assert!(!has_focus(tester, "B"));
 
             for (intent, a_focused) in [
                 // A -> B
@@ -5747,18 +5685,17 @@ mod tests {
                 // A <- B (wrap around)
                 (&waft_widgets::PreviousFocusIntent, true),
             ] {
-                assert!(invoke(&mut tester, intent));
-                assert_eq!(has_focus(&tester, "A"), a_focused);
-                assert_eq!(has_focus(&tester, "B"), !a_focused);
+                assert!(invoke(tester, intent));
+                assert_eq!(has_focus(tester, "A"), a_focused);
+                assert_eq!(has_focus(tester, "B"), !a_focused);
             }
         });
     }
 
     #[test]
     fn popup_menu_with_route_settings() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Material::new()
                     .child(
                         Center::new().child(crate::elevated_button::ElevatedButton::new(
@@ -5769,7 +5706,7 @@ mod tests {
                     .into_widget()
             });
 
-            let context = only(tester.find_onstage_text("Go"));
+            let context = tester.element(find::text("Go"));
             let example_setting = RouteSettings::default().name("simple");
 
             drop(show_menu_at_fill::<()>(
@@ -5784,8 +5721,8 @@ mod tests {
             // Dart's `_ClosureNavigatorObserver` records the settings of the route on top; the
             // settings of the route the item is in say the same.
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("foo").len(), 1);
-            let foo = only(tester.find_onstage_text("foo"));
+            expect(tester, &find::text("foo"), finds_one_widget());
+            let foo = tester.element(find::text("foo"));
             let settings =
                 waft_widgets::AnyModalRoute::settings_of(&mut tester.cell.borrow_mut(), foo);
             assert_eq!(
@@ -5793,7 +5730,7 @@ mod tests {
                 Some("simple")
             );
 
-            tap_text(&mut tester, "foo");
+            tester.tap(find::text("foo"));
             tester.pump_and_settle();
             let settings =
                 waft_widgets::AnyModalRoute::settings_of(&mut tester.cell.borrow_mut(), context);
@@ -5806,12 +5743,11 @@ mod tests {
 
     #[test]
     fn popup_menu_is_positioned_under_the_child() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_button_key = GlobalKey::new();
             let child_key = GlobalKey::new();
             let (key, child) = (popup_button_key.clone(), child_key.clone());
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Material::new()
                     .child(Column::new().children(vec![
                         PopupMenuButton::<()>::new(|_app, _context| {
@@ -5827,22 +5763,21 @@ mod tests {
                     .into_widget()
             });
 
-            tap_key(&mut tester, &popup_button_key);
+            tap_key(tester, &popup_button_key);
             tester.pump_and_settle();
 
-            let child_bottom_left = rect_of_key(&tester, &child_key).bottom_left();
+            let child_bottom_left = rect_of_key(tester, &child_key).bottom_left();
             // Dart's `find.bySemanticsLabel('Popup menu')`: the menu's `Semantics` node, the
             // `_PopupMenu`'s box.
-            let menu_top_left = rect_of::<PopupMenu<()>>(&tester).top_left();
-            assert_offset_near(child_bottom_left, menu_top_left);
+            let menu_top_left = rect_of::<PopupMenu<()>>(tester).top_left();
+            assert_f32_equals(child_bottom_left, menu_top_left);
         });
     }
 
     #[test]
     fn popup_menu_item_on_tap_should_be_calling_after_navigator_pop() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 crate::scaffold::Scaffold::new()
                     .app_bar(waft_widgets::PreferredSizeWidgetRef::new(
                         crate::app_bar::AppBar::new().actions(vec![
@@ -5892,27 +5827,27 @@ mod tests {
                     .into_widget()
             });
 
-            let button = only(tester.find_by_type::<PopupMenuButton<i32>>());
+            let button = tester.element(find::by_type::<PopupMenuButton<i32>>());
             let center = tester.get_rect(tester.render_box_of(button)).center();
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
-            tap_text(&mut tester, "ACTION");
+            tester.tap(find::text("ACTION"));
             tester.pump_and_settle();
 
             // Verify that the ModalBottomSheet is displayed
-            assert_eq!(tester.find_onstage_text("ModalBottomSheet").len(), 1);
+            expect(tester, &find::text("ModalBottomSheet"), finds_one_widget());
         });
     }
 
     /// Dart's `_labelStyle(tester, label)`: the style of the `RichText` below the text.
     fn label_style(tester: &WidgetTester, label: &str) -> TextStyle {
-        tester.glyph_style(only(tester.find_onstage_text(label)))
+        tester.glyph_style(tester.element(find::text(label)))
     }
 
     /// The menu's `Material`, the last one: Dart's `find.byType(Material).last`.
     fn last_material_size(tester: &WidgetTester) -> Size {
-        let materials = tester.find_by_type::<Material>();
+        let materials = find::by_type::<Material>().evaluate(tester);
         let material = *materials.last().expect("a Material");
         tester.get_rect(tester.render_box_of(material)).size()
     }
@@ -5969,30 +5904,29 @@ mod tests {
 
     #[test]
     fn material3_checked_popup_menu_item_label_text_style_uses_correct_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            app_bar_button(&mut tester, m3, &key, || checked_items(None));
+            app_bar_button(tester, m3, &key, || checked_items(None));
 
             // Show the menu
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             // Test default text style.
             let on_surface = m3(&tester.cell.borrow()).color_scheme.on_surface;
-            assert_eq!(label_style(&tester, "Item 1").font_size, Some(14.0));
+            assert_eq!(label_style(tester, "Item 1").font_size, Some(14.0));
             assert_eq!(
-                label_style(&tester, "Item 1").color.as_deref().copied(),
+                label_style(tester, "Item 1").color.as_deref().copied(),
                 Some(on_surface)
             );
 
             // Close the menu.
-            tester.tap(Offset::new(20.0, 20.0), 1);
+            tester.tap_at(Offset::new(20.0, 20.0), 1);
             tester.pump_and_settle();
 
             // Test custom text theme.
             app_bar_button(
-                &mut tester,
+                tester,
                 |app| {
                     m3(app)
                         .copy_with()
@@ -6006,11 +5940,11 @@ mod tests {
             );
 
             // Show the menu.
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             // Test custom text theme.
-            let style = label_style(&tester, "Item 1");
+            let style = label_style(tester, "Item 1");
             assert_eq!(style.font_size, custom_text_style().font_size);
             assert_eq!(style.font_weight, custom_text_style().font_weight);
             assert_eq!(style.font_style, custom_text_style().font_style);
@@ -6019,8 +5953,7 @@ mod tests {
 
     #[test]
     fn checked_popup_menu_item_label_text_style_resolve_material_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let label_text_style =
                 <dyn WidgetStateProperty<Option<TextStyle>>>::resolve_with(|states| {
@@ -6038,12 +5971,12 @@ mod tests {
                     )
                 });
             let style = Rc::clone(&label_text_style);
-            app_bar_button(&mut tester, m3, &key, move || {
+            app_bar_button(tester, m3, &key, move || {
                 checked_items(Some(Rc::clone(&style)))
             });
 
             // Show the menu.
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
             let mut selected = WidgetStates::new();
@@ -6056,8 +5989,8 @@ mod tests {
                 let style = label_text_style.resolve(states).expect("a style");
                 (style.color.as_deref().copied(), style.font_size)
             };
-            assert_eq!(merged(&tester, "Item 1"), expected(&WidgetStates::new()));
-            assert_eq!(merged(&tester, "Item 2"), expected(&selected));
+            assert_eq!(merged(tester, "Item 1"), expected(&WidgetStates::new()));
+            assert_eq!(merged(tester, "Item 2"), expected(&selected));
         });
     }
 
@@ -6072,10 +6005,9 @@ mod tests {
 
     #[test]
     fn checked_popup_menu_item_overrides_redundant_list_tile_content_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            keyed_text_button(&mut tester, m2, &key, || {
+            keyed_text_button(tester, m2, &key, || {
                 vec![
                     PopupMenuEntryRef::new(
                         CheckedPopupMenuItem::new()
@@ -6092,20 +6024,19 @@ mod tests {
             });
 
             // Show the menu.
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
-            assert_eq!(item_safe_area_minimum(&tester, "Item 0"), EdgeInsets::ZERO);
-            assert_eq!(item_safe_area_minimum(&tester, "Item 1"), EdgeInsets::ZERO);
+            assert_eq!(item_safe_area_minimum(tester, "Item 0"), EdgeInsets::ZERO);
+            assert_eq!(item_safe_area_minimum(tester, "Item 1"), EdgeInsets::ZERO);
         });
     }
 
     #[test]
     fn popup_menu_item_overrides_redundant_list_tile_content_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            keyed_text_button(&mut tester, m2, &key, || {
+            keyed_text_button(tester, m2, &key, || {
                 vec![
                     PopupMenuEntryRef::new(
                         PopupMenuItem::new(Some(ListTile::new().title(Text::new("Item 0"))))
@@ -6120,11 +6051,11 @@ mod tests {
             });
 
             // Show the menu.
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
 
-            assert_eq!(item_safe_area_minimum(&tester, "Item 0"), EdgeInsets::ZERO);
-            assert_eq!(item_safe_area_minimum(&tester, "Item 1"), EdgeInsets::ZERO);
+            assert_eq!(item_safe_area_minimum(tester, "Item 0"), EdgeInsets::ZERO);
+            assert_eq!(item_safe_area_minimum(tester, "Item 1"), EdgeInsets::ZERO);
         });
     }
 
@@ -6144,33 +6075,33 @@ mod tests {
     /// Material 2 twin: the default font size and colour, then the text theme's style that
     /// `custom` puts in its place.
     fn item_overrides_title_text_style(
+        tester: &mut WidgetTester,
         theme: fn(&App) -> ThemeData,
         default_font_size: f64,
         default_color: impl Fn(&ThemeData) -> Option<Color>,
         custom: fn(crate::text_theme::TextTheme, TextStyle) -> crate::text_theme::TextTheme,
     ) {
-        let mut tester = tester();
         let key = GlobalKey::new();
-        keyed_text_button(&mut tester, theme, &key, text_and_list_tile_items);
+        keyed_text_button(tester, theme, &key, text_and_list_tile_items);
 
         // Show the menu.
-        tap_key(&mut tester, &key);
+        tap_key(tester, &key);
         tester.pump_and_settle();
 
         let expected_color = default_color(&theme(&tester.cell.borrow()));
         for label in ["Item 0", "Item 1"] {
-            let style = label_style(&tester, label);
+            let style = label_style(tester, label);
             assert_eq!(style.font_size, Some(default_font_size), "{label}");
             assert_eq!(style.color.as_deref().copied(), expected_color, "{label}");
         }
 
         // Close the menu.
-        tester.tap(Offset::new(20.0, 20.0), 1);
+        tester.tap_at(Offset::new(20.0, 20.0), 1);
         tester.pump_and_settle();
 
         // Test custom text theme.
         keyed_text_button(
-            &mut tester,
+            tester,
             move |app| {
                 theme(app)
                     .copy_with()
@@ -6185,11 +6116,11 @@ mod tests {
         );
 
         // Show the menu.
-        tap_key(&mut tester, &key);
+        tap_key(tester, &key);
         tester.pump_and_settle();
 
         for label in ["Item 0", "Item 1"] {
-            let style = label_style(&tester, label);
+            let style = label_style(tester, label);
             assert_eq!(style.font_size, custom_text_style().font_size, "{label}");
             assert_eq!(
                 style.font_weight,
@@ -6202,8 +6133,9 @@ mod tests {
 
     #[test]
     fn material3_popup_menu_item_overrides_list_tile_title_text_style() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             item_overrides_title_text_style(
+                tester,
                 m3,
                 14.0,
                 |theme| Some(theme.color_scheme.on_surface),
@@ -6214,8 +6146,9 @@ mod tests {
 
     #[test]
     fn material2_popup_menu_item_overrides_list_tile_title_text_style() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             item_overrides_title_text_style(
+                tester,
                 m2,
                 16.0,
                 |theme| {
@@ -6232,8 +6165,7 @@ mod tests {
 
     #[test]
     fn checked_popup_menu_item_on_tap_callback_is_called_when_defined() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (count, on_tap) = counter();
             tester.pump_widget(test_app(TextDirection::Ltr, move || {
                 let on_tap = on_tap.clone();
@@ -6260,11 +6192,10 @@ mod tests {
             }));
 
             for (label, expected) in [("Item with onTap", 1), ("Item without onTap", 1)] {
-                tap_text(&mut tester, "button");
+                tester.tap(find::text("button"));
                 tester.pump_and_settle();
-                let center =
-                    rect_with_text::<CheckedPopupMenuItem<String>>(&tester, label).center();
-                tester.tap(center, 1);
+                let center = rect_with_text::<CheckedPopupMenuItem<String>>(tester, label).center();
+                tester.tap_at(center, 1);
                 tester.pump_and_settle();
                 assert_eq!(count.get(), expected);
             }
@@ -6274,11 +6205,13 @@ mod tests {
     /// Dart's 'PopupMenuButton uses root navigator if useRootNavigator is true' and 'does not
     /// use root navigator if useRootNavigator is false': whether the menu's route is the
     /// nested navigator's, which Dart's `MenuObserver`s count.
-    fn button_menu_is_in_nested_navigator(use_root_navigator: bool) -> bool {
-        let mut tester = tester();
+    fn button_menu_is_in_nested_navigator(
+        tester: &mut WidgetTester,
+        use_root_navigator: bool,
+    ) -> bool {
         let nested_key = GlobalKey::new();
         let nested = nested_key.clone();
-        pump_app(&mut tester, m3, move |_app| {
+        pump_app(tester, m3, move |_app| {
             Navigator::new()
                 .key(nested.into())
                 .on_generate_route(move |app, _settings| {
@@ -6313,10 +6246,10 @@ mod tests {
         });
 
         // Open the dialog.
-        tap_text(&mut tester, "button");
-        tester.pump(Duration::ZERO);
+        tester.tap(find::text("button"));
+        tester.pump();
 
-        let menu = only(tester.find_by_type::<PopupMenu<String>>());
+        let menu = tester.element(find::by_type::<PopupMenu<String>>());
         let nested = nested_key
             .current_context(&tester.cell.borrow())
             .expect("the nested navigator is mounted");
@@ -6325,18 +6258,17 @@ mod tests {
 
     #[test]
     fn popup_menu_button_uses_root_navigator_if_use_root_navigator_is_true() {
-        with_main_thread_stack(|| assert!(!button_menu_is_in_nested_navigator(true)));
+        test_widgets(|tester| assert!(!button_menu_is_in_nested_navigator(tester, true)));
     }
 
     #[test]
     fn popup_menu_button_does_not_use_root_navigator_if_use_root_navigator_is_false() {
-        with_main_thread_stack(|| assert!(button_menu_is_in_nested_navigator(false)));
+        test_widgets(|tester| assert!(button_menu_is_in_nested_navigator(tester, false)));
     }
 
     #[test]
     fn override_popup_menu_animation_using_animation_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let target_key = GlobalKey::new();
             let build_popup_menu =
                 |tester: &mut WidgetTester, animation_style: Option<AnimationStyle>| {
@@ -6361,45 +6293,45 @@ mod tests {
             };
 
             // Test default animation.
-            build_popup_menu(&mut tester, None);
+            build_popup_menu(tester, None);
 
-            tap_key(&mut tester, &target_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &target_key);
+            tester.pump();
             // Advance the animation by 1/3 of its duration.
-            tester.pump(Duration::from_millis(100));
-            assert_size_within(&tester, Size::new(112.0, 80.0));
+            tester.pump_by(Duration::from_millis(100));
+            assert_size_within(tester, Size::new(112.0, 80.0));
 
             // Advance the animation by 2/3 of its duration.
-            tester.pump(Duration::from_millis(100));
-            assert_size_within(&tester, Size::new(112.0, 160.0));
+            tester.pump_by(Duration::from_millis(100));
+            assert_size_within(tester, Size::new(112.0, 160.0));
 
             // Advance the animation to the end.
             tester.pump_and_settle();
-            assert_size_within(&tester, Size::new(112.0, 160.0));
+            assert_size_within(tester, Size::new(112.0, 160.0));
 
             // Tap outside to dismiss the menu.
-            tester.tap(Offset::new(20.0, 20.0), 1);
+            tester.tap_at(Offset::new(20.0, 20.0), 1);
             tester.pump_and_settle();
 
             // Override the animation duration.
             build_popup_menu(
-                &mut tester,
+                tester,
                 Some(AnimationStyle::new(None, Some(Duration::ZERO), None, None)),
             );
 
-            tap_key(&mut tester, &target_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &target_key);
+            tester.pump();
             // Advance the animation by 1 millisecond.
-            tester.pump(Duration::from_millis(1));
-            assert_size_within(&tester, Size::new(112.0, 160.0));
+            tester.pump_by(Duration::from_millis(1));
+            assert_size_within(tester, Size::new(112.0, 160.0));
 
             // Tap outside to dismiss the menu.
-            tester.tap(Offset::new(20.0, 20.0), 1);
+            tester.tap_at(Offset::new(20.0, 20.0), 1);
             tester.pump_and_settle();
 
             // Override the animation curve.
             build_popup_menu(
-                &mut tester,
+                tester,
                 Some(AnimationStyle::new(
                     Some(crate::motion::Easing::emphasized_accelerate()),
                     None,
@@ -6408,19 +6340,19 @@ mod tests {
                 )),
             );
 
-            tap_key(&mut tester, &target_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &target_key);
+            tester.pump();
             // Advance the animation by 1/3 of its duration.
-            tester.pump(Duration::from_millis(100));
-            assert_size_within(&tester, Size::new(32.4, 15.4));
+            tester.pump_by(Duration::from_millis(100));
+            assert_size_within(tester, Size::new(32.4, 15.4));
 
             // Advance the animation by 2/3 of its duration.
-            tester.pump(Duration::from_millis(100));
-            assert_size_within(&tester, Size::new(112.0, 72.2));
+            tester.pump_by(Duration::from_millis(100));
+            assert_size_within(tester, Size::new(112.0, 72.2));
 
             // Advance the animation to the end.
             tester.pump_and_settle();
-            assert_size_within(&tester, Size::new(112.0, 160.0));
+            assert_size_within(tester, Size::new(112.0, 160.0));
         });
     }
 
@@ -6429,7 +6361,7 @@ mod tests {
     fn scroll_menu_until_visible(tester: &mut WidgetTester, text: &str, delta: f64) {
         for _ in 0..50 {
             let viewport = scroll_view_rect(tester);
-            let target = text_rect(tester, text);
+            let target = tester.get_rect(find::text(text));
             if target.top >= viewport.top && target.bottom <= viewport.bottom {
                 return;
             }
@@ -6447,18 +6379,17 @@ mod tests {
                 ),
                 1,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
         }
         panic!("{text} did not come into view");
     }
 
     #[test]
     fn popup_menu_button_scrolls_initial_value_selected_value_to_visible() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let length = 50;
             let selected_value = length - 1;
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 crate::scaffold::Scaffold::new()
                     .body(
                         Align::new()
@@ -6476,39 +6407,38 @@ mod tests {
                     )
                     .into_widget()
             });
-            tap_text(&mut tester, "click here");
-            tester.pump(Duration::ZERO);
+            tester.tap(find::text("click here"));
+            tester.pump();
 
             // Set up finder and verify basic widget structure.
-            assert_eq!(tester.find_onstage_text("item #49").len(), 1);
+            expect(tester, &find::text("item #49"), finds_one_widget());
 
             // The initially selected menu item should be positioned on screen.
             let window_height = WidgetTester::SIZE.height();
-            assert!(text_rect(&tester, "item #49").bottom <= window_height);
+            assert!(tester.get_rect(find::text("item #49")).bottom <= window_height);
 
             // Select item 20.
-            scroll_menu_until_visible(&mut tester, "item #20", 500.0);
-            assert_eq!(tester.find_onstage_text("item #20").len(), 1);
-            tap_text(&mut tester, "item #20");
-            tester.pump(Duration::ZERO);
+            scroll_menu_until_visible(tester, "item #20", 500.0);
+            expect(tester, &find::text("item #20"), finds_one_widget());
+            tester.tap(find::text("item #20"));
+            tester.pump();
 
             // Open menu again.
-            tap_text(&mut tester, "click here");
-            tester.pump(Duration::ZERO);
-            assert_eq!(tester.find_onstage_text("item #20").len(), 1);
+            tester.tap(find::text("click here"));
+            tester.pump();
+            expect(tester, &find::text("item #20"), finds_one_widget());
 
             // The selected menu item should be positioned on screen.
-            assert!(text_rect(&tester, "item #20").bottom <= window_height);
+            assert!(tester.get_rect(find::text("item #20")).bottom <= window_height);
         });
     }
 
     #[test]
     fn popup_menu_button_properly_positions_a_constrained_size_popup() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let window_size = WidgetTester::SIZE;
             let length = 50;
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 crate::scaffold::Scaffold::new()
                     .body(
                         Padding::new(EdgeInsetsGeometry::all(50.0)).child(
@@ -6532,18 +6462,18 @@ mod tests {
                     )
                     .into_widget()
             });
-            tap_text(&mut tester, "click here");
-            tester.pump(Duration::ZERO);
+            tester.tap(find::text("click here"));
+            tester.pump();
 
             // Set up finders and verify basic widget structure
-            let button = only(tester.find_by_type::<PopupMenuButton<i32>>());
-            assert_eq!(tester.find_onstage_text("item #49").len(), 1);
-            let list_body = only(tester.find_by_type::<ListBody>());
+            let button = tester.element(find::by_type::<PopupMenuButton<i32>>());
+            expect(tester, &find::text("item #49"), finds_one_widget());
+            let list_body = tester.element(find::by_type::<ListBody>());
             let list_viewport = tester.ancestor_of_type::<SingleChildScrollView>(list_body);
 
             // The button and the list viewport should overlap
-            let button_bounds = tester.global_rect(tester.render_box_of(button));
-            let list_viewport_bounds = tester.global_rect(tester.render_box_of(list_viewport));
+            let button_bounds = tester.get_rect(button);
+            let list_viewport_bounds = tester.get_rect(list_viewport);
             assert!(list_viewport_bounds.top <= window_size.height());
             assert!(list_viewport_bounds.bottom <= window_size.height());
             assert!(list_viewport_bounds.overlaps(button_bounds));
@@ -6552,9 +6482,8 @@ mod tests {
 
     #[test]
     fn popup_menu_button_honors_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 crate::scaffold::Scaffold::new()
                     .body(
                         PopupMenuButton::new(|_app, _context| vec![item(1, "One")]).style(
@@ -6567,7 +6496,7 @@ mod tests {
                     )
                     .into_widget()
             });
-            let button = only(tester.find_by_type::<PopupMenuButton<i32>>());
+            let button = tester.element(find::by_type::<PopupMenuButton<i32>>());
             let rich_text = *tester
                 .descendants_of_type::<waft_widgets::RichText>(button)
                 .first()
@@ -6584,11 +6513,10 @@ mod tests {
 
     #[test]
     fn popup_menu_childs_ink_well_border_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border_radius = BorderRadius::all(waft_embedder::Radius::circular(20.0));
             for radius in [None, Some(border_radius)] {
-                centered_in_scaffold(&mut tester, m3, move || {
+                centered_in_scaffold(tester, m3, move || {
                     let mut button = PopupMenuButton::new(|_app, _context| {
                         vec![item("value".to_owned(), "Item 0")]
                     })
@@ -6605,7 +6533,7 @@ mod tests {
                 });
                 tester.pump_and_settle();
 
-                let ink_well = only(tester.find_by_type::<InkWell>());
+                let ink_well = tester.element(find::by_type::<InkWell>());
                 assert_eq!(
                     tester.widget(ink_well, |ink_well: &InkWell| ink_well
                         .ink_response
@@ -6618,8 +6546,7 @@ mod tests {
 
     #[test]
     fn popup_menu_button_respects_material_tap_target_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_size = 10.0;
             for (tap_target_size, expected) in [
                 (MaterialTapTargetSize::Padded, Size::new(48.0, 48.0)),
@@ -6628,7 +6555,7 @@ mod tests {
                     Size::new(button_size, button_size),
                 ),
             ] {
-                centered_in_scaffold(&mut tester, m3, move || {
+                centered_in_scaffold(tester, m3, move || {
                     PopupMenuButton::new(|_app, _context| vec![item("value".to_owned(), "Item 0")])
                         .style(
                             crate::button_style::ButtonStyle::new()
@@ -6639,17 +6566,16 @@ mod tests {
                 });
                 tester.pump_and_settle();
 
-                assert_eq!(rect_of::<InkWell>(&tester).size(), expected);
+                assert_eq!(rect_of::<InkWell>(tester).size(), expected);
             }
         });
     }
 
     #[test]
     fn if_request_focus_is_false_the_original_focus_should_be_preserved_upon_menu_appearance() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut());
-            pump_app(&mut tester, m3, {
+            pump_app(tester, m3, {
                 let field_focus_node = field_focus_node.clone();
                 move |_app| {
                     crate::scaffold::Scaffold::new()
@@ -6671,13 +6597,13 @@ mod tests {
                         .into_widget()
                 }
             });
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(waft_widgets::FocusNodeLeaf::has_focus(
                 field_focus_node.handle(),
                 &mut tester.cell.borrow_mut()
             ));
-            tap_text(&mut tester, "click here");
-            tester.pump(Duration::ZERO);
+            tester.tap(find::text("click here"));
+            tester.pump();
             assert!(waft_widgets::FocusNodeLeaf::has_focus(
                 field_focus_node.handle(),
                 &mut tester.cell.borrow_mut()
@@ -6688,8 +6614,8 @@ mod tests {
     /// How many `Icon`s show `icon`: Dart's `find.byIcon(icon)` with `findsOneWidget` or
     /// `findsNothing`.
     fn icon_count(tester: &WidgetTester, icon: &waft_widgets::IconData) -> usize {
-        tester
-            .find_onstage_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| {
                 tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
@@ -6699,13 +6625,9 @@ mod tests {
 
     #[test]
     fn popup_menu_button_is_horizontal_on_ios() {
-        with_main_thread_stack(|| {
-            let (mut tester, platform) = WidgetTester::sharing(
-                waft_test::TestPlatform::new().on(waft_embedder::TargetPlatform::Android),
-            );
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let build = |tester: &mut WidgetTester, target: waft_embedder::TargetPlatform| {
-                platform.set_target(target);
+                tester.platform().set_target(target);
                 pump_app(tester, m3, |_app| {
                     crate::scaffold::Scaffold::new()
                         .app_bar(waft_widgets::PreferredSizeWidgetRef::new(
@@ -6718,20 +6640,20 @@ mod tests {
                 });
             };
 
-            build(&mut tester, waft_embedder::TargetPlatform::Android);
+            build(tester, waft_embedder::TargetPlatform::Android);
 
-            assert_eq!(icon_count(&tester, &Icons::more_vert()), 1);
-            assert_eq!(icon_count(&tester, &Icons::more_horiz()), 0);
+            assert_eq!(icon_count(tester, &Icons::more_vert()), 1);
+            assert_eq!(icon_count(tester, &Icons::more_horiz()), 0);
 
             for target in [
                 waft_embedder::TargetPlatform::IOS,
                 waft_embedder::TargetPlatform::MacOS,
             ] {
-                build(&mut tester, target);
+                build(tester, target);
                 tester.pump_and_settle(); // Run theme change animation.
 
-                assert_eq!(icon_count(&tester, &Icons::more_vert()), 0);
-                assert_eq!(icon_count(&tester, &Icons::more_horiz()), 1);
+                assert_eq!(icon_count(tester, &Icons::more_vert()), 0);
+                assert_eq!(icon_count(tester, &Icons::more_horiz()), 1);
             }
         });
     }
@@ -6747,9 +6669,8 @@ mod tests {
 
     #[test]
     fn popup_menu_button_creates_icon_button_when_given_an_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 crate::scaffold::Scaffold::new()
                     .app_bar(waft_widgets::PreferredSizeWidgetRef::new(
                         crate::app_bar::AppBar::new().actions(vec![
@@ -6761,8 +6682,8 @@ mod tests {
                     .into_widget()
             });
 
-            assert_eq!(tester.find_onstage_by_type::<IconButton>().len(), 1);
-            assert_eq!(icon_count(&tester, &Icons::view_carousel()), 1);
+            expect(tester, &find::by_type::<IconButton>(), finds_one_widget());
+            assert_eq!(icon_count(tester, &Icons::view_carousel()), 1);
         });
     }
 
@@ -6774,7 +6695,7 @@ mod tests {
         tester.pump_and_settle();
 
         let button_top_left = rect_of_key(tester, button_key).top_left();
-        assert_offset_near(
+        assert_f32_equals(
             rect_of::<PopupMenu<i32>>(tester).top_left(),
             button_top_left,
         );
@@ -6790,11 +6711,10 @@ mod tests {
 
     #[test]
     fn popup_menu_positioning_inside_nested_overlay() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let key = button_key.clone();
-            pump_app(&mut tester, m3, move |app| {
+            pump_app(tester, m3, move |app| {
                 let body = crate::tooltip::tests::overlay(
                     app,
                     Center::new()
@@ -6808,15 +6728,14 @@ mod tests {
                     .body(Padding::new(EdgeInsetsGeometry::all(8.0)).child(body))
                     .into_widget()
             });
-            menu_top_left_is_the_buttons(&mut tester, &button_key);
+            menu_top_left_is_the_buttons(tester, &button_key);
         });
     }
 
-    fn nested_navigator_case(use_root_navigator: bool) {
-        let mut tester = tester();
+    fn nested_navigator_case(tester: &mut WidgetTester, use_root_navigator: bool) {
         let button_key = GlobalKey::new();
         let key = button_key.clone();
-        pump_app(&mut tester, m3, move |_app| {
+        pump_app(tester, m3, move |_app| {
             let key = key.clone();
             crate::scaffold::Scaffold::new()
                 .app_bar(waft_widgets::PreferredSizeWidgetRef::new(
@@ -6841,26 +6760,25 @@ mod tests {
                 ))
                 .into_widget()
         });
-        menu_top_left_is_the_buttons(&mut tester, &button_key);
+        menu_top_left_is_the_buttons(tester, &button_key);
     }
 
     #[test]
     fn popup_menu_positioning_inside_nested_navigator() {
-        with_main_thread_stack(|| nested_navigator_case(false));
+        test_widgets(|tester| nested_navigator_case(tester, false));
     }
 
     #[test]
     fn popup_menu_positioning_inside_nested_navigator_when_use_root_navigator() {
-        with_main_thread_stack(|| nested_navigator_case(true));
+        test_widgets(|tester| nested_navigator_case(tester, true));
     }
 
     #[test]
     fn popup_menu_button_with_route_settings() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let key = button_key.clone();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 crate::scaffold::Scaffold::new()
                     .body(
                         PopupMenuButton::new(|_app, _context| {
@@ -6875,12 +6793,12 @@ mod tests {
                     .into_widget()
             });
 
-            tap_key(&mut tester, &button_key);
+            tap_key(tester, &button_key);
             tester.pump_and_settle();
 
             // Dart's `_ClosureNavigatorObserver` records the settings of the route on top: the
             // menu's, which its items are in.
-            let item = only(tester.find_onstage_text("Item 1"));
+            let item = tester.element(find::text("Item 1"));
             let settings =
                 waft_widgets::AnyModalRoute::settings_of(&mut tester.cell.borrow_mut(), item);
             assert_eq!(
@@ -6892,11 +6810,10 @@ mod tests {
 
     #[test]
     fn popup_menu_removes_media_query_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let popup_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
             let saved = Rc::clone(&popup_context);
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 MediaQuery::new(
                     MediaQueryData::new().padding(EdgeInsets::all(50.0)),
                     Material::new().child(
@@ -6922,9 +6839,9 @@ mod tests {
                 .into_widget()
             });
 
-            tap_text(&mut tester, "XXX");
+            tester.tap(find::text("XXX"));
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let context = popup_context.get().expect("the menu built");
             assert_eq!(
@@ -6936,11 +6853,11 @@ mod tests {
 
     /// Dart's `tester.widget<Container>(find.byType(Container))` of the open menu's divider.
     fn divider_container(
+        tester: &mut WidgetTester,
         divider: PopupMenuDivider,
     ) -> (Option<EdgeInsetsGeometry>, waft_painting::BoxDecoration) {
-        let mut tester = tester();
         let divider = Rc::new(RefCell::new(Some(divider)));
-        centered_in_scaffold(&mut tester, m3, move || {
+        centered_in_scaffold(tester, m3, move || {
             let divider = Rc::clone(&divider);
             PopupMenuButton::<String>::new(move |_app, _context| {
                 let divider = divider.borrow_mut().take().unwrap_or_default();
@@ -6951,11 +6868,11 @@ mod tests {
             .into_widget()
         });
 
-        let button = only(tester.find_by_type::<PopupMenuButton<String>>());
+        let button = tester.element(find::by_type::<PopupMenuButton<String>>());
         let center = tester.get_rect(tester.render_box_of(button)).center();
-        tester.tap(center, 1);
-        tester.pump(Duration::ZERO);
-        let container = only(tester.find_by_type::<Container>());
+        tester.tap_at(center, 1);
+        tester.pump();
+        let container = tester.element(find::by_type::<Container>());
         tester.widget(container, |container: &Container| {
             (
                 container.margin,
@@ -6979,16 +6896,16 @@ mod tests {
 
     #[test]
     fn popup_menu_divider_custom_thickness() {
-        with_main_thread_stack(|| {
-            let (_, decoration) = divider_container(PopupMenuDivider::new().thickness(5.0));
+        test_widgets(|tester| {
+            let (_, decoration) = divider_container(tester, PopupMenuDivider::new().thickness(5.0));
             assert_eq!(bottom_side(&decoration).width, 5.0);
         });
     }
 
     #[test]
     fn popup_menu_divider_custom_indent() {
-        with_main_thread_stack(|| {
-            let (margin, _) = divider_container(PopupMenuDivider::new().indent(5.0));
+        test_widgets(|tester| {
+            let (margin, _) = divider_container(tester, PopupMenuDivider::new().indent(5.0));
             match margin {
                 Some(EdgeInsetsGeometry::Directional(margin)) => assert_eq!(margin.start, 5.0),
                 other => panic!("an EdgeInsetsDirectional margin, not {other:?}"),
@@ -6998,17 +6915,18 @@ mod tests {
 
     #[test]
     fn popup_menu_divider_custom_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let deep_orange = crate::colors::Colors::DEEP_ORANGE.primary();
-            let (_, decoration) = divider_container(PopupMenuDivider::new().color(deep_orange));
+            let (_, decoration) =
+                divider_container(tester, PopupMenuDivider::new().color(deep_orange));
             assert_eq!(bottom_side(&decoration).color, deep_orange);
         });
     }
 
     #[test]
     fn popup_menu_divider_custom_end_indent() {
-        with_main_thread_stack(|| {
-            let (margin, _) = divider_container(PopupMenuDivider::new().end_indent(5.0));
+        test_widgets(|tester| {
+            let (margin, _) = divider_container(tester, PopupMenuDivider::new().end_indent(5.0));
             match margin {
                 Some(EdgeInsetsGeometry::Directional(margin)) => assert_eq!(margin.end, 5.0),
                 other => panic!("an EdgeInsetsDirectional margin, not {other:?}"),
@@ -7018,8 +6936,9 @@ mod tests {
 
     #[test]
     fn popup_menu_divider_custom_radius() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (_, decoration) = divider_container(
+                tester,
                 PopupMenuDivider::new()
                     .radius(BorderRadius::all(waft_embedder::Radius::circular(5.0))),
             );
@@ -7035,8 +6954,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/171422.
     #[test]
     fn popup_menu_button_should_not_crash_when_being_hidden_immediately() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let show_popup_menu = Rc::new(Cell::new(true));
             let build_widget = |tester: &mut WidgetTester| {
                 let show = Rc::clone(&show_popup_menu);
@@ -7074,29 +6992,28 @@ mod tests {
                 });
             };
 
-            build_widget(&mut tester);
+            build_widget(tester);
 
             // Find the PopupMenuButton.
-            let button = only(tester.find_by_type::<PopupMenuButton<String>>());
+            let button = tester.element(find::by_type::<PopupMenuButton<String>>());
 
             // Tap on PopupMenuButton.
             let center = tester.get_rect(tester.render_box_of(button)).center();
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // Tap on "Hide" menu item.
-            tap_text(&mut tester, "Hide");
+            tester.tap(find::text("Hide"));
 
             // Rebuild the widget tree with the PopupMenuButton removed to trigger the bug.
-            build_widget(&mut tester);
+            build_widget(tester);
         });
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/43824.
     #[test]
     fn popup_menu_updates_when_popup_menu_theme_in_theme_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = |elevation: f64, color: Color, shadow: Color, tint: Color, radius: f64| {
                 PopupMenuThemeData::new()
                     .elevation(elevation)
@@ -7151,7 +7068,7 @@ mod tests {
             };
             let check_popup_menu =
                 |tester: &WidgetTester, popup_menu_theme: &PopupMenuThemeData| {
-                    let materials = tester.find_by_type::<Material>();
+                    let materials = find::by_type::<Material>().evaluate(tester);
                     let material = *materials.last().expect("the menu's Material");
                     tester.widget(material, |material: &Material| {
                         assert_eq!(Some(material.elevation), popup_menu_theme.elevation);
@@ -7167,33 +7084,32 @@ mod tests {
                 };
 
             // Show the menu with the first theme.
-            build_app(&mut tester, popup_menu_theme1.clone());
-            let button = only(tester.find_by_type::<PopupMenuButton<String>>());
+            build_app(tester, popup_menu_theme1.clone());
+            let button = tester.element(find::by_type::<PopupMenuButton<String>>());
             let center = tester.get_rect(tester.render_box_of(button)).center();
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
-            check_popup_menu(&tester, &popup_menu_theme1);
+            check_popup_menu(tester, &popup_menu_theme1);
 
             // Rebuild with the second theme.
-            build_app(&mut tester, popup_menu_theme2.clone());
+            build_app(tester, popup_menu_theme2.clone());
             tester.pump_and_settle();
 
-            check_popup_menu(&tester, &popup_menu_theme2);
+            check_popup_menu(tester, &popup_menu_theme2);
         });
     }
 
     #[test]
     fn checked_popup_menu_item_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            centered_in_scaffold(&mut tester, m3, || {
+        test_widgets(|tester| {
+            centered_in_scaffold(tester, m3, || {
                 SizedBox::shrink()
                     .child(CheckedPopupMenuItem::<String>::new().child(Text::new("X")))
                     .into_widget()
             });
             assert_eq!(
-                rect_of::<CheckedPopupMenuItem<String>>(&tester).size(),
+                rect_of::<CheckedPopupMenuItem<String>>(tester).size(),
                 Size::ZERO
             );
         });
@@ -7201,14 +7117,13 @@ mod tests {
 
     #[test]
     fn popup_menu_item_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            centered_in_scaffold(&mut tester, m3, || {
+        test_widgets(|tester| {
+            centered_in_scaffold(tester, m3, || {
                 SizedBox::shrink()
                     .child(PopupMenuItem::<String>::new(Some(Text::new("X"))))
                     .into_widget()
             });
-            assert_eq!(rect_of::<PopupMenuItem<String>>(&tester).size(), Size::ZERO);
+            assert_eq!(rect_of::<PopupMenuItem<String>>(tester).size(), Size::ZERO);
         });
     }
 
@@ -7218,13 +7133,9 @@ mod tests {
         // overlay, because there doesn't seem to be a way to open the menu at zero
         // area. Though, this should be sufficient since the overlay has been verified
         // by similar tests for MenuAnchor and PopupMenuItem.
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::with_physical_size(
-                waft_test::TestPlatform::new().on(waft_embedder::TargetPlatform::Android),
-                Size::ZERO,
-            );
-            tester.install_platform_fonts();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(
                         SizedBox::shrink().child(PopupMenuButton::new(|_app, _context| {
@@ -7234,7 +7145,7 @@ mod tests {
                     .into_widget()
             });
             assert_eq!(
-                rect_of::<PopupMenuButton<String>>(&tester).size(),
+                rect_of::<PopupMenuButton<String>>(tester).size(),
                 Size::ZERO
             );
         });
@@ -7242,14 +7153,13 @@ mod tests {
 
     #[test]
     fn popup_menu_divider_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(PopupMenuDivider::new()))
                     .into_widget()
             });
-            assert_eq!(rect_of::<PopupMenuDivider>(&tester).size(), Size::ZERO);
+            assert_eq!(rect_of::<PopupMenuDivider>(tester).size(), Size::ZERO);
         });
     }
 
@@ -7259,7 +7169,7 @@ mod tests {
     #[test]
     fn popup_menu_semantics_for_mismatched_platforms() {
         use waft_embedder::TargetPlatform;
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             for target in [
                 TargetPlatform::Android,
                 TargetPlatform::Fuchsia,
@@ -7268,10 +7178,11 @@ mod tests {
                 TargetPlatform::MacOS,
                 TargetPlatform::Windows,
             ] {
-                let mut tester = tester_on(target);
+                let mut tester = WidgetTester::on(target);
+                let tester = &mut tester;
                 for theme_platform in [TargetPlatform::Android, TargetPlatform::IOS] {
                     pump_app(
-                        &mut tester,
+                        tester,
                         move |app| ThemeData::builder().platform(theme_platform).build(app),
                         |_app| {
                             crate::scaffold::Scaffold::new()
@@ -7295,10 +7206,10 @@ mod tests {
                         },
                     );
 
-                    tap_text(&mut tester, "open");
+                    tester.tap(find::text("open"));
                     tester.pump_and_settle();
 
-                    let menu = only(tester.find_by_type::<PopupMenu<()>>());
+                    let menu = tester.element(find::by_type::<PopupMenu<()>>());
                     let label =
                         tester.widget(menu, |menu: &PopupMenu<()>| menu.semantic_label.clone());
                     match target {
@@ -7311,8 +7222,8 @@ mod tests {
                     }
 
                     // Dismiss the popup.
-                    let foo = only(tester.find_onstage_text("foo"));
-                    pop(&mut tester, foo);
+                    let foo = tester.element(find::text("foo"));
+                    pop(tester, foo);
                     tester.pump_and_settle();
                 }
             }
@@ -7323,11 +7234,10 @@ mod tests {
     /// here they are freed with the state's references to them.
     #[test]
     fn a_closed_menu_frees_the_item_fades_its_state_made() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let button_key = key.clone();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Material::new()
                     .child(
                         PopupMenuButton::new(|_app, _context| vec![item(1, "One"), item(2, "Two")])
@@ -7335,10 +7245,10 @@ mod tests {
                     )
                     .into_widget()
             });
-            tap_key(&mut tester, &key);
+            tap_key(tester, &key);
             tester.pump_and_settle();
             let opacities = {
-                let menu = only(tester.find_by_type::<PopupMenu<i32>>());
+                let menu = tester.element(find::by_type::<PopupMenu<i32>>());
                 let app = tester.cell.borrow();
                 let state = menu
                     .state_handle::<PopupMenuState<i32>>(&app)
@@ -7351,7 +7261,7 @@ mod tests {
             };
             assert_eq!(opacities.len(), 2);
 
-            tester.tap(Offset::ZERO, 1);
+            tester.tap_at(Offset::ZERO, 1);
             tester.pump_and_settle();
             tester.cell.checkpoint();
             let app = tester.cell.borrow();

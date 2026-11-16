@@ -469,46 +469,35 @@ impl InkFeatureLeaf for InkDecoration {
 mod tests {
     use std::time::Duration;
 
-    use waft_embedder::{Rect, Size, TargetPlatform, valo};
+    use waft_embedder::{Rect, Size};
     use waft_widgets::Center;
+
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
     use crate::ink_well::InkWell;
-    use crate::test_support::{Drawn, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, path_like};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
-
-    fn size_of(tester: &WidgetTester, key: &GlobalKey) -> Size {
-        tester
-            .render_object(key)
-            .as_box()
-            .expect("a box")
-            .size(&tester.cell.borrow())
-    }
+    use waft_rendering::testing::RecordedCall;
 
     #[test]
     fn the_ink_widget_expands_when_no_dimensions_are_set() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(
                 Material::new()
                     .child(Ink::new().key(key.clone().into()))
                     .into_widget(),
             );
-            assert_eq!(size_of(&tester, &key), Size::new(800.0, 600.0));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 600.0));
         });
     }
 
     #[test]
     fn the_ink_widget_fits_the_specified_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(
                 Material::new()
@@ -524,14 +513,13 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(200.0, 150.0));
+            assert_eq!(tester.get_size(&key), Size::new(200.0, 150.0));
         });
     }
 
     #[test]
     fn the_ink_widget_expands_on_a_unspecified_dimension() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(
                 Material::new()
@@ -542,7 +530,7 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(800.0, 150.0));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 150.0));
         });
     }
 
@@ -572,89 +560,67 @@ mod tests {
         .into_widget()
     }
 
-    fn op_argb(color: valo::Color) -> u32 {
-        let channel = |value: f32| (value * 255.0).round() as u32;
-        (channel(color.a) << 24)
-            | (channel(color.r) << 16)
-            | (channel(color.g) << 8)
-            | channel(color.b)
-    }
-
     /// Dart's `paints..rect(rect: rect, color: rect_color)..circle(color: circle_color)` on the
-    /// material: a `drawRect` of that rect and color, then, later in the list, a `drawCircle` of
-    /// that color; the calls between them are skipped.
+    /// material.
     fn paints_rect_then_circle(
         tester: &WidgetTester,
         rect_color: Color,
         rect: Rect,
         circle_color: Color,
     ) -> bool {
-        let list = tester.ink_list();
-        let ops = list.ops();
-        let is_rect = |op: &valo::Op| match op {
-            valo::Op::DrawRect {
-                rect: drawn, paint, ..
-            } => {
-                op_argb(paint.color) == rect_color.to_argb32()
-                    && Rect::from_ltwh(
-                        f64::from(drawn.x),
-                        f64::from(drawn.y),
-                        f64::from(drawn.width),
-                        f64::from(drawn.height),
-                    ) == rect
-            }
-            _ => false,
-        };
-        let is_circle = |op: &valo::Op| match op {
-            valo::Op::DrawPath { path, paint, .. } => {
-                path.as_oval().is_some() && op_argb(paint.color) == circle_color.to_argb32()
-            }
-            _ => false,
-        };
-        ops.iter()
-            .position(is_rect)
-            .is_some_and(|rect_at| ops[rect_at + 1..].iter().any(is_circle))
+        use waft_rendering::testing::{PaintCall, paints};
+        paints(
+            tester.ink_list().ops(),
+            &[
+                PaintCall::rect_at(rect, Some(rect_color)),
+                PaintCall::circle(Some(circle_color)),
+            ],
+        )
+        .is_ok()
     }
 
     #[test]
     fn material2_does_the_ink_widget_render_anything() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let blue = Colors::BLUE.primary();
             let red = Colors::RED.primary();
             let green = Colors::GREEN.primary();
             let ink_rect = Rect::from_ltrb(300.0, 200.0, 500.0, 400.0);
-            let widget = m2_ink_frame(&tester, Some(blue));
+            let widget = m2_ink_frame(tester, Some(blue));
             tester.pump_widget(widget);
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, WidgetTester::SIZE.center(Offset::ZERO));
-            tester.pump(Duration::ZERO); // start gesture
-            tester.pump(Duration::from_millis(200)); // wait for splash to be well under way
+            tester.pump(); // start gesture
+            tester.pump_by(Duration::from_millis(200)); // wait for splash to be well under way
 
             let box_ = tester.first::<crate::material::RenderInkFeatures>();
             assert!(
-                paints_rect_then_circle(&tester, blue, ink_rect, green),
+                paints_rect_then_circle(tester, blue, ink_rect, green),
                 "{:?}",
-                tester.ink_drawn()
+                tester.ink_calls()
             );
 
-            let widget = m2_ink_frame(&tester, Some(red));
+            let widget = m2_ink_frame(tester, Some(red));
             tester.pump_widget(widget);
             assert_eq!(tester.first::<crate::material::RenderInkFeatures>(), box_);
             assert!(
-                paints_rect_then_circle(&tester, red, ink_rect, green),
+                paints_rect_then_circle(tester, red, ink_rect, green),
                 "{:?}",
-                tester.ink_drawn()
+                tester.ink_calls()
             );
 
             // this is at a different depth in the tree so it's now a new InkWell
-            let widget = m2_ink_frame(&tester, None);
+            let widget = m2_ink_frame(tester, None);
             tester.pump_widget(widget);
             assert_eq!(tester.first::<crate::material::RenderInkFeatures>(), box_);
-            let drawn = tester.ink_drawn();
-            assert!(!drawn.iter().any(|drawn| matches!(drawn, Drawn::Rect(..))));
-            assert!(!drawn.iter().any(|drawn| matches!(drawn, Drawn::Path(..))));
+            let drawn = tester.ink_calls();
+            assert!(
+                !drawn
+                    .iter()
+                    .any(|drawn| matches!(drawn, RecordedCall::Rect { .. }))
+            );
+            assert!(!drawn.iter().any(|drawn| path_like(drawn).is_some()));
 
             tester.up(&gesture);
         });
@@ -662,8 +628,7 @@ mod tests {
 
     #[test]
     fn ink_with_is_visible_false_does_not_paint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let test_color = Color::new(0xffff1234);
             let ink_widget = |is_visible: bool| {
                 Material::new()
@@ -675,17 +640,17 @@ mod tests {
                     )
                     .into_widget()
             };
-            let has_test_color = |drawn: &[Drawn]| {
+            let has_test_color = |drawn: &[RecordedCall]| {
                 drawn
                     .iter()
-                    .any(|drawn| matches!(drawn, Drawn::Rect(color, _) if *color == test_color.to_argb32()))
+                    .any(|drawn| matches!(drawn, RecordedCall::Rect { color, .. } if color.to_argb32() == test_color.to_argb32()))
             };
 
             tester.pump_widget(ink_widget(true));
-            assert!(has_test_color(&tester.ink_drawn()));
+            assert!(has_test_color(&tester.ink_calls()));
 
             tester.pump_widget(ink_widget(false));
-            assert!(!has_test_color(&tester.ink_drawn()));
+            assert!(!has_test_color(&tester.ink_calls()));
         });
     }
 }

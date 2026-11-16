@@ -426,6 +426,8 @@ mod tests {
         WidgetStateProperty,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
+
     use super::*;
     use crate::bottom_navigation_bar::BottomNavigationBar;
     use crate::bottom_navigation_bar::tests::{
@@ -433,9 +435,7 @@ mod tests {
         material_of, paragraph_style, pump_bar,
     };
     use crate::icons::Icons;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::tester;
 
     #[test]
     fn bottom_navigation_bar_theme_data_copy_with_equality_basics() {
@@ -492,12 +492,12 @@ mod tests {
     fn transform_center(tester: &WidgetTester, text: &str) -> Offset {
         let transform =
             tester.ancestor_of_type::<waft_widgets::Transform>(first_text(tester, text));
-        tester.global_rect(tester.render_box_of(transform)).center()
+        tester.get_rect(transform).center()
     }
 
     #[test]
     fn bottom_navigation_bar_is_themeable() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Color::new(0xFF000001);
             let selected_item_color = Color::new(0xFF000002);
             let unselected_item_color = Color::new(0xFF000003);
@@ -507,7 +507,6 @@ mod tests {
             let unselected_text_style = TextStyle::new().font_size(21.0);
             let elevation = 9.0;
 
-            let mut tester = tester();
             let theme = BottomNavigationBarThemeData::new()
                 .background_color(background_color)
                 .selected_item_color(selected_item_color)
@@ -529,7 +528,7 @@ mod tests {
                     }),
                 );
             pump_bar(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .bottom_navigation_bar_theme(theme)
@@ -538,13 +537,13 @@ mod tests {
                 || BottomNavigationBar::new(ac_alarm()),
             );
 
-            let selected_font_style = paragraph_style(&tester, "AC");
-            let selected_icon = icon_style(&tester, Icons::ac_unit());
-            let unselected_icon = icon_style(&tester, Icons::access_alarm());
+            let selected_font_style = paragraph_style(tester, "AC");
+            let selected_icon = icon_style(tester, Icons::ac_unit());
+            let unselected_icon = icon_style(tester, Icons::access_alarm());
             assert_eq!(selected_font_style.font_size, selected_font_style.font_size);
             // Unselected label has a font size of 22 but is scaled down to be font size 21.
             assert_eq!(
-                label_transform(&tester, "Alarm"),
+                label_transform(tester, "Alarm"),
                 diagonal3(
                     unselected_text_style.font_size.unwrap()
                         / selected_text_style.font_size.unwrap()
@@ -556,20 +555,20 @@ mod tests {
             assert_eq!(unselected_icon.font_size, unselected_icon_theme.size);
             // There should not be any [Opacity] or [FadeTransition] widgets
             // since showUnselectedLabels and showSelectedLabels are true.
-            assert_eq!(descendants_of_bar::<Opacity>(&tester), 0);
-            assert_eq!(descendants_of_bar::<FadeTransition>(&tester), 0);
+            assert_eq!(descendants_of_bar::<Opacity>(tester), 0);
+            assert_eq!(descendants_of_bar::<FadeTransition>(tester), 0);
             assert_eq!(
-                material_of(&tester, |material| material.elevation),
+                material_of(tester, |material| material.elevation),
                 elevation
             );
             assert_eq!(
-                material_of(&tester, |material| material.color),
+                material_of(tester, |material| material.color),
                 Some(background_color)
             );
 
-            let selected_bar_item = transform_center(&tester, "AC");
-            let unselected_bar_item = transform_center(&tester, "Alarm");
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let selected_bar_item = transform_center(tester, "AC");
+            let unselected_bar_item = transform_center(tester, "Alarm");
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, selected_bar_item, false);
             tester.pump_and_settle();
@@ -584,7 +583,7 @@ mod tests {
 
     #[test]
     fn bottom_navigation_bar_properties_are_taken_over_the_theme_values() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let theme = BottomNavigationBarThemeData::new()
                 .background_color(Color::new(0xFF000001))
                 .selected_item_color(Color::new(0xFF000002))
@@ -611,13 +610,12 @@ mod tests {
             let landscape_layout = BottomNavigationBarLandscapeLayout::Spread;
             let cursor = WidgetStateMouseCursor::textable();
 
-            let mut tester = tester();
             let (selected_icon_given, unselected_icon_given) =
                 (selected_icon_theme.clone(), unselected_icon_theme.clone());
             let (selected_text_given, unselected_text_given) =
                 (selected_text_style.clone(), unselected_text_style.clone());
             pump_bar(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .bottom_navigation_bar_theme(theme)
@@ -641,13 +639,13 @@ mod tests {
                 },
             );
 
-            let selected_font_style = paragraph_style(&tester, "AC");
-            let selected_icon = icon_style(&tester, Icons::ac_unit());
-            let unselected_icon = icon_style(&tester, Icons::access_alarm());
+            let selected_font_style = paragraph_style(tester, "AC");
+            let selected_icon = icon_style(tester, Icons::ac_unit());
+            let unselected_icon = icon_style(tester, Icons::access_alarm());
             assert_eq!(selected_font_style.font_size, selected_font_style.font_size);
             // Unselected label has a font size of 22 but is scaled down to be font size 21.
             assert_eq!(
-                label_transform(&tester, "Alarm"),
+                label_transform(tester, "Alarm"),
                 diagonal3(
                     unselected_text_style.font_size.unwrap()
                         / selected_text_style.font_size.unwrap()
@@ -659,19 +657,19 @@ mod tests {
             assert_eq!(unselected_icon.font_size, unselected_icon_theme.size);
             // There should not be any [Opacity] or [FadeTransition] widgets
             // since showUnselectedLabels and showSelectedLabels are true.
-            assert_eq!(descendants_of_bar::<Opacity>(&tester), 0);
-            assert_eq!(descendants_of_bar::<FadeTransition>(&tester), 0);
+            assert_eq!(descendants_of_bar::<Opacity>(tester), 0);
+            assert_eq!(descendants_of_bar::<FadeTransition>(tester), 0);
             assert_eq!(
-                material_of(&tester, |material| material.elevation),
+                material_of(tester, |material| material.elevation),
                 elevation
             );
             assert_eq!(
-                material_of(&tester, |material| material.color),
+                material_of(tester, |material| material.color),
                 Some(background_color)
             );
 
-            let bar_item = transform_center(&tester, "AC");
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let bar_item = transform_center(tester, "AC");
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, bar_item, false);
             tester.pump_and_settle();
@@ -697,7 +695,7 @@ mod tests {
     }
 
     fn bar_descendants<W: 'static>(tester: &WidgetTester) -> Vec<waft_widgets::AnyElement> {
-        let bar = tester.find_by_type::<BottomNavigationBar>()[0];
+        let bar = find::by_type::<BottomNavigationBar>().evaluate(tester)[0];
         tester.descendants_of_type::<W>(bar)
     }
 
@@ -708,12 +706,11 @@ mod tests {
 
     #[test]
     fn bottom_navigation_bar_theme_can_be_used_to_hide_all_labels() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/66738.
-            let mut tester = tester();
-            pump_with_labels(&mut tester, false, false);
+            pump_with_labels(tester, false, false);
 
-            let find_visibility = bar_descendants::<Visibility>(&tester);
+            let find_visibility = bar_descendants::<Visibility>(tester);
             assert_eq!(find_visibility.len(), 2);
             for element in find_visibility {
                 assert!(!tester.widget(element, |visibility: &Visibility| visibility.visible));
@@ -723,36 +720,33 @@ mod tests {
 
     #[test]
     fn bottom_navigation_bar_theme_can_be_used_to_hide_selected_labels() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/66738.
-            let mut tester = tester();
-            pump_with_labels(&mut tester, false, true);
+            pump_with_labels(tester, false, true);
 
-            let find_fade_transition = bar_descendants::<FadeTransition>(&tester);
+            let find_fade_transition = bar_descendants::<FadeTransition>(tester);
             assert_eq!(find_fade_transition.len(), 2);
-            assert_eq!(fade_opacity(&tester, find_fade_transition[0]), 0.0);
-            assert_eq!(fade_opacity(&tester, find_fade_transition[1]), 1.0);
+            assert_eq!(fade_opacity(tester, find_fade_transition[0]), 0.0);
+            assert_eq!(fade_opacity(tester, find_fade_transition[1]), 1.0);
         });
     }
 
     #[test]
     fn bottom_navigation_bar_theme_can_be_used_to_hide_unselected_labels() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_with_labels(&mut tester, true, false);
+        test_widgets(|tester| {
+            pump_with_labels(tester, true, false);
 
-            let find_fade_transition = bar_descendants::<FadeTransition>(&tester);
+            let find_fade_transition = bar_descendants::<FadeTransition>(tester);
             assert_eq!(find_fade_transition.len(), 2);
-            assert_eq!(fade_opacity(&tester, find_fade_transition[0]), 1.0);
-            assert_eq!(fade_opacity(&tester, find_fade_transition[1]), 0.0);
+            assert_eq!(fade_opacity(tester, find_fade_transition[0]), 1.0);
+            assert_eq!(fade_opacity(tester, find_fade_transition[1]), 0.0);
         });
     }
 
     #[test]
     fn theme_data_holds_the_bottom_navigation_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = crate::test_support::test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(
                 theme.bottom_navigation_bar_theme,

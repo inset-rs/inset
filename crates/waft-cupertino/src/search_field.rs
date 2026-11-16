@@ -927,178 +927,44 @@ impl State for CupertinoSearchTextFieldState {
 mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
-    use std::time::Duration;
 
     use waft_embedder::{
-        Brightness, Color, FontWeight, Offset, PointerChange, PointerData, PointerDataPacket,
-        PointerDeviceKind, TargetPlatform, TextAffinity, TextDirection, TextSelection,
+        Brightness, Color, FontWeight, Offset, TextAffinity, TextDirection, TextSelection,
     };
-    use waft_foundation::AppCell;
-    use waft_gestures::GestureBinding;
-    use waft_painting::PaintingBinding;
-    use waft_test::{TestPlatform, TestView};
+    use waft_widgets::testing::{
+        WidgetTester, assert_more_or_less_equals_within, expect, find, finds_nothing,
+        finds_one_widget, test_widgets,
+    };
     use waft_widgets::{
-        AnyElement, Center, DecoratedBox, EditableText, GlobalKey, IconData, SizedBox, Text,
-        TextEditingController, TextEditingControllerLeaf, WidgetsBinding,
+        Center, DecoratedBox, EditableText, GlobalKey, SizedBox, Text, TextEditingController,
+        TextEditingControllerLeaf,
     };
 
     use crate::app::CupertinoApp;
     use crate::page_scaffold::CupertinoPageScaffold;
-    use crate::test_support::{build, pump};
     use crate::theme::CupertinoThemeData;
-
-    /// Flutter's test surface: 800 by 600 logical pixels.
-    fn flutter_test_cell() -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::IOS)
-            .with_view(Rc::new(TestView::with_pixel_ratio(1600.0, 1200.0, 2.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        install_fonts(&mut cell.borrow_mut());
-        // The binding's root, which each `pump_app` replaces, as flutter_test's starts with one.
-        build(&cell, SizedBox::new().into_widget());
-        cell
-    }
-
-    /// The test platform's fonts, as flutter_test installs them: every family answers with
-    /// FlutterTest, whose glyphs are an em square, and a missing glyph is its `.notdef`.
-    fn install_fonts(app: &mut App) {
-        PaintingBinding::instance(app).install_platform_fonts(app);
-    }
-
-    /// Dart's `tester.pumpWidget`: makes `app_widget` the view's child and runs one frame.
-    ///
-    /// One frame only, as Dart's: a rebuild a state schedules after it, such as the field's when
-    /// its editable first reports its scroll metrics, waits for the test's next pump.
-    fn pump_app(cell: &AppCell, app_widget: CupertinoApp) {
-        let mut app = cell.borrow_mut();
-        let view = app.platform().views().into_iter().next().expect("one view");
-        let root = waft_widgets::View::new(view, app_widget.into_widget()).into_widget();
-        WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
-        pump(&mut app, Duration::ZERO);
-        drop(app);
-        cell.checkpoint();
-    }
 
     fn centered(field: CupertinoSearchTextField) -> CupertinoApp {
         CupertinoApp::new().home(Center::new().child(field))
     }
 
-    fn root(app: &mut App) -> AnyElement {
-        WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("the tree is attached")
-    }
-
-    /// Every element under `element`, itself first, whose widget is a `W`.
-    fn elements_of<W: 'static>(app: &App, element: AnyElement) -> Vec<AnyElement> {
-        let mut found = Vec::new();
-        if waft_widgets::downcast_widget::<W>(&**element.widget(app)).is_some() {
-            found.push(element);
-        }
-        element.visit_children(app, &mut |child| found.extend(elements_of::<W>(app, child)));
-        found
-    }
-
-    fn widget_of<W: 'static>(app: &App, element: AnyElement) -> &W {
-        waft_widgets::downcast_widget::<W>(&**element.widget(app)).expect("a widget of the type")
-    }
-
-    /// The one `W` in the tree.
-    fn only<W: 'static>(app: &mut App) -> AnyElement {
-        let root = root(app);
-        let found = elements_of::<W>(app, root);
-        assert_eq!(found.len(), 1, "one {}", std::any::type_name::<W>());
-        found[0]
-    }
-
-    /// The icons showing `icon`.
-    fn icons(app: &mut App, icon: IconData) -> Vec<AnyElement> {
-        let root = root(app);
-        elements_of::<Icon>(app, root)
-            .into_iter()
-            .filter(|element| widget_of::<Icon>(app, *element).icon.as_ref() == Some(&icon))
-            .collect()
-    }
-
-    fn icon(app: &mut App, icon: IconData) -> AnyElement {
-        let found = icons(app, icon);
-        assert_eq!(found.len(), 1, "one icon");
-        found[0]
-    }
-
-    /// The texts reading `text`, as `Text` or as an `EditableText`'s value.
-    fn texts(app: &mut App, text: &str) -> usize {
-        let root = root(app);
-        let plain = elements_of::<Text>(app, root)
-            .into_iter()
-            .filter(|element| widget_of::<Text>(app, *element).data.as_deref() == Some(text))
-            .count();
-        let edited = elements_of::<EditableText>(app, root)
-            .into_iter()
-            .filter(|element| {
-                widget_of::<EditableText>(app, *element)
-                    .controller
-                    .text_value(app)
-                    == text
-            })
-            .count();
-        plain + edited
-    }
-
-    /// `element`'s box in global coordinates: its top left and its size.
-    fn rect_of(app: &App, element: AnyElement) -> (Offset, Size) {
-        let render_box = element
-            .find_render_object(app)
-            .expect("a render object")
-            .as_box()
-            .expect("a box");
-        (
-            render_box.local_to_global(app, Offset::ZERO, None),
-            render_box.size(app),
+    /// Dart's `tester.widget<DecoratedBox>(find.descendant(of: find.byType(
+    /// CupertinoSearchTextField), matching: find.byType(DecoratedBox))).decoration`.
+    fn decoration_of_field(tester: &WidgetTester) -> BoxDecoration {
+        tester.widget(
+            find::descendant(
+                find::by_type::<CupertinoSearchTextField>(),
+                find::by_type::<DecoratedBox>(),
+            ),
+            |decorated: &DecoratedBox| {
+                decorated
+                    .decoration
+                    .as_any()
+                    .downcast_ref::<BoxDecoration>()
+                    .expect("a box decoration")
+                    .clone()
+            },
         )
-    }
-
-    fn top_left(app: &App, element: AnyElement) -> Offset {
-        rect_of(app, element).0
-    }
-
-    fn top_right(app: &App, element: AnyElement) -> Offset {
-        let (origin, size) = rect_of(app, element);
-        Offset::new(origin.dx() + size.width(), origin.dy())
-    }
-
-    fn tap(app: &mut App, element: AnyElement) {
-        let (origin, size) = rect_of(app, element);
-        let at = Offset::new(
-            origin.dx() + size.width() / 2.0,
-            origin.dy() + size.height() / 2.0,
-        );
-        for change in [PointerChange::Down, PointerChange::Up] {
-            GestureBinding::instance(app).handle_pointer_data_packet(
-                app,
-                PointerDataPacket::new(vec![PointerData {
-                    change,
-                    kind: PointerDeviceKind::Touch,
-                    pointer_identifier: 1,
-                    physical_x: at.dx() * 2.0,
-                    physical_y: at.dy() * 2.0,
-                    ..PointerData::default()
-                }]),
-            );
-            app.drain_microtasks();
-        }
-        pump(app, Duration::ZERO);
-    }
-
-    fn decoration_of_field(app: &mut App) -> BoxDecoration {
-        let field = only::<CupertinoSearchTextField>(app);
-        let decorated = elements_of::<DecoratedBox>(app, field)[0];
-        widget_of::<DecoratedBox>(app, decorated)
-            .decoration
-            .as_any()
-            .downcast_ref::<BoxDecoration>()
-            .expect("a box decoration")
-            .clone()
     }
 
     fn controller_with(app: &mut App, text: &str) -> Ref<TextEditingController> {
@@ -1107,152 +973,139 @@ mod tests {
         controller
     }
 
-    fn inner_text_field(app: &mut App) -> &CupertinoTextField {
-        let element = only::<CupertinoTextField>(app);
-        widget_of::<CupertinoTextField>(app, element)
+    /// Dart's `tester.widget<CupertinoTextField>(find.byType(CupertinoTextField))`, read
+    /// through `read`.
+    fn inner_text_field<R>(
+        tester: &WidgetTester,
+        read: impl FnOnce(&CupertinoTextField) -> R,
+    ) -> R {
+        tester.widget(find::by_type::<CupertinoTextField>(), read)
     }
 
     #[test]
     fn default_search_field_has_a_border_radius() {
-        let cell = flutter_test_cell();
-        pump_app(&cell, centered(CupertinoSearchTextField::new()));
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            decoration_of_field(&mut app).border_radius,
-            Some(BorderRadius::all(Radius::circular(9.0)).into())
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(centered(CupertinoSearchTextField::new()));
+            assert_eq!(
+                decoration_of_field(tester).border_radius,
+                Some(BorderRadius::all(Radius::circular(9.0)).into())
+            );
+        });
     }
 
     #[test]
     fn decoration_overrides_default_background_color() {
-        let cell = flutter_test_cell();
-        pump_app(
-            &cell,
-            centered(
-                CupertinoSearchTextField::new()
-                    .decoration(BoxDecoration::new().color(Color::from_argb(1, 1, 1, 1))),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            decoration_of_field(&mut app)
-                .color
-                .map(|color| color.color()),
-            Some(Color::from_argb(1, 1, 1, 1))
-        );
+        test_widgets(|tester| {
+            tester
+                .pump_widget(centered(CupertinoSearchTextField::new().decoration(
+                    BoxDecoration::new().color(Color::from_argb(1, 1, 1, 1)),
+                )));
+            assert_eq!(
+                decoration_of_field(tester).color.map(|color| color.color()),
+                Some(Color::from_argb(1, 1, 1, 1))
+            );
+        });
     }
 
     #[test]
     fn decoration_overrides_default_border_radius() {
-        let cell = flutter_test_cell();
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .decoration(BoxDecoration::new().border_radius(BorderRadius::ZERO)),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            decoration_of_field(&mut app).border_radius,
-            Some(BorderRadius::ZERO.into())
-        );
+            ));
+            assert_eq!(
+                decoration_of_field(tester).border_radius,
+                Some(BorderRadius::ZERO.into())
+            );
+        });
     }
 
     #[test]
     fn text_entries_are_padded_by_default() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "initial");
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new().controller(controller.into_erased())),
-        );
-        let mut app = cell.borrow_mut();
-        let editable = only::<EditableText>(&mut app);
-        let field = only::<CupertinoSearchTextField>(&mut app);
-        assert_eq!(
-            top_left(&app, editable) - top_left(&app, field),
-            Offset::new(31.5, 9.5)
-        );
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "initial");
+            tester.pump_widget(centered(
+                CupertinoSearchTextField::new().controller(controller.into_erased()),
+            ));
+            assert_eq!(
+                tester.get_top_left(find::text("initial"))
+                    - tester.get_top_left(find::by_type::<CupertinoSearchTextField>()),
+                Offset::new(31.5, 9.5)
+            );
+        });
     }
 
     #[test]
     fn can_change_keyboard_type() {
-        let cell = flutter_test_cell();
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new().keyboard_type(Some(TextInputType::NUMBER))),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            inner_text_field(&mut app).keyboard_type,
-            Some(TextInputType::NUMBER)
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(centered(
+                CupertinoSearchTextField::new().keyboard_type(Some(TextInputType::NUMBER)),
+            ));
+            assert_eq!(
+                inner_text_field(tester, |field| field.keyboard_type),
+                Some(TextInputType::NUMBER)
+            );
+        });
     }
 
     #[test]
     fn can_control_text_content_via_controller() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new().controller(controller.clone().into_erased())),
-        );
-        let mut app = cell.borrow_mut();
-        controller.set_text(&mut app, "controller text");
-        pump(&mut app, Duration::ZERO);
-        assert_eq!(texts(&mut app, "controller text"), 1);
-        controller.set_text(&mut app, "");
-        pump(&mut app, Duration::ZERO);
-        assert_eq!(texts(&mut app, "controller text"), 0);
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            tester.pump_widget(centered(
+                CupertinoSearchTextField::new().controller(controller.clone().into_erased()),
+            ));
+            controller.set_text(&mut tester.cell.borrow_mut(), "controller text");
+            tester.pump();
+            expect(tester, &find::text("controller text"), finds_one_widget());
+            controller.set_text(&mut tester.cell.borrow_mut(), "");
+            tester.pump();
+            expect(tester, &find::text("controller text"), finds_nothing());
+        });
     }
 
-    fn placeholder_color_of(app: &mut App) -> Option<Color> {
-        let root = root(app);
-        let placeholder = elements_of::<Text>(app, root)
-            .into_iter()
-            .find(|element| widget_of::<Text>(app, *element).data.as_deref() == Some("Search"))
-            .expect("the placeholder");
-        widget_of::<Text>(app, placeholder)
-            .style
-            .as_ref()
-            .and_then(|style| style.color.as_ref())
-            .map(AnyColor::color)
+    /// Dart's `tester.widget<Text>(find.text('Search')).style!.color!`.
+    fn placeholder_color_of(tester: &WidgetTester) -> Option<Color> {
+        tester.widget(find::text("Search"), |placeholder: &Text| {
+            placeholder
+                .style
+                .as_ref()
+                .and_then(|style| style.color.as_ref())
+                .map(AnyColor::color)
+        })
     }
 
     #[test]
     fn placeholder_color() {
-        let cell = flutter_test_cell();
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new())
-                .theme(CupertinoThemeData::new().with_brightness(Brightness::Dark)),
-        );
-        // `CupertinoColors.secondaryLabel.darkColor`.
-        assert_eq!(
-            placeholder_color_of(&mut cell.borrow_mut()),
-            Some(Color::from_argb(153, 235, 235, 245))
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(
+                centered(CupertinoSearchTextField::new())
+                    .theme(CupertinoThemeData::new().with_brightness(Brightness::Dark)),
+            );
+            // `CupertinoColors.secondaryLabel.darkColor`.
+            assert_eq!(
+                placeholder_color_of(tester),
+                Some(Color::from_argb(153, 235, 235, 245))
+            );
 
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new())
-                .theme(CupertinoThemeData::new().with_brightness(Brightness::Light)),
-        );
-        // `CupertinoColors.secondaryLabel.color`.
-        assert_eq!(
-            placeholder_color_of(&mut cell.borrow_mut()),
-            Some(Color::from_argb(153, 60, 60, 67))
-        );
+            tester.pump_widget(
+                centered(CupertinoSearchTextField::new())
+                    .theme(CupertinoThemeData::new().with_brightness(Brightness::Light)),
+            );
+            // `CupertinoColors.secondaryLabel.color`.
+            assert_eq!(
+                placeholder_color_of(tester),
+                Some(Color::from_argb(153, 60, 60, 67))
+            );
+        });
     }
 
     #[test]
     fn placeholder_style_modifies_the_placeholder_and_not_the_text() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .controller(controller.clone().into_erased())
                     .placeholder("placeholder")
@@ -1266,83 +1119,71 @@ mod tests {
                             .color(Color::new(0xAAFFFFFF))
                             .font_weight(FontWeight::W600),
                     ),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        let root = root(&mut app);
-        let placeholder = elements_of::<Text>(&app, root)
-            .into_iter()
-            .find(|element| {
-                widget_of::<Text>(&app, *element).data.as_deref() == Some("placeholder")
-            })
-            .expect("the placeholder");
-        let style = widget_of::<Text>(&app, placeholder)
-            .style
-            .clone()
-            .expect("a placeholder style");
-        assert_eq!(style.color.map(|c| c.color()), Some(Color::new(0xAAFFFFFF)));
-        assert_eq!(style.font_weight, Some(FontWeight::W600));
+            ));
+            let style = tester.widget(find::text("placeholder"), |placeholder: &Text| {
+                placeholder.style.clone().expect("a placeholder style")
+            });
+            assert_eq!(style.color.map(|c| c.color()), Some(Color::new(0xAAFFFFFF)));
+            assert_eq!(style.font_weight, Some(FontWeight::W600));
 
-        controller.set_text(&mut app, "input");
-        pump(&mut app, Duration::ZERO);
-        let editable = only::<EditableText>(&mut app);
-        let style = widget_of::<EditableText>(&app, editable).style.clone();
-        assert_eq!(style.color.map(|c| c.color()), Some(Color::new(0x00FFFFFF)));
-        assert_eq!(style.font_weight, Some(FontWeight::W300));
+            controller.set_text(&mut tester.cell.borrow_mut(), "input");
+            tester.pump();
+            let style = tester.widget(find::text("input"), |input: &EditableText| {
+                input.style.clone()
+            });
+            assert_eq!(style.color.map(|c| c.color()), Some(Color::new(0x00FFFFFF)));
+            assert_eq!(style.font_weight, Some(FontWeight::W300));
+        });
     }
 
     #[test]
     fn prefix_widget_is_in_front_of_the_text() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "input");
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new().controller(controller.into_erased())),
-        );
-        let mut app = cell.borrow_mut();
-        let search = icon(&mut app, CupertinoIcons::search());
-        let editable = only::<EditableText>(&mut app);
-        let field = only::<CupertinoSearchTextField>(&mut app);
-        assert_eq!(
-            top_right(&app, search).dx() + 5.5,
-            top_left(&app, editable).dx()
-        );
-        assert_eq!(
-            top_left(&app, editable).dx(),
-            top_left(&app, field).dx() + rect_of(&app, search).1.width() + 11.5
-        );
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "input");
+            tester.pump_widget(centered(
+                CupertinoSearchTextField::new().controller(controller.into_erased()),
+            ));
+            let search = find::by_icon(&CupertinoIcons::search());
+            let editable = find::by_type::<EditableText>();
+            let field = find::by_type::<CupertinoSearchTextField>();
+            assert_eq!(
+                tester.get_top_right(&search).dx() + 5.5,
+                tester.get_top_left(&editable).dx()
+            );
+            assert_eq!(
+                tester.get_top_left(&editable).dx(),
+                tester.get_top_left(&field).dx() + tester.get_size(&search).width() + 11.5
+            );
+        });
     }
 
     #[test]
     fn suffix_widget_is_after_the_text() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "Hi");
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new().controller(controller.into_erased())),
-        );
-        let mut app = cell.borrow_mut();
-        let xmark = icon(&mut app, CupertinoIcons::xmark_circle_fill());
-        let editable = only::<EditableText>(&mut app);
-        let field = only::<CupertinoSearchTextField>(&mut app);
-        assert_eq!(
-            top_right(&app, editable).dx() + 5.5,
-            top_left(&app, xmark).dx()
-        );
-        assert_eq!(
-            top_right(&app, editable).dx(),
-            top_right(&app, field).dx() - rect_of(&app, xmark).1.width() - 10.5
-        );
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "Hi");
+            tester.pump_widget(centered(
+                CupertinoSearchTextField::new().controller(controller.into_erased()),
+            ));
+            let xmark = find::by_icon(&CupertinoIcons::xmark_circle_fill());
+            let editable = find::by_type::<EditableText>();
+            let field = find::by_type::<CupertinoSearchTextField>();
+            assert_eq!(
+                tester.get_top_right(&editable).dx() + 5.5,
+                tester.get_top_left(&xmark).dx()
+            );
+            assert_eq!(
+                tester.get_top_right(&editable).dx(),
+                tester.get_top_right(&field).dx() - tester.get_size(&xmark).width() - 10.5
+            );
+        });
     }
 
     #[test]
     fn prefix_widget_visibility() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        let prefix_icon = GlobalKey::new();
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            let prefix_icon = GlobalKey::new();
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .controller(controller.clone().into_erased())
                     .prefix_icon(
@@ -1351,247 +1192,222 @@ mod tests {
                             .width(50.0)
                             .height(50.0),
                     ),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert!(icons(&mut app, CupertinoIcons::search()).is_empty());
-        assert!(prefix_icon.current_context(&app).is_some());
+            ));
+            let search = || find::by_icon(&CupertinoIcons::search());
+            expect(tester, &search(), finds_nothing());
+            expect(
+                tester,
+                &find::by_global_key(&prefix_icon),
+                finds_one_widget(),
+            );
 
-        controller.set_text(&mut app, "text input");
-        pump(&mut app, Duration::ZERO);
-        assert_eq!(texts(&mut app, "text input"), 1);
-        assert!(icons(&mut app, CupertinoIcons::search()).is_empty());
-        assert!(prefix_icon.current_context(&app).is_some());
+            controller.set_text(&mut tester.cell.borrow_mut(), "text input");
+            tester.pump();
+            expect(tester, &find::text("text input"), finds_one_widget());
+            expect(tester, &search(), finds_nothing());
+            expect(
+                tester,
+                &find::by_global_key(&prefix_icon),
+                finds_one_widget(),
+            );
+        });
     }
 
     #[test]
     fn suffix_widget_respects_visibility_mode() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .controller(controller.clone().into_erased())
                     .suffix_mode(OverlayVisibilityMode::NotEditing),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            icons(&mut app, CupertinoIcons::xmark_circle_fill()).len(),
-            1
-        );
-        controller.set_text(&mut app, "text input");
-        pump(&mut app, Duration::ZERO);
-        assert_eq!(texts(&mut app, "text input"), 1);
-        assert!(icons(&mut app, CupertinoIcons::xmark_circle_fill()).is_empty());
+            ));
+            let xmark = || find::by_icon(&CupertinoIcons::xmark_circle_fill());
+            expect(tester, &xmark(), finds_one_widget());
+            controller.set_text(&mut tester.cell.borrow_mut(), "text input");
+            tester.pump();
+            expect(tester, &find::text("text input"), finds_one_widget());
+            expect(tester, &xmark(), finds_nothing());
+        });
     }
 
     #[test]
     fn default_prefix_and_suffix_insets_are_aligned() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        pump_app(
-            &cell,
-            CupertinoApp::new().home(Center::new().child(
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            tester.pump_widget(CupertinoApp::new().home(Center::new().child(
                 CupertinoSearchTextField::new().controller(controller.clone().into_erased()),
-            )),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(icons(&mut app, CupertinoIcons::search()).len(), 1);
-        assert!(icons(&mut app, CupertinoIcons::xmark_circle_fill()).is_empty());
+            )));
+            let search = find::by_icon(&CupertinoIcons::search());
+            let xmark = find::by_icon(&CupertinoIcons::xmark_circle_fill());
+            expect(tester, &search, finds_one_widget());
+            expect(tester, &xmark, finds_nothing());
 
-        controller.set_text(&mut app, "text input");
-        pump(&mut app, Duration::ZERO);
-        let search = icon(&mut app, CupertinoIcons::search());
-        let xmark = icon(&mut app, CupertinoIcons::xmark_circle_fill());
-        let (search_origin, search_size) = rect_of(&app, search);
-        let (xmark_origin, xmark_size) = rect_of(&app, xmark);
-        assert_eq!(search_origin, Offset::new(6.0, 290.0));
-        assert_eq!(xmark_origin, Offset::new(775.0, 290.0));
-        assert_eq!(
-            search_origin + Offset::new(search_size.width(), search_size.height()),
-            Offset::new(26.0, 310.0)
-        );
-        assert_eq!(
-            xmark_origin + Offset::new(xmark_size.width(), xmark_size.height()),
-            Offset::new(795.0, 310.0)
-        );
+            controller.set_text(&mut tester.cell.borrow_mut(), "text input");
+            tester.pump();
+            expect(tester, &find::text("text input"), finds_one_widget());
+            expect(tester, &search, finds_one_widget());
+            expect(tester, &xmark, finds_one_widget());
+
+            assert_eq!(tester.get_top_left(&search), Offset::new(6.0, 290.0));
+            assert_eq!(tester.get_top_left(&xmark), Offset::new(775.0, 290.0));
+            assert_eq!(tester.get_bottom_right(&search), Offset::new(26.0, 310.0));
+            assert_eq!(tester.get_bottom_right(&xmark), Offset::new(795.0, 310.0));
+        });
     }
 
     #[test]
     fn clear_button_shows_with_right_visibility_mode() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .controller(controller.clone().into_erased())
                     .placeholder("placeholder does not affect clear button"),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert!(icons(&mut app, CupertinoIcons::xmark_circle_fill()).is_empty());
-        controller.set_text(&mut app, "text input");
-        pump(&mut app, Duration::ZERO);
-        assert_eq!(
-            icons(&mut app, CupertinoIcons::xmark_circle_fill()).len(),
-            1
-        );
-        assert_eq!(texts(&mut app, "text input"), 1);
-        drop(app);
+            ));
+            let xmark = || find::by_icon(&CupertinoIcons::xmark_circle_fill());
+            expect(tester, &xmark(), finds_nothing());
+            controller.set_text(&mut tester.cell.borrow_mut(), "text input");
+            tester.pump();
+            expect(tester, &xmark(), finds_one_widget());
+            expect(tester, &find::text("text input"), finds_one_widget());
 
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        pump_app(
-            &cell,
-            centered(
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .controller(controller.clone().into_erased())
                     .placeholder("placeholder does not affect clear button")
                     .suffix_mode(OverlayVisibilityMode::NotEditing),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            icons(&mut app, CupertinoIcons::xmark_circle_fill()).len(),
-            1
-        );
-        controller.set_text(&mut app, "input");
-        pump(&mut app, Duration::ZERO);
-        assert!(icons(&mut app, CupertinoIcons::xmark_circle_fill()).is_empty());
+            ));
+            expect(tester, &xmark(), finds_one_widget());
+            controller.set_text(&mut tester.cell.borrow_mut(), "input");
+            tester.pump();
+            expect(tester, &xmark(), finds_nothing());
+        });
     }
 
     #[test]
     fn clear_button_removes_text() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new().controller(controller.clone().into_erased())),
-        );
-        let mut app = cell.borrow_mut();
-        controller.set_text(&mut app, "text entry");
-        pump(&mut app, Duration::ZERO);
-        let xmark = icon(&mut app, CupertinoIcons::xmark_circle_fill());
-        tap(&mut app, xmark);
-        assert_eq!(controller.handle().text_value(&app), "");
-        assert_eq!(texts(&mut app, "Search"), 1);
-        assert_eq!(texts(&mut app, "text entry"), 0);
-        assert!(icons(&mut app, CupertinoIcons::xmark_circle_fill()).is_empty());
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            tester.pump_widget(centered(
+                CupertinoSearchTextField::new().controller(controller.clone().into_erased()),
+            ));
+            controller.set_text(&mut tester.cell.borrow_mut(), "text entry");
+            tester.pump();
+            let xmark = || find::by_icon(&CupertinoIcons::xmark_circle_fill());
+            tester.tap(xmark());
+            tester.pump();
+            assert_eq!(controller.handle().text_value(&tester.cell.borrow()), "");
+            expect(tester, &find::text("Search"), finds_one_widget());
+            expect(tester, &find::text("text entry"), finds_nothing());
+            expect(tester, &xmark(), finds_nothing());
+        });
     }
 
     #[test]
     fn tapping_clear_button_also_calls_on_changed_when_text_not_empty() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "");
-        let value = Rc::new(RefCell::new(String::from("text entry")));
-        let seen = Rc::clone(&value);
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "");
+            let value = Rc::new(RefCell::new(String::from("text entry")));
+            let seen = Rc::clone(&value);
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .controller(controller.clone().into_erased())
                     .placeholder("placeholder")
                     .on_changed(move |_app, new_value| *seen.borrow_mut() = new_value),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        let text = value.borrow().clone();
-        controller.set_text(&mut app, text);
-        pump(&mut app, Duration::ZERO);
-        let xmark = icon(&mut app, CupertinoIcons::xmark_circle_fill());
-        tap(&mut app, xmark);
-        assert!(controller.handle().text_value(&app).is_empty());
-        assert_eq!(texts(&mut app, "text entry"), 0);
-        assert!(value.borrow().is_empty());
+            ));
+            let text = value.borrow().clone();
+            controller.set_text(&mut tester.cell.borrow_mut(), text);
+            tester.pump();
+            tester.tap(find::by_icon(&CupertinoIcons::xmark_circle_fill()));
+            tester.pump();
+            assert!(
+                controller
+                    .handle()
+                    .text_value(&tester.cell.borrow())
+                    .is_empty()
+            );
+            expect(tester, &find::text("text entry"), finds_nothing());
+            assert!(value.borrow().is_empty());
+        });
     }
 
     #[test]
     fn rtl_puts_attachments_to_the_right_places() {
-        let cell = flutter_test_cell();
-        pump_app(
-            &cell,
-            CupertinoApp::new().home(Directionality::new(
+        test_widgets(|tester| {
+            tester.pump_widget(CupertinoApp::new().home(Directionality::new(
                 TextDirection::Rtl,
                 Center::new().child(
                     CupertinoSearchTextField::new().suffix_mode(OverlayVisibilityMode::Always),
                 ),
-            )),
-        );
-        let mut app = cell.borrow_mut();
-        let search = icon(&mut app, CupertinoIcons::search());
-        let xmark = icon(&mut app, CupertinoIcons::xmark_circle_fill());
-        assert_eq!(top_left(&app, search).dx(), 800.0 - 26.0);
-        assert_eq!(top_right(&app, xmark).dx(), 25.0);
+            )));
+            let search = find::by_icon(&CupertinoIcons::search());
+            let xmark = find::by_icon(&CupertinoIcons::xmark_circle_fill());
+            assert_eq!(tester.get_top_left(&search).dx(), 800.0 - 26.0);
+            assert_eq!(tester.get_top_right(&xmark).dx(), 25.0);
+        });
     }
 
     #[test]
     fn can_modify_prefix_and_suffix_insets() {
-        let cell = flutter_test_cell();
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .suffix_mode(OverlayVisibilityMode::Always)
                     .prefix_insets(EdgeInsetsGeometry::ZERO)
                     .suffix_insets(EdgeInsetsGeometry::ZERO),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        let search = icon(&mut app, CupertinoIcons::search());
-        let xmark = icon(&mut app, CupertinoIcons::xmark_circle_fill());
-        assert_eq!(top_left(&app, search).dx(), 0.0);
-        assert_eq!(top_right(&app, xmark).dx(), 800.0);
+            ));
+            let search = find::by_icon(&CupertinoIcons::search());
+            let xmark = find::by_icon(&CupertinoIcons::xmark_circle_fill());
+            assert_eq!(tester.get_top_left(&search).dx(), 0.0);
+            assert_eq!(tester.get_top_right(&xmark).dx(), 800.0);
+        });
     }
 
     #[test]
     fn custom_suffix_on_tap_overrides_default_clearing_behavior() {
-        let cell = flutter_test_cell();
-        let controller = controller_with(&mut cell.borrow_mut(), "Text");
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "Text");
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .controller(controller.clone().into_erased())
                     .on_suffix_tap(Rc::new(|_app| {})),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        pump(&mut app, Duration::ZERO);
-        let xmark = icon(&mut app, CupertinoIcons::xmark_circle_fill());
-        tap(&mut app, xmark);
-        assert!(!controller.handle().text_value(&app).is_empty());
-        assert_eq!(texts(&mut app, "Text"), 1);
+            ));
+            tester.pump();
+            tester.tap(find::by_icon(&CupertinoIcons::xmark_circle_fill()));
+            tester.pump();
+            assert!(
+                !controller
+                    .handle()
+                    .text_value(&tester.cell.borrow())
+                    .is_empty()
+            );
+            expect(tester, &find::text("Text"), finds_one_widget());
+        });
     }
 
     #[test]
     fn on_tap_is_properly_forwarded_to_the_inner_text_field() {
-        let cell = flutter_test_cell();
-        // on_tap can be none.
-        pump_app(&cell, centered(CupertinoSearchTextField::new()));
-        let taps = Rc::new(Cell::new(0));
-        let counted = Rc::clone(&taps);
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            // on_tap can be none.
+            tester.pump_widget(centered(CupertinoSearchTextField::new()));
+            let taps = Rc::new(Cell::new(0));
+            let counted = Rc::clone(&taps);
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .on_tap(Listener::new(move |_app| counted.set(counted.get() + 1))),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(taps.get(), 0);
-        let field = only::<CupertinoTextField>(&mut app);
-        tap(&mut app, field);
-        assert_eq!(taps.get(), 1);
+            ));
+            assert_eq!(taps.get(), 0);
+            tester.tap(find::by_type::<CupertinoTextField>());
+            assert_eq!(taps.get(), 1);
+        });
     }
 
     #[test]
     fn its_settings_are_forwarded_to_the_inner_text_field() {
-        let cell = flutter_test_cell();
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .autocorrect(false)
                     .enabled(false)
@@ -1603,114 +1419,115 @@ mod tests {
                     .cursor_radius(Radius::circular(1.0))
                     .cursor_opacity_animates(false)
                     .cursor_color(Color::from_argb(255, 255, 0, 0)),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        let field = inner_text_field(&mut app);
-        assert_eq!(field.autocorrect, Some(false));
-        assert!(!field.enabled);
-        assert_eq!(field.text_input_action, Some(TextInputAction::Search));
-        assert_eq!(field.smart_quotes_type, Some(SmartQuotesType::Disabled));
-        assert_eq!(field.smart_dashes_type, Some(SmartDashesType::Disabled));
-        assert!(!field.enable_ime_personalized_learning);
-        assert_eq!(field.cursor_width, 1.0);
-        assert_eq!(field.cursor_height, Some(10.0));
-        assert_eq!(field.cursor_radius, Radius::circular(1.0));
-        assert!(!field.cursor_opacity_animates);
-        assert_eq!(
-            field.cursor_color.as_ref().map(AnyColor::color),
-            Some(Color::from_argb(255, 255, 0, 0))
-        );
+            ));
+            inner_text_field(tester, |field| {
+                assert_eq!(field.autocorrect, Some(false));
+                assert!(!field.enabled);
+                assert_eq!(field.text_input_action, Some(TextInputAction::Search));
+                assert_eq!(field.smart_quotes_type, Some(SmartQuotesType::Disabled));
+                assert_eq!(field.smart_dashes_type, Some(SmartDashesType::Disabled));
+                assert!(!field.enable_ime_personalized_learning);
+                assert_eq!(field.cursor_width, 1.0);
+                assert_eq!(field.cursor_height, Some(10.0));
+                assert_eq!(field.cursor_radius, Radius::circular(1.0));
+                assert!(!field.cursor_opacity_animates);
+                assert_eq!(
+                    field.cursor_color.as_ref().map(AnyColor::color),
+                    Some(Color::from_argb(255, 255, 0, 0))
+                );
+            });
+        });
     }
 
     #[test]
     fn autofocus_true_gives_focus_to_the_widget() {
-        let cell = flutter_test_cell();
-        let focus_node = FocusNode::new(&mut cell.borrow_mut());
-        pump_app(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
+            tester.pump_widget(centered(
                 CupertinoSearchTextField::new()
                     .focus_node(focus_node.clone().into_erased())
                     .autofocus(true),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        pump(&mut app, Duration::ZERO);
-        assert!(focus_node.has_focus(&mut app));
+            ));
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            assert!(focus_node.has_focus(&mut app));
+        });
     }
 
     #[test]
     fn focused_search_field_hides_prefix_in_higher_accessibility_text_scale_modes() {
-        let icon_size = 10.0;
-        let field = |focus_node: &Ref<FocusNode>, scale_factor: f64| {
-            CupertinoApp::new().home(MediaQuery::with_clamped_text_scaling(
-                None,
-                scale_factor,
-                scale_factor,
-                CupertinoPageScaffold::new(
-                    Center::new().child(
-                        CupertinoSearchTextField::new()
-                            .placeholder("Search")
-                            .focus_node(focus_node.clone().into_erased())
-                            .prefix_icon(Icon::new(Some(CupertinoIcons::add())))
-                            .suffix_icon(Icon::new(Some(CupertinoIcons::xmark())))
-                            .suffix_mode(OverlayVisibilityMode::Always)
-                            .item_size(icon_size),
+        test_widgets(|tester| {
+            let icon_size = 10.0;
+            let field = |focus_node: &Ref<FocusNode>, scale_factor: f64| {
+                CupertinoApp::new().home(MediaQuery::with_clamped_text_scaling(
+                    None,
+                    scale_factor,
+                    scale_factor,
+                    CupertinoPageScaffold::new(
+                        Center::new().child(
+                            CupertinoSearchTextField::new()
+                                .placeholder("Search")
+                                .focus_node(focus_node.clone().into_erased())
+                                .prefix_icon(Icon::new(Some(CupertinoIcons::add())))
+                                .suffix_icon(Icon::new(Some(CupertinoIcons::xmark())))
+                                .suffix_mode(OverlayVisibilityMode::Always)
+                                .item_size(icon_size),
+                        ),
                     ),
-                ),
-            ))
-        };
-        let cell = flutter_test_cell();
-        let focus_node = FocusNode::new(&mut cell.borrow_mut());
-        pump_app(&cell, field(&focus_node, 3.0));
-        {
-            let mut app = cell.borrow_mut();
+                ))
+            };
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
+            tester.pump_widget(field(&focus_node, 3.0));
             for each in [CupertinoIcons::add(), CupertinoIcons::xmark()] {
-                let found = icon(&mut app, each);
-                assert_eq!(rect_of(&app, found).1, Size::square(3.0 * icon_size));
+                assert_eq!(
+                    tester.get_size(find::by_icon(&each)),
+                    Size::square(3.0 * icon_size)
+                );
             }
-            focus_node.request_focus(&mut app, None);
-            for frame in 0..60 {
-                pump(&mut app, Duration::from_millis(16 * frame));
-            }
+            focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump_and_settle();
             // The prefix icon shrinks at higher accessibility text scale modes.
-            let add = icon(&mut app, CupertinoIcons::add());
-            assert_eq!(rect_of(&app, add).1, Size::ZERO);
-            let xmark = icon(&mut app, CupertinoIcons::xmark());
-            assert_eq!(rect_of(&app, xmark).1, Size::square(3.0 * icon_size));
-        }
-        // Below the threshold, the prefix icon is displayed.
-        pump_app(&cell, field(&focus_node, 2.9));
-        let mut app = cell.borrow_mut();
-        for each in [CupertinoIcons::add(), CupertinoIcons::xmark()] {
-            let found = icon(&mut app, each);
-            assert_eq!(rect_of(&app, found).1, Size::square(2.9 * icon_size));
-        }
+            assert_eq!(
+                tester.get_size(find::by_icon(&CupertinoIcons::add())),
+                Size::ZERO
+            );
+            assert_eq!(
+                tester.get_size(find::by_icon(&CupertinoIcons::xmark())),
+                Size::square(3.0 * icon_size)
+            );
+            // Below the threshold, the prefix icon is displayed.
+            tester.pump_widget(field(&focus_node, 2.9));
+            tester.pump_and_settle();
+            for each in [CupertinoIcons::add(), CupertinoIcons::xmark()] {
+                assert_eq!(
+                    tester.get_size(find::by_icon(&each)),
+                    Size::square(2.9 * icon_size)
+                );
+            }
+        });
     }
 
     #[test]
     fn does_not_crash_at_zero_area() {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::IOS)
-            .with_view(Rc::new(TestView::with_pixel_ratio(0.0, 0.0, 2.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        install_fonts(&mut cell.borrow_mut());
-        build(&cell, SizedBox::new().into_widget());
-        let controller = controller_with(&mut cell.borrow_mut(), "X");
-        pump_app(
-            &cell,
-            centered(CupertinoSearchTextField::new().controller(controller.clone().into_erased())),
-        );
-        let mut app = cell.borrow_mut();
-        let field = only::<CupertinoSearchTextField>(&mut app);
-        assert_eq!(rect_of(&app, field).1, Size::ZERO);
-        let erased: TextEditingControllerRef = controller.clone().into_erased();
-        erased.set_selection(
-            &mut app,
-            TextSelection::collapsed(0, TextAffinity::Downstream),
-        );
-        pump(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "X");
+            tester.pump_widget(centered(
+                CupertinoSearchTextField::new().controller(controller.clone().into_erased()),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<CupertinoSearchTextField>()),
+                Size::ZERO
+            );
+            let mut app = tester.cell.borrow_mut();
+            let erased: TextEditingControllerRef = controller.clone().into_erased();
+            erased.set_selection(
+                &mut app,
+                TextSelection::collapsed(0, TextAffinity::Downstream),
+            );
+            drop(app);
+            tester.pump();
+        });
     }
 
     /// The fade the scroll-resizing tests watch, between the icons' height with their insets and
@@ -1723,6 +1540,6 @@ mod tests {
         assert_eq!(opacity(36.0 * 4.0 / 5.0, 36.0), 1.0);
         assert_eq!(opacity(10.0, 36.0), 1.0);
         let halfway = 36.0 * 9.0 / 10.0;
-        assert!((opacity(halfway, 36.0) - 0.5).abs() < 1e-9);
+        assert_more_or_less_equals_within(opacity(halfway, 36.0), 0.5, 1e-9);
     }
 }

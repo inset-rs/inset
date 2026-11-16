@@ -13,6 +13,14 @@ pub use progress_bar::*;
 mod progress_ring;
 pub use progress_ring::*;
 
+mod auto_suggest_box;
+pub use auto_suggest_box::{
+    AutoSuggestBox, AutoSuggestBoxItemTemplate, AutoSuggestBoxOpenChangedHandler,
+    AutoSuggestBoxQuerySubmittedEventArgs, AutoSuggestBoxQuerySubmittedHandler,
+    AutoSuggestBoxState, AutoSuggestBoxSuggestionChosenEventArgs,
+    AutoSuggestBoxSuggestionChosenHandler, AutoSuggestBoxTextChangedEventArgs,
+    AutoSuggestBoxTextChangedHandler, AutoSuggestBoxTextMember, AutoSuggestionBoxTextChangeReason,
+};
 mod button;
 mod password_box;
 mod text_box;
@@ -112,6 +120,9 @@ pub use toggle_split_button::*;
 
 mod menu_bar;
 pub use menu_bar::*;
+
+mod command_bar;
+pub use command_bar::*;
 
 mod breadcrumb_bar;
 pub use breadcrumb_bar::*;

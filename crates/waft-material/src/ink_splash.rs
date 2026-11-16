@@ -357,20 +357,17 @@ impl InkFeatureLeaf for InkSplash {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::TargetPlatform;
     use waft_foundation::K_IS_WEB;
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
     use waft_widgets::{Center, Directionality, IntoWidget, SizedBox, WidgetRef};
 
     use super::*;
     use crate::ink_well::InkWell;
     use crate::no_splash::NoSplash;
-    use crate::test_support::{Drawn, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, path_like};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
+    use waft_rendering::testing::RecordedCall;
 
     fn with_theme(tester: &WidgetTester, use_material3: bool, child: WidgetRef) -> WidgetRef {
         let data = ThemeData::builder()
@@ -381,12 +378,11 @@ mod tests {
 
     #[test]
     fn material2_ink_well_widget_renders_an_ink_splash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let splash_color = Color::new(0xAA0000FF);
             let border_radius = BorderRadius::all(waft_embedder::Radius::circular(6.0));
             let widget = with_theme(
-                &tester,
+                tester,
                 false,
                 Material::new()
                     .child(
@@ -403,23 +399,36 @@ mod tests {
             );
             tester.pump_widget(widget);
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, WidgetTester::SIZE.center(Offset::ZERO));
-            tester.pump(Duration::ZERO); // start gesture
-            tester.pump(Duration::from_millis(200)); // wait for splash to be well under way
+            tester.pump(); // start gesture
+            tester.pump_by(Duration::from_millis(200)); // wait for splash to be well under way
 
-            let drawn = tester.ink_drawn();
+            let drawn = tester.ink_calls();
             let circle = drawn
                 .iter()
-                .find_map(|drawn| match drawn {
-                    Drawn::Path(color, bounds) if *color == splash_color.value() => Some(*bounds),
-                    _ => None,
+                .find_map(|call| {
+                    path_like(call)
+                        .filter(|(color, _)| color.value() == splash_color.value())
+                        .map(|(_, bounds)| bounds)
                 })
                 .unwrap_or_else(|| panic!("a splash circle in {drawn:?}"));
             assert_eq!(circle.center(), Offset::new(100.0, 30.0));
-            assert!((circle.width() / 2.0 - 21.0).abs() < 1e-3, "{circle:?}");
-            let all = Drawn::all(&tester.ink_list());
-            assert!(all.contains(&Drawn::Clip), "the rounded clip: {all:?}");
+            waft_widgets::testing::assert_more_or_less_equals_within(
+                circle.width() / 2.0,
+                21.0,
+                1e-3,
+            );
+            let all: Vec<RecordedCall> = tester
+                .ink_list()
+                .ops()
+                .iter()
+                .map(RecordedCall::of)
+                .collect();
+            assert!(
+                all.contains(&RecordedCall::Clip),
+                "the rounded clip: {all:?}"
+            );
 
             tester.up(&gesture);
         });
@@ -447,18 +456,18 @@ mod tests {
                 .into_widget(),
         );
         tester.pump_widget(widget);
-        let mut gesture = WidgetTester::touch(1);
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, WidgetTester::SIZE.center(Offset::ZERO));
-        tester.pump(Duration::from_millis(200));
-        tester.pump(Duration::from_millis(16));
-        let drawn = tester.ink_drawn();
+        tester.pump_by(Duration::from_millis(200));
+        tester.pump_by(Duration::from_millis(16));
+        let drawn = tester.ink_calls();
         let rects = drawn
             .iter()
-            .filter(|drawn| matches!(drawn, Drawn::Rect(..)))
+            .filter(|drawn| matches!(drawn, RecordedCall::Rect { .. }))
             .count();
         let circles = drawn
             .iter()
-            .filter(|drawn| matches!(drawn, Drawn::Path(..)))
+            .filter(|drawn| path_like(drawn).is_some())
             .count();
         tester.up(&gesture);
         tester.pump_and_settle();
@@ -467,31 +476,27 @@ mod tests {
 
     #[test]
     fn material2_ink_well_with_no_splash_splash_factory_paints_nothing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // NoSplash.splashFactory, no splash circles drawn
-            let (_, circles) =
-                press_and_count(&mut tester, false, Some(NoSplash::splash_factory()));
+            let (_, circles) = press_and_count(tester, false, Some(NoSplash::splash_factory()));
             assert_eq!(circles, 0);
 
             // Default splashFactory (from Theme.of().splashFactory), one splash circle drawn.
-            let (_, circles) = press_and_count(&mut tester, false, None);
+            let (_, circles) = press_and_count(tester, false, None);
             assert_eq!(circles, 1);
         });
     }
 
     #[test]
     fn material3_ink_well_with_no_splash_splash_factory_paints_nothing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // NoSplash.splashFactory, one rect is drawn for the highlight.
-            let (rects, circles) =
-                press_and_count(&mut tester, true, Some(NoSplash::splash_factory()));
+            let (rects, circles) = press_and_count(tester, true, Some(NoSplash::splash_factory()));
             assert_eq!((rects, circles), (1, 0));
 
             // Default splashFactory (from Theme.of().splashFactory), two rects are drawn for the
             // splash and highlight.
-            let (rects, _) = press_and_count(&mut tester, true, None);
+            let (rects, _) = press_and_count(tester, true, None);
             assert_eq!(rects, if K_IS_WEB { 1 } else { 2 });
         });
     }

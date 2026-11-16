@@ -262,6 +262,8 @@ mod tests {
 
     use waft_widgets::WidgetStatePropertyAll;
 
+    use waft_widgets::testing::{WidgetTester, expect, find, finds_one_widget, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::input_decorator::InputDecorationTheme;
@@ -320,10 +322,9 @@ mod tests {
     use crate::menu_anchor::{MenuAnchor, MenuItemButton, MenuPanel};
     use crate::scaffold::Scaffold;
     use crate::shadows::k_elevation_to_shadow;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_field::TextField;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::tester;
 
     fn entries() -> Vec<DropdownMenuEntry<i32>> {
         vec![
@@ -474,13 +475,13 @@ mod tests {
 
     /// Dart's `find.widgetWithIcon(IconButton, Icons.arrow_drop_down).first`.
     fn arrow_drop_down_button(tester: &WidgetTester) -> AnyElement {
-        let icon = tester.find_by_icon(&Icons::arrow_drop_down());
+        let icon = tester.element(find::by_icon(&Icons::arrow_drop_down()).first());
         tester.ancestor_of_type::<IconButton>(icon)
     }
 
     /// Dart's `getMenuMaterial`.
     fn menu_material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let panel = only(tester.find_by_type::<MenuPanel>());
+        let panel = tester.element(find::by_type::<MenuPanel>());
         let material = tester.descendants_of_type::<Material>(panel)[0];
         tester.widget::<Material, R>(material, read)
     }
@@ -491,7 +492,10 @@ mod tests {
         label: &str,
         read: impl FnOnce(&Material) -> R,
     ) -> R {
-        let text = *tester.find_text(label).last().expect("the label");
+        let text = *find::text(label)
+            .evaluate(tester)
+            .last()
+            .expect("the label");
         let button = tester.ancestor_of_type::<MenuItemButton>(text);
         let material = only(tester.descendants_of_type::<Material>(button));
         tester.widget::<Material, R>(material, read)
@@ -507,12 +511,12 @@ mod tests {
     fn tap(tester: &mut WidgetTester, element: AnyElement) {
         let render = tester.render_box_of(element);
         let center = tester.get_rect(render).center();
-        tester.tap(center, 1);
+        tester.tap_at(center, 1);
     }
 
     /// What the cases but the first expect of the field, the menu and its first item.
     fn assert_the_menu_shows(tester: &mut WidgetTester, theme: &ThemeData, expected: &Expected) {
-        let editable = only(tester.find_by_type::<EditableText>());
+        let editable = tester.element(find::by_type::<EditableText>());
         tester.widget(editable, |editable: &EditableText| {
             assert_eq!(editable.style.color, Some(expected.color.clone()));
             assert_eq!(
@@ -528,7 +532,7 @@ mod tests {
             assert_eq!(editable.style.word_spacing, Some(expected.word_spacing));
         });
 
-        let text_field = only(tester.find_by_type::<TextField>());
+        let text_field = tester.element(find::by_type::<TextField>());
         tester.widget(text_field, |text_field: &TextField| {
             let decoration = text_field.decoration.as_ref().expect("a decoration");
             assert_eq!(decoration.filled, Some(true));
@@ -537,8 +541,8 @@ mod tests {
 
         let button = arrow_drop_down_button(tester);
         tap(tester, button);
-        tester.pump(std::time::Duration::ZERO);
-        assert_eq!(tester.find_by_type::<MenuAnchor>().len(), 1);
+        tester.pump_by(std::time::Duration::ZERO);
+        expect(tester, &find::by_type::<MenuAnchor>(), finds_one_widget());
 
         menu_material(tester, |material| {
             assert_eq!(material.color, Some(expected.menu_background));
@@ -569,8 +573,7 @@ mod tests {
     // dropdown_menu_theme_test.dart 'With no other configuration, defaults are used'.
     #[test]
     fn with_no_other_configuration_the_defaults_are_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme.clone(),
@@ -578,7 +581,7 @@ mod tests {
             ));
 
             let label_large = theme.text_theme.label_large.clone().expect("a label large");
-            let editable = only(tester.find_by_type::<EditableText>());
+            let editable = tester.element(find::by_type::<EditableText>());
             tester.widget(editable, |editable: &EditableText| {
                 assert_eq!(editable.style.color, label_large.color);
                 assert_eq!(editable.style.background, label_large.background);
@@ -587,7 +590,7 @@ mod tests {
                 assert_eq!(editable.style.word_spacing, label_large.word_spacing);
             });
 
-            let text_field = only(tester.find_by_type::<TextField>());
+            let text_field = tester.element(find::by_type::<TextField>());
             tester.widget(text_field, |text_field: &TextField| {
                 let decoration = text_field.decoration.as_ref().expect("a decoration");
                 assert!(decoration.border.as_ref().is_some_and(|border| {
@@ -595,12 +598,12 @@ mod tests {
                 }));
             });
 
-            let button = arrow_drop_down_button(&tester);
-            tap(&mut tester, button);
-            tester.pump(std::time::Duration::ZERO);
-            assert_eq!(tester.find_by_type::<MenuAnchor>().len(), 1);
+            let button = arrow_drop_down_button(tester);
+            tap(tester, button);
+            tester.pump_by(std::time::Duration::ZERO);
+            expect(tester, &find::by_type::<MenuAnchor>(), finds_one_widget());
 
-            menu_material(&tester, |material| {
+            menu_material(tester, |material| {
                 assert_eq!(material.color, Some(theme.color_scheme.surface_container()));
                 assert_eq!(material.shadow_color, Some(theme.color_scheme.shadow()));
                 assert_eq!(material.surface_tint_color, Some(Colors::TRANSPARENT));
@@ -608,7 +611,7 @@ mod tests {
                 assert!(shape_is(material, &rounded(4.0)));
             });
 
-            button_material(&tester, "Item 0", |material| {
+            button_material(tester, "Item 0", |material| {
                 assert_eq!(material.color, Some(Colors::TRANSPARENT));
                 assert_eq!(material.elevation, 0.0);
                 assert!(shape_is(material, &RoundedRectangleBorder::default()));
@@ -621,8 +624,7 @@ mod tests {
     // dropdown_menu_theme_test.dart 'ThemeData.dropdownMenuTheme overrides defaults'.
     #[test]
     fn the_theme_data_dropdown_menu_theme_overrides_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expected = global();
             let theme = ThemeData::builder()
                 .dropdown_menu_theme(expected.theme_data())
@@ -631,15 +633,14 @@ mod tests {
                 theme.clone(),
                 centered(DropdownMenu::new(entries())),
             ));
-            assert_the_menu_shows(&mut tester, &theme, &expected);
+            assert_the_menu_shows(tester, &theme, &expected);
         });
     }
 
     // dropdown_menu_theme_test.dart 'DropdownMenuTheme overrides ThemeData and defaults'.
     #[test]
     fn a_dropdown_menu_theme_overrides_the_theme_data_and_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expected = local();
             let theme = ThemeData::builder()
                 .dropdown_menu_theme(global().theme_data())
@@ -652,7 +653,7 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            assert_the_menu_shows(&mut tester, &theme, &expected);
+            assert_the_menu_shows(tester, &theme, &expected);
         });
     }
 
@@ -660,8 +661,7 @@ mod tests {
     // and defaults'.
     #[test]
     fn the_widget_parameters_override_the_themes_and_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expected = parameters();
             let theme = ThemeData::builder()
                 .dropdown_menu_theme(global().theme_data())
@@ -680,7 +680,7 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            assert_the_menu_shows(&mut tester, &theme, &expected);
+            assert_the_menu_shows(tester, &theme, &expected);
         });
     }
 
@@ -688,8 +688,7 @@ mod tests {
     // applied when the menu is disabled'.
     #[test]
     fn the_theme_disabled_color_colours_a_disabled_menu() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .dropdown_menu_theme(
                     DropdownMenuThemeData::new().disabled_color(Colors::GREY.primary()),
@@ -705,7 +704,7 @@ mod tests {
             ));
 
             // make sure the displaying text has grey color
-            let editable = only(tester.find_by_type::<EditableText>());
+            let editable = tester.element(find::by_type::<EditableText>());
             tester.widget(editable, |editable: &EditableText| {
                 assert_eq!(editable.style.color, Some(Colors::GREY.primary().into()));
             });

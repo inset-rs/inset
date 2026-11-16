@@ -2393,66 +2393,45 @@ impl State for MediaQueryFromViewState {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
-    use std::time::Duration;
     use waft_foundation::AppCell;
 
-    use waft_embedder::{TargetPlatform, ViewConstraints, ViewId, ViewMetrics};
-    use waft_test::TestPlatform;
+    use waft_embedder::TargetPlatform;
+    use waft_test::{TestPlatform, TestView};
 
     use super::*;
-    use crate::binding::run_widget;
     use crate::framework::StatelessWidget;
     use crate::test_harness::Harness;
-    use crate::test_harness::pump_every_view;
-    use crate::view::View;
+    use crate::testing::WidgetTester;
     use crate::widgets::basic::SizedBox;
 
-    /// An 800x600 physical view at 2x with a status bar, a home indicator, a keyboard, and the
-    /// system's gesture zones along the sides and the bottom.
-    #[derive(Default)]
-    struct TestView {
-        host: waft_test::TestViewHost,
+    /// Gives `view` a phone's insets: a status bar, a home indicator, a keyboard, and the system's
+    /// gesture zones along the sides and the bottom.
+    fn give_phone_insets(view: &TestView) {
+        let safe_area = ViewPadding {
+            left: 0.0,
+            top: 40.0,
+            right: 0.0,
+            bottom: 68.0,
+        };
+        view.set_padding(safe_area);
+        view.set_view_padding(safe_area);
+        view.set_view_insets(ViewPadding {
+            bottom: 20.0,
+            ..ViewPadding::ZERO
+        });
+        view.set_system_gesture_insets(ViewPadding {
+            left: 60.0,
+            top: 0.0,
+            right: 60.0,
+            bottom: 112.0,
+        });
     }
 
-    impl EmbedderView for TestView {
-        fn id(&self) -> ViewId {
-            ViewId(0)
-        }
-
-        fn metrics(&self) -> ViewMetrics {
-            let safe_area = ViewPadding {
-                left: 0.0,
-                top: 40.0,
-                right: 0.0,
-                bottom: 68.0,
-            };
-            ViewMetrics {
-                physical_size: [800.0, 600.0],
-                physical_constraints: ViewConstraints::tight(800.0, 600.0),
-                device_pixel_ratio: 2.0,
-                padding: safe_area,
-                view_padding: safe_area,
-                view_insets: ViewPadding {
-                    left: 0.0,
-                    top: 0.0,
-                    right: 0.0,
-                    bottom: 20.0,
-                },
-                system_gesture_insets: ViewPadding {
-                    left: 60.0,
-                    top: 0.0,
-                    right: 60.0,
-                    bottom: 112.0,
-                },
-                screen: None,
-            }
-        }
-
-        fn present(&self, _scene: std::sync::Arc<waft_embedder::Scene>) {}
-
-        fn host(&self) -> &dyn waft_embedder::ViewHost {
-            &self.host
-        }
+    /// An 800x600 physical view at 2x with a phone's insets.
+    fn phone_view() -> TestView {
+        let view = TestView::with_pixel_ratio(800.0, 600.0, 2.0);
+        give_phone_insets(&view);
+        view
     }
 
     /// What a [`Reader`] does with its context on every build.
@@ -2522,7 +2501,7 @@ mod tests {
     fn from_view_computes_logical_size_and_padding() {
         let cell = AppCell::new();
         let app = cell.borrow();
-        let data = MediaQueryData::from_view(&app, &TestView::default(), None);
+        let data = MediaQueryData::from_view(&app, &phone_view(), None);
         assert_eq!(data.size, Size::new(400.0, 300.0));
         assert_eq!(data.device_pixel_ratio, 2.0);
         assert_eq!(data.padding, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 34.0));
@@ -2550,7 +2529,7 @@ mod tests {
             .bold_text(true)
             .text_scaler(TextScaler::linear(2.0))
             .size(Size::new(1.0, 1.0));
-        let data = MediaQueryData::from_view(&app, &TestView::default(), Some(&platform_data));
+        let data = MediaQueryData::from_view(&app, &phone_view(), Some(&platform_data));
         assert_eq!(data.platform_brightness, Brightness::Dark);
         assert!(data.bold_text);
         assert_eq!(data.text_scaler, TextScaler::linear(2.0));
@@ -2740,7 +2719,7 @@ mod tests {
     fn from_view_yields_the_views_metrics_and_takes_platform_data_from_the_ambient_query() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let view: ViewRef = Rc::new(TestView::default());
+        let view: ViewRef = Rc::new(phone_view());
         let (reader, seen) = data_reader();
         let from_view = MediaQuery::from_view(None, Rc::clone(&view), reader);
 
@@ -2781,28 +2760,25 @@ mod tests {
 
     #[test]
     fn from_view_under_a_view_yields_the_views_metrics() {
-        let view: ViewRef = Rc::new(TestView::default());
         // A dark-themed host, so the view's own data and the platform's can be told apart.
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::IOS)
-            .with_brightness(Brightness::Dark)
-            .with_view(Rc::clone(&view));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let mut app = cell.borrow_mut();
-        let (reader, seen) = data_reader();
-        let from_view = MediaQuery::from_view(None, Rc::clone(&view), reader);
-        run_widget(
-            &mut app,
-            View::new(Rc::clone(&view), from_view).into_widget(),
+        let tester = &mut WidgetTester::with_platform(
+            TestPlatform::new()
+                .on(TargetPlatform::IOS)
+                .with_brightness(Brightness::Dark),
         );
-        drop(app);
-        cell.elapse(Duration::ZERO);
-        let mut app = cell.borrow_mut();
-        pump_every_view(&mut app, Duration::ZERO);
+        tester.view().set_physical_size(Size::new(800.0, 600.0));
+        tester.view().set_device_pixel_ratio(2.0);
+        give_phone_insets(tester.view());
+        let view = Rc::clone(tester.view()) as ViewRef;
+        let (reader, seen) = data_reader();
+        tester.pump_widget(MediaQuery::from_view(None, Rc::clone(&view), reader));
 
         assert_eq!(seen.borrow().len(), 1);
         let data = seen.borrow()[0].clone();
-        assert_eq!(data, MediaQueryData::from_view(&app, &*view, None));
+        assert_eq!(
+            data,
+            MediaQueryData::from_view(&tester.cell.borrow(), &*view, None)
+        );
         assert_eq!(data.size, Size::new(400.0, 300.0));
         assert_eq!(data.padding, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 34.0));
         assert_eq!(

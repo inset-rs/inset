@@ -20,6 +20,10 @@ waft-scheduler.workspace = true
 waft-services.workspace = true
 unicode-general-category.workspace = true
 
+[features]
+# `testing`: flutter_test's `paints` matcher, for the tests of a crate above this one.
+test-support = []
+
 [dev-dependencies]
 waft-test.workspace = true
 waft-embedder = { workspace = true, features = ["test-support"] }

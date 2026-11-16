@@ -1781,45 +1781,16 @@ mod tests {
     use std::time::Duration;
     use waft_foundation::AppCell;
 
-    use waft_embedder::{TargetPlatform, TextDirection};
+    use waft_embedder::TextDirection;
     use waft_painting::{AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry};
     use waft_rendering::AnyRenderBox;
-    use waft_test::{TestPlatform, TestView};
 
     use super::*;
-    use crate::binding::run_app;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Align, Directionality, Padding};
     use crate::widgets::navigator::{HeroControllerScope, RouteSettings};
     use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::routes::RoutePageBuilder;
-
-    const VIEW_WIDTH: f64 = 300.0;
-    const VIEW_HEIGHT: f64 = 200.0;
-
-    /// An [`App`] with a single view; the navigator needs a binding for its global keys.
-    fn app_with_view() -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView::new(VIEW_WIDTH, VIEW_HEIGHT)));
-        AppCell::with_platform(Rc::new(platform))
-    }
-
-    fn mount(cell: &AppCell, child: WidgetRef) {
-        run_app(&mut cell.borrow_mut(), child);
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-    }
-
-    /// Runs frames until every route transition has settled.
-    fn settle(app: &mut App, from: Duration) -> Duration {
-        let mut at = from;
-        for _ in 0..40 {
-            at += Duration::from_millis(20);
-            pump_every_view(app, at);
-        }
-        at
-    }
 
     fn tag() -> HeroTagRef {
         Rc::new("photo")
@@ -1874,9 +1845,35 @@ mod tests {
         .into_widget()
     }
 
-    fn navigator_state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
-        key.current_state::<NavigatorState>(app)
-            .expect("a mounted navigator")
+    /// Pumps a navigator hosting `controller` whose first page is `first_page`, and settles it.
+    fn mount_navigator(
+        tester: &mut WidgetTester,
+        key: &GlobalKey,
+        controller: &Ref<HeroController>,
+        first_page: RoutePageBuilder,
+    ) -> Handle<NavigatorState> {
+        tester.pump_widget(hero_navigator(key, controller.clone(), first_page));
+        let navigator = key
+            .current_state::<NavigatorState>(&tester.cell.borrow())
+            .expect("a mounted navigator");
+        tester.pump_and_settle();
+        navigator
+    }
+
+    /// Pushes a route named "second" whose page is `page`.
+    fn push_second(
+        tester: &mut WidgetTester,
+        navigator: Handle<NavigatorState>,
+        page: RoutePageBuilder,
+    ) {
+        tester.update(|app| {
+            let second = hero_route(app, "second", page);
+            navigator.push(app, second.into_erased());
+        });
+    }
+
+    fn ms(millis: u64) -> Duration {
+        Duration::from_millis(millis)
     }
 
     /// The theater's children, bottom-most first; the top-most is the entry inserted last.
@@ -1915,281 +1912,240 @@ mod tests {
 
     #[test]
     fn a_hero_flies_between_two_page_routes() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let controller = HeroController::new(&mut app);
-        drop(app);
-        mount(
-            &cell,
-            hero_navigator(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let controller = tester.update(HeroController::new);
+            let navigator = mount_navigator(
+                tester,
                 &key,
-                controller.clone(),
+                &controller,
                 hero_page(10.0, 20.0, 40.0, 30.0, true),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator = navigator_state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        let entries_before = overlay_children(&mut app, navigator).len();
-
-        let second = hero_route(
-            &mut app,
-            "second",
-            hero_page(150.0, 100.0, 80.0, 60.0, true),
-        );
-        navigator.push(&mut app, second.into_erased());
-
-        // The observer's post-frame callback measures the destination and starts the flight.
-        let mut at = at + Duration::from_millis(20);
-        pump_every_view(&mut app, at);
-        let flight = only_flight(&app, controller.handle());
-        let manifest = flight.manifest(&app);
-        let (from_hero, to_hero) = (
-            app.get(manifest).from_hero.handle(),
-            app.get(manifest).to_hero.handle(),
-        );
-        assert_eq!(
-            app.get(manifest).r#type,
-            HeroFlightDirection::Push,
-            "a push flies forwards"
-        );
-        assert_eq!(
-            (
-                app.get(from_hero).placeholder_size,
-                app.get(to_hero).placeholder_size
-            ),
-            (Some(Size::new(40.0, 30.0)), Some(Size::new(80.0, 60.0))),
-            "both heroes hand their place to a placeholder of their own size"
-        );
-        assert_eq!(
-            manifest.from_hero_location(&mut app),
-            Rect::from_ltrb(10.0, 20.0, 50.0, 50.0),
-            "the source hero is measured in its route's coordinate space"
-        );
-        assert_eq!(
-            manifest.to_hero_location(&mut app),
-            Rect::from_ltrb(150.0, 100.0, 230.0, 160.0),
-            "the destination hero is measured after the offstage frame laid it out"
-        );
-        let tween = flight.hero_rect_tween(&app);
-        assert_eq!(
-            (tween.transform(&app, 0.0), tween.transform(&app, 1.0)),
-            (
-                Some(Rect::from_ltrb(10.0, 20.0, 50.0, 50.0)),
-                Some(Rect::from_ltrb(150.0, 100.0, 230.0, 160.0))
-            ),
-            "the flight interpolates from the source bounds to the destination bounds"
-        );
-
-        // The shuttle is the entry the flight inserted on top of the navigator's overlay.
-        at += Duration::from_millis(20);
-        pump_every_view(&mut app, at);
-        let children = overlay_children(&mut app, navigator);
-        assert!(
-            children.len() > entries_before,
-            "the flight added an overlay entry"
-        );
-        let mut rect = top_overlay_rect(&mut app, navigator);
-        assert!(
-            rect.left < 80.0 && rect.width() < 60.0,
-            "the shuttle starts at the source hero's bounds, not the destination's: {rect:?}"
-        );
-
-        // ... and it moves towards the destination as the route transition runs.
-        for _ in 0..4 {
-            at += Duration::from_millis(40);
-            pump_every_view(&mut app, at);
-            let moved = top_overlay_rect(&mut app, navigator);
-            assert!(
-                moved.left > rect.left && moved.width() > rect.width(),
-                "the shuttle's rect grows towards the destination: {rect:?} then {moved:?}"
             );
-            rect = moved;
-        }
+            let entries_before = tester.update(|app| overlay_children(app, navigator).len());
 
-        settle(&mut app, at);
-        assert!(
-            app.get(&controller).flights.is_empty(),
-            "the finished flight is removed from the controller"
-        );
-        assert_eq!(
-            overlay_children(&mut app, navigator).len(),
-            entries_before + 1,
-            "the shuttle's entry is gone; only the pushed route's entry remains"
-        );
-        assert!(
-            app.get(to_hero).placeholder_size.is_none(),
-            "the destination hero is visible again"
-        );
-        assert!(
-            app.get(from_hero).placeholder_size.is_some(),
-            "the source hero stays hidden underneath the route on top"
-        );
+            push_second(tester, navigator, hero_page(150.0, 100.0, 80.0, 60.0, true));
+
+            // The observer's post-frame callback measures the destination and starts the flight.
+            tester.pump_by(ms(20));
+            let (from_hero, to_hero) = tester.update(|app| {
+                let flight = only_flight(app, controller.handle());
+                let manifest = flight.manifest(app);
+                let (from_hero, to_hero) = (
+                    app.get(manifest).from_hero.handle(),
+                    app.get(manifest).to_hero.handle(),
+                );
+                assert_eq!(
+                    app.get(manifest).r#type,
+                    HeroFlightDirection::Push,
+                    "a push flies forwards"
+                );
+                assert_eq!(
+                    (
+                        app.get(from_hero).placeholder_size,
+                        app.get(to_hero).placeholder_size
+                    ),
+                    (Some(Size::new(40.0, 30.0)), Some(Size::new(80.0, 60.0))),
+                    "both heroes hand their place to a placeholder of their own size"
+                );
+                assert_eq!(
+                    manifest.from_hero_location(app),
+                    Rect::from_ltrb(10.0, 20.0, 50.0, 50.0),
+                    "the source hero is measured in its route's coordinate space"
+                );
+                assert_eq!(
+                    manifest.to_hero_location(app),
+                    Rect::from_ltrb(150.0, 100.0, 230.0, 160.0),
+                    "the destination hero is measured after the offstage frame laid it out"
+                );
+                let tween = flight.hero_rect_tween(app);
+                assert_eq!(
+                    (tween.transform(app, 0.0), tween.transform(app, 1.0)),
+                    (
+                        Some(Rect::from_ltrb(10.0, 20.0, 50.0, 50.0)),
+                        Some(Rect::from_ltrb(150.0, 100.0, 230.0, 160.0))
+                    ),
+                    "the flight interpolates from the source bounds to the destination bounds"
+                );
+                (from_hero, to_hero)
+            });
+
+            // The shuttle is the entry the flight inserted on top of the navigator's overlay.
+            tester.pump_by(ms(20));
+            let children = tester.update(|app| overlay_children(app, navigator));
+            assert!(
+                children.len() > entries_before,
+                "the flight added an overlay entry"
+            );
+            let mut rect = tester.update(|app| top_overlay_rect(app, navigator));
+            assert!(
+                rect.left < 80.0 && rect.width() < 60.0,
+                "the shuttle starts at the source hero's bounds, not the destination's: {rect:?}"
+            );
+
+            // ... and it moves towards the destination as the route transition runs.
+            for _ in 0..4 {
+                tester.pump_by(ms(40));
+                let moved = tester.update(|app| top_overlay_rect(app, navigator));
+                assert!(
+                    moved.left > rect.left && moved.width() > rect.width(),
+                    "the shuttle's rect grows towards the destination: {rect:?} then {moved:?}"
+                );
+                rect = moved;
+            }
+
+            tester.pump_and_settle();
+            tester.update(|app| {
+                assert!(
+                    app.get(&controller).flights.is_empty(),
+                    "the finished flight is removed from the controller"
+                );
+                assert_eq!(
+                    overlay_children(app, navigator).len(),
+                    entries_before + 1,
+                    "the shuttle's entry is gone; only the pushed route's entry remains"
+                );
+                assert!(
+                    app.get(to_hero).placeholder_size.is_none(),
+                    "the destination hero is visible again"
+                );
+                assert!(
+                    app.get(from_hero).placeholder_size.is_some(),
+                    "the source hero stays hidden underneath the route on top"
+                );
+            });
+        });
     }
 
     #[test]
     fn popping_back_flies_the_hero_home_and_clears_its_placeholder() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let controller = HeroController::new(&mut app);
-        drop(app);
-        mount(
-            &cell,
-            hero_navigator(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let controller = tester.update(HeroController::new);
+            let navigator = mount_navigator(
+                tester,
                 &key,
-                controller.clone(),
+                &controller,
                 hero_page(10.0, 20.0, 40.0, 30.0, true),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator = navigator_state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-
-        let second = hero_route(
-            &mut app,
-            "second",
-            hero_page(150.0, 100.0, 80.0, 60.0, true),
-        );
-        navigator.push(&mut app, second.into_erased());
-        let at = settle(&mut app, at + Duration::from_millis(20));
-        assert!(
-            app.get(&controller).flights.is_empty(),
-            "the push flight is over"
-        );
-
-        navigator.pop(&mut app, None);
-        let mut at = at + Duration::from_millis(20);
-        pump_every_view(&mut app, at);
-        let flight = only_flight(&app, controller.handle());
-        let manifest = flight.manifest(&app);
-        assert_eq!(
-            app.get(manifest).r#type,
-            HeroFlightDirection::Pop,
-            "a pop flies backwards"
-        );
-        let to_hero = app.get(manifest).to_hero.handle();
-
-        at += Duration::from_millis(20);
-        pump_every_view(&mut app, at);
-        let mut rect = top_overlay_rect(&mut app, navigator);
-        assert!(
-            rect.left > 80.0,
-            "the shuttle starts at the popped route's hero: {rect:?}"
-        );
-        for _ in 0..4 {
-            at += Duration::from_millis(40);
-            pump_every_view(&mut app, at);
-            let moved = top_overlay_rect(&mut app, navigator);
-            assert!(
-                moved.left < rect.left,
-                "the shuttle flies back: {rect:?} then {moved:?}"
             );
-            rect = moved;
-        }
 
-        settle(&mut app, at);
-        assert!(app.get(&controller).flights.is_empty());
-        assert!(
-            app.get(to_hero).placeholder_size.is_none(),
-            "the hero that stays on screen shows its child again"
-        );
+            push_second(tester, navigator, hero_page(150.0, 100.0, 80.0, 60.0, true));
+            tester.pump_and_settle();
+            assert!(
+                tester.cell.borrow().get(&controller).flights.is_empty(),
+                "the push flight is over"
+            );
+
+            tester.update(|app| navigator.pop(app, None));
+            tester.pump_by(ms(20));
+            let to_hero = tester.update(|app| {
+                let flight = only_flight(app, controller.handle());
+                let manifest = flight.manifest(app);
+                assert_eq!(
+                    app.get(manifest).r#type,
+                    HeroFlightDirection::Pop,
+                    "a pop flies backwards"
+                );
+                app.get(manifest).to_hero.handle()
+            });
+
+            tester.pump_by(ms(20));
+            let mut rect = tester.update(|app| top_overlay_rect(app, navigator));
+            assert!(
+                rect.left > 80.0,
+                "the shuttle starts at the popped route's hero: {rect:?}"
+            );
+            for _ in 0..4 {
+                tester.pump_by(ms(40));
+                let moved = tester.update(|app| top_overlay_rect(app, navigator));
+                assert!(
+                    moved.left < rect.left,
+                    "the shuttle flies back: {rect:?} then {moved:?}"
+                );
+                rect = moved;
+            }
+
+            tester.pump_and_settle();
+            let app = tester.cell.borrow();
+            assert!(app.get(&controller).flights.is_empty());
+            assert!(
+                app.get(to_hero).placeholder_size.is_none(),
+                "the hero that stays on screen shows its child again"
+            );
+        });
     }
 
     #[test]
     fn a_disabled_hero_mode_keeps_the_hero_out_of_the_flight() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let controller = HeroController::new(&mut app);
-        drop(app);
-        mount(
-            &cell,
-            hero_navigator(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let controller = tester.update(HeroController::new);
+            let navigator = mount_navigator(
+                tester,
                 &key,
-                controller.clone(),
+                &controller,
                 hero_page(10.0, 20.0, 40.0, 30.0, false),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator = navigator_state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        let entries_before = overlay_children(&mut app, navigator).len();
+            );
+            let entries_before = tester.update(|app| overlay_children(app, navigator).len());
 
-        let second = hero_route(
-            &mut app,
-            "second",
-            hero_page(150.0, 100.0, 80.0, 60.0, true),
-        );
-        navigator.push(&mut app, second.into_erased());
-        let at = at + Duration::from_millis(20);
-        pump_every_view(&mut app, at);
-        assert!(
-            app.get(&controller).flights.is_empty(),
-            "the source hero is behind a disabled HeroMode, so no pair matches"
-        );
+            push_second(tester, navigator, hero_page(150.0, 100.0, 80.0, 60.0, true));
+            tester.pump_by(ms(20));
+            assert!(
+                tester.cell.borrow().get(&controller).flights.is_empty(),
+                "the source hero is behind a disabled HeroMode, so no pair matches"
+            );
 
-        settle(&mut app, at);
-        assert_eq!(
-            overlay_children(&mut app, navigator).len(),
-            entries_before + 1,
-            "nothing but the pushed route was added to the overlay"
-        );
+            tester.pump_and_settle();
+            assert_eq!(
+                tester.update(|app| overlay_children(app, navigator).len()),
+                entries_before + 1,
+                "nothing but the pushed route was added to the overlay"
+            );
+        });
     }
 
     #[test]
     fn a_custom_flight_shuttle_builder_supplies_the_in_flight_widget() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let controller = HeroController::new(&mut app);
-        let built = Rc::new(std::cell::Cell::new(0u32));
-        let shuttle_builder: HeroFlightShuttleBuilder = {
-            let built = Rc::clone(&built);
-            Rc::new(move |_app, _flight, _animation, direction, _from, _to| {
-                built.set(built.get() + 1);
-                assert_eq!(direction, HeroFlightDirection::Push);
-                SizedBox::new().width(11.0).height(13.0).into_widget()
-            })
-        };
-        drop(app);
-        mount(
-            &cell,
-            hero_navigator(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let controller = tester.update(HeroController::new);
+            let built = Rc::new(std::cell::Cell::new(0u32));
+            let shuttle_builder: HeroFlightShuttleBuilder = {
+                let built = Rc::clone(&built);
+                Rc::new(move |_app, _flight, _animation, direction, _from, _to| {
+                    built.set(built.get() + 1);
+                    assert_eq!(direction, HeroFlightDirection::Push);
+                    SizedBox::new().width(11.0).height(13.0).into_widget()
+                })
+            };
+            let navigator = mount_navigator(
+                tester,
                 &key,
-                controller.clone(),
+                &controller,
                 hero_page(10.0, 20.0, 40.0, 30.0, true),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator = navigator_state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+            );
 
-        let page: RoutePageBuilder = Rc::new(move |_app, _context, _animation, _secondary| {
-            Align::new()
-                .alignment(AlignmentGeometry::TOP_LEFT)
-                .child(
-                    Padding::new(EdgeInsetsGeometry::from_ltrb(150.0, 100.0, 0.0, 0.0)).child(
-                        Hero::new(tag(), SizedBox::new().width(80.0).height(60.0))
-                            .flight_shuttle_builder(shuttle_builder.clone()),
-                    ),
-                )
-                .into_widget()
+            let page: RoutePageBuilder = Rc::new(move |_app, _context, _animation, _secondary| {
+                Align::new()
+                    .alignment(AlignmentGeometry::TOP_LEFT)
+                    .child(
+                        Padding::new(EdgeInsetsGeometry::from_ltrb(150.0, 100.0, 0.0, 0.0)).child(
+                            Hero::new(tag(), SizedBox::new().width(80.0).height(60.0))
+                                .flight_shuttle_builder(shuttle_builder.clone()),
+                        ),
+                    )
+                    .into_widget()
+            });
+            push_second(tester, navigator, page);
+            tester.pump_by(ms(20));
+            tester.pump_by(ms(20));
+
+            assert_eq!(built.get(), 1, "the shuttle is built once and then reused");
+            // `Positioned` sizes the shuttle to the flight's rect, so the shuttle's own 11x13 only
+            // shows up as the child the overlay entry built.
+            assert!(!tester.cell.borrow().get(&controller).flights.is_empty());
+            tester.pump_and_settle();
+            assert!(tester.cell.borrow().get(&controller).flights.is_empty());
         });
-        let second = hero_route(&mut app, "second", page);
-        navigator.push(&mut app, second.into_erased());
-        let mut at = at + Duration::from_millis(20);
-        pump_every_view(&mut app, at);
-        at += Duration::from_millis(20);
-        pump_every_view(&mut app, at);
-
-        assert_eq!(built.get(), 1, "the shuttle is built once and then reused");
-        // `Positioned` sizes the shuttle to the flight's rect, so the shuttle's own 11x13 only
-        // shows up as the child the overlay entry built.
-        assert!(!app.get(&controller).flights.is_empty());
-        settle(&mut app, at);
-        assert!(app.get(&controller).flights.is_empty());
     }
 
     #[test]

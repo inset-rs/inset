@@ -17,16 +17,38 @@ pub enum Entry {
     Lists,
     Drawers,
     Messages,
+    SelectionControls,
+    Sliders,
+    Progress,
+    TextFields,
+    Chips,
+    Segments,
+    Cards,
+    Tabs,
+    Dialogs,
+    Menus,
+    Pickers,
 }
 
 impl Entry {
     /// Index order — the order the tiles appear in.
-    pub const ALL: [Entry; 5] = [
+    pub const ALL: [Entry; 16] = [
         Entry::Buttons,
         Entry::AppBars,
         Entry::Lists,
         Entry::Drawers,
         Entry::Messages,
+        Entry::SelectionControls,
+        Entry::Sliders,
+        Entry::Progress,
+        Entry::TextFields,
+        Entry::Chips,
+        Entry::Segments,
+        Entry::Cards,
+        Entry::Tabs,
+        Entry::Dialogs,
+        Entry::Menus,
+        Entry::Pickers,
     ];
 
     /// The entry named by its variant, case-insensitively: how a launcher picks a page.
@@ -45,6 +67,17 @@ impl Entry {
             Entry::Lists => "Lists",
             Entry::Drawers => "Drawers",
             Entry::Messages => "Snack Bars & Sheets",
+            Entry::SelectionControls => "Selection Controls",
+            Entry::Sliders => "Sliders",
+            Entry::Progress => "Progress Indicators",
+            Entry::TextFields => "Text Fields",
+            Entry::Chips => "Chips",
+            Entry::Segments => "Segmented & Toggle Buttons",
+            Entry::Cards => "Cards, Badges & Avatars",
+            Entry::Tabs => "Tabs",
+            Entry::Dialogs => "Dialogs",
+            Entry::Menus => "Menus",
+            Entry::Pickers => "Date & Time Pickers",
         }
     }
 
@@ -56,6 +89,17 @@ impl Entry {
             Entry::Lists => Icons::view_list(),
             Entry::Drawers => Icons::menu_open(),
             Entry::Messages => Icons::announcement(),
+            Entry::SelectionControls => Icons::check_box(),
+            Entry::Sliders => Icons::tune(),
+            Entry::Progress => Icons::autorenew(),
+            Entry::TextFields => Icons::text_fields(),
+            Entry::Chips => Icons::label(),
+            Entry::Segments => Icons::view_week(),
+            Entry::Cards => Icons::style(),
+            Entry::Tabs => Icons::tab(),
+            Entry::Dialogs => Icons::chat_bubble(),
+            Entry::Menus => Icons::more_vert(),
+            Entry::Pickers => Icons::event(),
         }
     }
 
@@ -78,6 +122,17 @@ impl Entry {
             Entry::Lists => pages::lists::body(app, context),
             Entry::Drawers => pages::drawers::body(app, context),
             Entry::Messages => pages::messages::body(app, context),
+            Entry::SelectionControls => pages::selection_controls::body(app, context),
+            Entry::Sliders => pages::sliders::body(app, context),
+            Entry::Progress => pages::progress::body(app, context),
+            Entry::TextFields => pages::text_fields::body(app, context),
+            Entry::Chips => pages::chips::body(app, context),
+            Entry::Segments => pages::segments::body(app, context),
+            Entry::Cards => pages::cards::body(app, context),
+            Entry::Tabs => pages::tabs::body(app, context),
+            Entry::Dialogs => pages::dialogs::body(app, context),
+            Entry::Menus => pages::menus::body(app, context),
+            Entry::Pickers => pages::pickers::body(app, context),
         }
     }
 

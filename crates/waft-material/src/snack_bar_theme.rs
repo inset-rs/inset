@@ -518,10 +518,12 @@ mod tests {
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
     use waft_widgets::{SizedBox, WidgetState};
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
+    use crate::drawer_theme::tests::probe;
     use crate::drawer_theme::tests::theme_seen_through_capture;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
     use crate::theme_data::ThemeData;
 
     fn rounded(radius: f64) -> RoundedRectangleBorder {
@@ -775,15 +777,14 @@ mod tests {
 
     #[test]
     fn of_returns_the_theme_data_snack_bar_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = SnackBarThemeData::new()
                 .elevation(3.0)
                 .background_color(Colors::RED.primary());
             let theme_data_snack_bar = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .snack_bar_theme(theme_data_snack_bar.clone())
@@ -799,13 +800,12 @@ mod tests {
 
     #[test]
     fn of_returns_the_closest_snack_bar_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let widget_snack_bar = SnackBarThemeData::new().elevation(7.0);
             let expected = widget_snack_bar.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .snack_bar_theme(SnackBarThemeData::new().elevation(3.0))
@@ -822,13 +822,12 @@ mod tests {
 
     #[test]
     fn a_captured_snack_bar_theme_is_kept_under_another_snack_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let captured = SnackBarThemeData::new().elevation(1.0);
             let shadowing = SnackBarThemeData::new().elevation(2.0);
 
             let seen = theme_seen_through_capture(
-                &cell,
+                tester,
                 |probe| SnackBarTheme::new(captured.clone(), probe).into_widget(),
                 |wrapped| SnackBarTheme::new(shadowing.clone(), wrapped).into_widget(),
                 SnackBarTheme::of,
@@ -849,9 +848,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_snack_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.snack_bar_theme, SnackBarThemeData::new());
 

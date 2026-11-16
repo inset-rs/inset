@@ -1,17 +1,21 @@
 //! The system's image codecs, Image I/O's: a photo opened by its file says its format, its size
-//! upright, its one frame, how its picture is turned, and what its EXIF says of how it was taken,
+//! upright, that it is one still picture, how its picture is turned, and what its EXIF says of how it was taken,
 //! its location among it; decoded into the app's memory at a size, it comes upright, scaled down
 //! to fit; decoded by the hardware codecs, it is the host's own hardware buffer, an `IOSurface`,
 //! whose pixels read back in BGRA; and both encode again, the app's pixels and the buffer's, into
 //! an image that opens with no metadata, the buffer as HEIC too where the system encodes it, which
-//! decodes back into a buffer. An animation's bytes open with each frame's delay, and bytes of no
-//! image fail with the kind of their failure. All without a window.
+//! decodes back into a buffer. An animation's bytes open with each frame's delay and how many
+//! times it plays, a document's as its pages, each with its own size, and bytes of no image fail
+//! with the kind of their failure. All without a window.
 //!
 //! Its own binary, without the test harness, as the media tests are. The photo,
 //! `tests/media/photo.jpg`, is 48 by 32 pixels as stored, its left half red and its right half
 //! blue, with EXIF saying to turn it a quarter clockwise to show it, so upright it is 32 by 48, red
 //! above and blue below; the animation, `tests/media/three-frames.gif`, three frames of 8 by 8,
-//! red, green and blue, each shown a tenth of a second.
+//! red, green and blue, each shown a tenth of a second, played forever;
+//! `tests/media/four-plays.gif`, two frames of one pixel whose NETSCAPE extension repeats them
+//! three times; and the document, `tests/media/two-pages.tiff`, a red page of 3 by 2 and a blue
+//! one of 2 by 5.
 
 #[cfg(target_os = "macos")]
 fn main() {
@@ -32,8 +36,8 @@ mod codecs {
     use std::time::{Duration, Instant};
 
     use waft_embedder::image_codecs::{
-        AlphaType, DateTime, ImageCodecs, ImageErrorKind, ImageRotation, ImageSource, PixelBuffer,
-        PixelFormat,
+        AlphaType, AnimationPlays, DateTime, ImageCodecs, ImageErrorKind, ImagePictures,
+        ImageRotation, ImageSource, PixelBuffer, PixelFormat,
     };
     use waft_embedder::{HardwareBuffer, Size};
     use waft_embedder_winit::SurfaceBuffer;
@@ -69,15 +73,16 @@ mod codecs {
 
         encodes_again(codecs.as_ref(), pixels, &buffer);
         an_animation_opens_with_its_delays(codecs.as_ref());
+        an_animation_says_how_many_times_it_plays(codecs.as_ref());
+        a_document_opens_as_its_pages(codecs.as_ref());
         what_is_no_image_fails(codecs.as_ref());
     }
 
-    /// The photo's format, size upright, frame, orientation and metadata.
+    /// The photo's format, size upright, pictures, orientation and metadata.
     fn says_what_it_is(photo: &dyn ImageSource) {
         assert_eq!(photo.mime_type(), "image/jpeg");
         assert_eq!(photo.size(), Size::new(32.0, 48.0), "upright");
-        assert_eq!(photo.frames().len(), 1);
-        assert_eq!(photo.frames()[0].duration, None, "a still image");
+        assert_eq!(photo.pictures(), ImagePictures::Still);
         let orientation = photo.orientation();
         assert_eq!(
             (orientation.mirrored, orientation.rotation),
@@ -216,17 +221,17 @@ mod codecs {
         assert_eq!(unknown.unwrap_err().kind, ImageErrorKind::Unsupported);
     }
 
-    /// The animation's three frames, each with its delay.
+    /// The animation's three frames, each with its delay, played forever.
     fn an_animation_opens_with_its_delays(codecs: &dyn ImageCodecs) {
         let bytes = std::fs::read(media("three-frames.gif")).expect("the animation");
         let animation = waited("the animation", codecs.open(Arc::from(bytes))).expect("it opens");
         assert_eq!(animation.mime_type(), "image/gif");
-        let delays: Vec<_> = animation
-            .frames()
-            .iter()
-            .map(|frame| frame.duration)
-            .collect();
+        let ImagePictures::Animation(pictures) = animation.pictures() else {
+            panic!("an animation: {:?}", animation.pictures());
+        };
+        let delays: Vec<_> = pictures.frames.iter().map(|frame| frame.duration).collect();
         assert_eq!(delays, [Some(Duration::from_millis(100)); 3]);
+        assert_eq!(pictures.plays, AnimationPlays::Forever);
         let last = waited("its last frame", animation.decode_pixels(2, None)).expect("decoded");
         let [red, green, blue, _] = last.bytes()[..4] else {
             unreachable!()
@@ -237,6 +242,46 @@ mod codecs {
             &last.bytes()[..4]
         );
         let past = waited("a frame it has not", animation.decode_pixels(3, None));
+        assert_eq!(
+            past.err().map(|error| error.kind),
+            Some(ImageErrorKind::Other)
+        );
+    }
+
+    /// The GIF repeated three times after its first play, which Image I/O counts as four plays.
+    fn an_animation_says_how_many_times_it_plays(codecs: &dyn ImageCodecs) {
+        let bytes = std::fs::read(media("four-plays.gif")).expect("the animation");
+        let animation = waited("the animation", codecs.open(Arc::from(bytes))).expect("it opens");
+        let ImagePictures::Animation(pictures) = animation.pictures() else {
+            panic!("an animation: {:?}", animation.pictures());
+        };
+        assert_eq!(pictures.frames.len(), 2);
+        assert_eq!(pictures.plays, AnimationPlays::Times(4));
+    }
+
+    /// The TIFF's two pages, each with its own size, the first its primary, the image's size its
+    /// primary page's, and each page decoding at its own size.
+    fn a_document_opens_as_its_pages(codecs: &dyn ImageCodecs) {
+        let bytes = std::fs::read(media("two-pages.tiff")).expect("the document");
+        let document = waited("the document", codecs.open(Arc::from(bytes))).expect("it opens");
+        let ImagePictures::Pages(pictures) = document.pictures() else {
+            panic!("a document of pages: {:?}", document.pictures());
+        };
+        let sizes: Vec<_> = pictures.pages.iter().map(|page| page.size).collect();
+        assert_eq!(sizes, [Size::new(3.0, 2.0), Size::new(2.0, 5.0)]);
+        assert_eq!(pictures.primary, 0);
+        assert_eq!(document.size(), Size::new(3.0, 2.0));
+        let second = waited("its second page", document.decode_pixels(1, None)).expect("decoded");
+        assert_eq!(second.layout().size, [2, 5]);
+        let [red, _, blue, _] = second.bytes()[..4] else {
+            unreachable!()
+        };
+        assert!(
+            blue > 200 && red < 60,
+            "the blue page: {:?}",
+            &second.bytes()[..4]
+        );
+        let past = waited("a page it has not", document.decode_pixels(2, None));
         assert_eq!(
             past.err().map(|error| error.kind),
             Some(ImageErrorKind::Other)

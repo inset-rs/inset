@@ -125,20 +125,13 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use waft_embedder::TargetPlatform;
     use waft_widgets::Center;
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::button_style_button::ButtonStyleButton;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-
-    /// A tester on Android with flutter_test's fonts, so a `Text` measures as in Flutter's tests.
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
 
     /// `MaterialApp(home: Center(child: child))`.
     fn pump_centered<K>(tester: &mut WidgetTester, child: impl IntoWidget<K>) {
@@ -154,39 +147,35 @@ mod tests {
 
     #[test]
     fn can_press() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pressed = Rc::new(Cell::new(false));
             let on_pressed = {
                 let pressed = Rc::clone(&pressed);
                 Listener::new(move |_app| pressed.set(true))
             };
             pump_centered(
-                &mut tester,
+                tester,
                 DesktopTextSelectionToolbarButton::new(Some(on_pressed), Text::new("Tap me")),
             );
 
             assert!(!pressed.get());
 
-            let buttons = tester.find_by_type::<DesktopTextSelectionToolbarButton>();
-            let center = tester
-                .global_rect(tester.render_box_of(buttons[0]))
-                .center();
-            tester.tap(center, 1);
+            let buttons = find::by_type::<DesktopTextSelectionToolbarButton>().evaluate(tester);
+            let center = tester.get_rect(buttons[0]).center();
+            tester.tap_at(center, 1);
             assert!(pressed.get());
         });
     }
 
     #[test]
     fn passing_null_to_on_pressed_disables_the_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_centered(
-                &mut tester,
+                tester,
                 DesktopTextSelectionToolbarButton::new(None, Text::new("Cannot tap me")),
             );
 
-            let buttons = tester.find_by_type::<TextButton>();
+            let buttons = find::by_type::<TextButton>().evaluate(tester);
             assert_eq!(buttons.len(), 1);
             assert!(!tester.widget(buttons[0], |button: &TextButton| button.enabled()));
         });
@@ -194,16 +183,14 @@ mod tests {
 
     #[test]
     fn desktop_text_selection_toolbar_button_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_centered(
-                &mut tester,
+                tester,
                 SizedBox::shrink()
                     .child(DesktopTextSelectionToolbarButton::new(None, Text::new("X"))),
             );
-            let buttons = tester.find_by_type::<DesktopTextSelectionToolbarButton>();
-            let render = tester.render_box_of(buttons[0]);
-            assert_eq!(render.size(&tester.cell.borrow()), Size::ZERO);
+            let buttons = find::by_type::<DesktopTextSelectionToolbarButton>().evaluate(tester);
+            assert_eq!(tester.get_size(buttons[0]), Size::ZERO);
         });
     }
 }

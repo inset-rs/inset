@@ -12,7 +12,7 @@ use waft_widgets::*;
 use waft_winui::*;
 
 /// Named symbols available to controls and gallery navigation.
-const SYMBOLS: [(FluentSymbol, &str); 28] = [
+const SYMBOLS: [(FluentSymbol, &str); 45] = [
     (FluentSymbol::CursorClick, "Cursor click"),
     (FluentSymbol::ToggleLeft, "Toggle"),
     (FluentSymbol::CheckboxChecked, "Checked"),
@@ -41,6 +41,23 @@ const SYMBOLS: [(FluentSymbol, &str); 28] = [
     (FluentSymbol::Back, "Back"),
     (FluentSymbol::Settings, "Settings"),
     (FluentSymbol::More, "More"),
+    (FluentSymbol::Document, "Document"),
+    (FluentSymbol::Camera, "Camera"),
+    (FluentSymbol::Mic, "Microphone"),
+    (FluentSymbol::Folder, "Folder"),
+    (FluentSymbol::Globe, "Globe"),
+    (FluentSymbol::Shield, "Shield"),
+    (FluentSymbol::Clipboard, "Clipboard"),
+    (FluentSymbol::Alert, "Alert"),
+    (FluentSymbol::WindowConsole, "Terminal"),
+    (FluentSymbol::PlugConnected, "Connection"),
+    (FluentSymbol::Live, "Listener"),
+    (FluentSymbol::Question, "Question"),
+    (FluentSymbol::Desktop, "Machine"),
+    (FluentSymbol::Pulse, "Activity"),
+    (FluentSymbol::Play, "Play"),
+    (FluentSymbol::Stop, "Stop"),
+    (FluentSymbol::Table, "Table"),
 ];
 
 /// Glyphs of the bundled icon font that the catalog enum does not name, shown the way
@@ -50,7 +67,7 @@ const GLYPHS: [(u32, &str); 6] = [
     (61942, "bookmark"),
     (57935, "calendar"),
     (62727, "mail"),
-    (62555, "globe"),
+    (62593, "home"),
     (62910, "person"),
 ];
 

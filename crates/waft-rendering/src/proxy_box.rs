@@ -19,9 +19,9 @@ use std::rc::Rc;
 use waft_animation::{AnimationRef, AnyAnimation};
 use waft_embedder::Locale;
 use waft_embedder::{
-    BlendMode, Clip, Color, FillRule, FilterQuality, ImageFilter, Matrix4, Offset, Paint,
-    PaintStyle, Path, PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline,
-    rrect_radii_elliptical, rsuperellipse_radii_elliptical, valo,
+    BlendMode, Clip, Color, FillRule, FilterQuality, ImageFilter, Matrix4, Offset, Paint, Path,
+    PathBuilder, RRect, RSuperellipse, Rect, Size, TextBaseline, rrect_radii_elliptical,
+    rsuperellipse_radii_elliptical, valo,
 };
 use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained};
 use waft_gestures::{
@@ -33,7 +33,7 @@ use waft_gestures::{
 use waft_painting::{
     Alignment, AlignmentGeometry, BorderRadius, BorderRadiusGeometry, BoxFit, BoxPainter, BoxShape,
     ClipContext, DecorationRef, ImageConfiguration, ShapeBorderRef, TextDirection, apply_box_fit,
-    debug_disable_shadows, draw_rrect, get_as_translation,
+    draw_rrect, get_as_translation,
 };
 use waft_services::{MouseCursor, MouseCursorRef, MouseTrackerAnnotation};
 
@@ -5321,9 +5321,6 @@ pub trait RenderPhysicalModelBase<T: Clone + 'static>: RenderCustomClip<T> {
     /// The z-coordinate relative to the parent at which to place this material.
     ///
     /// The value is non-negative.
-    ///
-    /// If `debug_disable_shadows` is set, this value is ignored and no shadow is
-    /// drawn (an outline is rendered instead).
     fn elevation(self: RenderHandle<Self>, app: &App) -> f64 {
         self.physical_model_data(app).elevation
     }
@@ -5567,25 +5564,10 @@ impl RenderObject for RenderPhysicalModel {
         let elevation = self.elevation(app);
         let shadow_color = self.shadow_color(app);
         let color = self.color(app);
-        let mut paint_shadows = true;
-        if cfg!(debug_assertions) && debug_disable_shadows() {
-            if elevation > 0.0 {
-                draw_rrect(
-                    context.canvas(),
-                    offset_rrect,
-                    &Paint {
-                        color: shadow_color.into(),
-                        style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
-                        ..Paint::default()
-                    },
-                );
-            }
-            paint_shadows = false;
-        }
 
         let device_pixel_ratio = device_pixel_ratio_of_view(app, self.as_object());
         let canvas = context.canvas();
-        if elevation != 0.0 && paint_shadows {
+        if elevation != 0.0 {
             let mut offset_rrect_as_path = PathBuilder::new();
             offset_rrect_as_path.rrect_radii_elliptical(
                 valo::Rect::from(offset_rrect.outer_rect()),
@@ -5870,25 +5852,10 @@ impl RenderObject for RenderPhysicalShape {
         let elevation = self.elevation(app);
         let shadow_color = self.shadow_color(app);
         let color = self.color(app);
-        let mut paint_shadows = true;
-        if cfg!(debug_assertions) && debug_disable_shadows() {
-            if elevation > 0.0 {
-                context.canvas().draw_path(
-                    offset_path.as_valo(),
-                    offset_path.fill_type,
-                    &Paint {
-                        color: shadow_color.into(),
-                        style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
-                        ..Paint::default()
-                    },
-                );
-            }
-            paint_shadows = false;
-        }
 
         let device_pixel_ratio = device_pixel_ratio_of_view(app, self.as_object());
         let canvas = context.canvas();
-        if elevation != 0.0 && paint_shadows {
+        if elevation != 0.0 {
             #[expect(deprecated, reason = "Dart's paint reads the deprecated `Color.alpha`")]
             let transparent_occluder = color.alpha() != 0xFF;
             canvas.draw_shadow(
@@ -9390,8 +9357,12 @@ mod tests {
     use waft_painting::BoxDecoration;
 
     use super::*;
-    use crate::layer::{ErasedLayer, OffsetLayer, PictureLayer};
+    use crate::layer::ErasedLayer;
     use crate::pipeline_owner::PipelineOwner;
+    use crate::testing::{
+        CanvasMethod, EnginePhase, count_calls, layout_with, painted_ops, pump_frame,
+        test_render_root,
+    };
     use crate::view::ViewConfiguration;
     use waft_embedder::SceneBuilder;
 
@@ -9470,29 +9441,6 @@ mod tests {
                 intrinsic,
             },
         )
-    }
-
-    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
-        let root = OffsetLayer::new(app, Offset::ZERO);
-        root.as_layer().attach(app, node.id());
-        node.schedule_initial_paint(app, root.as_container_layer());
-    }
-
-    /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
-    fn first_frame(app: &mut App, root: AnyRenderBox) -> Ref<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.layout(app, BoxConstraints::tight(Size::new(100.0, 100.0)), false);
-        schedule_root_paint(app, root.as_object());
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
-        owner
-    }
-
-    fn pump_frame(app: &mut App, owner: Handle<PipelineOwner>) {
-        owner.flush_layout(app);
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
     }
 
     /// `box_test.dart`: a `RenderConstrainedBox` reports its child's intrinsics enforced by its
@@ -9699,9 +9647,13 @@ mod tests {
         );
         let boundary = RenderRepaintBoundary::new(&mut app, Some(inner.as_box()));
         let opacity = RenderOpacity::new(&mut app, 1.0, Some(boundary.as_box()));
-        // Flutter's test binding puts a `RenderView` above; a root must stay a repaint boundary.
-        let root = RenderRepaintBoundary::new(&mut app, Some(opacity.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            opacity.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         assert!(!inner.as_object().is_repaint_boundary(&app));
         assert!(inner.as_object().debug_layer(&app).is_none());
         assert!(boundary.as_object().is_repaint_boundary(&app));
@@ -9709,13 +9661,13 @@ mod tests {
         assert!(layer.as_layer().attached(&app), "this time it painted");
 
         opacity.set_opacity(&mut app, 0.0);
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert!(inner.as_object().debug_layer(&app).is_none());
         let layer = boundary.as_object().debug_layer(&app).expect("kept");
         assert!(!layer.as_layer().attached(&app), "this time it did not");
 
         opacity.set_opacity(&mut app, 0.5);
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         let layer = boundary.as_object().debug_layer(&app).expect("kept");
         assert!(layer.as_layer().attached(&app), "this time it did again");
     }
@@ -9729,13 +9681,18 @@ mod tests {
         let complete = k_always_complete_animation(&mut app);
         let fade = RenderAnimatedOpacity::new(&mut app, dismissed, Some(child.as_box()));
         assert!(!fade.as_object().is_repaint_boundary(&app));
-        let root = RenderRepaintBoundary::new(&mut app, Some(fade.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            fade.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         fade.set_opacity(&mut app, complete);
         assert!(fade.as_object().is_repaint_boundary(&app));
         assert!(fade.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         let layer = fade.as_object().debug_layer(&app).expect("a boundary now");
         let opacity = app
             .handle::<OpacityLayer>(layer.id())
@@ -9831,9 +9788,14 @@ mod tests {
             ImageConfiguration::EMPTY,
             None,
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(decorated.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
-        let ops = scene_ops(&mut app, root.as_object());
+        layout_with(
+            &mut app,
+            decorated.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
+        let ops = scene_ops(&mut app);
         assert!(
             ops.iter()
                 .any(|op| matches!(op, waft_embedder::valo::Op::DrawDisplayList { .. })),
@@ -9860,29 +9822,16 @@ mod tests {
         (is_hit, result.path().len())
     }
 
-    /// Every canvas operation of the pictures in a repaint boundary's layer tree.
-    fn picture_ops(app: &App, boundary: AnyRenderObject) -> Vec<Op> {
-        let layer = boundary.debug_layer(app).expect("painted");
-        layer
-            .depth_first_iterate_children(app)
-            .into_iter()
-            .filter_map(|child| {
-                app.handle::<PictureLayer>(child.id())
-                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
-            })
-            .flatten()
-            .collect()
-    }
-
-    fn picture_has_clip(app: &App, boundary: AnyRenderObject) -> bool {
-        picture_ops(app, boundary)
+    /// Whether `render`, painted on its own, clips.
+    fn picture_has_clip(app: &mut App, render: AnyRenderObject) -> bool {
+        painted_ops(app, render)
             .iter()
             .any(|op| matches!(op, Op::ClipPath { .. }))
     }
 
-    /// The rect and color of every fill in a repaint boundary's recording.
-    fn drawn_rects(app: &App, boundary: AnyRenderObject) -> Vec<(valo::Rect, valo::Color)> {
-        picture_ops(app, boundary)
+    /// The rect and color of every fill `render` paints.
+    fn drawn_rects(app: &mut App, render: AnyRenderObject) -> Vec<(valo::Rect, valo::Color)> {
+        painted_ops(app, render)
             .iter()
             .filter_map(|op| match op {
                 Op::DrawRect { rect, paint, .. } => Some((*rect, paint.color)),
@@ -9996,10 +9945,15 @@ mod tests {
             Clip::HardEdge,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            clip.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
-        let ops = picture_ops(&app, root.as_object());
+        let ops = painted_ops(&mut app, clip.as_object());
         let clip_path = ops
             .iter()
             .find_map(|op| match op {
@@ -10025,15 +9979,20 @@ mod tests {
         let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let clip = RenderClipRect::new(&mut app, None, Clip::None, Some(child.as_box()));
-        let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            clip.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         assert!(
-            !picture_has_clip(&app, root.as_object()),
+            !picture_has_clip(&mut app, clip.as_object()),
             "Clip::None paints the child directly"
         );
         assert_eq!(
-            drawn_rects(&app, root.as_object()),
+            drawn_rects(&mut app, clip.as_object()),
             [fill(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), RED)]
         );
     }
@@ -10051,11 +10010,16 @@ mod tests {
             None,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            clip.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         let bounds = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
-        let ops = picture_ops(&app, root.as_object());
+        let ops = painted_ops(&mut app, clip.as_object());
         let clip_path = ops
             .iter()
             .find_map(|op| match op {
@@ -10111,8 +10075,13 @@ mod tests {
             Clip::HardEdge,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            clip.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         assert!(clip.custom_clip_data(&app).clip.is_some());
 
         reclip.set_value(&mut app, 1);
@@ -10121,7 +10090,7 @@ mod tests {
             "the clipper's notification dropped the cached clip"
         );
         assert!(clip.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert!(clip.custom_clip_data(&app).clip.is_some());
 
         clip.layout(
@@ -10150,10 +10119,15 @@ mod tests {
             None,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(transform.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            transform.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
-        let ops = picture_ops(&app, root.as_object());
+        let ops = painted_ops(&mut app, transform.as_object());
         let pushed = ops.iter().find_map(|op| match op {
             Op::Transform(transform) => Some(*transform),
             _ => None,
@@ -10177,17 +10151,22 @@ mod tests {
             None,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(transform.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            transform.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         assert!(
-            !picture_ops(&app, root.as_object())
+            !painted_ops(&mut app, transform.as_object())
                 .iter()
                 .any(|op| matches!(op, Op::Transform(_))),
             "a translation is folded into the child's paint offset"
         );
         assert_eq!(
-            drawn_rects(&app, root.as_object()),
+            drawn_rects(&mut app, transform.as_object()),
             [fill(Rect::from_ltwh(10.0, 20.0, 100.0, 100.0), RED)]
         );
     }
@@ -10288,11 +10267,16 @@ mod tests {
             true,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(translated.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            translated.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         assert_eq!(
-            drawn_rects(&app, root.as_object()),
+            drawn_rects(&mut app, translated.as_object()),
             [fill(Rect::from_ltwh(50.0, 0.0, 100.0, 100.0), RED)],
             "half the width to the right"
         );
@@ -10367,13 +10351,18 @@ mod tests {
         let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let offstage = RenderOffstage::new(&mut app, true, Some(child.as_box()));
-        let root = RenderRepaintBoundary::new(&mut app, Some(offstage.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            offstage.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         assert!(RenderObject::sized_by_parent(offstage, &app));
         assert_eq!(child.size(&app), Size::new(100.0, 100.0), "still laid out");
         assert!(
-            !picture_has_clip(&app, root.as_object()),
+            !picture_has_clip(&mut app, offstage.as_object()),
             "offstage paints nothing"
         );
         assert_eq!(
@@ -10383,9 +10372,9 @@ mod tests {
         assert!(!offstage.as_object().paints_child(&app, child.as_object()));
 
         offstage.set_offstage(&mut app, false);
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert_eq!(
-            drawn_rects(&app, root.as_object()),
+            drawn_rects(&mut app, offstage.as_object()),
             [fill(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), RED)]
         );
         assert!(hit_test(&mut app, offstage.as_box(), Offset::new(50.0, 50.0)).0);
@@ -10397,11 +10386,16 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let colored = red_box(&mut app);
-        let root = RenderRepaintBoundary::new(&mut app, Some(colored.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            colored.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         assert_eq!(
-            drawn_rects(&app, root.as_object()),
+            drawn_rects(&mut app, colored.as_object()),
             [fill(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), RED)]
         );
         assert_eq!(
@@ -10417,12 +10411,17 @@ mod tests {
         let mut app = cell.borrow_mut();
         let child = red_box(&mut app);
         let colored = RenderColoredBox::new(&mut app, BLUE, true, Some(child.as_box()));
-        let root = RenderRepaintBoundary::new(&mut app, Some(colored.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            colored.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         let bounds = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
         assert_eq!(
-            drawn_rects(&app, root.as_object()),
+            drawn_rects(&mut app, colored.as_object()),
             [fill(bounds, BLUE), fill(bounds, RED)]
         );
     }
@@ -10489,9 +10488,10 @@ mod tests {
         assert_eq!(result.path().len(), 2, "the child, then the meta data");
     }
 
-    /// The scene of a repaint-boundary root after a frame, as display-list ops.
-    fn scene_ops(app: &mut App, root: AnyRenderObject) -> Vec<Op> {
-        let scene = root
+    /// The scene of the test view after a frame, as display-list ops.
+    fn scene_ops(app: &mut App) -> Vec<Op> {
+        let scene = test_render_root(app)
+            .as_object()
             .debug_layer(app)
             .expect("painted")
             .build_scene(app, SceneBuilder::new());
@@ -10511,9 +10511,14 @@ mod tests {
             None,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(filter.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
-        let ops = scene_ops(&mut app, root.as_object());
+        layout_with(
+            &mut app,
+            filter.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
+        let ops = scene_ops(&mut app);
         let blur = ops
             .iter()
             .position(|op| {
@@ -10545,8 +10550,8 @@ mod tests {
 
         let key = BackdropKey::new();
         filter.set_backdrop_key(&mut app, Some(key));
-        pump_frame(&mut app, owner.handle());
-        let ops = scene_ops(&mut app, root.as_object());
+        pump_frame(&mut app, EnginePhase::Paint);
+        let ops = scene_ops(&mut app);
         assert!(
             ops.iter().any(|op| matches!(
                 op,
@@ -10562,8 +10567,8 @@ mod tests {
         );
 
         filter.set_enabled(&mut app, false);
-        pump_frame(&mut app, owner.handle());
-        let ops = scene_ops(&mut app, root.as_object());
+        pump_frame(&mut app, EnginePhase::Paint);
+        let ops = scene_ops(&mut app);
         assert!(
             !ops.iter().any(|op| matches!(
                 op,
@@ -10593,9 +10598,14 @@ mod tests {
             None,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(filter.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
-        let ops = scene_ops(&mut app, root.as_object());
+        layout_with(
+            &mut app,
+            filter.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
+        let ops = scene_ops(&mut app);
         let composed = valo::ImageFilter::compose(
             valo::ImageFilter::Color(saturation.to_valo()),
             valo::ImageFilter::blur(4.0, 0.0),
@@ -10618,8 +10628,13 @@ mod tests {
         let mut app = cell.borrow_mut();
         let child = opaque_leaf(&mut app);
         let oval = RenderClipOval::new(&mut app, None, Clip::AntiAlias, Some(child.as_box()));
-        let root = RenderRepaintBoundary::new(&mut app, Some(oval.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            oval.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         let hit = |app: &mut App, x: f64, y: f64| {
             let mut result = HitTestResult::new();
             oval.as_box().hit_test(
@@ -10631,7 +10646,7 @@ mod tests {
         assert!(hit(&mut app, 50.0, 50.0), "the center is inside");
         assert!(!hit(&mut app, 2.0, 2.0), "a corner is outside the oval");
         assert!(
-            picture_has_clip(&app, root.as_object()),
+            picture_has_clip(&mut app, oval.as_object()),
             "an oval clips with a path"
         );
     }
@@ -10666,8 +10681,13 @@ mod tests {
             Clip::AntiAlias,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            clip.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         let hit = |app: &mut App, x: f64, y: f64| {
             let mut result = HitTestResult::new();
             clip.as_box().hit_test(
@@ -10721,10 +10741,15 @@ mod tests {
             Clip::AntiAlias,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            clip.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
-        let ops = picture_ops(&app, root.as_object());
+        let ops = painted_ops(&mut app, clip.as_object());
         let fill_rule = ops
             .iter()
             .find_map(|op| match op {
@@ -10753,8 +10778,13 @@ mod tests {
             Some(TextDirection::Ltr),
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            clip.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         clip.update_clip(&mut app);
         assert_eq!(clip.clip(&app).tl_radius_x, 12.0);
         assert_eq!(
@@ -10762,7 +10792,7 @@ mod tests {
             Rect::from_ltwh(0.0, 0.0, 100.0, 100.0)
         );
         assert!(
-            picture_has_clip(&app, root.as_object()),
+            picture_has_clip(&mut app, clip.as_object()),
             "a superellipse clips with its path"
         );
         clip.set_border_radius(&mut app, BorderRadiusGeometry::circular(4.0));
@@ -10791,12 +10821,9 @@ mod tests {
         assert!(clipper.should_reclip(&app, &other));
     }
 
-    /// The shadows a repaint boundary's recording draws: `drawShadow`'s draws.
-    fn shadow_count(app: &App, boundary: AnyRenderObject) -> usize {
-        picture_ops(app, boundary)
-            .iter()
-            .filter(|op| matches!(op, Op::DrawShadow { .. }))
-            .count()
+    /// Dart's `paintsExactlyCountTimes(#drawShadow, n)`: the shadows `render` paints.
+    fn shadow_count(app: &mut App, render: AnyRenderObject) -> usize {
+        count_calls(&painted_ops(app, render), CanvasMethod::DrawShadow)
     }
 
     fn physical_model(
@@ -10822,16 +10849,21 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let model = physical_model(&mut app, None, Clip::None);
-        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            model.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         assert!(!model.as_object().needs_compositing(&app));
 
         model.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert!(!model.as_object().needs_compositing(&app));
 
         model.set_elevation(&mut app, 0.0);
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert!(!model.as_object().needs_compositing(&app));
     }
 
@@ -10842,13 +10874,18 @@ mod tests {
         let mut app = cell.borrow_mut();
         let child = sized_box(&mut app, Size::new(10.0, 10.0));
         let model = physical_model(&mut app, Some(child.as_box()), Clip::None);
-        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
-        assert_eq!(shadow_count(&app, root.as_object()), 0);
+        layout_with(
+            &mut app,
+            model.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
+        assert_eq!(shadow_count(&mut app, model.as_object()), 0);
 
         model.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, owner.handle());
-        assert_eq!(shadow_count(&app, root.as_object()), 1);
+        pump_frame(&mut app, EnginePhase::Paint);
+        assert_eq!(shadow_count(&mut app, model.as_object()), 1);
     }
 
     /// `_TestPathClipper` of `proxy_box_test.dart`.
@@ -10873,8 +10910,13 @@ mod tests {
     /// `proxy_box_test.dart`'s `_testLayerReuse`: a repaint keeps the clip layer.
     fn assert_reuses_its_clip_layer<L: 'static>(app: &mut App, clip: AnyRenderBox) {
         assert!(clip.as_object().layer_as::<L>(app).is_none());
-        let root = RenderRepaintBoundary::new(app, Some(clip));
-        let owner = first_frame(app, root.as_box());
+        layout_with(
+            app,
+            clip,
+            Some(BoxConstraints::tight(Size::new(10.0, 10.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         let layer = clip
             .as_object()
             .layer_as::<L>(app)
@@ -10883,7 +10925,7 @@ mod tests {
         // Mark for repaint otherwise pump_frame is a noop.
         clip.as_object().mark_needs_paint(app);
         assert!(clip.as_object().debug_needs_paint(app));
-        pump_frame(app, owner.handle());
+        pump_frame(app, EnginePhase::Paint);
         assert!(!clip.as_object().debug_needs_paint(app));
         assert!(clip.as_object().layer_as::<L>(app) == Some(layer));
     }
@@ -10940,9 +10982,8 @@ mod tests {
             BLUE,
             Color::new(0xFF000000),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
-        let _owner = first_frame_in_view(&mut app, root.as_box(), 3.0);
-        let ops = picture_ops(&app, root.as_object());
+        let _owner = first_frame_in_view(&mut app, model.as_box(), 3.0);
+        let ops = painted_ops(&mut app, model.as_object());
         let shadow = ops
             .iter()
             .position(|op| {
@@ -11023,9 +11064,14 @@ mod tests {
             None,
             Some(shape.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(padding.as_box()));
-        let _owner = first_frame_in_view(&mut app, root.as_box(), 1.0);
-        let ops = picture_ops(&app, root.as_object());
+        layout_with(
+            &mut app,
+            padding.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
+        let ops = painted_ops(&mut app, padding.as_object());
         let round_rect = ops
             .iter()
             .find_map(|op| match op {
@@ -11043,17 +11089,17 @@ mod tests {
         );
     }
 
-    /// Lays `root` out and paints it under a [`RenderView`] of 100x100 logical pixels at
-    /// `device_pixel_ratio`, as Flutter's test binding puts one above the tree.
+    /// Lays `child` out and paints it under a [`RenderView`] of 100x100 logical pixels at
+    /// `device_pixel_ratio`: the test view has no device pixel ratio for a shadow to read.
     fn first_frame_in_view(
         app: &mut App,
-        root: AnyRenderBox,
+        child: AnyRenderBox,
         device_pixel_ratio: f64,
     ) -> Ref<PipelineOwner> {
         let constraints = BoxConstraints::tight(Size::new(100.0, 100.0));
         let view = RenderView::new(
             app,
-            Some(root),
+            Some(child),
             Some(ViewConfiguration::new(
                 constraints * device_pixel_ratio,
                 constraints,
@@ -11100,9 +11146,14 @@ mod tests {
             BLUE,
             Color::new(0xFF000000),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
-        let ops = picture_ops(&app, root.as_object());
+        layout_with(
+            &mut app,
+            model.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
+        let ops = painted_ops(&mut app, model.as_object());
         assert!(
             fills_only_with_draw_paint_inside_a_save_layer(&ops, BLUE),
             "{ops:?}"
@@ -11123,9 +11174,14 @@ mod tests {
             BLUE,
             Color::new(0xFF000000),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
-        let ops = picture_ops(&app, root.as_object());
+        layout_with(
+            &mut app,
+            shape.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
+        let ops = painted_ops(&mut app, shape.as_object());
         assert!(
             fills_only_with_draw_paint_inside_a_save_layer(&ops, BLUE),
             "{ops:?}"
@@ -11160,8 +11216,13 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let shape = physical_shape(&mut app);
-        let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            shape.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         assert!(!shape.as_object().debug_needs_paint(&app));
 
         // Same shape, no repaint.
@@ -11185,14 +11246,19 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let shape = physical_shape(&mut app);
-        let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            shape.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         assert!(!shape.as_object().needs_compositing(&app));
         shape.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert!(!shape.as_object().needs_compositing(&app));
         shape.set_elevation(&mut app, 0.0);
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert!(!shape.as_object().needs_compositing(&app));
     }
 

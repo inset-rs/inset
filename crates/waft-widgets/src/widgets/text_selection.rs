@@ -5556,56 +5556,11 @@ mod tests {
     use std::rc::Rc;
     use waft_foundation::ListenableObject;
 
-    use waft_embedder::PointerDeviceKind;
     use waft_foundation::AppCell;
-    use waft_gestures::{
-        GestureBinding, PointerDownEvent, PointerEvent, PointerMoveEvent, PointerUpEvent,
-    };
 
-    use crate::test_harness::{binding_cell, binding_mount};
+    use crate::testing::{TestPointer, test_widgets};
     use crate::widgets::basic::{ColoredBox, SizedBox};
     use waft_embedder::Color;
-
-    fn press(app: &mut App, pointer: i64, position: Offset, kind: PointerDeviceKind) {
-        GestureBinding::instance(app).handle_pointer_event(
-            app,
-            PointerEvent::Down(PointerDownEvent {
-                pointer,
-                position,
-                kind,
-                ..PointerDownEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-    }
-
-    fn move_to(app: &mut App, pointer: i64, from: Offset, to: Offset, kind: PointerDeviceKind) {
-        GestureBinding::instance(app).handle_pointer_event(
-            app,
-            PointerEvent::Move(PointerMoveEvent {
-                pointer,
-                position: to,
-                delta: to - from,
-                kind,
-                down: true,
-                ..PointerMoveEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-    }
-
-    fn release(app: &mut App, pointer: i64, position: Offset, kind: PointerDeviceKind) {
-        GestureBinding::instance(app).handle_pointer_event(
-            app,
-            PointerEvent::Up(PointerUpEvent {
-                pointer,
-                position,
-                kind,
-                ..PointerUpEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-    }
 
     #[test]
     fn text_selection_overlay_is_a_type() {
@@ -5750,76 +5705,61 @@ mod tests {
 
     #[test]
     fn a_mouse_click_fires_tap_down_and_single_tap_up() {
-        let log = Rc::new(RefCell::new(Vec::new()));
-        let cell = binding_cell();
-        let down = log_tap_down(Rc::clone(&log));
-        let up = log_tap_up(Rc::clone(&log));
-        binding_mount(
-            &cell,
-            TextSelectionGestureDetector::new(
-                SizedBox::new()
-                    .width(300.0)
-                    .height(200.0)
-                    .child(ColoredBox::new(Color::new(0xFFFFFFFF))),
-            )
-            .on_tap_down(down)
-            .on_single_tap_up(up)
-            .on_drag_selection_start(log_drag_start(Rc::new(RefCell::new(Vec::new()))))
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let at = Offset::new(20.0, 20.0);
-        press(&mut app, 1, at, PointerDeviceKind::Mouse);
-        release(&mut app, 1, at, PointerDeviceKind::Mouse);
-        assert_eq!(*log.borrow(), ["onTapDown", "onSingleTapUp"]);
+        test_widgets(|tester| {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            let down = log_tap_down(Rc::clone(&log));
+            let up = log_tap_up(Rc::clone(&log));
+            tester.pump_widget(
+                TextSelectionGestureDetector::new(
+                    SizedBox::new()
+                        .width(300.0)
+                        .height(200.0)
+                        .child(ColoredBox::new(Color::new(0xFFFFFFFF))),
+                )
+                .on_tap_down(down)
+                .on_single_tap_up(up)
+                .on_drag_selection_start(log_drag_start(Rc::new(RefCell::new(Vec::new()))))
+                .into_widget(),
+            );
+            let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_MOUSE_BUTTON);
+            tester.down(&mut mouse, Offset::new(20.0, 20.0));
+            tester.up(&mouse);
+            assert_eq!(*log.borrow(), ["onTapDown", "onSingleTapUp"]);
+        });
     }
 
     #[test]
     fn a_mouse_drag_fires_start_update_and_end() {
-        let log = Rc::new(RefCell::new(Vec::new()));
-        let cell = binding_cell();
-        let start = log_drag_start(Rc::clone(&log));
-        let update = log_drag_update(Rc::clone(&log));
-        let end = log_drag_end(Rc::clone(&log));
-        binding_mount(
-            &cell,
-            TextSelectionGestureDetector::new(
-                SizedBox::new()
-                    .width(300.0)
-                    .height(200.0)
-                    .child(ColoredBox::new(Color::new(0xFFFFFFFF))),
-            )
-            .on_drag_selection_start(start)
-            .on_drag_selection_update(update)
-            .on_drag_selection_end(end)
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let start_at = Offset::new(20.0, 20.0);
-        let end_at = Offset::new(80.0, 20.0);
-        press(&mut app, 1, start_at, PointerDeviceKind::Mouse);
-        move_to(
-            &mut app,
-            1,
-            start_at,
-            Offset::new(40.0, 20.0),
-            PointerDeviceKind::Mouse,
-        );
-        move_to(
-            &mut app,
-            1,
-            Offset::new(40.0, 20.0),
-            end_at,
-            PointerDeviceKind::Mouse,
-        );
-        release(&mut app, 1, end_at, PointerDeviceKind::Mouse);
-        let events = log.borrow().clone();
-        assert!(
-            events.first() == Some(&"onDragSelectionStart"),
-            "{events:?}"
-        );
-        assert!(events.contains(&"onDragSelectionUpdate"), "{events:?}");
-        assert_eq!(events.last(), Some(&"onDragSelectionEnd"));
+        test_widgets(|tester| {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            let start = log_drag_start(Rc::clone(&log));
+            let update = log_drag_update(Rc::clone(&log));
+            let end = log_drag_end(Rc::clone(&log));
+            tester.pump_widget(
+                TextSelectionGestureDetector::new(
+                    SizedBox::new()
+                        .width(300.0)
+                        .height(200.0)
+                        .child(ColoredBox::new(Color::new(0xFFFFFFFF))),
+                )
+                .on_drag_selection_start(start)
+                .on_drag_selection_update(update)
+                .on_drag_selection_end(end)
+                .into_widget(),
+            );
+            let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_MOUSE_BUTTON);
+            tester.down(&mut mouse, Offset::new(20.0, 20.0));
+            tester.move_to(&mut mouse, Offset::new(40.0, 20.0), true);
+            tester.move_to(&mut mouse, Offset::new(80.0, 20.0), true);
+            tester.up(&mouse);
+            let events = log.borrow().clone();
+            assert!(
+                events.first() == Some(&"onDragSelectionStart"),
+                "{events:?}"
+            );
+            assert!(events.contains(&"onDragSelectionUpdate"), "{events:?}");
+            assert_eq!(events.last(), Some(&"onDragSelectionEnd"));
+        });
     }
 
     /// Selection controls that draw nothing, for a field that must have an overlay.
@@ -5872,58 +5812,49 @@ mod tests {
 
         use crate::{
             Directionality, EditableText, FocusNode, ListenableBuilder, Overlay,
-            TextEditingController, run_app,
+            TextEditingController,
         };
-        use waft_embedder::{TargetPlatform, TextDirection};
+        use waft_embedder::TextDirection;
         use waft_foundation::ValueNotifier;
-        use waft_painting::{PaintingBinding, TextStyle};
-        use waft_test::{TestPlatform, TestView};
+        use waft_painting::TextStyle;
 
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView::new(300.0, 200.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let shown = {
-            let mut app = cell.borrow_mut();
-            PaintingBinding::instance(&mut app).install_fonts(&mut app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-            let shown = app.create(ValueNotifier::new(true));
-            let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
-            let focus_node = FocusNode::new(&mut app);
-            let visible = shown.handle();
-            let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
-                if !*app.get(visible).value() {
-                    return SizedBox::shrink().into_widget();
-                }
-                EditableText::new(
-                    controller.erase(),
-                    focus_node.erase(),
-                    TextStyle::new(),
-                    Color::from_argb(255, 0, 0, 0),
-                    Color::from_argb(255, 128, 128, 128),
+        test_widgets(|tester| {
+            let (shown, tree) = {
+                let mut app = tester.cell.borrow_mut();
+                let shown = app.create(ValueNotifier::new(true));
+                let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
+                let focus_node = FocusNode::new(&mut app);
+                let visible = shown.handle();
+                let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
+                    if !*app.get(visible).value() {
+                        return SizedBox::shrink().into_widget();
+                    }
+                    EditableText::new(
+                        controller.erase(),
+                        focus_node.erase(),
+                        TextStyle::new(),
+                        Color::from_argb(255, 0, 0, 0),
+                        Color::from_argb(255, 128, 128, 128),
+                    )
+                    .selection_controls(Rc::new(NoSelectionControls))
+                    .autofocus(true)
+                    .into_widget()
+                });
+                (
+                    shown,
+                    Directionality::new(TextDirection::Ltr, Overlay::wrap(field)),
                 )
-                .selection_controls(Rc::new(NoSelectionControls))
-                .autofocus(true)
-                .into_widget()
-            });
-            run_app(
-                &mut app,
-                Directionality::new(TextDirection::Ltr, Overlay::wrap(field)).into_widget(),
-            );
-            shown
-        };
-        cell.elapse(Duration::ZERO);
-        let mut at = Duration::ZERO;
-        let mut pump = |cell: &AppCell| {
-            for _ in 0..5 {
-                at += Duration::from_millis(20);
-                crate::test_harness::pump_every_view(&mut cell.borrow_mut(), at);
-            }
-        };
-        pump(&cell);
-        shown.set_value(&mut cell.borrow_mut(), false);
-        pump(&cell);
+            };
+            tester.pump_widget(tree);
+            let pump = |tester: &mut crate::testing::WidgetTester| {
+                for _ in 0..5 {
+                    tester.pump_by(Duration::from_millis(20));
+                }
+            };
+            pump(tester);
+            shown.set_value(&mut tester.cell.borrow_mut(), false);
+            pump(tester);
+        });
     }
 
     /// Selection controls whose handles record the default text style they are built under.
@@ -5979,56 +5910,58 @@ mod tests {
     /// the field.
     #[test]
     fn the_selection_handles_carry_the_themes_of_the_context_that_shows_them() {
-        use crate::{DefaultTextStyle, Directionality, Overlay};
-        use waft_embedder::TextDirection;
-        use waft_painting::TextStyle;
+        test_widgets(|tester| {
+            use crate::{DefaultTextStyle, Directionality, Overlay};
+            use waft_embedder::TextDirection;
+            use waft_painting::TextStyle;
 
-        let cell = binding_cell();
-        let field_context: Rc<std::cell::Cell<Option<BuildContext>>> = Rc::default();
-        let tree = {
-            let field_context = Rc::clone(&field_context);
-            Directionality::new(
-                TextDirection::Ltr,
-                Overlay::wrap(DefaultTextStyle::new(
-                    TextStyle::new().font_size(42.0),
-                    crate::Builder::new(move |_app, context| {
-                        field_context.set(Some(context));
-                        SizedBox::expand().into_widget()
-                    }),
-                )),
-            )
-            .into_widget()
-        };
-        binding_mount(&cell, tree);
-        let mut app = cell.borrow_mut();
-        let context = field_context.get().expect("the field built");
-        let font_sizes: Rc<RefCell<Vec<Option<f64>>>> = Rc::default();
-        let links = (
-            waft_rendering::LayerLink::new(&mut app),
-            waft_rendering::LayerLink::new(&mut app),
-            waft_rendering::LayerLink::new(&mut app),
-        );
-        let overlay = SelectionOverlay::new(
-            &mut app,
-            context,
-            TextSelectionHandleType::Left,
-            10.0,
-            TextSelectionHandleType::Right,
-            10.0,
-            Vec::new(),
-            Some(Rc::new(RecordingControls {
-                font_sizes: Rc::clone(&font_sizes),
-            })),
-            None,
-            None,
-            links.0,
-            links.1,
-            links.2,
-        );
-        overlay.show_handles(&mut app);
-        crate::test_harness::binding_pump(&mut app, std::time::Duration::from_millis(16));
-        let seen = font_sizes.borrow().clone();
-        assert!(!seen.is_empty(), "a handle was built");
-        assert!(seen.iter().all(|size| *size == Some(42.0)), "{seen:?}");
+            let field_context: Rc<std::cell::Cell<Option<BuildContext>>> = Rc::default();
+            let tree = {
+                let field_context = Rc::clone(&field_context);
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Overlay::wrap(DefaultTextStyle::new(
+                        TextStyle::new().font_size(42.0),
+                        crate::Builder::new(move |_app, context| {
+                            field_context.set(Some(context));
+                            SizedBox::expand().into_widget()
+                        }),
+                    )),
+                )
+                .into_widget()
+            };
+            tester.pump_widget(tree);
+            let mut app = tester.cell.borrow_mut();
+            let context = field_context.get().expect("the field built");
+            let font_sizes: Rc<RefCell<Vec<Option<f64>>>> = Rc::default();
+            let links = (
+                waft_rendering::LayerLink::new(&mut app),
+                waft_rendering::LayerLink::new(&mut app),
+                waft_rendering::LayerLink::new(&mut app),
+            );
+            let overlay = SelectionOverlay::new(
+                &mut app,
+                context,
+                TextSelectionHandleType::Left,
+                10.0,
+                TextSelectionHandleType::Right,
+                10.0,
+                Vec::new(),
+                Some(Rc::new(RecordingControls {
+                    font_sizes: Rc::clone(&font_sizes),
+                })),
+                None,
+                None,
+                links.0,
+                links.1,
+                links.2,
+            );
+            overlay.show_handles(&mut app);
+            drop(app);
+            tester.pump();
+            let seen = font_sizes.borrow().clone();
+            assert!(!seen.is_empty(), "a handle was built");
+            assert!(seen.iter().all(|size| *size == Some(42.0)), "{seen:?}");
+        });
     }
 }

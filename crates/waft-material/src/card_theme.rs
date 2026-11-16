@@ -501,15 +501,17 @@ mod tests {
 
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::card::Card;
     use crate::card::tests::{card_material, card_padding, rounded};
     use crate::colors::Colors;
+    use crate::drawer_theme::tests::probe;
     use crate::drawer_theme::tests::theme_seen_through_capture;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// Dart's `_cardTheme()`.
     fn card_theme() -> CardThemeData {
@@ -648,13 +650,12 @@ mod tests {
 
     #[test]
     fn material3_passing_no_card_theme_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, scaffold_with_card());
+        test_widgets(|tester| {
+            pump_app(tester, m3, scaffold_with_card());
             let colors = m3(&tester.cell.borrow()).color_scheme;
 
-            let padding = card_padding(&tester);
-            let material = card_material(&tester);
+            let padding = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(material.clip_behavior, Clip::None);
             assert_eq!(material.color, Some(colors.surface_container_low()));
@@ -668,11 +669,10 @@ mod tests {
 
     #[test]
     fn card_uses_values_from_card_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let card_theme = card_theme();
-            let mut tester = tester();
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .card_theme(card_theme.clone())
@@ -681,8 +681,8 @@ mod tests {
                 scaffold_with_card(),
             );
 
-            let padding = card_padding(&tester);
-            let material = card_material(&tester);
+            let padding = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(Some(material.clip_behavior), card_theme.clip_behavior);
             assert_eq!(material.color, card_theme.color);
@@ -696,10 +696,9 @@ mod tests {
 
     #[test]
     fn card_widget_properties_take_priority_over_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .card_color(Colors::PINK.primary())
@@ -724,8 +723,8 @@ mod tests {
                 },
             );
 
-            let padding = card_padding(&tester);
-            let material = card_material(&tester);
+            let padding = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(material.clip_behavior, Clip::HardEdge);
             assert_eq!(material.color, Some(Colors::ORANGE.primary()));
@@ -738,11 +737,10 @@ mod tests {
 
     #[test]
     fn card_theme_properties_take_priority_over_theme_data_properties() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let card_theme = card_theme();
-            let mut tester = tester();
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .card_color(Colors::PINK.primary())
@@ -752,19 +750,18 @@ mod tests {
                 scaffold_with_card(),
             );
 
-            assert_eq!(card_material(&tester).color, card_theme.color);
+            assert_eq!(card_material(tester).color, card_theme.color);
         });
     }
 
     #[test]
     fn material3_theme_data_properties_are_used_when_no_card_theme_is_set() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, scaffold_with_card());
+        test_widgets(|tester| {
+            pump_app(tester, m3, scaffold_with_card());
             let colors = m3(&tester.cell.borrow()).color_scheme;
 
             assert_eq!(
-                card_material(&tester).color,
+                card_material(tester).color,
                 Some(colors.surface_container_low())
             );
         });
@@ -772,10 +769,9 @@ mod tests {
 
     #[test]
     fn card_properties_are_taken_over_the_theme_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .card_theme(
@@ -811,8 +807,8 @@ mod tests {
                 },
             );
 
-            let card_margin = card_padding(&tester);
-            let material = card_material(&tester);
+            let card_margin = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(material.clip_behavior, Clip::HardEdge);
             assert_eq!(material.color, Some(Colors::YELLOW.primary()));
@@ -825,10 +821,9 @@ mod tests {
 
     #[test]
     fn local_card_theme_can_override_global_card_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .card_theme(
@@ -869,8 +864,8 @@ mod tests {
                 },
             );
 
-            let card_margin = card_padding(&tester);
-            let material = card_material(&tester);
+            let card_margin = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(material.clip_behavior, Clip::HardEdge);
             assert_eq!(material.color, Some(Colors::YELLOW.primary()));
@@ -883,23 +878,21 @@ mod tests {
 
     #[test]
     fn material2_theme_data_properties_are_used_when_no_card_theme_is_set() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m2, scaffold_with_card());
+        test_widgets(|tester| {
+            pump_app(tester, m2, scaffold_with_card());
             let card_color = m2(&tester.cell.borrow()).card_color;
 
-            assert_eq!(card_material(&tester).color, Some(card_color));
+            assert_eq!(card_material(tester).color, Some(card_color));
         });
     }
 
     #[test]
     fn material2_passing_no_card_theme_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m2, scaffold_with_card());
+        test_widgets(|tester| {
+            pump_app(tester, m2, scaffold_with_card());
 
-            let padding = card_padding(&tester);
-            let material = card_material(&tester);
+            let padding = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(material.clip_behavior, Clip::None);
             assert_eq!(material.color, Some(Colors::WHITE));
@@ -913,13 +906,12 @@ mod tests {
 
     #[test]
     fn of_returns_the_theme_data_card_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = card_theme();
             let theme_data_card = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .card_theme(theme_data_card.clone())
@@ -935,13 +927,12 @@ mod tests {
 
     #[test]
     fn of_returns_the_closest_card_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let widget_card = CardThemeData::new().elevation(7.0);
             let expected = widget_card.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .card_theme(CardThemeData::new().elevation(3.0))
@@ -961,11 +952,9 @@ mod tests {
 
     #[test]
     fn a_card_theme_without_properties_shadows_theme_data_with_an_empty_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-
+        test_widgets(|tester| {
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .card_theme(CardThemeData::new().elevation(3.0))
@@ -995,9 +984,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_card_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.card_theme, CardThemeData::new());
 
@@ -1028,11 +1016,9 @@ mod tests {
     fn a_captured_card_theme_is_not_a_theme_to_wrap() {
         // CardTheme extends InheritedWidget, not InheritedTheme: a `Theme` that captures its
         // ancestors does not carry it, so the probe reads what is nearest to it.
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-
+        test_widgets(|tester| {
             let seen = theme_seen_through_capture(
-                &cell,
+                tester,
                 |probe| {
                     CardTheme::new()
                         .with_data(CardThemeData::new().elevation(1.0))

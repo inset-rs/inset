@@ -375,16 +375,18 @@ mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{Center, FocusHighlightStrategy, WidgetState, WidgetStates};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::icons::{Icons, install_material_icon_font};
     use crate::scaffold::Scaffold;
     use crate::switch::Switch;
     use crate::switch::tests::{
-        Drawn, M2_SHADOWS, c, circles, colors, drawn, hover, ignore, press, switch_rect,
+        M2_SHADOWS, c, circles, color_of, colors, drawn, glyph_origins, hover, ignore, press,
+        stroke_of, switch_rect,
     };
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{pump_app, tester};
+    use crate::tooltip::tests::pump_app;
 
     #[test]
     fn copy_with_and_equality_keep_an_empty_theme_data() {
@@ -476,9 +478,8 @@ mod tests {
     /// Dart's 'Material2 - Switch is themeable' and 'Material3 - Switch is themeable'.
     #[test]
     fn a_switch_is_themeable() {
-        with_main_thread_stack(|| {
-            for use_material3 in [false, true] {
-                let mut tester = tester();
+        for use_material3 in [false, true] {
+            test_widgets(|tester| {
                 install_material_icon_font(&mut tester.cell.borrow_mut());
                 tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
                 let icon1 = Rc::new(Icon::new(Some(Icons::check())));
@@ -516,19 +517,16 @@ mod tests {
                     );
                     tester.pump_and_settle();
                 };
-                let thumb_and_glyph = |painted: &[Drawn]| {
-                    let glyphs = painted
-                        .iter()
-                        .filter(|drawn| matches!(drawn, Drawn::Glyphs(..)))
-                        .count();
-                    (painted.iter().rev().find_map(Drawn::color), glyphs)
+                let thumb_and_glyph = |painted: &[waft_embedder::valo::Op]| {
+                    let glyphs = glyph_origins(painted).len();
+                    (painted.iter().rev().find_map(color_of), glyphs)
                 };
 
                 // Switch.
-                pump(&mut tester, false, false);
-                let painted = drawn(&tester);
-                assert_eq!(painted[0].color(), Some(c(DEFAULT_TRACK_COLOR)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                pump(tester, false, false);
+                let painted = drawn(tester);
+                assert_eq!(color_of(&painted[0]), Some(c(DEFAULT_TRACK_COLOR)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(DEFAULT_TRACK_OUTLINE_COLOR)
                         && f64::from(width) == DEFAULT_TRACK_OUTLINE_WIDTH));
                 if use_material3 {
@@ -547,13 +545,13 @@ mod tests {
                 }
                 // Size from MaterialTapTargetSize.shrinkWrap.
                 let width = if use_material3 { 60.0 } else { 59.0 };
-                assert_eq!(switch_rect(&tester).size(), Size::new(width, 40.0));
+                assert_eq!(switch_rect(tester).size(), Size::new(width, 40.0));
 
                 // Selected switch.
-                pump(&mut tester, true, false);
-                let painted = drawn(&tester);
-                assert_eq!(painted[0].color(), Some(c(SELECTED_TRACK_COLOR)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                pump(tester, true, false);
+                let painted = drawn(tester);
+                assert_eq!(color_of(&painted[0]), Some(c(SELECTED_TRACK_COLOR)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(SELECTED_TRACK_OUTLINE_COLOR)
                         && f64::from(width) == SELECTED_TRACK_OUTLINE_WIDTH));
                 if use_material3 {
@@ -566,53 +564,52 @@ mod tests {
                 }
 
                 // Switch with hover.
-                pump(&mut tester, false, false);
-                hover(&mut tester);
+                pump(tester, false, false);
+                hover(tester);
                 tester.pump_and_settle();
                 assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
                 assert_eq!(
-                    circles(&drawn(&tester), SPLASH_RADIUS),
+                    circles(&drawn(tester), SPLASH_RADIUS),
                     [c(HOVER_OVERLAY_COLOR)]
                 );
 
                 // Switch with focus.
-                pump(&mut tester, false, true);
+                pump(tester, false, true);
                 assert_eq!(
-                    circles(&drawn(&tester), SPLASH_RADIUS),
+                    circles(&drawn(tester), SPLASH_RADIUS),
                     [c(FOCUS_OVERLAY_COLOR)]
                 );
-            }
-        });
+            });
+        }
     }
 
     /// Dart's 'Material2 - Switch properties are taken over the theme values' and its
     /// Material 3 twin.
     #[test]
     fn the_switch_properties_win_over_the_theme_values() {
-        with_main_thread_stack(|| {
-            const THEME_DEFAULT_THUMB_COLOR: Color = Color::new(0xfffffff0);
-            const THEME_SELECTED_THUMB_COLOR: Color = Color::new(0xfffffff1);
-            const THEME_DEFAULT_TRACK_COLOR: Color = Color::new(0xfffffff2);
-            const THEME_SELECTED_TRACK_COLOR: Color = Color::new(0xfffffff3);
-            const THEME_DEFAULT_OUTLINE_COLOR: Color = Color::new(0xfffffff6);
-            const THEME_SELECTED_OUTLINE_COLOR: Color = Color::new(0xfffffff7);
-            const THEME_FOCUS_OVERLAY_COLOR: Color = Color::new(0xfffffff4);
-            const THEME_HOVER_OVERLAY_COLOR: Color = Color::new(0xfffffff5);
+        for use_material3 in [false, true] {
+            test_widgets(|tester| {
+                const THEME_DEFAULT_THUMB_COLOR: Color = Color::new(0xfffffff0);
+                const THEME_SELECTED_THUMB_COLOR: Color = Color::new(0xfffffff1);
+                const THEME_DEFAULT_TRACK_COLOR: Color = Color::new(0xfffffff2);
+                const THEME_SELECTED_TRACK_COLOR: Color = Color::new(0xfffffff3);
+                const THEME_DEFAULT_OUTLINE_COLOR: Color = Color::new(0xfffffff6);
+                const THEME_SELECTED_OUTLINE_COLOR: Color = Color::new(0xfffffff7);
+                const THEME_FOCUS_OVERLAY_COLOR: Color = Color::new(0xfffffff4);
+                const THEME_HOVER_OVERLAY_COLOR: Color = Color::new(0xfffffff5);
 
-            const DEFAULT_THUMB: Color = Color::new(0xffffff0f);
-            const SELECTED_THUMB: Color = Color::new(0xffffff1f);
-            const DEFAULT_TRACK: Color = Color::new(0xffffff2f);
-            const SELECTED_TRACK: Color = Color::new(0xffffff3f);
-            const DEFAULT_OUTLINE: Color = Color::new(0xffffff6f);
-            const SELECTED_OUTLINE: Color = Color::new(0xffffff7f);
-            const DEFAULT_OUTLINE_WIDTH: f64 = 6.0;
-            const SELECTED_OUTLINE_WIDTH: f64 = 8.0;
-            const FOCUS_COLOR: Color = Color::new(0xffffff4f);
-            const HOVER_COLOR: Color = Color::new(0xffffff5f);
-            const SPLASH: f64 = 2.0;
+                const DEFAULT_THUMB: Color = Color::new(0xffffff0f);
+                const SELECTED_THUMB: Color = Color::new(0xffffff1f);
+                const DEFAULT_TRACK: Color = Color::new(0xffffff2f);
+                const SELECTED_TRACK: Color = Color::new(0xffffff3f);
+                const DEFAULT_OUTLINE: Color = Color::new(0xffffff6f);
+                const SELECTED_OUTLINE: Color = Color::new(0xffffff7f);
+                const DEFAULT_OUTLINE_WIDTH: f64 = 6.0;
+                const SELECTED_OUTLINE_WIDTH: f64 = 8.0;
+                const FOCUS_COLOR: Color = Color::new(0xffffff4f);
+                const HOVER_COLOR: Color = Color::new(0xffffff5f);
+                const SPLASH: f64 = 2.0;
 
-            for use_material3 in [false, true] {
-                let mut tester = tester();
                 install_material_icon_font(&mut tester.cell.borrow_mut());
                 tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
                 let switch_theme = SwitchThemeData::new()
@@ -672,45 +669,45 @@ mod tests {
                 let thumb_index = if use_material3 { 2 } else { 5 };
 
                 // Switch.
-                pump(&mut tester, false, false);
-                let painted = drawn(&tester);
-                assert_eq!(painted[0].color(), Some(c(DEFAULT_TRACK)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                pump(tester, false, false);
+                let painted = drawn(tester);
+                assert_eq!(color_of(&painted[0]), Some(c(DEFAULT_TRACK)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(DEFAULT_OUTLINE) && f64::from(width) == DEFAULT_OUTLINE_WIDTH));
-                assert_eq!(painted[thumb_index].color(), Some(c(DEFAULT_THUMB)));
+                assert_eq!(color_of(&painted[thumb_index]), Some(c(DEFAULT_THUMB)));
                 if use_material3 {
                     // Dart's `paragraph(offset: Offset(12, 12))`: the glyph's ink is in the
                     // 16x16 icon square there.
                     assert!(
-                        matches!(painted[3], Drawn::Glyphs(x, y) if (12.0..28.0).contains(&x) && (12.0..28.0).contains(&y)),
+                        matches!(glyph_origins(&painted).as_slice(), [(x, y)] if (12.0..28.0).contains(x) && (12.0..28.0).contains(y)),
                         "{:?}",
                         painted[3]
                     );
                 }
                 // Size from MaterialTapTargetSize.shrinkWrap.
                 let width = if use_material3 { 60.0 } else { 59.0 };
-                assert_eq!(switch_rect(&tester).size(), Size::new(width, 40.0));
+                assert_eq!(switch_rect(tester).size(), Size::new(width, 40.0));
 
                 // Selected switch.
-                pump(&mut tester, true, false);
-                let painted = drawn(&tester);
-                assert_eq!(painted[0].color(), Some(c(SELECTED_TRACK)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                pump(tester, true, false);
+                let painted = drawn(tester);
+                assert_eq!(color_of(&painted[0]), Some(c(SELECTED_TRACK)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(SELECTED_OUTLINE) && f64::from(width) == SELECTED_OUTLINE_WIDTH));
-                assert_eq!(painted[thumb_index].color(), Some(c(SELECTED_THUMB)));
+                assert_eq!(color_of(&painted[thumb_index]), Some(c(SELECTED_THUMB)));
 
                 // Switch with hover.
-                pump(&mut tester, false, false);
-                hover(&mut tester);
+                pump(tester, false, false);
+                hover(tester);
                 tester.pump_and_settle();
                 assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
-                assert_eq!(circles(&drawn(&tester), SPLASH), [c(HOVER_COLOR)]);
+                assert_eq!(circles(&drawn(tester), SPLASH), [c(HOVER_COLOR)]);
 
                 // Switch with focus.
-                pump(&mut tester, false, true);
-                assert_eq!(circles(&drawn(&tester), SPLASH), [c(FOCUS_COLOR)]);
-            }
-        });
+                pump(tester, false, true);
+                assert_eq!(circles(&drawn(tester), SPLASH), [c(FOCUS_COLOR)]);
+            });
+        }
     }
 
     /// Dart's 'Material2 - Switch active and inactive properties are taken over the theme
@@ -718,13 +715,12 @@ mod tests {
     #[test]
     #[allow(deprecated)]
     fn the_switch_active_and_inactive_colors_win_over_the_theme_values() {
-        with_main_thread_stack(|| {
-            const DEFAULT_THUMB: Color = Color::new(0xffffff0f);
-            const SELECTED_THUMB: Color = Color::new(0xffffff1f);
-            const DEFAULT_TRACK: Color = Color::new(0xffffff2f);
-            const SELECTED_TRACK: Color = Color::new(0xffffff3f);
-            for use_material3 in [false, true] {
-                let mut tester = tester();
+        for use_material3 in [false, true] {
+            test_widgets(|tester| {
+                const DEFAULT_THUMB: Color = Color::new(0xffffff0f);
+                const SELECTED_THUMB: Color = Color::new(0xffffff1f);
+                const DEFAULT_TRACK: Color = Color::new(0xffffff2f);
+                const SELECTED_TRACK: Color = Color::new(0xffffff3f);
                 let outline = ThemeData::new(&tester.cell.borrow()).color_scheme.outline();
                 let switch_theme = SwitchThemeData::new()
                     .thumb_color(by_selected(Color::new(0xfffffff1), Color::new(0xfffffff0)))
@@ -732,7 +728,7 @@ mod tests {
                 for selected in [false, true] {
                     let switch_theme = switch_theme.clone();
                     pump_scaffold(
-                        &mut tester,
+                        tester,
                         move |app| {
                             ThemeData::builder()
                                 .use_material3(use_material3)
@@ -759,45 +755,45 @@ mod tests {
                         (true, false) => vec![c(track), c(outline), c(thumb)],
                     };
                     assert_eq!(
-                        colors(&drawn(&tester)),
+                        colors(&drawn(tester)),
                         expected,
                         "M3 {use_material3}, selected {selected}"
                     );
                 }
-            }
-        });
+            });
+        }
     }
 
     /// Dart's 'Material2 - Switch theme overlay color resolves in active/pressed states' and its
     /// Material 3 twin.
     #[test]
     fn the_theme_overlay_color_resolves_in_the_active_and_pressed_states() {
-        with_main_thread_stack(|| {
-            const ACTIVE_PRESSED_OVERLAY: Color = Color::new(0xFF000001);
-            const INACTIVE_PRESSED_OVERLAY: Color = Color::new(0xFF000002);
-            const SPLASH: f64 = 24.0;
-            let switch_theme = SwitchThemeData::new()
-                .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
-                    |states: &WidgetStates| {
-                        if states.contains(&WidgetState::Pressed) {
-                            if states.contains(&WidgetState::Selected) {
-                                return Some(ACTIVE_PRESSED_OVERLAY);
+        for use_material3 in [false, true] {
+            test_widgets(|tester| {
+                const ACTIVE_PRESSED_OVERLAY: Color = Color::new(0xFF000001);
+                const INACTIVE_PRESSED_OVERLAY: Color = Color::new(0xFF000002);
+                const SPLASH: f64 = 24.0;
+                let switch_theme = SwitchThemeData::new()
+                    .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+                        |states: &WidgetStates| {
+                            if states.contains(&WidgetState::Pressed) {
+                                if states.contains(&WidgetState::Selected) {
+                                    return Some(ACTIVE_PRESSED_OVERLAY);
+                                }
+                                return Some(INACTIVE_PRESSED_OVERLAY);
                             }
-                            return Some(INACTIVE_PRESSED_OVERLAY);
-                        }
-                        None
-                    },
-                ))
-                .splash_radius(SPLASH);
-            for use_material3 in [false, true] {
-                let mut tester = tester();
+                            None
+                        },
+                    ))
+                    .splash_radius(SPLASH);
+
                 for (active, expected) in [
                     (false, INACTIVE_PRESSED_OVERLAY),
                     (true, ACTIVE_PRESSED_OVERLAY),
                 ] {
                     let switch_theme = switch_theme.clone();
                     pump_scaffold(
-                        &mut tester,
+                        tester,
                         move |app| {
                             ThemeData::builder()
                                 .use_material3(use_material3)
@@ -806,29 +802,28 @@ mod tests {
                         },
                         Switch::new(active, ignore()),
                     );
-                    let touch = press(&mut tester);
+                    let touch = press(tester);
                     tester.pump_and_settle();
                     assert_eq!(
-                        circles(&drawn(&tester), SPLASH),
+                        circles(&drawn(tester), SPLASH),
                         [c(expected)],
                         "M3 {use_material3}, active {active}"
                     );
                     tester.up(&touch);
                     tester.pump_and_settle();
                 }
-            }
-        });
+            });
+        }
     }
 
     /// Dart's 'Material2 - Local SwitchTheme can override global SwitchTheme' and its
     /// Material 3 twin.
     #[test]
     fn a_local_switch_theme_overrides_the_global_one() {
-        with_main_thread_stack(|| {
-            const LOCAL: Color = Color::new(0xffff0000);
-            const LOCAL_OUTLINE_WIDTH: f64 = 4.0;
-            for use_material3 in [false, true] {
-                let mut tester = tester();
+        for use_material3 in [false, true] {
+            test_widgets(|tester| {
+                const LOCAL: Color = Color::new(0xffff0000);
+                const LOCAL_OUTLINE_WIDTH: f64 = 4.0;
                 let global = SwitchThemeData::new()
                     .thumb_color(all(Color::new(0xfffffff1)))
                     .track_color(all(Color::new(0xfffffff2)))
@@ -843,7 +838,7 @@ mod tests {
                     .body(SwitchTheme::new(local, Switch::new(true, ignore())))
                     .into_widget();
                 pump_app(
-                    &mut tester,
+                    tester,
                     move |app| {
                         ThemeData::builder()
                             .use_material3(use_material3)
@@ -853,9 +848,9 @@ mod tests {
                     move |_app| home,
                 );
                 tester.pump_and_settle();
-                let painted = drawn(&tester);
-                assert_eq!(painted[0].color(), Some(c(LOCAL)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                let painted = drawn(tester);
+                assert_eq!(color_of(&painted[0]), Some(c(LOCAL)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(LOCAL) && f64::from(width) == LOCAL_OUTLINE_WIDTH));
                 let thumb_shadows = if use_material3 {
                     &[][..]
@@ -867,14 +862,13 @@ mod tests {
                     [&[c(LOCAL), c(LOCAL)][..], thumb_shadows, &[c(LOCAL)][..]].concat(),
                     "M3 {use_material3}"
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn the_switch_theme_padding_is_respected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (padding, expected) in [
                 (None, Size::new(60.0, 48.0)),
                 (Some(EdgeInsetsGeometry::ZERO), Size::new(52.0, 48.0)),
@@ -886,12 +880,12 @@ mod tests {
                     .body(Center::new().child(Switch::new(true, ignore())))
                     .into_widget();
                 pump_app(
-                    &mut tester,
+                    tester,
                     move |app| ThemeData::builder().switch_theme(switch_theme).build(app),
                     move |_app| home,
                 );
                 tester.pump_and_settle();
-                assert_eq!(switch_rect(&tester).size(), expected, "{padding:?}");
+                assert_eq!(switch_rect(tester).size(), expected, "{padding:?}");
             }
         });
     }

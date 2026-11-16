@@ -224,10 +224,9 @@ impl_disabled_chip_attributes!(ActionChip, |chip| chip.on_pressed.is_some());
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::time::Duration;
 
     use waft_animation::AnimationStyle;
-    use waft_embedder::{Offset, PointerChange, Size, TargetPlatform};
+    use waft_embedder::{Offset, PointerChange, Size};
     use waft_foundation::K_IS_WEB;
     use waft_painting::{
         BorderRadiusGeometry, BorderSide, RoundedRectangleBorder, ShapeBorderRef, StadiumBorder,
@@ -240,21 +239,24 @@ pub(crate) mod tests {
         WidgetStatePropertyRef,
     };
 
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, assert_more_or_less_equals_within, find, test_widgets,
+    };
+
     use super::*;
     use crate::chip::tests::{
-        center_of, chip_material_of, icon_data, ink_decoration_color, label_style_color, only,
-        rect_of, size_of, tester, text, wrap_ltr,
+        chip_material_of, icon_data, ink_decoration_color, label_style_color, only, text, wrap_ltr,
     };
     use crate::colors::Colors;
     use crate::icons::Icons;
     use crate::material::Material;
     use crate::motion::Durations;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{
-        PaintCall, TestPointer, WidgetTester, material_app, paints_calls, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintInspection, material_app};
+
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};
+    use waft_rendering::testing::{PaintCall, paints};
 
     const LABEL: &str = "action chip";
 
@@ -277,28 +279,26 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_action_chip_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
 
             // Test enabled ActionChip defaults.
             let enabled = ActionChip::new(Text::new(LABEL)).on_pressed(Listener::new(|_| {}));
-            pump_chip(&mut tester, &theme, enabled, true);
+            pump_chip(tester, &theme, enabled, true);
 
             // Test default chip size.
-            let size = size_of(&tester, only::<ActionChip>(&tester));
-            assert!((size.width() - 189.1).abs() <= 0.01, "{size:?}");
-            assert!((size.height() - 48.0).abs() <= 0.01, "{size:?}");
+            let size = tester.get_size(only::<ActionChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 189.1, 0.01);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.01);
             // Test default label style.
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 Some(theme.color_scheme.on_surface)
             );
 
-            let chip = only::<RawChip>(&tester);
+            let chip = only::<RawChip>(tester);
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, chip);
+                chip_material_of(tester, chip);
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(Colors::TRANSPARENT));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
@@ -309,20 +309,15 @@ pub(crate) mod tests {
                     ..BorderSide::default()
                 })
             );
-            assert_eq!(ink_decoration_color(&tester), None);
+            assert_eq!(ink_decoration_color(tester), None);
 
             // Test disabled ActionChip defaults.
-            pump_chip(
-                &mut tester,
-                &theme,
-                ActionChip::new(Text::new(LABEL)),
-                false,
-            );
+            pump_chip(tester, &theme, ActionChip::new(Text::new(LABEL)), false);
             tester.pump_and_settle();
 
-            let chip = only::<RawChip>(&tester);
+            let chip = only::<RawChip>(tester);
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, chip);
+                chip_material_of(tester, chip);
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(Colors::TRANSPARENT));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
@@ -333,15 +328,13 @@ pub(crate) mod tests {
                     ..BorderSide::default()
                 })
             );
-            assert_eq!(ink_decoration_color(&tester), None);
+            assert_eq!(ink_decoration_color(tester), None);
         });
     }
 
     #[test]
     fn material3_action_chip_elevated_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let transparent_side = BorderSide {
                 color: Colors::TRANSPARENT,
@@ -350,46 +343,46 @@ pub(crate) mod tests {
 
             // Test enabled ActionChip.elevated defaults.
             let enabled = ActionChip::elevated(Text::new(LABEL)).on_pressed(Listener::new(|_| {}));
-            pump_chip(&mut tester, &theme, enabled, true);
+            pump_chip(tester, &theme, enabled, true);
 
-            let size = size_of(&tester, only::<ActionChip>(&tester));
-            assert!((size.width() - 189.1).abs() <= 0.01, "{size:?}");
-            assert!((size.height() - 48.0).abs() <= 0.01, "{size:?}");
+            let size = tester.get_size(only::<ActionChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 189.1, 0.01);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.01);
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 Some(theme.color_scheme.on_surface)
             );
 
-            let chip = only::<RawChip>(&tester);
+            let chip = only::<RawChip>(tester);
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, chip);
+                chip_material_of(tester, chip);
             assert_eq!(elevation, 1.0);
             assert_eq!(shadow_color, Some(theme.color_scheme.shadow()));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(transparent_side));
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(theme.color_scheme.surface_container_low())
             );
 
             // Test disabled ActionChip.elevated defaults.
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 ActionChip::elevated(Text::new(LABEL)),
                 false,
             );
             tester.pump_and_settle();
 
-            let chip = only::<RawChip>(&tester);
+            let chip = only::<RawChip>(tester);
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, chip);
+                chip_material_of(tester, chip);
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(theme.color_scheme.shadow()));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(transparent_side));
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(theme.color_scheme.on_surface.with_alpha(0x1f))
             );
         });
@@ -397,19 +390,17 @@ pub(crate) mod tests {
 
     #[test]
     fn action_chip_can_be_tapped() {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let pressed = std::rc::Rc::new(std::cell::Cell::new(0));
             let chip = ActionChip::new(Text::new(LABEL)).on_pressed({
                 let pressed = std::rc::Rc::clone(&pressed);
                 Listener::new(move |_| pressed.set(pressed.get() + 1))
             });
-            pump_chip(&mut tester, &theme, chip, false);
+            pump_chip(tester, &theme, chip, false);
 
-            let center = crate::chip::tests::center_of(&tester, only::<ActionChip>(&tester));
-            tester.tap(center, 1);
+            let center = crate::chip::tests::center_of(tester, only::<ActionChip>(tester));
+            tester.tap_at(center, 1);
             assert_eq!(pressed.get(), 1);
         });
     }
@@ -437,31 +428,31 @@ pub(crate) mod tests {
     ) -> bool {
         let render = tester.render_box_of(material_box(tester, chip)).as_object();
         let ops = tester.painted_ops_deep(render);
-        paints_calls(&ops, &[PaintCall::rrect(Some(color))])
+        paints(&ops, &[PaintCall::rrect(Some(color))]).is_ok()
     }
 
     /// Dart's `paints..path(color: color)` on `getMaterialBox(tester, chip)`.
     pub(crate) fn paints_path_color(tester: &WidgetTester, chip: AnyElement, color: Color) -> bool {
         let render = tester.render_box_of(material_box(tester, chip)).as_object();
-        paints_calls(
+        paints(
             &tester.painted_ops_deep(render),
             &[PaintCall::path(Some(color))],
         )
+        .is_ok()
     }
 
     pub(crate) fn raw_chips(tester: &WidgetTester) -> Vec<AnyElement> {
-        tester.find_by_type::<RawChip>()
+        find::by_type::<RawChip>().evaluate(tester)
     }
 
     #[test]
     fn material2_action_chip_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m2(&tester.cell.borrow());
 
             // Test enabled ActionChip defaults.
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 ActionChip::new(Text::new(LABEL)).on_pressed(Listener::new(|_| {})),
                 true,
@@ -469,12 +460,12 @@ pub(crate) mod tests {
 
             // Test default chip size.
             assert_eq!(
-                size_of(&tester, only::<ActionChip>(&tester)),
+                tester.get_size(only::<ActionChip>(tester)),
                 Size::new(178.0, 48.0)
             );
             // Test default label style.
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 theme
                     .text_theme
                     .body_large
@@ -484,7 +475,7 @@ pub(crate) mod tests {
             );
 
             let (elevation, shadow_color, _, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(Colors::BLACK));
             assert_eq!(
@@ -492,28 +483,23 @@ pub(crate) mod tests {
                 Some(ShapeBorderRef::new(StadiumBorder::new(BorderSide::NONE)))
             );
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(Colors::BLACK.with_alpha(0x1f))
             );
 
             // Test disabled ActionChip defaults.
-            pump_chip(
-                &mut tester,
-                &theme,
-                ActionChip::new(Text::new(LABEL)),
-                false,
-            );
+            pump_chip(tester, &theme, ActionChip::new(Text::new(LABEL)), false);
             tester.pump_and_settle();
 
             let (elevation, shadow_color, _, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(Colors::BLACK));
             assert_eq!(
                 shape,
                 Some(ShapeBorderRef::new(StadiumBorder::new(BorderSide::NONE)))
             );
-            assert_eq!(ink_decoration_color(&tester), Some(Colors::BLACK38));
+            assert_eq!(ink_decoration_color(tester), Some(Colors::BLACK38));
         });
     }
 
@@ -566,8 +552,7 @@ pub(crate) mod tests {
 
     #[test]
     fn action_chip_color_resolves_material_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_color = Color::new(0xff00ff00);
             let background_color = Color::new(0xff0000ff);
             let color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
@@ -577,7 +562,7 @@ pub(crate) mod tests {
                 Some(background_color)
             });
             check_enabled_and_disabled_colors(
-                &mut tester,
+                tester,
                 |enabled| two_chips(Some(color.clone()), None, enabled),
                 disabled_color,
                 background_color,
@@ -587,12 +572,11 @@ pub(crate) mod tests {
 
     #[test]
     fn action_chip_uses_provided_state_color_properties() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_color = Color::new(0xff00ff00);
             let background_color = Color::new(0xff0000ff);
             check_enabled_and_disabled_colors(
-                &mut tester,
+                tester,
                 |enabled| two_chips(None, Some((disabled_color, background_color)), enabled),
                 disabled_color,
                 background_color,
@@ -602,10 +586,9 @@ pub(crate) mod tests {
 
     #[test]
     fn action_chip_clip_behavior_properly_passes_through_to_the_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let check = |tester: &WidgetTester, clip_behavior: Clip| {
-                let materials = tester.find_by_type::<Material>();
+                let materials = find::by_type::<Material>().evaluate(tester);
                 // There should be two Material widgets, first Material is from the
                 // "wrapForChip" and last Material is from the "RawChip".
                 assert_eq!(materials.len(), 2);
@@ -616,25 +599,24 @@ pub(crate) mod tests {
                 );
             };
             pump_wrapped(
-                &mut tester,
+                tester,
                 ActionChip::new(Text::new("label")).on_pressed(Listener::new(|_| {})),
             );
-            check(&tester, Clip::None);
+            check(tester, Clip::None);
 
             pump_wrapped(
-                &mut tester,
+                tester,
                 ActionChip::new(Text::new("label"))
                     .clip_behavior(Clip::AntiAlias)
                     .on_pressed(Listener::new(|_| {})),
             );
-            check(&tester, Clip::AntiAlias);
+            check(tester, Clip::AntiAlias);
         });
     }
 
     #[test]
     fn action_chip_uses_provided_icon_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let build_chip = |tester: &mut WidgetTester, icon_theme: Option<IconThemeData>| {
                 let mut chip = ActionChip::new(Text::new("action chip"))
@@ -650,19 +632,19 @@ pub(crate) mod tests {
             };
 
             // Test default icon theme.
-            build_chip(&mut tester, None);
+            build_chip(tester, None);
             assert_eq!(
-                icon_data(&tester).color.map(|color| color.color()),
+                icon_data(tester).color.map(|color| color.color()),
                 Some(theme.color_scheme.primary)
             );
 
             // Test provided icon theme.
             build_chip(
-                &mut tester,
+                tester,
                 Some(IconThemeData::new().color(Color::new(0xff00ff00))),
             );
             assert_eq!(
-                icon_data(&tester).color.map(|color| color.color()),
+                icon_data(tester).color.map(|color| color.color()),
                 Some(Color::new(0xff00ff00))
             );
         });
@@ -670,8 +652,7 @@ pub(crate) mod tests {
 
     #[test]
     fn action_chip_avatar_layout_constraints_can_be_customized() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border = 1.0;
             let icon_size = 18.0;
             let label_padding = 8.0;
@@ -691,22 +672,27 @@ pub(crate) mod tests {
                 }
                 pump_wrapped(tester, Center::new().child(chip));
             };
-            let chip_size = |tester: &WidgetTester| size_of(tester, only::<ActionChip>(tester));
+            let chip_size = |tester: &WidgetTester| tester.get_size(only::<ActionChip>(tester));
             let chip_top_left = |tester: &WidgetTester| {
-                rect_of(tester, material_of(tester, only::<RawChip>(tester))).top_left()
+                tester
+                    .get_rect(material_of(tester, only::<RawChip>(tester)))
+                    .top_left()
             };
             let label_top_left = |tester: &WidgetTester| {
-                rect_of(tester, only::<waft_widgets::Container>(tester)).top_left()
+                tester
+                    .get_rect(only::<waft_widgets::Container>(tester))
+                    .top_left()
             };
 
             // Test default avatar layout constraints.
-            build_chip(&mut tester, None);
-            assert_eq!(chip_size(&tester).width(), 234.0);
-            assert_eq!(chip_size(&tester).height(), 118.0);
+            build_chip(tester, None);
+            assert_eq!(chip_size(tester).width(), 234.0);
+            assert_eq!(chip_size(tester).height(), 118.0);
 
             // Calculate the distance between avatar and chip edges.
-            let top_left = chip_top_left(&tester);
-            let avatar_center = center_of(&tester, tester.find_by_icon(&Icons::favorite()));
+            let top_left = chip_top_left(tester);
+            let avatar_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::favorite()).first()));
             assert_eq!(
                 top_left.dx(),
                 avatar_center.dx() - (label_size.width() / 2.0) - padding - border
@@ -718,25 +704,25 @@ pub(crate) mod tests {
 
             // Calculate the distance between avatar and label.
             assert_eq!(
-                label_top_left(&tester).dx(),
+                label_top_left(tester).dx(),
                 avatar_center.dx() + (label_size.width() / 2.0) + label_padding
             );
 
             // Test custom avatar layout constraints.
             build_chip(
-                &mut tester,
+                tester,
                 Some(BoxConstraints::tight_for_finite(
                     f64::INFINITY,
                     f64::INFINITY,
                 )),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(chip_size(&tester).width(), 152.0);
-            assert_eq!(chip_size(&tester).height(), 118.0);
+            assert_eq!(chip_size(tester).width(), 152.0);
+            assert_eq!(chip_size(tester).height(), 118.0);
 
             // Calculate the distance between avatar and chip edges.
-            let top_left = chip_top_left(&tester);
+            let top_left = chip_top_left(tester);
             assert_eq!(
                 top_left.dx(),
                 avatar_center.dx() - (icon_size / 2.0) - padding - border
@@ -748,7 +734,7 @@ pub(crate) mod tests {
 
             // Calculate the distance between avatar and label.
             assert_eq!(
-                label_top_left(&tester).dx(),
+                label_top_left(tester).dx(),
                 avatar_center.dx() + (icon_size / 2.0) + label_padding
             );
         });
@@ -765,10 +751,12 @@ pub(crate) mod tests {
             .select_animation(AnimationStyle::NO_ANIMATION)
     }
 
-    pub(crate) fn assert_animation_style_passed_to_raw_chip<K>(chip: impl IntoWidget<K>) {
-        let mut tester = tester();
-        pump_wrapped(&mut tester, Center::new().child(chip));
-        let passed = tester.widget(only::<RawChip>(&tester), |raw_chip: &RawChip| {
+    pub(crate) fn assert_animation_style_passed_to_raw_chip<K>(
+        tester: &mut WidgetTester,
+        chip: impl IntoWidget<K>,
+    ) {
+        pump_wrapped(tester, Center::new().child(chip));
+        let passed = tester.widget(only::<RawChip>(tester), |raw_chip: &RawChip| {
             raw_chip.chip_animation_style.clone()
         });
         let expected = animation_style();
@@ -787,8 +775,9 @@ pub(crate) mod tests {
 
     #[test]
     fn action_chip_chip_animation_style_is_passed_to_raw_chip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_animation_style_passed_to_raw_chip(
+                tester,
                 ActionChip::new(Text::new("ActionChip")).chip_animation_style(animation_style()),
             );
         });
@@ -796,8 +785,9 @@ pub(crate) mod tests {
 
     #[test]
     fn elevated_action_chip_chip_animation_style_is_passed_to_raw_chip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_animation_style_passed_to_raw_chip(
+                tester,
                 ActionChip::elevated(Text::new("ActionChip"))
                     .chip_animation_style(animation_style()),
             );
@@ -806,24 +796,23 @@ pub(crate) mod tests {
 
     pub(crate) fn hover_over_chip(tester: &mut WidgetTester, mouse: &mut TestPointer) {
         tester.add_pointer(mouse, Offset::new(10.0, 10.0));
-        tester.pump(Duration::ZERO);
+        tester.pump();
         assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::BASIC));
-        let chip = center_of(tester, text(tester, "Chip"));
+        let chip = tester.get_center(text(tester, "Chip"));
         tester.move_to(mouse, chip, false);
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     #[test]
     fn action_chip_has_expected_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_wrapped(
-                &mut tester,
+                tester,
                 Center::new()
                     .child(ActionChip::new(Text::new("Chip")).on_pressed(Listener::new(|_| {}))),
             );
-            let mut mouse = WidgetTester::mouse(1, 0);
-            hover_over_chip(&mut tester, &mut mouse);
+            let mut mouse = TestPointer::mouse(1, 0);
+            hover_over_chip(tester, &mut mouse);
             let expected: MouseCursorRef = if K_IS_WEB {
                 SystemMouseCursors::CLICK.into()
             } else {
@@ -835,24 +824,22 @@ pub(crate) mod tests {
 
     #[test]
     fn action_chip_mouse_cursor_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_cursor: MouseCursorRef = SystemMouseCursors::GRAB.into();
             pump_wrapped(
-                &mut tester,
+                tester,
                 Center::new()
                     .child(ActionChip::new(Text::new("Chip")).mouse_cursor(custom_cursor.clone())),
             );
-            let mut mouse = WidgetTester::mouse(1, 0);
-            hover_over_chip(&mut tester, &mut mouse);
+            let mut mouse = TestPointer::mouse(1, 0);
+            hover_over_chip(tester, &mut mouse);
             assert!(*tester.active_cursor(1) == *custom_cursor);
         });
     }
 
     #[test]
     fn mouse_cursor_resolves_in_focused_unfocused_disabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
 
@@ -874,23 +861,23 @@ pub(crate) mod tests {
                 pump_wrapped(tester, Center::new().child(chip));
             };
 
-            build_chip(&mut tester, true);
+            build_chip(tester, true);
 
             // Unfocused case.
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let chip = center_of(&tester, text(&tester, "Chip"));
+            let mut mouse = TestPointer::mouse(1, 0);
+            let chip = tester.get_center(text(tester, "Chip"));
             tester.add_pointer(&mut mouse, chip);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.move_to(&mut mouse, chip, false);
             assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::BASIC));
 
             // Focused case.
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::GRAB));
 
             // Disabled case.
-            build_chip(&mut tester, false);
+            build_chip(tester, false);
             assert!(
                 *tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::FORBIDDEN)
             );
@@ -900,8 +887,7 @@ pub(crate) mod tests {
 
     #[test]
     fn action_chip_renders_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,
@@ -912,8 +898,8 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
             ));
-            let x_text = text(&tester, "X");
-            assert!(size_of(&tester, x_text).is_empty());
+            let x_text = text(tester, "X");
+            assert!(tester.get_size(x_text).is_empty());
         });
     }
 }

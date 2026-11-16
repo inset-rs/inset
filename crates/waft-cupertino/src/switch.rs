@@ -1870,25 +1870,19 @@ mod tests {
     use std::cell::RefCell;
 
     use waft_embedder::valo::Op;
-    use waft_embedder::{
-        HapticFeedbackType, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind,
-    };
-    use waft_foundation::AppCell;
-    use waft_gestures::GestureBinding;
+    use waft_embedder::{HapticFeedbackType, PointerChange};
     use waft_rendering::{
         AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject, RenderOpacity,
-        RendererBinding,
     };
     use waft_test::TestPlatform;
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
     use waft_widgets::{
-        Actions, ActivateIntent, Center, FocusHighlightStrategy, FocusManager, FocusNode,
+        Actions, ActivateIntent, AnyFocusNode, Center, FocusHighlightStrategy, FocusNode,
         GlobalKey, MediaQueryData, SizedBox, UnfocusDisposition,
     };
 
     use super::*;
-    use crate::icons::{CupertinoIcons, install_cupertino_icon_font};
-    use crate::test_support::{build, pump, test_view};
-    use waft_widgets::AnyFocusNode;
+    use crate::icons::CupertinoIcons;
 
     /// The haptics a test platform played, in order.
     #[derive(Default)]
@@ -1979,17 +1973,17 @@ mod tests {
     }
 
     struct Fixture {
-        cell: Rc<AppCell>,
+        tester: WidgetTester,
         host: Handle<HostState>,
         focus_node: Option<FocusNodeRef>,
-        /// Where the last pointer event was, for the next one's delta.
-        last_position: Offset,
+        /// The finger [`Fixture::touch`] moves.
+        finger: TestPointer,
         haptics: Rc<RecordedHaptics>,
         changes: Rc<RefCell<Vec<bool>>>,
-        clock: Duration,
     }
 
     struct Setup {
+        platform: TargetPlatform,
         initial: bool,
         text_direction: TextDirection,
         media: Option<MediaQueryData>,
@@ -2002,6 +1996,7 @@ mod tests {
     impl Setup {
         fn new() -> Setup {
             Setup {
+                platform: TargetPlatform::Android,
                 initial: false,
                 text_direction: TextDirection::Ltr,
                 media: None,
@@ -2010,6 +2005,11 @@ mod tests {
                 accept: |_old, new| new,
                 configure: Rc::new(|switch| switch),
             }
+        }
+
+        fn on(mut self, platform: TargetPlatform) -> Setup {
+            self.platform = platform;
+            self
         }
 
         fn initial(mut self, initial: bool) -> Setup {
@@ -2051,65 +2051,59 @@ mod tests {
             self
         }
 
-        /// Mounts the host on an iOS test platform that records its haptics.
+        /// Mounts the host on a tester of its own, on a platform that records its haptics.
         fn mount(self) -> Fixture {
             let haptics = Rc::new(RecordedHaptics::default());
-            let platform = TestPlatform::new()
-                .on(TargetPlatform::IOS)
-                .with_view(test_view())
-                .with_haptics(Rc::clone(&haptics) as Rc<dyn waft_embedder::Haptics>);
-            let cell = AppCell::with_platform(Rc::new(platform));
-            install_cupertino_icon_font(&mut cell.borrow_mut());
+            let mut tester = WidgetTester::with_platform(
+                TestPlatform::new()
+                    .on(self.platform)
+                    .with_haptics(Rc::clone(&haptics) as Rc<dyn waft_embedder::Haptics>),
+            );
             let focus_node = self
                 .focusable
-                .then(|| FocusNode::new(&mut cell.borrow_mut()).into_erased());
+                .then(|| FocusNode::new(&mut tester.cell.borrow_mut()).into_erased());
             let changes: Rc<RefCell<Vec<bool>>> = Rc::default();
             let host_key = GlobalKey::new();
-            build(
-                &cell,
-                Host {
-                    key: Some(host_key.clone().into()),
-                    initial: self.initial,
-                    text_direction: self.text_direction,
-                    media: self.media,
-                    theme: self.theme,
-                    focus_node: focus_node.clone(),
-                    accept: self.accept,
-                    configure: self.configure,
-                    changes: Rc::clone(&changes),
-                }
-                .into_widget(),
-            );
+            tester.pump_widget(Host {
+                key: Some(host_key.clone().into()),
+                initial: self.initial,
+                text_direction: self.text_direction,
+                media: self.media,
+                theme: self.theme,
+                focus_node: focus_node.clone(),
+                accept: self.accept,
+                configure: self.configure,
+                changes: Rc::clone(&changes),
+            });
             let host = host_key
-                .current_state::<HostState>(&cell.borrow_mut())
+                .current_state::<HostState>(&tester.cell.borrow_mut())
                 .expect("the host mounted");
             Fixture {
-                cell,
+                tester,
                 host,
                 focus_node,
-                last_position: Offset::ZERO,
+                finger: TestPointer::touch(1),
                 haptics,
                 changes,
-                clock: Duration::ZERO,
             }
         }
     }
 
     impl Fixture {
         fn value(&self) -> bool {
-            self.cell.borrow().get(self.host).value
+            self.tester.cell.borrow().get(self.host).value
         }
 
         fn state(&self) -> Handle<CupertinoSwitchState> {
-            let key = self.cell.borrow().get(self.host).switch_key.clone();
-            key.current_state::<CupertinoSwitchState>(&self.cell.borrow_mut())
+            let key = self.tester.cell.borrow().get(self.host).switch_key.clone();
+            key.current_state::<CupertinoSwitchState>(&self.tester.cell.borrow_mut())
                 .expect("the switch mounted")
         }
 
         /// Dart's `position.value` on the switch's state.
         fn position(&self) -> f64 {
             let state = self.state();
-            let app = self.cell.borrow();
+            let app = self.tester.cell.borrow();
             state.position(&app).value(&app)
         }
 
@@ -2119,111 +2113,54 @@ mod tests {
 
         /// Rebuilds the host with `change` applied, as a Dart test's second `pumpWidget`.
         fn set(&mut self, change: impl FnOnce(&mut HostState)) {
-            self.host.set_state(&mut self.cell.borrow_mut(), change);
-            self.pump(16);
+            self.host
+                .set_state(&mut self.tester.cell.borrow_mut(), change);
+            self.tester.pump();
         }
 
-        fn tick(&mut self, millis: u64) -> Duration {
-            self.clock += Duration::from_millis(millis);
-            self.clock
-        }
-
-        fn pump(&mut self, millis: u64) {
-            let at = self.tick(millis);
-            pump(&mut self.cell.borrow_mut(), at);
-        }
-
-        /// Dart's `pumpAndSettle`: frames until no animation is left.
-        fn settle(&mut self) {
-            for _ in 0..120 {
-                self.pump(16);
-            }
-        }
-
-        /// The switch's top-left corner in the view: the 400x300 logical view centres the
+        /// The switch's top-left corner in the view: the 800x600 logical view centres the
         /// 59x39 switch.
         fn origin() -> Offset {
-            Offset::new((400.0 - 59.0) / 2.0, (300.0 - 39.0) / 2.0)
+            Offset::new((800.0 - 59.0) / 2.0, (600.0 - 39.0) / 2.0)
         }
 
         fn center() -> Offset {
             Self::origin() + Offset::new(59.0 / 2.0, 39.0 / 2.0)
         }
 
-        /// The test view is 2x: logical coordinates double into the packet.
         fn node(&self) -> AnyFocusNode {
             self.focus_node
                 .handle()
                 .expect("mounted with Setup::focus_node")
         }
 
-        fn send(&mut self, change: PointerChange, kind: PointerDeviceKind, at: Offset) {
-            let time_stamp = self.tick(10);
-            let delta = match change {
-                PointerChange::Add | PointerChange::Down => Offset::ZERO,
-                _ => at - self.last_position,
-            };
-            self.last_position = at;
-            let mut app = self.cell.borrow_mut();
-            GestureBinding::instance(&mut app).handle_pointer_data_packet(
-                &mut app,
-                PointerDataPacket::new(vec![PointerData {
-                    change,
-                    kind,
-                    time_stamp,
-                    device: 1,
-                    pointer_identifier: 1,
-                    buttons: if matches!(change, PointerChange::Down | PointerChange::Move) {
-                        1
-                    } else {
-                        0
-                    },
-                    physical_x: at.dx() * 2.0,
-                    physical_y: at.dy() * 2.0,
-                    physical_delta_x: delta.dx() * 2.0,
-                    physical_delta_y: delta.dy() * 2.0,
-                    ..PointerData::default()
-                }]),
-            );
-            app.drain_microtasks();
-        }
-
+        /// Dart's `startGesture(at)`, `gesture.moveTo(at)` and `gesture.up()` of one finger.
         fn touch(&mut self, change: PointerChange, at: Offset) {
-            self.send(change, PointerDeviceKind::Touch, at);
+            match change {
+                PointerChange::Down => self.tester.down(&mut self.finger, at),
+                PointerChange::Move => self.tester.move_to(&mut self.finger, at, true),
+                PointerChange::Up => {
+                    self.finger.position = at;
+                    self.tester.up(&self.finger);
+                }
+                _ => unreachable!("a finger goes down, moves and goes up"),
+            }
         }
 
-        /// Dart's `tester.tap` at the switch's centre.
+        /// Dart's `tester.tap(find.byType(CupertinoSwitch))`.
         fn tap(&mut self) {
-            self.touch(PointerChange::Down, Self::center());
-            self.touch(PointerChange::Up, Self::center());
-            self.pump(16);
+            self.tester.tap(find::by_type::<CupertinoSwitch>());
         }
 
-        /// Dart's `tester.drag`: down at the centre, a move of the default drag slop, then
-        /// the rest, then up.
+        /// Dart's `tester.drag(find.byType(CupertinoSwitch), Offset(dx, 0))`.
         fn drag(&mut self, dx: f64) {
-            const DRAG_SLOP: f64 = 20.0;
-            let start = Self::center();
-            self.touch(PointerChange::Down, start);
-            self.touch(
-                PointerChange::Move,
-                start + Offset::new(DRAG_SLOP.copysign(dx), 0.0),
-            );
-            self.touch(PointerChange::Move, start + Offset::new(dx, 0.0));
-            self.touch(PointerChange::Up, start + Offset::new(dx, 0.0));
-            self.pump(16);
-        }
-
-        /// A mouse that arrives over `at`, as a desktop hover does.
-        fn hover(&mut self, at: Offset) {
-            self.send(PointerChange::Add, PointerDeviceKind::Mouse, at);
-            self.send(PointerChange::Hover, PointerDeviceKind::Mouse, at);
-            self.pump(16);
+            self.tester
+                .drag(find::by_type::<CupertinoSwitch>(), Offset::new(dx, 0.0));
         }
 
         fn first<T: RenderObject>(&self) -> RenderHandle<T> {
-            let key = self.cell.borrow().get(self.host).switch_key.clone();
-            let app = self.cell.borrow();
+            let key = self.tester.cell.borrow().get(self.host).switch_key.clone();
+            let app = self.tester.cell.borrow();
             let root = key
                 .current_context(&app)
                 .expect("the switch mounted")
@@ -2233,13 +2170,14 @@ mod tests {
         }
 
         fn opacity(&self) -> f64 {
-            self.first::<RenderOpacity>().opacity(&self.cell.borrow())
+            self.first::<RenderOpacity>()
+                .opacity(&self.tester.cell.borrow())
         }
 
         /// What the switch's painter draws, in paint order.
         fn drawn(&self) -> Vec<Drawn> {
             let custom = self.first::<RenderCustomPaint>();
-            let mut app = self.cell.borrow_mut();
+            let mut app = self.tester.cell.borrow_mut();
             let painter = custom.painter(&app).expect("the switch's painter");
             let size = custom.size(&app);
             let mut canvas = Canvas::new();
@@ -2349,28 +2287,33 @@ mod tests {
     fn an_activate_intent_toggles_the_switch_both_ways() {
         let mut fixture = Setup::new().initial(true).focus_node().mount();
         let node = fixture.node();
-        node.request_focus(&mut fixture.cell.borrow_mut(), None);
-        fixture.settle();
+        node.request_focus(&mut fixture.tester.cell.borrow_mut(), None);
+        fixture.tester.pump_and_settle();
         // A space key reaches the switch as an `ActivateIntent` through `WidgetsApp`'s
         // shortcuts; the test invokes the intent where the shortcut would.
         for expected in [false, true] {
             let context = node
-                .context(&fixture.cell.borrow())
+                .context(&fixture.tester.cell.borrow())
                 .expect("the node is attached");
-            Actions::invoke(&mut fixture.cell.borrow_mut(), context, &ActivateIntent);
-            fixture.settle();
+            Actions::invoke(
+                &mut fixture.tester.cell.borrow_mut(),
+                context,
+                &ActivateIntent,
+            );
+            fixture.tester.pump_and_settle();
             assert_eq!(fixture.value(), expected);
         }
     }
 
     #[test]
     fn a_tap_plays_one_light_impact_and_a_rebuild_plays_none() {
-        let mut fixture = Setup::new().mount();
+        let mut fixture = Setup::new().on(TargetPlatform::IOS).mount();
         fixture.tap();
+        fixture.tester.pump();
         assert_eq!(fixture.haptics(), [HapticFeedbackType::LightImpact]);
 
         fixture.set(|host| host.value = !host.value);
-        fixture.settle();
+        fixture.tester.pump_and_settle();
         assert_eq!(
             fixture.haptics(),
             [HapticFeedbackType::LightImpact],
@@ -2381,10 +2324,12 @@ mod tests {
     #[test]
     fn a_drag_past_the_threshold_plays_a_light_impact() {
         let mut fixture = Setup::new()
+            .on(TargetPlatform::IOS)
             .configure(|switch| switch.drag_start_behavior(DragStartBehavior::Down))
             .mount();
         fixture.drag(56.0);
         assert!(fixture.value());
+        fixture.tester.pump();
         assert_eq!(fixture.haptics(), [HapticFeedbackType::LightImpact]);
     }
 
@@ -2401,11 +2346,13 @@ mod tests {
             );
             fixture.drag(56.0);
             assert!(fixture.value(), "{behavior:?}");
+            fixture.tester.pump();
             fixture.drag(56.0);
             assert!(
                 fixture.value(),
                 "{behavior:?}: dragging right of on stays on"
             );
+            fixture.tester.pump();
             fixture.drag(-56.0);
             assert!(!fixture.value(), "{behavior:?}");
         }
@@ -2421,8 +2368,10 @@ mod tests {
         assert!(!fixture.value());
         fixture.drag(-56.0);
         assert!(fixture.value());
+        fixture.tester.pump();
         fixture.drag(-56.0);
         assert!(fixture.value());
+        fixture.tester.pump();
         fixture.drag(56.0);
         assert!(!fixture.value());
     }
@@ -2438,32 +2387,32 @@ mod tests {
         let center = Fixture::center();
         fixture.touch(PointerChange::Down, center);
         fixture.touch(PointerChange::Move, center + Offset::new(21.0, 0.0));
-        fixture.pump(16);
+        fixture.tester.pump();
         fixture.touch(PointerChange::Up, center + Offset::new(21.0, 0.0));
-        fixture.pump(16);
+        fixture.tester.pump();
         assert!(!fixture.value());
         assert_eq!(fixture.position(), 0.0);
-        fixture.settle();
+        fixture.tester.pump_and_settle();
         assert_eq!(fixture.position(), 0.0);
 
         // Move past the middle.
         fixture.touch(PointerChange::Down, center);
         fixture.touch(PointerChange::Move, center + Offset::new(36.0, 0.0));
-        fixture.pump(16);
+        fixture.tester.pump();
         fixture.touch(PointerChange::Up, center + Offset::new(36.0, 0.0));
-        fixture.pump(16);
+        fixture.tester.pump();
         assert!(fixture.value());
-        fixture.settle();
+        fixture.tester.pump_and_settle();
         assert_eq!(fixture.position(), 1.0);
 
         // Now move back to the left, the revert animation should play.
         fixture.touch(PointerChange::Down, center);
         fixture.touch(PointerChange::Move, center + Offset::new(-36.0, 0.0));
-        fixture.pump(16);
+        fixture.tester.pump();
         fixture.touch(PointerChange::Up, center + Offset::new(-36.0, 0.0));
-        fixture.pump(16);
+        fixture.tester.pump();
         assert!(fixture.value(), "the host vetoed turning off");
-        fixture.settle();
+        fixture.tester.pump_and_settle();
         assert_eq!(fixture.position(), 1.0);
         assert_eq!(*fixture.changes.borrow(), [true, false]);
     }
@@ -2481,10 +2430,10 @@ mod tests {
             fixture.touch(PointerChange::Move, center + Offset::new(activation, 0.0));
             fixture.touch(PointerChange::Move, center);
             fixture.touch(PointerChange::Move, center + Offset::new(dx, 0.0));
-            fixture.settle();
+            fixture.tester.pump_and_settle();
             let held = (fixture.position(), fixture.value());
             fixture.touch(PointerChange::Up, center + Offset::new(dx, 0.0));
-            fixture.settle();
+            fixture.tester.pump_and_settle();
             (held, (fixture.position(), fixture.value()))
         };
 
@@ -2555,7 +2504,7 @@ mod tests {
             Some(0xFF00000B)
         );
         fixture.drag(-56.0);
-        fixture.settle();
+        fixture.tester.pump_and_settle();
         assert_eq!(
             fixture.drawn().last().and_then(Drawn::color),
             Some(0xFF00000A)
@@ -2600,7 +2549,9 @@ mod tests {
 
             fixture.tap();
             assert!(fixture.value());
-            fixture.pump(60);
+            // Kick off animation, then advance to intermediate frame.
+            fixture.tester.pump();
+            fixture.tester.pump_by(Duration::from_millis(60));
             let (on, off) = labels(&fixture.drawn());
             assert_eq!(
                 on,
@@ -2613,7 +2564,7 @@ mod tests {
                 "{case}"
             );
 
-            fixture.settle();
+            fixture.tester.pump_and_settle();
             let (on, off) = labels(&fixture.drawn());
             assert_eq!(
                 on,
@@ -2677,13 +2628,11 @@ mod tests {
             .configure(|switch| switch.focus_color(FOCUS).autofocus(true))
             .mount();
         let node = fixture.node();
-        {
-            let mut app = fixture.cell.borrow_mut();
-            let manager = FocusManager::instance(&mut app);
-            manager.set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-        }
-        fixture.settle();
-        assert!(node.has_primary_focus(&fixture.cell.borrow()));
+        fixture
+            .tester
+            .set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
+        fixture.tester.pump_and_settle();
+        assert!(node.has_primary_focus(&fixture.tester.cell.borrow()));
         let ring = [Some(SYSTEM_GREEN), Some(0xffff0000), None];
         assert_eq!(
             colors(&fixture.drawn()),
@@ -2691,7 +2640,7 @@ mod tests {
         );
 
         fixture.set(|host| host.value = false);
-        fixture.settle();
+        fixture.tester.pump_and_settle();
         let ring = [Some(SECONDARY_SYSTEM_FILL), Some(0xffff0000), None];
         assert_eq!(
             colors(&fixture.drawn()),
@@ -2699,8 +2648,8 @@ mod tests {
         );
 
         fixture.set(|host| host.enabled = false);
-        fixture.settle();
-        assert!(!node.has_primary_focus(&fixture.cell.borrow()));
+        fixture.tester.pump_and_settle();
+        assert!(!node.has_primary_focus(&fixture.tester.cell.borrow()));
         let track = [Some(SECONDARY_SYSTEM_FILL), None];
         assert_eq!(
             colors(&fixture.drawn()),
@@ -2724,15 +2673,18 @@ mod tests {
             .mount();
         let node = fixture.node();
 
-        node.request_focus(&mut fixture.cell.borrow_mut(), None);
-        fixture.pump(16);
+        node.request_focus(&mut fixture.tester.cell.borrow_mut(), None);
+        fixture.tester.pump();
         assert!(focused.get());
-        assert!(node.has_focus(&mut fixture.cell.borrow_mut()));
+        assert!(node.has_focus(&mut fixture.tester.cell.borrow_mut()));
 
-        node.unfocus(&mut fixture.cell.borrow_mut(), UnfocusDisposition::Scope);
-        fixture.pump(16);
+        node.unfocus(
+            &mut fixture.tester.cell.borrow_mut(),
+            UnfocusDisposition::Scope,
+        );
+        fixture.tester.pump();
         assert!(!focused.get());
-        assert!(!node.has_focus(&mut fixture.cell.borrow_mut()));
+        assert!(!node.has_focus(&mut fixture.tester.cell.borrow_mut()));
     }
 
     /// The fill under the outline and the outline itself.
@@ -2778,7 +2730,7 @@ mod tests {
                 })
                 .mount();
             fixture.set(|host| host.enabled = enabled);
-            fixture.settle();
+            fixture.tester.pump_and_settle();
             let (track, outline) = outline(&fixture.drawn());
             assert!(matches!(track, Drawn::Fill(..)), "{track:?}");
             assert_eq!(
@@ -2821,13 +2773,11 @@ mod tests {
             })
             .mount();
         let node = fixture.node();
-        {
-            let mut app = fixture.cell.borrow_mut();
-            let manager = FocusManager::instance(&mut app);
-            manager.set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-        }
-        fixture.settle();
-        assert!(node.has_primary_focus(&fixture.cell.borrow()));
+        fixture
+            .tester
+            .set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
+        fixture.tester.pump_and_settle();
+        assert!(node.has_primary_focus(&fixture.tester.cell.borrow()));
         let drawn = fixture.drawn();
         assert_eq!(drawn[1], Drawn::Stroke(0xFF000002, 6.0));
         assert!(
@@ -2836,8 +2786,10 @@ mod tests {
             drawn[2]
         );
 
-        fixture.hover(Fixture::center());
-        fixture.settle();
+        let mut mouse = TestPointer::mouse(1, 0);
+        fixture.tester.add_pointer(&mut mouse, Offset::ZERO);
+        fixture.tester.move_to(&mut mouse, Fixture::center(), false);
+        fixture.tester.pump_and_settle();
         assert_eq!(fixture.drawn()[1], Drawn::Stroke(0xFF000001, 4.0));
     }
 
@@ -2850,21 +2802,19 @@ mod tests {
                 ))
             })
             .mount();
-        let cursor = |fixture: &Fixture| {
-            let mut app = fixture.cell.borrow_mut();
-            RendererBinding::instance(&mut app)
-                .mouse_tracker(&app)
-                .debug_device_active_cursor(&app, 1)
-        };
-        fixture.hover(Fixture::center() + Offset::new(51.0, 31.0));
-        assert_eq!(cursor(&fixture), Some(SystemMouseCursors::BASIC.into()));
-        fixture.send(
-            PointerChange::Hover,
-            PointerDeviceKind::Mouse,
-            Fixture::center(),
+        let tester = &mut fixture.tester;
+        let mut mouse = TestPointer::mouse(1, 0);
+        // The pointer is not pointing at the switch.
+        tester.add_pointer(&mut mouse, Fixture::center() + Offset::new(51.0, 31.0));
+        tester.pump();
+        assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
+        // The pointer now points at the switch.
+        tester.move_to(&mut mouse, Fixture::center(), false);
+        tester.pump();
+        assert_eq!(
+            tester.active_cursor(1),
+            SystemMouseCursors::FORBIDDEN.into()
         );
-        fixture.pump(16);
-        assert_eq!(cursor(&fixture), Some(SystemMouseCursors::FORBIDDEN.into()));
     }
 
     #[test]
@@ -2907,11 +2857,9 @@ mod tests {
 
     #[test]
     fn a_switch_squeezed_to_nothing_lays_out_at_zero() {
-        let cell = crate::test_support::test_cell();
-        let key = GlobalKey::new();
-        build(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Center::new().child(
                     SizedBox::shrink().child(
@@ -2919,32 +2867,25 @@ mod tests {
                             .key(key.clone().into()),
                     ),
                 ),
-            )
-            .into_widget(),
-        );
-        let app = cell.borrow();
-        let render = key
-            .current_context(&app)
-            .and_then(|context| context.find_render_object(&app))
-            .and_then(|object| object.as_box())
-            .expect("the switch laid out");
-        assert_eq!(render.size(&app), Size::ZERO);
+            ));
+            assert_eq!(tester.get_size(&key), Size::ZERO);
+        });
     }
 
     #[test]
     fn unmounting_the_switch_disposes_its_painter_and_animations() {
-        let fixture = Setup::new().mount();
+        let mut fixture = Setup::new().mount();
         let state = fixture.state();
         let painter = fixture
+            .tester
             .cell
             .borrow()
             .get(state)
             .painter
             .handle()
             .expect("created");
-        build(&fixture.cell, SizedBox::shrink().into_widget());
-        fixture.cell.checkpoint();
-        let app = fixture.cell.borrow();
+        fixture.tester.pump_widget(SizedBox::shrink());
+        let app = fixture.tester.cell.borrow();
         assert!(!app.contains(painter));
     }
 }

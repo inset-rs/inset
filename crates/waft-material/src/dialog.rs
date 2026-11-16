@@ -2630,12 +2630,15 @@ pub(crate) mod tests {
     use waft_rendering::RenderParagraph;
     use waft_widgets::{AnyElement, Center, Container, GlobalKey, MediaQueryData, SizedBox, Text};
 
+    use waft_widgets::testing::{
+        WidgetTester, assert_f32_equals, expect, find, finds_one_widget, test_widgets,
+    };
+
     use super::*;
     use crate::elevated_button::ElevatedButton;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     fn rounded(radius: f64) -> RoundedRectangleBorder {
         RoundedRectangleBorder::new(
@@ -2787,38 +2790,18 @@ pub(crate) mod tests {
 
     /// Dart's `tester.tap(find.text('X'))` then `tester.pumpAndSettle()`.
     pub(crate) fn open(tester: &mut WidgetTester) {
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump_and_settle();
-    }
-
-    pub(crate) fn only(found: Vec<AnyElement>) -> AnyElement {
-        assert_eq!(found.len(), 1, "one widget found");
-        found[0]
-    }
-
-    pub(crate) fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.get_rect(tester.render_box_of(element))
-    }
-
-    /// Dart's `tester.getRect(find.text(text))`.
-    fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        rect_of(tester, only(tester.find_onstage_text(text)))
     }
 
     /// Dart's `find.text(text)` with `findsOneWidget` or `findsNothing`.
     pub(crate) fn shows(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
-    }
-
-    /// Dart's `tester.tap(find.text(text))`.
-    pub(crate) fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let center = text_rect(tester, text).center();
-        tester.tap(center, 1);
+        find::text(text).evaluate(tester).len()
     }
 
     /// Dart's `tester.tapAt(at)`.
     pub(crate) fn tap_at(tester: &mut WidgetTester, at: Offset) {
-        tester.tap(at, 1);
+        tester.tap_at(at, 1);
     }
 
     pub(crate) fn rect_of_key(tester: &WidgetTester, key: &GlobalKey) -> Rect {
@@ -2828,7 +2811,7 @@ pub(crate) mod tests {
     /// Dart's `find.descendant(of: find.byType(Dialog), matching: find.byType(Material))`, the
     /// first.
     pub(crate) fn dialog_material(tester: &WidgetTester) -> AnyElement {
-        let dialog = tester.find_by_type::<Dialog>()[0];
+        let dialog = find::by_type::<Dialog>().evaluate(tester)[0];
         tester.descendants_of_type::<Material>(dialog)[0]
     }
 
@@ -2842,9 +2825,9 @@ pub(crate) mod tests {
 
     /// Dart's `_getTextRenderObjectFromDialog(tester, text).text.style`.
     pub(crate) fn text_style_in_dialog(tester: &WidgetTester, text: &str) -> Option<TextStyle> {
-        let dialog = tester.find_by_type::<Dialog>()[0];
-        let element = tester
-            .find_text(text)
+        let dialog = find::by_type::<Dialog>().evaluate(tester)[0];
+        let element = find::text(text)
+            .evaluate(tester)
             .into_iter()
             .find(|element| tester.ancestors(*element).contains(&dialog))
             .expect("the text is in the dialog");
@@ -2858,8 +2841,8 @@ pub(crate) mod tests {
 
     /// Dart's `_findOverflowBar()`: the `Padding` the `OverflowBar` is the child of.
     fn overflow_bar_padding(tester: &WidgetTester) -> Rect {
-        let bar = tester.find_by_type::<OverflowBar>()[0];
-        rect_of(tester, tester.ancestor_of_type::<Padding>(bar))
+        let bar = find::by_type::<OverflowBar>().evaluate(tester)[0];
+        tester.get_rect(tester.ancestor_of_type::<Padding>(bar))
     }
 
     fn green_box(height: f64, width: f64) -> WidgetRef {
@@ -2878,7 +2861,7 @@ pub(crate) mod tests {
                 .child(Center::new().child(ElevatedButton::new(None, Some(Text::new(text)))))
                 .into_widget()
         });
-        tester.find_text(text)[0]
+        find::text(text).evaluate(tester)[0]
     }
 
     /// Records the value `future` resolves with: Dart's `await result`.
@@ -2902,16 +2885,11 @@ pub(crate) mod tests {
     /// leaves nothing in the arena.
     #[test]
     fn opening_and_closing_a_dialog_leaves_nothing_behind() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_with_dialog(
-                &mut tester,
-                m3,
-                AlertDialog::new().content(Text::new("Body")),
-            );
+        test_widgets(|tester| {
+            pump_with_dialog(tester, m3, AlertDialog::new().content(Text::new("Body")));
             tester.assert_leaves_nothing_behind(|tester| {
                 open(tester);
-                let body = only(tester.find_onstage_text("Body"));
+                let body = tester.element(find::text("Body"));
                 Navigator::pop(&mut tester.cell.borrow_mut(), body, None);
                 tester.pump_and_settle();
                 assert_eq!(shows(tester, "Body"), 0);
@@ -2921,8 +2899,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dialog_is_scrollable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let did_press_ok = Rc::new(Cell::new(false));
             let pressed = Rc::clone(&did_press_ok);
             let dialog = AlertDialog::new()
@@ -2934,34 +2911,33 @@ pub(crate) mod tests {
                     Some(Text::new("OK")),
                 )
                 .into_widget()]);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert!(!did_press_ok.get());
-            tap_text(&mut tester, "OK");
+            tester.tap(find::text("OK"));
             assert!(did_press_ok.get());
         });
     }
 
     #[test]
     fn dialog_background_color_from_alert_dialog() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_color = Colors::PINK.primary();
             let dialog = AlertDialog::new()
                 .background_color(custom_color)
                 .actions([]);
             pump_with_dialog(
-                &mut tester,
+                tester,
                 |app| ThemeData::builder().brightness(Brightness::Dark).build(app),
                 dialog,
             );
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                material_from_dialog(&tester, |material| material.color),
+                material_from_dialog(tester, |material| material.color),
                 Some(custom_color)
             );
         });
@@ -2973,8 +2949,7 @@ pub(crate) mod tests {
         reason = "Dart's case sets the deprecated `background` too"
     )]
     fn dialog_background_defaults_to_color_scheme_surface_container_high() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = {
                 let app = tester.cell.borrow();
                 let color_scheme = ThemeData::new(&app)
@@ -2987,12 +2962,12 @@ pub(crate) mod tests {
             };
             let expected = theme.color_scheme.surface_container_high();
             let dialog = Dialog::new().child(SizedBox::new().width(200.0).height(200.0));
-            pump_with_dialog(&mut tester, move |_app| theme, dialog);
+            pump_with_dialog(tester, move |_app| theme, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                material_from_dialog(&tester, |material| material.color),
+                material_from_dialog(tester, |material| material.color),
                 Some(expected)
             );
         });
@@ -3006,35 +2981,33 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_dialog_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog = AlertDialog::new()
                 .title(Text::new("Title"))
                 .content(Text::new("Y"))
                 .actions([]);
-            pump_with_dialog(&mut tester, material2_theme, dialog);
+            pump_with_dialog(tester, material2_theme, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                material_from_dialog(&tester, |material| material.color),
+                material_from_dialog(tester, |material| material.color),
                 Some(Colors::GREY.shade800())
             );
-            assert_shape(&tester, &*default_m2_dialog_shape());
+            assert_shape(tester, &*default_m2_dialog_shape());
             assert_eq!(
-                material_from_dialog(&tester, |material| material.elevation),
+                material_from_dialog(tester, |material| material.elevation),
                 24.0
             );
 
-            let bottom_left = rect_of(&tester, dialog_material(&tester)).bottom_left();
+            let bottom_left = tester.get_rect(dialog_material(tester)).bottom_left();
             assert_eq!(bottom_left.dy(), 360.0);
         });
     }
 
     #[test]
     fn material3_dialog_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expected = material3_theme(&tester.cell.borrow())
                 .color_scheme
                 .surface_container_high();
@@ -3042,17 +3015,17 @@ pub(crate) mod tests {
                 .title(Text::new("Title"))
                 .content(Text::new("Y"))
                 .actions([]);
-            pump_with_dialog(&mut tester, material3_theme, dialog);
+            pump_with_dialog(tester, material3_theme, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                material_from_dialog(&tester, |material| material.color),
+                material_from_dialog(tester, |material| material.color),
                 Some(expected)
             );
-            assert_shape(&tester, &*default_m3_dialog_shape());
+            assert_shape(tester, &*default_m3_dialog_shape());
             assert_eq!(
-                material_from_dialog(&tester, |material| material.elevation),
+                material_from_dialog(tester, |material| material.elevation),
                 6.0
             );
         });
@@ -3068,61 +3041,58 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_dialog_fullscreen_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog_text_m2 = "Fullscreen Dialog - M2";
             pump_with_dialog(
-                &mut tester,
+                tester,
                 material2_theme,
                 Dialog::fullscreen().child(Text::new(dialog_text_m2)),
             );
 
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(shows(&tester, dialog_text_m2), 1);
+            assert_eq!(shows(tester, dialog_text_m2), 1);
             assert_eq!(
-                material_from_dialog(&tester, |material| material.color),
+                material_from_dialog(tester, |material| material.color),
                 Some(Colors::GREY.shade800())
             );
 
             // Try to dismiss the fullscreen dialog with the escape key.
-            dismiss_with_escape(&mut tester);
+            dismiss_with_escape(tester);
 
-            assert_eq!(shows(&tester, dialog_text_m2), 0);
+            assert_eq!(shows(tester, dialog_text_m2), 0);
         });
     }
 
     #[test]
     fn material3_dialog_fullscreen_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog_text_m3 = "Fullscreen Dialog - M3";
             let expected = material3_theme(&tester.cell.borrow()).color_scheme.surface;
             pump_with_dialog(
-                &mut tester,
+                tester,
                 material3_theme,
                 Dialog::fullscreen().child(Text::new(dialog_text_m3)),
             );
 
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(shows(&tester, dialog_text_m3), 1);
+            assert_eq!(shows(tester, dialog_text_m3), 1);
             assert_eq!(
-                material_from_dialog(&tester, |material| material.color),
+                material_from_dialog(tester, |material| material.color),
                 Some(expected)
             );
 
             // Try to dismiss the fullscreen dialog with the escape key.
-            dismiss_with_escape(&mut tester);
+            dismiss_with_escape(tester);
 
-            assert_eq!(shows(&tester, dialog_text_m3), 0);
+            assert_eq!(shows(tester, dialog_text_m3), 0);
         });
     }
 
     #[test]
     fn custom_dialog_elevation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_elevation = 12.0;
             let shadow_color = Color::new(0xFF000001);
             let surface_tint_color = Color::new(0xFF000002);
@@ -3131,11 +3101,11 @@ pub(crate) mod tests {
                 .elevation(custom_elevation)
                 .shadow_color(shadow_color)
                 .surface_tint_color(surface_tint_color);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
-            material_from_dialog(&tester, |material| {
+            material_from_dialog(tester, |material| {
                 assert_eq!(material.elevation, custom_elevation);
                 assert_eq!(material.shadow_color, Some(shadow_color));
                 assert_eq!(material.surface_tint_color, Some(surface_tint_color));
@@ -3145,20 +3115,19 @@ pub(crate) mod tests {
 
     #[test]
     fn custom_title_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let title_text = "Title";
             let title_text_style = TextStyle::new().color(Colors::PINK.primary());
             let dialog = AlertDialog::new()
                 .title(Text::new(title_text))
                 .title_text_style(title_text_style.clone())
                 .actions([]);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                text_style_in_dialog(&tester, title_text),
+                text_style_in_dialog(tester, title_text),
                 Some(title_text_style)
             );
         });
@@ -3166,20 +3135,19 @@ pub(crate) mod tests {
 
     #[test]
     fn custom_content_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content_text = "Content";
             let content_text_style = TextStyle::new().color(Colors::PINK.primary());
             let dialog = AlertDialog::new()
                 .content(Text::new(content_text))
                 .content_text_style(content_text_style.clone())
                 .actions([]);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                text_style_in_dialog(&tester, content_text),
+                text_style_in_dialog(tester, content_text),
                 Some(content_text_style)
             );
         });
@@ -3187,17 +3155,16 @@ pub(crate) mod tests {
 
     #[test]
     fn alert_dialog_custom_clip_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog = AlertDialog::new()
                 .actions([])
                 .clip_behavior(Clip::AntiAlias);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                material_from_dialog(&tester, |material| material.clip_behavior),
+                material_from_dialog(tester, |material| material.clip_behavior),
                 Clip::AntiAlias
             );
         });
@@ -3205,17 +3172,16 @@ pub(crate) mod tests {
 
     #[test]
     fn simple_dialog_custom_clip_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog = SimpleDialog::new()
                 .clip_behavior(Clip::AntiAlias)
                 .children([]);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                material_from_dialog(&tester, |material| material.clip_behavior),
+                material_from_dialog(tester, |material| material.clip_behavior),
                 Clip::AntiAlias
             );
         });
@@ -3223,19 +3189,18 @@ pub(crate) mod tests {
 
     #[test]
     fn simple_dialog_custom_content_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content_text = "Content";
             let content_text_style = TextStyle::new().color(Colors::PINK.primary());
             let dialog = SimpleDialog::new()
                 .content_text_style(content_text_style.clone())
                 .children([Text::new(content_text).into_widget()]);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                text_style_in_dialog(&tester, content_text),
+                text_style_in_dialog(tester, content_text),
                 Some(content_text_style)
             );
         });
@@ -3243,14 +3208,13 @@ pub(crate) mod tests {
 
     #[test]
     fn simple_dialog_custom_content_text_style_dialog_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content_text = "Content";
             let content_text_style = TextStyle::new().color(Colors::ORANGE.primary());
             let dialog = SimpleDialog::new().children([Text::new(content_text).into_widget()]);
             let theme_style = content_text_style.clone();
             pump_with_dialog(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .dialog_theme(DialogThemeData::new().content_text_style(theme_style))
@@ -3259,10 +3223,10 @@ pub(crate) mod tests {
                 dialog,
             );
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                text_style_in_dialog(&tester, content_text),
+                text_style_in_dialog(tester, content_text),
                 Some(content_text_style)
             );
         });
@@ -3270,14 +3234,13 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_simple_dialog_custom_content_text_style_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content_text = "Content";
             let content_text_style = TextStyle::new().color(Colors::PURPLE.primary());
             let dialog = SimpleDialog::new().children([Text::new(content_text).into_widget()]);
             let theme_style = content_text_style.clone();
             pump_with_dialog(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .text_theme(crate::text_theme::TextTheme::new().body_medium(theme_style))
@@ -3286,10 +3249,10 @@ pub(crate) mod tests {
                 dialog,
             );
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                text_style_in_dialog(&tester, content_text).and_then(|style| style.color),
+                text_style_in_dialog(tester, content_text).and_then(|style| style.color),
                 content_text_style.color
             );
         });
@@ -3297,14 +3260,13 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_simple_dialog_custom_content_text_style_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content_text = "Content";
             let content_text_style = TextStyle::new().color(Colors::TEAL.primary());
             let dialog = SimpleDialog::new().children([Text::new(content_text).into_widget()]);
             let theme_style = content_text_style.clone();
             pump_with_dialog(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .use_material3(false)
@@ -3314,10 +3276,10 @@ pub(crate) mod tests {
                 dialog,
             );
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                text_style_in_dialog(&tester, content_text).and_then(|style| style.color),
+                text_style_in_dialog(tester, content_text).and_then(|style| style.color),
                 content_text_style.color
             );
         });
@@ -3325,57 +3287,53 @@ pub(crate) mod tests {
 
     #[test]
     fn custom_dialog_shape() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_border = rounded(16.0);
             let dialog = AlertDialog::new().actions([]).shape(custom_border);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
-            assert_shape(&tester, &custom_border);
+            assert_shape(tester, &custom_border);
         });
     }
 
     #[test]
     fn null_dialog_shape() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog = AlertDialog::new().actions([]);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
-            assert_shape(&tester, &*default_m3_dialog_shape());
+            assert_shape(tester, &*default_m3_dialog_shape());
         });
     }
 
     #[test]
     fn rectangular_dialog_shape() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_border = Border::default();
             let dialog = AlertDialog::new().actions([]).shape(custom_border);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
-            assert_shape(&tester, &custom_border);
+            assert_shape(tester, &custom_border);
         });
     }
 
     #[test]
     fn custom_dialog_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog = AlertDialog::new()
                 .actions([])
                 .alignment(AlignmentGeometry::BOTTOM_LEFT);
-            pump_with_dialog(&mut tester, m3, dialog);
+            pump_with_dialog(tester, m3, dialog);
 
-            open(&mut tester);
+            open(tester);
 
-            let bottom_left = rect_of(&tester, dialog_material(&tester)).bottom_left();
+            let bottom_left = tester.get_rect(dialog_material(tester)).bottom_left();
             assert_eq!(bottom_left.dx(), 40.0);
             assert_eq!(bottom_left.dy(), 576.0);
         });
@@ -3404,18 +3362,17 @@ pub(crate) mod tests {
 
     #[test]
     fn simple_dialog_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let context = app_with_disabled_button(&mut tester, "Go");
+        test_widgets(|tester| {
+            let context = app_with_disabled_button(tester, "Go");
 
             let result = result_of::<i32>(
-                &tester,
-                Show::default().on(&tester, context, simple_dialog_popping_42()),
+                tester,
+                Show::default().on(tester, context, simple_dialog_popping_42()),
             );
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Title"), 1);
-            tap_text(&mut tester, "First option");
+            assert_eq!(shows(tester, "Title"), 1);
+            tester.tap(find::text("First option"));
 
             assert_eq!(result.get(), Some(Some(42)));
         });
@@ -3423,8 +3380,7 @@ pub(crate) mod tests {
 
     #[test]
     fn can_show_dialog_using_navigator_global_key() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let navigator = GlobalKey::new();
             let root = {
                 let app = tester.cell.borrow();
@@ -3440,13 +3396,13 @@ pub(crate) mod tests {
                 .current_context(&tester.cell.borrow())
                 .expect("the navigator is mounted");
             let result = result_of::<i32>(
-                &tester,
-                Show::default().on(&tester, context, simple_dialog_popping_42()),
+                tester,
+                Show::default().on(tester, context, simple_dialog_popping_42()),
             );
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Title"), 1);
-            tap_text(&mut tester, "First option");
+            assert_eq!(shows(tester, "Title"), 1);
+            tester.tap(find::text("First option"));
 
             assert_eq!(result.get(), Some(Some(42)));
         });
@@ -3454,8 +3410,7 @@ pub(crate) mod tests {
 
     #[test]
     fn custom_padding_on_simple_dialog_option() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_padding = EdgeInsets::from_ltrb(4.0, 10.0, 8.0, 6.0);
             let dialog =
                 SimpleDialog::new()
@@ -3465,14 +3420,12 @@ pub(crate) mod tests {
                         .padding(custom_padding)
                         .child(Text::new("First option"))
                         .into_widget()]);
-            pump_with_dialog(&mut tester, m3, dialog);
-            open(&mut tester);
+            pump_with_dialog(tester, m3, dialog);
+            open(tester);
 
-            let dialog_rect = rect_of(
-                &tester,
-                only(tester.find_onstage_by_type::<SimpleDialogOption>()),
-            );
-            let text_rect = text_rect(&tester, "First option");
+            let dialog_rect =
+                tester.get_rect(tester.element(find::by_type::<SimpleDialogOption>()));
+            let text_rect = tester.get_rect(find::text("First option"));
 
             assert_eq!(text_rect.left, dialog_rect.left + custom_padding.left);
             assert_eq!(text_rect.top, dialog_rect.top + custom_padding.top);
@@ -3496,40 +3449,39 @@ pub(crate) mod tests {
 
     #[test]
     fn barrier_dismissible() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let context = app_with_disabled_button(&mut tester, "Go");
+        test_widgets(|tester| {
+            let context = app_with_disabled_button(tester, "Go");
 
-            drop(Show::default().on(&tester, context, hundred_square("Dialog1")));
+            drop(Show::default().on(tester, context, hundred_square("Dialog1")));
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog1"), 1);
+            assert_eq!(shows(tester, "Dialog1"), 1);
 
             // Tap on the barrier.
-            tap_at(&mut tester, Offset::new(10.0, 10.0));
+            tap_at(tester, Offset::new(10.0, 10.0));
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog1"), 0);
+            assert_eq!(shows(tester, "Dialog1"), 0);
 
             let show = Show {
                 barrier_dismissible: false,
                 ..Show::default()
             };
-            drop(show.on(&tester, context, hundred_square("Dialog2")));
+            drop(show.on(tester, context, hundred_square("Dialog2")));
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog2"), 1);
+            assert_eq!(shows(tester, "Dialog2"), 1);
 
             // Tap on the barrier, which shouldn't do anything this time.
-            tap_at(&mut tester, Offset::new(10.0, 10.0));
+            tap_at(tester, Offset::new(10.0, 10.0));
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog2"), 1);
+            assert_eq!(shows(tester, "Dialog2"), 1);
         });
     }
 
     pub(crate) fn last_barrier_color(tester: &WidgetTester) -> Option<Color> {
-        let barriers = tester.find_by_type::<waft_widgets::ModalBarrier>();
+        let barriers = find::by_type::<waft_widgets::ModalBarrier>().evaluate(tester);
         tester.widget::<waft_widgets::ModalBarrier, _>(
             *barriers.last().expect("a modal barrier"),
             |barrier| barrier.color,
@@ -3538,39 +3490,28 @@ pub(crate) mod tests {
 
     #[test]
     fn barrier_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new().child(Text::new("Test")).into_widget()
             });
-            let context = tester.find_text("Test")[0];
+            let context = find::text("Test").evaluate(tester)[0];
             let dialog: WidgetBuilder = Rc::new(|_app, _context| Text::new("Dialog").into_widget());
 
             // Test default barrier color
-            drop(Show::default().on(&tester, context, Rc::clone(&dialog)));
+            drop(Show::default().on(tester, context, Rc::clone(&dialog)));
             tester.pump_and_settle();
-            assert_eq!(last_barrier_color(&tester), Some(Colors::BLACK54));
+            assert_eq!(last_barrier_color(tester), Some(Colors::BLACK54));
 
             // Dismiss it and test a custom barrier color
-            tap_at(&mut tester, Offset::new(10.0, 10.0));
+            tap_at(tester, Offset::new(10.0, 10.0));
             let show = Show {
                 barrier_color: Some(Colors::PINK.primary()),
                 ..Show::default()
             };
-            drop(show.on(&tester, context, dialog));
+            drop(show.on(tester, context, dialog));
             tester.pump_and_settle();
-            assert_eq!(last_barrier_color(&tester), Some(Colors::PINK.primary()));
+            assert_eq!(last_barrier_color(tester), Some(Colors::PINK.primary()));
         });
-    }
-
-    /// Dart's `expect(actual, expected)` and `moreOrLessEquals` on positions that went through
-    /// a render object's transform: `Matrix4` is valo's f32 matrix, so they carry f32 rounding
-    /// that Dart's f64 has not, and nothing more.
-    fn assert_near(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() <= f64::from(f32::EPSILON) * expected.abs().max(1.0),
-            "{actual} is not {expected}"
-        );
     }
 
     /// Dart's `ElevatedButton(key: key, onPressed: () {}, child: Text(text))`.
@@ -3587,26 +3528,27 @@ pub(crate) mod tests {
 
     /// The size of the first `Material` under the `AlertDialog`: the dialog itself.
     fn alert_dialog_material_size(tester: &WidgetTester) -> Size {
-        let dialog = tester.find_by_type::<AlertDialog>()[0];
-        rect_of(tester, tester.descendants_of_type::<Material>(dialog)[0]).size()
+        let dialog = find::by_type::<AlertDialog>().evaluate(tester)[0];
+        tester
+            .get_rect(tester.descendants_of_type::<Material>(dialog)[0])
+            .size()
     }
 
     #[test]
     fn alert_dialog_actions_padding_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog = AlertDialog::new()
                 .title(Text::new("title"))
                 .content(Text::new("content"))
                 .actions([button(None, "button")]);
-            pump_with_dialog(&mut tester, m3, dialog);
-            open(&mut tester);
+            pump_with_dialog(tester, m3, dialog);
+            open(tester);
 
             // The [AlertDialog] is the entire screen, since it also contains the scrim.
             // The first [Material] child of [AlertDialog] is the actual dialog
             // itself.
-            let dialog_size = alert_dialog_material_size(&tester);
-            let actions_size = overflow_bar_padding(&tester).size();
+            let dialog_size = alert_dialog_material_size(tester);
+            let actions_size = overflow_bar_padding(tester).size();
 
             assert_eq!(actions_size.width(), dialog_size.width());
         });
@@ -3614,8 +3556,7 @@ pub(crate) mod tests {
 
     #[test]
     fn alert_dialog_actions_padding_surrounds_actions_with_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog = AlertDialog::new()
                 .title(Text::new("title"))
                 .content(Text::new("content"))
@@ -3623,11 +3564,13 @@ pub(crate) mod tests {
                 // The OverflowBar is inset by the buttonPadding/2 + actionsPadding
                 .button_padding(EdgeInsetsGeometry::ZERO)
                 .actions_padding(EdgeInsetsGeometry::all(30.0));
-            pump_with_dialog(&mut tester, m3, dialog);
-            open(&mut tester);
+            pump_with_dialog(tester, m3, dialog);
+            open(tester);
 
-            let dialog_size = alert_dialog_material_size(&tester);
-            let actions_size = rect_of(&tester, tester.find_by_type::<OverflowBar>()[0]).size();
+            let dialog_size = alert_dialog_material_size(tester);
+            let actions_size = tester
+                .get_rect(find::by_type::<OverflowBar>().evaluate(tester)[0])
+                .size();
 
             assert_eq!(actions_size.width(), dialog_size.width() - (30.0 * 2.0));
         });
@@ -3636,6 +3579,7 @@ pub(crate) mod tests {
     /// Dart's `AlertDialog.buttonPadding` cases: `spacing` between the buttons and
     /// `top`, `bottom` and `right` between them and the bar's padding edges.
     fn check_button_padding(
+        tester: &mut WidgetTester,
         theme: impl FnOnce(&App) -> ThemeData,
         button_padding: Option<EdgeInsetsGeometry>,
         spacing: f64,
@@ -3643,7 +3587,6 @@ pub(crate) mod tests {
         bottom: f64,
         right: f64,
     ) {
-        let mut tester = tester();
         let key1 = GlobalKey::new();
         let key2 = GlobalKey::new();
         let mut dialog = AlertDialog::new()
@@ -3654,49 +3597,50 @@ pub(crate) mod tests {
                 button(Some(&key2), "button 2"),
             ]);
         dialog.button_padding = button_padding;
-        pump_with_dialog(&mut tester, theme, dialog);
-        open(&mut tester);
+        pump_with_dialog(tester, theme, dialog);
+        open(tester);
 
-        let rect1 = rect_of_key(&tester, &key1);
-        let rect2 = rect_of_key(&tester, &key2);
-        let bar = overflow_bar_padding(&tester);
+        let rect1 = rect_of_key(tester, &key1);
+        let rect2 = rect_of_key(tester, &key2);
+        let bar = overflow_bar_padding(tester);
 
         // Padding between both buttons
-        assert_near(
+        assert_f32_equals(
             rect2.bottom_left().dx(),
             rect1.bottom_right().dx() + spacing,
         );
 
         // Padding between button and edges of the button bar
         // First button
-        assert_near(rect1.top_right().dy(), bar.top_right().dy() + top);
-        assert_near(rect1.bottom_right().dy(), bar.bottom_right().dy() - bottom);
+        assert_f32_equals(rect1.top_right().dy(), bar.top_right().dy() + top);
+        assert_f32_equals(rect1.bottom_right().dy(), bar.bottom_right().dy() - bottom);
 
         // Second button
-        assert_near(rect2.top_right().dy(), bar.top_right().dy() + top);
-        assert_near(rect2.bottom_right().dy(), bar.bottom_right().dy() - bottom);
-        assert_near(rect2.bottom_right().dx(), bar.bottom_right().dx() - right);
+        assert_f32_equals(rect2.top_right().dy(), bar.top_right().dy() + top);
+        assert_f32_equals(rect2.bottom_right().dy(), bar.bottom_right().dy() - bottom);
+        assert_f32_equals(rect2.bottom_right().dx(), bar.bottom_right().dx() - right);
     }
 
     #[test]
     fn material2_alert_dialog_button_padding_defaults() {
-        with_main_thread_stack(|| {
-            check_button_padding(material2_theme, None, 8.0, 8.0, 8.0, 8.0);
+        test_widgets(|tester| {
+            check_button_padding(tester, material2_theme, None, 8.0, 8.0, 8.0, 8.0);
         });
     }
 
     #[test]
     fn material3_alert_dialog_button_padding_defaults() {
-        with_main_thread_stack(|| {
-            check_button_padding(material3_theme, None, 8.0, 0.0, 24.0, 24.0);
+        test_widgets(|tester| {
+            check_button_padding(tester, material3_theme, None, 8.0, 0.0, 24.0, 24.0);
         });
     }
 
     #[test]
     fn alert_dialog_button_padding_custom_values() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let half = (10.0 + 20.0) / 2.0;
             check_button_padding(
+                tester,
                 m2,
                 Some(EdgeInsetsGeometry::only(10.0, 0.0, 20.0, 0.0)),
                 half,
@@ -3789,25 +3733,24 @@ pub(crate) mod tests {
         }
 
         fn dialog_rect(tester: &WidgetTester) -> Rect {
-            rect_of(tester, dialog_material(tester))
+            tester.get_rect(dialog_material(tester))
         }
 
         /// Dart's `openDialog(tester, dialog, textScaleFactor, isM3:)`.
         fn open_dialog<K>(
+            tester: &mut WidgetTester,
             dialog: impl IntoWidget<K>,
             text_scale_factor: f64,
             is_m3: bool,
-        ) -> WidgetTester {
-            let mut tester = tester();
+        ) {
             app_with_dialog(
-                &mut tester,
+                tester,
                 move |app| ThemeData::builder().use_material3(is_m3).build(app),
                 dialog.into_widget(),
                 text_scale_factor,
                 None,
             );
-            open(&mut tester);
-            tester
+            open(tester);
         }
 
         fn expect_left_edge_padding(
@@ -3819,8 +3762,8 @@ pub(crate) mod tests {
             let dialog = dialog_rect(tester);
             let found = rect(tester, finder);
             let padding = unscaled_value * padding_scale_factor(text_scale_factor);
-            assert_near(dialog.top_left().dx(), found.top_left().dx() - padding);
-            assert_near(
+            assert_f32_equals(dialog.top_left().dx(), found.top_left().dx() - padding);
+            assert_f32_equals(
                 dialog.bottom_left().dx(),
                 found.bottom_left().dx() - padding,
             );
@@ -3835,8 +3778,8 @@ pub(crate) mod tests {
             let dialog = dialog_rect(tester);
             let found = rect(tester, finder);
             let padding = unscaled_value * padding_scale_factor(text_scale_factor);
-            assert_near(dialog.top_right().dx(), found.top_right().dx() + padding);
-            assert_near(
+            assert_f32_equals(dialog.top_right().dx(), found.top_right().dx() + padding);
+            assert_f32_equals(
                 dialog.bottom_right().dx(),
                 found.bottom_right().dx() + padding,
             );
@@ -3851,8 +3794,8 @@ pub(crate) mod tests {
             let dialog = dialog_rect(tester);
             let found = rect(tester, finder);
             let padding = unscaled_value * padding_scale_factor(text_scale_factor);
-            assert_near(dialog.top_left().dy(), found.top_left().dy() - padding);
-            assert_near(dialog.top_right().dy(), found.top_right().dy() - padding);
+            assert_f32_equals(dialog.top_left().dy(), found.top_left().dy() - padding);
+            assert_f32_equals(dialog.top_right().dy(), found.top_right().dy() - padding);
         }
 
         fn expect_bottom_edge_padding(
@@ -3864,11 +3807,11 @@ pub(crate) mod tests {
             let dialog = dialog_rect(tester);
             let found = rect(tester, finder);
             let padding = unscaled_value * padding_scale_factor(text_scale_factor);
-            assert_near(
+            assert_f32_equals(
                 dialog.bottom_left().dy(),
                 found.bottom_right().dy() + padding,
             );
-            assert_near(
+            assert_f32_equals(
                 dialog.bottom_right().dy(),
                 found.bottom_right().dy() + padding,
             );
@@ -3882,8 +3825,8 @@ pub(crate) mod tests {
         ) {
             let top = rect(tester, top);
             let bottom = rect(tester, bottom);
-            assert_near(top.bottom_left().dy(), bottom.top_left().dy() - value);
-            assert_near(top.bottom_right().dy(), bottom.top_right().dy() - value);
+            assert_f32_equals(top.bottom_left().dy(), bottom.top_left().dy() - value);
+            assert_f32_equals(top.bottom_right().dy(), bottom.top_right().dy() - value);
         }
 
         fn expect_actions_at_the_edges(tester: &WidgetTester, text_scale_factor: f64) {
@@ -3894,184 +3837,184 @@ pub(crate) mod tests {
 
         #[test]
         fn alert_dialog_padding_is_correct_when_only_icon_and_actions_are_specified() {
-            with_main_thread_stack(|| {
-                for text_scale_factor in TEXT_SCALE_FACTORS {
+            for text_scale_factor in TEXT_SCALE_FACTORS {
+                test_widgets(|tester| {
                     let parts = Parts::new();
                     let dialog = AlertDialog::new()
                         .icon(parts.icon())
                         .actions(parts.actions());
-                    let tester = open_dialog(dialog, text_scale_factor, false);
+                    open_dialog(tester, dialog, text_scale_factor, false);
                     let icon = || Part::Key(&parts.icon_key);
 
-                    expect_top_edge_padding(&tester, icon(), text_scale_factor, 24.0);
-                    expect_left_edge_padding(&tester, icon(), text_scale_factor, 24.0);
-                    expect_right_edge_padding(&tester, icon(), text_scale_factor, 24.0);
-                    expect_vertical_inner_padding(&tester, icon(), Part::Actions, 24.0);
-                    expect_actions_at_the_edges(&tester, text_scale_factor);
-                }
-            });
+                    expect_top_edge_padding(tester, icon(), text_scale_factor, 24.0);
+                    expect_left_edge_padding(tester, icon(), text_scale_factor, 24.0);
+                    expect_right_edge_padding(tester, icon(), text_scale_factor, 24.0);
+                    expect_vertical_inner_padding(tester, icon(), Part::Actions, 24.0);
+                    expect_actions_at_the_edges(tester, text_scale_factor);
+                });
+            }
         }
 
         #[test]
         fn alert_dialog_padding_is_correct_when_only_icon_title_and_actions_are_specified() {
-            with_main_thread_stack(|| {
-                for text_scale_factor in TEXT_SCALE_FACTORS {
+            for text_scale_factor in TEXT_SCALE_FACTORS {
+                test_widgets(|tester| {
                     let parts = Parts::new();
                     let dialog = AlertDialog::new()
                         .icon(parts.icon())
                         .title(parts.title())
                         .actions(parts.actions());
-                    let tester = open_dialog(dialog, text_scale_factor, false);
+                    open_dialog(tester, dialog, text_scale_factor, false);
                     let icon = || Part::Key(&parts.icon_key);
                     let title = || Part::Key(&parts.title_key);
 
-                    expect_top_edge_padding(&tester, icon(), text_scale_factor, 24.0);
-                    expect_left_edge_padding(&tester, icon(), text_scale_factor, 24.0);
-                    expect_right_edge_padding(&tester, icon(), text_scale_factor, 24.0);
-                    expect_vertical_inner_padding(&tester, icon(), title(), 16.0);
-                    expect_left_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_right_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_vertical_inner_padding(&tester, title(), Part::Actions, 20.0);
-                    expect_actions_at_the_edges(&tester, text_scale_factor);
-                }
-            });
+                    expect_top_edge_padding(tester, icon(), text_scale_factor, 24.0);
+                    expect_left_edge_padding(tester, icon(), text_scale_factor, 24.0);
+                    expect_right_edge_padding(tester, icon(), text_scale_factor, 24.0);
+                    expect_vertical_inner_padding(tester, icon(), title(), 16.0);
+                    expect_left_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_right_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_vertical_inner_padding(tester, title(), Part::Actions, 20.0);
+                    expect_actions_at_the_edges(tester, text_scale_factor);
+                });
+            }
         }
 
         #[test]
         fn alert_dialog_padding_is_correct_when_only_icon_content_and_actions_are_specified() {
-            with_main_thread_stack(|| {
-                for text_scale_factor in TEXT_SCALE_FACTORS {
-                    for is_m3 in [true, false] {
+            for text_scale_factor in TEXT_SCALE_FACTORS {
+                for is_m3 in [true, false] {
+                    test_widgets(|tester| {
                         let parts = Parts::new();
                         let dialog = AlertDialog::new()
                             .icon(parts.icon())
                             .content(parts.content())
                             .actions(parts.actions());
-                        let tester = open_dialog(dialog, text_scale_factor, is_m3);
+                        open_dialog(tester, dialog, text_scale_factor, is_m3);
                         let icon = || Part::Key(&parts.icon_key);
                         let content = || Part::Key(&parts.content_key);
 
-                        expect_top_edge_padding(&tester, icon(), text_scale_factor, 24.0);
-                        expect_left_edge_padding(&tester, icon(), text_scale_factor, 24.0);
-                        expect_right_edge_padding(&tester, icon(), text_scale_factor, 24.0);
+                        expect_top_edge_padding(tester, icon(), text_scale_factor, 24.0);
+                        expect_left_edge_padding(tester, icon(), text_scale_factor, 24.0);
+                        expect_right_edge_padding(tester, icon(), text_scale_factor, 24.0);
                         expect_vertical_inner_padding(
-                            &tester,
+                            tester,
                             icon(),
                             content(),
                             if is_m3 { 16.0 } else { 20.0 },
                         );
-                        expect_left_edge_padding(&tester, content(), text_scale_factor, 24.0);
-                        expect_right_edge_padding(&tester, content(), text_scale_factor, 24.0);
-                        expect_vertical_inner_padding(&tester, content(), Part::Actions, 24.0);
-                        expect_actions_at_the_edges(&tester, text_scale_factor);
-                    }
+                        expect_left_edge_padding(tester, content(), text_scale_factor, 24.0);
+                        expect_right_edge_padding(tester, content(), text_scale_factor, 24.0);
+                        expect_vertical_inner_padding(tester, content(), Part::Actions, 24.0);
+                        expect_actions_at_the_edges(tester, text_scale_factor);
+                    });
                 }
-            });
+            }
         }
 
         #[test]
         fn alert_dialog_padding_is_correct_when_only_title_and_actions_are_specified() {
-            with_main_thread_stack(|| {
-                for text_scale_factor in TEXT_SCALE_FACTORS {
+            for text_scale_factor in TEXT_SCALE_FACTORS {
+                test_widgets(|tester| {
                     let parts = Parts::new();
                     let dialog = AlertDialog::new()
                         .title(parts.title())
                         .actions(parts.actions());
-                    let tester = open_dialog(dialog, text_scale_factor, false);
+                    open_dialog(tester, dialog, text_scale_factor, false);
                     let title = || Part::Key(&parts.title_key);
 
-                    expect_top_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_left_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_right_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_vertical_inner_padding(&tester, title(), Part::Actions, 20.0);
-                    expect_actions_at_the_edges(&tester, text_scale_factor);
-                }
-            });
+                    expect_top_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_left_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_right_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_vertical_inner_padding(tester, title(), Part::Actions, 20.0);
+                    expect_actions_at_the_edges(tester, text_scale_factor);
+                });
+            }
         }
 
         #[test]
         fn alert_dialog_padding_is_correct_when_only_content_and_actions_are_specified() {
-            with_main_thread_stack(|| {
-                for text_scale_factor in TEXT_SCALE_FACTORS {
+            for text_scale_factor in TEXT_SCALE_FACTORS {
+                test_widgets(|tester| {
                     let parts = Parts::new();
                     let dialog = AlertDialog::new()
                         .content(parts.content())
                         .actions(parts.actions());
-                    let tester = open_dialog(dialog, text_scale_factor, false);
+                    open_dialog(tester, dialog, text_scale_factor, false);
                     let content = || Part::Key(&parts.content_key);
 
-                    expect_top_edge_padding(&tester, content(), text_scale_factor, 20.0);
-                    expect_left_edge_padding(&tester, content(), text_scale_factor, 24.0);
-                    expect_right_edge_padding(&tester, content(), text_scale_factor, 24.0);
-                    expect_vertical_inner_padding(&tester, content(), Part::Actions, 24.0);
-                    expect_actions_at_the_edges(&tester, text_scale_factor);
-                }
-            });
+                    expect_top_edge_padding(tester, content(), text_scale_factor, 20.0);
+                    expect_left_edge_padding(tester, content(), text_scale_factor, 24.0);
+                    expect_right_edge_padding(tester, content(), text_scale_factor, 24.0);
+                    expect_vertical_inner_padding(tester, content(), Part::Actions, 24.0);
+                    expect_actions_at_the_edges(tester, text_scale_factor);
+                });
+            }
         }
 
         #[test]
         fn alert_dialog_padding_is_correct_when_title_content_and_actions_are_specified() {
-            with_main_thread_stack(|| {
-                for text_scale_factor in TEXT_SCALE_FACTORS {
+            for text_scale_factor in TEXT_SCALE_FACTORS {
+                test_widgets(|tester| {
                     let parts = Parts::new();
                     let dialog = AlertDialog::new()
                         .title(parts.title())
                         .content(parts.content())
                         .actions(parts.actions());
-                    let tester = open_dialog(dialog, text_scale_factor, false);
+                    open_dialog(tester, dialog, text_scale_factor, false);
                     let title = || Part::Key(&parts.title_key);
                     let content = || Part::Key(&parts.content_key);
 
-                    expect_top_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_left_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_right_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_vertical_inner_padding(&tester, title(), content(), 20.0);
-                    expect_left_edge_padding(&tester, content(), text_scale_factor, 24.0);
-                    expect_right_edge_padding(&tester, content(), text_scale_factor, 24.0);
-                    expect_vertical_inner_padding(&tester, content(), Part::Actions, 24.0);
-                    expect_actions_at_the_edges(&tester, text_scale_factor);
-                }
-            });
+                    expect_top_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_left_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_right_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_vertical_inner_padding(tester, title(), content(), 20.0);
+                    expect_left_edge_padding(tester, content(), text_scale_factor, 24.0);
+                    expect_right_edge_padding(tester, content(), text_scale_factor, 24.0);
+                    expect_vertical_inner_padding(tester, content(), Part::Actions, 24.0);
+                    expect_actions_at_the_edges(tester, text_scale_factor);
+                });
+            }
         }
 
         #[test]
         fn simple_dialog_padding_is_correct_when_only_children_are_specified() {
-            with_main_thread_stack(|| {
-                for text_scale_factor in TEXT_SCALE_FACTORS {
+            for text_scale_factor in TEXT_SCALE_FACTORS {
+                test_widgets(|tester| {
                     let parts = Parts::new();
                     let dialog = SimpleDialog::new().children(parts.children());
-                    let tester = open_dialog(dialog, text_scale_factor, false);
+                    open_dialog(tester, dialog, text_scale_factor, false);
                     let children = || Part::Key(&parts.children_key);
 
-                    expect_top_edge_padding(&tester, children(), text_scale_factor, 12.0);
-                    expect_left_edge_padding(&tester, children(), text_scale_factor, 0.0);
-                    expect_right_edge_padding(&tester, children(), text_scale_factor, 0.0);
-                    expect_bottom_edge_padding(&tester, children(), text_scale_factor, 16.0);
-                }
-            });
+                    expect_top_edge_padding(tester, children(), text_scale_factor, 12.0);
+                    expect_left_edge_padding(tester, children(), text_scale_factor, 0.0);
+                    expect_right_edge_padding(tester, children(), text_scale_factor, 0.0);
+                    expect_bottom_edge_padding(tester, children(), text_scale_factor, 16.0);
+                });
+            }
         }
 
         #[test]
         fn simple_dialog_padding_is_correct_when_title_and_children_are_specified() {
-            with_main_thread_stack(|| {
-                for text_scale_factor in TEXT_SCALE_FACTORS {
+            for text_scale_factor in TEXT_SCALE_FACTORS {
+                test_widgets(|tester| {
                     let parts = Parts::new();
                     let dialog = SimpleDialog::new()
                         .title(parts.title())
                         .children(parts.children());
-                    let tester = open_dialog(dialog, text_scale_factor, false);
+                    open_dialog(tester, dialog, text_scale_factor, false);
                     let title = || Part::Key(&parts.title_key);
                     let children = || Part::Key(&parts.children_key);
 
-                    expect_top_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_left_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_right_edge_padding(&tester, title(), text_scale_factor, 24.0);
-                    expect_vertical_inner_padding(&tester, title(), children(), 12.0);
-                    expect_left_edge_padding(&tester, children(), text_scale_factor, 0.0);
-                    expect_right_edge_padding(&tester, children(), text_scale_factor, 0.0);
-                    expect_bottom_edge_padding(&tester, children(), text_scale_factor, 16.0);
-                }
-            });
+                    expect_top_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_left_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_right_edge_padding(tester, title(), text_scale_factor, 24.0);
+                    expect_vertical_inner_padding(tester, title(), children(), 12.0);
+                    expect_left_edge_padding(tester, children(), text_scale_factor, 0.0);
+                    expect_right_edge_padding(tester, children(), text_scale_factor, 0.0);
+                    expect_bottom_edge_padding(tester, children(), text_scale_factor, 16.0);
+                });
+            }
         }
     }
 
@@ -4099,16 +4042,15 @@ pub(crate) mod tests {
 
     #[test]
     fn dialogs_can_set_the_vertical_direction_of_overflowing_actions() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
             let dialog =
                 overflowing_dialog(&key1, &key2).actions_overflow_direction(VerticalDirection::Up);
-            pump_with_dialog(&mut tester, m3, dialog);
-            open(&mut tester);
+            pump_with_dialog(tester, m3, dialog);
+            open(tester);
 
-            let button_one_rect = rect_of_key(&tester, &key1);
-            let button_two_rect = rect_of_key(&tester, &key2);
+            let button_one_rect = rect_of_key(tester, &key1);
+            let button_two_rect = rect_of_key(tester, &key2);
             // Second [ElevatedButton] should appear above the first.
             assert!(button_two_rect.bottom <= button_one_rect.top);
         });
@@ -4116,37 +4058,34 @@ pub(crate) mod tests {
 
     #[test]
     fn dialogs_have_no_spacing_by_default_for_overflowing_actions() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-            pump_with_dialog(&mut tester, m3, overflowing_dialog(&key1, &key2));
-            open(&mut tester);
+            pump_with_dialog(tester, m3, overflowing_dialog(&key1, &key2));
+            open(tester);
 
-            let button_one_rect = rect_of_key(&tester, &key1);
-            let button_two_rect = rect_of_key(&tester, &key2);
-            assert_near(button_one_rect.bottom, button_two_rect.top);
+            let button_one_rect = rect_of_key(tester, &key1);
+            let button_two_rect = rect_of_key(tester, &key2);
+            assert_f32_equals(button_one_rect.bottom, button_two_rect.top);
         });
     }
 
     #[test]
     fn dialogs_can_set_the_button_spacing_of_overflowing_actions() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
             let dialog = overflowing_dialog(&key1, &key2).actions_overflow_button_spacing(10.0);
-            pump_with_dialog(&mut tester, m3, dialog);
-            open(&mut tester);
+            pump_with_dialog(tester, m3, dialog);
+            open(tester);
 
-            let button_one_rect = rect_of_key(&tester, &key1);
-            let button_two_rect = rect_of_key(&tester, &key2);
-            assert_near(button_one_rect.bottom, button_two_rect.top - 10.0);
+            let button_one_rect = rect_of_key(tester, &key1);
+            let button_two_rect = rect_of_key(tester, &key2);
+            assert_f32_equals(button_one_rect.bottom, button_two_rect.top - 10.0);
         });
     }
 
     #[test]
     fn dialogs_can_set_the_alignment_of_the_overflow_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
             let dialog = AlertDialog::new()
                 .title(Text::new("title"))
@@ -4158,12 +4097,12 @@ pub(crate) mod tests {
                     "Loooooooooooooonger button 2",
                 ))
                 .actions_overflow_alignment(OverflowBarAlignment::Center);
-            pump_with_dialog(&mut tester, m3, dialog);
-            open(&mut tester);
+            pump_with_dialog(tester, m3, dialog);
+            open(tester);
 
-            let button_one_rect = rect_of_key(&tester, &key1);
-            let button_two_rect = rect_of_key(&tester, &key2);
-            assert_near(button_one_rect.center().dx(), button_two_rect.center().dx());
+            let button_one_rect = rect_of_key(tester, &key1);
+            let button_two_rect = rect_of_key(tester, &key2);
+            assert_f32_equals(button_one_rect.center().dx(), button_two_rect.center().dx());
         });
     }
 
@@ -4208,8 +4147,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dialogs_removes_media_query_padding_and_view_insets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let outer_context = context_cell();
             let route_context = context_cell();
             let dialog_context = context_cell();
@@ -4234,7 +4172,7 @@ pub(crate) mod tests {
                 ..Show::default()
             };
             drop(show.on(
-                &tester,
+                tester,
                 seen(&outer_context),
                 Rc::new(move |_app, context| {
                     route.set(Some(context));
@@ -4248,7 +4186,7 @@ pub(crate) mod tests {
                 }),
             ));
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let mut app = tester.cell.borrow_mut();
             let padding = |app: &mut App, context: &Cell<Option<BuildContext>>| {
@@ -4274,8 +4212,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dialog_widget_insets_by_view_insets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(
                 MediaQuery::new(
@@ -4291,7 +4228,7 @@ pub(crate) mod tests {
                 800.0 - (40.0 + 30.0),
                 600.0 - (24.0 + 40.0),
             );
-            assert_eq!(rect_of_key(&tester, &key), inset);
+            assert_eq!(rect_of_key(tester, &key), inset);
             tester.pump_widget(
                 MediaQuery::new(
                     MediaQueryData::new(),
@@ -4300,11 +4237,11 @@ pub(crate) mod tests {
                 .into_widget(),
             );
             // no change because this is an animation
-            assert_eq!(rect_of_key(&tester, &key), inset);
-            tester.pump(Duration::from_secs(1));
+            assert_eq!(rect_of_key(tester, &key), inset);
+            tester.pump_by(Duration::from_secs(1));
             // animation finished
             assert_eq!(
-                rect_of_key(&tester, &key),
+                rect_of_key(tester, &key),
                 Rect::from_ltrb(40.0, 24.0, 800.0 - 40.0, 600.0 - 24.0)
             );
         });
@@ -4312,8 +4249,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dialog_inset_padding_added_to_outside_of_dialog() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             // The default testing screen (800, 600)
             let screen_rect = Rect::from_ltrb(0.0, 0.0, 800.0, 600.0);
@@ -4329,7 +4265,7 @@ pub(crate) mod tests {
                 .into_widget(),
             );
             tester.pump_and_settle();
-            assert_eq!(rect_of_key(&tester, &key), screen_rect);
+            assert_eq!(rect_of_key(tester, &key), screen_rect);
 
             // Test with an insetPadding.
             tester.pump_widget(
@@ -4343,7 +4279,7 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             assert_eq!(
-                rect_of_key(&tester, &key),
+                rect_of_key(tester, &key),
                 Rect::from_ltrb(
                     screen_rect.left + 10.0,
                     screen_rect.top + 20.0,
@@ -4356,8 +4292,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dialog_fullscreen_material_extends_behind_the_keyboard_child_stays_above_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let child_context = context_cell();
             let dialog = |key: &GlobalKey, child_context: &Rc<Cell<Option<BuildContext>>>| {
@@ -4368,7 +4303,7 @@ pub(crate) mod tests {
                     placeholder(&key)
                 }))
             };
-            let material_rect = |tester: &WidgetTester| rect_of(tester, dialog_material(tester));
+            let material_rect = |tester: &WidgetTester| tester.get_rect(dialog_material(tester));
 
             tester.pump_widget(
                 MediaQuery::new(
@@ -4380,7 +4315,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             // The child is kept above the keyboard and does not see the inset.
             assert_eq!(
-                rect_of_key(&tester, &key),
+                rect_of_key(tester, &key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 400.0)
             );
             assert_eq!(
@@ -4390,7 +4325,7 @@ pub(crate) mod tests {
             // The dialog's surface keeps covering the whole screen, including the
             // area behind the keyboard.
             assert_eq!(
-                material_rect(&tester),
+                material_rect(tester),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0)
             );
 
@@ -4400,11 +4335,11 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             assert_eq!(
-                rect_of_key(&tester, &key),
+                rect_of_key(tester, &key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0)
             );
             assert_eq!(
-                material_rect(&tester),
+                material_rect(tester),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0)
             );
         });
@@ -4413,7 +4348,7 @@ pub(crate) mod tests {
     /// Dart's `AlertDialog.scrollable` cases: drags `drag` by `dy` and expects every one of
     /// `moved` to have moved by `dy` from where it was.
     fn drag_key(tester: &mut WidgetTester, key: &GlobalKey, dy: f64) {
-        let start = tester.center_of(key);
+        let start = tester.get_center(key);
         tester.drag_from(start, Offset::new(0.0, dy), 1);
     }
 
@@ -4434,19 +4369,18 @@ pub(crate) mod tests {
 
         #[test]
         fn title_is_scrollable() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let title_key = GlobalKey::new();
                 let dialog = AlertDialog::new()
                     .title(keyed_box(&title_key, Colors::GREEN.primary(), 1000.0))
                     .scrollable(true);
-                pump_with_dialog(&mut tester, m3, dialog);
-                open(&mut tester);
+                pump_with_dialog(tester, m3, dialog);
+                open(tester);
 
-                let original_offset = origin_of(&tester, &title_key);
-                drag_key(&mut tester, &title_key, -200.0);
+                let original_offset = origin_of(tester, &title_key);
+                drag_key(tester, &title_key, -200.0);
                 assert_eq!(
-                    origin_of(&tester, &title_key),
+                    origin_of(tester, &title_key),
                     original_offset.translate(0.0, -200.0)
                 );
             });
@@ -4454,19 +4388,18 @@ pub(crate) mod tests {
 
         #[test]
         fn content_is_scrollable() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let content_key = GlobalKey::new();
                 let dialog = AlertDialog::new()
                     .content(keyed_box(&content_key, Colors::ORANGE.primary(), 1000.0))
                     .scrollable(true);
-                pump_with_dialog(&mut tester, m3, dialog);
-                open(&mut tester);
+                pump_with_dialog(tester, m3, dialog);
+                open(tester);
 
-                let original_offset = origin_of(&tester, &content_key);
-                drag_key(&mut tester, &content_key, -200.0);
+                let original_offset = origin_of(tester, &content_key);
+                drag_key(tester, &content_key, -200.0);
                 assert_eq!(
-                    origin_of(&tester, &content_key),
+                    origin_of(tester, &content_key),
                     original_offset.translate(0.0, -200.0)
                 );
             });
@@ -4474,37 +4407,36 @@ pub(crate) mod tests {
 
         #[test]
         fn title_and_content_are_scrollable() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let title_key = GlobalKey::new();
                 let content_key = GlobalKey::new();
                 let dialog = AlertDialog::new()
                     .title(keyed_box(&title_key, Colors::GREEN.primary(), 400.0))
                     .content(keyed_box(&content_key, Colors::ORANGE.primary(), 400.0))
                     .scrollable(true);
-                pump_with_dialog(&mut tester, m3, dialog);
-                open(&mut tester);
+                pump_with_dialog(tester, m3, dialog);
+                open(tester);
 
-                let title_original_offset = origin_of(&tester, &title_key);
-                let content_original_offset = origin_of(&tester, &content_key);
+                let title_original_offset = origin_of(tester, &title_key);
+                let content_original_offset = origin_of(tester, &content_key);
 
                 // Dragging the title widget should scroll both the title
                 // and the content widgets.
-                drag_key(&mut tester, &title_key, -200.0);
+                drag_key(tester, &title_key, -200.0);
                 assert_eq!(
-                    origin_of(&tester, &title_key),
+                    origin_of(tester, &title_key),
                     title_original_offset.translate(0.0, -200.0)
                 );
                 assert_eq!(
-                    origin_of(&tester, &content_key),
+                    origin_of(tester, &content_key),
                     content_original_offset.translate(0.0, -200.0)
                 );
 
                 // Dragging the content widget should scroll both the title
                 // and the content widgets.
-                drag_key(&mut tester, &content_key, 200.0);
-                assert_eq!(origin_of(&tester, &title_key), title_original_offset);
-                assert_eq!(origin_of(&tester, &content_key), content_original_offset);
+                drag_key(tester, &content_key, 200.0);
+                assert_eq!(origin_of(tester, &title_key), title_original_offset);
+                assert_eq!(origin_of(tester, &content_key), content_original_offset);
             });
         }
     }
@@ -4564,8 +4496,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dialog_with_route_settings() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let current_route_setting: Rc<std::cell::RefCell<Option<RouteSettingsRef>>> =
                 Rc::default();
             let current = Rc::clone(&current_route_setting);
@@ -4587,7 +4518,7 @@ pub(crate) mod tests {
             };
             tester.pump_widget(root);
 
-            let context = tester.find_text("Go")[0];
+            let context = find::text("Go").evaluate(tester)[0];
             let example_setting =
                 RouteSettingsRef::Settings(waft_widgets::RouteSettings::default().name("simple"));
 
@@ -4596,9 +4527,9 @@ pub(crate) mod tests {
                 ..Show::default()
             };
             let result = result_of::<i32>(
-                &tester,
+                tester,
                 show.on(
-                    &tester,
+                    tester,
                     context,
                     Rc::new(|_app, context| {
                         SimpleDialog::new()
@@ -4615,13 +4546,13 @@ pub(crate) mod tests {
             );
 
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "Title"), 1);
+            assert_eq!(shows(tester, "Title"), 1);
             assert_eq!(
                 current_route_setting.borrow().clone(),
                 Some(example_setting)
             );
 
-            tap_text(&mut tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
 
             assert_eq!(result.get(), Some(None));
@@ -4638,8 +4569,7 @@ pub(crate) mod tests {
 
     #[test]
     fn alert_dialog_actions_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let action_key = GlobalKey::new();
             let build_frame = |tester: &mut WidgetTester, alignment: Option<MainAxisAlignment>| {
                 let action_key = action_key.clone();
@@ -4657,20 +4587,23 @@ pub(crate) mod tests {
                     crate::scaffold::Scaffold::new().body(dialog).into_widget()
                 });
             };
-            let alert_dialog =
-                |tester: &WidgetTester| rect_of(tester, tester.find_by_type::<AlertDialog>()[0]);
+            let alert_dialog = |tester: &WidgetTester| {
+                tester.get_rect(find::by_type::<AlertDialog>().evaluate(tester)[0])
+            };
             let action = |tester: &WidgetTester| rect_of_key(tester, &action_key);
 
             // Default configuration
-            build_frame(&mut tester, None);
-            assert_eq!(alert_dialog(&tester).top_left().dx(), 0.0);
-            assert_eq!(alert_dialog(&tester).top_right().dx(), 800.0);
+            build_frame(tester, None);
+            assert_eq!(alert_dialog(tester).top_left().dx(), 0.0);
+            assert_eq!(alert_dialog(tester).top_right().dx(), 800.0);
             assert_eq!(
-                rect_of(&tester, tester.find_by_type::<OverflowBar>()[0]).width(),
+                tester
+                    .get_rect(find::by_type::<OverflowBar>().evaluate(tester)[0])
+                    .width(),
                 800.0
             );
-            assert_eq!(action(&tester).top_left().dx(), 800.0 - 20.0);
-            assert_eq!(action(&tester).top_right().dx(), 800.0);
+            assert_eq!(action(tester).top_left().dx(), 800.0 - 20.0);
+            assert_eq!(action(tester).top_right().dx(), 800.0);
 
             // All possible alignment values
             let centered = ((800.0 - 20.0) / 2.0, (800.0 - 20.0) / 2.0 + 20.0);
@@ -4682,9 +4615,9 @@ pub(crate) mod tests {
                 (MainAxisAlignment::SpaceAround, centered),
                 (MainAxisAlignment::SpaceEvenly, centered),
             ] {
-                build_frame(&mut tester, Some(alignment));
-                assert_eq!(action(&tester).top_left().dx(), left, "{alignment:?}");
-                assert_eq!(action(&tester).top_right().dx(), right, "{alignment:?}");
+                build_frame(tester, Some(alignment));
+                assert_eq!(action(tester).top_left().dx(), left, "{alignment:?}");
+                assert_eq!(action(tester).top_right().dx(), right, "{alignment:?}");
             }
         });
     }
@@ -4698,7 +4631,7 @@ pub(crate) mod tests {
                 .expect("a focused node with a context");
             waft_widgets::Actions::invoke(&mut app, context, intent)
         };
-        tester.pump(Duration::ZERO);
+        tester.pump();
         result
             .and_then(|result| result.downcast_ref::<bool>().copied())
             .expect("the focus actions answer whether focus moved")
@@ -4739,17 +4672,16 @@ pub(crate) mod tests {
 
     #[test]
     fn uses_closed_loop_focus_traversal() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let (dialog, ok_node, cancel_node) = ok_cancel_dialog(&tester);
-            pump_with_dialog(&mut tester, m3, dialog);
-            open(&mut tester);
+        test_widgets(|tester| {
+            let (dialog, ok_node, cancel_node) = ok_cancel_dialog(tester);
+            pump_with_dialog(tester, m3, dialog);
+            open(tester);
 
             // Start at OK
             ok_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            assert!(focus_of(&tester, ok_node));
-            assert!(!focus_of(&tester, cancel_node));
+            tester.pump();
+            assert!(focus_of(tester, ok_node));
+            assert!(!focus_of(tester, cancel_node));
 
             for (intent, ok_focused) in [
                 // OK -> Cancel
@@ -4764,49 +4696,47 @@ pub(crate) mod tests {
                 // OK <- Cancel
                 (&waft_widgets::PreviousFocusIntent, true),
             ] {
-                assert!(move_focus(&mut tester, intent));
-                assert_eq!(focus_of(&tester, ok_node), ok_focused);
-                assert_eq!(focus_of(&tester, cancel_node), !ok_focused);
+                assert!(move_focus(tester, intent));
+                assert_eq!(focus_of(tester, ok_node), ok_focused);
+                assert_eq!(focus_of(tester, cancel_node), !ok_focused);
             }
         });
     }
 
     #[test]
     fn uses_open_focus_traversal_when_overridden() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let (dialog, ok_node, cancel_node) = ok_cancel_dialog(&tester);
+        test_widgets(|tester| {
+            let (dialog, ok_node, cancel_node) = ok_cancel_dialog(tester);
             app_with_dialog(
-                &mut tester,
+                tester,
                 m3,
                 dialog.into_widget(),
                 1.0,
                 Some(TraversalEdgeBehavior::LeaveFlutterView),
             );
-            open(&mut tester);
+            open(tester);
 
             // Start at OK
             ok_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            assert!(focus_of(&tester, ok_node));
-            assert!(!focus_of(&tester, cancel_node));
+            tester.pump();
+            assert!(focus_of(tester, ok_node));
+            assert!(!focus_of(tester, cancel_node));
 
             // OK -> Cancel
-            assert!(move_focus(&mut tester, &waft_widgets::NextFocusIntent));
-            assert!(!focus_of(&tester, ok_node));
-            assert!(focus_of(&tester, cancel_node));
+            assert!(move_focus(tester, &waft_widgets::NextFocusIntent));
+            assert!(!focus_of(tester, ok_node));
+            assert!(focus_of(tester, cancel_node));
 
             // Cancel -> nothing
-            assert!(!move_focus(&mut tester, &waft_widgets::NextFocusIntent));
-            assert!(!focus_of(&tester, ok_node));
-            assert!(!focus_of(&tester, cancel_node));
+            assert!(!move_focus(tester, &waft_widgets::NextFocusIntent));
+            assert!(!focus_of(tester, ok_node));
+            assert!(!focus_of(tester, cancel_node));
         });
     }
 
     #[test]
     fn adaptive_alert_dialog_shows_correct_widget_on_each_platform() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dialog = AlertDialog::adaptive()
                 .content(green_box(5000.0, 300.0))
                 .actions([TextButton::new(
@@ -4825,7 +4755,7 @@ pub(crate) mod tests {
                 (TargetPlatform::Windows, 0),
             ] {
                 app_with_dialog(
-                    &mut tester,
+                    tester,
                     move |app| ThemeData::builder().platform(platform).build(app),
                     dialog.clone(),
                     1.0,
@@ -4833,15 +4763,17 @@ pub(crate) mod tests {
                 );
                 tester.pump_and_settle();
 
-                open(&mut tester);
+                open(tester);
 
                 assert_eq!(
-                    tester.find_onstage_by_type::<CupertinoAlertDialog>().len(),
+                    find::by_type::<CupertinoAlertDialog>()
+                        .evaluate(tester)
+                        .len(),
                     cupertino,
                     "on {platform:?}"
                 );
 
-                tap_at(&mut tester, Offset::new(10.0, 10.0));
+                tap_at(tester, Offset::new(10.0, 10.0));
                 tester.pump_and_settle();
             }
         });
@@ -4874,10 +4806,9 @@ pub(crate) mod tests {
 
     #[test]
     fn show_adaptive_dialog_should_not_allow_dismiss_on_barrier_on_ios_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .platform(TargetPlatform::IOS)
@@ -4891,56 +4822,55 @@ pub(crate) mod tests {
                         .into_widget()
                 },
             );
-            let context = tester.find_text("Go")[0];
+            let context = find::text("Go").evaluate(tester)[0];
 
-            drop(Show::default().on(&tester, context, hundred_square("Dialog1")));
+            drop(Show::default().on(tester, context, hundred_square("Dialog1")));
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog1"), 1);
+            assert_eq!(shows(tester, "Dialog1"), 1);
 
             // Tap on the barrier.
-            tap_at(&mut tester, Offset::new(10.0, 10.0));
+            tap_at(tester, Offset::new(10.0, 10.0));
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog1"), 0);
+            assert_eq!(shows(tester, "Dialog1"), 0);
 
-            show_adaptive(&tester, context, hundred_square("Dialog2"), None);
+            show_adaptive(tester, context, hundred_square("Dialog2"), None);
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog2"), 1);
+            assert_eq!(shows(tester, "Dialog2"), 1);
 
             // Tap on the barrier, which shouldn't do anything this time.
-            tap_at(&mut tester, Offset::new(10.0, 10.0));
+            tap_at(tester, Offset::new(10.0, 10.0));
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog2"), 1);
+            assert_eq!(shows(tester, "Dialog2"), 1);
         });
     }
 
     #[test]
     fn applies_animation_style_to_show_adaptive_dialog() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let animation_style = AnimationStyle::new(
                 Some(Curves::ease_in_out()),
                 Some(Duration::from_secs(1)),
                 None,
                 None,
             );
-            let context = app_with_disabled_button(&mut tester, "Go");
+            let context = app_with_disabled_button(tester, "Go");
             show_adaptive(
-                &tester,
+                tester,
                 context,
                 hundred_square("Dialog1"),
                 Some(animation_style),
             );
 
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog1"), 1);
+            assert_eq!(shows(tester, "Dialog1"), 1);
 
-            tap_at(&mut tester, Offset::new(10.0, 10.0));
+            tap_at(tester, Offset::new(10.0, 10.0));
             tester.pump_and_settle_by(Duration::from_secs(1));
-            assert_eq!(shows(&tester, "Dialog1"), 0);
+            assert_eq!(shows(tester, "Dialog1"), 0);
         });
     }
 
@@ -4986,18 +4916,17 @@ pub(crate) mod tests {
         use waft_widgets::FocusNodeLeaf;
         node.as_node()
             .request_focus(&mut tester.cell.borrow_mut(), None);
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     #[test]
     fn setting_dialog_route_request_focus_to_false_does_not_request_focus_on_the_dialog() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved_context = context_cell();
             let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut());
             let dialog_text = "Dialog Text";
             let saved = Rc::clone(&saved_context);
-            pump_app(&mut tester, m3, {
+            pump_app(tester, m3, {
                 let focus_node = focus_node.clone();
                 move |_app| {
                     Material::new()
@@ -5010,15 +4939,15 @@ pub(crate) mod tests {
                         .into_widget()
                 }
             });
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Initially, there is no dialog and the text field has no focus.
-            assert_eq!(shows(&tester, dialog_text), 0);
-            assert!(!has_focus_of(&tester, focus_node.handle()));
+            assert_eq!(shows(tester, dialog_text), 0);
+            assert!(!has_focus_of(tester, focus_node.handle()));
 
             // Request focus on the text field.
-            request_focus_of(&mut tester, focus_node.handle());
-            assert!(has_focus_of(&tester, focus_node.handle()));
+            request_focus_of(tester, focus_node.handle());
+            assert!(has_focus_of(tester, focus_node.handle()));
 
             // Bring up dialog.
             let navigator =
@@ -5032,19 +4961,19 @@ pub(crate) mod tests {
                 );
                 drop(navigator.push(&mut app, route.erase()));
             }
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // The dialog is showing and the text field has lost focus.
-            assert_eq!(shows(&tester, dialog_text), 1);
-            assert!(!has_focus_of(&tester, focus_node.handle()));
+            assert_eq!(shows(tester, dialog_text), 1);
+            assert!(!has_focus_of(tester, focus_node.handle()));
 
             // Dismiss the dialog.
             navigator.pop(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // The dialog is dismissed and the focus is shifted back to the text field.
-            assert_eq!(shows(&tester, dialog_text), 0);
-            assert!(has_focus_of(&tester, focus_node.handle()));
+            assert_eq!(shows(tester, dialog_text), 0);
+            assert!(has_focus_of(tester, focus_node.handle()));
 
             // Bring up dialog again with requestFocus to false.
             {
@@ -5057,18 +4986,17 @@ pub(crate) mod tests {
                 route.clone().request_focus(&mut app, false);
                 drop(navigator.push(&mut app, route.erase()));
             }
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // The dialog is showing and the text field still has focus.
-            assert_eq!(shows(&tester, dialog_text), 1);
-            assert!(has_focus_of(&tester, focus_node.handle()));
+            assert_eq!(shows(tester, dialog_text), 1);
+            assert!(has_focus_of(tester, focus_node.handle()));
         });
     }
 
     #[test]
     fn request_focus_works_correctly_in_show_dialog() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let navigator_key = GlobalKey::new();
             let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut());
             let root =
@@ -5083,12 +5011,12 @@ pub(crate) mod tests {
                         .into_widget()
                 };
             tester.pump_widget(root);
-            request_focus_of(&mut tester, focus_node.handle());
-            assert!(has_focus_of(&tester, focus_node.handle()));
+            request_focus_of(tester, focus_node.handle());
+            assert!(has_focus_of(tester, focus_node.handle()));
 
             let dialog_scope_has_focus = |tester: &WidgetTester| {
                 use waft_widgets::FocusNodeLeaf;
-                let element = tester.find_text("dialog")[0];
+                let element = find::text("dialog").evaluate(tester)[0];
                 let mut app = tester.cell.borrow_mut();
                 let scope = waft_widgets::FocusScope::of(&mut app, element, true);
                 scope.as_node().has_focus(&mut app)
@@ -5104,10 +5032,10 @@ pub(crate) mod tests {
                 request_focus: Some(true),
                 ..Show::default()
             };
-            drop(show.on(&tester, navigator_context(&tester), Rc::clone(&dialog)));
+            drop(show.on(tester, navigator_context(tester), Rc::clone(&dialog)));
             tester.pump_and_settle();
-            assert!(dialog_scope_has_focus(&tester));
-            assert!(!has_focus_of(&tester, focus_node.handle()));
+            assert!(dialog_scope_has_focus(tester));
+            assert!(!has_focus_of(tester, focus_node.handle()));
 
             {
                 let mut app = tester.cell.borrow_mut();
@@ -5117,16 +5045,16 @@ pub(crate) mod tests {
                     .pop(&mut app, None);
             }
             tester.pump_and_settle();
-            assert!(has_focus_of(&tester, focus_node.handle()));
+            assert!(has_focus_of(tester, focus_node.handle()));
 
             let show = Show {
                 request_focus: Some(false),
                 ..Show::default()
             };
-            drop(show.on(&tester, navigator_context(&tester), dialog));
+            drop(show.on(tester, navigator_context(tester), dialog));
             tester.pump_and_settle();
-            assert!(!dialog_scope_has_focus(&tester));
-            assert!(has_focus_of(&tester, focus_node.handle()));
+            assert!(!dialog_scope_has_focus(tester));
+            assert!(has_focus_of(tester, focus_node.handle()));
         });
     }
 
@@ -5138,11 +5066,10 @@ pub(crate) mod tests {
 
     #[test]
     fn dialog_respects_the_given_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             pump_with_dialog(
-                &mut tester,
+                tester,
                 m3,
                 Dialog::new()
                     .constraints(BoxConstraints::new().max_width(560.0))
@@ -5153,37 +5080,35 @@ pub(crate) mod tests {
                             .height(100.0),
                     ),
             );
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(sized_box_width(&tester, &key), 560.0);
+            assert_eq!(sized_box_width(tester, &key), 560.0);
         });
     }
 
     #[test]
     fn alert_dialog_respects_the_default_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             pump_with_dialog(
-                &mut tester,
+                tester,
                 m3,
                 AlertDialog::new()
                     .content(SizedBox::new().key(key.clone().into()))
                     .content_padding(EdgeInsetsGeometry::ZERO),
             );
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(sized_box_width(&tester, &key), 280.0);
+            assert_eq!(sized_box_width(tester, &key), 280.0);
         });
     }
 
     #[test]
     fn alert_dialog_respects_the_given_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             pump_with_dialog(
-                &mut tester,
+                tester,
                 m3,
                 AlertDialog::new()
                     .constraints(BoxConstraints::new().max_width(560.0))
@@ -5195,37 +5120,35 @@ pub(crate) mod tests {
                     )
                     .content_padding(EdgeInsetsGeometry::ZERO),
             );
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(sized_box_width(&tester, &key), 560.0);
+            assert_eq!(sized_box_width(tester, &key), 560.0);
         });
     }
 
     #[test]
     fn simple_dialog_respects_the_default_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             pump_with_dialog(
-                &mut tester,
+                tester,
                 m3,
                 SimpleDialog::new()
                     .content_padding(EdgeInsetsGeometry::ZERO)
                     .children([SizedBox::new().key(key.clone().into()).into_widget()]),
             );
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(sized_box_width(&tester, &key), 280.0);
+            assert_eq!(sized_box_width(tester, &key), 280.0);
         });
     }
 
     #[test]
     fn simple_dialog_respects_the_given_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             pump_with_dialog(
-                &mut tester,
+                tester,
                 m3,
                 SimpleDialog::new()
                     .constraints(BoxConstraints::new().max_width(560.0))
@@ -5236,18 +5159,17 @@ pub(crate) mod tests {
                         .height(100.0)
                         .into_widget()]),
             );
-            open(&mut tester);
+            open(tester);
 
-            assert_eq!(sized_box_width(&tester, &key), 560.0);
+            assert_eq!(sized_box_width(tester, &key), 560.0);
         });
     }
 
     #[test]
     fn test_no_back_gesture_on_fullscreen_dialogs() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // no back button in app bar for RawDialogRoute with full screen dialog set to true
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 crate::scaffold::Scaffold::new()
                     .body(Builder::new(|_app, context| {
                         TextButton::new(
@@ -5273,17 +5195,17 @@ pub(crate) mod tests {
                     .into_widget()
             });
 
-            open(&mut tester);
+            open(tester);
 
             assert_eq!(
-                tester
-                    .find_onstage_by_type::<crate::action_buttons::BackButton>()
+                find::by_type::<crate::action_buttons::BackButton>()
+                    .evaluate(tester)
                     .len(),
                 0
             );
             assert_eq!(
-                tester
-                    .find_onstage_by_type::<crate::action_buttons::CloseButton>()
+                find::by_type::<crate::action_buttons::CloseButton>()
+                    .evaluate(tester)
                     .len(),
                 1
             );
@@ -5291,60 +5213,56 @@ pub(crate) mod tests {
     }
 
     fn size_of_only<W: 'static>(tester: &WidgetTester) -> Size {
-        rect_of(tester, only(tester.find_by_type::<W>())).size()
+        tester.get_rect(tester.element(find::by_type::<W>())).size()
     }
 
     #[test]
     fn simple_dialog_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(SimpleDialog::new().title(Text::new("X"))))
                     .into_widget()
             });
-            assert_eq!(size_of_only::<SimpleDialog>(&tester), Size::ZERO);
+            assert_eq!(size_of_only::<SimpleDialog>(tester), Size::ZERO);
         });
     }
 
     #[test]
     fn simple_dialog_option_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Material::new()
                     .child(Center::new().child(
                         SizedBox::shrink().child(SimpleDialogOption::new().child(Text::new("X"))),
                     ))
                     .into_widget()
             });
-            assert_eq!(size_of_only::<SimpleDialogOption>(&tester), Size::ZERO);
+            assert_eq!(size_of_only::<SimpleDialogOption>(tester), Size::ZERO);
         });
     }
 
     #[test]
     fn dialog_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(Dialog::new().child(Text::new("X"))))
                     .into_widget()
             });
-            assert!(size_of_only::<Dialog>(&tester).is_empty());
+            assert!(size_of_only::<Dialog>(tester).is_empty());
         });
     }
 
     #[test]
     fn alert_dialog_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(AlertDialog::new().content(Text::new("X"))))
                     .into_widget()
             });
-            assert!(size_of_only::<AlertDialog>(&tester).is_empty());
+            assert!(size_of_only::<AlertDialog>(tester).is_empty());
         });
     }
 
@@ -5353,7 +5271,7 @@ pub(crate) mod tests {
     fn route_semantics_hit_test_behavior(
         tester: &WidgetTester,
     ) -> Option<SemanticsHitTestBehavior> {
-        let dialog = only(tester.find_by_type::<Dialog>());
+        let dialog = tester.element(find::by_type::<Dialog>());
         let semantics = tester.ancestor_of_type::<Semantics>(dialog);
         tester.widget::<Semantics, _>(semantics, |semantics| {
             semantics.properties.hit_test_behavior
@@ -5382,10 +5300,9 @@ pub(crate) mod tests {
 
     #[test]
     fn dialog_has_hit_test_behavior_opaque_to_prevent_dismissal_on_empty_areas() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             app_showing_on_press(
-                &mut tester,
+                tester,
                 Rc::new(|_app, _context| {
                     Dialog::new()
                         .child(SizedBox::new().width(200.0).height(200.0))
@@ -5393,12 +5310,12 @@ pub(crate) mod tests {
                 }),
             );
 
-            tap_text(&mut tester, "Show Dialog");
+            tester.tap(find::text("Show Dialog"));
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_by_type::<Dialog>().len(), 1);
+            expect(tester, &find::by_type::<Dialog>(), finds_one_widget());
             assert_eq!(
-                route_semantics_hit_test_behavior(&tester),
+                route_semantics_hit_test_behavior(tester),
                 Some(SemanticsHitTestBehavior::Opaque)
             );
         });
@@ -5406,10 +5323,9 @@ pub(crate) mod tests {
 
     #[test]
     fn alert_dialog_has_hit_test_behavior_opaque_via_dialog() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             app_showing_on_press(
-                &mut tester,
+                tester,
                 Rc::new(|_app, context| {
                     AlertDialog::new()
                         .title(Text::new("Test Dialog"))
@@ -5425,15 +5341,15 @@ pub(crate) mod tests {
                 }),
             );
 
-            tap_text(&mut tester, "Show Dialog");
+            tester.tap(find::text("Show Dialog"));
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_by_type::<AlertDialog>().len(), 1);
-            assert_eq!(tester.find_onstage_by_type::<Dialog>().len(), 1);
+            expect(tester, &find::by_type::<AlertDialog>(), finds_one_widget());
+            expect(tester, &find::by_type::<Dialog>(), finds_one_widget());
             // Find the route-level Semantics with hitTestBehavior.opaque
             // (wraps the entire dialog content, above the Dialog widget)
             assert_eq!(
-                route_semantics_hit_test_behavior(&tester),
+                route_semantics_hit_test_behavior(tester),
                 Some(SemanticsHitTestBehavior::Opaque)
             );
         });
@@ -5444,8 +5360,7 @@ pub(crate) mod tests {
         use std::cell::RefCell;
         use waft_widgets::{DismissDirection, Dismissible, ListView, StateSetter, StatefulBuilder};
 
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
             let dismissed_items: Rc<RefCell<Vec<i32>>> = Rc::default();
 
@@ -5530,76 +5445,75 @@ pub(crate) mod tests {
             };
 
             let dismiss_item = |tester: &mut WidgetTester, item: i32| {
-                let start = text_rect(tester, &item.to_string()).center();
+                let start = tester.get_rect(find::text(&item.to_string())).center();
                 tester.fling_from(start, Offset::new(300.0, 0.0), 1000.0, 1); // fling to the right
-                tester.pump(Duration::ZERO); // start the slide
-                tester.pump(Duration::from_secs(1)); // finish the slide and start shrinking...
-                tester.pump(Duration::ZERO); // first frame of shrinking animation
-                tester.pump(Duration::from_secs(1)); // finish the shrinking and call the callback...
-                tester.pump(Duration::ZERO); // rebuild after the callback removes the entry
+                tester.pump(); // start the slide
+                tester.pump_by(Duration::from_secs(1)); // finish the slide and start shrinking...
+                tester.pump(); // first frame of shrinking animation
+                tester.pump_by(Duration::from_secs(1)); // finish the shrinking and call the callback...
+                tester.pump(); // rebuild after the callback removes the entry
             };
             let dismissed = || dismissed_items.borrow().clone();
 
             // Dismiss item 0 is confirmed via the AlertDialog
-            build_frame(&mut tester);
+            build_frame(tester);
             assert!(dismissed().is_empty());
-            dismiss_item(&mut tester, 0); // Causes the AlertDialog to appear per confirmDismiss
+            dismiss_item(tester, 0); // Causes the AlertDialog to appear per confirmDismiss
             tester.pump_and_settle();
-            tap_text(&mut tester, "TRUE"); // AlertDialog action
+            tester.tap(find::text("TRUE")); // AlertDialog action
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "TRUE"), 0); // Dialog was dismissed
-            assert_eq!(shows(&tester, "FALSE"), 0);
+            assert_eq!(shows(tester, "TRUE"), 0); // Dialog was dismissed
+            assert_eq!(shows(tester, "FALSE"), 0);
             assert_eq!(dismissed(), vec![0]);
-            assert_eq!(shows(&tester, "0"), 0);
+            assert_eq!(shows(tester, "0"), 0);
 
             // Dismiss item 1 is not confirmed via the AlertDialog
-            build_frame(&mut tester);
+            build_frame(tester);
             assert_eq!(dismissed(), vec![0]);
-            dismiss_item(&mut tester, 1); // Causes the AlertDialog to appear per confirmDismiss
+            dismiss_item(tester, 1); // Causes the AlertDialog to appear per confirmDismiss
             tester.pump_and_settle();
-            tap_text(&mut tester, "FALSE"); // AlertDialog action
+            tester.tap(find::text("FALSE")); // AlertDialog action
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "TRUE"), 0); // Dialog was dismissed
-            assert_eq!(shows(&tester, "FALSE"), 0);
+            assert_eq!(shows(tester, "TRUE"), 0); // Dialog was dismissed
+            assert_eq!(shows(tester, "FALSE"), 0);
             assert_eq!(dismissed(), vec![0]);
-            assert_eq!(shows(&tester, "0"), 0);
-            assert_eq!(shows(&tester, "1"), 1);
+            assert_eq!(shows(tester, "0"), 0);
+            assert_eq!(shows(tester, "1"), 1);
 
             // Dismiss item 1 is not confirmed via the AlertDialog
-            build_frame(&mut tester);
+            build_frame(tester);
             assert_eq!(dismissed(), vec![0]);
-            dismiss_item(&mut tester, 1); // Causes the AlertDialog to appear per confirmDismiss
+            dismiss_item(tester, 1); // Causes the AlertDialog to appear per confirmDismiss
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "FALSE"), 1);
-            assert_eq!(shows(&tester, "TRUE"), 1);
-            tap_at(&mut tester, Offset::ZERO); // Tap outside of the AlertDialog
+            assert_eq!(shows(tester, "FALSE"), 1);
+            assert_eq!(shows(tester, "TRUE"), 1);
+            tap_at(tester, Offset::ZERO); // Tap outside of the AlertDialog
             tester.pump_and_settle();
             assert_eq!(dismissed(), vec![0]);
-            assert_eq!(shows(&tester, "0"), 0);
-            assert_eq!(shows(&tester, "1"), 1);
-            assert_eq!(shows(&tester, "TRUE"), 0); // Dialog was dismissed
-            assert_eq!(shows(&tester, "FALSE"), 0);
+            assert_eq!(shows(tester, "0"), 0);
+            assert_eq!(shows(tester, "1"), 1);
+            assert_eq!(shows(tester, "TRUE"), 0); // Dialog was dismissed
+            assert_eq!(shows(tester, "FALSE"), 0);
 
             // Dismiss item 1 is confirmed via the AlertDialog
-            build_frame(&mut tester);
+            build_frame(tester);
             assert_eq!(dismissed(), vec![0]);
-            dismiss_item(&mut tester, 1); // Causes the AlertDialog to appear per confirmDismiss
+            dismiss_item(tester, 1); // Causes the AlertDialog to appear per confirmDismiss
             tester.pump_and_settle();
-            tap_text(&mut tester, "TRUE"); // AlertDialog action
+            tester.tap(find::text("TRUE")); // AlertDialog action
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "TRUE"), 0); // Dialog was dismissed
-            assert_eq!(shows(&tester, "FALSE"), 0);
+            assert_eq!(shows(tester, "TRUE"), 0); // Dialog was dismissed
+            assert_eq!(shows(tester, "FALSE"), 0);
             assert_eq!(dismissed(), vec![0, 1]);
-            assert_eq!(shows(&tester, "0"), 0);
-            assert_eq!(shows(&tester, "1"), 0);
+            assert_eq!(shows(tester, "0"), 0);
+            assert_eq!(shows(tester, "1"), 0);
         });
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/28505.
     #[test]
     fn show_dialog_only_gets_theme_from_context_on_the_first_call() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_frame = |tester: &mut WidgetTester, builder_key: KeyRef| {
                 pump_app(tester, m3, move |_app| {
                     Center::new()
@@ -5627,26 +5541,25 @@ pub(crate) mod tests {
                 });
             };
 
-            build_frame(&mut tester, waft_foundation::UniqueKey::new().into());
+            build_frame(tester, waft_foundation::UniqueKey::new().into());
 
             // Open the dialog.
-            let button = only(tester.find_by_type::<ElevatedButton>());
-            let center = rect_of(&tester, button).center();
-            tester.tap(center, 1);
+            let button = tester.element(find::by_type::<ElevatedButton>());
+            let center = tester.get_rect(button).center();
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // Force the Builder to be recreated (new key) which causes outerContext to
             // be deactivated. If showDialog()'s implementation were to refer to
             // outerContext again, it would crash.
-            build_frame(&mut tester, waft_foundation::UniqueKey::new().into());
-            tester.pump(Duration::ZERO);
+            build_frame(tester, waft_foundation::UniqueKey::new().into());
+            tester.pump();
         });
     }
 
     #[test]
     fn show_dialog_safe_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = {
                 let app = tester.cell.borrow();
                 crate::app::MaterialApp::new()
@@ -5663,7 +5576,7 @@ pub(crate) mod tests {
                     .into_widget()
             };
             tester.pump_widget(root);
-            let context = tester.find_text("Test")[0];
+            let context = find::text("Test").evaluate(tester)[0];
             let key = GlobalKey::new();
             let page = {
                 let key = key.clone();
@@ -5674,29 +5587,29 @@ pub(crate) mod tests {
             };
 
             // By default it should honor the safe area
-            drop(Show::default().on(&tester, context, page()));
+            drop(Show::default().on(tester, context, page()));
             tester.pump_and_settle();
             assert_eq!(
-                rect_of_key(&tester, &key).top_left(),
+                rect_of_key(tester, &key).top_left(),
                 Offset::new(20.0, 20.0)
             );
             assert_eq!(
-                rect_of_key(&tester, &key).bottom_right(),
+                rect_of_key(tester, &key).bottom_right(),
                 Offset::new(780.0, 580.0)
             );
 
             // Dismiss it and test with useSafeArea off
-            tap_at(&mut tester, Offset::new(10.0, 10.0));
+            tap_at(tester, Offset::new(10.0, 10.0));
             let show = Show {
                 use_safe_area: false,
                 ..Show::default()
             };
-            drop(show.on(&tester, context, page()));
+            drop(show.on(tester, context, page()));
             tester.pump_and_settle();
             // Should take up the whole screen
-            assert_eq!(rect_of_key(&tester, &key).top_left(), Offset::ZERO);
+            assert_eq!(rect_of_key(tester, &key).top_left(), Offset::ZERO);
             assert_eq!(
-                rect_of_key(&tester, &key).bottom_right(),
+                rect_of_key(tester, &key).bottom_right(),
                 Offset::new(800.0, 600.0)
             );
         });
@@ -5727,8 +5640,10 @@ pub(crate) mod tests {
 
     /// Dart's `showDialog uses root navigator by default` and `... nested navigator if
     /// useRootNavigator is false`: the dialogs the root and the nested observer saw.
-    fn dialogs_seen_by_root_and_nested(use_root_navigator: bool) -> (u32, u32) {
-        let mut tester = tester();
+    fn dialogs_seen_by_root_and_nested(
+        tester: &mut WidgetTester,
+        use_root_navigator: bool,
+    ) -> (u32, u32) {
         let (root_observer, nested_observer) = {
             let mut app = tester.cell.borrow_mut();
             (
@@ -5777,9 +5692,9 @@ pub(crate) mod tests {
         tester.pump_widget(root);
 
         // Open the dialog.
-        let button = only(tester.find_by_type::<ElevatedButton>());
-        let center = rect_of(&tester, button).center();
-        tester.tap(center, 1);
+        let button = tester.element(find::by_type::<ElevatedButton>());
+        let center = tester.get_rect(button).center();
+        tester.tap_at(center, 1);
 
         let app = tester.cell.borrow();
         (
@@ -5790,33 +5705,32 @@ pub(crate) mod tests {
 
     #[test]
     fn show_dialog_uses_root_navigator_by_default() {
-        with_main_thread_stack(|| {
-            assert_eq!(dialogs_seen_by_root_and_nested(true), (1, 0));
+        test_widgets(|tester| {
+            assert_eq!(dialogs_seen_by_root_and_nested(tester, true), (1, 0));
         });
     }
 
     #[test]
     fn show_dialog_uses_nested_navigator_if_use_root_navigator_is_false() {
-        with_main_thread_stack(|| {
-            assert_eq!(dialogs_seen_by_root_and_nested(false), (0, 1));
+        test_widgets(|tester| {
+            assert_eq!(dialogs_seen_by_root_and_nested(tester, false), (0, 1));
         });
     }
 
     #[test]
     fn show_dialog_throws_a_friendly_user_message_when_context_is_not_active() {
         // Regression test for https://github.com/flutter/flutter/issues/12467
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new().child(Text::new("Test")).into_widget()
             });
-            let context = tester.find_text("Test")[0];
+            let context = find::text("Test").evaluate(tester)[0];
 
-            pump_app(&mut tester, m3, |_app| Center::new().into_widget());
+            pump_app(tester, m3, |_app| Center::new().into_widget());
 
             let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 drop(Show::default().on(
-                    &tester,
+                    tester,
                     context,
                     Rc::new(|_app, _inner_context| {
                         AlertDialog::new().title(Text::new("Title")).into_widget()
@@ -5841,11 +5755,10 @@ pub(crate) mod tests {
     /// makes for its fade, freed once the route is gone.
     #[test]
     fn a_disposed_dialog_route_frees_its_fade() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved_context = context_cell();
             let saved = Rc::clone(&saved_context);
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Material::new()
                     .child(Builder::new(move |_app, context| {
                         saved.set(Some(context));

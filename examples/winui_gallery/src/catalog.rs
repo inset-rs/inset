@@ -7,6 +7,8 @@ use waft_winui::FluentSymbol;
 pub enum Feature {
     /// Application menu headers and keyboard navigation.
     MenuBar,
+    /// A toolbar of commands with an overflow menu.
+    CommandBar,
     BreadcrumbBar,
     /// Independent primary and flyout actions.
     SplitButton,
@@ -40,6 +42,8 @@ pub enum Feature {
     NumberBox,
     /// Choosing one item from a drop-down list, or typing it.
     ComboBox,
+    /// A text box that lists suggestions as the user types.
+    AutoSuggestBox,
     /// Switch content, headers and dragging.
     ToggleSwitch,
     /// Pixel, auto and star layout.
@@ -86,13 +90,14 @@ pub enum Feature {
 
 impl Feature {
     /// Display order in the navigation pane.
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 41] = [
         Self::Button,
         Self::DropDownButton,
         Self::SplitButton,
         Self::ToggleSplitButton,
         Self::MenuFlyout,
         Self::MenuBar,
+        Self::CommandBar,
         Self::BreadcrumbBar,
         Self::Flyout,
         Self::ContentDialog,
@@ -100,6 +105,7 @@ impl Feature {
         Self::PasswordBox,
         Self::NumberBox,
         Self::ComboBox,
+        Self::AutoSuggestBox,
         Self::ToggleSwitch,
         Self::Grid,
         Self::CheckBox,
@@ -135,6 +141,7 @@ impl Feature {
             Self::ToggleSplitButton => "ToggleSplitButton",
             Self::MenuFlyout => "MenuFlyout",
             Self::MenuBar => "MenuBar",
+            Self::CommandBar => "CommandBar",
             Self::BreadcrumbBar => "BreadcrumbBar",
             Self::Flyout => "Flyout",
             Self::ContentDialog => "ContentDialog",
@@ -144,6 +151,7 @@ impl Feature {
             Self::PasswordBox => "PasswordBox",
             Self::NumberBox => "NumberBox",
             Self::ComboBox => "ComboBox",
+            Self::AutoSuggestBox => "AutoSuggestBox",
             Self::ToggleSwitch => "ToggleSwitch",
             Self::Grid => "Grid",
             Self::CheckBox => "CheckBox",
@@ -180,6 +188,7 @@ impl Feature {
             Self::ToggleSplitButton => FluentSymbol::Checkmark,
             Self::MenuFlyout => FluentSymbol::More,
             Self::MenuBar => FluentSymbol::MenuList,
+            Self::CommandBar => FluentSymbol::Toolbox,
             Self::BreadcrumbBar => FluentSymbol::ChevronLeft,
             Self::Flyout => FluentSymbol::ChevronRight,
             Self::ContentDialog => FluentSymbol::Warning,
@@ -189,6 +198,7 @@ impl Feature {
             Self::PasswordBox => FluentSymbol::LockClosed,
             Self::NumberBox => FluentSymbol::ChevronUpDown,
             Self::ComboBox => FluentSymbol::CheckmarkCircle,
+            Self::AutoSuggestBox => FluentSymbol::Search,
             Self::ToggleSwitch => FluentSymbol::ToggleLeft,
             Self::Grid => FluentSymbol::Grid,
             Self::CheckBox => FluentSymbol::CheckboxChecked,
@@ -230,6 +240,9 @@ impl Feature {
             Self::MenuBar => {
                 "Organize application commands into menus with pointer and keyboard navigation."
             }
+            Self::CommandBar => {
+                "Show an app's commands in a bar, the rest in an overflow menu that takes what no longer fits."
+            }
             Self::Flyout => "Show reusable content beside its opening control.",
             Self::ContentDialog => "Ask a modal question with up to three command buttons.",
             Self::DropDownButton => "Open a flyout from a button with a dropdown chevron.",
@@ -243,6 +256,9 @@ impl Feature {
             }
             Self::ComboBox => {
                 "Choose one item from a drop-down list with the pointer or the keyboard, or type it."
+            }
+            Self::AutoSuggestBox => {
+                "Type to get suggestions, move through them with the arrow keys, and submit a query."
             }
             Self::ToggleSwitch => "Switch settings on and off, or drag the thumb.",
             Self::Grid => "Arrange content with fixed, content-sized and proportional tracks.",

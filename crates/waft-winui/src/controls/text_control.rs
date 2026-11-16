@@ -1,5 +1,6 @@
 //! TextBoxBase integration shared by the source TextBox and PasswordBox templates.
 
+use super::auto_suggest_box::AutoSuggestBoxTextBoxStyle;
 use super::combo_box::ComboBoxTextBoxStyle;
 use super::number_box::NumberBoxTextBoxStyle;
 use super::{PasswordRevealMode, ScrollBarVisibility, TextBox, TextWrapping};
@@ -29,6 +30,9 @@ pub(super) struct TextControl {
 
     /// ComboBox's `ComboBoxTextBoxStyle`, absent for the default TextBox template.
     combo_box: Option<ComboBoxTextBoxStyle>,
+
+    /// AutoSuggestBox's `AutoSuggestBoxTextBoxStyle`, absent for the default TextBox template.
+    auto_suggest_box: Option<AutoSuggestBoxTextBoxStyle>,
 }
 
 impl TextControl {
@@ -39,6 +43,7 @@ impl TextControl {
             password,
             number_box: None,
             combo_box: None,
+            auto_suggest_box: None,
         }
     }
 
@@ -51,6 +56,12 @@ impl TextControl {
     /// Draws ComboBox's `EditableText` template instead of the default one.
     pub(super) fn combo_box_style(mut self, style: ComboBoxTextBoxStyle) -> Self {
         self.combo_box = Some(style);
+        self
+    }
+
+    /// Draws AutoSuggestBox's `TextBox` template instead of the default one.
+    pub(super) fn auto_suggest_box_style(mut self, style: AutoSuggestBoxTextBoxStyle) -> Self {
+        self.auto_suggest_box = Some(style);
         self
     }
 }
@@ -364,11 +375,15 @@ impl TextControlState {
     /// Constructs the source helper-button template with its own native ButtonBase state.
     fn helper(self: Handle<Self>, app: &App) -> WidgetRef {
         let password = self.widget(app).password.is_some();
+        let auto_suggest_box = self.widget(app).auto_suggest_box.is_some();
         let width = app.get(self).helper_width;
-        let width = self
-            .widget(app)
-            .number_box
-            .map_or(width, |style| style.delete_button_width(width));
+        let width = if auto_suggest_box {
+            AutoSuggestBoxTextBoxStyle::DELETE_BUTTON_WIDTH
+        } else {
+            self.widget(app)
+                .number_box
+                .map_or(width, |style| style.delete_button_width(width))
+        };
         let corner = self.widget(app).config.corner_radius;
         CommonStates::new(
             Listener::new(move |app| self.clear(app)),
@@ -392,10 +407,23 @@ impl TextControlState {
                         r.text_control_button_foreground,
                     ),
                 };
+                let (margin, font_size) = if auto_suggest_box {
+                    (
+                        r.auto_suggest_box_delete_button_margin,
+                        r.auto_suggest_box_icon_font_size,
+                    )
+                } else if password {
+                    (
+                        r.text_box_inner_button_margin,
+                        r.password_box_icon_font_size,
+                    )
+                } else {
+                    (r.text_box_inner_button_margin, r.text_box_icon_font_size)
+                };
                 SizedBox::new()
                     .width(width)
                     .child(
-                        Padding::new(insets(r.text_box_inner_button_margin)).child(
+                        Padding::new(insets(margin)).child(
                             ControlBorder::new(Brush::Solid(background), Brush::Solid(border))
                                 .border_thickness_ltrb(r.text_control_border_theme_thickness)
                                 .corner_radius(corner)
@@ -406,11 +434,7 @@ impl TextControlState {
                                         } else {
                                             FluentSymbol::Dismiss
                                         })
-                                        .font_size(if password {
-                                            r.password_box_icon_font_size
-                                        } else {
-                                            r.text_box_icon_font_size
-                                        })
+                                        .font_size(font_size)
                                         .foreground(foreground),
                                     ),
                                 ),
@@ -698,6 +722,9 @@ impl State for TextControlState {
             content,
         );
 
+        let auto_suggest_box = widget.auto_suggest_box.clone();
+        // The columns HeaderContentPresenter and DescriptionPresenter span.
+        let full_span = if auto_suggest_box.is_some() { 4 } else { 2 };
         let mut cells = Vec::new();
         if let Some(header) = config.header.clone() {
             // HeaderContentPresenter.
@@ -705,6 +732,8 @@ impl State for TextControlState {
                 GridCell::new(
                     Padding::new(insets(if password.is_some() {
                         r.password_box_top_header_margin
+                    } else if auto_suggest_box.is_some() {
+                        r.auto_suggest_box_top_header_margin
                     } else {
                         r.text_box_top_header_margin
                     }))
@@ -724,7 +753,7 @@ impl State for TextControlState {
                         header,
                     )),
                 )
-                .column_span(2)
+                .column_span(full_span)
                 .into_widget(),
             );
         }
@@ -744,10 +773,11 @@ impl State for TextControlState {
             .child(
                 ControlBorder::new(background, border)
                     .border_thickness_ltrb(border_thickness)
-                    .corner_radius_corners(widget.combo_box.map_or(
-                        [config.corner_radius.unwrap_or(r.control_corner_radius[0]); 4],
-                        |style| style.corner_radius,
-                    )),
+                    .corner_radius_corners(match (widget.combo_box, &auto_suggest_box) {
+                        (Some(style), _) => style.corner_radius,
+                        (_, Some(style)) => style.corner_radius,
+                        _ => [config.corner_radius.unwrap_or(r.control_corner_radius[0]); 4],
+                    }),
             ),
             Rc::new(move |app, _, size| {
                 if !app.contains(self) || !self.mounted(app) {
@@ -767,7 +797,17 @@ impl State for TextControlState {
                 }
             }),
         );
-        let columns = if number_box.is_some() { 3 } else { 2 };
+        let border = match &auto_suggest_box {
+            Some(style) => (style.border_element)(border.into_widget()),
+            None => border.into_widget(),
+        };
+        let columns = if auto_suggest_box.is_some() {
+            4
+        } else if number_box.is_some() {
+            3
+        } else {
+            2
+        };
         cells.push(
             GridCell::new(border)
                 .row(1)
@@ -793,6 +833,16 @@ impl State for TextControlState {
             // NumberBox's PopupIndicator.
             cells.push(GridCell::new(indicator).row(1).column(2).into_widget());
         }
+        if let Some(query_button) = auto_suggest_box.as_ref().and_then(|style| {
+            style.query_button(
+                config.is_enabled,
+                focused,
+                config.foreground.unwrap_or(r.text_control_foreground),
+            )
+        }) {
+            // AutoSuggestBox's QueryButton.
+            cells.push(GridCell::new(query_button).row(1).column(2).into_widget());
+        }
 
         if let Some(description) = config.description {
             // DescriptionPresenter.
@@ -809,7 +859,7 @@ impl State for TextControlState {
                     description,
                 ))
                 .row(2)
-                .column_span(2)
+                .column_span(full_span)
                 .into_widget(),
             );
         }
@@ -826,7 +876,12 @@ impl State for TextControlState {
                     ColumnDefinition::new(GridLength::AUTO),
                 ]
                 .into_iter()
-                .chain(number_box.map(NumberBoxTextBoxStyle::spin_buttons_column)),
+                .chain(number_box.map(NumberBoxTextBoxStyle::spin_buttons_column))
+                .chain(
+                    auto_suggest_box
+                        .iter()
+                        .flat_map(|_| AutoSuggestBoxTextBoxStyle::trailing_columns(r)),
+                ),
             )
             .children(cells);
         TextFieldTapRegion::new(

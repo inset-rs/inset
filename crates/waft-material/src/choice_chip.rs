@@ -480,9 +480,8 @@ impl ChipThemeDataGetters for ChoiceChipDefaultsM3 {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
-    use std::time::Duration;
 
-    use waft_embedder::{Offset, PointerChange, Size, TargetPlatform};
+    use waft_embedder::{Offset, PointerChange, Size};
     use waft_foundation::K_IS_WEB;
     use waft_painting::{
         BorderRadiusGeometry, BorderSide, RoundedRectangleBorder, ShapeBorderRef, StadiumBorder,
@@ -494,21 +493,24 @@ mod tests {
         WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef,
     };
 
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, assert_more_or_less_equals_within, find, test_widgets,
+    };
+
     use super::*;
     use crate::action_chip::tests::{
         animation_style, assert_animation_style_passed_to_raw_chip, hover_over_chip, material_of,
         paints_rrect_color, pump_wrapped, raw_chips,
     };
     use crate::chip::tests::{
-        center_of, chip_material_of, icon_data, ink_decoration_color, label_style_color, only,
-        rect_of, size_of, tester, text,
+        chip_material_of, icon_data, ink_decoration_color, label_style_color, only, text,
     };
     use crate::chip_theme::{ChipTheme, ChipThemeData};
     use crate::colors::Colors;
     use crate::icons::Icons;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};
 
@@ -543,27 +545,25 @@ mod tests {
 
     #[test]
     fn material3_choice_chip_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let disabled_side = theme.color_scheme.on_surface.with_alpha(0x1f);
 
             // Test enabled ChoiceChip defaults.
-            pump_chip(&mut tester, &theme, enabled(false), true);
+            pump_chip(tester, &theme, enabled(false), true);
 
             // Test default chip size.
-            let size = size_of(&tester, only::<ChoiceChip>(&tester));
-            assert!((size.width() - 189.1).abs() <= 0.01, "{size:?}");
-            assert!((size.height() - 48.0).abs() <= 0.01, "{size:?}");
+            let size = tester.get_size(only::<ChoiceChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 189.1, 0.01);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.01);
             // Test default label style.
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 Some(theme.color_scheme.on_surface_variant())
             );
 
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(Colors::TRANSPARENT));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
@@ -571,11 +571,11 @@ mod tests {
                 shape,
                 rounded_rectangle(theme.color_scheme.outline_variant())
             );
-            assert_eq!(ink_decoration_color(&tester), None);
+            assert_eq!(ink_decoration_color(tester), None);
 
             // Test disabled ChoiceChip defaults.
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 ChoiceChip::new(Text::new(LABEL), false),
                 false,
@@ -583,31 +583,31 @@ mod tests {
             tester.pump_and_settle();
 
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(Colors::TRANSPARENT));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(disabled_side));
-            assert_eq!(ink_decoration_color(&tester), None);
+            assert_eq!(ink_decoration_color(tester), None);
 
             // Test selected enabled ChoiceChip defaults.
-            pump_chip(&mut tester, &theme, enabled(true), false);
+            pump_chip(tester, &theme, enabled(true), false);
             tester.pump_and_settle();
 
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, None);
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(Colors::TRANSPARENT));
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(theme.color_scheme.secondary_container())
             );
 
             // Test selected disabled ChoiceChip defaults.
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 ChoiceChip::new(Text::new(LABEL), true),
                 false,
@@ -615,30 +615,28 @@ mod tests {
             tester.pump_and_settle();
 
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, None);
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(Colors::TRANSPARENT));
-            assert_eq!(ink_decoration_color(&tester), Some(disabled_side));
+            assert_eq!(ink_decoration_color(tester), Some(disabled_side));
         });
     }
 
     #[test]
     fn choice_chip_can_be_tapped() {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             pump_chip(
-                &mut tester,
+                tester,
                 &theme,
                 ChoiceChip::new(Text::new(LABEL), false),
                 false,
             );
 
-            let center = center_of(&tester, only::<ChoiceChip>(&tester));
-            tester.tap(center, 1);
+            let center = tester.get_center(only::<ChoiceChip>(tester));
+            tester.tap_at(center, 1);
         });
     }
 
@@ -659,22 +657,21 @@ mod tests {
 
     #[test]
     fn material2_choice_chip_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m2(&tester.cell.borrow());
             let stadium = Some(ShapeBorderRef::new(StadiumBorder::new(BorderSide::NONE)));
 
             // Test enabled ChoiceChip defaults.
-            pump_chip(&mut tester, &theme, enabled(false), true);
+            pump_chip(tester, &theme, enabled(false), true);
 
             // Test default chip size.
             assert_eq!(
-                size_of(&tester, only::<ChoiceChip>(&tester)),
+                tester.get_size(only::<ChoiceChip>(tester)),
                 Size::new(178.0, 48.0)
             );
             // Test default label style.
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 theme
                     .text_theme
                     .body_large
@@ -684,12 +681,12 @@ mod tests {
             );
 
             let (elevation, shadow_color, _, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(Colors::BLACK));
             assert_eq!(shape, stadium);
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(Colors::BLACK.with_alpha(0x1f))
             );
 
@@ -700,23 +697,22 @@ mod tests {
             ];
             // Test disabled, selected enabled and selected disabled ChoiceChip defaults.
             for (chip, ink_color) in cases {
-                pump_chip(&mut tester, &theme, chip, false);
+                pump_chip(tester, &theme, chip, false);
                 tester.pump_and_settle();
 
                 let (elevation, shadow_color, _, shape) =
-                    chip_material_of(&tester, only::<RawChip>(&tester));
+                    chip_material_of(tester, only::<RawChip>(tester));
                 assert_eq!(elevation, 0.0);
                 assert_eq!(shadow_color, Some(Colors::BLACK));
                 assert_eq!(shape, stadium);
-                assert_eq!(ink_decoration_color(&tester), Some(ink_color));
+                assert_eq!(ink_decoration_color(tester), Some(ink_color));
             }
         });
     }
 
     #[test]
     fn material3_choice_chip_elevated_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let disabled_fill = theme.color_scheme.on_surface.with_alpha(0x1f);
             let elevated = |selected: bool, enabled: bool| {
@@ -724,68 +720,68 @@ mod tests {
             };
 
             // Test enabled ChoiceChip.elevated defaults.
-            pump_chip(&mut tester, &theme, elevated(false, true), true);
+            pump_chip(tester, &theme, elevated(false, true), true);
 
             // Test default chip size.
-            let size = size_of(&tester, only::<ChoiceChip>(&tester));
-            assert!((size.width() - 189.1).abs() <= 0.01, "{size:?}");
-            assert!((size.height() - 48.0).abs() <= 0.01, "{size:?}");
+            let size = tester.get_size(only::<ChoiceChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 189.1, 0.01);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.01);
             // Test default label style.
             assert_eq!(
-                label_style_color(&tester, LABEL),
+                label_style_color(tester, LABEL),
                 Some(theme.color_scheme.on_surface_variant())
             );
 
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 1.0);
             assert_eq!(shadow_color, Some(theme.color_scheme.shadow()));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(Colors::TRANSPARENT));
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(theme.color_scheme.surface_container_low())
             );
 
             // Test disabled ChoiceChip.elevated defaults.
-            pump_chip(&mut tester, &theme, elevated(false, false), false);
+            pump_chip(tester, &theme, elevated(false, false), false);
             tester.pump_and_settle();
 
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(theme.color_scheme.shadow()));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(Colors::TRANSPARENT));
-            assert_eq!(ink_decoration_color(&tester), Some(disabled_fill));
+            assert_eq!(ink_decoration_color(tester), Some(disabled_fill));
 
             // Test selected enabled ChoiceChip.elevated defaults.
-            pump_chip(&mut tester, &theme, elevated(true, true), false);
+            pump_chip(tester, &theme, elevated(true, true), false);
             tester.pump_and_settle();
 
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 1.0);
             assert_eq!(shadow_color, None);
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(Colors::TRANSPARENT));
             assert_eq!(
-                ink_decoration_color(&tester),
+                ink_decoration_color(tester),
                 Some(theme.color_scheme.secondary_container())
             );
 
             // Test selected disabled ChoiceChip.elevated defaults. The Dart case builds
             // `selected: false` here, and so does this one.
-            pump_chip(&mut tester, &theme, elevated(false, false), false);
+            pump_chip(tester, &theme, elevated(false, false), false);
             tester.pump_and_settle();
 
             let (elevation, shadow_color, surface_tint_color, shape) =
-                chip_material_of(&tester, only::<RawChip>(&tester));
+                chip_material_of(tester, only::<RawChip>(tester));
             assert_eq!(elevation, 0.0);
             assert_eq!(shadow_color, Some(theme.color_scheme.shadow()));
             assert_eq!(surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(shape, rounded_rectangle(Colors::TRANSPARENT));
-            assert_eq!(ink_decoration_color(&tester), Some(disabled_fill));
+            assert_eq!(ink_decoration_color(tester), Some(disabled_fill));
         });
     }
 
@@ -841,8 +837,7 @@ mod tests {
 
     #[test]
     fn choice_chip_color_resolves_material_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_selected_color = Color::new(0xffffff00);
             let disabled_color = Color::new(0xff00ff00);
             let background_color = Color::new(0xff0000ff);
@@ -862,7 +857,7 @@ mod tests {
                 Some(background_color)
             });
             check_painted_colors(
-                &mut tester,
+                tester,
                 |enabled, selected| two_chips(Some(color.clone()), None, enabled, selected),
                 &[
                     (true, false, background_color),
@@ -876,13 +871,12 @@ mod tests {
 
     #[test]
     fn choice_chip_uses_provided_state_color_properties() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_color = Color::new(0xff00ff00);
             let background_color = Color::new(0xff0000ff);
             let selected_color = Color::new(0xffff0000);
             check_painted_colors(
-                &mut tester,
+                tester,
                 |enabled, selected| {
                     two_chips(
                         None,
@@ -902,10 +896,9 @@ mod tests {
 
     #[test]
     fn choice_chip_clip_behavior_properly_passes_through_to_the_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let check = |tester: &WidgetTester, clip_behavior: Clip| {
-                let materials = tester.find_by_type::<Material>();
+                let materials = find::by_type::<Material>().evaluate(tester);
                 // There should be two Material widgets, first Material is from the
                 // "wrapForChip" and last Material is from the "RawChip".
                 assert_eq!(materials.len(), 2);
@@ -915,28 +908,27 @@ mod tests {
                     clip_behavior
                 );
             };
-            pump_wrapped(&mut tester, choice_chip("label", false));
-            check(&tester, Clip::None);
+            pump_wrapped(tester, choice_chip("label", false));
+            check(tester, Clip::None);
 
             pump_wrapped(
-                &mut tester,
+                tester,
                 choice_chip("label", false).clip_behavior(Clip::AntiAlias),
             );
-            check(&tester, Clip::AntiAlias);
+            check(tester, Clip::AntiAlias);
         });
     }
 
     #[test]
     fn choice_chip_passes_icon_theme_property_to_raw_chip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_theme = IconThemeData::new().color(Colors::RED.primary());
             pump_wrapped(
-                &mut tester,
+                tester,
                 choice_chip("Test", true).icon_theme(icon_theme.clone()),
             );
             assert_eq!(
-                raw_chip_of(&tester, |raw| raw.icon_theme.clone()),
+                raw_chip_of(tester, |raw| raw.icon_theme.clone()),
                 Some(icon_theme)
             );
         });
@@ -944,18 +936,17 @@ mod tests {
 
     #[test]
     fn choice_chip_passes_show_checkmark_from_chip_theme_to_raw_chip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let show_checkmark = false;
             pump_wrapped(
-                &mut tester,
+                tester,
                 ChipTheme::new(
                     ChipThemeData::new().show_checkmark(show_checkmark),
                     choice_chip("Test", true),
                 ),
             );
             assert_eq!(
-                raw_chip_of(&tester, |raw| raw.show_checkmark),
+                raw_chip_of(tester, |raw| raw.show_checkmark),
                 Some(show_checkmark)
             );
         });
@@ -963,20 +954,19 @@ mod tests {
 
     #[test]
     fn choice_chip_passes_checkmark_properties_to_raw_chip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let show_checkmark = false;
             let checkmark_color = Color::new(0xff0000ff);
             let mut chip = choice_chip("Test", true);
             chip.show_checkmark = Some(show_checkmark);
             chip.checkmark_color = Some(checkmark_color);
-            pump_wrapped(&mut tester, chip);
+            pump_wrapped(tester, chip);
             assert_eq!(
-                raw_chip_of(&tester, |raw| raw.show_checkmark),
+                raw_chip_of(tester, |raw| raw.show_checkmark),
                 Some(show_checkmark)
             );
             assert_eq!(
-                raw_chip_of(&tester, |raw| raw.checkmark_color),
+                raw_chip_of(tester, |raw| raw.checkmark_color),
                 Some(checkmark_color)
             );
         });
@@ -984,8 +974,7 @@ mod tests {
 
     #[test]
     fn choice_chip_uses_provided_icon_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let build_chip = |tester: &mut WidgetTester, icon_theme: Option<IconThemeData>| {
                 let mut chip = enabled(false).avatar(waft_widgets::Icon::new(Some(Icons::add())));
@@ -999,19 +988,19 @@ mod tests {
             };
 
             // Test default icon theme.
-            build_chip(&mut tester, None);
+            build_chip(tester, None);
             assert_eq!(
-                icon_data(&tester).color.map(|color| color.color()),
+                icon_data(tester).color.map(|color| color.color()),
                 Some(theme.color_scheme.primary)
             );
 
             // Test provided icon theme.
             build_chip(
-                &mut tester,
+                tester,
                 Some(IconThemeData::new().color(Color::new(0xff00ff00))),
             );
             assert_eq!(
-                icon_data(&tester).color.map(|color| color.color()),
+                icon_data(tester).color.map(|color| color.color()),
                 Some(Color::new(0xff00ff00))
             );
         });
@@ -1019,8 +1008,7 @@ mod tests {
 
     #[test]
     fn choice_chip_avatar_layout_constraints_can_be_customized() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border = 1.0;
             let icon_size = 18.0;
             let label_padding = 8.0;
@@ -1041,22 +1029,27 @@ mod tests {
                 }
                 pump_wrapped(tester, Center::new().child(chip));
             };
-            let chip_size = |tester: &WidgetTester| size_of(tester, only::<ChoiceChip>(tester));
+            let chip_size = |tester: &WidgetTester| tester.get_size(only::<ChoiceChip>(tester));
             let chip_top_left = |tester: &WidgetTester| {
-                rect_of(tester, material_of(tester, only::<RawChip>(tester))).top_left()
+                tester
+                    .get_rect(material_of(tester, only::<RawChip>(tester)))
+                    .top_left()
             };
             let label_top_left = |tester: &WidgetTester| {
-                rect_of(tester, only::<waft_widgets::Container>(tester)).top_left()
+                tester
+                    .get_rect(only::<waft_widgets::Container>(tester))
+                    .top_left()
             };
 
             // Test default avatar layout constraints.
-            build_chip(&mut tester, None);
-            assert_eq!(chip_size(&tester).width(), 234.0);
-            assert_eq!(chip_size(&tester).height(), 118.0);
+            build_chip(tester, None);
+            assert_eq!(chip_size(tester).width(), 234.0);
+            assert_eq!(chip_size(tester).height(), 118.0);
 
             // Calculate the distance between avatar and chip edges.
-            let top_left = chip_top_left(&tester);
-            let avatar_center = center_of(&tester, tester.find_by_icon(&Icons::favorite()));
+            let top_left = chip_top_left(tester);
+            let avatar_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::favorite()).first()));
             assert_eq!(
                 top_left.dx(),
                 avatar_center.dx() - (label_size.width() / 2.0) - padding - border
@@ -1068,25 +1061,25 @@ mod tests {
 
             // Calculate the distance between avatar and label.
             assert_eq!(
-                label_top_left(&tester).dx(),
+                label_top_left(tester).dx(),
                 avatar_center.dx() + (label_size.width() / 2.0) + label_padding
             );
 
             // Test custom avatar layout constraints.
             build_chip(
-                &mut tester,
+                tester,
                 Some(BoxConstraints::tight_for_finite(
                     f64::INFINITY,
                     f64::INFINITY,
                 )),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(chip_size(&tester).width(), 152.0);
-            assert_eq!(chip_size(&tester).height(), 118.0);
+            assert_eq!(chip_size(tester).width(), 152.0);
+            assert_eq!(chip_size(tester).height(), 118.0);
 
             // Calculate the distance between avatar and chip edges.
-            let top_left = chip_top_left(&tester);
+            let top_left = chip_top_left(tester);
             assert_eq!(
                 top_left.dx(),
                 avatar_center.dx() - (icon_size / 2.0) - padding - border
@@ -1098,7 +1091,7 @@ mod tests {
 
             // Calculate the distance between avatar and label.
             assert_eq!(
-                label_top_left(&tester).dx(),
+                label_top_left(tester).dx(),
                 avatar_center.dx() + (icon_size / 2.0) + label_padding
             );
         });
@@ -1106,8 +1099,9 @@ mod tests {
 
     #[test]
     fn choice_chip_chip_animation_style_is_passed_to_raw_chip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_animation_style_passed_to_raw_chip(
+                tester,
                 Center::new()
                     .child(choice_chip("ChoiceChip", true).chip_animation_style(animation_style())),
             );
@@ -1116,8 +1110,9 @@ mod tests {
 
     #[test]
     fn elevated_choice_chip_chip_animation_style_is_passed_to_raw_chip() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_animation_style_passed_to_raw_chip(
+                tester,
                 Center::new().child(
                     ChoiceChip::elevated(Text::new("ChoiceChip"), true)
                         .chip_animation_style(animation_style()),
@@ -1128,17 +1123,16 @@ mod tests {
 
     #[test]
     fn choice_chip_has_expected_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut chip = ChoiceChip::new(Text::new("Chip"), false);
             chip.on_selected = Some(Rc::new(|_app, _selected| {}));
-            pump_wrapped(&mut tester, Center::new().child(chip));
-            let mut mouse = WidgetTester::mouse(1, 0);
+            pump_wrapped(tester, Center::new().child(chip));
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::new(10.0, 10.0));
             assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::BASIC));
-            let center = center_of(&tester, only::<ChoiceChip>(&tester));
+            let center = tester.get_center(only::<ChoiceChip>(tester));
             tester.move_to(&mut mouse, center, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let expected: MouseCursorRef = if K_IS_WEB {
                 SystemMouseCursors::CLICK.into()
             } else {
@@ -1150,25 +1144,23 @@ mod tests {
 
     #[test]
     fn choice_chip_mouse_cursor_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_cursor: MouseCursorRef = SystemMouseCursors::GRAB.into();
             pump_wrapped(
-                &mut tester,
+                tester,
                 Center::new().child(
                     ChoiceChip::new(Text::new("Chip"), false).mouse_cursor(custom_cursor.clone()),
                 ),
             );
-            let mut mouse = WidgetTester::mouse(1, 0);
-            hover_over_chip(&mut tester, &mut mouse);
+            let mut mouse = TestPointer::mouse(1, 0);
+            hover_over_chip(tester, &mut mouse);
             assert!(*tester.active_cursor(1) == *custom_cursor);
         });
     }
 
     #[test]
     fn mouse_cursor_resolves_in_focused_unfocused_disabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
 
@@ -1192,21 +1184,21 @@ mod tests {
             };
 
             // Unfocused case.
-            build_chip(&mut tester, true);
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let chip = center_of(&tester, text(&tester, "Chip"));
+            build_chip(tester, true);
+            let mut mouse = TestPointer::mouse(1, 0);
+            let chip = tester.get_center(text(tester, "Chip"));
             tester.add_pointer(&mut mouse, chip);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.move_to(&mut mouse, chip, false);
             assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::BASIC));
 
             // Focused case.
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::GRAB));
 
             // Disabled case.
-            build_chip(&mut tester, false);
+            build_chip(tester, false);
             assert!(
                 *tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::FORBIDDEN)
             );
@@ -1216,8 +1208,7 @@ mod tests {
 
     #[test]
     fn choice_chip_renders_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,
@@ -1228,8 +1219,8 @@ mod tests {
                     )
                     .into_widget(),
             ));
-            let x_text = text(&tester, "X");
-            assert!(size_of(&tester, x_text).is_empty());
+            let x_text = text(tester, "X");
+            assert!(tester.get_size(x_text).is_empty());
         });
     }
 }
