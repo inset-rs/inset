@@ -353,6 +353,9 @@ macro_rules! list_constructor_setters {
     };
 }
 
+pub(crate) use builder_constructor_setters;
+pub(crate) use list_constructor_setters;
+
 impl SliverListBuilder {
     fn new(item_builder: NullableIndexedWidgetBuilder) -> SliverListBuilder {
         SliverListBuilder {

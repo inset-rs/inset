@@ -53,6 +53,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/animated_cross_fade.rs → animated_cross_fade.dart
 - widgets/sliver_fill.rs → sliver_fill.dart
 - widgets/raw_radio.rs → raw_radio.dart
+- widgets/drag_boundary.rs → drag_boundary.dart
+- widgets/sliver_prototype_extent_list.rs → sliver_prototype_extent_list.dart
 
 ## widgets/preferred_size.rs → preferred_size.dart (+ the `Size` subclass mechanism)
 
@@ -216,7 +218,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the binding raises no system-font change yet.
   Affect: a banner does not repaint when the system fonts change.
 
-## widgets/basic.rs → basic.dart (+ `WidgetBuilder` from framework.dart, `Spacer` from spacer.dart, `IndexedStack` from indexed_stack.dart)
+## widgets/basic.rs → basic.dart (+ `WidgetBuilder` from framework.dart, `Spacer` from spacer.dart, `IndexedStack` from indexed_stack.dart, `IndexedWidgetBuilder` from framework.dart)
 
 - Change: a Dart constructor assert on one argument runs on its setter, and one across arguments in the widget's `debug_check_constructor`, when it is turned into a `WidgetRef` (`into_widget`); `Flex`, `RawIndexedStack`, `CustomPaint` and `Table` still check theirs when the element creates or updates the render object.
   Reason: language — a struct literal has no constructor body, and a fluent setter cannot see the arguments a later setter will supply.
@@ -420,6 +422,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: a pointer scroll signal is resolved through gestures' `PointerSignalResolver`, but the host is not told the event was handled.
   Reason: platform — `PointerEvent.respond` is omitted on signal events (waft-gestures records it).
   Affect: an embedder that would scroll the page itself is not told the scrollable took the event.
+
+- Change: `EdgeDraggingAutoScroller` starts each scroll step at the checkpoint after the frame that ended the previous one.
+  Reason: language — foundation's `Task` entry: an awaited task resumes at a checkpoint, never within the frame in which what it awaits completes.
+  Affect: each auto-scroll step costs one extra frame, so a drag held past the edge scrolls more slowly than Flutter's.
 
 ## widgets/scroll_view.rs → scroll_view.dart
 
@@ -714,6 +720,24 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — the constraints are a `BoxConstraints` subclass instance only through rendering's wrapper (D17).
   Affect: a builder reads fields through deref and calls `.constraints()` to hand the plain value on; a parent that changes only a subclass field reruns the builder, as in Dart.
 
+## widgets/reorderable_list.rs → reorderable_list.dart
+
+- Change: `ReorderableListState::start_item_drag_reorder` and `SliverReorderableListState::start_item_drag_reorder` take the recognizer as a `Ref<R>` of any `MultiDragGestureRecognizer` leaf, and a drag start listener is a `ReorderableDragStartListenerWidget` whose `create_recognizer` returns its associated `Recognizer` type; `ReorderableDelayedDragStartListener` holds its superclass's fields as `listener`.
+  Reason: language — waft-gestures has `MultiDragGestureRecognizer` only as a trait over its leaves, with no erased form to pass or return, so the list sets `on_start` on the typed recognizer and then keeps it as a `RecognizerRef`.
+  Affect: a listener subclass returns one recognizer type fixed when it is compiled, where a Dart override may pick the type at run time.
+
+## widgets/autocomplete.rs → autocomplete.dart
+
+- Change: `AutocompleteOptionsBuilder` returns a `Task<Vec<T>>`; a builder that has its options at hand returns `Task::ready`.
+  Reason: language — Rust has no `FutureOr` union of a value and a future.
+  Affect: every options builder is written as returning a task, and its options reach the state at the next checkpoint either way, as Dart's `await` delivers even a plain value in a microtask.
+- Change: `RawAutocomplete::new` fills `display_string_for_option` with `default_string_for_option`, the option's `Display` form, so `new` needs `T: Display`.
+  Reason: language — a Rust value has no `toString` every type answers.
+  Affect: an option type with no `Display` cannot use `new`, even when it sets its own `display_string_for_option`.
+- Change: Dart's constructor asserts across `fieldViewBuilder`, `key`, `focusNode`, `textEditingController` and `initialValue` run when the widget is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — those fields arrive through fluent setters after `new`, so they are only complete once the chain ends (basic.rs's assert entry).
+  Affect: a widget missing its field, or with both a controller and an initial value, panics where it is handed to the tree, not where it is written.
+
 ## Deferred
 
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
@@ -808,4 +832,12 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - overlay.rs: the theater's clip layer handle and the entry location's compositing-bits update. Trigger: layer handles and compositing bits in `waft-rendering`.
 - overlay.rs: the deferred-child gates on the theater's `markNeedsLayout` and the layout box's dirty flag. Trigger: a public `RenderBox` super-hook for `markNeedsLayout` and a readable dirty flag in `waft-rendering`.
 - heroes.rs: the hero diagnostics and the structured report behind the duplicate-tag check (a `debug_assert!` carrying Dart's message meanwhile). Trigger: diagnostics.
+- reorderable_list.rs: 'SliverReorderableList item has correct semantics' and 'SliverReorderableList custom semantics action has correct label'. Trigger: the semantics tree.
+- reorderable_list.rs: 'When creating a new item, be in the correct position'. Trigger: `Finder.hitTestable(at:)` in `waft_widgets::testing`.
+- reorderable_list.rs: 'Tests the correctness of the drop animation in various scenarios'. Trigger: `WidgetTester.timedDrag` in `waft_widgets::testing`.
+- reorderable_list.rs: 'SliverReorderableList auto scrolls speed is configurable' (offsets 120 and 40, a ratio of 3 where Dart's is 4). Trigger: a task resumed within the frame in which what it awaits completes (scrollable_helpers.rs's auto-scroll entry).
+- autocomplete.rs: the `_announceSemantics` results-found / no-results announcement through `SemanticsService`, and autocomplete_test.dart's three announcement cases. Trigger: the semantics tree.
+- autocomplete.rs: the two "when field scrolled offscreen" cases (desktop and mobile). Trigger: flutter_test's `scrollUntilVisible` in `waft_widgets::testing`.
 
+## Skipped
+- reorderable_list.rs: the second 'ReorderableList supports items with nested list views without throwing layout exception.', a repeat of the first in Dart's file.
