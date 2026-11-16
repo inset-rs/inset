@@ -676,9 +676,9 @@ Ported against: aa3207e6
 
 ## items_view/selection_model.rs → `SelectionModel`
 
-- Change: `SelectionModel` holds one flat list's selection, without the tree of `IndexPath`s, the source collection or its change notifications.
+- Change: `SelectionModel` holds one flat list's selection, without the tree of `IndexPath`s or the source collection, and its owner tells it of an insertion or removal (`on_items_added`, `on_items_removed`) where WinUI's `SelectionNode` hears the collection's change notifications.
   Reason: framework — `ItemsView` asks only for a flat selection (`SelectAllFlat`), and Waft's list builder has no collection to observe.
-  Affect: Inserting or removing items does not shift the selection; an application that does so adjusts the selection itself, and items past a shortened count are dropped. A new count is a new `ItemsSource`: `ItemsViewSource::set_items` clears the selection as `SelectionModel::Source` does.
+  Affect: A `TableView`'s selection moves with its rows as `TableViewSource` inserts and removes them; an `ItemsView`'s does not, as `ItemsViewSource` has no in-place changes, and a new count is a new `ItemsSource`: `ItemsViewSource::set_items` clears the selection as `SelectionModel::Source` does.
 
 ## sort_indicator.rs → `SortIndicator`
 
@@ -720,9 +720,13 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
   Reason: framework — a widget has no methods an application can call.
   Affect: A request to a `TableViewSort` no mounted table holds answers false.
 
-- Change: `TableView`'s `SelectionChanged` reports the removed and added items by their indices in the source's items.
+- Change: `TableView`'s `SelectionChanged` reports the removed and added items by their indices in the source's items, a removed item by the index it had.
   Reason: language — the items are values with no identity to pass as `Object`s.
-  Affect: A handler reads `removed_items` and `added_items` as `usize` indices into `TableViewSource::items`.
+  Affect: A handler reads `removed_items` and `added_items` as `usize` indices for `TableViewSource::item`, and an index in `removed_items` of an item the source no longer holds names whatever moved into its place.
+
+- Change: `TableView` builds its rows by their index in the view, so a row inserted or removed above the focused row leaves the focus at its position rather than with its item.
+  Reason: framework — WinUI's `ItemsRepeater` moves a realized element with its item (`ElementIndexChanged`), while Waft's list builder builds each index anew.
+  Affect: After a live insertion above it, the focus visual and the arrow keys' starting row are on the row now at the focused index; the selection follows its item.
 
 - Change: `TableView`'s keyboard navigation brings a row that is not built into view at an offset estimated from the height of the nearest built row, and focuses it once built.
   Reason: framework — Waft's `SliverList` cannot build an arbitrary row on demand as `ItemsRepeater::GetOrCreateElement` does.
@@ -734,9 +738,17 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
 
 ## table_view/source.rs → `TableViewSource`
 
-- Change: `TableViewSource` holds the items it is given, and `set_items` replaces them all, as the collection it wraps raising a reset, the filter and the sorts applied again to the new items.
-  Reason: framework — WinUI's source observes an `IObservableVector` and applies insertions and removals to its projection one by one, following each row by its object's identity, and the port has no collection to observe.
-  Affect: Giving a table new items clears its selection.
+- Change: `TableViewSource` holds the items it is given and takes the collection's changes as calls, `insert`, `remove` and `replace` for one item, `update` for an item's values and `set_items` for a reset, and names a row by its item's index, which it moves as items are inserted and removed.
+  Reason: language — WinUI's source observes an `IObservableVector` of objects that raise `PropertyChanged`, and follows each row by its object's identity, and Rust items are values with no identity to observe.
+  Affect: An application changes the items through the source: `update` changes an item's values and keeps its row selected, as `PropertyChanged` does, and `replace` puts a new item in its place and deselects its row.
+
+- Change: `TableViewSource` places every inserted, removed, replaced or updated item at its exact row, among a filter's rows and within a sort's ties by source order, where WinUI's shaping rebuilds the whole view for a change under a filter without a sort, for an item that ties with a sorted row unless it is the last item, and for removing an item the filter left out.
+  Reason: deliberate improvement — each row of the view knows its item's source index, which WinUI's projection of objects does not carry, so the place source order gives can always be found.
+  Affect: The selection stays on its item through those changes, where WinUI's rebuild clears it.
+
+- Change: `TableViewSource::update` moves an updated item's row to its new place when a sort key changed, and adds or removes the row when the filter's answer changed, where WinUI's shaping sorts and filters again only on a collection change and leaves a row whose sort key changed through `PropertyChanged` at its old place until the next one (`ShapedItemsSource::ApplyIncrementalChange`, and the limitation `TableView_Sort.cpp` notes).
+  Reason: deliberate improvement — an update is a call on the source, so the source knows which item changed and can place it, where WinUI's source hears no `PropertyChanged`.
+  Affect: A live table stays sorted and filtered as its values change, and a row that moves keeps its selection without a `SelectionChanged`.
 
 - Change: `TableViewSource::sort` adds a sort axis on every call, where WinUI's `Sort` replaces the axis an earlier call declared with the same key selector.
   Reason: language — a Rust closure has no identity by which a later call could name an earlier axis.
@@ -811,12 +823,11 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
 - `Page`'s `TopAppBar` and `BottomAppBar`, whose closed height WinUI also keeps the content clear of, remain deferred. Trigger: The kit ports `AppBar`.
 - `Page`'s navigation members, `Frame`, `NavigationCacheMode` and `OnNavigatedTo`, `OnNavigatedFrom` and `OnNavigatingFrom`, remain deferred. Trigger: The kit ports `Frame`.
 - `Page` giving the focus to its first focusable element when it loads with nothing focused, with the soft keyboard held back for that focus (`InitialFocusSIPSuspender`), remains deferred. Trigger: Waft's text input can be focused without showing the soft keyboard.
-- `SelectionNode::OnSourceListChanged`, which shifts or drops the selection when items are added to or removed from the same `ItemsSource`, remains deferred; `ItemsViewSource::set_items` replaces the items and clears the selection. Trigger: A caller that changes items in place.
+- `ItemsViewSource`'s in-place changes, which `SelectionModel::on_items_added` and `on_items_removed` would follow as `TableViewSource`'s do, remain deferred; `ItemsViewSource::set_items` replaces the items and clears the selection. Trigger: A caller that changes an `ItemsView`'s items in place.
 - `ItemsView`'s other layouts, `LinedFlowLayout` and `UniformGridLayout`, its `ItemTransitionProvider` and its `VerticalScrollController` remain deferred. Trigger: An application needs a grid or flow of items, or animated insertion and removal.
 - `ItemsView`'s and `ItemContainer`'s accessibility, their automation peers and selection patterns, remains deferred. Trigger: The kit gains accessibility support.
 - `ItemsView`'s gamepad and XY focus navigation remains deferred. Trigger: A host supplies gamepad or remote-control input.
 
-- The next step for `TableView`: `insert`, `remove` and `replace` on `TableViewSource`, with `SelectionNode::OnSourceListChanged`, so that a row's selection follows it as items are added and removed in place, as WinUI's projection follows an `IObservableVector`; until then `set_items` replaces the items and clears the selection. Trigger: The inspector's live panels, which refresh their rows while one is selected.
 - `TableView`'s cell editing remains deferred: `IsReadOnly` and `IsEditing`, `CommitEdit` and `CancelEdit`, `BeginningEdit` and `CellEditEnding`, a column's `IsReadOnly` and `CellEditingTemplate`, and the text column's editor. Trigger: An application edits cells in a table.
 - `TableView`'s grouping, `GroupHeaderTemplate` and `TableViewGroupHeader`, remains deferred. Trigger: An application groups a table's rows.
 - `TableView`'s cell tooltips, `CellToolTipBinding`, remain deferred. Trigger: An application shows a cell's full text on hover.

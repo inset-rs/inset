@@ -567,14 +567,15 @@ impl<T: 'static> TableViewState<T> {
         }
     }
 
-    /// The source rebuilt its view: the selection starts over on the new rows (`SelectionNode::OnSourceListChanged`, `Reset`) and the rows are rebuilt.
+    /// The source changed its view: the selection follows the rows the change moved, or starts over on a rebuilt view (`SelectionNode::OnSourceListChanged`), and the rows are rebuilt.
     fn source_changed(self: Handle<Self>, app: &mut App) {
         if !self.alive(app) {
             return;
         }
         if let Some(selection) = self.selection_handle(app) {
+            let changes = self.source_handle(app).changes(app).to_vec();
             let count = self.row_count(app);
-            selection.set_source(app, count);
+            selection.source_changed(app, &changes, count);
         }
         self.set_state(app, |_| {});
     }
@@ -1077,16 +1078,15 @@ impl<T: 'static> TableViewState<T> {
         let r = ThemeResources::of(app, context);
         let widget = self.widget(app).clone();
         let source = self.source_handle(app);
-        let items = source.shared_items(app);
         let Some(&item) = source.view(app).get(index) else {
             return SizedBox::new().into_widget();
         };
+        let item = source.shared_item(app, item);
         let columns = self.owned_columns(app);
         let cells: Vec<WidgetRef> = columns
             .iter()
             .map(|&column| {
-                let element =
-                    column.generate_element(app, context, &items[item], layout.cell_style);
+                let element = column.generate_element(app, context, &item, layout.cell_style);
                 cell_wrapper(&r, layout.vertical_lines, layout.min_height, element)
             })
             .collect();

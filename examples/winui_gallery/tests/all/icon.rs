@@ -168,3 +168,29 @@ fn glyph_extent(icon: FontIcon) -> f64 {
         .filter(|&covered| covered)
         .count() as f64
 }
+
+#[test]
+fn the_inspectors_symbols_each_draw_a_glyph_of_their_own() {
+    let symbols = [
+        FluentSymbol::Camera,
+        FluentSymbol::Mic,
+        FluentSymbol::Folder,
+        FluentSymbol::Globe,
+        FluentSymbol::Shield,
+        FluentSymbol::Clipboard,
+        FluentSymbol::Alert,
+        FluentSymbol::WindowConsole,
+    ];
+    let drawn: Vec<Vec<bool>> = symbols
+        .iter()
+        .map(|&symbol| rendered(FontIcon::symbol(symbol)))
+        .collect();
+    for (symbol, coverage) in symbols.iter().zip(&drawn) {
+        assert!(coverage.iter().any(|&covered| covered), "{symbol:?} draws");
+    }
+    for (i, a) in drawn.iter().enumerate() {
+        for b in &drawn[i + 1..] {
+            assert_ne!(a, b, "each symbol is a glyph of its own");
+        }
+    }
+}
