@@ -957,13 +957,10 @@ mod tests {
         cell
     }
 
+    /// The test platform's fonts, as flutter_test installs them: every family answers with
+    /// FlutterTest, whose glyphs are an em square, and a missing glyph is its `.notdef`.
     fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
+        PaintingBinding::instance(app).install_platform_fonts(app);
     }
 
     fn pump_app(cell: &AppCell, app_widget: CupertinoApp) {
@@ -1151,6 +1148,23 @@ mod tests {
     }
 
     #[test]
+    fn text_entries_are_padded_by_default() {
+        let cell = flutter_test_cell();
+        let controller = controller_with(&mut cell.borrow_mut(), "initial");
+        pump_app(
+            &cell,
+            centered(CupertinoSearchTextField::new().controller(controller.into_erased())),
+        );
+        let mut app = cell.borrow_mut();
+        let editable = only::<EditableText>(&mut app);
+        let field = only::<CupertinoSearchTextField>(&mut app);
+        assert_eq!(
+            top_left(&app, editable) - top_left(&app, field),
+            Offset::new(31.5, 9.5)
+        );
+    }
+
+    #[test]
     fn can_change_keyboard_type() {
         let cell = flutter_test_cell();
         pump_app(
@@ -1195,8 +1209,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "an icon whose IconTheme gives it a size and a new colour trips TextPainter's \
-                paint-time size check (text_painter.rs), which this test's change of brightness does"]
     fn placeholder_color() {
         let cell = flutter_test_cell();
         pump_app(
@@ -1383,13 +1395,16 @@ mod tests {
         let xmark = icon(&mut app, CupertinoIcons::xmark_circle_fill());
         let (search_origin, search_size) = rect_of(&app, search);
         let (xmark_origin, xmark_size) = rect_of(&app, xmark);
-        // Flutter's 290 and 310 are its test font's; the field's height here is the system font's,
-        // so the two icons are checked on one line rather than at Flutter's.
-        assert_eq!(search_origin.dx(), 6.0);
-        assert_eq!(xmark_origin.dx(), 775.0);
-        assert_eq!(search_origin.dy(), xmark_origin.dy());
-        assert_eq!(search_size, Size::new(20.0, 20.0));
-        assert_eq!(xmark_size, Size::new(20.0, 20.0));
+        assert_eq!(search_origin, Offset::new(6.0, 290.0));
+        assert_eq!(xmark_origin, Offset::new(775.0, 290.0));
+        assert_eq!(
+            search_origin + Offset::new(search_size.width(), search_size.height()),
+            Offset::new(26.0, 310.0)
+        );
+        assert_eq!(
+            xmark_origin + Offset::new(xmark_size.width(), xmark_size.height()),
+            Offset::new(795.0, 310.0)
+        );
     }
 
     #[test]
