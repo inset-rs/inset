@@ -8,6 +8,7 @@ use crate::widgets::localizations::{Localizations, WidgetsLocalizations};
 use crate::widgets::lookup_boundary::LookupBoundary;
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::overlay::Overlay;
+use crate::widgets::table::Table;
 
 /// Asserts that the given context has a [`MediaQuery`] ancestor.
 ///
@@ -135,6 +136,36 @@ pub fn debug_check_has_widgets_localizations(app: &mut App, context: BuildContex
              WidgetsLocalizations, either use a WidgetsApp at the root of your application to \
              include them automatically, or add a Localization widget with a \
              WidgetsLocalizations delegate.",
+            context.widget(app).type_name(),
+        );
+    }
+    true
+}
+
+/// Asserts that the given context has a [`Table`] ancestor.
+///
+/// Used by various widgets to make sure that they are only used in an appropriate context.
+///
+/// To invoke this function, use the following pattern, typically in the relevant Widget's
+/// build method:
+///
+/// ```text
+/// debug_assert!(debug_check_has_table(app, context));
+/// ```
+///
+/// Always place this before any early returns, so that the invariant is checked in all cases.
+/// This prevents bugs from hiding until a particular codepath is hit.
+///
+/// This method can be expensive (it walks the element tree).
+///
+/// Does nothing if asserts are disabled. Always returns true.
+pub fn debug_check_has_table(app: &App, context: BuildContext) -> bool {
+    if cfg!(debug_assertions)
+        && downcast_widget::<Table>(&**context.widget(app)).is_none()
+        && context.find_ancestor_widget_of_exact_type::<Table>(app).is_none()
+    {
+        panic!(
+            "No Table widget found.\n{} widgets require a Table widget ancestor.",
             context.widget(app).type_name(),
         );
     }

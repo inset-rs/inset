@@ -1292,7 +1292,7 @@ impl IntoWidget<SliverMultiBoxAdaptorKind> for SliverGridList {
 // SliverMultiBoxAdaptorElement
 
 /// Dart's `context as SliverMultiBoxAdaptorElement`, as the render object's child manager.
-pub(crate) fn child_manager_of<W: SliverMultiBoxAdaptorWidget>(
+pub fn child_manager_of<W: SliverMultiBoxAdaptorWidget>(
     app: &App,
     context: BuildContext,
 ) -> Rc<dyn RenderSliverBoxChildManager>

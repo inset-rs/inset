@@ -1106,7 +1106,7 @@ impl InkResponse {
         true
     }
 
-    fn build_state_widget(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+    pub(crate) fn build_state_widget(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let parent_state = ParentInkResponseProvider::maybe_of(app, context);
         InkResponseStateWidget {
             response: self.clone(),

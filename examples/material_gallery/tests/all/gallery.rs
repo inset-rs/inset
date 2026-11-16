@@ -627,3 +627,70 @@ fn the_modal_bottom_sheet_opens_from_its_button() {
         assert_messages_button_shows(fixture, "Modal sheet", "A modal bottom sheet");
     });
 }
+
+/// A data table's column header sorts it (a second tap reverses it), and a row's tap selects it.
+#[test]
+fn a_data_table_sorts_by_its_header_and_selects_a_row() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::DataTables);
+        fixture.expect_shown("Sorted by Dessert ascending; 0 selected");
+        assert_eq!(first_dessert(fixture), "Cupcake");
+
+        fixture.tap(find::text("Dessert").first());
+        fixture.expect_shown("Sorted by Dessert descending; 0 selected");
+        assert_eq!(first_dessert(fixture), "Ice cream sandwich");
+
+        fixture.tap(find::text("Dessert").first());
+        fixture.expect_shown("Sorted by Dessert ascending; 0 selected");
+
+        fixture.tap_text("Cupcake");
+        fixture.expect_shown("Sorted by Dessert ascending; 1 selected");
+    });
+}
+
+/// The first dessert row the table shows.
+fn first_dessert(fixture: &mut Fixture) -> String {
+    fixture
+        .texts()
+        .into_iter()
+        .find(|text| DESSERT_NAMES.contains(&text.as_str()))
+        .expect("a dessert row is shown")
+}
+
+const DESSERT_NAMES: [&str; 6] = [
+    "Frozen yogurt",
+    "Ice cream sandwich",
+    "Eclair",
+    "Cupcake",
+    "Gingerbread",
+    "Honeycomb",
+];
+
+/// The search bar's view opens from a tap, lists the suggestions, and a tapped suggestion
+/// closes it and reaches the page.
+#[test]
+fn a_search_anchor_view_returns_the_chosen_suggestion() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Search);
+        fixture.expect_shown("Chose: \u{2014}");
+
+        fixture.tap(find::text("Pick a fruit"));
+        fixture.tap_text("Banana");
+        fixture.expect_shown("Chose: Banana");
+    });
+}
+
+/// Tapping a carousel item reports its index in the caption under that carousel.
+#[test]
+fn a_carousel_item_reports_its_tap() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Carousels);
+
+        fixture.tap(find::text("Item 1").first());
+        assert!(
+            fixture.texts().iter().any(|text| text == "Tapped item 1"),
+            "the first carousel reported item 1; saw {:?}",
+            fixture.texts()
+        );
+    });
+}

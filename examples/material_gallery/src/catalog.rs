@@ -17,16 +17,22 @@ pub enum Entry {
     Lists,
     Drawers,
     Messages,
+    DataTables,
+    Search,
+    Carousels,
 }
 
 impl Entry {
     /// Index order — the order the tiles appear in.
-    pub const ALL: [Entry; 5] = [
+    pub const ALL: [Entry; 8] = [
         Entry::Buttons,
         Entry::AppBars,
         Entry::Lists,
         Entry::Drawers,
         Entry::Messages,
+        Entry::DataTables,
+        Entry::Search,
+        Entry::Carousels,
     ];
 
     /// The entry named by its variant, case-insensitively: how a launcher picks a page.
@@ -45,6 +51,9 @@ impl Entry {
             Entry::Lists => "Lists",
             Entry::Drawers => "Drawers",
             Entry::Messages => "Snack Bars & Sheets",
+            Entry::DataTables => "Data Tables",
+            Entry::Search => "Search",
+            Entry::Carousels => "Carousels",
         }
     }
 
@@ -56,6 +65,9 @@ impl Entry {
             Entry::Lists => Icons::view_list(),
             Entry::Drawers => Icons::menu_open(),
             Entry::Messages => Icons::announcement(),
+            Entry::DataTables => Icons::table_chart(),
+            Entry::Search => Icons::search(),
+            Entry::Carousels => Icons::view_carousel(),
         }
     }
 
@@ -78,6 +90,9 @@ impl Entry {
             Entry::Lists => pages::lists::body(app, context),
             Entry::Drawers => pages::drawers::body(app, context),
             Entry::Messages => pages::messages::body(app, context),
+            Entry::DataTables => pages::data_tables::body(app, context),
+            Entry::Search => pages::search::body(app, context),
+            Entry::Carousels => pages::carousels::body(app, context),
         }
     }
 
