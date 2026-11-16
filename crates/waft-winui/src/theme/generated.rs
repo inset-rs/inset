@@ -3582,6 +3582,154 @@ pub struct ThemeResources {
     pub item_container_selected_inner_margin: [f64; 4],
     /// `ItemContainerSelectedInnerThickness`.
     pub item_container_selected_inner_thickness: [f64; 4],
+    // `TabularSurfaces_themeresources.xaml`
+    /// `TabularSurfaceRowBackgroundBrush`.
+    pub tabular_surface_row_background_brush: Color,
+    /// `TabularSurfaceRowBackgroundAlternatingBrush`.
+    pub tabular_surface_row_background_alternating_brush: Color,
+    /// `TabularSurfaceRowBackgroundPointerOverBrush`.
+    pub tabular_surface_row_background_pointer_over_brush: Color,
+    /// `TabularSurfaceRowBackgroundPressedBrush`.
+    pub tabular_surface_row_background_pressed_brush: Color,
+    /// `TabularSurfaceRowBackgroundSelectedBrush`.
+    pub tabular_surface_row_background_selected_brush: Color,
+    /// `TabularSurfaceRowBackgroundSelectedPointerOverBrush`.
+    pub tabular_surface_row_background_selected_pointer_over_brush: Color,
+    /// `TabularSurfaceRowBackgroundSelectedPressedBrush`.
+    pub tabular_surface_row_background_selected_pressed_brush: Color,
+    /// `TabularSurfaceRowBackgroundDisabledBrush`.
+    pub tabular_surface_row_background_disabled_brush: Color,
+    /// `TabularSurfaceSelectionIndicatorBrush`.
+    pub tabular_surface_selection_indicator_brush: Color,
+    /// `TabularSurfaceRowForegroundBrush`.
+    pub tabular_surface_row_foreground_brush: Color,
+    /// `TabularSurfaceRowForegroundSelectedBrush`.
+    pub tabular_surface_row_foreground_selected_brush: Color,
+    /// `TabularSurfaceRowForegroundSelectedPointerOverBrush`.
+    pub tabular_surface_row_foreground_selected_pointer_over_brush: Color,
+    /// `TabularSurfaceRowForegroundSelectedPressedBrush`.
+    pub tabular_surface_row_foreground_selected_pressed_brush: Color,
+    /// `TabularSurfaceRowForegroundDisabledBrush`.
+    pub tabular_surface_row_foreground_disabled_brush: Color,
+    /// `TabularSurfaceHeaderBackgroundBrush`.
+    pub tabular_surface_header_background_brush: Color,
+    /// `TabularSurfaceHeaderForegroundBrush`.
+    pub tabular_surface_header_foreground_brush: Color,
+    /// `TabularSurfaceHeaderSeparatorBrush`.
+    pub tabular_surface_header_separator_brush: Color,
+    /// `TabularSurfaceGridLineBrush`.
+    pub tabular_surface_grid_line_brush: Color,
+    /// `TabularSurfaceFocusBorderBrush`.
+    pub tabular_surface_focus_border_brush: Color,
+    /// `TabularSurfaceSelectedBorderBrush`.
+    pub tabular_surface_selected_border_brush: Color,
+    /// `TabularSurfaceGroupHeaderBackgroundBrush`.
+    pub tabular_surface_group_header_background_brush: Color,
+    /// `TabularSurfaceGroupHeaderForegroundBrush`.
+    pub tabular_surface_group_header_foreground_brush: Color,
+    /// `TabularSurfaceGroupHeaderCountForegroundBrush`.
+    pub tabular_surface_group_header_count_foreground_brush: Color,
+    /// `MUX_TabularSurfaceRowBackgroundBrush`.
+    pub mux_tabular_surface_row_background_brush: Color,
+    /// `MUX_TabularSurfaceRowBackgroundAlternatingBrush`.
+    pub mux_tabular_surface_row_background_alternating_brush: Color,
+    /// `MUX_TabularSurfaceRowBackgroundPointerOverBrush`.
+    pub mux_tabular_surface_row_background_pointer_over_brush: Color,
+    /// `MUX_TabularSurfaceRowBackgroundPressedBrush`.
+    pub mux_tabular_surface_row_background_pressed_brush: Color,
+    /// `MUX_TabularSurfaceRowBackgroundSelectedBrush`.
+    pub mux_tabular_surface_row_background_selected_brush: Color,
+    /// `MUX_TabularSurfaceRowBackgroundSelectedPointerOverBrush`.
+    pub mux_tabular_surface_row_background_selected_pointer_over_brush: Color,
+    /// `MUX_TabularSurfaceRowBackgroundSelectedPressedBrush`.
+    pub mux_tabular_surface_row_background_selected_pressed_brush: Color,
+    /// `MUX_TabularSurfaceRowBackgroundDisabledBrush`.
+    pub mux_tabular_surface_row_background_disabled_brush: Color,
+    /// `MUX_TabularSurfaceSelectionIndicatorBrush`.
+    pub mux_tabular_surface_selection_indicator_brush: Color,
+    /// `MUX_TabularSurfaceRowForegroundBrush`.
+    pub mux_tabular_surface_row_foreground_brush: Color,
+    /// `MUX_TabularSurfaceRowForegroundSelectedBrush`.
+    pub mux_tabular_surface_row_foreground_selected_brush: Color,
+    /// `MUX_TabularSurfaceRowForegroundSelectedPointerOverBrush`.
+    pub mux_tabular_surface_row_foreground_selected_pointer_over_brush: Color,
+    /// `MUX_TabularSurfaceRowForegroundSelectedPressedBrush`.
+    pub mux_tabular_surface_row_foreground_selected_pressed_brush: Color,
+    /// `MUX_TabularSurfaceRowForegroundDisabledBrush`.
+    pub mux_tabular_surface_row_foreground_disabled_brush: Color,
+    /// `MUX_TabularSurfaceHeaderBackgroundBrush`.
+    pub mux_tabular_surface_header_background_brush: Color,
+    /// `MUX_TabularSurfaceHeaderForegroundBrush`.
+    pub mux_tabular_surface_header_foreground_brush: Color,
+    /// `MUX_TabularSurfaceHeaderSeparatorBrush`.
+    pub mux_tabular_surface_header_separator_brush: Color,
+    /// `MUX_TabularSurfaceGridLineBrush`.
+    pub mux_tabular_surface_grid_line_brush: Color,
+    /// `MUX_TabularSurfaceFocusBorderBrush`.
+    pub mux_tabular_surface_focus_border_brush: Color,
+    /// `MUX_TabularSurfaceSelectedBorderBrush`.
+    pub mux_tabular_surface_selected_border_brush: Color,
+    /// `MUX_TabularSurfaceGroupHeaderBackgroundBrush`.
+    pub mux_tabular_surface_group_header_background_brush: Color,
+    /// `MUX_TabularSurfaceGroupHeaderForegroundBrush`.
+    pub mux_tabular_surface_group_header_foreground_brush: Color,
+    /// `MUX_TabularSurfaceGroupHeaderCountForegroundBrush`.
+    pub mux_tabular_surface_group_header_count_foreground_brush: Color,
+    /// `TabularSurfaceGridLineThickness`.
+    pub tabular_surface_grid_line_thickness: [f64; 4],
+    /// `TabularSurfaceVerticalGridLineThickness`.
+    pub tabular_surface_vertical_grid_line_thickness: [f64; 4],
+    /// `TabularSurfaceCellPadding`.
+    pub tabular_surface_cell_padding: [f64; 4],
+    /// `TabularSurfaceHeaderCellPadding`.
+    pub tabular_surface_header_cell_padding: [f64; 4],
+    /// `TabularSurfaceRowMinHeight`.
+    pub tabular_surface_row_min_height: f64,
+    /// `TabularSurfaceHeaderMinHeight`.
+    pub tabular_surface_header_min_height: f64,
+    /// `TabularSurfaceCornerRadius`.
+    pub tabular_surface_corner_radius: [f64; 4],
+    /// `TabularSurfaceSelectedBorderThickness`.
+    pub tabular_surface_selected_border_thickness: [f64; 4],
+    // `SortIndicator_themeresources.xaml`
+    /// `SortIndicatorForeground`.
+    pub sort_indicator_foreground: Color,
+    /// `SortIndicatorSize`.
+    pub sort_indicator_size: f64,
+    /// `SortIndicatorGlyphSize`.
+    pub sort_indicator_glyph_size: f64,
+    // `ResizeGripper.xaml`
+    /// `ResizeGripperSeparatorBrush`.
+    pub resize_gripper_separator_brush: Color,
+    /// `ResizeGripperSeparatorThickness`.
+    pub resize_gripper_separator_thickness: [f64; 4],
+    /// `ResizeGripperSeparatorThicknessVertical`.
+    pub resize_gripper_separator_thickness_vertical: [f64; 4],
+    // `TableView_themeresources.xaml`
+    /// `TableViewRowMinHeight`.
+    pub table_view_row_min_height: f64,
+    /// `TableViewHeaderFontSize`.
+    pub table_view_header_font_size: f64,
+    /// `TableViewCellFontSize`.
+    pub table_view_cell_font_size: f64,
+    /// `TableViewResizeGripperWidth`.
+    pub table_view_resize_gripper_width: f64,
+    /// `TableViewHeaderCellPadding`.
+    pub table_view_header_cell_padding: [f64; 4],
+    /// `TableViewRowMinHeightCompact`.
+    pub table_view_row_min_height_compact: f64,
+    /// `TableViewRowMinHeightComfortable`.
+    pub table_view_row_min_height_comfortable: f64,
+    /// `TableViewCellPadding`.
+    pub table_view_cell_padding: [f64; 4],
+    /// `TableViewCellPaddingCompact`.
+    pub table_view_cell_padding_compact: [f64; 4],
+    /// `TableViewCellPaddingComfortable`.
+    pub table_view_cell_padding_comfortable: [f64; 4],
+    /// `TableViewHeaderCellPaddingCompact`.
+    pub table_view_header_cell_padding_compact: [f64; 4],
+    /// `TableViewHeaderCellPaddingComfortable`.
+    pub table_view_header_cell_padding_comfortable: [f64; 4],
 }
 
 impl ThemeResources {
@@ -9343,6 +9491,198 @@ impl ThemeResources {
             item_container_checkbox_margin: [4.0, -2.0, 4.0, -2.0],
             item_container_selected_inner_margin: [2.0, 2.0, 2.0, 2.0],
             item_container_selected_inner_thickness: [1.0, 1.0, 1.0, 1.0],
+            tabular_surface_row_background_brush: Color::from_argb(0, 255, 255, 255),
+            tabular_surface_row_background_alternating_brush: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            tabular_surface_row_background_pointer_over_brush: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            tabular_surface_row_background_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            tabular_surface_row_background_selected_brush: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            tabular_surface_row_background_selected_pointer_over_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            tabular_surface_row_background_selected_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            tabular_surface_row_background_disabled_brush: Color::from_argb(0, 255, 255, 255),
+            tabular_surface_selection_indicator_brush: accent.base,
+            tabular_surface_row_foreground_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            tabular_surface_row_foreground_selected_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            tabular_surface_row_foreground_selected_pointer_over_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            tabular_surface_row_foreground_selected_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            tabular_surface_row_foreground_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
+            },
+            tabular_surface_header_background_brush: match theme {
+                Theme::Light => Color::from_argb(38, 0, 0, 0),
+                Theme::Dark => Color::from_argb(38, 255, 255, 255),
+            },
+            tabular_surface_header_foreground_brush: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            tabular_surface_header_separator_brush: match theme {
+                Theme::Light => Color::from_argb(15, 0, 0, 0),
+                Theme::Dark => Color::from_argb(18, 255, 255, 255),
+            },
+            tabular_surface_grid_line_brush: match theme {
+                Theme::Light => Color::from_argb(41, 0, 0, 0),
+                Theme::Dark => Color::from_argb(41, 255, 255, 255),
+            },
+            tabular_surface_focus_border_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            tabular_surface_selected_border_brush: accent.base,
+            tabular_surface_group_header_background_brush: match theme {
+                Theme::Light => Color::from_argb(20, 0, 0, 0),
+                Theme::Dark => Color::from_argb(76, 58, 58, 58),
+            },
+            tabular_surface_group_header_foreground_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            tabular_surface_group_header_count_foreground_brush: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            mux_tabular_surface_row_background_brush: Color::from_argb(0, 255, 255, 255),
+            mux_tabular_surface_row_background_alternating_brush: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            mux_tabular_surface_row_background_pointer_over_brush: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            mux_tabular_surface_row_background_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            mux_tabular_surface_row_background_selected_brush: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            mux_tabular_surface_row_background_selected_pointer_over_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            mux_tabular_surface_row_background_selected_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            mux_tabular_surface_row_background_disabled_brush: Color::from_argb(0, 255, 255, 255),
+            mux_tabular_surface_selection_indicator_brush: accent.base,
+            mux_tabular_surface_row_foreground_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            mux_tabular_surface_row_foreground_selected_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            mux_tabular_surface_row_foreground_selected_pointer_over_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            mux_tabular_surface_row_foreground_selected_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            mux_tabular_surface_row_foreground_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(92, 0, 0, 0),
+                Theme::Dark => Color::from_argb(93, 255, 255, 255),
+            },
+            mux_tabular_surface_header_background_brush: match theme {
+                Theme::Light => Color::from_argb(38, 0, 0, 0),
+                Theme::Dark => Color::from_argb(38, 255, 255, 255),
+            },
+            mux_tabular_surface_header_foreground_brush: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            mux_tabular_surface_header_separator_brush: match theme {
+                Theme::Light => Color::from_argb(15, 0, 0, 0),
+                Theme::Dark => Color::from_argb(18, 255, 255, 255),
+            },
+            mux_tabular_surface_grid_line_brush: match theme {
+                Theme::Light => Color::from_argb(41, 0, 0, 0),
+                Theme::Dark => Color::from_argb(41, 255, 255, 255),
+            },
+            mux_tabular_surface_focus_border_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            mux_tabular_surface_selected_border_brush: accent.base,
+            mux_tabular_surface_group_header_background_brush: match theme {
+                Theme::Light => Color::from_argb(20, 0, 0, 0),
+                Theme::Dark => Color::from_argb(76, 58, 58, 58),
+            },
+            mux_tabular_surface_group_header_foreground_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            mux_tabular_surface_group_header_count_foreground_brush: match theme {
+                Theme::Light => Color::from_argb(158, 0, 0, 0),
+                Theme::Dark => Color::from_argb(197, 255, 255, 255),
+            },
+            tabular_surface_grid_line_thickness: [0.0, 0.0, 0.0, 1.0],
+            tabular_surface_vertical_grid_line_thickness: [0.0, 0.0, 1.0, 0.0],
+            tabular_surface_cell_padding: [12.0, 4.0, 12.0, 4.0],
+            tabular_surface_header_cell_padding: [8.0, 4.0, 8.0, 4.0],
+            tabular_surface_row_min_height: 28.0,
+            tabular_surface_header_min_height: 40.0,
+            tabular_surface_corner_radius: [4.0, 4.0, 4.0, 4.0],
+            tabular_surface_selected_border_thickness: [2.0, 2.0, 2.0, 2.0],
+            sort_indicator_foreground: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            sort_indicator_size: 16.0,
+            sort_indicator_glyph_size: 12.0,
+            resize_gripper_separator_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            resize_gripper_separator_thickness: [0.0, 0.0, 2.0, 0.0],
+            resize_gripper_separator_thickness_vertical: [0.0, 0.0, 0.0, 2.0],
+            table_view_row_min_height: 40.0,
+            table_view_header_font_size: 14.0,
+            table_view_cell_font_size: 14.0,
+            table_view_resize_gripper_width: 8.0,
+            table_view_header_cell_padding: [8.0, 4.0, 8.0, 4.0],
+            table_view_row_min_height_compact: 30.0,
+            table_view_row_min_height_comfortable: 48.0,
+            table_view_cell_padding: [8.0, 4.0, 8.0, 4.0],
+            table_view_cell_padding_compact: [8.0, 2.0, 8.0, 2.0],
+            table_view_cell_padding_comfortable: [8.0, 8.0, 8.0, 8.0],
+            table_view_header_cell_padding_compact: [8.0, 2.0, 8.0, 2.0],
+            table_view_header_cell_padding_comfortable: [8.0, 8.0, 8.0, 8.0],
         }
     }
 }
