@@ -135,6 +135,8 @@ pub enum FluentSymbol {
     Document,
     /// Rows of a list.
     List,
+    /// Rows and columns of a table.
+    Table,
 }
 
 impl FluentSymbol {
@@ -189,6 +191,7 @@ impl FluentSymbol {
             Self::SpinnerIos => 63241,
             Self::Document => 62329,
             Self::List => 62702,
+            Self::Table => 63326,
         })
         .unwrap()
     }

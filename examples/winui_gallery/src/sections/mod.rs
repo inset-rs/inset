@@ -47,4 +47,5 @@ pub mod items_view;
 pub mod line_numbers;
 pub mod page;
 pub mod selector_bar;
+pub mod table_view;
 pub mod tree_view;

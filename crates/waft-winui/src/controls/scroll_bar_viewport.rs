@@ -19,6 +19,9 @@ pub(crate) struct ScrollBarViewport {
     /// Whether `child` is a native scroller attached to `controller`, such as a lazy ListView,
     /// rather than content to put in a viewport.
     child_scrolls: bool,
+    /// How many viewports lie between this bar and the scroller it reports: 0 unless the scroller
+    /// is inside another one, as a table's rows are inside its horizontal scrolling.
+    depth: u32,
 }
 
 impl ScrollBarViewport {
@@ -32,6 +35,7 @@ impl ScrollBarViewport {
             child: child.into_widget(),
             axis: Axis::Vertical,
             child_scrolls: false,
+            depth: 0,
         }
     }
 
@@ -50,6 +54,12 @@ impl ScrollBarViewport {
     /// Selects the scrollbar's source horizontal or vertical template.
     pub(crate) fn axis(mut self, axis: Axis) -> Self {
         self.axis = axis;
+        self
+    }
+
+    /// Reports a scroller `depth` viewports down, whose bar stays at this viewport's edge.
+    pub(crate) fn depth(mut self, depth: u32) -> Self {
+        self.depth = depth;
         self
     }
 }
@@ -114,7 +124,9 @@ impl ScrollBarViewportState {
         let overflow = metrics.scrollable_length > 0.0;
         let expanded = app.get(self).expanded && overflow;
         let viewport = if widget.child_scrolls {
-            ScrollMetricsObserver::new(widget.controller.clone(), widget.child).into_widget()
+            ScrollMetricsObserver::new(widget.controller.clone(), widget.child)
+                .depth(widget.depth)
+                .into_widget()
         } else {
             ScrollViewport::new(widget.axis, widget.controller.clone(), widget.child).into_widget()
         };
@@ -210,8 +222,10 @@ impl ScrollBarViewportState {
                 r.scroll_bar_horizontal_thumb_min_height
             }
         } - r.scroll_bar_thumb_stroke_thickness;
+        let depth = widget.depth;
         RawScrollbar::new(Stack::new().children(parts))
             .controller(widget.controller.native_controller(app))
+            .notification_predicate(Rc::new(move |notification| notification.depth() == depth))
             .interactive(true)
             .thumb_visibility(app.get(self).hovered && overflow)
             .thumb_color(r.scroll_bar_thumb_fill)

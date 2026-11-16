@@ -63,6 +63,7 @@ mod slider_tooltip;
 mod split_button;
 mod split_view;
 mod tab_view;
+mod table_view;
 mod text_input;
 mod theme_scope;
 mod toggle_switch;

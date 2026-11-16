@@ -68,6 +68,10 @@ DEFAULT_CONTROLS = (
     'TreeView',
     'SelectorBar',
     'ItemContainer',
+    'TabularSurfaces',
+    'SortIndicator',
+    'ResizeGripper',
+    'TableView',
 )
 
 NS = {
@@ -76,6 +80,10 @@ NS = {
 }
 # MenuFlyoutPresenter::UpdateTemplateSettings looks up this key in C++, not XAML.
 RUNTIME_RESOURCE_REFERENCES = {'MenuFlyout': ['FlyoutThemeTouchMinWidth']}
+# Controls whose resource dictionary is their default-style page itself rather than a
+# `<Control>_themeresources.xaml`: ResizeGripper.xaml keeps its keys there because theme-XBF
+# emission is off for the Tabular binary.
+DICTIONARY_FILES = {'ResizeGripper': 'ResizeGripper.xaml'}
 # Templates beside a control's dictionary that its own template uses, besides `<Control>.xaml`.
 COMPANION_TEMPLATES = {'ColorPicker': ['ColorSpectrum'], 'TreeView': ['TreeViewItem']}
 # Styles in another control's dictionary that a control's own styles are based on: the setters
@@ -126,7 +134,7 @@ def inherited_setters(dictionary, style_key, templates):
 
 
 def control_source(root, control):
-    filename = f'{control}_themeresources.xaml'
+    filename = DICTIONARY_FILES.get(control, f'{control}_themeresources.xaml')
     candidates = (root / 'controls/dev/CommonStyles' / filename,
                   root / 'controls/dev' / control / filename)
     for path in candidates:

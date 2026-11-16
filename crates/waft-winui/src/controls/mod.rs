@@ -130,3 +130,12 @@ pub use item_container::*;
 
 mod items_view;
 pub use items_view::*;
+
+mod sort_indicator;
+pub(crate) use sort_indicator::*;
+
+mod resize_gripper;
+pub(crate) use resize_gripper::*;
+
+mod table_view;
+pub use table_view::*;
