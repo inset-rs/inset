@@ -10,7 +10,7 @@ use std::rc::Rc;
 use waft_embedder::SemanticsRole;
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listener, OptionRetained, Ref,
-    ValueChanged,
+    Retained, ValueChanged,
 };
 use waft_services::{KeyEvent, LogicalKeyboardKey};
 
@@ -94,7 +94,9 @@ pub trait RadioGroupRegistry<T: Clone + PartialEq + 'static>: Sized + 'static {
 
 /// Erased `RadioGroupRegistry<T>`: one identity and a static vtable.
 ///
-/// This is what a field or parameter Dart types as `RadioGroupRegistry<T>` becomes.
+/// This is what a parameter Dart types as `RadioGroupRegistry<T>` becomes, and what a field
+/// holding one for the length of a call holds; a field Dart keeps is
+/// [`RadioGroupRegistryRef<T>`].
 pub struct AnyRadioGroupRegistry<T: Clone + PartialEq + 'static> {
     id: HandleId,
     vtable: &'static RadioGroupRegistryVTable<T>,
@@ -105,6 +107,24 @@ impl<T: Clone + PartialEq + 'static> Clone for AnyRadioGroupRegistry<T> {
         *self
     }
 }
+
+impl<T: Clone + PartialEq + 'static> From<AnyRadioGroupRegistry<T>> for HandleId {
+    fn from(registry: AnyRadioGroupRegistry<T>) -> HandleId {
+        registry.id
+    }
+}
+
+impl<T: Clone + PartialEq + 'static, Leaf: RadioGroupRegistry<T>> From<Handle<Leaf>>
+    for AnyRadioGroupRegistry<T>
+{
+    fn from(handle: Handle<Leaf>) -> AnyRadioGroupRegistry<T> {
+        handle.as_radio_group_registry()
+    }
+}
+
+/// A field or parameter Dart types as `RadioGroupRegistry<T>`, kept: the erased registry with
+/// its count.
+pub type RadioGroupRegistryRef<T> = Retained<AnyRadioGroupRegistry<T>>;
 
 impl<T: Clone + PartialEq + 'static> Copy for AnyRadioGroupRegistry<T> {}
 
@@ -147,6 +167,19 @@ impl<T: Clone + PartialEq + 'static> AnyRadioGroupRegistry<T> {
     pub fn on_changed(self, app: &mut App, value: Option<T>) {
         (self.vtable.on_changed)(app, self.id, value);
     }
+
+    /// A reference while something still keeps the registry, `None` once it is freed or its
+    /// last keeper has let go; see [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<RadioGroupRegistryRef<T>> {
+        Retained::upgrade(app, self)
+    }
+
+    /// A reference to a registry something is known to keep; see
+    /// [`Handle::keep`](waft_foundation::Handle::keep).
+    #[track_caller]
+    pub fn keep(self, app: &App) -> RadioGroupRegistryRef<T> {
+        Retained::keep(app, self)
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -176,7 +209,7 @@ impl<T: Clone + PartialEq + 'static> RadioClientVTable<T> {
 /// The field Dart's `RadioClient` mixin declares; a client carries this bag under the field
 /// `radio_client` ([`radio_client_accessors!`](crate::radio_client_accessors)).
 pub struct RadioClientData<T: Clone + PartialEq + 'static> {
-    registry: Option<AnyRadioGroupRegistry<T>>,
+    registry: Option<RadioGroupRegistryRef<T>>,
 }
 
 impl<T: Clone + PartialEq + 'static> RadioClientData<T> {
@@ -262,7 +295,7 @@ pub trait RadioClient<T: Clone + PartialEq + 'static>: Sized + 'static {
 
     /// The [`RadioGroupRegistry`] this client is registered to.
     fn registry(self: Handle<Self>, app: &App) -> Option<AnyRadioGroupRegistry<T>> {
-        self.radio_client_data(app).registry
+        self.radio_client_data(app).registry.handle()
     }
 
     /// See [`registry`](Self::registry).
@@ -272,16 +305,17 @@ pub trait RadioClient<T: Clone + PartialEq + 'static>: Sized + 'static {
     fn set_registry(
         self: Handle<Self>,
         app: &mut App,
-        new_registry: Option<AnyRadioGroupRegistry<T>>,
+        new_registry: Option<RadioGroupRegistryRef<T>>,
     ) {
-        let registry = self.radio_client_data(app).registry;
-        if registry != new_registry
+        let registry = self.radio_client_data(app).registry.handle();
+        let new = new_registry.handle();
+        if registry != new
             && let Some(registry) = registry
         {
             registry.unregister_client(app, self.as_radio_client());
         }
         self.radio_client_data_mut(app).registry = new_registry;
-        if let Some(new_registry) = new_registry {
+        if let Some(new_registry) = new {
             new_registry.register_client(app, self.as_radio_client());
         }
     }
@@ -416,11 +450,11 @@ impl<T: Clone + PartialEq + 'static> RadioGroup<T> {
     ///
     /// This registers a dependency on the context so that it rebuilds if the registry has
     /// changed or its [`RadioGroupRegistry::group_value`] has changed.
-    pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<AnyRadioGroupRegistry<T>> {
-        context
+    pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<RadioGroupRegistryRef<T>> {
+        let state = context
             .depend_on_inherited_widget_of_exact_type::<RadioGroupStateScope<T>>(app)
-            .map(|scope| scope.state)
-            .map(|state| state.as_radio_group_registry())
+            .map(|scope| scope.state)?;
+        state.as_radio_group_registry().upgrade(app)
     }
 }
 

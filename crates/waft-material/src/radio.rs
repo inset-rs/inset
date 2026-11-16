@@ -17,9 +17,9 @@ use waft_foundation::{
 use waft_painting::{AnyBorderSide, BorderSide, CircleBorder, ShapeBorder};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnyRadioClient, AnyRadioGroupRegistry, AnyToggleableState, BuildContext, CustomPaint,
-    FocusNode, FocusNodeLeaf, FocusNodeRef, IntoWidget, KeyRef, RadioBuilder, RadioGroup,
-    RadioGroupRegistry, RawRadio, State, StateData, StatefulWidget, ToggleablePainter,
+    AnyRadioClient, AnyToggleableState, BuildContext, CustomPaint, FocusNode, FocusNodeLeaf,
+    FocusNodeRef, IntoWidget, KeyRef, RadioBuilder, RadioGroup, RadioGroupRegistry,
+    RadioGroupRegistryRef, RawRadio, State, StateData, StatefulWidget, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, WidgetRef, WidgetState, WidgetStateBorderSide,
     WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
 };
@@ -240,7 +240,7 @@ pub struct Radio<T: Clone + PartialEq + 'static> {
     ///
     /// Unless provided, the [`BuildContext`] will be used to look up the ancestor
     /// [`RadioGroupRegistry`].
-    pub group_registry: Option<AnyRadioGroupRegistry<T>>,
+    pub group_registry: Option<RadioGroupRegistryRef<T>>,
     radio_type: RadioType,
     /// Whether this widget is interactive.
     ///
@@ -476,7 +476,7 @@ impl<T: Clone + PartialEq + 'static> Radio<T> {
     }
 
     /// Dart `Radio(groupRegistry:)`.
-    pub fn group_registry(mut self, group_registry: AnyRadioGroupRegistry<T>) -> Radio<T> {
+    pub fn group_registry(mut self, group_registry: RadioGroupRegistryRef<T>) -> Radio<T> {
         self.group_registry = Some(group_registry);
         self
     }
@@ -562,8 +562,8 @@ impl<T: Clone + PartialEq + 'static> RadioState<T> {
         RadioGroup::<T>::maybe_of(app, context).is_some()
     }
 
-    fn effective_registry(self: Handle<Self>, app: &mut App) -> AnyRadioGroupRegistry<T> {
-        if let Some(group_registry) = self.widget(app).group_registry {
+    fn effective_registry(self: Handle<Self>, app: &mut App) -> RadioGroupRegistryRef<T> {
+        if let Some(group_registry) = self.widget(app).group_registry.clone() {
             return group_registry;
         }
 
@@ -573,15 +573,15 @@ impl<T: Clone + PartialEq + 'static> RadioState<T> {
         }
 
         // Handles deprecated API.
-        let registry = match app.get(self).internal_radio_registry.handle() {
+        let registry = match app.get(self).internal_radio_registry.as_ref().cloned() {
             Some(registry) => registry,
             None => {
                 let registry = app.create(RadioRegistry { state: self });
                 app.get_mut(self).internal_radio_registry = Some(registry.clone());
-                registry.handle()
+                registry
             }
         };
-        registry.as_radio_group_registry()
+        registry.erase()
     }
 
     /// Dart's `CupertinoRadio<T>(...)` that [`Radio::adaptive`] builds on iOS and macOS.
