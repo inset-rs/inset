@@ -28,7 +28,8 @@ pub struct SelectorBarItem {
     pub text: String,
 
     /// What the item shows in place of its text, in the item's foreground as the text is: a text
-    /// with an `InfoBadge`, for one. Flutter `Tab.child`; set it or `text`, not both.
+    /// with an `InfoBadge`, for one. Flutter `Tab.child`; an item made with
+    /// [`with_child`](Self::with_child) has it and an empty text.
     pub child: Option<WidgetRef>,
 
     /// `Icon`, drawn at `SelectorBarItemIconScale` in the item's foreground.
@@ -50,15 +51,13 @@ impl SelectorBarItem {
         }
     }
 
-    /// Shows `child` in place of the text. Panics when the item has a text, as Flutter's `Tab`
-    /// asserts that it is not given both.
-    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Self {
-        assert!(
-            self.text.is_empty(),
-            "Cannot provide both a text and a child to a SelectorBarItem."
-        );
-        self.child = Some(child.into_widget());
-        self
+    /// Creates an item showing `child` in place of a text, as Flutter's `Tab(child:)`, which
+    /// takes a text or a child, not both.
+    pub fn with_child<K>(id: impl Into<String>, child: impl IntoWidget<K>) -> Self {
+        Self {
+            child: Some(child.into_widget()),
+            ..Self::new(id, String::new())
+        }
     }
 
     /// Sets `Icon`.

@@ -64,7 +64,7 @@ impl State for OwnerState {
             .enumerate()
             .map(|(index, name)| {
                 let item = if index == CHILD {
-                    SelectorBarItem::new(*name, "").child(Text::new(*name))
+                    SelectorBarItem::with_child(*name, Text::new(*name))
                 } else {
                     SelectorBarItem::new(*name, *name)
                 };
