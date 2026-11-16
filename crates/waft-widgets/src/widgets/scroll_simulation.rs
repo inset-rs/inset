@@ -91,30 +91,28 @@ impl BouncingScrollSimulation {
             spring_time: 0.0,
             tolerance,
         };
-        // A release past an edge, moving back into the content fast enough to cross that edge
-        // again, decelerates like a release within the extents, as UIKit's does, where Flutter's
-        // springs back to the edge (`PORTING.md`).
-        let carried_back =
-            simulation.carries_back_into_content(position, velocity, constant_deceleration);
-        if position < leading_extent && !carried_back {
+        // Taken from UIScrollView.decelerationRate (.normal = 0.998)
+        // 0.998^1000 = ~0.135
+        let friction_simulation = FrictionSimulation::with_options(
+            0.135,
+            position,
+            velocity,
+            tolerance,
+            constant_deceleration,
+        );
+        let final_x = friction_simulation.final_x();
+        // A release past an edge springs back to it only where friction would leave it past that
+        // edge; one friction carries back into the content decelerates like a release within the
+        // extents, as UIKit's does, where Flutter's springs back to the edge (`PORTING.md`).
+        if position < leading_extent && final_x < leading_extent {
             simulation.spring_simulation =
                 Some(simulation.underscroll_simulation(position, velocity));
             simulation.spring_time = f64::NEG_INFINITY;
-        } else if position > trailing_extent && !carried_back {
+        } else if position > trailing_extent && final_x > trailing_extent {
             simulation.spring_simulation =
                 Some(simulation.overscroll_simulation(position, velocity));
             simulation.spring_time = f64::NEG_INFINITY;
         } else {
-            // Taken from UIScrollView.decelerationRate (.normal = 0.998)
-            // 0.998^1000 = ~0.135
-            let friction_simulation = FrictionSimulation::with_options(
-                0.135,
-                position,
-                velocity,
-                tolerance,
-                constant_deceleration,
-            );
-            let final_x = friction_simulation.final_x();
             if velocity > 0.0 && final_x > trailing_extent {
                 simulation.spring_time = friction_simulation.time_at_x(trailing_extent);
                 simulation.spring_simulation = Some(
@@ -143,34 +141,6 @@ impl BouncingScrollSimulation {
             simulation.friction_simulation = Some(friction_simulation);
         }
         simulation
-    }
-
-    /// Whether a release at `position`, past an edge, moves back into the content fast enough
-    /// for friction to carry it back past that edge.
-    fn carries_back_into_content(
-        &self,
-        position: f64,
-        velocity: f64,
-        constant_deceleration: f64,
-    ) -> bool {
-        let past_leading_moving_in = position < self.leading_extent && velocity > 0.0;
-        let past_trailing_moving_in = position > self.trailing_extent && velocity < 0.0;
-        if !past_leading_moving_in && !past_trailing_moving_in {
-            return false;
-        }
-        let final_x = FrictionSimulation::with_options(
-            0.135,
-            position,
-            velocity,
-            self.tolerance,
-            constant_deceleration,
-        )
-        .final_x();
-        if past_leading_moving_in {
-            final_x > self.leading_extent
-        } else {
-            final_x < self.trailing_extent
-        }
     }
 
     /// The maximum velocity that can be transferred from the inertia of a ballistic
