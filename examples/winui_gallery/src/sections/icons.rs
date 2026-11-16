@@ -12,7 +12,7 @@ use waft_widgets::*;
 use waft_winui::*;
 
 /// Named symbols available to controls and gallery navigation.
-const SYMBOLS: [(FluentSymbol, &str); 38] = [
+const SYMBOLS: [(FluentSymbol, &str); 45] = [
     (FluentSymbol::CursorClick, "Cursor click"),
     (FluentSymbol::ToggleLeft, "Toggle"),
     (FluentSymbol::CheckboxChecked, "Checked"),
@@ -50,6 +50,13 @@ const SYMBOLS: [(FluentSymbol, &str); 38] = [
     (FluentSymbol::Clipboard, "Clipboard"),
     (FluentSymbol::Alert, "Alert"),
     (FluentSymbol::WindowConsole, "Terminal"),
+    (FluentSymbol::PlugConnected, "Connection"),
+    (FluentSymbol::Live, "Listener"),
+    (FluentSymbol::Question, "Question"),
+    (FluentSymbol::Desktop, "Machine"),
+    (FluentSymbol::Pulse, "Activity"),
+    (FluentSymbol::Play, "Play"),
+    (FluentSymbol::Stop, "Stop"),
     (FluentSymbol::Table, "Table"),
 ];
 

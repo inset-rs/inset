@@ -17,6 +17,7 @@
 mod common;
 
 mod acrylic;
+mod auto_suggest_box;
 mod breadcrumb_bar;
 mod button_family;
 mod check_box;

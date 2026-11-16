@@ -13,6 +13,14 @@ pub use progress_bar::*;
 mod progress_ring;
 pub use progress_ring::*;
 
+mod auto_suggest_box;
+pub use auto_suggest_box::{
+    AutoSuggestBox, AutoSuggestBoxItemTemplate, AutoSuggestBoxOpenChangedHandler,
+    AutoSuggestBoxQuerySubmittedEventArgs, AutoSuggestBoxQuerySubmittedHandler,
+    AutoSuggestBoxState, AutoSuggestBoxSuggestionChosenEventArgs,
+    AutoSuggestBoxSuggestionChosenHandler, AutoSuggestBoxTextChangedEventArgs,
+    AutoSuggestBoxTextChangedHandler, AutoSuggestBoxTextMember, AutoSuggestionBoxTextChangeReason,
+};
 mod button;
 mod password_box;
 mod text_box;

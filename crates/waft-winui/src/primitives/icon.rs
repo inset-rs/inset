@@ -155,6 +155,20 @@ pub enum FluentSymbol {
     Alert,
     /// A console window, for a terminal.
     WindowConsole,
+    /// A plug in its socket, for a connection.
+    PlugConnected,
+    /// A point sending out waves, for something live or listening.
+    Live,
+    /// A question mark; WinUI's `Symbol.Help`.
+    Question,
+    /// A desktop computer, for a machine.
+    Desktop,
+    /// A pulse line, for activity.
+    Pulse,
+    /// A triangle pointing forward; WinUI's `Symbol.Play`.
+    Play,
+    /// A square; WinUI's `Symbol.Stop`.
+    Stop,
 }
 
 impl FluentSymbol {
@@ -219,6 +233,13 @@ impl FluentSymbol {
             Self::Clipboard => 62153,
             Self::Alert => 61716,
             Self::WindowConsole => 61039,
+            Self::PlugConnected => 59801,
+            Self::Live => 62704,
+            Self::Question => 63032,
+            Self::Desktop => 62297,
+            Self::Pulse => 59868,
+            Self::Play => 62981,
+            Self::Stop => 63274,
         })
         .unwrap()
     }
@@ -475,6 +496,16 @@ mod tests {
                 FluentSymbol::WindowConsole,
                 "ic_fluent_window_console_20_regular",
             ),
+            (
+                FluentSymbol::PlugConnected,
+                "ic_fluent_plug_connected_20_regular",
+            ),
+            (FluentSymbol::Live, "ic_fluent_live_20_regular"),
+            (FluentSymbol::Question, "ic_fluent_question_20_regular"),
+            (FluentSymbol::Desktop, "ic_fluent_desktop_20_regular"),
+            (FluentSymbol::Pulse, "ic_fluent_pulse_20_regular"),
+            (FluentSymbol::Play, "ic_fluent_play_20_regular"),
+            (FluentSymbol::Stop, "ic_fluent_stop_20_regular"),
         ] {
             let entry = format!("\"{name}\": {}", symbol.glyph() as u32);
             assert!(codepoints.contains(&entry), "{symbol:?} is {name}");
