@@ -397,7 +397,7 @@ mod tests {
         WidgetState, WidgetStates,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
@@ -533,11 +533,6 @@ mod tests {
         assert!(popup_menu_theme.mouse_cursor.is_none());
     }
 
-    fn only(found: Vec<AnyElement>) -> AnyElement {
-        assert_eq!(found.len(), 1, "one widget found");
-        found[0]
-    }
-
     fn element_of(tester: &WidgetTester, key: &GlobalKey) -> AnyElement {
         key.current_context(&tester.cell.borrow())
             .expect("the keyed widget is mounted")
@@ -545,8 +540,8 @@ mod tests {
 
     /// The last `Material` in the tree: the menu's.
     fn menu_material(tester: &WidgetTester) -> AnyElement {
-        *tester
-            .find_by_type::<Material>()
+        *find::by_type::<Material>()
+            .evaluate(tester)
             .last()
             .expect("the menu's Material")
     }
@@ -566,7 +561,7 @@ mod tests {
 
     /// The `n`th `ListTile`'s `title_text_style`.
     fn list_tile_title_text_style(tester: &WidgetTester, last: bool) -> Option<TextStyle> {
-        let tiles = tester.find_by_type::<ListTile>();
+        let tiles = find::by_type::<ListTile>().evaluate(tester);
         let tile = if last { tiles.last() } else { tiles.first() };
         tester.widget(*tile.expect("a ListTile"), |tile: &ListTile| {
             tile.title_text_style.clone()
@@ -574,19 +569,15 @@ mod tests {
     }
 
     fn menu_padding(tester: &WidgetTester) -> Option<EdgeInsetsGeometry> {
-        let scroll_view = only(tester.find_by_type::<SingleChildScrollView>());
+        let scroll_view = tester.element(find::by_type::<SingleChildScrollView>());
         tester.widget(scroll_view, |scroll_view: &SingleChildScrollView| {
             scroll_view.padding
         })
     }
 
-    fn center_of(tester: &WidgetTester, key: &GlobalKey) -> Offset {
-        tester.center_of(key)
-    }
-
     fn icon_color_and_size(tester: &WidgetTester) -> (Option<Color>, Size) {
         let more = Icons::adaptive().more(&tester.cell.borrow());
-        let icon = tester.find_by_icon(&more);
+        let icon = tester.element(find::by_icon(&more).first());
         (
             tester.glyph_style(icon).color.as_deref().copied(),
             tester.get_rect(tester.render_box_of(icon)).size(),
@@ -607,12 +598,12 @@ mod tests {
     ) -> (MouseCursorRef, Option<MouseCursorRef>) {
         let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut gesture, Offset::ZERO);
-        let at = center_of(tester, over);
+        let at = tester.get_center(over);
         tester.move_to(&mut gesture, at, false);
         tester.pump_and_settle();
         let over_cursor = tester.active_cursor(1);
         let down_cursor = down.map(|down| {
-            let at = center_of(tester, down);
+            let at = tester.get_center(down);
             tester.down(&mut gesture, at);
             tester.pump_and_settle();
             tester.active_cursor(1)
@@ -692,8 +683,8 @@ mod tests {
                 theme.icon_theme.color.as_deref().copied()
             );
 
-            let at = center_of(tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             let button = menu_material(tester);
@@ -723,7 +714,9 @@ mod tests {
             assert_eq!(label.color.as_deref().copied(), Some(disabled_color));
 
             let top_left_button = tester
-                .get_rect(tester.render_box_of(only(tester.find_by_type::<PopupMenuButton<()>>())))
+                .get_rect(
+                    tester.render_box_of(tester.element(find::by_type::<PopupMenuButton<()>>())),
+                )
                 .top_left();
             let top_left_menu = tester.get_rect(tester.render_box_of(button)).top_left();
             assert_eq!(top_left_menu, top_left_button);
@@ -799,8 +792,8 @@ mod tests {
                 (popup_menu_theme.icon_color, Size::new(17.0, 17.0))
             );
 
-            let at = center_of(tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             let button = menu_material(tester);
@@ -923,8 +916,8 @@ mod tests {
                 (Some(icon_color), Size::new(icon_size, icon_size))
             );
 
-            let at = center_of(tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             let button = menu_material(tester);
@@ -975,8 +968,8 @@ mod tests {
                 .key(popup_button_key.clone().into()),
             );
 
-            let at = center_of(tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             let button = menu_material(tester);
@@ -1000,7 +993,9 @@ mod tests {
             );
 
             let top_left_button = tester
-                .get_rect(tester.render_box_of(only(tester.find_by_type::<PopupMenuButton<()>>())))
+                .get_rect(
+                    tester.render_box_of(tester.element(find::by_type::<PopupMenuButton<()>>())),
+                )
                 .top_left();
             let top_left_menu = tester.get_rect(tester.render_box_of(button)).top_left();
             assert_eq!(top_left_menu, top_left_button);
@@ -1057,8 +1052,8 @@ mod tests {
                 .key(popup_button_key.clone().into()),
             );
 
-            let at = center_of(tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             let button = menu_material(tester);
@@ -1135,8 +1130,8 @@ mod tests {
                 .shape(shape),
             );
 
-            let at = center_of(tester, &popup_button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&popup_button_key);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             let button = menu_material(tester);

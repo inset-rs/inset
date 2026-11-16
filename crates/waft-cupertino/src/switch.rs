@@ -1875,7 +1875,7 @@ mod tests {
         AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject, RenderOpacity,
     };
     use waft_test::TestPlatform;
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
     use waft_widgets::{
         Actions, ActivateIntent, AnyFocusNode, Center, FocusHighlightStrategy, FocusNode,
         GlobalKey, MediaQueryData, SizedBox, UnfocusDisposition,
@@ -2147,15 +2147,15 @@ mod tests {
             }
         }
 
-        /// Dart's `tester.tap` at the switch's centre.
+        /// Dart's `tester.tap(find.byType(CupertinoSwitch))`.
         fn tap(&mut self) {
-            self.tester.tap(Self::center(), 1);
+            self.tester.tap(find::by_type::<CupertinoSwitch>());
         }
 
         /// Dart's `tester.drag(find.byType(CupertinoSwitch), Offset(dx, 0))`.
         fn drag(&mut self, dx: f64) {
             self.tester
-                .drag_from(Self::center(), Offset::new(dx, 0.0), 1);
+                .drag(find::by_type::<CupertinoSwitch>(), Offset::new(dx, 0.0));
         }
 
         fn first<T: RenderObject>(&self) -> RenderHandle<T> {
@@ -2868,7 +2868,7 @@ mod tests {
                     ),
                 ),
             ));
-            assert_eq!(tester.size_of(&key), Size::ZERO);
+            assert_eq!(tester.get_size(&key), Size::ZERO);
         });
     }
 

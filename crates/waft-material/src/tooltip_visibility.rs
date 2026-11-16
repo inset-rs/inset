@@ -89,7 +89,9 @@ mod tests {
     use waft_embedder::{Offset, PointerChange};
     use waft_widgets::{Center, GestureDetector, GlobalKey, MouseRegion, RawTooltip, SizedBox};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::tooltip::tests::{
@@ -125,9 +127,9 @@ mod tests {
                 .into_widget()
             });
 
-            let raw_tooltips = tester.find_by_type::<RawTooltip>();
-            let mouse_regions_under_raw_tooltips = tester
-                .find_by_type::<MouseRegion>()
+            let raw_tooltips = find::by_type::<RawTooltip>().evaluate(tester);
+            let mouse_regions_under_raw_tooltips = find::by_type::<MouseRegion>()
+                .evaluate(tester)
                 .into_iter()
                 .filter(|mouse_region| {
                     tester
@@ -179,7 +181,7 @@ mod tests {
     fn tooltip_shows_when_hovered_when_in_tooltip_visibility_with_visible_true() {
         test_widgets(|tester| {
             let mut gesture = hover(tester, true);
-            assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+            expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
 
             // Wait for it to disappear.
             tester.move_to(&mut gesture, Offset::ZERO, false);
@@ -212,7 +214,7 @@ mod tests {
         test_widgets(|tester| {
             set_widget_for_tooltip_mode(tester, TooltipTriggerMode::Tap, false);
 
-            assert!(tester.find_by_type::<GestureDetector>().is_empty());
+            expect(tester, &find::by_type::<GestureDetector>(), finds_nothing());
         });
     }
 
@@ -226,7 +228,7 @@ mod tests {
 
             let at = tooltip_center(tester);
             test_gesture_tap(tester, at);
-            assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+            expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
         });
     }
 
@@ -262,7 +264,7 @@ mod tests {
     fn tooltip_triggers_manually_when_in_tooltip_visibility_with_visible_true() {
         test_widgets(|tester| {
             ensure_visible_under(tester, true);
-            assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+            expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
         });
     }
 }

@@ -2204,14 +2204,15 @@ pub(crate) mod tests {
     use waft_painting::TextDirection;
     use waft_widgets::{Container, DefaultTextStyle, Icon, IconTheme, Text, WidgetStateColor};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
     use crate::icons::Icons;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{Drawn, PaintInspection};
+    use crate::test_support::{PaintInspection, path_like};
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::RecordedCall;
     use waft_services::SystemMouseCursors;
     use waft_widgets::Directionality as DirectionalityWidget;
     use waft_widgets::FocusNodeLeaf;
@@ -2249,17 +2250,17 @@ pub(crate) mod tests {
             .collect()
     }
 
-    pub(crate) fn text_button_of(tester: &WidgetTester, text: &str) -> waft_widgets::AnyElement {
-        tester.ancestor_of_type::<TextButton>(tester.find_text(text)[0])
+    pub(crate) fn text_button_of(text: &str) -> waft_widgets::testing::Finder {
+        find::widget_with_text::<TextButton>(text)
     }
 
     /// `tester.widget<DefaultTextStyle>(find.descendant(of: find.widgetWithText(TextButton,
     /// text), matching: find.byType(DefaultTextStyle))).style`.
     pub(crate) fn button_text_style(tester: &WidgetTester, text: &str) -> TextStyle {
-        let button = text_button_of(tester, text);
-        let styles = tester.descendants_of_type::<DefaultTextStyle>(button);
-        assert_eq!(styles.len(), 1);
-        tester.widget(styles[0], |style: &DefaultTextStyle| style.style.clone())
+        tester.widget(
+            find::descendant(text_button_of(text), find::by_type::<DefaultTextStyle>()),
+            |style: &DefaultTextStyle| style.style.clone(),
+        )
     }
 
     pub(crate) fn style_color(style: &TextStyle) -> Option<Color> {
@@ -2271,20 +2272,19 @@ pub(crate) mod tests {
         tester: &WidgetTester,
         icon: &waft_widgets::IconData,
     ) -> Option<Color> {
-        let icon_element = tester.find_by_icon(icon);
-        let button = tester.ancestor_of_type::<TextButton>(icon_element);
-        let theme = *tester
-            .descendants_of_type::<IconTheme>(button)
-            .last()
-            .expect("an IconTheme");
+        let theme = find::descendant(
+            find::widget_with_icon::<TextButton>(icon),
+            find::by_type::<IconTheme>(),
+        )
+        .last();
         tester.widget(theme, |theme: &IconTheme| {
             theme.data.color.as_deref().copied()
         })
     }
 
     pub(crate) fn button_rect(tester: &WidgetTester, index: usize) -> Rect {
-        let element = tester.find_by_type::<TextButton>()[index];
-        tester.get_rect(tester.render_box_of(element))
+        let element = find::by_type::<TextButton>().evaluate(tester)[index];
+        tester.get_rect(element)
     }
 
     // 'Initial toggle state is reflected'
@@ -2348,7 +2348,7 @@ pub(crate) mod tests {
             );
 
             let center = text_center(tester, "Second child");
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(*is_selected.borrow(), [false, false]);
@@ -2364,8 +2364,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn text_center(tester: &WidgetTester, text: &str) -> Offset {
-        let element = tester.find_text(text)[0];
-        tester.get_rect(tester.render_box_of(element)).center()
+        let element = find::text(text).evaluate(tester)[0];
+        tester.get_rect(element).center()
     }
 
     // 'onPressed that is null disables buttons'
@@ -2389,7 +2389,7 @@ pub(crate) mod tests {
             );
 
             let center = text_center(tester, "Second child");
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // Nothing should change
@@ -2663,10 +2663,10 @@ pub(crate) mod tests {
         read: impl FnOnce(&Material) -> R,
     ) -> R {
         let button = match text {
-            Some(text) => text_button_of(tester, text),
-            None => tester.find_by_type::<TextButton>()[0],
+            Some(text) => text_button_of(text),
+            None => find::by_type::<TextButton>().first(),
         };
-        let material = tester.descendants_of_type::<Material>(button)[0];
+        let material = find::descendant(button, find::by_type::<Material>()).first();
         tester.widget(material, read)
     }
 
@@ -2835,16 +2835,16 @@ pub(crate) mod tests {
 
     /// What `paints` records for the first `_RenderInkFeatures`: its own paint and its
     /// descendants' (the button's `Material` is one of them).
-    fn first_ink_features_painted(tester: &WidgetTester) -> Vec<Drawn> {
+    fn first_ink_features_painted(tester: &WidgetTester) -> Vec<RecordedCall> {
         let render = tester.first::<crate::material::RenderInkFeatures>();
-        tester.painted(render.as_object())
+        tester.painted_calls(render.as_object())
     }
 
     pub(crate) fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
         first_ink_features_painted(tester)
             .into_iter()
             .filter_map(|drawn| match drawn {
-                Drawn::Rect(color, _) => Some(color),
+                RecordedCall::Rect { color, .. } => Some(color.value()),
                 _ => None,
             })
             .collect()
@@ -2853,10 +2853,7 @@ pub(crate) mod tests {
     pub(crate) fn ink_circle_colors(tester: &WidgetTester) -> Vec<u32> {
         first_ink_features_painted(tester)
             .into_iter()
-            .filter_map(|drawn| match drawn {
-                Drawn::Path(color, _) => Some(color),
-                _ => None,
-            })
+            .filter_map(|drawn| path_like(&drawn).map(|(color, _)| color.value()))
             .collect()
     }
 
@@ -3005,32 +3002,20 @@ pub(crate) mod tests {
         physical_model: bool,
         expected: &[(Color, f64)],
     ) -> bool {
-        use waft_embedder::valo::Op;
-        let ops = tester.painted_ops(render);
-        let after_model = if physical_model {
-            let Some(first_path) = ops.iter().position(|op| matches!(op, Op::DrawPath { .. }))
-            else {
-                return false;
-            };
-            first_path + 1
-        } else {
-            0
+        use waft_rendering::testing::{PaintCall, PaintedStyle, paints};
+        // Dart's `path(style: stroke, color:, strokeWidth:)`.
+        let stroked = |(color, width): &(Color, f64)| PaintCall::Path {
+            color: Some(*color),
+            style: Some(PaintedStyle::Stroke(Some(*width))),
+            includes: Vec::new(),
+            excludes: Vec::new(),
         };
-        let mut remaining = expected.iter();
-        let mut wanted = remaining.next();
-        for op in &ops[after_model..] {
-            let Some((color, width)) = wanted else {
-                break;
-            };
-            if let Op::DrawPath { paint, .. } = op
-                && let waft_embedder::valo::PaintStyle::Stroke(stroke) = &paint.style
-                && paint.color == waft_embedder::valo::Color::from(*color)
-                && f64::from(stroke.width) == *width
-            {
-                wanted = remaining.next();
-            }
+        let mut pattern = Vec::new();
+        if physical_model {
+            pattern.push(PaintCall::path(None));
         }
-        wanted.is_none()
+        pattern.extend(expected.iter().map(stroked));
+        paints(&tester.painted_ops(render), &pattern).is_ok()
     }
 
     pub(crate) fn select_toggle_button_objects(
@@ -3127,10 +3112,10 @@ pub(crate) mod tests {
     }
 
     fn select_toggle_button_rects(tester: &WidgetTester) -> Vec<Rect> {
-        tester
-            .find_by_type::<SelectToggleButton>()
+        find::by_type::<SelectToggleButton>()
+            .evaluate(tester)
             .into_iter()
-            .map(|element| tester.get_rect(tester.render_box_of(element)))
+            .map(|element| tester.get_rect(element))
             .collect()
     }
 
@@ -3204,8 +3189,8 @@ pub(crate) mod tests {
     }
 
     fn bottom_left_dy(tester: &WidgetTester, text: &str) -> f64 {
-        let element = tester.find_text(text)[0];
-        tester.get_rect(tester.render_box_of(element)).bottom
+        let element = find::text(text).evaluate(tester)[0];
+        tester.get_rect(element).bottom
     }
 
     fn baseline_row() -> Row {
@@ -3285,14 +3270,22 @@ pub(crate) mod tests {
             let text_dy = bottom_left_dy(tester, "Text");
 
             assert_eq!(first_toggle_button_dy, second_toggle_button_dy);
-            assert!((first_toggle_button_dy - (elevated_button_dy - 1.7)).abs() <= 0.1);
-            assert!((first_toggle_button_dy - (text_dy - 9.7)).abs() <= 0.1);
+            waft_widgets::testing::assert_more_or_less_equals_within(
+                first_toggle_button_dy,
+                elevated_button_dy - 1.7,
+                0.1,
+            );
+            waft_widgets::testing::assert_more_or_less_equals_within(
+                first_toggle_button_dy,
+                text_dy - 9.7,
+                0.1,
+            );
         });
     }
 
     fn top_right_dx(tester: &WidgetTester, text: &str) -> f64 {
-        let element = tester.find_text(text)[0];
-        tester.get_rect(tester.render_box_of(element)).right
+        let element = find::text(text).evaluate(tester)[0];
+        tester.get_rect(element).right
     }
 
     // 'Directionality test'
@@ -3459,9 +3452,8 @@ pub(crate) mod tests {
     }
 
     fn toggle_buttons_size(tester: &WidgetTester) -> Size {
-        let element = tester.find_by_type::<ToggleButtons>()[0];
-        let app = tester.cell.borrow();
-        tester.render_box_of(element).size(&app)
+        let element = find::by_type::<ToggleButtons>().evaluate(tester)[0];
+        tester.get_size(element)
     }
 
     fn tap_target_buttons(constraints: BoxConstraints, labels: [&str; 3]) -> ToggleButtons {
@@ -3669,9 +3661,9 @@ pub(crate) mod tests {
 
             // `find.widgetWithText(Material, text).first`: the outermost Material above the text.
             let toggle_button_elevation = |tester: &WidgetTester, text: &str| {
-                let text_element = tester.find_text(text)[0];
-                let material = tester
-                    .find_by_type::<Material>()
+                let text_element = find::text(text).evaluate(tester)[0];
+                let material = find::by_type::<Material>()
+                    .evaluate(tester)
                     .into_iter()
                     .find(|material| tester.ancestors(text_element).contains(material))
                     .expect("a Material above the text");

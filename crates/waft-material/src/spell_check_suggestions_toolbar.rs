@@ -342,7 +342,7 @@ mod tests {
     use waft_embedder::Size;
     use waft_widgets::Center;
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::scaffold::Scaffold;
@@ -389,9 +389,9 @@ mod tests {
 
     /// Dart's `tester.getTopLeft(findSpellCheckSuggestionsToolbar()).dy`.
     fn toolbar_y(tester: &WidgetTester) -> f64 {
-        let containers = tester.find_by_type::<SpellCheckSuggestionsToolbarContainer>();
+        let containers = find::by_type::<SpellCheckSuggestionsToolbarContainer>().evaluate(tester);
         assert_eq!(containers.len(), 1);
-        tester.global_rect(tester.render_box_of(containers[0])).top
+        tester.get_rect(containers[0]).top
     }
 
     #[test]
@@ -461,7 +461,7 @@ mod tests {
                 )
             };
             tester.pump_widget(root);
-            let toolbars = tester.find_by_type::<SpellCheckSuggestionsToolbar>();
+            let toolbars = find::by_type::<SpellCheckSuggestionsToolbar>().evaluate(tester);
             let render = tester.render_box_of(toolbars[0]);
             assert_eq!(render.size(&tester.cell.borrow()), Size::ZERO);
         });

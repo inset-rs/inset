@@ -5939,12 +5939,23 @@ mod tests {
     use waft_services::PhysicalKeyboardKey;
     use waft_widgets::{AnyElement, Column, Container, Icon, primary_focus};
 
+    use waft_rendering::testing::{PaintCall, assert_paints, paints};
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, assert_more_or_less_equals_within,
+        expect, find, finds_nothing, finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
-    use crate::test_support::material_app;
+    use crate::test_support::{PaintInspection, material_app};
+
+    /// What the first ink features render object and its subtree paint: Dart's `paints` on
+    /// `getOverlayColor(tester)`.
+    fn overlay_ops(tester: &WidgetTester) -> Vec<waft_embedder::valo::Op> {
+        let render = waft_rendering::RenderBox::as_object(
+            tester.first::<crate::material::RenderInkFeatures>(),
+        );
+        tester.painted_ops_deep(render)
+    }
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::m3;
 
@@ -6194,36 +6205,25 @@ mod tests {
     /// The kit's onstage finders do not see an `OverlayPortal`'s child, where a menu is, so
     /// these finders count every mounted `Text`; no case here builds offstage text.
     fn shows(tester: &WidgetTester, text: &str) -> bool {
-        match tester.find_text(text).len() {
+        match find::text(text).evaluate(tester).len() {
             0 => false,
             1 => true,
             count => panic!("{count} widgets show {text:?}"),
         }
     }
 
-    /// Dart's `tester.getRect(find.text(text))`.
-    fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        tester.get_rect(tester.render_box_of(only(tester.find_text(text))))
-    }
-
     /// Dart's `tester.getRect(find.byType(W))` of the only one.
     fn rect_of<W: 'static>(tester: &WidgetTester) -> Rect {
-        tester.get_rect(tester.render_box_of(only(tester.find_by_type::<W>())))
+        tester.get_rect(tester.render_box_of(tester.element(find::by_type::<W>())))
     }
 
     fn rect_of_element(tester: &WidgetTester, element: AnyElement) -> Rect {
         tester.get_rect(tester.render_box_of(element))
     }
 
-    /// Dart's `tester.tap(find.text(text))`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let center = text_rect(tester, text).center();
-        tester.tap(center, 1);
-    }
-
     /// Dart's `find.ancestor(of: find.text(text), matching: find.byType(W))`, nearest first.
     fn ancestors_of_type<W: 'static>(tester: &WidgetTester, text: &str) -> Vec<AnyElement> {
-        let ancestors = tester.ancestors(only(tester.find_text(text)));
+        let ancestors = tester.ancestors(tester.element(find::text(text)));
         let app = tester.cell.borrow();
         ancestors
             .into_iter()
@@ -6235,7 +6235,7 @@ mod tests {
 
     /// Dart's `findMenuPanels()`.
     fn menu_panels(tester: &WidgetTester) -> Vec<AnyElement> {
-        tester.find_by_type::<MenuPanel>()
+        find::by_type::<MenuPanel>().evaluate(tester)
     }
 
     /// Dart's `hoverOver`: a new mouse, as Dart's `createGesture` makes one, moved over `at`,
@@ -6362,7 +6362,7 @@ mod tests {
             assert!(!shows(tester, &TestMenu::SubSubMenu110.label()));
             assert!(log.opened().is_empty());
 
-            tap_text(tester, &TestMenu::MainMenu1.label());
+            tester.tap(find::text(&TestMenu::MainMenu1.label()));
             pump(tester);
 
             assert!(shows(tester, &TestMenu::MainMenu0.label()));
@@ -6377,7 +6377,7 @@ mod tests {
             assert_eq!(log.opened().last(), Some(&TestMenu::MainMenu1));
             log.clear();
 
-            tap_text(tester, &TestMenu::SubMenu11.label());
+            tester.tap(find::text(&TestMenu::SubMenu11.label()));
             pump(tester);
 
             assert!(shows(tester, &TestMenu::MainMenu0.label()));
@@ -6619,7 +6619,7 @@ mod tests {
                 );
 
                 // Menu bar (horizontal menu).
-                let text_button = tester.find_by_type::<TextButton>()[0];
+                let text_button = find::by_type::<TextButton>().evaluate(tester)[0];
                 let menu_material = tester.ancestor_of_type::<Material>(text_button);
                 assert!(log.opened().is_empty());
                 tester.widget::<Material, _>(menu_material, |material| {
@@ -6640,7 +6640,7 @@ mod tests {
                 });
 
                 // Vertical menu.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 let item = widget_with_text::<TextButton>(tester, &TestMenu::SubMenu10.label());
@@ -6663,9 +6663,9 @@ mod tests {
                     assert_eq!(text_style.height, Some(1.43));
                 });
 
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 pump(tester);
-                let icon = tester.find_by_icon(&Icons::add());
+                let icon = tester.element(find::by_icon(&Icons::add()).first());
                 let glyph = tester.glyph_style(icon);
                 assert_eq!(
                     glyph.color,
@@ -6713,7 +6713,7 @@ mod tests {
                 });
 
                 // Vertical menu.
-                tap_text(tester, &TestMenu::MainMenu2.label());
+                tester.tap(find::text(&TestMenu::MainMenu2.label()));
                 pump(tester);
 
                 let item = widget_with_text::<TextButton>(tester, &TestMenu::SubMenu20.label());
@@ -6732,7 +6732,7 @@ mod tests {
                     assert_eq!(text_style.color, Some(disabled.into()));
                 });
 
-                let icon = tester.find_by_icon(&Icons::ac_unit());
+                let icon = tester.element(find::by_icon(&Icons::ac_unit()).first());
                 let glyph = tester.glyph_style(icon);
                 assert_eq!(glyph.color, Some(disabled.into()));
             });
@@ -6779,13 +6779,13 @@ mod tests {
                     Some(button_focus.handle())
                 );
 
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
-                tap_text(tester, &TestMenu::SubMenu11.label());
+                tester.tap(find::text(&TestMenu::SubMenu11.label()));
                 pump(tester);
 
-                tap_text(tester, &TestMenu::SubSubMenu110.label());
+                tester.tap(find::text(&TestMenu::SubSubMenu110.label()));
                 pump(tester);
 
                 assert_eq!(focus_in_on_pressed.get(), Some(button_focus.handle()));
@@ -6870,7 +6870,7 @@ mod tests {
                 );
 
                 // Open and make sure things are the right size.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 assert_eq!(
@@ -6878,7 +6878,7 @@ mod tests {
                     Rect::from_ltrb(0.0, 0.0, 800.0, 48.0)
                 );
                 assert_eq!(
-                    text_rect(tester, &TestMenu::SubMenu10.label()),
+                    tester.get_rect(find::text(&TestMenu::SubMenu10.label())),
                     Rect::from_ltrb(124.0, 73.0, 314.0, 87.0)
                 );
                 let materials = ancestors_of_type::<Material>(tester, &TestMenu::SubMenu10.label());
@@ -6906,7 +6906,7 @@ mod tests {
                 );
 
                 // Open and make sure things are the right size.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 assert_eq!(
@@ -6914,7 +6914,7 @@ mod tests {
                     Rect::from_ltrb(0.0, 0.0, 800.0, 48.0)
                 );
                 assert_eq!(
-                    text_rect(tester, &TestMenu::SubMenu10.label()),
+                    tester.get_rect(find::text(&TestMenu::SubMenu10.label())),
                     Rect::from_ltrb(486.0, 73.0, 676.0, 87.0)
                 );
                 let materials = ancestors_of_type::<Material>(tester, &TestMenu::SubMenu10.label());
@@ -6924,7 +6924,7 @@ mod tests {
                 );
 
                 // Close and make sure it goes back where it was.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 assert_eq!(
@@ -6948,7 +6948,7 @@ mod tests {
                 );
 
                 // Open the menu and make sure things are the right size, in the right place.
-                tap_text(tester, "Press Me");
+                tester.tap(find::text("Press Me"));
                 pump(tester);
                 assert_eq!(
                     menu_scope_rect_of_key(tester, &key),
@@ -7015,7 +7015,7 @@ mod tests {
 
                 let label = TestMenu::SubMenu00.label();
                 // Open the menu and make sure things are the right size, in the right place.
-                tap_text(tester, "Press Me");
+                tester.tap(find::text("Press Me"));
                 pump(tester);
                 assert_eq!(
                     menu_scope_rect(tester, &label),
@@ -7081,7 +7081,7 @@ mod tests {
 
                 let label = TestMenu::SubMenu00.label();
                 // Open the menu and make sure things are the right size, in the right place.
-                tap_text(tester, "Press Me");
+                tester.tap(find::text("Press Me"));
                 pump(tester);
                 assert_eq!(
                     menu_scope_rect(tester, &label),
@@ -7122,7 +7122,7 @@ mod tests {
 
                 let label = TestMenu::SubMenu00.label();
                 // Open the menu and make sure things are the right size, in the right place.
-                tap_text(tester, "Press Me");
+                tester.tap(find::text("Press Me"));
                 pump(tester);
                 assert_eq!(
                     menu_scope_rect(tester, &label),
@@ -7185,7 +7185,7 @@ mod tests {
                 );
 
                 // Open and make sure things are the right size.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 assert_eq!(
@@ -7193,7 +7193,7 @@ mod tests {
                     Rect::from_ltrb(22.0, 22.0, 778.0, 70.0)
                 );
                 assert_eq!(
-                    text_rect(tester, &TestMenu::SubMenu10.label()),
+                    tester.get_rect(find::text(&TestMenu::SubMenu10.label())),
                     Rect::from_ltrb(146.0, 95.0, 336.0, 109.0)
                 );
                 let materials = ancestors_of_type::<Material>(tester, &TestMenu::SubMenu10.label());
@@ -7203,7 +7203,7 @@ mod tests {
                 );
 
                 // Close and make sure it goes back where it was.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 assert_eq!(
@@ -7228,7 +7228,7 @@ mod tests {
                 );
 
                 // Open and make sure things are the right size.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 assert_eq!(
@@ -7236,7 +7236,7 @@ mod tests {
                     Rect::from_ltrb(22.0, 22.0, 778.0, 70.0)
                 );
                 assert_eq!(
-                    text_rect(tester, &TestMenu::SubMenu10.label()),
+                    tester.get_rect(find::text(&TestMenu::SubMenu10.label())),
                     Rect::from_ltrb(464.0, 95.0, 654.0, 109.0)
                 );
                 let materials = ancestors_of_type::<Material>(tester, &TestMenu::SubMenu10.label());
@@ -7246,7 +7246,7 @@ mod tests {
                 );
 
                 // Close and make sure it goes back where it was.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 assert_eq!(
@@ -7326,7 +7326,7 @@ mod tests {
         fn a_menu_anchor_clips_its_menu_hard_edged_unless_told_otherwise() {
             test_widgets(|tester| {
                 pump_material(tester, m3, |_app| clip_behavior_anchor(None));
-                tap_text(tester, "Tap me");
+                tester.tap(find::text("Tap me"));
                 pump(tester);
 
                 // Test default clip behavior.
@@ -7336,12 +7336,12 @@ mod tests {
                 );
 
                 // Close the menu.
-                tester.tap(Offset::new(10.0, 10.0), 1);
+                tester.tap_at(Offset::new(10.0, 10.0), 1);
                 tester.pump_and_settle();
                 pump_material(tester, m3, |_app| {
                     clip_behavior_anchor(Some(Clip::AntiAlias))
                 });
-                tap_text(tester, "Tap me");
+                tester.tap(find::text("Tap me"));
                 pump(tester);
 
                 // Test custom clip behavior.
@@ -7368,27 +7368,27 @@ mod tests {
                 assert!(log.opened().is_empty());
                 assert!(log.closed().is_empty());
 
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
                 assert_eq!(log.opened(), [TestMenu::MainMenu1]);
                 assert!(log.closed().is_empty());
                 log.clear();
 
-                tap_text(tester, &TestMenu::SubMenu11.label());
+                tester.tap(find::text(&TestMenu::SubMenu11.label()));
                 pump(tester);
 
                 assert_eq!(log.opened(), [TestMenu::SubMenu11]);
                 assert!(log.closed().is_empty());
                 log.clear();
 
-                tap_text(tester, &TestMenu::SubMenu11.label());
+                tester.tap(find::text(&TestMenu::SubMenu11.label()));
                 pump(tester);
 
                 assert!(log.opened().is_empty());
                 assert_eq!(log.closed(), [TestMenu::SubMenu11]);
                 log.clear();
 
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 pump(tester);
 
                 assert_eq!(log.opened(), [TestMenu::MainMenu0]);
@@ -7428,19 +7428,19 @@ mod tests {
                 assert!(log.closed().is_empty());
 
                 // Doesn't consume tap when the menu is closed.
-                tap_text(tester, &TestMenu::OutsideButton.label());
+                tester.tap(find::text(&TestMenu::OutsideButton.label()));
                 pump(tester);
                 assert_eq!(log.selected(), [TestMenu::OutsideButton]);
                 log.clear();
 
-                tap_text(tester, &TestMenu::AnchorButton.label());
+                tester.tap(find::text(&TestMenu::AnchorButton.label()));
                 pump(tester);
                 assert_eq!(log.opened(), [TestMenu::AnchorButton]);
                 assert!(log.closed().is_empty());
                 assert_eq!(log.selected(), [TestMenu::AnchorButton]);
                 log.clear();
 
-                tap_text(tester, &TestMenu::OutsideButton.label());
+                tester.tap(find::text(&TestMenu::OutsideButton.label()));
                 pump(tester);
 
                 assert!(log.opened().is_empty());
@@ -7468,19 +7468,19 @@ mod tests {
                 assert!(log.closed().is_empty());
 
                 // Doesn't consume tap when the menu is closed.
-                tap_text(tester, &TestMenu::OutsideButton.label());
+                tester.tap(find::text(&TestMenu::OutsideButton.label()));
                 pump(tester);
                 assert_eq!(log.selected(), [TestMenu::OutsideButton]);
                 log.clear();
 
-                tap_text(tester, &TestMenu::AnchorButton.label());
+                tester.tap(find::text(&TestMenu::AnchorButton.label()));
                 pump(tester);
                 assert_eq!(log.opened(), [TestMenu::AnchorButton]);
                 assert!(log.closed().is_empty());
                 assert_eq!(log.selected(), [TestMenu::AnchorButton]);
                 log.clear();
 
-                tap_text(tester, &TestMenu::OutsideButton.label());
+                tester.tap(find::text(&TestMenu::OutsideButton.label()));
                 pump(tester);
 
                 assert!(log.opened().is_empty());
@@ -7504,15 +7504,15 @@ mod tests {
                         .into_widget()
                 });
 
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
-                tap_text(tester, &TestMenu::SubMenu11.label());
+                tester.tap(find::text(&TestMenu::SubMenu11.label()));
                 pump(tester);
 
                 assert_eq!(log.opened(), [TestMenu::MainMenu1, TestMenu::SubMenu11]);
                 log.opened.borrow_mut().clear();
-                tap_text(tester, &TestMenu::SubSubMenu110.label());
+                tester.tap(find::text(&TestMenu::SubSubMenu110.label()));
                 pump(tester);
 
                 assert_eq!(log.selected(), [TestMenu::SubSubMenu110]);
@@ -7547,7 +7547,7 @@ mod tests {
                 });
 
                 // Have to open a menu initially to start things going.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
                 submenu(tester, "Menu 1");
 
@@ -7561,7 +7561,7 @@ mod tests {
                 pump(tester);
                 item(tester, "External Focus");
 
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
                 submenu(tester, "Menu 1");
 
@@ -7592,7 +7592,7 @@ mod tests {
                 });
 
                 // Have to open a menu initially to start things going.
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 tester.pump_and_settle();
 
                 submenu(tester, "Menu 0");
@@ -7653,7 +7653,7 @@ mod tests {
                 use LogicalKeyboardKey as K;
 
                 // Have to open a menu initially to start things going.
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 tester.pump_and_settle();
 
                 key(tester, K::ARROW_RIGHT);
@@ -7772,7 +7772,7 @@ mod tests {
                 use LogicalKeyboardKey as K;
 
                 // Have to open a menu initially to start things going.
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 pump(tester);
 
                 key(tester, K::ARROW_LEFT);
@@ -7948,7 +7948,7 @@ mod tests {
 
                 // Directional traversal doesn't work until a menu item is focused.
                 // To start focusing, hover over the first menu item.
-                let start = text_rect(tester, "start").center();
+                let start = tester.get_rect(find::text("start")).center();
                 hover_over(tester, start);
                 pump(tester);
                 item(tester, "start");
@@ -8024,7 +8024,7 @@ mod tests {
 
             // Directional traversal doesn't work until a menu item is focused.
             // To start focusing, hover over the first menu item.
-            let start = text_rect(tester, "start").center();
+            let start = tester.get_rect(find::text("start")).center();
             hover_over(tester, start);
             pump(tester);
             item(tester, "start");
@@ -8074,7 +8074,7 @@ mod tests {
             send_key(tester, K::ESCAPE);
             pump(tester);
             assert!(focused_is_anchor_button(tester));
-            assert!(tester.find_by_type::<MenuItemButton>().is_empty());
+            expect(tester, &find::by_type::<MenuItemButton>(), finds_nothing());
         }
 
         // menu_anchor_test.dart 'MenuAnchor LTR directional traversal works'.
@@ -8120,7 +8120,7 @@ mod tests {
 
             /// Dart's `hoverOver(tester, find.text(text))`, then the case's `tester.pump()`.
             fn hover_text(&mut self, tester: &mut WidgetTester, text: &str) {
-                let at = text_rect(tester, text).center();
+                let at = tester.get_rect(find::text(text)).center();
                 tester.move_to(&mut self.0, at, false);
                 pump(tester);
             }
@@ -8177,7 +8177,7 @@ mod tests {
                 assert_eq!(*focused_menu.borrow(), None);
 
                 // Have to open a menu initially to start things going.
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 pump(tester);
                 focused("Menu 0", "SubmenuButton");
 
@@ -8225,7 +8225,7 @@ mod tests {
                 let mut mouse = Mouse::new(tester);
 
                 // Have to open a menu initially to start things going.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
                 submenu(tester, "Menu 1");
 
@@ -8420,7 +8420,7 @@ mod tests {
 
                 // Scroll the menu while the pointer is over a menu item. The focus should
                 // not change.
-                let item_15 = only(tester.find_text("Item 15"));
+                let item_15 = tester.element(find::text("Item 15"));
                 {
                     let mut app = tester.cell.borrow_mut();
                     let render = item_15.find_render_object(&app).expect("laid out");
@@ -8482,7 +8482,7 @@ mod tests {
                     )
                 });
 
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 pump(tester);
 
                 assert!(!log.opened().is_empty());
@@ -8554,7 +8554,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                tap_text(tester, "Show menu");
+                tester.tap(find::text("Show menu"));
                 pump(tester);
                 assert!(root_opened.get());
 
@@ -8614,7 +8614,7 @@ mod tests {
 
                 build(tester, None);
 
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 pump(tester);
 
                 assert!(!log.opened().is_empty());
@@ -8670,7 +8670,7 @@ mod tests {
                 tester.pump_widget(root);
 
                 // Open the drop down menu and focus on the MenuAnchor.
-                tap_text(tester, "Main button");
+                tester.tap(find::text("Main button"));
                 tester.pump_and_settle();
                 assert!(shows(tester, "Submenu item 0"));
 
@@ -8734,10 +8734,7 @@ mod tests {
         /// Dart's `expect(find.byType(Scrollbar).last, paints..rrect(color: color))`: what the
         /// foreground painter under the last `Scrollbar` paints, painted on its own.
         fn last_scrollbar_paints_a_path_in(tester: &WidgetTester, color: u32) -> bool {
-            let scrollbar = *tester
-                .find_by_type::<crate::scrollbar::Scrollbar>()
-                .last()
-                .expect("a Scrollbar");
+            let scrollbar = tester.element(find::by_type::<crate::scrollbar::Scrollbar>().last());
             let mut app = tester.cell.borrow_mut();
             let render = scrollbar.find_render_object(&app).expect("laid out");
             let mut pending = vec![render];
@@ -8758,9 +8755,11 @@ mod tests {
             let (painter, size) = painter.expect("a foreground painter under the Scrollbar");
             let mut canvas = waft_embedder::Canvas::new();
             painter.paint(&mut app, &mut canvas, size);
-            crate::test_support::Drawn::draws(&canvas.build())
-                .iter()
-                .any(|drawn| matches!(drawn, crate::test_support::Drawn::Path(painted, _) if *painted == color))
+            paints(
+                canvas.build().ops(),
+                &[PaintCall::rrect(Some(Color::new(color)))],
+            )
+            .is_ok()
         }
 
         // menu_anchor_test.dart 'Menu scrollbar inherits ScrollbarTheme'
@@ -8784,14 +8783,14 @@ mod tests {
                         )));
                     pump_tall_menu(tester, scrollbar_theme.clone(), None);
 
-                    tap_text(tester, "Main Menu");
+                    tester.tap(find::text("Main Menu"));
                     tester.pump_and_settle();
 
                     // Test Scrollbar thumb color.
                     assert!(last_scrollbar_paints_a_path_in(tester, 0xffff0000));
 
                     // Close the menu.
-                    tester.tap(Offset::new(10.0, 10.0), 1);
+                    tester.tap_at(Offset::new(10.0, 10.0), 1);
                     tester.pump_and_settle();
 
                     let local_theme = scrollbar_theme.copy_with().thumb_color(Rc::new(
@@ -8799,13 +8798,160 @@ mod tests {
                     ));
                     pump_tall_menu(tester, scrollbar_theme, Some(local_theme));
 
-                    tap_text(tester, "Main Menu");
+                    tester.tap(find::text("Main Menu"));
                     tester.pump_and_settle();
 
                     // Scrollbar thumb color should be updated.
                     assert!(last_scrollbar_paints_a_path_in(tester, 0xff00ff00));
                 });
             }
+        }
+
+        // menu_anchor_test.dart 'Menu scrollbar does not inherit MediaQuery padding' (material_ui).
+        #[test]
+        fn a_menus_scrollbar_does_not_inherit_the_media_query_padding() {
+            test_widgets(|tester| {
+                use waft_rendering::testing::RecordedCall;
+                use waft_widgets::{Scrollable, ScrollableState, ScrollbarPainterRef};
+
+                use crate::scrollbar::Scrollbar;
+                use crate::text_button::TextButton;
+
+                tester.view().set_device_pixel_ratio(1.0);
+                tester.view().set_padding(waft_embedder::ViewPadding {
+                    left: 8.0,
+                    top: 16.0,
+                    right: 32.0,
+                    bottom: 24.0,
+                });
+                let menu_item_padding: Rc<Cell<Option<EdgeInsets>>> = Rc::default();
+                let controller: MenuControllerRef =
+                    MenuController::new(&mut tester.cell.borrow_mut()).into_erased();
+
+                let mut menu_children = vec![
+                    waft_widgets::Builder::new({
+                        let menu_item_padding = Rc::clone(&menu_item_padding);
+                        move |app, context| {
+                            menu_item_padding.set(Some(MediaQuery::padding_of(app, context)));
+                            MenuItemButton::new()
+                                .on_pressed(Listener::new(|_app| {}))
+                                .child(Text::new("Item 0"))
+                                .into_widget()
+                        }
+                    })
+                    .into_widget(),
+                ];
+                menu_children.extend((1..4).map(|i| {
+                    MenuItemButton::new()
+                        .on_pressed(Listener::new(|_app| {}))
+                        .child(Text::new(format!("Item {i}")))
+                        .into_widget()
+                }));
+                let anchor = MenuAnchor::new(menu_children)
+                    .controller(controller)
+                    .style(MenuStyle::new().maximum_size(Rc::new(
+                        waft_widgets::WidgetStatePropertyAll::new(Some(Size::from_height(100.0))),
+                    )))
+                    .builder(|_app, _context, controller, _child| {
+                        TextButton::new(
+                            Some(Listener::new(move |app| controller.open(app, None))),
+                            Some(Text::new("Open menu")),
+                        )
+                        .into_widget()
+                    });
+                tester.pump_widget(
+                    crate::app::MaterialApp::new()
+                        .home(Material::new().child(anchor))
+                        .into_widget(),
+                );
+
+                tester.tap(find::text("Open menu"));
+                tester.pump_and_settle();
+
+                let scrollbar_painter = tester.widget(
+                    find::descendant(
+                        find::by_type::<Scrollbar>(),
+                        find::by_widget_predicate(
+                            "a CustomPaint with a ScrollbarPainter",
+                            |_app, widget| {
+                                waft_widgets::downcast_widget::<waft_widgets::CustomPaint>(widget)
+                                    .and_then(|custom_paint| {
+                                        custom_paint.foreground_painter.as_ref()
+                                    })
+                                    .is_some_and(|painter| {
+                                        painter
+                                            .as_any()
+                                            .downcast_ref::<ScrollbarPainterRef>()
+                                            .is_some()
+                                    })
+                            },
+                        ),
+                    ),
+                    |custom_paint: &waft_widgets::CustomPaint| {
+                        custom_paint
+                            .foreground_painter
+                            .as_ref()
+                            .and_then(|painter| {
+                                painter
+                                    .as_any()
+                                    .downcast_ref::<ScrollbarPainterRef>()
+                                    .cloned()
+                            })
+                            .expect("a ScrollbarPainter")
+                    },
+                );
+                // The scrollbar ignores the view padding, but the menu children still
+                // observe it.
+                assert_eq!(
+                    scrollbar_painter.painter().padding(&tester.cell.borrow()),
+                    EdgeInsets::ZERO.into()
+                );
+                assert_eq!(
+                    menu_item_padding.get(),
+                    Some(EdgeInsets::from_ltrb(8.0, 16.0, 32.0, 24.0))
+                );
+
+                // The menu scrolls all the way to the bottom and the scrollbar thumb
+                // reaches the end of its track instead of stopping short of it.
+                let scrollable = tester.element(find::descendant(
+                    find::by_type::<Scrollbar>(),
+                    find::by_type::<Scrollable>(),
+                ));
+                let position = scrollable
+                    .state_handle::<ScrollableState>(&tester.cell.borrow())
+                    .expect("a Scrollable element holds a ScrollableState")
+                    .position(&tester.cell.borrow());
+                assert!(position.max_scroll_extent(&tester.cell.borrow()) > 0.0);
+                tester.drag(find::by_type::<Scrollbar>(), Offset::new(0.0, -200.0));
+                tester.pump_and_settle();
+                {
+                    let app = tester.cell.borrow();
+                    assert_eq!(position.pixels(&app), position.max_scroll_extent(&app));
+                }
+
+                // The thumb is painted at the very end of the track rather than stopping
+                // short of it by the height of the removed bottom padding.
+                let scrollbar_extent = tester.get_size(find::by_type::<Scrollbar>()).height();
+                let scrollbar = tester.render_object(find::by_type::<Scrollbar>());
+                waft_rendering::testing::assert_paints(
+                    &tester.painted_ops_deep(scrollbar),
+                    &[PaintCall::something(move |call| {
+                        // The thumb is a rect on Android and a rounded rect elsewhere. The
+                        // track shares the same shape but always starts at the top, so only
+                        // the thumb is considered here.
+                        let shape = match call {
+                            RecordedCall::Rect { rect, .. } => Some(*rect),
+                            RecordedCall::RRect { bounds, .. } => Some(*bounds),
+                            _ => None,
+                        };
+                        Ok(shape.is_some_and(|shape| {
+                            shape.top > 0.0
+                                && (shape.bottom - scrollbar_extent).abs()
+                                    <= f64::from(f32::EPSILON) * scrollbar_extent.max(1.0)
+                        }))
+                    })],
+                );
+            });
         }
     }
 
@@ -8820,9 +8966,7 @@ mod tests {
         use super::*;
         use crate::badge::Badge;
         use crate::filled_button::FilledButton;
-        use crate::material::RenderInkFeatures;
         use crate::scaffold::Scaffold;
-        use crate::test_support::Drawn;
 
         const ALL_PLATFORMS: [TargetPlatform; 6] = [
             TargetPlatform::Android,
@@ -8918,31 +9062,6 @@ mod tests {
 
         fn character_shortcut(activator: CharacterActivator) -> MenuSerializableShortcutRef {
             Rc::new(activator)
-        }
-
-        /// The ink rect colours every `Material` paints, in tree order: what Dart's `paints` sees
-        /// below the first `_RenderInkFeatures`.
-        fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
-            let mut colors = Vec::new();
-            for render in tester.all::<RenderInkFeatures>() {
-                let mut canvas = waft_embedder::Canvas::new();
-                render.paint_ink_features(&mut tester.cell.borrow_mut(), &mut canvas, Offset::ZERO);
-                for drawn in Drawn::draws(&canvas.build()) {
-                    if let Drawn::Rect(color, _) = drawn {
-                        colors.push(color);
-                    }
-                }
-            }
-            colors
-        }
-
-        /// Dart's `paints..rect(color: a)..rect(color: b)...`: the colours drawn in this order,
-        /// others in between.
-        fn paints_rects_in_order(drawn: &[u32], expected: &[Color]) -> bool {
-            let mut drawn = drawn.iter();
-            expected
-                .iter()
-                .all(|color| drawn.any(|drawn| *drawn == color.value()))
         }
 
         // ---- Accelerators ----
@@ -9137,7 +9256,7 @@ mod tests {
                 pump(tester);
                 send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
                 pump(tester);
-                tap_text(tester, &TestMenu::SubSubMenu112.label());
+                tester.tap(find::text(&TestMenu::SubSubMenu112.label()));
                 pump(tester);
 
                 assert_eq!(
@@ -9255,10 +9374,10 @@ mod tests {
                 pump_menu_bar(tester, controller.clone(), TestMenus::default());
 
                 // Open a menu initially.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
-                tap_text(tester, &TestMenu::SubMenu11.label());
+                tester.tap(find::text(&TestMenu::SubMenu11.label()));
                 pump(tester);
 
                 // Now pump a new menu with a different UniqueKey to dispose of the opened
@@ -9295,10 +9414,10 @@ mod tests {
                 });
 
                 // Open a menu initially.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
-                tap_text(tester, &TestMenu::SubMenu11.label());
+                tester.tap(find::text(&TestMenu::SubMenu11.label()));
                 pump(tester);
                 let mut opened = log.opened();
                 opened.sort_by_key(|menu| *menu as u32);
@@ -9391,10 +9510,10 @@ mod tests {
                 });
 
                 // Open a menu initially.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
-                tap_text(tester, &TestMenu::SubMenu11.label());
+                tester.tap(find::text(&TestMenu::SubMenu11.label()));
                 pump(tester);
 
                 let labels: Vec<Option<String>> = [
@@ -9536,10 +9655,10 @@ mod tests {
                 });
 
                 // Open a menu initially.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
-                tap_text(tester, &TestMenu::SubMenu11.label());
+                tester.tap(find::text(&TestMenu::SubMenu11.label()));
                 pump(tester);
 
                 let labels: Vec<Option<String>> = [
@@ -9598,7 +9717,7 @@ mod tests {
                         .child(Text::new(TestMenu::SubMenu00.label())),
                 );
 
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 pump(tester);
 
                 assert!(shows(tester, "leadingIcon"));
@@ -9656,7 +9775,7 @@ mod tests {
                         .child(Text::new(TestMenu::SubMenu00.label())),
                 );
 
-                tap_text(tester, &TestMenu::MainMenu0.label());
+                tester.tap(find::text(&TestMenu::MainMenu0.label()));
                 pump(tester);
 
                 assert!(shows(tester, "trailingIcon"));
@@ -9748,27 +9867,39 @@ mod tests {
                 let controller = new_controller(tester);
                 pump_tap_me_anchor(tester, controller.clone(), true);
 
-                tap_text(tester, "Tap me");
+                tester.tap(find::text("Tap me"));
                 pump(tester);
-                assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 1);
+                expect(
+                    tester,
+                    &find::by_type::<MenuItemButton>(),
+                    finds_one_widget(),
+                );
 
                 // Taps the MenuItemButton which should close the menu.
-                tap_text(tester, "Button 1");
+                tester.tap(find::text("Button 1"));
                 pump(tester);
-                assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 0);
+                expect(tester, &find::by_type::<MenuItemButton>(), finds_nothing());
 
                 tester.pump_and_settle();
 
                 pump_tap_me_anchor(tester, controller.clone(), false);
 
-                tap_text(tester, "Tap me");
+                tester.tap(find::text("Tap me"));
                 pump(tester);
-                assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 1);
+                expect(
+                    tester,
+                    &find::by_type::<MenuItemButton>(),
+                    finds_one_widget(),
+                );
 
                 // Taps the MenuItemButton which shouldn't close the menu.
-                tap_text(tester, "Button 1");
+                tester.tap(find::text("Button 1"));
                 pump(tester);
-                assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 1);
+                expect(
+                    tester,
+                    &find::by_type::<MenuItemButton>(),
+                    finds_one_widget(),
+                );
             });
         }
 
@@ -9898,7 +10029,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                tap_text(tester, "Open");
+                tester.tap(find::text("Open"));
                 tester.pump_and_settle();
 
                 // Decorations that paint outside the leading icon's bounds stay visible.
@@ -9919,7 +10050,7 @@ mod tests {
                 assert_eq!(clips_above(tester, leading_element), 0);
 
                 // The label itself is still clipped so that long labels truncate.
-                let label_element = tester.find_text(label)[0];
+                let label_element = find::text(label).evaluate(tester)[0];
                 assert_eq!(clips_above(tester, label_element), 1);
                 let app = tester.cell.borrow();
                 let paragraph = label_element
@@ -9955,23 +10086,23 @@ mod tests {
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
-                assert!(paints_rects_in_order(
-                    &ink_rect_colors(tester),
-                    &[overlay_color.with_opacity(0.08)]
-                ));
+                assert_paints(
+                    &overlay_ops(tester),
+                    &[PaintCall::rect(Some(overlay_color.with_opacity(0.08)))],
+                );
 
                 // Highlighted (pressed).
                 gesture.buttons = waft_gestures::K_PRIMARY_BUTTON;
                 tester.down(&mut gesture, center);
                 tester.pump_and_settle();
-                assert!(paints_rects_in_order(
-                    &ink_rect_colors(tester),
+                assert_paints(
+                    &overlay_ops(tester),
                     &[
-                        overlay_color.with_opacity(0.08),
-                        overlay_color.with_opacity(0.08),
-                        overlay_color.with_opacity(0.1),
-                    ]
-                ));
+                        PaintCall::rect(Some(overlay_color.with_opacity(0.08))),
+                        PaintCall::rect(Some(overlay_color.with_opacity(0.08))),
+                        PaintCall::rect(Some(overlay_color.with_opacity(0.1))),
+                    ],
+                );
             });
         }
 
@@ -9994,7 +10125,7 @@ mod tests {
         use waft_painting::{BoxDecoration, TextStyle};
         use waft_rendering::AnyRenderObject;
         use waft_services::{SystemMouseCursor, SystemMouseCursors};
-        use waft_test::TestPlatform;
+
         use waft_widgets::{
             Align, Center, DecoratedBox, Overlay, OverlayEntry, Positioned, RenderTheater,
             SizedBox, Stack, StatefulBuilder, UnfocusDisposition, WidgetStatePropertyAll,
@@ -10006,7 +10137,6 @@ mod tests {
         use crate::filled_button::FilledButton;
         use crate::material_state::MaterialStatePropertyAll;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{Drawn, PaintInspection};
         use crate::text_theme::TextTheme;
         use crate::tooltip::tests::m2;
 
@@ -10035,8 +10165,8 @@ mod tests {
 
         /// Dart's `tester.getCenter(find.byType(W).first)`.
         fn center_of_first<W: 'static>(tester: &WidgetTester) -> Offset {
-            let element = *tester
-                .find_by_type::<W>()
+            let element = *find::by_type::<W>()
+                .evaluate(tester)
                 .first()
                 .expect("a widget of the type");
             rect_of_element(tester, element).center()
@@ -10044,8 +10174,8 @@ mod tests {
 
         /// Dart's `tester.getCenter(find.byType(W).last)`.
         fn center_of_last<W: 'static>(tester: &WidgetTester) -> Offset {
-            let element = *tester
-                .find_by_type::<W>()
+            let element = *find::by_type::<W>()
+                .evaluate(tester)
                 .last()
                 .expect("a widget of the type");
             rect_of_element(tester, element).center()
@@ -10073,7 +10203,7 @@ mod tests {
 
         /// Dart's `findsNWidgets(count)` of `find.byType(W)`.
         fn count_of<W: 'static>(tester: &WidgetTester) -> usize {
-            tester.find_by_type::<W>().len()
+            find::by_type::<W>().evaluate(tester).len()
         }
 
         // ---- Layout ----
@@ -10121,12 +10251,12 @@ mod tests {
                     .into_widget()
                 });
 
-                tap_text(tester, "OPEN MENU");
+                tester.tap(find::text("OPEN MENU"));
                 pump(tester);
 
                 assert!(shows(tester, "Set focus to null"));
 
-                tap_text(tester, "Set focus to null");
+                tester.tap(find::text("Set focus to null"));
                 tester.pump_and_settle();
                 assert!(button_focus_node.take().is_none());
             });
@@ -10173,7 +10303,7 @@ mod tests {
                 "SubMenuButton2",
                 "SubMenuButton3",
             ] {
-                tap_text(tester, text);
+                tester.tap(find::text(text));
                 pump(tester);
             }
         }
@@ -10239,7 +10369,7 @@ mod tests {
             });
 
             pump(tester);
-            tap_text(tester, "Tap me");
+            tester.tap(find::text("Tap me"));
             pump(tester);
         }
 
@@ -10358,17 +10488,12 @@ mod tests {
         // menu_anchor_test.dart 'menu is positioned to avoid the software keyboard'.
         #[test]
         fn a_menu_is_positioned_to_avoid_the_software_keyboard() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/142921
                 // The menu should not extend into the area occupied by the software keyboard.
                 let screen_size = Size::new(600.0, 800.0);
-                // Dart's `changeSurfaceSize(tester, screenSize)`: the view's logical size, at the
-                // test view's device pixel ratio of 3.
-                let mut tester = WidgetTester::with_physical_size(
-                    TestPlatform::new().on(TargetPlatform::Android),
-                    Size::new(screen_size.width() * 3.0, screen_size.height() * 3.0),
-                );
-                let tester = &mut tester;
+                // Dart's `changeSurfaceSize(tester, screenSize)`.
+                tester.set_surface_size(Some(screen_size));
                 const KEYBOARD_HEIGHT: f64 = 200.0;
                 let controller = new_controller(tester);
 
@@ -10502,14 +10627,14 @@ mod tests {
                 // Helper function to get menu padding by measuring first/last items.
                 let menu_padding = |tester: &WidgetTester| -> (f64, f64) {
                     // Find any menu items that are available.
-                    let menu_items = tester.find_by_type::<SubmenuButton>();
+                    let menu_items = find::by_type::<SubmenuButton>().evaluate(tester);
                     if menu_items.len() < 2 {
                         return (0.0, 0.0);
                     }
 
                     let first_item = rect_of_element(tester, menu_items[0]);
                     let last_item = rect_of_element(tester, *menu_items.last().expect("two items"));
-                    let materials = tester.find_by_type::<Material>();
+                    let materials = find::by_type::<Material>().evaluate(tester);
                     let menu_panel =
                         rect_of_element(tester, *materials.last().expect("a material"));
 
@@ -10563,7 +10688,7 @@ mod tests {
                             },
                         );
 
-                        tap_text(tester, "OPEN MENU");
+                        tester.tap(find::text("OPEN MENU"));
                         pump(tester);
                     };
 
@@ -10625,7 +10750,7 @@ mod tests {
                 .controller(controller)
                 .into_widget()
             });
-            tap_text(tester, &TestMenu::MainMenu0.label());
+            tester.tap(find::text(&TestMenu::MainMenu0.label()));
             pump(tester);
         }
 
@@ -10781,10 +10906,10 @@ mod tests {
                 });
 
                 let submenu = center_of_first::<SubmenuButton>(tester);
-                tester.tap(submenu, 1);
+                tester.tap_at(submenu, 1);
                 pump(tester);
 
-                let checkbox = only(tester.find_by_type::<CheckboxMenuButton>());
+                let checkbox = tester.element(find::by_type::<CheckboxMenuButton>());
                 assert_eq!(
                     tester.widget(checkbox, |button: &CheckboxMenuButton| button.value),
                     None
@@ -10793,11 +10918,11 @@ mod tests {
                 for expected in [Some(false), Some(true), None] {
                     if expected != Some(false) {
                         let submenu = center_of_first::<SubmenuButton>(tester);
-                        tester.tap(submenu, 1);
+                        tester.tap_at(submenu, 1);
                         pump(tester);
                     }
                     let checkbox = center_of_first::<CheckboxMenuButton>(tester);
-                    tester.tap(checkbox, 1);
+                    tester.tap_at(checkbox, 1);
                     tester.pump_and_settle();
                     assert_eq!(check_box_value.get(), expected);
                 }
@@ -10842,33 +10967,33 @@ mod tests {
                 });
 
                 let submenu = center_of_first::<SubmenuButton>(tester);
-                tester.tap(submenu, 1);
+                tester.tap_at(submenu, 1);
                 pump(tester);
 
-                let first = tester.find_by_type::<RadioMenuButton<i32>>()[0];
+                let first = find::by_type::<RadioMenuButton<i32>>().evaluate(tester)[0];
                 assert_eq!(
                     tester.widget(first, |button: &RadioMenuButton<i32>| button.group_value),
                     None
                 );
 
                 let first = center_of_first::<RadioMenuButton<i32>>(tester);
-                tester.tap(first, 1);
+                tester.tap_at(first, 1);
                 tester.pump_and_settle();
                 assert_eq!(radio_value.get(), Some(0));
 
                 let submenu = center_of_first::<SubmenuButton>(tester);
-                tester.tap(submenu, 1);
+                tester.tap_at(submenu, 1);
                 pump(tester);
                 let first = center_of_first::<RadioMenuButton<i32>>(tester);
-                tester.tap(first, 1);
+                tester.tap_at(first, 1);
                 tester.pump_and_settle();
                 assert_eq!(radio_value.get(), None);
 
                 let submenu = center_of_first::<SubmenuButton>(tester);
-                tester.tap(submenu, 1);
+                tester.tap_at(submenu, 1);
                 pump(tester);
                 let last = center_of_last::<RadioMenuButton<i32>>(tester);
-                tester.tap(last, 1);
+                tester.tap_at(last, 1);
                 tester.pump_and_settle();
                 assert_eq!(radio_value.get(), Some(1));
             });
@@ -10926,10 +11051,10 @@ mod tests {
                 };
 
                 // Test menu button text style uses the TextTheme.labelLarge.
-                check(tester, tester.find_by_type::<TextButton>()[0]);
+                check(tester, find::by_type::<TextButton>().evaluate(tester)[0]);
 
                 // Open the menu.
-                tap_text(tester, &TestMenu::MainMenu1.label());
+                tester.tap(find::text(&TestMenu::MainMenu1.label()));
                 pump(tester);
 
                 // Test menu item text style uses the TextTheme.labelLarge.
@@ -11000,7 +11125,7 @@ mod tests {
 
                 // Horizontal _MenuPanel wraps children with IntrinsicWidth to ensure MenuItemButton
                 // with vertical overflow axis is as wide as the widest child.
-                let item = only(tester.find_by_type::<MenuItemButton>());
+                let item = tester.element(find::by_type::<MenuItemButton>());
                 let ancestors = tester.ancestors(item);
                 let app = tester.cell.borrow();
                 let intrinsic_widths = ancestors
@@ -11012,30 +11137,6 @@ mod tests {
                     .count();
                 assert_eq!(intrinsic_widths, 1);
             });
-        }
-
-        /// The colours of the rects the first ink features render object and its subtree paint:
-        /// Dart's `paints..rect(color:)` on `getOverlayColor(tester)`.
-        fn overlay_rect_colors(tester: &WidgetTester) -> Vec<u32> {
-            let render: AnyRenderObject = waft_rendering::RenderBox::as_object(
-                tester.first::<crate::material::RenderInkFeatures>(),
-            );
-            tester
-                .painted(render)
-                .into_iter()
-                .filter_map(|drawn| match drawn {
-                    Drawn::Rect(color, _) => Some(color),
-                    _ => None,
-                })
-                .collect()
-        }
-
-        /// Whether `expected` appear in `painted` in that order: Dart's `paints..rect()..rect()`.
-        fn paints_in_order(painted: &[u32], expected: &[Color]) -> bool {
-            let mut painted = painted.iter();
-            expected
-                .iter()
-                .all(|color| painted.any(|painted| *painted == color.value()))
         }
 
         // menu_anchor_test.dart 'SubmenuButton.styleFrom overlayColor overrides default overlay
@@ -11071,28 +11172,28 @@ mod tests {
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
-                assert!(paints_in_order(
-                    &overlay_rect_colors(tester),
-                    &[overlay_color.with_opacity(0.08)]
-                ));
+                assert_paints(
+                    &overlay_ops(tester),
+                    &[PaintCall::rect(Some(overlay_color.with_opacity(0.08)))],
+                );
 
                 // Highlighted (pressed).
                 tester.down(&mut gesture, center);
                 tester.pump_and_settle();
-                assert!(paints_in_order(
-                    &overlay_rect_colors(tester),
+                assert_paints(
+                    &overlay_ops(tester),
                     &[
-                        overlay_color.with_opacity(0.08),
-                        overlay_color.with_opacity(0.08),
-                        overlay_color.with_opacity(0.1),
-                    ]
-                ));
+                        PaintCall::rect(Some(overlay_color.with_opacity(0.08))),
+                        PaintCall::rect(Some(overlay_color.with_opacity(0.08))),
+                        PaintCall::rect(Some(overlay_color.with_opacity(0.1))),
+                    ],
+                );
             });
         }
 
         /// Dart's `iconStyle(tester, icon)`.
         fn icon_color(tester: &WidgetTester, icon: &waft_widgets::IconData) -> Option<Color> {
-            let icon = tester.find_by_icon(icon);
+            let icon = tester.element(find::by_icon(icon).first());
             tester.glyph_style(icon).color.as_deref().copied()
         }
 
@@ -11124,7 +11225,7 @@ mod tests {
 
                 // Test enabled button.
                 build_button(tester, true);
-                let icon = tester.find_by_icon(&Icons::add());
+                let icon = tester.element(find::by_icon(&Icons::add()).first());
                 assert_eq!(
                     rect_of_element(tester, icon).size(),
                     Size::new(ICON_SIZE, ICON_SIZE)
@@ -11169,7 +11270,7 @@ mod tests {
 
                 // Test enabled button.
                 build_button(tester, true);
-                let icon = tester.find_by_icon(&Icons::add());
+                let icon = tester.element(find::by_icon(&Icons::add()).first());
                 assert_eq!(
                     rect_of_element(tester, icon).size(),
                     Size::new(ICON_SIZE, ICON_SIZE)
@@ -11236,7 +11337,7 @@ mod tests {
 
         /// The render object of every `Overlay`: Dart's `tester.renderObject(find.byWidget(o))`.
         fn overlay_render_objects(tester: &WidgetTester) -> Vec<AnyRenderObject> {
-            let overlays = tester.find_by_type::<Overlay>();
+            let overlays = find::by_type::<Overlay>().evaluate(tester);
             let app = tester.cell.borrow();
             overlays
                 .into_iter()
@@ -11399,7 +11500,7 @@ mod tests {
                 assert_eq!(close_count.get(), 0);
 
                 let button = center_of_first::<FilledButton>(tester);
-                tester.tap(button, 1);
+                tester.tap_at(button, 1);
                 pump(tester);
 
                 assert!(shows(tester, "close"));
@@ -11408,7 +11509,7 @@ mod tests {
                 assert_eq!(close_count.get(), 0);
 
                 let button = center_of_first::<FilledButton>(tester);
-                tester.tap(button, 1);
+                tester.tap_at(button, 1);
                 pump(tester);
 
                 assert!(shows(tester, "open"));
@@ -11420,8 +11521,8 @@ mod tests {
 
         /// How many `Icon`s show `icon`: Dart's `find.byIcon(icon)`.
         fn count_icon(tester: &WidgetTester, icon: &waft_widgets::IconData) -> usize {
-            tester
-                .find_by_type::<Icon>()
+            find::by_type::<Icon>()
+                .evaluate(tester)
                 .into_iter()
                 .filter(|element| {
                     tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
@@ -11495,7 +11596,7 @@ mod tests {
                 };
 
                 build_menu(tester, None, true);
-                tap_text(tester, &TestMenu::SubMenu00.label());
+                tester.tap(find::text(&TestMenu::SubMenu00.label()));
                 pump(tester);
 
                 assert_eq!(count_icon(tester, &Icons::arrow_right()), 1);
@@ -11504,7 +11605,7 @@ mod tests {
                 pump(tester);
 
                 build_menu(tester, Some(Rc::clone(&submenu_icon)), true);
-                tap_text(tester, &TestMenu::SubMenu00.label());
+                tester.tap(find::text(&TestMenu::SubMenu00.label()));
                 pump(tester);
                 assert_eq!(count_icon(tester, &default_icon), 1);
 
@@ -11515,9 +11616,11 @@ mod tests {
                 controller.close(&mut tester.cell.borrow_mut());
                 pump(tester);
 
-                tap_text(tester, &TestMenu::SubMenu00.label());
+                tester.tap(find::text(&TestMenu::SubMenu00.label()));
                 pump(tester);
-                let at = text_rect(tester, &TestMenu::SubSubMenu110.label()).center();
+                let at = tester
+                    .get_rect(find::text(&TestMenu::SubSubMenu110.label()))
+                    .center();
                 hover_over(tester, at);
                 pump(tester);
                 assert_eq!(count_icon(tester, &hovered_icon), 1);
@@ -11526,7 +11629,7 @@ mod tests {
                 pump(tester);
 
                 build_menu(tester, Some(Rc::clone(&submenu_icon)), false);
-                tap_text(tester, &TestMenu::SubMenu00.label());
+                tester.tap(find::text(&TestMenu::SubMenu00.label()));
                 pump(tester);
                 assert_eq!(count_icon(tester, &disabled_icon), 1);
             });
@@ -11596,7 +11699,7 @@ mod tests {
                 });
 
                 // Open SubmenuButton.
-                tap_text(tester, "File");
+                tester.tap(find::text("File"));
                 tester.pump_and_settle();
 
                 // Move to MenuItemButton.
@@ -11757,7 +11860,6 @@ mod tests {
     mod animations {
         use std::cell::Cell;
 
-        use waft_test::TestPlatform;
         use waft_widgets::{Center, Column, SizedBox};
 
         use super::*;
@@ -11863,16 +11965,9 @@ mod tests {
         /// Dart's `tester.getRect(find.descendant(of: find.byType(MenuAnchor), matching:
         /// find.byType(FocusScope)))`: the menu's `FocusScope`.
         fn panel_rect(tester: &WidgetTester) -> Rect {
-            let anchor = only(tester.find_by_type::<MenuAnchor>());
+            let anchor = tester.element(find::by_type::<MenuAnchor>());
             let scope = only(tester.descendants_of_type::<FocusScope>(anchor));
             rect_of_element(tester, scope)
-        }
-
-        fn assert_close(actual: f64, expected: f64, tolerance: f64, reason: &str) {
-            assert!(
-                (actual - expected).abs() <= tolerance,
-                "{reason}: {actual} is not within {tolerance} of {expected}"
-            );
         }
 
         /// Dart's `MenuAnchor(controller: controller, animated: true, menuChildren: children)` as a
@@ -11943,7 +12038,7 @@ mod tests {
                 pump(tester);
                 pump_ms(tester, 50);
 
-                assert_close(item_opacity(tester, "Item 0"), 0.2, 0.05, "animated");
+                assert_more_or_less_equals_within(item_opacity(tester, "Item 0"), 0.2, 0.05);
 
                 pump_material(tester, m3, |_app| {
                     MenuAnchor::new(items(&["Item 0"]))
@@ -11966,11 +12061,11 @@ mod tests {
                 pump(tester);
                 pump_ms(tester, 50);
 
-                assert_close(item_opacity(tester, "Item 0"), 0.2, 0.05, "Item 0");
+                assert_more_or_less_equals_within(item_opacity(tester, "Item 0"), 0.2, 0.05);
 
                 pump_animated_anchor(tester, controller.clone(), items(&["Item 1"]));
 
-                assert_close(item_opacity(tester, "Item 1"), 0.2, 0.05, "Item 1");
+                assert_more_or_less_equals_within(item_opacity(tester, "Item 1"), 0.2, 0.05);
             });
         }
 
@@ -11990,7 +12085,7 @@ mod tests {
 
                 // Opacity values at different millisecond offsets during the 50 ms fade-in
                 // animation.
-                for (ms, expected) in [
+                for (_ms, expected) in [
                     (0, 0.0),
                     (10, 0.2),
                     (20, 0.4),
@@ -11998,7 +12093,7 @@ mod tests {
                     (40, 0.8),
                     (50, 1.0),
                 ] {
-                    assert_close(panel_opacity(tester), expected, 0.05, &format!("at t={ms}"));
+                    assert_more_or_less_equals_within(panel_opacity(tester), expected, 0.05);
                     pump_ms(tester, 10);
                 }
             });
@@ -12021,14 +12116,15 @@ mod tests {
                 close(tester, controller.handle());
                 pump(tester);
 
-                assert_close(panel_opacity(tester), 1.0, 0.05, "at t=0");
+                assert_more_or_less_equals_within(panel_opacity(tester), 1.0, 0.05);
 
                 pump_ms(tester, 100);
 
                 // Opacity values at different millisecond offsets during the 50 ms fade-out
                 // animation.
-                for (ms, expected) in [(110, 1.0), (120, 0.8), (130, 0.6), (140, 0.4), (150, 0.2)] {
-                    assert_close(panel_opacity(tester), expected, 0.05, &format!("at t={ms}"));
+                for (_ms, expected) in [(110, 1.0), (120, 0.8), (130, 0.6), (140, 0.4), (150, 0.2)]
+                {
+                    assert_more_or_less_equals_within(panel_opacity(tester), expected, 0.05);
                     pump_ms(tester, 10);
                 }
             });
@@ -12055,7 +12151,7 @@ mod tests {
                 open(tester, controller.handle(), None);
                 pump(tester);
 
-                for (ms, expected) in [
+                for (_ms, expected) in [
                     (0, 0.0),
                     (100, 60.5),
                     (200, 125.5),
@@ -12064,7 +12160,7 @@ mod tests {
                     (500, 160.0),
                 ] {
                     let height = panel_rect(tester).height();
-                    assert_close(height, expected, 1.0, &format!("at t={ms}"));
+                    assert_more_or_less_equals_within(height, expected, 1.0);
                     pump_ms(tester, 100);
                 }
             });
@@ -12087,11 +12183,11 @@ mod tests {
 
                 pump_ms(tester, 50);
 
-                assert_close(panel_rect(tester).height(), 153.0, 2.0, "at t=50");
+                assert_more_or_less_equals_within(panel_rect(tester).height(), 153.0, 2.0);
 
                 pump_ms(tester, 50);
 
-                for (ms, expected) in [
+                for (_ms, expected) in [
                     (100, 129.0),
                     (110, 120.0),
                     (120, 110.0),
@@ -12099,12 +12195,7 @@ mod tests {
                     (140, 80.0),
                     (150, 0.0),
                 ] {
-                    assert_close(
-                        panel_rect(tester).height(),
-                        expected,
-                        2.0,
-                        &format!("at t={ms}"),
-                    );
+                    assert_more_or_less_equals_within(panel_rect(tester).height(), expected, 2.0);
                     pump_ms(tester, 10);
                 }
             });
@@ -12126,7 +12217,7 @@ mod tests {
 
                 // Opacity values at different millisecond offsets during the 500ms opening
                 // animation.
-                for (time, expected) in [
+                for (_time, expected) in [
                     (100, [0.400, 0.0667, 0.00, 0.00]),
                     (200, [0.800, 0.467, 0.133, 0.00]),
                     (300, [1.00, 0.867, 0.533, 0.200]),
@@ -12136,7 +12227,7 @@ mod tests {
                     pump_ms(tester, 100);
                     for (i, expected) in expected.into_iter().enumerate() {
                         let opacity = item_opacity(tester, &format!("Item {i}"));
-                        assert_close(opacity, expected, 0.05, &format!("Item {i} at t={time}"));
+                        assert_more_or_less_equals_within(opacity, expected, 0.05);
                     }
                 }
             });
@@ -12155,14 +12246,14 @@ mod tests {
                         .into_widget()
                 });
 
-                tap_text(tester, "Open Menu");
+                tester.tap(find::text("Open Menu"));
                 pump(tester);
                 pump_ms(tester, 501);
                 close(tester, controller.handle());
                 pump(tester);
 
                 // Opacity values at different millisecond offsets during the 150ms close animation.
-                for (time, expected) in [
+                for (_time, expected) in [
                     (0, [1.00, 1.00, 1.00, 1.00]),
                     (25, [1.00, 1.00, 1.00, 1.00]),
                     (50, [1.00, 1.00, 1.00, 1.00]),
@@ -12173,7 +12264,7 @@ mod tests {
                 ] {
                     for (i, expected) in expected.into_iter().enumerate() {
                         let opacity = text_fade_opacity(tester, &format!("Item {i}"));
-                        assert_close(opacity, expected, 0.05, &format!("Item {i} at t={time}"));
+                        assert_more_or_less_equals_within(opacity, expected, 0.05);
                     }
                     pump_ms(tester, 25);
                 }
@@ -12367,7 +12458,7 @@ mod tests {
                 pump(tester);
                 pump_ms(tester, 100);
 
-                tap_text(tester, "Item 0");
+                tester.tap(find::text("Item 0"));
                 pump(tester);
 
                 assert_eq!(press_count.get(), 1);
@@ -12375,7 +12466,7 @@ mod tests {
                 open(tester, controller.handle(), None);
                 pump(tester);
                 pump_ms(tester, 250);
-                tap_text(tester, "Item 1");
+                tester.tap(find::text("Item 1"));
                 pump(tester);
 
                 assert_eq!(press_count.get(), 2);
@@ -12411,7 +12502,7 @@ mod tests {
                 pump(tester);
 
                 // Try to tap the item while closing
-                tap_text(tester, "Item 0");
+                tester.tap(find::text("Item 0"));
                 pump(tester);
 
                 // Item should not have been pressed
@@ -12519,11 +12610,11 @@ mod tests {
 
                 assert!(has_primary_focus(tester, outside_focus_node.handle()));
 
-                tap_text(tester, "Open Menu");
+                tester.tap(find::text("Open Menu"));
                 pump(tester);
                 pump_ms(tester, 500);
 
-                let submenu = text_rect(tester, "Submenu").center();
+                let submenu = tester.get_rect(find::text("Submenu")).center();
                 hover_over(tester, submenu);
                 pump(tester);
                 pump_ms(tester, 500);
@@ -12576,7 +12667,7 @@ mod tests {
                     .into_widget()
                 });
 
-                tap_text(tester, "Menu");
+                tester.tap(find::text("Menu"));
                 pump(tester);
                 pump_ms(tester, 100);
 
@@ -12672,7 +12763,7 @@ mod tests {
                     if wait > 0 {
                         pump_ms(tester, wait);
                     }
-                    let center = text_rect(tester, text).center();
+                    let center = tester.get_rect(find::text(text)).center();
                     hover_with_new_mouse(tester, device as i64 + 1, center);
                     pump(tester);
 
@@ -12707,7 +12798,7 @@ mod tests {
                     .into_widget()
                 });
 
-                tap_text(tester, "Menu 0");
+                tester.tap(find::text("Menu 0"));
                 pump(tester);
                 pump_ms(tester, 20);
                 send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
@@ -12799,7 +12890,7 @@ mod tests {
                 pump_animated_anchor(tester, controller.clone(), items(&texts));
 
                 let thumb_visibility = |tester: &WidgetTester| {
-                    let scrollbar = only(tester.find_by_type::<Scrollbar>());
+                    let scrollbar = tester.element(find::by_type::<Scrollbar>());
                     tester.widget::<Scrollbar, _>(scrollbar, |scrollbar| scrollbar.thumb_visibility)
                 };
 
@@ -13036,12 +13127,8 @@ mod tests {
         // menu_anchor_test.dart 'MenuAnchor does not crash at zero area'.
         #[test]
         fn a_menu_anchor_in_a_view_of_zero_area_does_not_panic() {
-            test_widgets(|_| {
-                let mut tester = WidgetTester::with_physical_size(
-                    TestPlatform::new().on(waft_embedder::TargetPlatform::Android),
-                    Size::ZERO,
-                );
-                let tester = &mut tester;
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::ZERO);
                 let menu_controller = new_controller(tester);
                 pump_home(tester, |_app| {
                     Scaffold::new()
@@ -13085,7 +13172,7 @@ mod tests {
                 pump(tester);
                 assert!(has_primary_focus(tester, outside_focus_node.handle()));
 
-                tap_text(tester, "Open menu");
+                tester.tap(find::text("Open menu"));
                 tester.pump_and_settle();
                 assert!(shows(tester, "Item 1"));
 
@@ -13095,7 +13182,7 @@ mod tests {
                 assert!(has_primary_focus(tester, outside_focus_node.handle()));
 
                 // Reopen by tap, traverse with arrow key, and close with Escape.
-                tap_text(tester, "Open menu");
+                tester.tap(find::text("Open menu"));
                 tester.pump_and_settle();
                 assert!(shows(tester, "Item 1"));
 
@@ -13158,11 +13245,11 @@ mod tests {
                         .into_widget()
                 });
 
-                tap_text(tester, "Show Dialog");
+                tester.tap(find::text("Show Dialog"));
                 tester.pump_and_settle();
                 assert!(shows(tester, "Dialog Title"));
 
-                tap_text(tester, "Open menu");
+                tester.tap(find::text("Open menu"));
                 tester.pump_and_settle();
                 assert!(shows(tester, "Menu Item 1"));
 

@@ -177,7 +177,7 @@ mod tests {
     use waft_rendering::BoxConstraints;
     use waft_widgets::{Axis, Builder, Column, ConstrainedBox, Expanded};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
@@ -186,8 +186,8 @@ mod tests {
     use crate::menu_theme::MenuTheme;
     use crate::menu_theme::tests::{
         ThemeTestMenus, assert_constructor_parameters_override_theme_parameters, green_menu_style,
-        menu_panels, only, overriding_bar, panel_material, rect, red_stadium_menu_style, tap_text,
-        test_menu, theme_test_menus,
+        menu_panels, overriding_bar, panel_material, red_stadium_menu_style, test_menu,
+        theme_test_menus,
     };
     use crate::test_support::material_app;
     use crate::tooltip::tests::m2;
@@ -250,10 +250,10 @@ mod tests {
             );
 
             // Open a test menu.
-            tap_text(tester, test_menu::MAIN_MENU_1);
+            tester.tap(find::text(test_menu::MAIN_MENU_1));
             tester.pump();
             assert_eq!(
-                rect(tester, menu_panels(tester, Axis::Horizontal)[0]),
+                tester.get_rect(menu_panels(Axis::Horizontal).first()),
                 Rect::from_ltrb(228.0, 0.0, 572.0, 68.0)
             );
             panel_material(tester, Axis::Horizontal, |material| {
@@ -262,7 +262,7 @@ mod tests {
             });
 
             assert_eq!(
-                rect(tester, only(menu_panels(tester, Axis::Vertical))),
+                tester.get_rect(menu_panels(Axis::Vertical)),
                 Rect::from_ltrb(346.0, 58.0, 560.0, 218.0)
             );
             panel_material(tester, Axis::Vertical, |material| {
@@ -284,7 +284,7 @@ mod tests {
             );
 
             // Open a test menu.
-            tap_text(tester, test_menu::MAIN_MENU_1);
+            tester.tap(find::text(test_menu::MAIN_MENU_1));
             tester.pump();
 
             assert_constructor_parameters_override_theme_parameters(tester);

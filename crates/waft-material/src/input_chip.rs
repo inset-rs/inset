@@ -275,13 +275,13 @@ mod tests {
         Icon, SizedBox, Text, WidgetState, WidgetStateMouseCursor, WidgetStateProperty,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::action_chip::tests::{
         hover_over_chip, material_of, paints_path_color, paints_rrect_color, pump_wrapped,
     };
-    use crate::chip::tests::{center_of, icon_data, only, rect_of, size_of, text};
+    use crate::chip::tests::{icon_data, only, text};
     use crate::circle_avatar::CircleAvatar;
     use crate::colors::Colors;
     use crate::filter_chip::tests::{
@@ -424,8 +424,8 @@ mod tests {
                     .into_widget(),
             ));
 
-            let center = center_of(tester, only::<InputChip>(tester));
-            tester.tap(center, 1);
+            let center = tester.get_center(only::<InputChip>(tester));
+            tester.tap_at(center, 1);
         });
     }
 
@@ -679,7 +679,7 @@ mod tests {
             // Test enabled chip.
             build_chip(tester, true);
 
-            let delete_button_location = center_of(tester, only::<Icon>(tester));
+            let delete_button_location = tester.get_center(only::<Icon>(tester));
             let mut gesture = TestPointer::mouse(1, 0);
             tester.move_to(&mut gesture, delete_button_location, false);
             tester.pump();
@@ -718,12 +718,14 @@ mod tests {
                 }
                 pump_wrapped(tester, Center::new().child(chip));
             };
-            let chip_size = |tester: &WidgetTester| size_of(tester, only::<InputChip>(tester));
+            let chip_size = |tester: &WidgetTester| tester.get_size(only::<InputChip>(tester));
             let chip_top_left = |tester: &WidgetTester| {
-                rect_of(tester, material_of(tester, only::<RawChip>(tester))).top_left()
+                tester
+                    .get_rect(material_of(tester, only::<RawChip>(tester)))
+                    .top_left()
             };
             let label_top_left =
-                |tester: &WidgetTester| rect_of(tester, only::<Container>(tester)).top_left();
+                |tester: &WidgetTester| tester.get_rect(only::<Container>(tester)).top_left();
 
             // Test default avatar layout constraints.
             build_chip(tester, None);
@@ -732,7 +734,8 @@ mod tests {
 
             // Calculate the distance between avatar and chip edges.
             let top_left = chip_top_left(tester);
-            let avatar_center = center_of(tester, tester.find_by_icon(&Icons::favorite()));
+            let avatar_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::favorite()).first()));
             assert_eq!(
                 top_left.dx(),
                 avatar_center.dx() - (label_size.width() / 2.0) - padding - border
@@ -802,12 +805,14 @@ mod tests {
                 }
                 pump_wrapped(tester, Center::new().child(chip));
             };
-            let chip_size = |tester: &WidgetTester| size_of(tester, only::<InputChip>(tester));
+            let chip_size = |tester: &WidgetTester| tester.get_size(only::<InputChip>(tester));
             let chip_top_right = |tester: &WidgetTester| {
-                rect_of(tester, material_of(tester, only::<RawChip>(tester))).top_right()
+                tester
+                    .get_rect(material_of(tester, only::<RawChip>(tester)))
+                    .top_right()
             };
             let label_top_right =
-                |tester: &WidgetTester| rect_of(tester, only::<Container>(tester)).top_right();
+                |tester: &WidgetTester| tester.get_rect(only::<Container>(tester)).top_right();
 
             // Test default delete icon layout constraints.
             build_chip(tester, None);
@@ -816,7 +821,8 @@ mod tests {
 
             // Calculate the distance between delete icon and chip edges.
             let top_right = chip_top_right(tester);
-            let delete_icon_center = center_of(tester, tester.find_by_icon(&Icons::clear()));
+            let delete_icon_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::clear()).first()));
             assert_eq!(
                 top_right.dx(),
                 delete_icon_center.dx() + (label_size.width() / 2.0) + padding + border
@@ -972,7 +978,7 @@ mod tests {
             // Unfocused case.
             build_chip(tester, true);
             let mut mouse = TestPointer::mouse(1, 0);
-            let chip = center_of(tester, text(tester, "Chip"));
+            let chip = tester.get_center(text(tester, "Chip"));
             tester.add_pointer(&mut mouse, chip);
             tester.pump();
             tester.move_to(&mut mouse, chip, false);
@@ -1003,7 +1009,7 @@ mod tests {
                         .body(Center::new().child(SizedBox::shrink().child(chip)))
                         .into_widget(),
                 ));
-                assert!(size_of(tester, only::<InputChip>(tester)).is_empty());
+                assert!(tester.get_size(only::<InputChip>(tester)).is_empty());
             };
 
             test_chip(InputChip::new(Text::new("X")));

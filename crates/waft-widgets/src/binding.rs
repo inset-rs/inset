@@ -2011,15 +2011,10 @@ mod tests {
             run_app(&mut app, probe.into_widget());
             drop(app);
             tester.cell.elapse(Duration::ZERO);
-            let app = tester.cell.borrow();
-            drop(app);
             tester.pump();
-            let mut app = tester.cell.borrow_mut();
             assert_eq!(*sizes.borrow(), vec![Size::new(800.0, 600.0)]);
 
-            tester.view().resize(1500.0, 600.0);
-            RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
-            drop(app);
+            tester.view().set_physical_size(Size::new(1500.0, 600.0));
             tester.pump_by(Duration::from_millis(16));
             assert_eq!(
                 *sizes.borrow(),

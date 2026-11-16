@@ -1910,7 +1910,7 @@ mod tests {
     use waft_foundation::Listener;
     use waft_widgets::{Builder, Container, IntoWidget, SizedBox};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::filled_button::FilledButton;
@@ -2807,10 +2807,10 @@ mod tests {
             )
             .into_widget(),
         ));
-        let button = tester.find_by_type::<FilledButton>();
+        let button = find::by_type::<FilledButton>().evaluate(tester);
         assert_eq!(button.len(), 1);
-        let materials: Vec<_> = tester
-            .find_by_type::<Material>()
+        let materials: Vec<_> = find::by_type::<Material>()
+            .evaluate(tester)
             .into_iter()
             .filter(|material| tester.ancestors(*material).contains(&button[0]))
             .collect();

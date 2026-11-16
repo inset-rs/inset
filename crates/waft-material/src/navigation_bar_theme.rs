@@ -385,7 +385,7 @@ mod tests {
     use waft_painting::{BorderSide, CircleBorder, EdgeInsets};
     use waft_widgets::{Icon, IconData, Opacity, WidgetState};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::icons::Icons;
@@ -486,8 +486,13 @@ mod tests {
 
     /// Dart's `_iconTheme(tester, icon)`: the nearest `IconTheme` above the icon.
     fn icon_theme(tester: &WidgetTester, icon: &IconData) -> IconThemeData {
-        let icon_theme =
-            tester.ancestor_of_type::<waft_widgets::IconTheme>(tester.find_by_icon(icon));
+        let icon_theme = tester.element(
+            find::ancestor(
+                find::by_icon(icon),
+                find::by_type::<waft_widgets::IconTheme>(),
+            )
+            .first(),
+        );
         tester.widget(icon_theme, |icon_theme: &waft_widgets::IconTheme| {
             icon_theme.data.clone()
         })

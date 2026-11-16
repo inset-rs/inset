@@ -787,7 +787,9 @@ mod tests {
         SizedBox, Text,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::bottom_navigation_bar::tests::paragraph_style;
@@ -852,32 +854,22 @@ mod tests {
 
     /// Dart's `tester.tap(find.byKey(key))`.
     fn tap_key(tester: &mut WidgetTester, key: &GlobalKey) {
-        let center = tester.center_of(key);
-        tester.tap(center, 1);
-    }
-
-    /// Dart's `tester.tap(find.text(text))`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let element = *tester
-            .find_text(text)
-            .first()
-            .expect("a Text showing the text");
-        let center = rect(tester, element).center();
-        tester.tap(center, 1);
+        let center = tester.get_center(key);
+        tester.tap_at(center, 1);
     }
 
     fn rect(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.global_rect(tester.render_box_of(element))
+        tester.get_rect(element)
     }
 
     fn key_rect(tester: &WidgetTester, key: &GlobalKey) -> Rect {
         let render = tester.render_object(key).as_box().expect("a render box");
-        tester.global_rect(render)
+        tester.get_rect(render)
     }
 
     fn banner(tester: &WidgetTester) -> AnyElement {
-        *tester
-            .find_by_type::<MaterialBanner>()
+        *find::by_type::<MaterialBanner>()
+            .evaluate(tester)
             .first()
             .expect("a MaterialBanner")
     }
@@ -885,8 +877,8 @@ mod tests {
     /// Dart's `find.descendant(of: find.byType(MaterialBanner), matching: find.byType(W))`.
     fn in_banner<W: 'static>(tester: &WidgetTester) -> Vec<AnyElement> {
         let banner = banner(tester);
-        tester
-            .find_by_type::<W>()
+        find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| tester.ancestors(*element).contains(&banner))
             .collect()
@@ -899,7 +891,10 @@ mod tests {
 
     /// Dart's `_getMaterialFromText`: the nearest `Material` around the content.
     fn material_around(tester: &WidgetTester, text: &str) -> AnyElement {
-        let content = *tester.find_text(text).first().expect("the content");
+        let content = *find::text(text)
+            .evaluate(tester)
+            .first()
+            .expect("the content");
         tester.ancestor_of_type::<Material>(content)
     }
 
@@ -919,18 +914,24 @@ mod tests {
     }
 
     fn divider_color(tester: &WidgetTester) -> Option<Color> {
-        let divider = *tester.find_by_type::<Divider>().first().expect("a Divider");
+        let divider = *find::by_type::<Divider>()
+            .evaluate(tester)
+            .first()
+            .expect("a Divider");
         tester.widget(divider, |divider: &Divider| divider.color)
     }
 
     fn content_rect(tester: &WidgetTester, text: &str) -> Rect {
-        let content = *tester.find_text(text).first().expect("the content");
+        let content = *find::text(text)
+            .evaluate(tester)
+            .first()
+            .expect("the content");
         rect(tester, content)
     }
 
     fn overflow_bar_rect(tester: &WidgetTester) -> Rect {
-        let bar = *tester
-            .find_by_type::<OverflowBar>()
+        let bar = *find::by_type::<OverflowBar>()
+            .evaluate(tester)
             .first()
             .expect("an OverflowBar");
         rect(tester, bar)
@@ -1122,7 +1123,7 @@ mod tests {
             };
 
             build_app(tester, TextScaler::NO_SCALING);
-            assert_eq!(tester.find_text("A").len(), 1);
+            expect(tester, &find::text("A"), finds_one_widget());
             assert_eq!(content_rect(tester, "A").size(), Size::new(14.25, 20.0));
 
             build_app(tester, TextScaler::linear(1.1));
@@ -1186,21 +1187,21 @@ mod tests {
             tap_key(tester, &tap_target);
             tester.pump_and_settle();
             assert_eq!(banner_elevation(tester), 0.0);
-            tap_text(tester, "DISMISS");
+            tester.tap(find::text("DISMISS"));
             tester.pump_and_settle();
 
             pump_elevation_banner(tester, &tap_target, None, Some(6.0));
             tap_key(tester, &tap_target);
             tester.pump_and_settle();
             assert_eq!(banner_elevation(tester), 6.0);
-            tap_text(tester, "DISMISS");
+            tester.tap(find::text("DISMISS"));
             tester.pump_and_settle();
 
             pump_elevation_banner(tester, &tap_target, Some(3.0), Some(6.0));
             tap_key(tester, &tap_target);
             tester.pump_and_settle();
             assert_eq!(banner_elevation(tester), 3.0);
-            tap_text(tester, "DISMISS");
+            tester.tap(find::text("DISMISS"));
             tester.pump_and_settle();
         });
     }
@@ -1216,14 +1217,14 @@ mod tests {
             tap_key(tester, &tap_target);
             tester.pump_and_settle();
             assert_eq!(banner_elevation(tester), 6.0);
-            tap_text(tester, "DISMISS");
+            tester.tap(find::text("DISMISS"));
             tester.pump_and_settle();
 
             pump_elevation_banner(tester, &tap_target, Some(3.0), Some(6.0));
             tap_key(tester, &tap_target);
             tester.pump_and_settle();
             assert_eq!(banner_elevation(tester), 3.0);
-            tap_text(tester, "DISMISS");
+            tester.tap(find::text("DISMISS"));
             tester.pump_and_settle();
         });
     }
@@ -1268,7 +1269,8 @@ mod tests {
                     )
                 })
             });
-            let shown = |tester: &WidgetTester| tester.find_text(HELLO_MATERIAL_BANNER).len();
+            let shown =
+                |tester: &WidgetTester| find::text(HELLO_MATERIAL_BANNER).evaluate(tester).len();
             assert_eq!(shown(tester), 0);
             tap_key(tester, &tap_target);
             assert_eq!(shown(tester), 0);
@@ -1317,8 +1319,8 @@ mod tests {
             });
             let shown = |tester: &WidgetTester| {
                 (
-                    tester.find_text("banner1").len(),
-                    tester.find_text("banner2").len(),
+                    find::text("banner1").evaluate(tester).len(),
+                    find::text("banner2").evaluate(tester).len(),
                 )
             };
             assert_eq!(shown(tester), (0, 0));
@@ -1409,8 +1411,8 @@ mod tests {
             tap_key(tester, &material_banner_tap_target);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_text("SnackBar").len(), 1);
-            assert_eq!(tester.find_text("MaterialBanner").len(), 1);
+            expect(tester, &find::text("SnackBar"), finds_one_widget());
+            expect(tester, &find::text("MaterialBanner"), finds_one_widget());
         });
     }
 
@@ -2084,7 +2086,7 @@ mod tests {
     }
 
     fn icon_rect(tester: &WidgetTester, icon: &waft_widgets::IconData) -> Rect {
-        rect(tester, tester.find_by_icon(icon))
+        rect(tester, tester.element(find::by_icon(icon).first()))
     }
 
     /// Asserts the default single-line paddings Dart's defaults cases check.
@@ -2237,7 +2239,7 @@ mod tests {
 
             assert_content_and_leading(tester, (24.0, 41.0), (19.0, 11.0));
 
-            assert!(tester.find_by_type::<Divider>().is_empty());
+            expect(tester, &find::by_type::<Divider>(), finds_nothing());
         });
     }
 
@@ -2275,7 +2277,7 @@ mod tests {
 
             assert_content_and_leading(tester, (24.0, 41.0), (19.0, 11.0));
 
-            assert!(tester.find_by_type::<Divider>().is_empty());
+            expect(tester, &find::by_type::<Divider>(), finds_nothing());
         });
     }
 
@@ -2316,7 +2318,7 @@ mod tests {
 
             assert_content_and_leading(tester, (29.0, 58.0), (24.0, 22.0));
 
-            assert!(tester.find_by_type::<Divider>().is_empty());
+            expect(tester, &find::by_type::<Divider>(), finds_nothing());
         });
     }
 
@@ -2353,7 +2355,7 @@ mod tests {
 
             assert_content_and_leading(tester, (29.0, 58.0), (24.0, 22.0));
 
-            assert!(tester.find_by_type::<Divider>().is_empty());
+            expect(tester, &find::by_type::<Divider>(), finds_nothing());
         });
     }
 

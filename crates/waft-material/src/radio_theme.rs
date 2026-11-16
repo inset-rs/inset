@@ -396,8 +396,8 @@ mod tests {
     use super::*;
     use crate::radio::Radio;
     use crate::radio::tests::{
-        assert_paints, center_of_radio, circle, find_radio, hover_at, no_op, press_at,
-        radio_material, scaffold_app,
+        CircleArguments, assert_paints, center_of_radio, circle, find_radio, hover_at, no_op,
+        press_at, radio_material, scaffold_app,
     };
     use crate::theme_data::ThemeData;
 

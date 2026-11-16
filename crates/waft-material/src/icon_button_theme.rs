@@ -266,7 +266,7 @@ mod tests {
         WidgetStateProperty, WidgetStatePropertyAll, WidgetStates,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::button_style::{ButtonShapeVariant, ButtonSizeVariant, IconButtonWidthVariant};
@@ -276,8 +276,9 @@ mod tests {
     use crate::icons::Icons;
     use crate::ink_well::InkWell;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{Drawn, PaintInspection, material_app};
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::{MaterialTapTargetSize, ThemeData};
+    use waft_rendering::testing::RecordedCall;
 
     fn noop() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
@@ -288,15 +289,15 @@ mod tests {
     }
 
     fn icon_button_element(tester: &WidgetTester) -> AnyElement {
-        tester.find_by_type::<IconButton>()[0]
+        find::by_type::<IconButton>().evaluate(tester)[0]
     }
 
     /// The first `W` below the `IconButton`: Dart's `find.descendant(of: find.byType(IconButton),
     /// matching: find.byType(W))`.
     fn below_button<W: 'static, R>(tester: &WidgetTester, read: impl FnOnce(&W) -> R) -> R {
         let button = icon_button_element(tester);
-        let found = tester
-            .find_by_type::<W>()
+        let found = find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .find(|element| tester.ancestors(*element).contains(&button))
             .expect("a widget of that type below the IconButton");
@@ -304,13 +305,12 @@ mod tests {
     }
 
     fn button_size(tester: &WidgetTester) -> Size {
-        let render = tester.render_box_of(icon_button_element(tester));
-        render.size(&tester.cell.borrow())
+        tester.get_size(icon_button_element(tester))
     }
 
     fn icon_alignment(tester: &WidgetTester) -> AlignmentGeometry {
-        let icon = tester.find_by_type::<Icon>()[0];
-        let align = tester.ancestor_of_type::<Align>(icon);
+        let align = tester
+            .element(find::ancestor(find::by_type::<Icon>(), find::by_type::<Align>()).first());
         tester.widget(align, |align: &Align| align.alignment)
     }
 
@@ -736,18 +736,17 @@ mod tests {
             tester.pump_widget(widget);
             let rects = |tester: &WidgetTester| -> Vec<u32> {
                 tester
-                    .ink_drawn()
+                    .ink_calls()
                     .into_iter()
                     .filter_map(|drawn| match drawn {
-                        Drawn::Rect(color, _) => Some(color),
+                        RecordedCall::Rect { color, .. } => Some(color.value()),
                         _ => None,
                     })
                     .collect()
             };
 
             // Hovered.
-            let render = tester.render_box_of(icon_button_element(tester));
-            let center = tester.global_rect(render).center();
+            let center = tester.get_center(icon_button_element(tester));
             let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut mouse, Offset::ZERO);
             tester.move_to(&mut mouse, center, false);

@@ -1324,7 +1324,6 @@ pub(crate) mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::valo::Op;
     use waft_embedder::{PointerChange, Rect};
     use waft_gestures::{K_LONG_PRESS_TIMEOUT, K_PRIMARY_BUTTON};
     use waft_painting::AlignmentGeometry;
@@ -1335,7 +1334,10 @@ pub(crate) mod tests {
         MouseRegion, Row, SizedBox, StatefulBuilder, TooltipTriggerMode, WidgetStateColor,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_rendering::testing::{PaintCall, PaintedStyle};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::material::{Material, RenderInkFeatures};
@@ -1406,7 +1408,7 @@ pub(crate) mod tests {
 
     /// Dart's `find.byType(Radio<T>)`: the one radio of that type.
     pub(crate) fn find_radio<T: Clone + PartialEq + 'static>(tester: &WidgetTester) -> AnyElement {
-        let found = tester.find_by_type::<Radio<T>>();
+        let found = find::by_type::<Radio<T>>().evaluate(tester);
         assert_eq!(found.len(), 1, "one Radio");
         found[0]
     }
@@ -1442,208 +1444,71 @@ pub(crate) mod tests {
         tester.down(&mut touch, at);
     }
 
-    /// One recorded canvas op, reduced to what the radio cases' `paints` matchers compare. A
-    /// draw with a transparent paint is not recorded at all, so Dart's
-    /// `..circle(color: Colors.transparent)` has nothing to match here and is left out of the
-    /// expectations.
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    pub(crate) enum Painted {
-        /// `drawRect`: its colour as `0xAARRGGBB` and its rect.
-        Rect(u32, Rect),
-        /// `drawCircle`: its colour, its radius and, for a stroke, its stroke width.
-        Circle {
-            color: u32,
-            radius: f32,
-            stroke_width: Option<f32>,
-        },
-        Save,
-        Restore,
-    }
-
-    fn argb(color: waft_embedder::valo::Color) -> u32 {
-        let channel = |value: f32| (value * 255.0).round() as u32;
-        (channel(color.a) << 24)
-            | (channel(color.r) << 16)
-            | (channel(color.g) << 8)
-            | channel(color.b)
-    }
-
-    impl Painted {
-        fn of(op: &Op) -> Option<Painted> {
-            match op {
-                Op::DrawRect { paint, rect, .. } => Some(Painted::Rect(
-                    argb(paint.color),
-                    Rect::from_ltwh(
-                        f64::from(rect.x),
-                        f64::from(rect.y),
-                        f64::from(rect.width),
-                        f64::from(rect.height),
-                    ),
-                )),
-                Op::DrawPath { path, paint, .. } => {
-                    let bounds = path.bounds();
-                    if (bounds.width - bounds.height).abs() >= 1e-3 {
-                        return None;
-                    }
-                    Some(Painted::Circle {
-                        color: argb(paint.color),
-                        radius: bounds.width / 2.0,
-                        stroke_width: match &paint.style {
-                            PaintStyle::Stroke(stroke) => Some(stroke.width),
-                            PaintStyle::Fill => None,
-                        },
-                    })
-                }
-                Op::Save => Some(Painted::Save),
-                Op::Restore => Some(Painted::Restore),
-                _ => None,
-            }
-        }
-    }
-
-    /// What `render` and its subtree draw, painted at the origin.
-    pub(crate) fn painted(tester: &WidgetTester, render: AnyRenderObject) -> Vec<Painted> {
-        tester
-            .pictures(render)
-            .iter()
-            .flat_map(|picture| {
-                picture
-                    .ops()
-                    .iter()
-                    .filter_map(Painted::of)
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    }
-
-    /// One step of Dart's `paints` matcher.
-    #[derive(Clone, Copy, Debug)]
-    pub(crate) enum Paints {
-        Rect {
-            color: Option<Color>,
-            rect: Option<Rect>,
-        },
-        Circle {
-            color: Option<Color>,
-            radius: Option<f64>,
-            stroke_width: Option<f64>,
-        },
-        Save,
-        Restore,
-    }
-
     /// Dart's `..rect(color:, rect:)`.
-    pub(crate) fn rect(color: Color, rect: Rect) -> Paints {
-        Paints::Rect {
-            color: Some(color),
-            rect: Some(rect),
-        }
+    pub(crate) fn rect(color: Color, rect: Rect) -> PaintCall {
+        PaintCall::rect_at(rect, Some(color))
     }
 
-    /// Dart's `..rect()`.
-    pub(crate) fn any_rect() -> Paints {
-        Paints::Rect {
-            color: None,
-            rect: None,
-        }
+    /// Dart's `..rect()`: a rect of any colour.
+    pub(crate) fn any_rect() -> PaintCall {
+        PaintCall::rect(None)
     }
 
     /// Dart's `..circle(color:)`.
-    pub(crate) fn circle(color: Color) -> Paints {
-        Paints::Circle {
-            color: Some(color),
-            radius: None,
-            stroke_width: None,
-        }
+    pub(crate) fn circle(color: Color) -> PaintCall {
+        PaintCall::circle(Some(color))
     }
 
-    impl Paints {
-        /// Dart's `radius:` argument of `..circle`.
-        pub(crate) fn radius(self, radius: f64) -> Paints {
+    /// Dart's `radius:` and `strokeWidth:` arguments of `..circle`, the latter with or
+    /// without `style: stroke`.
+    pub(crate) trait CircleArguments {
+        fn radius(self, radius: f64) -> PaintCall;
+        fn stroke_width(self, stroke_width: f64) -> PaintCall;
+    }
+
+    impl CircleArguments for PaintCall {
+        fn radius(self, radius: f64) -> PaintCall {
             match self {
-                Paints::Circle {
-                    color,
-                    stroke_width,
-                    ..
-                } => Paints::Circle {
-                    color,
+                PaintCall::Circle {
+                    x, y, color, style, ..
+                } => PaintCall::Circle {
+                    x,
+                    y,
                     radius: Some(radius),
-                    stroke_width,
-                },
-                other => other,
-            }
-        }
-
-        /// Dart's `strokeWidth:` argument of `..circle`, with or without `style: stroke`.
-        pub(crate) fn stroke_width(self, stroke_width: f64) -> Paints {
-            match self {
-                Paints::Circle { color, radius, .. } => Paints::Circle {
                     color,
-                    radius,
-                    stroke_width: Some(stroke_width),
+                    style,
                 },
                 other => other,
             }
         }
 
-        fn is_same_call(&self, painted: &Painted) -> bool {
-            matches!(
-                (self, painted),
-                (Paints::Rect { .. }, Painted::Rect(..))
-                    | (Paints::Circle { .. }, Painted::Circle { .. })
-                    | (Paints::Save, Painted::Save)
-                    | (Paints::Restore, Painted::Restore)
-            )
-        }
-
-        fn matches(&self, painted: &Painted) -> bool {
-            match (*self, *painted) {
-                (Paints::Rect { color, rect }, Painted::Rect(painted_color, painted_rect)) => {
-                    color.is_none_or(|color| color.value() == painted_color)
-                        && rect.is_none_or(|rect| rect == painted_rect)
-                }
-                (
-                    Paints::Circle {
-                        color,
-                        radius,
-                        stroke_width,
-                    },
-                    Painted::Circle {
-                        color: painted_color,
-                        radius: painted_radius,
-                        stroke_width: painted_stroke_width,
-                    },
-                ) => {
-                    color.is_none_or(|color| color.value() == painted_color)
-                        && radius.is_none_or(|radius| (radius as f32 - painted_radius).abs() < 1e-3)
-                        && stroke_width.is_none_or(|stroke_width| {
-                            painted_stroke_width == Some(stroke_width as f32)
-                        })
-                }
-                (Paints::Save, Painted::Save) | (Paints::Restore, Painted::Restore) => true,
-                _ => false,
+        fn stroke_width(self, stroke_width: f64) -> PaintCall {
+            match self {
+                PaintCall::Circle {
+                    x,
+                    y,
+                    radius,
+                    color,
+                    ..
+                } => PaintCall::Circle {
+                    x,
+                    y,
+                    radius,
+                    color,
+                    style: Some(PaintedStyle::Stroke(Some(stroke_width))),
+                },
+                other => other,
             }
         }
     }
 
-    /// Dart's `expect(render, paints..a()..b())`: each step finds the next call of its kind,
-    /// skipping calls of other kinds, and that call must match it.
+    /// Dart's `expect(render, paints..a()..b())` on what `render` and its subtree draw.
     pub(crate) fn assert_paints(
         tester: &WidgetTester,
         render: AnyRenderObject,
-        expected: &[Paints],
+        expected: &[PaintCall],
     ) {
-        let actual = painted(tester, render);
-        let mut calls = actual.iter();
-        for step in expected {
-            let call = calls
-                .find(|call| step.is_same_call(call))
-                .unwrap_or_else(|| panic!("no call left for {step:?} in {actual:?}"));
-            assert!(
-                step.matches(call),
-                "{call:?} does not match {step:?} in {actual:?}"
-            );
-        }
+        waft_rendering::testing::assert_paints(&tester.painted_ops(render), expected);
     }
 
     /// The first `T` at or below `node`, depth first.
@@ -1694,7 +1559,7 @@ pub(crate) mod tests {
             tester.pump_widget(wrap(
                 Radio::new(1).group_value(2).on_changed(log_into(&log)),
             ));
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert_eq!(*log.borrow(), [Some(1)]);
             log.borrow_mut().clear();
 
@@ -1704,11 +1569,11 @@ pub(crate) mod tests {
                     .on_changed(log_into(&log))
                     .active_color(Colors::GREEN.shade500()),
             ));
-            tester.tap(tester.center_of(&key), 2);
+            tester.tap_at(tester.get_center(&key), 2);
             assert!(log.borrow().is_empty());
 
             tester.pump_widget(wrap(Radio::new(1).group_value(2)));
-            tester.tap(tester.center_of(&key), 3);
+            tester.tap_at(tester.get_center(&key), 3);
             assert!(log.borrow().is_empty());
         });
     }
@@ -1735,7 +1600,7 @@ pub(crate) mod tests {
                 )
                 .into_widget(),
             );
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert!(log.borrow().is_empty());
         });
     }
@@ -1760,7 +1625,7 @@ pub(crate) mod tests {
                     .on_changed(log_into(&log))
                     .toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert_eq!(*log.borrow(), [Some(1)]);
             log.borrow_mut().clear();
 
@@ -1770,14 +1635,14 @@ pub(crate) mod tests {
                     .on_changed(log_into(&log))
                     .toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 2);
+            tester.tap_at(tester.get_center(&key), 2);
             assert_eq!(*log.borrow(), [None]);
             log.borrow_mut().clear();
 
             tester.pump_widget(wrap(
                 Radio::new(1).on_changed(log_into(&log)).toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 3);
+            tester.tap_at(tester.get_center(&key), 3);
             assert_eq!(*log.borrow(), [Some(1)]);
         });
     }
@@ -2224,7 +2089,7 @@ pub(crate) mod tests {
                 }),
             ));
 
-            tester.tap(tester.center_of(&key0), 1);
+            tester.tap_at(tester.get_center(&key0), 1);
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
             assert_eq!(group_value.get(), Some(0));
@@ -2387,7 +2252,7 @@ pub(crate) mod tests {
                 INACTIVE_ENABLED_FILL_COLOR
             });
             let theme = m3(tester);
-            let mut check = |group_value: i32, enabled: bool, expected: &[Paints]| {
+            let mut check = |group_value: i32, enabled: bool, expected: &[PaintCall]| {
                 let fill_color = Rc::clone(&fill_color);
                 tester.pump_widget(focus_and_hover_app(
                     theme.clone(),
@@ -2664,7 +2529,7 @@ pub(crate) mod tests {
             };
 
             tester.pump_widget(build_radio(true));
-            let center = tester.center_of(&key);
+            let center = tester.get_center(&key);
             // Put a pointer down on the screen.
             let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
@@ -2684,8 +2549,8 @@ pub(crate) mod tests {
             const TAP_TOOLTIP: &str = "tap tooltip";
             let theme = m3(tester);
             let tooltip_center = |tester: &WidgetTester| {
-                let tooltip = tester.find_by_type::<Tooltip>()[0];
-                tester.global_rect(tester.render_box_of(tooltip)).center()
+                let tooltip = find::by_type::<Tooltip>().evaluate(tester)[0];
+                tester.get_rect(tooltip).center()
             };
             tester.pump_widget(material_app(
                 theme.clone(),
@@ -2699,11 +2564,11 @@ pub(crate) mod tests {
             ));
 
             // Default tooltip shows up after long pressed.
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
-            tester.tap(tooltip_center(tester), 1);
+            tester.tap_at(tooltip_center(tester), 1);
             tester.pump_by(Duration::from_millis(10));
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
             let mut gesture_long_press = TestPointer::touch(2);
             tester.down(&mut gesture_long_press, tooltip_center(tester));
@@ -2712,7 +2577,7 @@ pub(crate) mod tests {
             tester.up(&gesture_long_press);
             tester.pump();
 
-            assert_eq!(tester.find_text(LONG_PRESS_TOOLTIP).len(), 1);
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_one_widget());
 
             // Tooltip shows up after tapping when set triggerMode to TooltipTriggerMode.tap.
             tester.pump_widget(material_app(
@@ -2729,12 +2594,12 @@ pub(crate) mod tests {
 
             tester.pump_by(Duration::from_secs(24 * 60 * 60));
             tester.pump_and_settle();
-            assert!(tester.find_text(TAP_TOOLTIP).is_empty());
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(TAP_TOOLTIP), finds_nothing());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
-            tester.tap(tooltip_center(tester), 3);
+            tester.tap_at(tooltip_center(tester), 3);
             tester.pump_by(Duration::from_millis(10));
-            assert_eq!(tester.find_text(TAP_TOOLTIP).len(), 1);
+            expect(tester, &find::text(TAP_TOOLTIP), finds_one_widget());
         });
     }
 
@@ -2768,7 +2633,7 @@ pub(crate) mod tests {
                 circle(selected),
                 // Inner circle - primary value
                 circle(selected),
-                Paints::Restore,
+                PaintCall::Restore,
             ],
         );
 
@@ -2778,7 +2643,7 @@ pub(crate) mod tests {
         assert_paints(
             tester,
             radio_material::<bool>(tester),
-            &[Paints::Save, circle(selected), Paints::Restore],
+            &[PaintCall::Save, circle(selected), PaintCall::Restore],
         );
 
         tester.pump_widget(Container::new().into_widget());
@@ -3007,10 +2872,10 @@ pub(crate) mod tests {
                 let app = build_app(tester, platform);
                 tester.pump_widget(app);
                 tester.pump_and_settle();
-                assert_eq!(
-                    tester.find_by_type::<CupertinoRadio<i32>>().len(),
-                    1,
-                    "{platform:?}"
+                expect(
+                    tester,
+                    &find::by_type::<CupertinoRadio<i32>>(),
+                    finds_one_widget(),
                 );
             }
 
@@ -3024,7 +2889,9 @@ pub(crate) mod tests {
                 tester.pump_widget(app);
                 tester.pump_and_settle();
                 assert!(
-                    tester.find_by_type::<CupertinoRadio<i32>>().is_empty(),
+                    find::by_type::<CupertinoRadio<i32>>()
+                        .evaluate(tester)
+                        .is_empty(),
                     "{platform:?}"
                 );
             }
@@ -3185,8 +3052,8 @@ pub(crate) mod tests {
     fn resolves_in_hovered_and_focused_states(
         tester: &mut WidgetTester,
         configure: impl FnOnce(Radio<i32>) -> Radio<i32>,
-        focused: &[Paints],
-        hovered: &[Paints],
+        focused: &[PaintCall],
+        hovered: &[PaintCall],
     ) {
         tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
         let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
@@ -3347,7 +3214,7 @@ pub(crate) mod tests {
             });
             let theme = m3(tester);
             let colors = theme.color_scheme.clone();
-            let mut check = |enabled: bool, expected: &[Paints]| {
+            let mut check = |enabled: bool, expected: &[PaintCall]| {
                 let inner_radius = Rc::clone(&inner_radius);
                 tester.pump_widget(group_app(theme.clone(), 0, move |radio| {
                     radio.inner_radius(inner_radius).enabled(enabled)
@@ -3428,7 +3295,7 @@ pub(crate) mod tests {
             };
 
             tester.pump_widget(build(Some("lafayette")));
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert_eq!(*changes.borrow(), [Some(String::from("jefferson"))]);
 
             // An equal string that is another object selects the radio.
@@ -3442,7 +3309,7 @@ pub(crate) mod tests {
             );
 
             // Selecting a toggleable radio again unselects it.
-            tester.tap(tester.center_of(&key), 2);
+            tester.tap_at(tester.get_center(&key), 2);
             assert_eq!(*changes.borrow(), [Some(String::from("jefferson")), None]);
         });
     }

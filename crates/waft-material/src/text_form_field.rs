@@ -1066,7 +1066,7 @@ mod tests {
         Text, TextEditingController,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::material::Material;
@@ -1086,19 +1086,19 @@ mod tests {
     }
 
     fn editable_state(tester: &WidgetTester) -> Handle<EditableTextState> {
-        tester.find_by_type::<EditableText>()[0]
+        find::by_type::<EditableText>().evaluate(tester)[0]
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state")
     }
 
     fn field_state(tester: &WidgetTester) -> Handle<TextFormFieldState> {
-        tester.find_by_type::<TextFormField>()[0]
+        find::by_type::<TextFormField>().evaluate(tester)[0]
             .state_handle::<TextFormFieldState>(&tester.cell.borrow())
             .expect("a TextFormField state")
     }
 
     fn text_field(tester: &WidgetTester) -> AnyElement {
-        tester.find_by_type::<TextField>()[0]
+        find::by_type::<TextField>().evaluate(tester)[0]
     }
 
     /// Dart's `tester.showKeyboard(find.byType(TextField))`.
@@ -1133,7 +1133,7 @@ mod tests {
             let root = centered(tester, TextFormField::new().text_align(TextAlign::Center));
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_by_type::<TextField>().len(), 1);
+            assert_eq!(find::by_type::<TextField>().evaluate(tester).len(), 1);
             let text_align =
                 tester.widget::<TextField, _>(text_field(tester), |field| field.text_align);
             assert_eq!(text_align, TextAlign::Center);
@@ -1273,12 +1273,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_text("0 of 10").len(), 1);
+            assert_eq!(find::text("0 of 10").evaluate(tester).len(), 1);
 
             enter_text(tester, "01234");
             tester.pump();
 
-            assert_eq!(tester.find_text("5 of 10").len(), 1);
+            assert_eq!(find::text("5 of 10").evaluate(tester).len(), 1);
         });
     }
 
@@ -1293,7 +1293,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let element = tester.find_by_type::<EditableText>()[0];
+            let element = find::by_type::<EditableText>().evaluate(tester)[0];
             let show_cursor =
                 tester.widget::<EditableText, _>(element, EditableText::effective_show_cursor);
             assert!(!show_cursor);
@@ -1505,7 +1505,7 @@ mod tests {
             tester.pump_widget(root);
             tester.pump();
 
-            assert_eq!(tester.find_text("**validation error**").len(), 1);
+            assert_eq!(find::text("**validation error**").evaluate(tester).len(), 1);
         });
     }
 

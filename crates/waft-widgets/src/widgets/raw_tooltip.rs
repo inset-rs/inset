@@ -1580,7 +1580,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use waft_foundation::Ref;
 
-    use waft_embedder::{Color, PointerChange, Rect, TextDirection};
+    use waft_embedder::{Color, PointerChange, TextDirection};
     use waft_gestures::{K_LONG_PRESS_TIMEOUT, K_PRESS_TIMEOUT, K_PRIMARY_BUTTON};
     use waft_painting::{AlignmentGeometry, EdgeInsetsGeometry};
     use waft_rendering::RenderParagraph;
@@ -1589,7 +1589,10 @@ mod tests {
 
     use super::*;
     use crate::framework::GlobalKey;
-    use crate::testing::{TestPointer, WidgetTester, test_widgets};
+    use crate::testing::{
+        Finder, TestPointer, WidgetTester, assert_more_or_less_equals, expect, find, finds_nothing,
+        finds_one_widget, test_widgets,
+    };
     use crate::widgets::app::WidgetsApp;
     use crate::widgets::basic::{
         Align, Builder, Center, ColoredBox, Column, Directionality, Padding, Spacer, Stack,
@@ -1609,15 +1612,13 @@ mod tests {
 
     /// A case's [`WidgetTester`] with what Dart's cases add to it: the overlay entry
     /// `tester.pumpWidget(WidgetsApp(builder: (_, _) => Overlay(initialEntries: [entry])))`
-    /// pumps the case's tree into, the pointer the next gesture takes, and the case's mouse
-    /// `TestGesture`.
+    /// pumps the case's tree into, and the case's mouse `TestGesture`.
     struct Tester<'t> {
         tester: &'t mut WidgetTester,
         /// What the overlay's one entry builds: the tree `pump_widget` was last given.
         home: Rc<RefCell<Rc<dyn Fn() -> WidgetRef>>>,
         /// The entry `pump_widget` mounted, until `pump_root` replaces the tree.
         entry: Option<Ref<OverlayEntry>>,
-        next_pointer: i64,
         mouse: TestPointer,
         /// Whether the mouse's primary button is held: Dart's mouse `TestGesture` after `down`.
         mouse_is_down: bool,
@@ -1643,7 +1644,6 @@ mod tests {
                 tester,
                 home: Rc::new(RefCell::new(Rc::new(|| SizedBox::shrink().into_widget()))),
                 entry: None,
-                next_pointer: 1,
                 mouse: TestPointer::mouse(MOUSE_DEVICE, K_PRIMARY_BUTTON),
                 mouse_is_down: false,
             }
@@ -1698,30 +1698,23 @@ mod tests {
             );
         }
 
-        /// The pointer Dart's tester gives the next gesture.
-        fn next_pointer(&mut self) -> i64 {
-            let pointer = self.next_pointer;
-            self.next_pointer += 1;
-            pointer
-        }
-
         /// Dart's `tester.startGesture(position)`: a touch pointer down.
         fn start_gesture(&mut self, position: Offset) -> TestPointer {
-            let mut pointer = TestPointer::touch(self.next_pointer());
+            let mut pointer = TestPointer::touch(self.tester.next_pointer());
             self.tester.down(&mut pointer, position);
             pointer
         }
 
         /// Dart's `tester.tap(finder)`, at the center of what it found.
         fn tap(&mut self, position: Offset) {
-            let pointer = self.next_pointer();
-            self.tester.tap(position, pointer);
+            let pointer = self.tester.next_pointer();
+            self.tester.tap_at(position, pointer);
         }
 
         /// Dart's `tester.longPress(finder)`.
         fn long_press(&mut self, position: Offset) {
-            let pointer = self.next_pointer();
-            self.tester.long_press(position, pointer);
+            let pointer = self.tester.next_pointer();
+            self.tester.long_press_at(position, pointer);
         }
 
         /// Dart's `_testGestureTap`.
@@ -1768,24 +1761,6 @@ mod tests {
             self.mouse_is_down = false;
             let mouse = self.mouse;
             self.tester.up(&mouse);
-        }
-
-        /// Dart's `find.byKey(key)` finding one widget.
-        fn finds(&self, key: &GlobalKey) -> bool {
-            key.current_context(&self.tester.cell.borrow()).is_some()
-        }
-
-        /// The global rectangle of the box `key` is on.
-        fn rect_of(&self, key: &GlobalKey) -> Rect {
-            let app = self.tester.cell.borrow();
-            let render_box = key
-                .current_context(&app)
-                .expect("mounted")
-                .find_render_object(&app)
-                .and_then(|render_object| render_object.as_box())
-                .expect("a box");
-            let top_left = render_box.local_to_global(&app, Offset::ZERO, None);
-            top_left & render_box.size(&app)
         }
 
         fn state(&self, key: &GlobalKey) -> Handle<RawTooltipState> {
@@ -1910,7 +1885,7 @@ mod tests {
             let tip_key = GlobalKey::new();
             let key = tip_key.clone();
             let tester = position_case(tester, 300.0, 0.0, move || tip(&key), None);
-            let tip = tester.rect_of(&tip_key);
+            let tip = tester.get_rect(&tip_key);
             assert_eq!(tip.top_center().dx(), 300.0);
             assert_eq!(tip.top_center().dy(), 0.0);
         });
@@ -1933,7 +1908,7 @@ mod tests {
                 },
                 None,
             );
-            let tip = tester.rect_of(&tip_key);
+            let tip = tester.get_rect(&tip_key);
             assert_eq!(tip.height(), 30.0); // 20.0 height + 5.0 padding * 2 (top, bottom)
             assert_eq!(tip.top_left(), Offset::new(10.0, 0.0));
         });
@@ -1951,7 +1926,7 @@ mod tests {
                 move || sized_box(42.0, 100.0).key(key.clone().into()).into_widget(),
                 Some(prefer_above()),
             );
-            let tip = tester.rect_of(&tip_key);
+            let tip = tester.get_rect(&tip_key);
             assert_eq!(tip.height(), 100.0);
             assert_eq!(tip.top, 200.0);
             assert_eq!(tip.bottom, 300.0);
@@ -1970,7 +1945,7 @@ mod tests {
                 move || sized_box(42.0, 190.0).key(key.clone().into()).into_widget(),
                 Some(prefer_above()),
             );
-            let tip = tester.rect_of(&tip_key);
+            let tip = tester.get_rect(&tip_key);
             assert_eq!(tip.height(), 190.0);
             assert_eq!(tip.top, 109.0);
             assert_eq!(tip.bottom, 299.0);
@@ -1989,7 +1964,7 @@ mod tests {
                 move || sized_box(42.0, 190.0).key(key.clone().into()).into_widget(),
                 None,
             );
-            let tip = tester.rect_of(&tip_key);
+            let tip = tester.get_rect(&tip_key);
             assert_eq!(tip.height(), 190.0);
             assert_eq!(tip.top, 300.0);
             assert_eq!(tip.bottom, 490.0);
@@ -2009,7 +1984,7 @@ mod tests {
             let tip_key = GlobalKey::new();
             let key = tip_key.clone();
             let tester = position_case(tester, 1600.0, 300.0, move || padded_ten_high(&key), None);
-            let tip = tester.rect_of(&tip_key);
+            let tip = tester.get_rect(&tip_key);
             assert_eq!(tip.height(), 20.0);
             assert_eq!(tip.top, 300.0);
             assert_eq!(tip.right, 790.0);
@@ -2023,7 +1998,7 @@ mod tests {
             let tip_key = GlobalKey::new();
             let key = tip_key.clone();
             let tester = position_case(tester, 780.0, 300.0, move || padded_ten_high(&key), None);
-            let tip = tester.rect_of(&tip_key);
+            let tip = tester.get_rect(&tip_key);
             assert_eq!(tip.height(), 20.0);
             assert_eq!(tip.top, 300.0);
             assert_eq!(tip.right, 790.0);
@@ -2064,10 +2039,10 @@ mod tests {
             });
             tester.long_press(CENTER);
             tester.pump_by(Duration::from_secs(1));
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
-            let target_center = tester.rect_of(&target_key).center();
-            let tooltip_position = tester.rect_of(&tip_key).top_left();
+            let target_center = tester.get_center(&target_key);
+            let tooltip_position = tester.get_top_left(&tip_key);
             // The tooltip should be positioned at target + (25, -25-14).
             assert!((tooltip_position.dx() - (target_center.dx() + 25.0)).abs() <= 5.0);
             assert!((tooltip_position.dy() - (target_center.dy() - 25.0 - 14.0)).abs() <= 5.0);
@@ -2090,7 +2065,7 @@ mod tests {
             let pointer = tester.start_gesture(CENTER);
             tester.pump_by(K_LONG_PRESS_TIMEOUT);
             tester.pump_by(Duration::from_millis(10));
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
             tester.up(&pointer);
 
             // tap (down, up) gesture hides tooltip, since its not
@@ -2098,21 +2073,21 @@ mod tests {
             tester.tap(CENTER);
             tester.pump();
             tester.pump_and_settle();
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             // long press once more
             let pointer = tester.start_gesture(CENTER);
             tester.pump();
             tester.pump_by(Duration::from_millis(300));
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             tester.pump_by(K_LONG_PRESS_TIMEOUT);
             tester.pump_by(Duration::from_millis(10));
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // keep holding the long press, should still show tooltip
             tester.pump_by(K_LONG_PRESS_TIMEOUT);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
             tester.up(&pointer);
         });
     }
@@ -2132,20 +2107,20 @@ mod tests {
 
             let pointer = tester.start_gesture(CENTER);
             tester.pump_by(K_LONG_PRESS_TIMEOUT);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
             // Keep holding to prevent the tooltip from dismissing.
             tester.pump_by(ETERNITY);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
             tester.pump();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.up(&pointer);
             tester.pump();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.pump_by(touch_delay);
             tester.pump_by(Duration::from_millis(500));
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2166,13 +2141,13 @@ mod tests {
             let pointer = tester.start_gesture(CENTER);
             tester.pump_by(K_LONG_PRESS_TIMEOUT);
             tester.pump_by(Duration::from_millis(10));
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
             tester.up(&pointer);
 
             // Tooltip is dismissed after touchDelay expired
             tester.pump_by(touch_delay);
             tester.pump_by(Duration::from_millis(10));
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2188,15 +2163,15 @@ mod tests {
                 None,
                 None,
             );
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             tester.test_gesture_tap(CENTER);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Tooltip is dismissed after touchDelay expired
             tester.pump_by(touch_delay);
             tester.pump_by(Duration::from_millis(10));
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2206,17 +2181,17 @@ mod tests {
             let mut tester = Tester::new(tester);
             let tip_key =
                 set_widget_for_tooltip_mode(&mut tester, TooltipTriggerMode::Tap, None, None, None);
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             // Tap to trigger the tooltip.
             tester.test_gesture_tap(CENTER);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Tap to dismiss the tooltip. Tooltip is dismissed immediately.
-            let tip = tester.rect_of(&tip_key).center();
+            let tip = tester.get_center(&tip_key);
             tester.test_gesture_tap(tip);
             tester.pump_by(Duration::from_millis(10));
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2231,17 +2206,17 @@ mod tests {
                 Some(false),
                 None,
             );
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             // Tap to trigger the tooltip.
             tester.test_gesture_tap(CENTER);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Tap the tooltip. The tooltip is not dismissed.
-            let tip = tester.rect_of(&tip_key).center();
+            let tip = tester.get_center(&tip_key);
             tester.test_gesture_tap(tip);
             tester.pump_by(Duration::from_millis(10));
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
         });
     }
 
@@ -2251,10 +2226,10 @@ mod tests {
             let mut tester = Tester::new(tester);
             let tip_key =
                 set_widget_for_tooltip_mode(&mut tester, TooltipTriggerMode::Tap, None, None, None);
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             tester.test_gesture_tap(CENTER);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
         });
     }
 
@@ -2269,13 +2244,13 @@ mod tests {
                 None,
                 None,
             );
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             tester.test_gesture_tap(CENTER);
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             tester.test_gesture_long_press(CENTER);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
         });
     }
 
@@ -2290,13 +2265,13 @@ mod tests {
                 None,
                 None,
             );
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             tester.test_gesture_tap(CENTER);
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             tester.test_gesture_long_press(CENTER);
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2385,20 +2360,20 @@ mod tests {
             tester.pump();
             // Wait for it to appear.
             tester.pump();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Wait a looong time to make sure that it doesn't go away if the mouse is
             // still over the widget.
             tester.pump_by(ONE_DAY);
             tester.pump_and_settle();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.mouse_move_to(Offset::ZERO);
             tester.pump();
 
             // Wait for it to disappear.
             tester.pump_and_settle();
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2416,27 +2391,27 @@ mod tests {
             tester.pump();
             // Wait for it to appear.
             tester.pump();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Wait a looong time to make sure that it doesn't go away if the mouse is
             // still over the widget.
             tester.pump_by(ONE_DAY);
             tester.pump_and_settle();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Hover to the tooltip text and verify the tooltip doesn't go away.
-            let tip = tester.rect_of(&tip_key).top_left();
+            let tip = tester.get_top_left(&tip_key);
             tester.mouse_move_to(tip);
             tester.pump_by(ONE_DAY);
             tester.pump_and_settle();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.mouse_move_to(Offset::ZERO);
             tester.pump();
 
             // Wait for it to disappear.
             tester.pump_and_settle();
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2477,14 +2452,18 @@ mod tests {
             tester.pump();
             // Wait for the first tooltip to appear.
             tester.pump_by(hover_delay);
-            assert!(tester.finds(&first_key));
-            assert!(!tester.finds(&last_key));
+            expect(
+                &tester,
+                &find::by_global_key(&first_key),
+                finds_one_widget(),
+            );
+            expect(&tester, &find::by_global_key(&last_key), finds_nothing());
 
             // Move to the second tooltip and expect it to show up immediately.
             tester.mouse_move_to(Offset::new(400.0, 150.0));
             tester.pump();
-            assert!(!tester.finds(&first_key));
-            assert!(tester.finds(&last_key));
+            expect(&tester, &find::by_global_key(&first_key), finds_nothing());
+            expect(&tester, &find::by_global_key(&last_key), finds_one_widget());
         });
     }
 
@@ -2528,21 +2507,29 @@ mod tests {
             // Wait for it to appear.
             tester.pump_by(hover_delay);
 
-            assert!(!tester.finds(&outer_tip));
-            assert!(tester.finds(&inner_tip));
+            expect(&tester, &find::by_global_key(&outer_tip), finds_nothing());
+            expect(
+                &tester,
+                &find::by_global_key(&inner_tip),
+                finds_one_widget(),
+            );
             tester.mouse_move_to(outer_center);
             tester.pump();
             // Wait for it to switch.
             tester.pump_and_settle();
-            assert!(tester.finds(&outer_tip));
-            assert!(!tester.finds(&inner_tip));
+            expect(
+                &tester,
+                &find::by_global_key(&outer_tip),
+                finds_one_widget(),
+            );
+            expect(&tester, &find::by_global_key(&inner_tip), finds_nothing());
 
             tester.mouse_move_to(Offset::ZERO);
 
             // Wait for all tooltips to disappear.
             tester.pump_and_settle();
-            assert!(!tester.finds(&outer_tip));
-            assert!(!tester.finds(&inner_tip));
+            expect(&tester, &find::by_global_key(&outer_tip), finds_nothing());
+            expect(&tester, &find::by_global_key(&inner_tip), finds_nothing());
         });
     }
 
@@ -2559,16 +2546,16 @@ mod tests {
             tester.pump();
             // Wait for it to appear.
             tester.pump();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
             tester.pump_by(ONE_DAY);
             tester.pump_and_settle();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             assert!(RawTooltip::dismiss_all_tool_tips(
                 &mut tester.cell.borrow_mut()
             ));
             tester.pump_and_settle();
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2603,12 +2590,16 @@ mod tests {
             tester.pump();
             // Wait for it to appear.
             tester.pump_by(hover_delay);
-            assert!(tester.finds(&colored_box));
+            expect(
+                &tester,
+                &find::by_global_key(&colored_box),
+                finds_one_widget(),
+            );
 
             // Try to dismiss the tooltip with the shortcut key.
             tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
             tester.pump_and_settle();
-            assert!(!tester.finds(&colored_box));
+            expect(&tester, &find::by_global_key(&colored_box), finds_nothing());
 
             tester.mouse_move_to(Offset::ZERO);
             tester.pump_and_settle();
@@ -2660,14 +2651,14 @@ mod tests {
             tester.pump();
             tester.pump_by(hover_delay);
             // Make sure both messages are on the screen.
-            assert!(tester.finds(&message1));
-            assert!(tester.finds(&message2));
+            expect(&tester, &find::by_global_key(&message1), finds_one_widget());
+            expect(&tester, &find::by_global_key(&message2), finds_one_widget());
 
             // Try to dismiss the tooltip with the shortcut key
             tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
             tester.pump_and_settle();
-            assert!(!tester.finds(&message1));
-            assert!(!tester.finds(&message2));
+            expect(&tester, &find::by_global_key(&message1), finds_nothing());
+            expect(&tester, &find::by_global_key(&message2), finds_nothing());
         });
     }
 
@@ -2682,16 +2673,16 @@ mod tests {
             tester.pump();
             // Wait for it to appear.
             tester.pump();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
             tester.pump_by(ONE_DAY);
             tester.pump_and_settle();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.long_press(CENTER);
             tester.pump_by(ONE_DAY);
             tester.pump_and_settle();
             // Still visible.
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Still visible.
             tester.pump_by(ONE_DAY);
@@ -2701,7 +2692,7 @@ mod tests {
             tester.mouse_move_to(Offset::ZERO);
             tester.pump_by(ONE_DAY);
             tester.pump_and_settle();
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2735,18 +2726,14 @@ mod tests {
 
             tester.mouse_move_to(CENTER);
             tester.pump_by(Duration::from_secs(1));
-            assert!(
-                tester.finds(&tip_key),
-                "Tooltip should be visible when hovered."
-            );
+            // Tooltip should be visible when hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.mouse_move_to(Offset::ZERO);
             tester.pump_by(Duration::from_millis(100));
             tester.pump_and_settle();
-            assert!(
-                !tester.finds(&tip_key),
-                "Tooltip should be hidden when no longer hovered."
-            );
+            // Tooltip should be hidden when no longer hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2759,25 +2746,19 @@ mod tests {
 
             tester.mouse_move_to(CENTER);
             tester.pump_by(Duration::from_secs(1));
-            assert!(
-                tester.finds(&tip_key),
-                "Tooltip should be visible when hovered."
-            );
+            // Tooltip should be visible when hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.mouse_move_to(Offset::ZERO);
             tester.pump_by(Duration::from_millis(100));
             tester.pump_and_settle();
-            assert!(
-                tester.finds(&tip_key),
-                "Tooltip should wait until dismissDelay expires before being hidden"
-            );
+            // Tooltip should wait until dismissDelay expires before being hidden
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.pump_by(Duration::from_secs(1));
             tester.pump_and_settle();
-            assert!(
-                !tester.finds(&tip_key),
-                "Tooltip should be hidden when no longer hovered."
-            );
+            // Tooltip should be hidden when no longer hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2808,15 +2789,15 @@ mod tests {
 
             // Wait for the tooltip to actually appear.
             tester.pump_by(Duration::from_millis(100));
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Move the mouse to the tooltip overlay.
-            let tip = tester.rect_of(&tip_key).center();
+            let tip = tester.get_center(&tip_key);
             tester.mouse_move_to(tip);
             tester.pump_and_settle();
 
             // Verify the tooltip overlay is no longer displayed.
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2835,7 +2816,11 @@ mod tests {
                 )
                 .into_widget()
             });
-            assert!(tester.finds(&child_key));
+            expect(
+                &tester,
+                &find::by_global_key(&child_key),
+                finds_one_widget(),
+            );
             let state = child_key
                 .current_context(&tester.cell.borrow_mut())
                 .expect("mounted");
@@ -2849,7 +2834,7 @@ mod tests {
             drop(app);
             tester.long_press(Offset::ZERO);
             tester.pump_by(Duration::from_secs(1));
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2893,9 +2878,9 @@ mod tests {
             };
 
             tester.pump_widget(build_app(TextDirection::Rtl));
-            let center = tester.rect_of(&tooltip_key).center();
+            let center = tester.get_center(&tooltip_key);
             tester.long_press(center);
-            assert!(tester.finds(&text_key));
+            expect(&tester, &find::by_global_key(&text_key), finds_one_widget());
             assert_eq!(text_direction_of(&tester, &text_key), TextDirection::Rtl);
 
             tester.pump_by(Duration::from_secs(10));
@@ -2904,7 +2889,7 @@ mod tests {
 
             tester.pump_widget(build_app(TextDirection::Ltr));
             tester.long_press(center);
-            assert!(tester.finds(&text_key));
+            expect(&tester, &find::by_global_key(&text_key), finds_one_widget());
             assert_eq!(text_direction_of(&tester, &text_key), TextDirection::Ltr);
         });
     }
@@ -2936,19 +2921,19 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
-            let center = tester.rect_of(&tooltip_key).center();
+            let center = tester.get_center(&tooltip_key);
             tester.tap(center);
             // Wait for GestureArena disambiguation, delay is kPressTimeout to disambiguate
             // between onTap and onVerticalDragStart
             tester.pump_by(K_PRESS_TIMEOUT);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Tooltip is dismissed after touchDelay expired
             tester.pump_by(touch_delay);
             tester.pump_by(Duration::from_millis(10));
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -2970,13 +2955,13 @@ mod tests {
             tester.pump();
             // Wait for it to appear.
             tester.pump_by(hover_delay);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Remove the `Tooltip` widget.
             tester.pump_root(Center::new().child(SizedBox::shrink()).into_widget());
 
             // The tooltip should be removed, including the overlay child.
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -3033,7 +3018,7 @@ mod tests {
                 tester.pump();
                 tester.pump_by(hover_delay);
                 tester.pump_and_settle();
-                assert!(tester.finds(&tip_key));
+                expect(tester, &find::by_global_key(&tip_key), finds_one_widget());
             };
             let mouse_exit = |tester: &mut Tester| {
                 tester.mouse_move_to(Offset::ZERO);
@@ -3043,18 +3028,18 @@ mod tests {
                 mouse_exit(tester);
                 tester.pump_by(Duration::from_secs(60 * 60));
                 tester.pump_and_settle();
-                assert!(!tester.finds(&tip_key));
+                expect(tester, &find::by_global_key(&tip_key), finds_nothing());
             };
 
             mouse_enter_and_wait_until_visible(&mut tester);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             wait_for_reset(&mut tester);
 
             mouse_enter_and_wait_until_visible(&mut tester);
             mouse_exit(&mut tester);
             mouse_enter_and_wait_until_visible(&mut tester);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             wait_for_reset(&mut tester);
 
@@ -3063,7 +3048,7 @@ mod tests {
             mouse_enter_and_wait_until_visible(&mut tester);
             mouse_exit(&mut tester);
             mouse_enter_and_wait_until_visible(&mut tester);
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             wait_for_reset(&mut tester);
         });
@@ -3134,10 +3119,10 @@ mod tests {
                 None,
                 None,
             );
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             tester.test_gesture_tap(CENTER);
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -3150,19 +3135,15 @@ mod tests {
 
             tester.mouse_move_to(CENTER);
             tester.pump_by(Duration::from_secs(1));
-            assert!(
-                tester.finds(&tip_key),
-                "Tooltip should be visible when hovered."
-            );
+            // Tooltip should be visible when hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.mouse_move_to(Offset::ZERO);
             // Set a duration equal to the default exit
             tester.pump_by(Duration::from_millis(100));
             tester.pump_and_settle();
-            assert!(
-                !tester.finds(&tip_key),
-                "Tooltip should not wait for touchDelay before it hides itself."
-            );
+            // Tooltip should not wait for touchDelay before it hides itself.
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -3181,8 +3162,12 @@ mod tests {
                 )
                 .into_widget()
             });
-            assert!(tester.finds(&child_key));
-            assert!(!tester.finds(&tip_key));
+            expect(
+                &tester,
+                &find::by_global_key(&child_key),
+                finds_one_widget(),
+            );
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -3201,7 +3186,7 @@ mod tests {
                 )
                 .into_widget()
             });
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -3233,7 +3218,7 @@ mod tests {
 
             tester.pump();
             tester.pump_and_settle();
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
 
             let touch_gesture = tester.start_gesture(CENTER);
             tester.pump_by(K_LONG_PRESS_TIMEOUT + K_PRESS_TIMEOUT);
@@ -3241,7 +3226,7 @@ mod tests {
 
             tester.pump();
             tester.pump_and_settle();
-            assert!(tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
         });
     }
 
@@ -3338,26 +3323,20 @@ mod tests {
             tester.mouse_down(Offset::ZERO);
             tester.mouse_move_to(CENTER);
             tester.pump_by(Duration::from_secs(1));
-            assert!(
-                tester.finds(&tip_key),
-                "Tooltip should be visible when hovered."
-            );
+            // Tooltip should be visible when hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.mouse_up();
             tester.pump_by(Duration::from_secs(10 * 24 * 60 * 60));
             tester.pump_and_settle();
-            assert!(
-                tester.finds(&tip_key),
-                "Tooltip should be visible even when there is a PointerUp when hovered."
-            );
+            // Tooltip should be visible even when there is a PointerUp when hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.mouse_move_to(Offset::ZERO);
             tester.pump_by(Duration::from_secs(1));
             tester.pump_and_settle();
-            assert!(
-                !tester.finds(&tip_key),
-                "Tooltip should be dismissed with no hovering mouse cursor."
-            );
+            // Tooltip should be dismissed with no hovering mouse cursor.
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -3373,33 +3352,27 @@ mod tests {
             // interpreted as a PointHover event by the Tooltip.
             tester.mouse_move_to(CENTER);
             tester.pump_by(Duration::from_secs(1));
-            assert!(
-                tester.finds(&tip_key),
-                "Tooltip should be visible when hovered."
-            );
+            // Tooltip should be visible when hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             // Tapping on the Tooltip widget should dismiss the tooltip, since the
             // trigger mode is longPress.
             tester.tap(CENTER);
             tester.pump();
             tester.pump_and_settle();
-            assert!(!tester.finds(&tip_key));
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
             tester.mouse_remove_pointer();
 
             tester.mouse_move_to(CENTER);
             tester.pump_by(Duration::from_secs(1));
-            assert!(
-                tester.finds(&tip_key),
-                "Tooltip should be visible when hovered."
-            );
+            // Tooltip should be visible when hovered.
+            expect(&tester, &find::by_global_key(&tip_key), finds_one_widget());
 
             tester.tap(Offset::ZERO);
             tester.pump();
             tester.pump_and_settle();
-            assert!(
-                !tester.finds(&tip_key),
-                "Tapping outside of the Tooltip widget should dismiss the tooltip."
-            );
+            // Tapping outside of the Tooltip widget should dismiss the tooltip.
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -3416,10 +3389,8 @@ mod tests {
             // is set to tap.
             tester.mouse_down(CENTER);
             tester.pump_by(Duration::from_secs(1));
-            assert!(
-                !tester.finds(&tip_key),
-                "Tooltip should NOT be visible when hovered and tapped, when trigger mode is not tap"
-            );
+            // Tooltip should NOT be visible when hovered and tapped, when trigger mode is not tap
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
             tester.mouse_up();
             tester.mouse_remove_pointer();
             tester.pump_by(Duration::from_secs(10 * 24 * 60 * 60));
@@ -3435,10 +3406,8 @@ mod tests {
             tester.pump_by(Duration::from_millis(100));
             tester.mouse_up();
             tester.pump_by(Duration::from_secs(1));
-            assert!(
-                !tester.finds(&tip_key),
-                "Tooltip should NOT be visible when hovered and tapped, when trigger mode is tap"
-            );
+            // Tooltip should NOT be visible when hovered and tapped, when trigger mode is tap
+            expect(&tester, &find::by_global_key(&tip_key), finds_nothing());
         });
     }
 
@@ -3543,32 +3512,25 @@ mod tests {
 
     #[test]
     fn raw_tooltip_does_not_crash_at_zero_area() {
-        // Dart's `tester.view.physicalSize = Size.zero`.
-        let tester = &mut WidgetTester::with_physical_size(TestPlatform::new(), Size::ZERO);
-        let mut tester = Tester::new(tester);
-        let tooltip_key = GlobalKey::new();
-        let key = tooltip_key.clone();
-        tester.pump_widget(move || {
-            Center::new()
-                .child(
-                    RawTooltip::new(
-                        Some("TIP".into()),
-                        |_app, _context, _animation| Text::new("Y").into_widget(),
-                        Text::new("X"),
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let mut tester = Tester::new(tester);
+            let tooltip_key = GlobalKey::new();
+            let key = tooltip_key.clone();
+            tester.pump_widget(move || {
+                Center::new()
+                    .child(
+                        RawTooltip::new(
+                            Some("TIP".into()),
+                            |_app, _context, _animation| Text::new("Y").into_widget(),
+                            Text::new("X"),
+                        )
+                        .key(key.clone().into()),
                     )
-                    .key(key.clone().into()),
-                )
-                .into_widget()
+                    .into_widget()
+            });
+            assert_eq!(tester.get_size(&tooltip_key), Size::ZERO);
         });
-        assert_eq!(tester.rect_of(&tooltip_key).size(), Size::ZERO);
-    }
-
-    /// Dart's `moreOrLessEquals(expected)`: within `precisionErrorTolerance`.
-    fn assert_more_or_less_equals(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() <= 1e-10,
-            "{actual} is not {expected}"
-        );
     }
 
     /// The tree of the `AnimationStyle` cases: `Center(RawTooltip(key:, animationStyle:,
@@ -3637,8 +3599,9 @@ mod tests {
             animation.value(&self.tester.cell.borrow())
         }
 
-        fn finds_tip(&self) -> bool {
-            self.tester.finds(&self.tip_key)
+        /// Dart's `find.text(tooltipText)`: the tip, keyed.
+        fn tip(&self) -> Finder {
+            find::by_global_key(&self.tip_key)
         }
     }
 
@@ -3684,7 +3647,7 @@ mod tests {
             // Halfway through the hide animation, the reverse curve applies.
             assert_more_or_less_equals(case.value(), Curves::ease_in_expo().transform(0.5));
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 
@@ -3708,7 +3671,7 @@ mod tests {
             // provided.
             assert_more_or_less_equals(case.value(), Curves::ease_in_expo().transform(0.5));
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 
@@ -3723,7 +3686,7 @@ mod tests {
             case.tester.pump_and_settle();
             case.dismiss_all_tool_tips();
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
 
             case.pump_widget(style(
                 Curves::linear(),
@@ -3744,7 +3707,7 @@ mod tests {
 
             case.dismiss_all_tool_tips();
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 
@@ -3770,7 +3733,7 @@ mod tests {
             // Halfway through the default 75ms hide duration.
             assert_more_or_less_equals(case.value(), 0.5);
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 
@@ -3797,7 +3760,7 @@ mod tests {
             // Halfway through the default 75ms hide duration, not the 400ms duration.
             assert_more_or_less_equals(case.value(), 0.5);
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 
@@ -3835,7 +3798,7 @@ mod tests {
             // Halfway through the hide animation, the updated reverse curve applies.
             assert_more_or_less_equals(case.value(), Curves::bounce_out().transform(0.5));
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 
@@ -3856,7 +3819,7 @@ mod tests {
                 Some(Curves::ease_in_expo()),
                 Some(Duration::from_millis(200)),
             ));
-            assert!(case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_one_widget());
 
             case.dismiss_all_tool_tips();
             case.tester.pump();
@@ -3866,7 +3829,7 @@ mod tests {
             // reverse curve.
             assert_more_or_less_equals(case.value(), Curves::ease_in_expo().transform(0.5));
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 
@@ -3893,11 +3856,11 @@ mod tests {
             // time an animation starts.
             case.tester.pump_by(Duration::from_millis(75));
             assert_eq!(case.value(), 1.0);
-            assert!(case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_one_widget());
 
             case.dismiss_all_tool_tips();
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 
@@ -3912,7 +3875,7 @@ mod tests {
             case.ensure_tooltip_visible();
             case.tester.pump();
             assert_eq!(case.value(), 1.0);
-            assert!(case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_one_widget());
 
             case.dismiss_all_tool_tips();
             case.tester.pump();
@@ -3921,7 +3884,7 @@ mod tests {
             // The hide animation uses the default 75ms reverse duration.
             assert_more_or_less_equals(case.value(), 0.5);
             case.tester.pump_and_settle();
-            assert!(!case.finds_tip());
+            expect(&case.tester, &case.tip(), finds_nothing());
         });
     }
 }

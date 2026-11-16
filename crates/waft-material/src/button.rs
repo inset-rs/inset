@@ -1000,8 +1000,9 @@ mod tests {
     use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
     use super::*;
-    use crate::test_support::{Drawn, PaintInspection};
+    use crate::test_support::{PaintInspection, path_like};
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::RecordedCall;
 
     fn noop() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
@@ -1047,10 +1048,10 @@ mod tests {
     /// The colors of the rects the first material's ink features draw.
     fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
         tester
-            .ink_drawn()
+            .ink_calls()
             .into_iter()
             .filter_map(|drawn| match drawn {
-                Drawn::Rect(color, _) => Some(color),
+                RecordedCall::Rect { color, .. } => Some(color.to_argb32()),
                 _ => None,
             })
             .collect()
@@ -1059,11 +1060,10 @@ mod tests {
     /// The colors and bounds of the circles (paths) the first material's ink features draw.
     fn ink_circles(tester: &WidgetTester) -> Vec<(u32, Rect)> {
         tester
-            .ink_drawn()
+            .ink_calls()
             .into_iter()
-            .filter_map(|drawn| match drawn {
-                Drawn::Path(color, bounds) => Some((color, bounds)),
-                _ => None,
+            .filter_map(|drawn| {
+                path_like(&drawn).map(|(color, bounds)| (color.to_argb32(), bounds))
             })
             .collect()
     }
@@ -1098,14 +1098,6 @@ mod tests {
         })
     }
 
-    fn size_of(tester: &WidgetTester, key: &GlobalKey) -> Size {
-        tester
-            .render_object(key)
-            .as_box()
-            .expect("a render box")
-            .size(&tester.cell.borrow())
-    }
-
     fn rect_of(tester: &WidgetTester, key: &GlobalKey) -> Rect {
         let render_box = tester.render_object(key).as_box().expect("a render box");
         let app = tester.cell.borrow();
@@ -1130,7 +1122,7 @@ mod tests {
                 ),
             ));
 
-            tester.tap(center_of_view(), 1);
+            tester.tap_at(center_of_view(), 1);
             tester.pump_by(Duration::from_millis(10));
             // valo records no circle of radius 0, which the splash has until its first
             // frame after this one; by then it has begun to fade.
@@ -1200,7 +1192,7 @@ mod tests {
             .material_tap_target_size(MaterialTapTargetSize::Padded)
             .child(label("+"))));
 
-            tester.tap(Offset::new(40.0, 400.0), 1);
+            tester.tap_at(Offset::new(40.0, 400.0), 1);
 
             assert_eq!(pressed.get(), 1);
         });
@@ -1277,9 +1269,9 @@ mod tests {
                     .child(label("+")),
                 ),
             ));
-            assert_eq!(size_of(tester, &key), Size::new(48.0, 48.0));
+            assert_eq!(tester.get_size(&key), Size::new(48.0, 48.0));
 
-            tester.tap(center_of_view() + Offset::new(20.0, 0.0), 1);
+            tester.tap_at(center_of_view() + Offset::new(20.0, 0.0), 1);
             assert_eq!(pressed.get(), 1);
         });
     }
@@ -1344,7 +1336,7 @@ mod tests {
                         .into_widget()]),
             ));
 
-            assert_eq!(size_of(tester, &key), Size::new(800.0, 48.0));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 48.0));
         });
     }
 
@@ -1462,7 +1454,7 @@ mod tests {
             tester.add_pointer(&mut mouse, Offset::ZERO);
             assert!(!ink_rect_colors(tester).contains(&0xff00ff00));
 
-            tester.move_to(&mut mouse, tester.center_of(&key), false);
+            tester.move_to(&mut mouse, tester.get_center(&key), false);
             tester.pump_and_settle();
 
             assert!(ink_rect_colors(tester).contains(&0xff00ff00));
@@ -1496,13 +1488,13 @@ mod tests {
             // onPressed not null, onLongPress null.
             was_pressed.set(false);
             assert!(build_frame(tester, Some(was_pressed_listener()), None));
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert!(was_pressed.get());
 
             // onPressed null, onLongPress not null.
             was_pressed.set(false);
             assert!(build_frame(tester, None, Some(was_pressed_listener())));
-            tester.long_press(tester.center_of(&key), 2);
+            tester.long_press_at(tester.get_center(&key), 2);
             assert!(was_pressed.get());
 
             // onPressed null, onLongPress null.
@@ -1528,11 +1520,11 @@ mod tests {
             .child(label("button"))));
 
             assert!(!did_press_button.get());
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert!(did_press_button.get());
 
             assert!(!did_long_press_button.get());
-            tester.long_press(tester.center_of(&key), 2);
+            tester.long_press_at(tester.get_center(&key), 2);
             assert!(did_long_press_button.get());
         });
     }
@@ -1577,7 +1569,7 @@ mod tests {
 
             build_test(tester, VisualDensity::STANDARD, false);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(100.0, 100.0));
+            assert_eq!(tester.get_size(&key), Size::new(100.0, 100.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
@@ -1585,7 +1577,7 @@ mod tests {
 
             build_test(tester, VisualDensity::new(3.0, 3.0), false);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(124.0, 124.0));
+            assert_eq!(tester.get_size(&key), Size::new(124.0, 124.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
@@ -1593,7 +1585,7 @@ mod tests {
 
             build_test(tester, VisualDensity::new(-3.0, -3.0), false);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(100.0, 100.0));
+            assert_eq!(tester.get_size(&key), Size::new(100.0, 100.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
@@ -1601,7 +1593,7 @@ mod tests {
 
             build_test(tester, VisualDensity::STANDARD, true);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(88.0, 48.0));
+            assert_eq!(tester.get_size(&key), Size::new(88.0, 48.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
@@ -1609,7 +1601,7 @@ mod tests {
 
             build_test(tester, VisualDensity::new(3.0, 3.0), true);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(100.0, 60.0));
+            assert_eq!(tester.get_size(&key), Size::new(100.0, 60.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
@@ -1617,7 +1609,7 @@ mod tests {
 
             build_test(tester, VisualDensity::new(-3.0, -3.0), true);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(76.0, 36.0));
+            assert_eq!(tester.get_size(&key), Size::new(76.0, 36.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
@@ -1704,7 +1696,7 @@ mod tests {
                         .child(RawMaterialButton::new(noop()).key(key.clone().into())),
                 ),
             ));
-            assert_eq!(size_of(tester, &key), Size::ZERO);
+            assert_eq!(tester.get_size(&key), Size::ZERO);
         });
     }
 }

@@ -1290,6 +1290,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
     use waft_painting::ShapeBorder;
+    use waft_rendering::testing::{CanvasMethod, PaintCall, assert_paints, count_calls};
 
     use waft_embedder::{Rect, TargetPlatform};
     use waft_painting::{BeveledRectangleBorder, BorderRadius, RoundedRectangleBorder};
@@ -1298,7 +1299,9 @@ mod tests {
         Align, AnyElement, Center, FocusNode, GlobalKey, Icon, IconData, PhysicalShape, Text,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::color_scheme::ColorScheme;
@@ -1344,46 +1347,43 @@ mod tests {
     }
 
     fn fab(tester: &WidgetTester) -> AnyElement {
-        only(tester.find_by_type::<FloatingActionButton>())
-    }
-
-    fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.global_rect(tester.render_box_of(element))
+        only(find::by_type::<FloatingActionButton>().evaluate(tester))
     }
 
     fn key_rect(tester: &WidgetTester, key: &GlobalKey) -> Rect {
         let render = tester.render_object(key).as_box().expect("a render box");
-        tester.global_rect(render)
+        tester.get_rect(render)
     }
 
     fn fab_rect(tester: &WidgetTester) -> Rect {
-        rect_of(tester, fab(tester))
+        tester.get_rect(fab(tester))
     }
 
     fn icon_rect(tester: &WidgetTester) -> Rect {
-        rect_of(tester, only(tester.find_by_type::<Icon>()))
-    }
-
-    fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        rect_of(tester, only(tester.find_text(text)))
+        tester.get_rect(only(find::by_type::<Icon>().evaluate(tester)))
     }
 
     /// Dart's `tester.widget<RawMaterialButton>(find.byType(RawMaterialButton))`.
     fn raw_button<R>(tester: &WidgetTester, read: impl FnOnce(&RawMaterialButton) -> R) -> R {
-        tester.widget(only(tester.find_by_type::<RawMaterialButton>()), read)
+        tester.widget(
+            only(find::by_type::<RawMaterialButton>().evaluate(tester)),
+            read,
+        )
     }
 
     /// Dart's `tester.widget<PhysicalShape>(find.byType(PhysicalShape)).elevation`.
     fn elevation(tester: &WidgetTester) -> f64 {
         tester.widget(
-            only(tester.find_by_type::<PhysicalShape>()),
+            only(find::by_type::<PhysicalShape>().evaluate(tester)),
             |shape: &PhysicalShape| shape.elevation,
         )
     }
 
     /// Dart's `tester.press(find.byType(PhysicalShape))`.
     fn press_physical_shape(tester: &mut WidgetTester) -> TestPointer {
-        let center = rect_of(tester, only(tester.find_by_type::<PhysicalShape>())).center();
+        let center = tester
+            .get_rect(only(find::by_type::<PhysicalShape>().evaluate(tester)))
+            .center();
         let mut touch = TestPointer::touch(1);
         tester.down(&mut touch, center);
         touch
@@ -1396,9 +1396,9 @@ mod tests {
 
     /// Dart's `_getIconSize(tester)`: the `SizedBox` the `Icon` builds.
     fn icon_size(tester: &WidgetTester) -> (Option<f64>, Option<f64>) {
-        let icon = only(tester.find_by_type::<Icon>());
-        let sized_box = tester
-            .find_by_type::<SizedBox>()
+        let icon = only(find::by_type::<Icon>().evaluate(tester));
+        let sized_box = find::by_type::<SizedBox>()
+            .evaluate(tester)
             .into_iter()
             .find(|sized_box| tester.ancestors(*sized_box).contains(&icon))
             .expect("the Icon's SizedBox");
@@ -1442,7 +1442,7 @@ mod tests {
 
             assert!(!did_press_button.get());
             let at = icon_rect(tester).center();
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             assert!(did_press_button.get());
         });
     }
@@ -1459,8 +1459,8 @@ mod tests {
             ));
 
             let at = icon_rect(tester).center();
-            tester.tap(at, 1);
-            let tooltips = tester.find_by_type::<Tooltip>();
+            tester.tap_at(at, 1);
+            let tooltips = find::by_type::<Tooltip>().evaluate(tester);
             let found = tooltips
                 .into_iter()
                 .filter(|tooltip| {
@@ -1485,12 +1485,12 @@ mod tests {
         let theme = m3(tester);
         tester.pump_widget(app_with(theme, fab));
 
-        assert!(tester.find_text("Add").is_empty());
+        expect(tester, &find::text("Add"), finds_nothing());
         let at = right_edge_of_fab(tester);
-        tester.long_press(at, 1);
+        tester.long_press_at(at, 1);
         tester.pump_and_settle();
 
-        assert_eq!(tester.find_text("Add").len(), 1);
+        expect(tester, &find::text("Add"), finds_one_widget());
     }
 
     // Regression test for: https://github.com/flutter/flutter/pull/21084
@@ -1524,7 +1524,7 @@ mod tests {
             FloatingActionButton::new(on_pressed).tooltip("Add"),
         ));
 
-        assert!(tester.find_text("Add").is_empty());
+        expect(tester, &find::text("Add"), finds_nothing());
 
         // Test hover for tooltip.
         let mut mouse = TestPointer::mouse(1, 0);
@@ -1534,19 +1534,19 @@ mod tests {
         tester.move_to(&mut mouse, center, false);
         tester.pump_and_settle();
 
-        assert_eq!(tester.find_text("Add").len(), 1);
+        expect(tester, &find::text("Add"), finds_one_widget());
 
         tester.move_to(&mut mouse, Offset::ZERO, false);
         tester.pump_and_settle();
 
-        assert!(tester.find_text("Add").is_empty());
+        expect(tester, &find::text("Add"), finds_nothing());
 
         // Test long press for tooltip.
         let center = fab_rect(tester).center();
-        tester.long_press(center, 2);
+        tester.long_press_at(center, 2);
         tester.pump_and_settle();
 
-        assert_eq!(tester.find_text("Add").len(), 1);
+        expect(tester, &find::text("Add"), finds_one_widget());
     }
 
     #[test]
@@ -1707,7 +1707,9 @@ mod tests {
         assert_eq!(elevation(tester), 6.0);
 
         // Hovered.
-        let center = rect_of(tester, only(tester.find_by_type::<PhysicalShape>())).center();
+        let center = tester
+            .get_rect(only(find::by_type::<PhysicalShape>().evaluate(tester)))
+            .center();
         let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, center, false);
@@ -1751,7 +1753,7 @@ mod tests {
                     )
                     .into_widget(),
                 ));
-                key_rect(tester, &key).size()
+                tester.get_size(&key)
             };
 
             assert_eq!(
@@ -1769,14 +1771,14 @@ mod tests {
     /// an icon and a 100 wide label, `height` high and laid out as 16 icon 8 label 20.
     fn assert_extended_with_icon_layout(tester: &WidgetTester, height: f64) {
         assert!(tester.widget(fab(tester), |fab: &FloatingActionButton| fab.is_extended));
-        assert_eq!(tester.find_text("label").len(), 1);
-        assert_eq!(tester.find_by_type::<Icon>().len(), 1);
+        expect(tester, &find::text("label"), finds_one_widget());
+        expect(tester, &find::by_type::<Icon>(), finds_one_widget());
 
         // Verify that the widget's height is `height` and that its internal
         // horizontal layout is: 16 icon 8 label 20
         let fab = fab_rect(tester);
         let icon = icon_rect(tester);
-        let label = text_rect(tester, "label");
+        let label = tester.get_rect(find::text("label"));
         assert_eq!(fab.height(), height);
         assert_eq!(icon.left - fab.left, 16.0);
         assert_eq!(label.left - icon.right, 8.0);
@@ -1793,13 +1795,13 @@ mod tests {
     /// high and laid out as 20 label 20.
     fn assert_extended_without_icon_layout(tester: &WidgetTester, height: f64) {
         assert!(tester.widget(fab(tester), |fab: &FloatingActionButton| fab.is_extended));
-        assert_eq!(tester.find_text("label").len(), 1);
-        assert!(tester.find_by_type::<Icon>().is_empty());
+        expect(tester, &find::text("label"), finds_one_widget());
+        expect(tester, &find::by_type::<Icon>(), finds_nothing());
 
         // Verify that the widget's height is `height` and that its internal
         // horizontal layout is: 20 label 20
         let fab = fab_rect(tester);
-        let label = text_rect(tester, "label");
+        let label = tester.get_rect(find::text("label"));
         assert_eq!(fab.height(), height);
         assert_eq!(label.left - fab.left, 20.0);
         assert_eq!(fab.right - label.right, 20.0);
@@ -1988,25 +1990,25 @@ mod tests {
             let short_fab = "X";
             let hello_world = "Hello World";
 
-            assert_eq!(tester.find_onstage_text(long_fab).len(), 1);
-            assert!(tester.find_onstage_text(short_fab).is_empty());
-            assert_eq!(tester.find_onstage_text(hello_world).len(), 1);
+            expect(tester, &find::text(long_fab), finds_one_widget());
+            expect(tester, &find::text(short_fab), finds_nothing());
+            expect(tester, &find::text(hello_world), finds_one_widget());
 
-            let at = text_rect(tester, long_fab).center();
-            tester.tap(at, 1);
+            let at = tester.get_rect(find::text(long_fab)).center();
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_text(short_fab).len(), 1);
-            assert!(tester.find_onstage_text(long_fab).is_empty());
+            expect(tester, &find::text(short_fab), finds_one_widget());
+            expect(tester, &find::text(long_fab), finds_nothing());
 
             // Trigger a hero transition from shortFAB to longFAB.
-            let at = text_rect(tester, "POP").center();
-            tester.tap(at, 2);
+            let at = tester.get_rect(find::text("POP")).center();
+            tester.tap_at(at, 2);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_text(long_fab).len(), 1);
-            assert!(tester.find_onstage_text(short_fab).is_empty());
-            assert_eq!(tester.find_onstage_text(hello_world).len(), 1);
+            expect(tester, &find::text(long_fab), finds_one_widget());
+            expect(tester, &find::text(short_fab), finds_nothing());
+            expect(tester, &find::text(hello_world), finds_one_widget());
         });
     }
 
@@ -2107,11 +2109,7 @@ mod tests {
             tester.pump();
 
             let render = tester.render_box_of(fab(tester)).as_object();
-            let clips = tester
-                .painted(render)
-                .into_iter()
-                .filter(|drawn| matches!(drawn, crate::test_support::Drawn::Clip))
-                .count();
+            let clips = count_calls(&tester.painted_ops(render), CanvasMethod::Clip);
             assert_eq!(clips, 0);
         });
     }
@@ -2151,17 +2149,9 @@ mod tests {
             tester.down(&mut touch, center);
             tester.pump_and_settle();
 
-            let circles: Vec<u32> = tester
-                .ink_drawn()
-                .into_iter()
-                .filter_map(|drawn| match drawn {
-                    crate::test_support::Drawn::Path(color, _) => Some(color),
-                    _ => None,
-                })
-                .collect();
-            assert!(
-                circles.contains(&splash_color.to_argb32()),
-                "no circle of {splash_color:?} in {circles:x?}"
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::circle(Some(splash_color))],
             );
         });
     }
@@ -2197,7 +2187,7 @@ mod tests {
                     .material_tap_target_size(MaterialTapTargetSize::ShrinkWrap),
             ));
 
-            assert_eq!(key_rect(tester, &key).size(), Size::new(40.0, 40.0));
+            assert_eq!(tester.get_size(&key), Size::new(40.0, 40.0));
         });
     }
 
@@ -2210,7 +2200,7 @@ mod tests {
                 FloatingActionButton::large(None).key(key.clone().into()),
             ));
 
-            assert_eq!(key_rect(tester, &key).size(), Size::new(96.0, 96.0));
+            assert_eq!(tester.get_size(&key), Size::new(96.0, 96.0));
         });
     }
 
@@ -2313,12 +2303,14 @@ mod tests {
         };
         tester.pump_widget(material_app(m3(tester), home));
 
-        let at = rect_of(tester, only(tester.find_by_type::<RawMaterialButton>())).center();
-        tester.tap(at, 1);
+        let at = tester
+            .get_rect(only(find::by_type::<RawMaterialButton>().evaluate(tester)))
+            .center();
+        tester.tap_at(at, 1);
         tester.pump_by(Duration::from_secs(1));
         assert!(feedback.haptics.borrow().is_empty());
         tester.widget(
-            only(tester.find_by_type::<InkWell>()),
+            only(find::by_type::<InkWell>().evaluate(tester)),
             |ink_well: &InkWell| ink_well.ink_response.enable_feedback,
         )
     }

@@ -2698,10 +2698,11 @@ pub(crate) mod tests {
     use waft_services::PhysicalKeyboardKey;
     use waft_widgets::{AnyElement, Directionality, IntoWidget};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_n_widgets, finds_one_widget, test_widgets,
+    };
 
     use super::*;
-    use crate::chip::tests::center_of;
     use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
 
@@ -2835,48 +2836,45 @@ pub(crate) mod tests {
 
     /// The first element showing `text`, Dart's `find.text(text)` for a tap.
     pub(crate) fn text(tester: &WidgetTester, text: &str) -> AnyElement {
-        *tester
-            .find_text(text)
-            .first()
-            .unwrap_or_else(|| panic!("a Text showing {text:?}"))
+        tester.element(find::text(text).first())
     }
 
     pub(crate) fn has_text(tester: &WidgetTester, text: &str) -> bool {
-        !tester.find_text(text).is_empty()
-    }
-
-    pub(crate) fn tap_text(tester: &mut WidgetTester, label: &str) {
-        let element = text(tester, label);
-        let at = center_of(tester, element);
-        tester.tap(at, 1);
+        !find::text(text).evaluate(tester).is_empty()
     }
 
     /// Dart's `nextMonthIcon` and `previousMonthIcon`: the `IconButton` whose tooltip, or whose
     /// icon's semantic label, starts with `prefix`.
     pub(crate) fn month_button(tester: &WidgetTester, prefix: &str) -> AnyElement {
-        tester
-            .find_by_type::<IconButton>()
-            .into_iter()
-            .find(|button| {
-                let tooltip = tester.widget(*button, |button: &IconButton| button.tooltip.clone());
-                if tooltip.is_some_and(|tooltip| tooltip.starts_with(prefix)) {
-                    return true;
-                }
-                tester
-                    .descendants_of_type::<Icon>(*button)
-                    .into_iter()
-                    .any(|icon| {
-                        tester
-                            .widget(icon, |icon: &Icon| icon.semantic_label.clone())
-                            .is_some_and(|label| label.starts_with(prefix))
+        let prefix = prefix.to_string();
+        tester.element(
+            find::by_widget_predicate(
+                &format!("an IconButton labeled {prefix:?}"),
+                move |_app, widget| {
+                    let Some(button) = waft_widgets::downcast_widget::<IconButton>(widget) else {
+                        return false;
+                    };
+                    if button
+                        .tooltip
+                        .as_ref()
+                        .is_some_and(|tooltip| tooltip.starts_with(&prefix))
+                    {
+                        return true;
+                    }
+                    waft_widgets::downcast_widget::<Icon>(&*button.icon).is_some_and(|icon| {
+                        icon.semantic_label
+                            .as_ref()
+                            .is_some_and(|label| label.starts_with(&prefix))
                     })
-            })
-            .unwrap_or_else(|| panic!("an IconButton labeled {prefix:?}"))
+                },
+            )
+            .first(),
+        )
     }
 
     pub(crate) fn tap_element(tester: &mut WidgetTester, element: AnyElement) {
-        let at = center_of(tester, element);
-        tester.tap(at, 1);
+        let at = tester.get_center(element);
+        tester.tap_at(at, 1);
     }
 
     pub(crate) fn tap_month_button(tester: &mut WidgetTester, prefix: &str) {
@@ -2906,7 +2904,7 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(tester, "12");
+            tester.tap(find::text("12"));
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2016, 1, 12))
@@ -2919,7 +2917,7 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             let reported = Reported::default();
             pump(tester, reported.options());
-            tap_text(tester, "12");
+            tester.tap(find::text("12"));
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2016, 1, 12))
@@ -2987,9 +2985,9 @@ pub(crate) mod tests {
                 },
             );
 
-            tap_text(tester, "January 2016"); // Switch to year mode.
+            tester.tap(find::text("January 2016")); // Switch to year mode.
             tester.pump_and_settle();
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_and_settle();
             assert!(has_text(tester, "January 2018"));
             assert_eq!(
@@ -3029,7 +3027,7 @@ pub(crate) mod tests {
                 Some(DateTime::utc(2020, 4, 1))
             );
 
-            tap_text(tester, "25");
+            tester.tap(find::text("25"));
             tester.pump_and_settle();
             assert!(has_text(tester, "April 2020"));
             assert_eq!(
@@ -3056,14 +3054,14 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(tester, "4");
+            tester.tap(find::text("4"));
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2016, 1, 4))
             );
-            tap_text(tester, "January 2016");
+            tester.tap(find::text("January 2016"));
             tester.pump_and_settle();
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_and_settle();
             assert_eq!(
                 reported.selected_date.get(),
@@ -3083,17 +3081,17 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(tester, "February 2020");
+            tester.tap(find::text("February 2020"));
             tester.pump_and_settle();
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_and_settle();
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2018, 2, 28))
             );
-            tap_text(tester, "February 2018");
+            tester.tap(find::text("February 2018"));
             tester.pump_and_settle();
-            tap_text(tester, "2020");
+            tester.tap(find::text("2020"));
             tester.pump_and_settle();
             // Changing back to 2020 the 29th is not selected anymore.
             assert_eq!(
@@ -3118,9 +3116,9 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             tap_month_button(tester, "Next month");
             tester.pump_and_settle();
-            tap_text(tester, "March 2016");
+            tester.tap(find::text("March 2016"));
             tester.pump_and_settle();
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_and_settle();
             assert!(has_text(tester, "March 2018"));
             assert_eq!(
@@ -3141,11 +3139,11 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(tester, "January 2016"); // Switch to year mode.
+            tester.tap(find::text("January 2016")); // Switch to year mode.
             tester.pump_and_settle();
-            tap_text(tester, "2017");
+            tester.tap(find::text("2017"));
             tester.pump_and_settle();
-            tap_text(tester, "19");
+            tester.tap(find::text("19"));
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2017, 1, 19))
@@ -3169,15 +3167,15 @@ pub(crate) mod tests {
             );
 
             // Earlier than firstDate. Should be ignored.
-            tap_text(tester, "10");
+            tester.tap(find::text("10"));
             assert_eq!(reported.selected_date.get(), None);
 
             // Later than lastDate. Should be ignored.
-            tap_text(tester, "20");
+            tester.tap(find::text("20"));
             assert_eq!(reported.selected_date.get(), None);
 
             // This one is just right.
-            tap_text(tester, "15");
+            tester.tap(find::text("15"));
             assert_eq!(reported.selected_date.get(), Some(valid_date));
         });
     }
@@ -3231,14 +3229,14 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(tester, "July 2018"); // Switch to year mode.
+            tester.tap(find::text("July 2018")); // Switch to year mode.
             tester.pump_and_settle();
-            tap_text(tester, "2016"); // Disabled, doesn't change the year.
+            tester.tap(find::text("2016")); // Disabled, doesn't change the year.
             tester.pump_and_settle();
-            tap_text(tester, "2020"); // Disabled, doesn't change the year.
+            tester.tap(find::text("2020")); // Disabled, doesn't change the year.
             tester.pump_and_settle();
 
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_and_settle();
             // Nothing should have changed.
             assert_eq!(reported.displayed_month.get(), None);
@@ -3258,9 +3256,9 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(tester, "May 2018");
+            tester.tap(find::text("May 2018"));
             tester.pump_and_settle();
-            tap_text(tester, "2016");
+            tester.tap(find::text("2016"));
             tester.pump_and_settle();
             // Month should be clamped to June as the range starts at June 2016.
             assert!(has_text(tester, "June 2016"));
@@ -3289,10 +3287,10 @@ pub(crate) mod tests {
                 },
             );
             // Selected date is now 2018-05-04 (initialDate).
-            tap_text(tester, "May 2018");
+            tester.tap(find::text("May 2018"));
             // Selected date is still 2018-05-04.
             tester.pump_and_settle();
-            tap_text(tester, "2019");
+            tester.tap(find::text("2019"));
             // Selected date would become 2019-05-04 but gets clamped to the month of
             // lastDate, so 2019-01-04.
             tester.pump_and_settle();
@@ -3322,10 +3320,10 @@ pub(crate) mod tests {
                 },
             );
             // Selected date is now 2018-05-15 (initialDate).
-            tap_text(tester, "May 2018");
+            tester.tap(find::text("May 2018"));
             // Selected date is still 2018-05-15.
             tester.pump_and_settle();
-            tap_text(tester, "2019");
+            tester.tap(find::text("2019"));
             // Selected date would become 2019-05-15 but gets clamped to the month of
             // lastDate, so 2019-01-15. Day is now beyond the lastDate so that also gets
             // clamped, to 2019-01-04.
@@ -3356,14 +3354,14 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(tester, "13"); // Odd, doesn't work.
+            tester.tap(find::text("13")); // Odd, doesn't work.
             assert_eq!(reported.selected_date.get(), None);
-            tap_text(tester, "10"); // Even, works.
+            tester.tap(find::text("10")); // Even, works.
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2017, 1, 10))
             );
-            tap_text(tester, "17"); // Odd, doesn't work.
+            tester.tap(find::text("17")); // Odd, doesn't work.
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2017, 1, 10))
@@ -3384,7 +3382,7 @@ pub(crate) mod tests {
             );
             // 2018 wouldn't be available if the year picker wasn't showing.
             // The initial current year is 2014.
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_and_settle();
             assert!(has_text(tester, "January 2018"));
         });
@@ -3425,11 +3423,11 @@ pub(crate) mod tests {
                 },
             );
 
-            assert_eq!(tester.find_text("Custom day 1").len(), 1);
+            expect(tester, &find::text("Custom day 1"), finds_one_widget());
 
             // Notify a date change only when the custom day is tapped.
             assert!(selected_dates.borrow().is_empty());
-            tap_text(tester, "Custom day 1");
+            tester.tap(find::text("Custom day 1"));
             tester.pump_and_settle();
             assert_eq!(*selected_dates.borrow(), vec![DateTime::utc(2016, 1, 1)]);
         });
@@ -3462,12 +3460,12 @@ pub(crate) mod tests {
             let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::new(0.0, 0.0));
             let twelve = text(tester, "12");
-            let at = center_of(tester, twelve);
+            let at = tester.get_center(twelve);
             tester.move_to(&mut mouse, at, false);
             tester.pump();
             assert!(states(12).contains(&WidgetState::Hovered));
 
-            tap_text(tester, "12");
+            tester.tap(find::text("12"));
             tester.pump_and_settle();
             assert!(states(12).contains(&WidgetState::Selected));
             assert!(!states(15).contains(&WidgetState::Selected));
@@ -3490,7 +3488,7 @@ pub(crate) mod tests {
                     ..PickerOptions::default()
                 },
             );
-            assert_eq!(tester.find_text("Custom Sunday").len(), 1);
+            expect(tester, &find::text("Custom Sunday"), finds_one_widget());
         });
     }
 
@@ -3537,10 +3535,10 @@ pub(crate) mod tests {
                     ..PickerOptions::default()
                 },
             );
-            tap_text(tester, "2017");
+            tester.tap(find::text("2017"));
             tester.pump_and_settle();
             assert!(has_text(tester, "May 2017"));
-            tap_text(tester, "10");
+            tester.tap(find::text("10"));
             tester.pump_and_settle();
             assert!(has_text(tester, "May 2017"));
             assert!(!has_text(tester, "2017"));
@@ -3566,13 +3564,13 @@ pub(crate) mod tests {
                 },
             );
 
-            tap_text(tester, "3");
+            tester.tap(find::text("3"));
             tester.pump_and_settle();
             assert_eq!(selection.get(), day(3));
-            tap_text(tester, "4");
+            tester.tap(find::text("4"));
             tester.pump_and_settle();
             assert_eq!(selection.get(), day(3));
-            tap_text(tester, "5");
+            tester.tap(find::text("5"));
             tester.pump_and_settle();
             assert_eq!(selection.get(), day(3));
         });
@@ -3595,9 +3593,9 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Should be in year mode.
-            assert_eq!(tester.find_text("January 2016").len(), 1); // Day/year selector
+            expect(tester, &find::text("January 2016"), finds_one_widget()); // Day/year selector
             assert!(!has_text(tester, "15")); // day 15 in grid
-            assert_eq!(tester.find_text("2016").len(), 1); // 2016 in year grid
+            expect(tester, &find::text("2016"), finds_one_widget()); // 2016 in year grid
 
             pump(
                 tester,
@@ -3610,9 +3608,9 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Should be in year mode still; updating an _initial_ parameter has no effect.
-            assert_eq!(tester.find_text("January 2016").len(), 1); // Day/year selector
+            expect(tester, &find::text("January 2016"), finds_one_widget()); // Day/year selector
             assert!(!has_text(tester, "15")); // day 15 in grid
-            assert_eq!(tester.find_text("2016").len(), 1); // 2016 in year grid
+            expect(tester, &find::text("2016"), finds_one_widget()); // 2016 in year grid
         });
     }
 
@@ -3666,14 +3664,14 @@ pub(crate) mod tests {
                 },
             );
             assert!(!has_text(tester, "2016"));
-            assert_eq!(tester.find_text("January 2016").len(), 1);
+            expect(tester, &find::text("January 2016"), finds_one_widget());
             // Navigate to the year selector and activate it.
             tab(tester);
             space(tester);
             tester.pump_and_settle();
             // The years should be visible.
-            assert_eq!(tester.find_text("2016").len(), 1);
-            assert_eq!(tester.find_text("January 2016").len(), 1);
+            expect(tester, &find::text("2016"), finds_one_widget());
+            expect(tester, &find::text("January 2016"), finds_one_widget());
         });
     }
 
@@ -3687,7 +3685,7 @@ pub(crate) mod tests {
                     ..PickerOptions::default()
                 },
             );
-            assert_eq!(tester.find_text("January 2016").len(), 1);
+            expect(tester, &find::text("January 2016"), finds_one_widget());
             // Navigate to the previous month button and activate it twice.
             tab(tester);
             tab(tester);
@@ -3696,7 +3694,7 @@ pub(crate) mod tests {
             space(tester);
             tester.pump_and_settle();
             // Should be showing Nov 2015
-            assert_eq!(tester.find_text("November 2015").len(), 1);
+            expect(tester, &find::text("November 2015"), finds_one_widget());
 
             // Navigate to the next month button and activate it four times.
             tab(tester);
@@ -3705,7 +3703,7 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
             }
             // Should be on Mar 2016.
-            assert_eq!(tester.find_text("March 2016").len(), 1);
+            expect(tester, &find::text("March 2016"), finds_one_widget());
         });
     }
 
@@ -3775,7 +3773,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Should have scrolled to Dec 2015.
-            assert_eq!(tester.find_text("December 2015").len(), 1);
+            expect(tester, &find::text("December 2015"), finds_one_widget());
 
             // Navigate from Dec 31 to Nov 26 with arrow keys.
             for _ in 0..5 {
@@ -3784,7 +3782,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Should have scrolled to Nov 2015.
-            assert_eq!(tester.find_text("November 2015").len(), 1);
+            expect(tester, &find::text("November 2015"), finds_one_widget());
 
             // Activate it
             space(tester);
@@ -3859,7 +3857,7 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             let root = year_picker(tester, None, None, None, None);
             tester.pump_widget(root);
-            assert_eq!(tester.find_text("2016").len(), 1);
+            expect(tester, &find::text("2016"), finds_one_widget());
         });
     }
 
@@ -3879,7 +3877,7 @@ pub(crate) mod tests {
             );
             tester.pump_widget(root);
             tester.pump_and_settle();
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_and_settle();
             assert_eq!(selected_date.get(), Some(DateTime::utc(2018, 1, 1)));
         });
@@ -3900,13 +3898,13 @@ pub(crate) mod tests {
                 }),
             );
             tester.pump_widget(root);
-            tap_text(tester, "2016"); // Disabled, doesn't change the year.
+            tester.tap(find::text("2016")); // Disabled, doesn't change the year.
             tester.pump_and_settle();
             assert_eq!(selected_year.get(), None);
-            tap_text(tester, "2020"); // Disabled, doesn't change the year.
+            tester.tap(find::text("2020")); // Disabled, doesn't change the year.
             tester.pump_and_settle();
             assert_eq!(selected_year.get(), None);
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_and_settle();
             assert_eq!(selected_year.get(), Some(DateTime::utc(2018, 7, 1)));
         });
@@ -3928,7 +3926,7 @@ pub(crate) mod tests {
                 Some(Rc::clone(&on_changed)),
             );
             tester.pump_widget(root);
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             assert_eq!(selected_year.get(), Some(DateTime::utc(2018, 6, 1)));
             let root = year_picker(
                 tester,
@@ -3938,7 +3936,7 @@ pub(crate) mod tests {
                 Some(on_changed),
             );
             tester.pump_widget(root);
-            tap_text(tester, "2019");
+            tester.tap(find::text("2019"));
             assert_eq!(selected_year.get(), Some(DateTime::utc(2019, 6, 1)));
         });
     }
@@ -3959,7 +3957,7 @@ pub(crate) mod tests {
                 Some(Rc::clone(&on_changed)),
             );
             tester.pump_widget(root);
-            tap_text(tester, "2019");
+            tester.tap(find::text("2019"));
             assert_eq!(selected_year.get(), Some(DateTime::utc(2019, 1, 1))); // january implied
             let root = year_picker(
                 tester,
@@ -3969,7 +3967,7 @@ pub(crate) mod tests {
                 Some(on_changed),
             );
             tester.pump_widget(root);
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             assert_eq!(selected_year.get(), Some(DateTime::utc(2018, 6, 1)));
         });
     }
@@ -4113,13 +4111,13 @@ pub(crate) mod tests {
     fn delegates_of_the_picker_and_the_year_picker(
         tester: &mut WidgetTester,
     ) -> (Rc<dyn CalendarDelegate>, Rc<dyn CalendarDelegate>) {
-        let picker = tester.find_by_type::<CalendarDatePicker>()[0];
+        let picker = tester.element(find::by_type::<CalendarDatePicker>().at(0));
         let calendar_picker_delegate = tester.widget(picker, |picker: &CalendarDatePicker| {
             Rc::clone(&picker.calendar_delegate)
         });
-        tap_text(tester, "February 2025");
+        tester.tap(find::text("February 2025"));
         tester.pump_and_settle();
-        let year_picker = tester.find_by_type::<YearPicker>()[0];
+        let year_picker = tester.element(find::by_type::<YearPicker>().at(0));
         let year_picker_delegate = tester.widget(year_picker, |picker: &YearPicker| {
             Rc::clone(&picker.calendar_delegate)
         });
@@ -4160,8 +4158,7 @@ pub(crate) mod tests {
 
     use crate::colors::Colors;
     use crate::date_picker_theme::DatePickerThemeData;
-    use crate::test_support::{PaintCall, paints_calls};
-
+    use waft_rendering::testing::{PaintCall, assert_paints, paints};
     fn states_of(
         states_for_day: &Rc<RefCell<HashMap<DateTime, WidgetStates>>>,
         day: DateTime,
@@ -4222,7 +4219,7 @@ pub(crate) mod tests {
             let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::new(0.0, 0.0));
             let day = text(tester, "12");
-            let at = center_of(tester, day);
+            let at = tester.get_center(day);
             tester.move_to(&mut mouse, at, false);
             check_states_survive_rebuild(tester, &states_for_day, WidgetState::Hovered);
         });
@@ -4251,7 +4248,7 @@ pub(crate) mod tests {
             pump(tester, states_picker(&states_for_day, false));
             let mut touch = TestPointer::touch(1);
             let day = text(tester, "12");
-            let at = center_of(tester, day);
+            let at = tester.get_center(day);
             tester.down(&mut touch, at);
             check_states_survive_rebuild(tester, &states_for_day, WidgetState::Pressed);
             tester.cancel(&touch);
@@ -4282,7 +4279,7 @@ pub(crate) mod tests {
         let ops = tester.nearest_material_ops(text(tester, "2"));
         // The current day is painted with a circle outline.
         assert!(
-            paints_calls(&ops, &[PaintCall::stroked_circle(color, 1.0)]),
+            paints(&ops, &[PaintCall::stroked_circle(color, 1.0)]).is_ok(),
             "no 1px outline of {color:?} among {} ops",
             ops.len()
         );
@@ -4440,13 +4437,10 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Month should show as January 2020.
-            assert_eq!(tester.find_text("January 2020").len(), 1);
+            expect(tester, &find::text("January 2020"), finds_one_widget());
             // Selected date should be painted with a colored circle.
             let ops = tester.nearest_material_ops(text(tester, "21"));
-            assert!(paints_calls(
-                &ops,
-                &[PaintCall::circle(Some(selected_color))]
-            ));
+            assert_paints(&ops, &[PaintCall::circle(Some(selected_color))]);
 
             // Change to the updated initialDate.
             // This should have no effect, the initialDate is only the _initial_ date.
@@ -4455,14 +4449,11 @@ pub(crate) mod tests {
             tester.pump_and_settle_by(Duration::from_millis(200));
 
             // Month should show as January 2020 still.
-            assert_eq!(tester.find_text("January 2020").len(), 1);
+            expect(tester, &find::text("January 2020"), finds_one_widget());
             assert!(!has_text(tester, "February 1976"));
             // Selected date should be painted with a colored circle.
             let ops = tester.nearest_material_ops(text(tester, "21"));
-            assert!(paints_calls(
-                &ops,
-                &[PaintCall::circle(Some(selected_color))]
-            ));
+            assert_paints(&ops, &[PaintCall::circle(Some(selected_color))]);
         });
     }
 
@@ -4487,9 +4478,9 @@ pub(crate) mod tests {
                 },
             );
             tester.pump_and_settle();
-            let page_view = tester.find_by_type::<waft_widgets::PageView>()[0];
+            let page_view = tester.element(find::by_type::<waft_widgets::PageView>().at(0));
             let mut gesture = TestPointer::touch(1);
-            let start = center_of(tester, page_view);
+            let start = tester.get_center(page_view);
             tester.down(&mut gesture, start);
             // This initial drag is required for the PageView to recognize the gesture, as it
             // uses DragStartBehavior.start. It does not count towards the drag distance.
@@ -4501,13 +4492,13 @@ pub(crate) mod tests {
             // Dragging for a bit less than half the width should reveal the previous month.
             move_by(tester, 800.0 / 2.0 - 1.0);
             tester.pump_and_settle();
-            assert_eq!(tester.find_text("January 2016").len(), 1);
-            assert_eq!(tester.find_text("1").len(), 2);
+            expect(tester, &find::text("January 2016"), finds_one_widget());
+            expect(tester, &find::text("1"), finds_n_widgets(2));
             // Dragging a bit over the half should still show both.
             move_by(tester, 2.0);
             tester.pump_and_settle();
-            assert_eq!(tester.find_text("December 2015").len(), 1);
-            assert_eq!(tester.find_text("1").len(), 2);
+            expect(tester, &find::text("December 2015"), finds_one_widget());
+            expect(tester, &find::text("1"), finds_n_widgets(2));
         });
     }
 
@@ -4546,7 +4537,7 @@ pub(crate) mod tests {
                 },
             );
             for (day, count) in [("10", 1), ("12", 2), ("14", 3)] {
-                tap_text(tester, day);
+                tester.tap(find::text(day));
                 tester.pump_by(HAPTIC_FEEDBACK_INTERVAL);
                 assert_eq!(feedback.haptics.borrow().len(), count, "after {day}");
             }
@@ -4567,7 +4558,7 @@ pub(crate) mod tests {
                 },
             );
             for day in ["11", "13", "15"] {
-                tap_text(tester, day);
+                tester.tap(find::text(day));
                 tester.pump_by(HAPTIC_FEEDBACK_INTERVAL);
                 assert_eq!(feedback.haptics.borrow().len(), 0, "after {day}");
             }
@@ -4586,10 +4577,10 @@ pub(crate) mod tests {
                     ..PickerOptions::default()
                 },
             );
-            tap_text(tester, "January 2016");
+            tester.tap(find::text("January 2016"));
             tester.pump_by(HAPTIC_FEEDBACK_INTERVAL);
             assert_eq!(feedback.haptics.borrow().len(), 1);
-            tap_text(tester, "2018");
+            tester.tap(find::text("2018"));
             tester.pump_by(HAPTIC_FEEDBACK_INTERVAL);
             assert_eq!(feedback.haptics.borrow().len(), 2);
         });
@@ -4614,7 +4605,8 @@ pub(crate) mod tests {
             // `allRenderObjects.firstWhere(_RenderInkFeatures)`: the outermost Material's ink
             // features, which paint the picker's inner Material as well.
             let outer_ink_features = |tester: &WidgetTester| {
-                let detector = tester.find_by_type::<waft_widgets::FocusableActionDetector>()[0];
+                let detector =
+                    tester.element(find::by_type::<waft_widgets::FocusableActionDetector>().at(0));
                 let app = tester.cell.borrow();
                 waft_widgets::LookupBoundary::find_ancestor_render_object_of_type::<
                     crate::material::RenderInkFeatures,
@@ -4627,6 +4619,7 @@ pub(crate) mod tests {
                 y: None,
                 radius: Some(35.0),
                 color: Some(overlay_color),
+                style: None,
             };
             // Dart's `paintsExactlyCountTimes(#clipPath, n)`: Waft records every clip, a
             // `clipRect` as well, as a path, so this counts the clips of the size of a day's
@@ -4643,20 +4636,17 @@ pub(crate) mod tests {
             };
 
             let ops = tester.painted_ops_deep(outer_ink_features(tester).as_object());
-            assert!(!paints_calls(&ops, std::slice::from_ref(&overlay)));
+            assert!(paints(&ops, std::slice::from_ref(&overlay)).is_err());
             assert_eq!(clips(&ops), 0);
 
             let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
             let day = text(tester, "25");
-            let at = center_of(tester, day);
+            let at = tester.get_center(day);
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             let ops = tester.painted_ops_deep(outer_ink_features(tester).as_object());
-            assert!(paints_calls(
-                &ops,
-                &[PaintCall::circle(None), overlay.clone()]
-            ));
+            assert_paints(&ops, &[PaintCall::circle(None), overlay.clone()]);
             assert_eq!(clips(&ops), 1);
         });
     }
@@ -4683,9 +4673,10 @@ pub(crate) mod tests {
                 .debug_ink_features(&app)
             };
             // Material outside the PageView.
-            let outer = tester.find_by_type::<waft_widgets::FocusableActionDetector>()[0];
+            let outer =
+                tester.element(find::by_type::<waft_widgets::FocusableActionDetector>().at(0));
             // Material directly wrapping the PageView.
-            let inner = tester.find_by_type::<waft_widgets::PageView>()[0];
+            let inner = tester.element(find::by_type::<waft_widgets::PageView>().at(0));
 
             // Only the inner Material should have ink features.
             assert!(ink_features_of(tester, outer).is_none());
@@ -4706,7 +4697,7 @@ pub(crate) mod tests {
             tester.pump_widget(root);
 
             // The test helper's Material and the one the YearPicker adds.
-            assert_eq!(tester.find_by_type::<Material>().len(), 2);
+            expect(tester, &find::by_type::<Material>(), finds_n_widgets(2));
 
             let ink_features_of = |tester: &WidgetTester, element: AnyElement| {
                 let app = tester.cell.borrow();
@@ -4716,8 +4707,12 @@ pub(crate) mod tests {
                 .expect("a Material above the element")
             };
             // Material outside the GridView, and the one directly wrapping it.
-            let outer = ink_features_of(tester, tester.find_by_type::<YearPicker>()[0]);
-            let inner = ink_features_of(tester, tester.find_by_type::<waft_widgets::GridView>()[0]);
+            let outer =
+                ink_features_of(tester, tester.element(find::by_type::<YearPicker>().at(0)));
+            let inner = ink_features_of(
+                tester,
+                tester.element(find::by_type::<waft_widgets::GridView>().at(0)),
+            );
             assert_ne!(outer.as_object(), inner.as_object());
             {
                 let app = tester.cell.borrow();
@@ -4728,7 +4723,7 @@ pub(crate) mod tests {
             // Hover over the 2022 year item to trigger the ink highlight.
             let mut mouse = TestPointer::mouse(1, 0);
             let year = text(tester, "2022");
-            let at = center_of(tester, year);
+            let at = tester.get_center(year);
             tester.add_pointer(&mut mouse, at);
             tester.move_to(&mut mouse, at, false);
             tester.pump();
@@ -4766,7 +4761,9 @@ pub(crate) mod tests {
 
     /// Dart's `findYearDecoration(tester, year)`: the side color of the year's decoration.
     fn year_side_color(tester: &WidgetTester, year: &str) -> Color {
-        let container = tester.ancestor_of_type::<waft_widgets::Container>(text(tester, year));
+        let container = tester.element(
+            find::ancestor(find::text(year), find::by_type::<waft_widgets::Container>()).first(),
+        );
         tester.widget(container, |container: &waft_widgets::Container| {
             let decoration = container
                 .decoration

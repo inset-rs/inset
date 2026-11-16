@@ -3418,16 +3418,21 @@ pub(crate) mod tests {
     use waft_widgets::{Center, StatefulBuilder};
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
     use crate::material::Material;
     use crate::slider_parts::SliderTickMarkShape;
     use crate::slider_value_indicator_shape::SliderComponentShape;
-    use crate::test_support::{PaintCall, material_app, paints_calls};
-    pub(crate) use crate::test_support::{PaintInspection, colors_match};
+    use crate::test_support::material_app;
+
+    pub(crate) use crate::test_support::PaintInspection;
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::{
+        CanvasMethod, PaintCall, assert_paints, colors_match, count_calls, paints,
+    };
 
     /// Dart's `LoggingThumbShape`: a thumb shape that also logs its repaint center.
     #[derive(Debug)]
@@ -3594,9 +3599,9 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn slider_rect(tester: &WidgetTester) -> Rect {
-        let slider = tester.find_by_type::<Slider>()[0];
+        let slider = find::by_type::<Slider>().evaluate(tester)[0];
         let render = tester.render_box_of(slider);
-        tester.global_rect(render)
+        tester.get_rect(render)
     }
 
     fn transient_callback_count(tester: &WidgetTester) -> usize {
@@ -3650,7 +3655,7 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 0.5);
             assert_eq!(heard.start_value.get(), Some(0.0));
             assert_eq!(heard.end_value.get(), Some(0.5));
@@ -3661,7 +3666,7 @@ pub(crate) mod tests {
 
             let rect = slider_rect(tester);
             let target = rect.top_left() + (rect.bottom_right() - rect.top_left()) / 4.0;
-            tester.tap(target, 2);
+            tester.tap_at(target, 2);
             assert!((heard.value.get() - 0.25).abs() <= 0.05);
             assert_eq!(heard.start_value.get(), Some(0.5));
             assert!((heard.end_value.get().unwrap() - 0.25).abs() <= 0.05);
@@ -3686,14 +3691,14 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 0.5);
             tester.pump(); // No animation should start.
             assert_eq!(transient_callback_count(tester), 0);
 
             let rect = slider_rect(tester);
             let target = rect.top_left() + (rect.bottom_right() - rect.top_left()) / 4.0;
-            tester.tap(target, 2);
+            tester.tap_at(target, 2);
             assert!((heard.value.get() - 0.75).abs() <= 0.05);
             tester.pump(); // No animation should start.
             assert_eq!(transient_callback_count(tester), 0);
@@ -3716,12 +3721,12 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 0.5);
             assert_eq!(heard.start_value.get(), Some(0.0));
             assert_eq!(heard.end_value.get(), Some(0.5));
             tester.pump();
-            tester.tap(slider_rect(tester).center(), 2);
+            tester.tap_at(slider_rect(tester).center(), 2);
             assert_eq!(heard.value.get(), 0.5);
             tester.pump();
             assert_eq!(heard.updates.get(), 1);
@@ -3746,7 +3751,7 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 0.5);
             tester.pump_by(Duration::from_millis(100));
             // Starts with the position animation and value indicator
@@ -3801,6 +3806,14 @@ pub(crate) mod tests {
             .as_render_object(&tester.cell.borrow())
     }
 
+    /// The value indicator box of Dart's cases: `tester.renderObject(find.byType(Overlay))`.
+    /// Its route children are repaint boundaries, so a case reads it through `painted_ops_deep`.
+    pub(crate) fn overlay_render(tester: &WidgetTester) -> AnyRenderObject {
+        tester
+            .render_box_of(find::by_type::<waft_widgets::Overlay>().evaluate(tester)[0])
+            .as_object()
+    }
+
     // 'Tick marks are skipped when they are too dense'.
     #[test]
     fn tick_marks_are_skipped_when_too_dense() {
@@ -3842,7 +3855,7 @@ pub(crate) mod tests {
 
     /// `tester.renderObject<RenderBox>(find.byType(Slider)).size`.
     pub(crate) fn slider_size(tester: &WidgetTester) -> Size {
-        let slider = tester.find_by_type::<Slider>()[0];
+        let slider = find::by_type::<Slider>().evaluate(tester)[0];
         let render = tester.render_box_of(slider);
         render.size(&tester.cell.borrow())
     }
@@ -3927,7 +3940,7 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 50.0);
             tester.drag_from(slider_rect(tester).center(), Offset::new(5.0, 0.0), 2);
             assert_eq!(heard.value.get(), 50.0);
@@ -3996,7 +4009,7 @@ pub(crate) mod tests {
                 Slider::new(0.0, Some(logging(&log))),
             ));
 
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             assert_eq!(*log.borrow(), vec![0.5]);
             log.borrow_mut().clear();
 
@@ -4006,7 +4019,7 @@ pub(crate) mod tests {
                 Slider::new(0.0, Some(logging(&log))).max(0.0),
             ));
 
-            tester.tap(slider_rect(tester).center(), 2);
+            tester.tap_at(slider_rect(tester).center(), 2);
             assert!(log.borrow().is_empty());
         });
     }
@@ -4033,7 +4046,7 @@ pub(crate) mod tests {
                 ]),
             ));
 
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             assert_eq!(value.get(), 0.5);
         });
     }
@@ -4119,17 +4132,16 @@ pub(crate) mod tests {
         });
     }
 
-    /// Dart's `paints..circle(color: color)`: whether `render` or its subtree draws a circle
-    /// in `color`.
     pub(crate) fn paints_circle(
         tester: &WidgetTester,
         render: AnyRenderObject,
         color: Color,
     ) -> bool {
-        tester.painted_ops(render).iter().any(|op| {
-            matches!(op, Op::DrawPath { path, paint, .. }
-                if circle_of(path).is_some() && colors_match(paint.color, color))
-        })
+        paints(
+            &tester.painted_ops(render),
+            &[PaintCall::circle(Some(color))],
+        )
+        .is_ok()
     }
 
     /// Dart's `MaterialApp(theme:, home: Material(child: Center(child: StatefulBuilder(...))))`
@@ -4800,14 +4812,12 @@ pub(crate) mod tests {
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
                 value.set(0.5);
                 tester.pump_widget(build_frame(tester, platform));
-                assert_eq!(tester.find_by_type::<Slider>().len(), 1);
-                let cupertino = tester.find_by_type::<CupertinoSlider>();
+                expect(tester, &find::by_type::<Slider>(), finds_one_widget());
+                let cupertino = find::by_type::<CupertinoSlider>().evaluate(tester);
                 assert_eq!(cupertino.len(), 1);
 
                 assert_eq!(value.get(), 0.5, "on {platform:?}");
-                let center = tester
-                    .global_rect(tester.render_box_of(cupertino[0]))
-                    .center();
+                let center = tester.get_rect(cupertino[0]).center();
                 let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, center);
                 // Drag to the right end of the track.
@@ -4825,8 +4835,8 @@ pub(crate) mod tests {
                 value.set(0.5);
                 tester.pump_widget(build_frame(tester, platform));
                 tester.pump_and_settle(); // Finish the theme change animation.
-                assert_eq!(tester.find_by_type::<Slider>().len(), 1);
-                assert!(tester.find_by_type::<CupertinoSlider>().is_empty());
+                expect(tester, &find::by_type::<Slider>(), finds_one_widget());
+                expect(tester, &find::by_type::<CupertinoSlider>(), finds_nothing());
 
                 assert_eq!(value.get(), 0.5, "on {platform:?}");
                 let center = slider_rect(tester).center();
@@ -5067,26 +5077,18 @@ pub(crate) mod tests {
         });
     }
 
-    /// The colour of the sixth rounded rect the `CupertinoSlider` paints: Dart's
-    /// `paints..rrect()` five times then `..rrect(color:)`. A blurred shadow rect is Valo's
-    /// `RRectBlur`, where Dart's is an `rrect` call with a mask filter.
-    fn sixth_cupertino_rrect_color(tester: &WidgetTester) -> Option<waft_embedder::valo::Color> {
-        let cupertino = tester.find_by_type::<CupertinoSlider>()[0];
+    /// Dart's `paints..rrect()` five times then `..rrect(color: color)` on what the
+    /// `CupertinoSlider` paints.
+    fn assert_sixth_cupertino_rrect_color(tester: &WidgetTester, color: Color) {
+        let cupertino = find::by_type::<CupertinoSlider>().evaluate(tester)[0];
         // The `Opacity` the Cupertino slider builds composites; what it paints is its child's.
         let opacity = tester.render_box_of(cupertino).as_object();
         let mut render = None;
         opacity.visit_children(&tester.cell.borrow(), &mut |child| render = Some(child));
         let render = render.expect("the opacity has the slider's render object");
-        tester
-            .painted_ops(render)
-            .iter()
-            .filter_map(|op| match op {
-                Op::DrawPath { paint, .. }
-                | Op::DrawRect { paint, .. }
-                | Op::RRectBlur { paint, .. } => Some(paint.color),
-                _ => None,
-            })
-            .nth(5)
+        let mut pattern = vec![PaintCall::rrect(None); 5];
+        pattern.push(PaintCall::rrect(Some(color)));
+        assert_paints(&tester.painted_ops(render), &pattern);
     }
 
     // 'If thumbColor is null, it defaults to CupertinoColors.white'.
@@ -5099,10 +5101,7 @@ pub(crate) mod tests {
             tester.pump_widget(slider_adaptive);
             tester.pump_and_settle();
 
-            assert_eq!(
-                sixth_cupertino_rrect_color(tester),
-                Some(CupertinoColors::WHITE.color().into())
-            );
+            assert_sixth_cupertino_rrect_color(tester, CupertinoColors::WHITE.color());
         });
     }
 
@@ -5120,7 +5119,7 @@ pub(crate) mod tests {
             tester.pump_widget(slider_adaptive);
             tester.pump_and_settle();
 
-            assert_eq!(sixth_cupertino_rrect_color(tester), Some(COLOR.into()));
+            assert_sixth_cupertino_rrect_color(tester, COLOR);
         });
     }
 
@@ -5362,8 +5361,6 @@ pub(crate) mod tests {
         });
     }
 
-    /// Whether `render` paints a circle in `color`, centred at `x`, of `radius` if given:
-    /// Dart's `paints..circle(color:, radius:, x:)`.
     fn paints_circle_at(
         tester: &WidgetTester,
         render: AnyRenderObject,
@@ -5371,14 +5368,17 @@ pub(crate) mod tests {
         x: f64,
         radius: Option<f64>,
     ) -> bool {
-        tester.painted_ops(render).iter().any(|op| match op {
-            Op::DrawPath { path, paint, .. } if colors_match(paint.color, color) => circle_of(path)
-                .is_some_and(|circle| {
-                    (circle.center().dx() - x).abs() < 1e-3
-                        && radius.is_none_or(|radius| (circle.width() / 2.0 - radius).abs() < 1e-3)
-                }),
-            _ => false,
-        })
+        paints(
+            &tester.painted_ops(render),
+            &[PaintCall::Circle {
+                x: Some(x),
+                y: None,
+                radius,
+                color: Some(color),
+                style: None,
+            }],
+        )
+        .is_ok()
     }
 
     // 'SliderInteraction.slideOnly'.
@@ -5995,7 +5995,7 @@ pub(crate) mod tests {
             let midpoint_dx = (tick_centers[index].dx() + tick_centers[index + 1].dx()) / 2.0;
             let dy = tick_centers[index].dy();
 
-            tester.tap(Offset::new(midpoint_dx - MIDPOINT_OFFSET, dy), 1);
+            tester.tap_at(Offset::new(midpoint_dx - MIDPOINT_OFFSET, dy), 1);
             tester.pump();
             assert_eq!(
                 value.get(),
@@ -6004,7 +6004,7 @@ pub(crate) mod tests {
                 i + 1
             );
 
-            tester.tap(Offset::new(midpoint_dx + MIDPOINT_OFFSET, dy), 1);
+            tester.tap_at(Offset::new(midpoint_dx + MIDPOINT_OFFSET, dy), 1);
             tester.pump();
             assert_eq!(
                 value.get(),
@@ -6055,7 +6055,7 @@ pub(crate) mod tests {
                 pump_discrete_slider(tester, &value, DIVISIONS, TextDirection::Ltr, None);
 
             for i in (0..=DIVISIONS).rev() {
-                tester.tap(tick_centers[i as usize], 1);
+                tester.tap_at(tick_centers[i as usize], 1);
                 tester.pump();
                 assert_eq!(value.get(), f64::from(i), "Tapping the center of tick {i}");
             }
@@ -6093,12 +6093,12 @@ pub(crate) mod tests {
     }
 
     /// Dart's `expect(render, paints..calls)`.
-    pub(crate) fn paints(
+    pub(crate) fn render_paints(
         tester: &WidgetTester,
         render: AnyRenderObject,
         calls: &[PaintCall],
     ) -> bool {
-        paints_calls(&tester.painted_ops(render), calls)
+        paints(&tester.painted_ops(render), calls).is_ok()
     }
 
     // 'Default Slider when year2023 is false'.
@@ -6158,7 +6158,7 @@ pub(crate) mod tests {
                         bottom_left,
                     )
                 };
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &[
@@ -6185,7 +6185,7 @@ pub(crate) mod tests {
             // Regression test for https://github.com/flutter/flutter/issues/194279
             let app = build_app(None, true, TextDirection::Rtl);
             tester.pump_widget(app);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &[
@@ -6212,12 +6212,12 @@ pub(crate) mod tests {
 
             // Test default colors for enabled slider.
             let render = slider_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[
@@ -6225,17 +6225,17 @@ pub(crate) mod tests {
                     PaintCall::circle(Some(disabled_thumb_color))
                 ]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(disabled_active_track_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(disabled_inactive_track_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(
@@ -6247,7 +6247,7 @@ pub(crate) mod tests {
             let app = build_app(Some(3), true, TextDirection::Ltr);
             tester.pump_widget(app);
             let render = slider_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -6260,22 +6260,22 @@ pub(crate) mod tests {
                     PaintCall::circle(Some(inactive_tick_mark_color)),
                 ],
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::circle(Some(disabled_thumb_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(disabled_active_track_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(disabled_inactive_track_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(
@@ -6288,7 +6288,7 @@ pub(crate) mod tests {
             tester.pump_widget(app);
             tester.pump_and_settle();
             let render = slider_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -6297,7 +6297,7 @@ pub(crate) mod tests {
                     PaintCall::rrect(Some(disabled_secondary_active_track_color)),
                 ],
             ));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -6305,22 +6305,22 @@ pub(crate) mod tests {
                     PaintCall::rrect(Some(disabled_thumb_color))
                 ]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(active_track_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(inactive_track_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(secondary_active_track_color))]
@@ -6330,7 +6330,7 @@ pub(crate) mod tests {
             let app = build_app(Some(3), false, TextDirection::Ltr);
             tester.pump_widget(app);
             let render = slider_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -6344,22 +6344,22 @@ pub(crate) mod tests {
                     PaintCall::rrect(Some(disabled_thumb_color)),
                 ],
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(active_track_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(inactive_track_color))]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[PaintCall::rrect(Some(secondary_active_track_color))]
@@ -6383,10 +6383,10 @@ pub(crate) mod tests {
                 .iter()
                 .position(|op| matches!(op, Op::Transform(_)))
                 .expect("the value indicator scales");
-            assert!(paints_calls(
+            assert_paints(
                 &ops[scale..],
-                &[PaintCall::rrect(Some(value_indicator_color))]
-            ));
+                &[PaintCall::rrect(Some(value_indicator_color))],
+            );
             tester.up(&gesture);
         });
     }
@@ -6587,7 +6587,7 @@ pub(crate) mod tests {
                     .last()
                     .is_some_and(|value_indicator_box| {
                         let render = value_indicator_box.as_render_object(&tester.cell.borrow());
-                        paints(
+                        render_paints(
                             tester,
                             render,
                             &[PaintCall::path(Some(red)), PaintCall::Paragraph],
@@ -6736,7 +6736,7 @@ pub(crate) mod tests {
 
             // The height equals to the default thumb height.
             assert_eq!(slider_render_box_size(tester), Size::new(800.0, 20.0));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &tracks((398.0, 8.0, 800.0, 12.0), (0.0, 7.0, 402.0, 13.0))
@@ -6754,7 +6754,7 @@ pub(crate) mod tests {
                 slider_render_box_size(tester),
                 Size::new(800.0 - START_PADDING - END_PADDING, 20.0)
             );
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &tracks((338.0, 8.0, 680.0, 12.0), (0.0, 7.0, 342.0, 13.0))
@@ -6774,7 +6774,7 @@ pub(crate) mod tests {
                 Size::new(800.0, TOP_PADDING + TRACK_HEIGHT + BOTTOM_PADDING)
             );
             assert_eq!(slider_render_box_size(tester), Size::new(800.0, 20.0));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &tracks((398.0, 8.0, 800.0, 12.0), (0.0, 7.0, 402.0, 13.0))
@@ -7195,7 +7195,7 @@ pub(crate) mod tests {
             tester.pump_widget(build_frame(tester, TargetPlatform::Android));
             tester.pump_and_settle();
 
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             assert_eq!(value.get(), 0.5);
             let render = tester.first::<RenderSlider>();
             let state = render.get(&tester.cell.borrow()).state;
@@ -7204,7 +7204,11 @@ pub(crate) mod tests {
             tester.pump_widget(build_frame(tester, TargetPlatform::IOS));
             // The theme's 200 ms change, ending before the timer's 500 ms.
             tester.pump_by(Duration::from_millis(300));
-            assert_eq!(tester.find_by_type::<CupertinoSlider>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<CupertinoSlider>(),
+                finds_one_widget(),
+            );
             {
                 let app = tester.cell.borrow();
                 assert!(app.is_disposed(render.handle()));
@@ -7285,40 +7289,43 @@ pub(crate) mod tests {
                     .into_widget(),
             ));
 
-            // Dart reads the `Overlay`'s render object, whose route children are repaint
-            // boundaries `painted_ops` does not record inline; the value indicator box is the
-            // render object in it that draws the slider's indicator.
-            let indicator_paints = |tester: &WidgetTester| {
-                tester
-                    .all::<RenderValueIndicator>()
-                    .into_iter()
-                    .any(|value_indicator_box| {
-                        let render = value_indicator_box.as_render_object(&tester.cell.borrow());
-                        paints(
-                            tester,
-                            render,
-                            &[PaintCall::path(Some(FILL_COLOR)), PaintCall::Paragraph],
-                        )
-                    })
-            };
+            let overlay_ops =
+                |tester: &WidgetTester| tester.painted_ops_deep(overlay_render(tester));
             let top_right = slider_rect(tester).top_right() + Offset::new(-24.0, 0.0);
             let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, top_right);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_by_type::<Slider>().len(), 1);
-            // Represents the Slider.
-            assert!(indicator_paints(tester));
+            expect(tester, &find::by_type::<Slider>(), finds_one_widget());
+            let sequence = [
+                // Represents the raised button with text, next: its shadow, Dart's
+                // `path(color: Colors.black)` under `debugDisableShadows`.
+                PaintCall::shadow(None),
+                PaintCall::Paragraph,
+                // Represents the Slider.
+                PaintCall::path(Some(FILL_COLOR)),
+                PaintCall::Paragraph,
+            ];
+            assert_paints(&overlay_ops(tester), &sequence);
+            assert_eq!(
+                count_calls(&overlay_ops(tester), CanvasMethod::DrawParagraph),
+                2
+            );
 
-            let next = tester.find_onstage_text("Next")[0];
-            let next = tester.global_rect(tester.render_box_of(next)).center();
-            tester.tap(next, 2);
+            let next = find::text("Next").evaluate(tester)[0];
+            let next = tester.get_rect(next).center();
+            tester.tap_at(next, 2);
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Slider>().is_empty());
-            assert!(!indicator_paints(tester));
-            assert_eq!(tester.find_onstage_text("Inner page").len(), 1);
+            expect(tester, &find::by_type::<Slider>(), finds_nothing());
+            assert!(paints(&overlay_ops(tester), &sequence[2..]).is_err());
+            // Represents the ElevatedButton with inner Text, inner page.
+            assert_eq!(
+                count_calls(&overlay_ops(tester), CanvasMethod::DrawParagraph),
+                1
+            );
+            expect(tester, &find::text("Inner page"), finds_one_widget());
 
             // Don't stop holding the value indicator.
             tester.up(&gesture);

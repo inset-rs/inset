@@ -572,7 +572,7 @@ mod tests {
     use waft_services::TextInputClient;
     use waft_widgets::{EditableText, EditableTextState, FocusNode, Form, FormState, GlobalKey};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, expect, find, finds_one_widget, test_widgets};
 
     use super::*;
     use crate::date::{CalendarDelegate, GregorianCalendarDelegate};
@@ -582,6 +582,7 @@ mod tests {
     use crate::test_support::{PaintInspection, material_app};
     use crate::text_field::TextField;
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::{PaintCall, PaintedStyle, assert_paints, paints};
 
     /// The options of Dart's test helper `inputDatePickerField(..)`.
     #[derive(Clone, Default)]
@@ -645,7 +646,7 @@ mod tests {
     }
 
     fn text_field_element(tester: &WidgetTester) -> waft_widgets::AnyElement {
-        tester.find_by_type::<TextField>()[0]
+        tester.element(find::by_type::<TextField>().at(0))
     }
 
     /// Dart's `textFieldController(tester).value.text`.
@@ -667,7 +668,7 @@ mod tests {
 
     /// Dart's `tester.enterText(find.byType(TextField), text)`.
     fn enter_text(tester: &mut WidgetTester, text: &str) {
-        let editable = tester.find_by_type::<EditableText>()[0];
+        let editable = tester.element(find::by_type::<EditableText>().at(0));
         let state = editable
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");
@@ -701,7 +702,7 @@ mod tests {
     }
 
     fn has_text(tester: &WidgetTester, text: &str) -> bool {
-        !tester.find_text(text).is_empty()
+        !find::text(text).evaluate(tester).is_empty()
     }
 
     fn saved() -> (Rc<Cell<Option<DateTime>>>, ValueChanged<DateTime>) {
@@ -797,7 +798,7 @@ mod tests {
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
-            assert_eq!(tester.find_text("Invalid format.").len(), 1);
+            expect(tester, &find::text("Invalid format."), finds_one_widget());
 
             // Change to a custom errorFormat text
             pump(
@@ -812,7 +813,11 @@ mod tests {
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert!(!has_text(tester, "Invalid format."));
-            assert_eq!(tester.find_text("That is not a date.").len(), 1);
+            expect(
+                tester,
+                &find::text("That is not a date."),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -838,13 +843,13 @@ mod tests {
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
-            assert_eq!(tester.find_text("Out of range.").len(), 1);
+            expect(tester, &find::text("Out of range."), finds_one_widget());
             // After last date
             enter_text(tester, "02/23/2050");
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
-            assert_eq!(tester.find_text("Out of range.").len(), 1);
+            expect(tester, &find::text("Out of range."), finds_one_widget());
 
             pump(
                 tester,
@@ -858,7 +863,11 @@ mod tests {
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert!(!has_text(tester, "Out of range."));
-            assert_eq!(tester.find_text("Not in given range.").len(), 1);
+            expect(
+                tester,
+                &find::text("Not in given range."),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -884,7 +893,7 @@ mod tests {
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
-            assert_eq!(tester.find_text("Out of range.").len(), 1);
+            expect(tester, &find::text("Out of range."), finds_one_widget());
             // Even day is valid
             enter_text(tester, "02/24/2030");
             assert!(form_validate(tester, &form_key));
@@ -933,7 +942,11 @@ mod tests {
             tester.pump_and_settle();
             form_validate(tester, &form_key);
             tester.pump_and_settle();
-            assert_eq!(tester.find_text("That is not a date.").len(), 1);
+            expect(
+                tester,
+                &find::text("That is not a date."),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -994,10 +1007,7 @@ mod tests {
 
     /// Dart's `textOpacity(tester, text)`: the value of the first `FadeTransition` above `text`.
     fn text_opacity(tester: &WidgetTester, text: &str) -> f64 {
-        let element = *tester
-            .find_text(text)
-            .first()
-            .unwrap_or_else(|| panic!("a Text showing {text:?}"));
+        let element = tester.element(find::text(text).first());
         let fade = tester
             .ancestors(element)
             .into_iter()
@@ -1021,7 +1031,7 @@ mod tests {
             pump(tester, FieldOptions::default());
             // Focus on it
             let at = crate::chip::tests::center_of(tester, text_field_element(tester));
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             // Hint text should be invisible
@@ -1053,7 +1063,7 @@ mod tests {
         test_widgets(|tester| {
             pump(tester, FieldOptions::default());
             // Default label
-            assert_eq!(tester.find_text("Enter Date").len(), 1);
+            expect(tester, &find::text("Enter Date"), finds_one_widget());
 
             pump(
                 tester,
@@ -1063,24 +1073,24 @@ mod tests {
                 },
             );
             assert!(!has_text(tester, "Enter Date"));
-            assert_eq!(tester.find_text("Give me a date!").len(), 1);
+            expect(tester, &find::text("Give me a date!"), finds_one_widget());
         });
     }
 
-    /// Whether the text field's subtree strokes a border: Dart reads the `_InputBorderPainter`
-    /// of the `_BorderContainer`, whose border is what `InputDecorator` draws.
-    fn paints_a_border(tester: &WidgetTester) -> bool {
-        use waft_embedder::valo::{Op, PaintStyle};
-        let field = tester.render_box_of(text_field_element(tester));
-        tester
-            .painted_ops_deep(field.as_object())
-            .iter()
-            .any(|op| match op {
-                Op::DrawPath { paint, .. } | Op::DrawRect { paint, .. } => {
-                    matches!(paint.style, PaintStyle::Stroke(_))
-                }
-                _ => false,
-            })
+    /// What the text field's subtree paints: Dart reads the `_InputBorderPainter` of the
+    /// `_BorderContainer`, whose border is what `InputDecorator` draws.
+    fn text_field_ops(tester: &WidgetTester) -> Vec<waft_embedder::valo::Op> {
+        tester.painted_ops_deep(tester.render_object(text_field_element(tester)))
+    }
+
+    /// The `drawPath` of a stroked border.
+    fn stroked_border() -> PaintCall {
+        PaintCall::Path {
+            color: None,
+            style: Some(PaintedStyle::Stroke(None)),
+            includes: Vec::new(),
+            excludes: Vec::new(),
+        }
     }
 
     #[test]
@@ -1089,7 +1099,7 @@ mod tests {
             // The default theme draws the text field's outline.
             pump(tester, FieldOptions::default());
             tester.pump_and_settle();
-            assert!(paints_a_border(tester));
+            assert_paints(&text_field_ops(tester), &[stroked_border()]);
 
             let theme = ThemeData::builder()
                 .input_decoration_theme(
@@ -1105,7 +1115,7 @@ mod tests {
             );
             tester.pump_and_settle();
             // Border should match: none is drawn.
-            assert!(!paints_a_border(tester));
+            assert!(paints(&text_field_ops(tester), &[stroked_border()]).is_err());
         });
     }
 
@@ -1270,7 +1280,7 @@ mod tests {
 
     /// Dart's `testTextInput.receiveAction(TextInputAction.done)`.
     fn receive_done(tester: &mut WidgetTester) {
-        let editable = tester.find_by_type::<EditableText>()[0];
+        let editable = tester.element(find::by_type::<EditableText>().at(0));
         let state = editable
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");

@@ -50,6 +50,8 @@ mod viewport;
 mod viewport_offset;
 mod wrap;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing;
 pub use animated_size::*;
 pub use binding::*;
 pub use box_::*;

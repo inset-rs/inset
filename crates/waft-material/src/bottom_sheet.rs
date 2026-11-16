@@ -2446,7 +2446,10 @@ mod tests {
     use waft_embedder::Rect;
     use waft_widgets::{AnyElement, Notification, RouteSettings};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, assert_f32_equals, assert_more_or_less_equals_within, expect,
+        find, finds_n_widgets, finds_nothing, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::scaffold::ScaffoldState;
@@ -2650,7 +2653,7 @@ mod tests {
     }
 
     fn found(tester: &WidgetTester, content: &str) -> usize {
-        tester.find_text(content).len()
+        find::text(content).evaluate(tester).len()
     }
 
     fn only(found: Vec<AnyElement>) -> AnyElement {
@@ -2659,7 +2662,7 @@ mod tests {
     }
 
     fn rect_of_text(tester: &WidgetTester, content: &str) -> Rect {
-        tester.global_rect(tester.render_box_of(only(tester.find_text(content))))
+        tester.get_rect(only(find::text(content).evaluate(tester)))
     }
 
     fn center_of_text(tester: &WidgetTester, content: &str) -> Offset {
@@ -2780,7 +2783,7 @@ mod tests {
 
             // Tap on bottom sheet should not trigger a rebuild.
             let center = center_of_text(tester, "BottomSheet");
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
             assert_eq!(build_count.get(), 1);
             assert_eq!(found(tester, "BottomSheet"), 1);
@@ -2837,7 +2840,7 @@ mod tests {
 
             // Tap on the bottom sheet itself, it should not be dismissed
             let center = center_of_text(tester, "BottomSheet");
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
             assert_eq!(found(tester, "BottomSheet"), 1);
             assert!(!then_called.get());
@@ -2864,7 +2867,7 @@ mod tests {
         assert!(!then_called.get());
 
         // Tap above the bottom sheet to dismiss it.
-        tester.tap(Offset::new(20.0, 20.0), 1);
+        tester.tap_at(Offset::new(20.0, 20.0), 1);
         tester.pump_and_settle(); // Bottom sheet dismiss animation.
         assert_eq!(then_called.get(), is_dismissible);
         assert_eq!(
@@ -2904,7 +2907,7 @@ mod tests {
             tester.pump_and_settle();
 
             // Tap above the bottom sheet to dismiss it.
-            tester.tap(Offset::new(20.0, 20.0), 1);
+            tester.tap_at(Offset::new(20.0, 20.0), 1);
             tester.pump();
             check_non_linear_animation(tester);
             tester.pump_and_settle(); // Bottom sheet dismiss animation.
@@ -3120,7 +3123,7 @@ mod tests {
 
     fn rect_of_key(tester: &WidgetTester, key: &GlobalKey) -> Rect {
         let render = tester.render_object(key).as_box().expect("a render box");
-        tester.global_rect(render)
+        tester.get_rect(render)
     }
 
     fn mounted(tester: &WidgetTester, key: &GlobalKey) -> bool {
@@ -3289,7 +3292,7 @@ mod tests {
 
             // Top padding is consumed and there is no SafeArea
             assert_eq!(padding_of(tester, inner.get()).top, 0.0);
-            assert!(tester.find_by_type::<SafeArea>().is_empty());
+            expect(tester, &find::by_type::<SafeArea>(), finds_nothing());
 
             // With a SafeArea
             Modal {
@@ -3301,7 +3304,7 @@ mod tests {
             tester.pump_by(Duration::from_secs(1));
 
             // A SafeArea is inserted, with left / top / right true but bottom false.
-            let safe_area = only(tester.find_by_type::<SafeArea>());
+            let safe_area = only(find::by_type::<SafeArea>().evaluate(tester));
             tester.widget(safe_area, |safe_area: &SafeArea| {
                 assert!(safe_area.left);
                 assert!(safe_area.top);
@@ -3352,7 +3355,7 @@ mod tests {
             tester.pump();
             tester.pump_by(Duration::from_secs(1));
 
-            let bottom_sheet = only(tester.find_by_type::<BottomSheet>());
+            let bottom_sheet = only(find::by_type::<BottomSheet>().evaluate(tester));
             tester.widget(bottom_sheet, |bottom_sheet: &BottomSheet| {
                 assert_eq!(bottom_sheet.background_color, Some(color));
                 assert_eq!(bottom_sheet.elevation, Some(elevation));
@@ -3360,8 +3363,8 @@ mod tests {
                 assert_eq!(bottom_sheet.clip_behavior, Some(clip_behavior));
             });
 
-            let modal_barrier = *tester
-                .find_by_type::<ModalBarrier>()
+            let modal_barrier = *find::by_type::<ModalBarrier>()
+                .evaluate(tester)
                 .last()
                 .expect("a modal barrier");
             tester.widget(modal_barrier, |modal_barrier: &ModalBarrier| {
@@ -3373,10 +3376,10 @@ mod tests {
     /// The `Material` under the only `BottomSheet`: Dart's `find.descendant(of:
     /// find.byType(BottomSheet), matching: find.byType(Material))`.
     fn sheet_material(tester: &WidgetTester) -> AnyElement {
-        let sheet = only(tester.find_by_type::<BottomSheet>());
+        let sheet = only(find::by_type::<BottomSheet>().evaluate(tester));
         only(
-            tester
-                .find_by_type::<Material>()
+            find::by_type::<Material>()
+                .evaluate(tester)
                 .into_iter()
                 .filter(|material| tester.ancestors(*material).contains(&sheet))
                 .collect(),
@@ -3423,10 +3426,7 @@ mod tests {
                 assert_eq!(material.elevation, 1.0);
                 assert!(**material.shape.as_ref().expect("a shape") == *default_shape);
             });
-            assert_eq!(
-                tester.global_rect(tester.render_box_of(material)).width(),
-                640.0
-            );
+            assert_eq!(tester.get_rect(material).width(), 640.0);
         });
     }
 
@@ -3454,7 +3454,7 @@ mod tests {
     /// The box the only `_DragHandle` lays out: Dart's `find.bySemanticsLabel('Dismiss')`,
     /// whose `Semantics` wraps the handle's `SizedBox`.
     fn drag_handle_rect(tester: &WidgetTester) -> Rect {
-        tester.global_rect(tester.render_box_of(only(tester.find_by_type::<DragHandle>())))
+        tester.get_rect(only(find::by_type::<DragHandle>().evaluate(tester)))
     }
 
     /// Dart's 'Drag handle interactive area size at minimum possible size' and 'at given
@@ -3507,10 +3507,10 @@ mod tests {
 
     /// The colour of the decorated `Container` under the only `_DragHandle`.
     fn drag_handle_color(tester: &WidgetTester) -> Option<Color> {
-        let handle = only(tester.find_by_type::<DragHandle>());
+        let handle = only(find::by_type::<DragHandle>().evaluate(tester));
         let decorated = only(
-            tester
-                .find_by_type::<Container>()
+            find::by_type::<Container>()
+                .evaluate(tester)
                 .into_iter()
                 .filter(|container| tester.ancestors(*container).contains(&handle))
                 .filter(|container| {
@@ -3740,7 +3740,7 @@ mod tests {
         assert_eq!(found(tester, "BottomSheet"), 1);
 
         // Tapping above the bottom sheet to dismiss it.
-        tester.tap(Offset::new(20.0, 20.0), 1); // Closing animation will start after tapping
+        tester.tap_at(Offset::new(20.0, 20.0), 1); // Closing animation will start after tapping
         tester.pump();
 
         assert_eq!(found(tester, "BottomSheet"), 1);
@@ -3898,14 +3898,14 @@ mod tests {
             Persistent::default().show(tester, scaffold, sheet());
 
             tester.pump();
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_one_widget());
 
             // The first sheet's animation is still running.
 
             // Trigger the second sheet will remove the first sheet from tree.
             Persistent::default().show(tester, scaffold, sheet());
             tester.pump();
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_one_widget());
 
             // Remove the Scaffold from the tree. A ticker still running when its provider is
             // disposed panics.
@@ -3937,13 +3937,13 @@ mod tests {
             Persistent::default().show(tester, scaffold, sheet());
 
             tester.pump();
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_one_widget());
             assert!(can_pop(tester));
 
             // Trigger the second sheet will remove the first sheet from tree.
             let sheet_controller = Persistent::default().show(tester, scaffold, sheet());
             tester.pump();
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_one_widget());
             assert!(can_pop(tester));
 
             sheet_controller.close(&mut tester.cell.borrow_mut());
@@ -3987,7 +3987,7 @@ mod tests {
             tester.pump_widget(app_saving_context(tester, &saved));
 
             tester.pump();
-            assert!(tester.find_by_type::<BottomSheet>().is_empty());
+            expect(tester, &find::by_type::<BottomSheet>(), finds_nothing());
 
             // Bring up bottom sheet.
             {
@@ -4001,7 +4001,7 @@ mod tests {
                 navigator.push(&mut app, route.erase());
             }
             tester.pump_and_settle();
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_one_widget());
         });
     }
 
@@ -4082,8 +4082,8 @@ mod tests {
 
     /// Dart's `tester.getBottomLeft(find.byType(BottomSheet)).dy`.
     fn bottom_sheet_bottom(tester: &WidgetTester) -> f64 {
-        let sheet = only(tester.find_by_type::<BottomSheet>());
-        tester.global_rect(tester.render_box_of(sheet)).bottom
+        let sheet = only(find::by_type::<BottomSheet>().evaluate(tester));
+        tester.get_rect(sheet).bottom
     }
 
     /// Dart's 'showModalBottomSheet does not use root Navigator by default'.
@@ -4093,7 +4093,7 @@ mod tests {
             tester.pump_widget(nested_navigator_app(tester, None));
 
             let button = center_of_text(tester, "Show bottom sheet");
-            tester.tap(button, 1);
+            tester.tap_at(button, 1);
             tester.pump_and_settle();
 
             // Bottom sheet is displayed in correct position within the inner navigator
@@ -4112,7 +4112,7 @@ mod tests {
             tester.pump_widget(nested_navigator_app(tester, Some(true)));
 
             let button = center_of_text(tester, "Show bottom sheet");
-            tester.tap(button, 1);
+            tester.tap_at(button, 1);
             tester.pump_and_settle();
 
             // Bottom sheet is displayed in correct position above all content including
@@ -4141,7 +4141,7 @@ mod tests {
             tester.pump();
 
             // Initially, there is no bottom sheet and the text field has no focus.
-            assert!(tester.find_by_type::<BottomSheet>().is_empty());
+            expect(tester, &find::by_type::<BottomSheet>(), finds_nothing());
             assert!(!has_focus(tester, focus_node.handle()));
 
             // Request focus on the text field.
@@ -4154,7 +4154,7 @@ mod tests {
             tester.pump();
 
             // The bottom sheet is showing and the text field has lost focus.
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_one_widget());
             assert!(!has_focus(tester, focus_node.handle()));
 
             // Dismiss the bottom sheet.
@@ -4162,7 +4162,7 @@ mod tests {
             tester.pump();
 
             // The bottom sheet is dismissed and the focus is shifted back to the text field.
-            assert!(tester.find_by_type::<BottomSheet>().is_empty());
+            expect(tester, &find::by_type::<BottomSheet>(), finds_nothing());
             assert!(has_focus(tester, focus_node.handle()));
 
             // Bring up bottom sheet again with requestFocus to false.
@@ -4170,7 +4170,7 @@ mod tests {
             tester.pump();
 
             // The bottom sheet is showing and the text field still has focus.
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_one_widget());
             assert!(has_focus(tester, focus_node.handle()));
         });
     }
@@ -4197,7 +4197,7 @@ mod tests {
             assert!(has_focus(tester, focus_node.handle()));
 
             let sheet_scope_has_focus = |tester: &WidgetTester| {
-                let sheet_text = only(tester.find_text("BottomSheet"));
+                let sheet_text = only(find::text("BottomSheet").evaluate(tester));
                 let mut app = tester.cell.borrow_mut();
                 waft_widgets::FocusScope::of(&mut app, sheet_text, true)
                     .as_node()
@@ -4483,8 +4483,8 @@ mod tests {
         let expected = barrier_label.map(str::to_string).unwrap_or_else(|| {
             <dyn MaterialLocalizations>::of(&mut tester.cell.borrow_mut(), context).scrim_label()
         });
-        let modal_barrier = *tester
-            .find_by_type::<ModalBarrier>()
+        let modal_barrier = *find::by_type::<ModalBarrier>()
+            .evaluate(tester)
             .last()
             .expect("a modal barrier");
         tester.widget(modal_barrier, |modal_barrier: &ModalBarrier| {
@@ -4528,13 +4528,6 @@ mod tests {
         rect_of_key(tester, key).top
     }
 
-    fn close_to(actual: f64, expected: f64, epsilon: f64) {
-        assert!(
-            (actual - expected).abs() <= epsilon,
-            "{actual} is not within {epsilon} of {expected}"
-        );
-    }
-
     /// Dart's 'Bottom sheet animation can be customized'.
     #[test]
     fn the_bottom_sheet_animation_can_be_customized() {
@@ -4561,7 +4554,7 @@ mod tests {
             tester.pump_by(Duration::from_millis(400));
 
             // The bottom sheet is partially visible.
-            close_to(top_of(tester, &sheet_key), 134.6, 0.1);
+            assert_more_or_less_equals_within(top_of(tester, &sheet_key), 134.6, 0.1);
 
             // Advance the animation by 1/2 of the custom forward duration.
             tester.pump_by(Duration::from_millis(400));
@@ -4576,7 +4569,7 @@ mod tests {
             tester.pump_by(Duration::from_millis(200));
 
             // The bottom sheet is partially visible.
-            close_to(top_of(tester, &sheet_key), 134.6, 0.1);
+            assert_more_or_less_equals_within(top_of(tester, &sheet_key), 134.6, 0.1);
 
             // Advance the animation by 1/2 of the custom reverse duration.
             tester.pump_by(Duration::from_millis(200));
@@ -4631,7 +4624,7 @@ mod tests {
         tester.pump_by(Duration::from_millis(half_forward));
 
         // The modal bottom sheet is partially visible.
-        close_to(top_of(tester, &sheet_key), 316.7, 0.1);
+        assert_more_or_less_equals_within(top_of(tester, &sheet_key), 316.7, 0.1);
 
         // Advance the animation by 1/2 of the forward duration.
         tester.pump_by(Duration::from_millis(half_forward));
@@ -4646,7 +4639,7 @@ mod tests {
         tester.pump_by(Duration::from_millis(half_reverse));
 
         // The modal bottom sheet is partially visible.
-        close_to(top_of(tester, &sheet_key), 316.7, 0.1);
+        assert_more_or_less_equals_within(top_of(tester, &sheet_key), 316.7, 0.1);
 
         // Advance the animation by 1/2 of the reverse duration.
         tester.pump_by(Duration::from_millis(half_reverse));
@@ -4715,11 +4708,8 @@ mod tests {
                     )
                     .into_widget(),
             ));
-            let sheet = only(tester.find_by_type::<BottomSheet>());
-            assert_eq!(
-                tester.global_rect(tester.render_box_of(sheet)).size(),
-                Size::ZERO
-            );
+            let sheet = only(find::by_type::<BottomSheet>().evaluate(tester));
+            assert_eq!(tester.get_rect(sheet).size(), Size::ZERO);
         });
     }
 
@@ -4757,7 +4747,7 @@ mod tests {
 
             // For the linear curve, the distance covered in each time interval should
             // be the same.
-            close_to(
+            assert_more_or_less_equals_within(
                 open_extent1 - open_extent2,
                 open_extent2 - open_extent3,
                 0.1,
@@ -4807,7 +4797,7 @@ mod tests {
 
             // For the linear curve, the distance covered in each time interval should
             // be the same.
-            close_to(
+            assert_more_or_less_equals_within(
                 close_extent2 - close_extent1,
                 close_extent3 - close_extent2,
                 0.1,
@@ -4906,7 +4896,7 @@ mod tests {
             // Its position immediately after releasing the gesture should remain
             // approximately the same as the last dragged position, ensuring the
             // animation continues from the current visual offset.
-            close_to(y_after_up, y_before_up, 0.1);
+            assert_more_or_less_equals_within(y_after_up, y_before_up, 0.1);
         });
     }
 
@@ -4949,7 +4939,7 @@ mod tests {
     /// `hitTestable()` finder.
     fn hit_testable(tester: &WidgetTester, element: AnyElement) -> bool {
         let render = tester.render_box_of(element);
-        let center = tester.global_rect(render).center();
+        let center = tester.get_rect(render).center();
         let mut app = tester.cell.borrow_mut();
         let view_id = app.platform().views()[0].id();
         let mut result = waft_gestures::HitTestResult::new();
@@ -5192,8 +5182,8 @@ mod tests {
 
     /// Dart's `find.byType(T).hitTestable()`: how many `T`s a hit test at their centre reaches.
     fn hit_testable_count<T: 'static>(tester: &WidgetTester) -> usize {
-        tester
-            .find_by_type::<T>()
+        find::by_type::<T>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| hit_testable(tester, *element))
             .count()
@@ -5205,9 +5195,9 @@ mod tests {
 
     /// Dart's `tester.tap(find.byType(BackButton))`.
     fn tap_back_button(tester: &mut WidgetTester, pointer: i64) {
-        let button = only(tester.find_by_type::<crate::action_buttons::BackButton>());
-        let center = tester.global_rect(tester.render_box_of(button)).center();
-        tester.tap(center, pointer);
+        let button = only(find::by_type::<crate::action_buttons::BackButton>().evaluate(tester));
+        let center = tester.get_rect(button).center();
+        tester.tap_at(center, pointer);
     }
 
     /// Dart's 'Persistent draggableScrollableSheet localHistoryEntries test'.
@@ -5259,8 +5249,8 @@ mod tests {
             tester.pump_widget(frame);
             tester.pump_and_settle();
             let fabs = |tester: &WidgetTester| {
-                tester
-                    .find_by_type::<crate::floating_action_button::FloatingActionButton>()
+                find::by_type::<crate::floating_action_button::FloatingActionButton>()
+                    .evaluate(tester)
                     .len()
             };
             let hit_testable_fabs = |tester: &WidgetTester| {
@@ -5351,7 +5341,10 @@ mod tests {
                     .into_widget(),
             ));
             let fab = |tester: &WidgetTester| {
-                only(tester.find_by_type::<crate::floating_action_button::FloatingActionButton>())
+                only(
+                    find::by_type::<crate::floating_action_button::FloatingActionButton>()
+                        .evaluate(tester),
+                )
             };
 
             let scaffold = scaffold_state(tester, &scaffold_key);
@@ -5385,8 +5378,8 @@ mod tests {
 
             assert_eq!(found(tester, "Two"), 1);
             assert_eq!(
-                tester
-                    .find_by_type::<crate::floating_action_button::FloatingActionButton>()
+                find::by_type::<crate::floating_action_button::FloatingActionButton>()
+                    .evaluate(tester)
                     .len(),
                 1
             );
@@ -5530,7 +5523,7 @@ mod tests {
             assert_eq!(found(tester, "modal bottom sheet"), 1);
 
             // Dismiss the modal bottomSheet by tapping above the sheet
-            tester.tap(Offset::new(20.0, 20.0), 1);
+            tester.tap_at(Offset::new(20.0, 20.0), 1);
             tester.pump_and_settle();
             assert_eq!(found(tester, "modal bottom sheet"), 0);
             assert_eq!(found(tester, "showModalBottomSheet"), 1);
@@ -5564,12 +5557,12 @@ mod tests {
 
             tester.pump_widget(build_frame(tester, "I love Flutter!"));
             let render_before_update =
-                tester.render_box_of(only(tester.find_text("I love Flutter!")));
+                tester.render_box_of(only(find::text("I love Flutter!").evaluate(tester)));
 
             tester.pump_widget(build_frame(tester, "Flutter is the best!"));
             tester.pump_and_settle();
             let render_after_update =
-                tester.render_box_of(only(tester.find_text("Flutter is the best!")));
+                tester.render_box_of(only(find::text("Flutter is the best!").evaluate(tester)));
 
             assert_eq!(render_before_update, render_after_update);
         });
@@ -5613,7 +5606,7 @@ mod tests {
 
             tester.pump_and_settle();
 
-            let bottom_sheet = only(tester.find_by_type::<BottomSheet>());
+            let bottom_sheet = only(find::by_type::<BottomSheet>().evaluate(tester));
             tester.widget(bottom_sheet, |bottom_sheet: &BottomSheet| {
                 assert_eq!(bottom_sheet.background_color, Some(color));
                 assert_eq!(bottom_sheet.elevation, Some(elevation));
@@ -5641,11 +5634,11 @@ mod tests {
             );
 
             tester.pump();
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_one_widget());
 
             bottom_sheet.close(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert!(tester.find_by_type::<BottomSheet>().is_empty());
+            expect(tester, &find::by_type::<BottomSheet>(), finds_nothing());
         });
     }
 
@@ -5654,9 +5647,9 @@ mod tests {
     /// The Material of the `index`th `BottomSheet` in tree order: Dart's
     /// `find.descendant(of: sheet, matching: find.byType(Material)).first`.
     fn material_of_sheet(tester: &WidgetTester, index: usize) -> Rect {
-        let sheet = tester.find_by_type::<BottomSheet>()[index];
+        let sheet = find::by_type::<BottomSheet>().evaluate(tester)[index];
         let material = tester.descendants_of_type::<Material>(sheet)[0];
-        tester.global_rect(tester.render_box_of(material))
+        tester.get_rect(material)
     }
 
     // The Scaffold's persistent bottom sheet is _StandardBottomSheet ->
@@ -5826,9 +5819,9 @@ mod tests {
         test_widgets(|tester| {
             let content = GlobalKey::new();
             let fab_center_y = |tester: &WidgetTester| {
-                let fab =
-                    tester.find_by_type::<crate::floating_action_button::FloatingActionButton>()[0];
-                tester.global_rect(tester.render_box_of(fab)).center().dy()
+                let fab = find::by_type::<crate::floating_action_button::FloatingActionButton>()
+                    .evaluate(tester)[0];
+                tester.get_rect(fab).center().dy()
             };
             let app = |keyboard_height: f64| {
                 let mut app = KeyboardInsetApp::new(keyboard_height);
@@ -5839,12 +5832,13 @@ mod tests {
             };
 
             tester.pump_widget(app(0.0).build(tester, &content));
-            assert_eq!(fab_center_y(tester), 500.0);
+            // Within f32: global positions go through valo's f32 matrices (waft-gestures' Matrix4 entry), where Dart's are f64 and compare equal.
+            assert_f32_equals(fab_center_y(tester), 500.0);
 
             tester.pump_widget(app(200.0).build(tester, &content));
             tester.pump_and_settle();
             // Top of the content (300), not the top of the extended Material.
-            assert_eq!(fab_center_y(tester), 300.0);
+            assert_f32_equals(fab_center_y(tester), 300.0);
         });
     }
 
@@ -5872,13 +5866,13 @@ mod tests {
             tester.pump();
             assert!(has_focus(tester));
             // The `EditableText`'s element, which holds its state.
-            let before = only(tester.find_by_type::<waft_widgets::EditableText>());
+            let before = only(find::by_type::<waft_widgets::EditableText>().evaluate(tester));
 
             tester.pump_widget(app(200.0).build(tester, &content));
             tester.pump();
             assert!(has_focus(tester));
             assert_eq!(
-                only(tester.find_by_type::<waft_widgets::EditableText>()),
+                only(find::by_type::<waft_widgets::EditableText>().evaluate(tester)),
                 before
             );
         });
@@ -5999,13 +5993,13 @@ mod tests {
             assert_eq!(inset_sheet_material(tester).bottom, 600.0);
 
             // Inside the content.
-            tester.tap(Offset::new(400.0, 350.0), 1);
+            tester.tap_at(Offset::new(400.0, 350.0), 1);
             assert_eq!(tap_count.get(), 1);
 
             // In the inset region, which only the keyboard can reach: the sheet's
             // Material absorbs the tap (as the Scaffold's own Material did before it
             // was covered), and the content is not hit.
-            tester.tap(Offset::new(400.0, 500.0), 2);
+            tester.tap_at(Offset::new(400.0, 500.0), 2);
             assert_eq!(tap_count.get(), 1);
         });
     }
@@ -6081,7 +6075,7 @@ mod tests {
                 .into_widget()
             });
             tester.pump_widget(app.build(tester, &content));
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 2);
+            expect(tester, &find::by_type::<BottomSheet>(), finds_n_widgets(2));
 
             // Only the Scaffold's own sheet extends behind the keyboard. The user's
             // sheet, and its Material, end with the content.
@@ -6304,8 +6298,8 @@ mod tests {
                 assert_eq!(material.color, Some(modal_background_color));
             });
 
-            let modal_barrier = *tester
-                .find_by_type::<ModalBarrier>()
+            let modal_barrier = *find::by_type::<ModalBarrier>()
+                .evaluate(tester)
                 .last()
                 .expect("a modal barrier");
             tester.widget(modal_barrier, |modal_barrier: &ModalBarrier| {
@@ -6439,7 +6433,7 @@ mod tests {
             drop(Modal::default().show(tester, saved.get(), sheet_builder("BottomSheet")));
             tester.pump_and_settle();
             let state = |tester: &WidgetTester| {
-                let sheet = tester.find_by_type::<ModalBottomSheet>()[0];
+                let sheet = find::by_type::<ModalBottomSheet>().evaluate(tester)[0];
                 let app = tester.cell.borrow();
                 sheet
                     .state_handle::<ModalBottomSheetState>(&app)

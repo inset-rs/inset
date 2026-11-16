@@ -382,7 +382,8 @@ mod tests {
     use crate::scaffold::Scaffold;
     use crate::switch::Switch;
     use crate::switch::tests::{
-        Drawn, M2_SHADOWS, c, circles, colors, drawn, hover, ignore, press, switch_rect,
+        M2_SHADOWS, c, circles, color_of, colors, drawn, glyph_origins, hover, ignore, press,
+        stroke_of, switch_rect,
     };
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::pump_app;
@@ -516,19 +517,16 @@ mod tests {
                     );
                     tester.pump_and_settle();
                 };
-                let thumb_and_glyph = |painted: &[Drawn]| {
-                    let glyphs = painted
-                        .iter()
-                        .filter(|drawn| matches!(drawn, Drawn::Glyphs(..)))
-                        .count();
-                    (painted.iter().rev().find_map(Drawn::color), glyphs)
+                let thumb_and_glyph = |painted: &[waft_embedder::valo::Op]| {
+                    let glyphs = glyph_origins(painted).len();
+                    (painted.iter().rev().find_map(color_of), glyphs)
                 };
 
                 // Switch.
                 pump(tester, false, false);
                 let painted = drawn(tester);
-                assert_eq!(painted[0].color(), Some(c(DEFAULT_TRACK_COLOR)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                assert_eq!(color_of(&painted[0]), Some(c(DEFAULT_TRACK_COLOR)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(DEFAULT_TRACK_OUTLINE_COLOR)
                         && f64::from(width) == DEFAULT_TRACK_OUTLINE_WIDTH));
                 if use_material3 {
@@ -552,8 +550,8 @@ mod tests {
                 // Selected switch.
                 pump(tester, true, false);
                 let painted = drawn(tester);
-                assert_eq!(painted[0].color(), Some(c(SELECTED_TRACK_COLOR)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                assert_eq!(color_of(&painted[0]), Some(c(SELECTED_TRACK_COLOR)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(SELECTED_TRACK_OUTLINE_COLOR)
                         && f64::from(width) == SELECTED_TRACK_OUTLINE_WIDTH));
                 if use_material3 {
@@ -673,15 +671,15 @@ mod tests {
                 // Switch.
                 pump(tester, false, false);
                 let painted = drawn(tester);
-                assert_eq!(painted[0].color(), Some(c(DEFAULT_TRACK)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                assert_eq!(color_of(&painted[0]), Some(c(DEFAULT_TRACK)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(DEFAULT_OUTLINE) && f64::from(width) == DEFAULT_OUTLINE_WIDTH));
-                assert_eq!(painted[thumb_index].color(), Some(c(DEFAULT_THUMB)));
+                assert_eq!(color_of(&painted[thumb_index]), Some(c(DEFAULT_THUMB)));
                 if use_material3 {
                     // Dart's `paragraph(offset: Offset(12, 12))`: the glyph's ink is in the
                     // 16x16 icon square there.
                     assert!(
-                        matches!(painted[3], Drawn::Glyphs(x, y) if (12.0..28.0).contains(&x) && (12.0..28.0).contains(&y)),
+                        matches!(glyph_origins(&painted).as_slice(), [(x, y)] if (12.0..28.0).contains(x) && (12.0..28.0).contains(y)),
                         "{:?}",
                         painted[3]
                     );
@@ -693,10 +691,10 @@ mod tests {
                 // Selected switch.
                 pump(tester, true, false);
                 let painted = drawn(tester);
-                assert_eq!(painted[0].color(), Some(c(SELECTED_TRACK)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                assert_eq!(color_of(&painted[0]), Some(c(SELECTED_TRACK)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(SELECTED_OUTLINE) && f64::from(width) == SELECTED_OUTLINE_WIDTH));
-                assert_eq!(painted[thumb_index].color(), Some(c(SELECTED_THUMB)));
+                assert_eq!(color_of(&painted[thumb_index]), Some(c(SELECTED_THUMB)));
 
                 // Switch with hover.
                 pump(tester, false, false);
@@ -851,8 +849,8 @@ mod tests {
                 );
                 tester.pump_and_settle();
                 let painted = drawn(tester);
-                assert_eq!(painted[0].color(), Some(c(LOCAL)));
-                assert!(matches!(painted[1], Drawn::Stroke(color, width, _)
+                assert_eq!(color_of(&painted[0]), Some(c(LOCAL)));
+                assert!(matches!(stroke_of(&painted[1]), Some((color, width, _))
                     if color == c(LOCAL) && f64::from(width) == LOCAL_OUTLINE_WIDTH));
                 let thumb_shadows = if use_material3 {
                     &[][..]

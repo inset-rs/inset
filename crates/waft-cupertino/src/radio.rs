@@ -983,7 +983,7 @@ mod tests {
         AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject,
     };
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
     use waft_widgets::{
         Center, FocusHighlightStrategy, GlobalKey, Row, SizedBox, WidgetStateMouseCursor,
     };
@@ -1053,13 +1053,17 @@ mod tests {
     /// Dart's `pumpWidget(CupertinoApp(theme:, home: Center(child: child)))`: the first call
     /// mounts the app, and a later one hands the mounted [`Host`] the new theme and child.
     fn pump_app(tester: &mut WidgetTester, theme: Option<CupertinoThemeData>, child: WidgetRef) {
-        let mounted = tester.find_by_type::<Host>().first().map(|host| {
-            let KeyRef::Global(key) = tester.widget(*host, |host: &Host| host.key.clone()) else {
-                unreachable!("pump_app keys its Host globally")
-            };
-            key.current_state::<HostState>(&tester.cell.borrow())
-                .expect("the host is mounted")
-        });
+        let mounted = find::by_type::<Host>()
+            .evaluate(tester)
+            .first()
+            .map(|host| {
+                let KeyRef::Global(key) = tester.widget(*host, |host: &Host| host.key.clone())
+                else {
+                    unreachable!("pump_app keys its Host globally")
+                };
+                key.current_state::<HostState>(&tester.cell.borrow())
+                    .expect("the host is mounted")
+            });
         match mounted {
             Some(host) => {
                 host.set_state(&mut tester.cell.borrow_mut(), |host| {
@@ -1205,7 +1209,7 @@ mod tests {
                 None,
                 keyed(radio(1).group_value(2).on_changed(log_into(&log)), &key),
             );
-            tester.tap(VIEW_CENTER, 1);
+            tester.tap_at(VIEW_CENTER, 1);
             assert_eq!(*log.borrow(), [Some(1)]);
             log.borrow_mut().clear();
 
@@ -1220,11 +1224,11 @@ mod tests {
                     &key,
                 ),
             );
-            tester.tap(VIEW_CENTER, 1);
+            tester.tap_at(VIEW_CENTER, 1);
             assert!(log.borrow().is_empty());
 
             pump_app(tester, None, keyed(radio(1).group_value(2), &key));
-            tester.tap(VIEW_CENTER, 1);
+            tester.tap_at(VIEW_CENTER, 1);
             assert!(log.borrow().is_empty());
         });
     }
@@ -1246,7 +1250,7 @@ mod tests {
                     &key,
                 ),
             );
-            tester.tap(VIEW_CENTER, 1);
+            tester.tap_at(VIEW_CENTER, 1);
             assert!(log.borrow().is_empty());
         });
     }
@@ -1268,7 +1272,7 @@ mod tests {
                     &key,
                 ),
             );
-            tester.tap(VIEW_CENTER, 1);
+            tester.tap_at(VIEW_CENTER, 1);
             assert_eq!(*log.borrow(), [Some(1)]);
             log.borrow_mut().clear();
 
@@ -1283,7 +1287,7 @@ mod tests {
                     &key,
                 ),
             );
-            tester.tap(VIEW_CENTER, 1);
+            tester.tap_at(VIEW_CENTER, 1);
             assert_eq!(*log.borrow(), [None]);
             log.borrow_mut().clear();
 
@@ -1292,7 +1296,7 @@ mod tests {
                 None,
                 keyed(radio(1).on_changed(log_into(&log)).toggleable(true), &key),
             );
-            tester.tap(VIEW_CENTER, 1);
+            tester.tap_at(VIEW_CENTER, 1);
             assert_eq!(*log.borrow(), [Some(1)]);
         });
     }
@@ -1319,7 +1323,7 @@ mod tests {
                 painter(tester, &key).value(&tester.cell.borrow()),
                 Some(false)
             );
-            tester.tap(VIEW_CENTER, 1);
+            tester.tap_at(VIEW_CENTER, 1);
             assert_eq!(*log.borrow(), [Some(String::from("jefferson"))]);
 
             pump_app(tester, None, group(Some("jefferson"), &log));

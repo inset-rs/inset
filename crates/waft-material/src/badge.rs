@@ -875,13 +875,13 @@ pub(crate) mod tests {
     use waft_painting::Alignment;
     use waft_widgets::{Align, Builder, Center, Container, Icon};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::bottom_navigation_bar::tests::paragraph_style;
     use crate::colors::Colors;
     use crate::icons::Icons;
-    use crate::test_support::{Drawn, PaintInspection};
+    use crate::test_support::{PaintInspection, path_like};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m3, pump_app};
@@ -921,8 +921,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn badge_rect(tester: &WidgetTester) -> Rect {
-        let badge = tester.find_by_type::<Badge>()[0];
-        tester.global_rect(tester.render_box_of(badge))
+        let badge = find::by_type::<Badge>().evaluate(tester)[0];
+        tester.get_rect(badge)
     }
 
     pub(crate) fn badge_paints_rrect(
@@ -930,14 +930,12 @@ pub(crate) mod tests {
         rrect: RRect,
         color: Option<Color>,
     ) -> bool {
-        let badge = tester.find_by_type::<Badge>()[0];
-        tester.paints_rrect(tester.render_box_of(badge).as_object(), rrect, color)
-    }
-
-    pub(crate) fn rect_of_text(tester: &WidgetTester, text: &str) -> Rect {
-        let label = tester.find_text(text);
-        assert_eq!(label.len(), 1, "one label showing {text}");
-        tester.global_rect(tester.render_box_of(label[0]))
+        let badge = find::by_type::<Badge>().evaluate(tester)[0];
+        waft_rendering::testing::paints(
+            &tester.painted_ops(tester.render_object(badge)),
+            &[waft_rendering::testing::PaintCall::rrect_at(rrect, color)],
+        )
+        .is_ok()
     }
 
     fn stadium(left: f64, top: f64, right: f64, bottom: f64, radius: f64) -> RRect {
@@ -979,7 +977,7 @@ pub(crate) mod tests {
             assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
 
             assert_eq!(
-                rect_of_text(tester, "0").top_left(),
+                tester.get_rect(find::text("0")).top_left(),
                 Offset::new(16.0, -4.0)
             );
 
@@ -1021,7 +1019,10 @@ pub(crate) mod tests {
             assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
             assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
 
-            assert_eq!(rect_of_text(tester, "0").top_left(), Offset::new(0.0, -4.0));
+            assert_eq!(
+                tester.get_rect(find::text("0")).top_left(),
+                Offset::new(0.0, -4.0)
+            );
 
             assert!(badge_paints_rrect(
                 tester,
@@ -1056,16 +1057,16 @@ pub(crate) mod tests {
 
             // The font's '0' is narrower than the badge is tall, where FlutterTest
             // gives it 11.5: the stadium is as wide as it is tall, and centers the text.
-            let label = tester.find_text("0");
+            let label = find::text("0").evaluate(tester);
             assert_eq!(label.len(), 1);
-            let text_rect = tester.global_rect(tester.render_box_of(label[0]));
+            let text_rect = tester.get_rect(label[0]);
             let badge_width = (text_rect.width() + 8.0).max(16.0);
             // x = alignment.start + the space around the text
-            assert!(
-                (text_rect.left - (12.0 + (badge_width - text_rect.width()) / 2.0)).abs() < 1e-9,
-                "{text_rect:?}"
+            waft_widgets::testing::assert_more_or_less_equals(
+                text_rect.left,
+                12.0 + (badge_width - text_rect.width()) / 2.0,
             );
-            assert!((text_rect.top - -4.0).abs() < 0.05, "{text_rect:?}");
+            waft_widgets::testing::assert_more_or_less_equals_within(text_rect.top, -4.0, 0.05);
 
             // L = alignment.start
             // T = alignment.top
@@ -1078,7 +1079,7 @@ pub(crate) mod tests {
             ));
 
             pump_app(tester, m3, |_app| build_frame(1000, &seen));
-            assert_eq!(tester.find_text("999+").len(), 1);
+            assert_eq!(find::text("999+").evaluate(tester).len(), 1);
         });
     }
 
@@ -1165,13 +1166,11 @@ pub(crate) mod tests {
                 text_style.color.as_ref().map(|color| color.color()),
                 Some(green)
             );
-            let badge = tester.find_by_type::<Badge>()[0];
-            let drawn = tester.painted(tester.render_box_of(badge).as_object());
-            assert!(
-                drawn
-                    .iter()
-                    .any(|drawn| matches!(drawn, Drawn::Path(color, _) if *color == 0xff000000))
-            );
+            let badge = find::by_type::<Badge>().evaluate(tester)[0];
+            let drawn = tester.painted_calls(tester.render_object(badge));
+            assert!(drawn.iter().any(|call| {
+                path_like(call).is_some_and(|(color, _)| color.to_argb32() == 0xff000000)
+            }));
         });
     }
 
@@ -1187,15 +1186,15 @@ pub(crate) mod tests {
                 )
             });
 
-            assert!(tester.find_text("0").is_empty());
-            assert_eq!(tester.find_by_type::<Icon>().len(), 1);
+            assert!(find::text("0").evaluate(tester).is_empty());
+            assert_eq!(find::by_type::<Icon>().evaluate(tester).len(), 1);
 
             // default Icon size
             assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
             assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
-            let badge = tester.find_by_type::<Badge>()[0];
-            let drawn = tester.painted(tester.render_box_of(badge).as_object());
-            assert!(!drawn.iter().any(|drawn| matches!(drawn, Drawn::Path(..))));
+            let badge = find::by_type::<Badge>().evaluate(tester)[0];
+            let drawn = tester.painted_calls(tester.render_object(badge));
+            assert!(!drawn.iter().any(|drawn| path_like(drawn).is_some()));
         });
     }
 
@@ -1331,9 +1330,9 @@ pub(crate) mod tests {
                     .child(SizedBox::shrink().child(Badge::new().label(Text::new("X"))))
                     .into_widget()
             });
-            let label = tester.find_text("X");
+            let label = find::text("X").evaluate(tester);
             assert_eq!(label.len(), 1);
-            let rect = tester.global_rect(tester.render_box_of(label[0]));
+            let rect = tester.get_rect(label[0]);
             assert_eq!(rect.size(), Size::ZERO);
         });
     }
@@ -1347,7 +1346,7 @@ pub(crate) mod tests {
                     None => Badge::count(count),
                 };
                 pump_app(tester, m3, |_app| top_left_aligned(badge.child(add_icon())));
-                assert_eq!(tester.find_text(text).len(), 1, "{text}");
+                assert_eq!(find::text(text).evaluate(tester).len(), 1, "{text}");
             };
 
             shows(5, Some(99), "5");
@@ -1378,7 +1377,7 @@ pub(crate) mod tests {
             pump_app(tester, m3, |_app| {
                 top_left_aligned(Badge::count(0).max_count(5).child(add_icon()))
             });
-            assert_eq!(tester.find_text("0").len(), 1);
+            assert_eq!(find::text("0").evaluate(tester).len(), 1);
         });
     }
 }

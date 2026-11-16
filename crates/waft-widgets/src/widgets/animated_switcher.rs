@@ -721,8 +721,10 @@ mod tests {
     use waft_embedder::{Size, TextDirection};
 
     use super::*;
-    use crate::framework::{AnyElement, downcast_widget};
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::testing::{
+        Finder, WidgetTester, assert_more_or_less_equals_within, expect, find, finds_n_widgets,
+        finds_nothing, finds_one_widget, test_widgets,
+    };
     use crate::widgets::basic::{Center, Column, Directionality, SizedBox};
     use crate::widgets::transitions::{Animated, ScaleTransition, SizeTransition};
 
@@ -732,35 +734,17 @@ mod tests {
         Duration::from_millis(milliseconds)
     }
 
-    /// `find.byKey(key)`.
-    fn count_by_key(tester: &WidgetTester, key: &KeyRef) -> usize {
-        let elements = tester.elements();
-        let app = tester.cell.borrow();
-        elements
-            .into_iter()
-            .filter(|element| element.widget(&app).key() == Some(key))
-            .count()
+    /// The `FadeTransition`s the switcher builds: Dart's `find.byType(FadeTransition)`.
+    fn fade_transitions() -> Finder {
+        find::by_type::<FadeTransition>()
     }
 
-    fn opacities(tester: &WidgetTester) -> Vec<f64> {
-        let found = tester.find_by_type::<FadeTransition>();
-        let app = tester.cell.borrow();
-        found
-            .into_iter()
-            .map(|element: AnyElement| {
-                downcast_widget::<FadeTransition>(&**element.widget(&app))
-                    .expect("a FadeTransition")
-                    .opacity
-                    .value(&app)
-            })
-            .collect()
-    }
-
-    fn assert_close(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() < 0.01,
-            "{actual} is not {expected}"
-        );
+    /// Dart's `tester.widget<FadeTransition>(finder).opacity.value`.
+    fn opacity(tester: &WidgetTester, finder: Finder) -> f64 {
+        let opacity = tester.widget(finder, |transition: &FadeTransition| {
+            transition.opacity.clone()
+        });
+        opacity.value(&tester.cell.borrow())
     }
 
     fn keyed_box(key: &KeyRef) -> WidgetRef {
@@ -784,19 +768,19 @@ mod tests {
         test_widgets(|tester| {
             let (one, two, three) = (unique_key(), unique_key(), unique_key());
             tester.pump_widget(switcher(Some(keyed_box(&one))));
-            assert_eq!(opacities(tester), [1.0]);
+            expect(tester, &fade_transitions(), finds_one_widget());
+            assert_eq!(opacity(tester, fade_transitions().first()), 1.0);
 
             tester.pump_widget(switcher(Some(keyed_box(&two))));
             tester.pump_by(ms(50));
-            assert_eq!(opacities(tester).len(), 2);
-            assert_eq!(opacities(tester)[0], 0.5);
+            expect(tester, &fade_transitions(), finds_n_widgets(2));
+            assert_eq!(opacity(tester, fade_transitions().first()), 0.5);
 
             tester.pump_widget(switcher(Some(keyed_box(&three))));
             tester.pump_by(ms(10));
-            let opacities_now = opacities(tester);
-            assert_close(opacities_now[0], 0.4);
-            assert_close(opacities_now[1], 0.4);
-            assert_close(opacities_now[2], 0.1);
+            assert_more_or_less_equals_within(opacity(tester, fade_transitions().at(0)), 0.4, 0.01);
+            assert_more_or_less_equals_within(opacity(tester, fade_transitions().at(1)), 0.4, 0.01);
+            assert_more_or_less_equals_within(opacity(tester, fade_transitions().at(2)), 0.1, 0.01);
             tester.pump_and_settle();
         });
     }
@@ -806,20 +790,19 @@ mod tests {
         test_widgets(|tester| {
             let (one, two, three) = (unique_key(), unique_key(), unique_key());
             tester.pump_widget(switcher(Some(keyed_box(&one))));
-            let counts = |tester: &WidgetTester| {
-                [
-                    count_by_key(tester, &one),
-                    count_by_key(tester, &two),
-                    count_by_key(tester, &three),
-                ]
-            };
-            assert_eq!(counts(tester), [1, 0, 0]);
+            expect(tester, &find::by_key(one.clone()), finds_one_widget());
+            expect(tester, &find::by_key(two.clone()), finds_nothing());
+            expect(tester, &find::by_key(three.clone()), finds_nothing());
 
             tester.pump_widget(switcher(Some(keyed_box(&two))));
-            assert_eq!(counts(tester), [1, 1, 0]);
+            expect(tester, &find::by_key(one.clone()), finds_one_widget());
+            expect(tester, &find::by_key(two.clone()), finds_one_widget());
+            expect(tester, &find::by_key(three.clone()), finds_nothing());
 
             tester.pump_widget(switcher(Some(keyed_box(&three))));
-            assert_eq!(counts(tester), [1, 0, 1]);
+            expect(tester, &find::by_key(one.clone()), finds_one_widget());
+            expect(tester, &find::by_key(two.clone()), finds_nothing());
+            expect(tester, &find::by_key(three.clone()), finds_one_widget());
         });
     }
 
@@ -828,11 +811,13 @@ mod tests {
         test_widgets(|tester| {
             let plain = |width: f64| SizedBox::new().width(width).into_widget();
             tester.pump_widget(switcher(Some(plain(1.0))));
-            assert_eq!(opacities(tester), [1.0]);
+            expect(tester, &fade_transitions(), finds_one_widget());
+            assert_eq!(opacity(tester, fade_transitions().first()), 1.0);
 
             tester.pump_widget(switcher(Some(plain(2.0))));
             tester.pump_by(ms(50));
-            assert_eq!(opacities(tester), [1.0]);
+            expect(tester, &fade_transitions(), finds_one_widget());
+            assert_eq!(opacity(tester, fade_transitions().first()), 1.0);
             tester.pump_and_settle();
         });
     }
@@ -842,23 +827,24 @@ mod tests {
         test_widgets(|tester| {
             let plain = || SizedBox::new().into_widget();
             tester.pump_widget(switcher(None));
-            assert!(tester.find_by_type::<FadeTransition>().is_empty());
+            expect(tester, &fade_transitions(), finds_nothing());
 
             tester.pump_widget(switcher(Some(plain())));
             tester.pump_by(ms(50));
-            assert_eq!(opacities(tester)[0], 0.5);
+            assert_eq!(opacity(tester, fade_transitions().first()), 0.5);
             tester.pump_and_settle();
 
             tester.pump_widget(switcher(Some(plain())));
-            assert_eq!(opacities(tester), [1.0]);
+            expect(tester, &fade_transitions(), finds_one_widget());
+            assert_eq!(opacity(tester, fade_transitions().first()), 1.0);
 
             tester.pump_widget(switcher(None));
             tester.pump_by(ms(50));
-            assert_eq!(opacities(tester)[0], 0.5);
+            assert_eq!(opacity(tester, fade_transitions().first()), 0.5);
 
             tester.pump_widget(switcher(None));
             tester.pump_by(ms(50));
-            assert_eq!(opacities(tester)[0], 0.0);
+            assert_eq!(opacity(tester, fade_transitions().first()), 0.0);
 
             tester.pump_and_settle();
         });
@@ -884,11 +870,10 @@ mod tests {
             let (one, two) = (unique_key(), unique_key());
             tester.pump_widget(switcher(Some(keyed_box(&one))));
             let current_animation = |tester: &WidgetTester| {
-                let elements = tester.elements();
+                let element = tester.element(find::by_type::<AnimatedSwitcher>());
                 let app = tester.cell.borrow();
-                let state = elements
-                    .into_iter()
-                    .find_map(|element| element.state_handle::<AnimatedSwitcherState>(&app))
+                let state = element
+                    .state_handle::<AnimatedSwitcherState>(&app)
                     .expect("a mounted AnimatedSwitcher");
                 app.get(state)
                     .current_entry
@@ -929,7 +914,7 @@ mod tests {
                 },
             );
             tester.pump_widget(widget);
-            assert_eq!(tester.find_by_type::<Column>().len(), 1);
+            expect(tester, &find::by_type::<Column>(), finds_one_widget());
         });
     }
 
@@ -974,7 +959,7 @@ mod tests {
                 Directionality::new(TextDirection::Rtl, switcher).into_widget()
             };
             tester.pump_widget(tree(Some(SizedBox::new().into_widget())));
-            assert_eq!(tester.find_by_type::<Column>().len(), 1);
+            expect(tester, &find::by_type::<Column>(), finds_one_widget());
             for child in found_children.borrow().iter() {
                 as_keyed_subtree(child);
             }
@@ -1047,22 +1032,22 @@ mod tests {
             };
             let (one, two, three) = (unique_key(), unique_key(), unique_key());
             tester.pump_widget(stateful(&one));
-            assert_eq!(opacities(tester), [1.0]);
+            expect(tester, &fade_transitions(), finds_one_widget());
+            assert_eq!(opacity(tester, fade_transitions().first()), 1.0);
             assert_eq!(generation.get(), 1);
 
             tester.pump_widget(stateful(&two));
             tester.pump_by(ms(50));
-            assert_eq!(opacities(tester).len(), 2);
-            assert_eq!(opacities(tester)[0], 0.5);
+            expect(tester, &fade_transitions(), finds_n_widgets(2));
+            assert_eq!(opacity(tester, fade_transitions().first()), 0.5);
             assert_eq!(generation.get(), 2);
 
             tester.pump_widget(stateful(&three));
             tester.pump_by(ms(10));
             assert_eq!(generation.get(), 3);
-            let opacities_now = opacities(tester);
-            assert_close(opacities_now[0], 0.4);
-            assert_close(opacities_now[1], 0.4);
-            assert_close(opacities_now[2], 0.1);
+            assert_more_or_less_equals_within(opacity(tester, fade_transitions().at(0)), 0.4, 0.01);
+            assert_more_or_less_equals_within(opacity(tester, fade_transitions().at(1)), 0.4, 0.01);
+            assert_more_or_less_equals_within(opacity(tester, fade_transitions().at(2)), 0.1, 0.01);
             tester.pump_and_settle();
             assert_eq!(generation.get(), 3);
         });
@@ -1079,20 +1064,18 @@ mod tests {
             };
             tester.pump_widget(sized(1.0));
             tester.pump_by(ms(10));
-            assert_eq!(opacities(tester)[0], 1.0);
-            let widths = |tester: &WidgetTester| {
-                tester
-                    .find_by_type::<SizedBox>()
-                    .into_iter()
-                    .map(|element| tester.widget(element, |sized_box: &SizedBox| sized_box.width))
-                    .collect::<Vec<_>>()
+            assert_eq!(opacity(tester, fade_transitions().first()), 1.0);
+            let width = |tester: &WidgetTester| {
+                tester.widget(find::by_type::<SizedBox>(), |sized_box: &SizedBox| {
+                    sized_box.width
+                })
             };
-            assert_eq!(widths(tester), [Some(1.0)]);
+            assert_eq!(width(tester), Some(1.0));
 
             tester.pump_widget(sized(2.0));
             tester.pump_by(ms(20));
-            assert_eq!(opacities(tester)[0], 1.0);
-            assert_eq!(widths(tester), [Some(2.0)]);
+            assert_eq!(opacity(tester, fade_transitions().first()), 1.0);
+            assert_eq!(width(tester), Some(2.0));
         });
     }
 
@@ -1167,7 +1150,7 @@ mod tests {
             tester.pump_widget(tree(&two));
             tester.pump_widget(tree(&one));
             tester.pump_by(ms(1000));
-            assert_eq!(count_by_key(tester, &one), 1);
+            expect(tester, &find::by_key(one.clone()), finds_one_widget());
         });
     }
 
@@ -1184,10 +1167,8 @@ mod tests {
                     Center::new().child(SizedBox::shrink().child(switcher)),
                 )
             };
-            let switcher_size = |tester: &WidgetTester| {
-                let element = tester.find_by_type::<AnimatedSwitcher>()[0];
-                tester.global_rect(tester.render_box_of(element)).size()
-            };
+            let switcher_size =
+                |tester: &WidgetTester| tester.get_size(find::by_type::<AnimatedSwitcher>());
             tester.pump_widget(tree(None));
             assert_eq!(switcher_size(tester), Size::ZERO);
 

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use waft_embedder::{RestorationMap, RestorationUpdate, Size, TargetPlatform, ViewRef};
 use waft_foundation::{App, AppCell};
+use waft_rendering::RendererBinding;
 use waft_scheduler::{FrameTarget, SchedulerBinding};
 use waft_test::{TestPlatform, TestView};
 
@@ -22,10 +23,11 @@ pub struct WidgetTester {
     pub cell: Rc<AppCell>,
     platform: Rc<TestPlatform>,
     view: Rc<TestView>,
-    device_pixel_ratio: f64,
     restoration: Option<Rc<TestRestoration>>,
     /// Whether a pump is running, or began and unwound: a pump that panicked never clears it.
     in_pump: bool,
+    /// Dart's `_nextPointer`: the pointer the next finder-taking gesture uses.
+    next_pointer: std::cell::Cell<i64>,
 }
 
 /// The host side of flutter_test's `TestRestorationManager`: it answers `Restoration::get` with
@@ -68,37 +70,42 @@ impl WidgetTester {
         WidgetTester::with_view(platform, Self::default_view())
     }
 
-    /// A tester on `platform` whose view is `physical_size` at flutter_test's device pixel ratio:
-    /// Dart's `tester.view.physicalSize = physical_size`.
-    pub fn with_physical_size(platform: TestPlatform, physical_size: Size) -> WidgetTester {
-        WidgetTester::with_view(
-            platform,
-            TestView::with_pixel_ratio(
-                physical_size.width(),
-                physical_size.height(),
-                WidgetTester::DEVICE_PIXEL_RATIO,
-            ),
-        )
-    }
-
-    /// A tester on `platform` with `view` as its one view: Dart's `tester.view.physicalSize` and
-    /// `tester.view.devicePixelRatio` set before the case pumps.
+    /// A tester on `platform` with `view` as its one view, for a case whose view is not
+    /// flutter_test's: one with a host of the case's own. A case that only sets the view's
+    /// metrics sets them on [`view`](Self::view), as Dart's does.
     pub fn with_view(platform: TestPlatform, view: TestView) -> WidgetTester {
         let view = Rc::new(view);
-        let device_pixel_ratio = waft_embedder::View::metrics(&*view).device_pixel_ratio;
         let platform = Rc::new(platform.with_view(Rc::clone(&view) as ViewRef));
         let cell = AppCell::with_platform(Rc::clone(&platform) as waft_embedder::PlatformRef);
         let mut tester = WidgetTester {
             cell,
             platform,
             view,
-            device_pixel_ratio,
             restoration: None,
             in_pump: false,
+            next_pointer: std::cell::Cell::new(1),
         };
+        tester.report_view_metrics_changes();
         tester.install_flutter_test_fonts();
         tester.pump_pre_test_tree();
         tester
+    }
+
+    /// Makes the view's metrics changes reach the framework as a host's do: dart:ui's
+    /// `onMetricsChanged`, which the framework sets to `RendererBinding.handleMetricsChanged`,
+    /// as one platform event, the checkpoint after it.
+    fn report_view_metrics_changes(&self) {
+        let cell = Rc::downgrade(&self.cell);
+        self.view.set_metrics_listener(Rc::new(move |_view| {
+            let Some(cell) = cell.upgrade() else {
+                return;
+            };
+            {
+                let mut app = cell.borrow_mut();
+                RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
+            }
+            cell.checkpoint();
+        }));
     }
 
     /// flutter_test's `_runTestBody` before the case: `runApp(Container(key: UniqueKey(), child:
@@ -164,10 +171,23 @@ impl WidgetTester {
         &self.platform
     }
 
-    /// The view the tree is in, whose host records what the framework asks of it: Dart's
-    /// `tester.view`.
+    /// The view the tree is in, whose host records what the framework asks of it and whose
+    /// metrics a case sets: Dart's `tester.view`. A metric set reaches the framework at once, so
+    /// a case sets it while it does not hold the app.
     pub fn view(&self) -> &Rc<TestView> {
         &self.view
+    }
+
+    /// Dart's `tester.binding.setSurfaceSize(size)`: the view's render view is laid out at `size`
+    /// logical pixels, or at the view's own size again for `None`, while the view's metrics, and
+    /// so the `MediaQuery`, stay as they are.
+    pub fn set_surface_size(&self, size: Option<Size>) {
+        {
+            let mut app = self.cell.borrow_mut();
+            let view = waft_embedder::View::id(&*self.view);
+            RendererBinding::instance(&mut app).set_surface_size(&mut app, view, size);
+        }
+        self.cell.checkpoint();
     }
 
     /// The target platform the case runs on: Dart's `defaultTargetPlatform`, which a
@@ -179,7 +199,7 @@ impl WidgetTester {
     /// The view's device pixel ratio, which turns a case's logical positions into the physical
     /// ones the host reports.
     pub fn device_pixel_ratio(&self) -> f64 {
-        self.device_pixel_ratio
+        waft_embedder::View::metrics(&*self.view).device_pixel_ratio
     }
 
     /// Dart's `tester.getRestorationData()`: what the host holds, which is what the app last
@@ -201,16 +221,48 @@ impl WidgetTester {
     /// Dart's `tester.pumpWidget(widget)`: makes `widget` the view's child, schedules a frame
     /// and pumps once.
     pub fn pump_widget<K>(&mut self, widget: impl IntoWidget<K>) {
-        self.in_pump = true;
-        {
-            let mut app = self.cell.borrow_mut();
-            let view = Rc::clone(&self.view) as ViewRef;
-            let view_id = view.id();
-            let root = View::new(view, widget.into_widget()).into_widget();
-            WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
-            SchedulerBinding::schedule_frame(&mut app, FrameTarget::View(view_id));
-        }
+        self.attach_and_schedule(widget);
         self.pump();
+    }
+
+    /// Dart's `binding.attachRootWidget(binding.wrapWithDefaultView(widget))` and
+    /// `binding.scheduleFrame()`.
+    fn attach_and_schedule<K>(&mut self, widget: impl IntoWidget<K>) {
+        self.in_pump = true;
+        let mut app = self.cell.borrow_mut();
+        let view = Rc::clone(&self.view) as ViewRef;
+        let view_id = view.id();
+        let root = View::new(view, widget.into_widget()).into_widget();
+        WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
+        SchedulerBinding::schedule_frame(&mut app, FrameTarget::View(view_id));
+    }
+
+    /// Dart's `tester.pumpFrames(target, maxDuration)`: makes `widget` the view's child,
+    /// schedules a frame, and pumps frames 16.683ms apart until `max_duration` has passed.
+    pub fn pump_frames<K>(&mut self, widget: impl IntoWidget<K>, max_duration: Duration) {
+        self.pump_frames_every(widget, max_duration, Duration::from_micros(16_683));
+    }
+
+    /// Dart's `tester.pumpFrames(target, maxDuration, interval)`.
+    pub fn pump_frames_every<K>(
+        &mut self,
+        widget: impl IntoWidget<K>,
+        max_duration: Duration,
+        interval: Duration,
+    ) {
+        self.attach_and_schedule(widget);
+        let mut elapsed = Duration::ZERO;
+        while elapsed < max_duration {
+            self.pump_by(interval);
+            elapsed += interval;
+        }
+    }
+
+    /// Dart's `tester.nextPointer`: the pointer a finder-taking gesture uses, numbered from 1.
+    pub fn next_pointer(&self) -> i64 {
+        let pointer = self.next_pointer.get();
+        self.next_pointer.set(pointer + 1);
+        pointer
     }
 
     /// Dart's `tester.pump()`: a frame now, if a view asked for one, with no time passing and

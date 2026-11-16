@@ -373,13 +373,13 @@ mod tests {
     use std::time::Duration;
     use waft_foundation::Ref;
 
-    use waft_embedder::{Canvas, Offset, Size};
+    use waft_embedder::{Canvas, Size};
     use waft_rendering::CustomPainter;
     use waft_services::SystemMouseCursors;
 
     use super::*;
     use crate::framework::IntoWidget;
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::testing::{WidgetTester, find, test_widgets};
     use crate::widgets::basic::{Builder, Center, CustomPaint, Directionality, SizedBox};
     use crate::widgets::focus_manager::FocusNode;
     use crate::widgets::radio_group::{AnyRadioClient, RadioGroup, RadioGroupRegistry};
@@ -462,9 +462,6 @@ mod tests {
             .into_widget()
     }
 
-    /// The radio fills the view's top-left 40x40, so a tap at (20, 20) lands on it.
-    const ON_THE_RADIO: Offset = Offset::new(20.0, 20.0);
-
     fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
         tester.update(|app| FocusNode::new(app).erase())
     }
@@ -504,7 +501,7 @@ mod tests {
                 );
             }
 
-            tester.tap(ON_THE_RADIO, 1);
+            tester.tap(find::by_type::<RawRadio<u32>>());
             // Rebuilds with new group value
             tester.pump_widget(build(&captured));
 
@@ -529,7 +526,7 @@ mod tests {
                 captured,
                 painted_box,
             ));
-            tester.tap(ON_THE_RADIO, 1);
+            tester.tap(find::by_type::<RawRadio<u32>>());
 
             // onChanged won't fire
             assert_eq!(tester.cell.borrow().get(&registry).group_value, None);
@@ -605,7 +602,7 @@ mod tests {
             let state = captured.get().expect("the builder ran");
             assert_eq!(state.value(&tester.cell.borrow()), Some(false));
 
-            tester.tap(ON_THE_RADIO, 1);
+            tester.tap(find::by_type::<RawRadio<String>>());
             assert_eq!(*changes.borrow(), [Some(String::from("lafayette"))]);
 
             // An equal string that is another object selects the radio.
@@ -618,7 +615,7 @@ mod tests {
             assert_eq!(state.value(&tester.cell.borrow()), Some(true));
 
             // Selecting a toggleable radio again unselects it.
-            tester.tap(ON_THE_RADIO, 1);
+            tester.tap(find::by_type::<RawRadio<String>>());
             assert_eq!(*changes.borrow(), [Some(String::from("lafayette")), None]);
         });
     }

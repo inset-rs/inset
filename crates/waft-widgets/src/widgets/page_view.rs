@@ -1649,10 +1649,7 @@ mod tests {
 
     use waft_animation::Curves;
     use waft_embedder::{Offset, Size, TextDirection};
-    use waft_rendering::{
-        AnyRenderBox, ContainerRenderObjectMixin, RenderHandle, RenderSliver,
-        RenderSliverFillViewport, RenderSliverMultiBoxAdaptor, SliverMultiBoxAdaptorParentData,
-    };
+    use waft_rendering::{RenderHandle, RenderSliver, RenderSliverFillViewport};
 
     use waft_embedder::{Color, TargetPlatform};
     use waft_foundation::{Listener, ValueKey};
@@ -1660,16 +1657,19 @@ mod tests {
 
     use super::*;
     use crate::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        Finder, TargetPlatformVariant, TestPointer, WidgetTester, assert_more_or_less_equals,
+        expect, find, finds_nothing, finds_one_widget, test_widgets, test_widgets_variant,
     };
-    use crate::widgets::basic::{
-        Builder, Center, ColoredBox, Column, Expanded, OverflowBox, SizedBox,
-    };
+    use crate::widgets::basic::{Builder, Center, Column, Expanded, OverflowBox, SizedBox};
     use crate::widgets::container::Container;
     use crate::widgets::gesture_detector::GestureDetector;
     use crate::widgets::overlay::{Overlay, OverlayEntry};
     use crate::widgets::page_storage::{PageStorage, PageStorageBucket, PageStorageKey};
     use crate::widgets::scroll_physics::{BouncingScrollPhysics, ClampingScrollPhysics};
+    use crate::widgets::text::Text;
+
+    const K_BLUE: Color = Color::new(0xFF0000FF);
+    const K_GREEN: Color = Color::new(0xFF00FF00);
 
     /// `states.dart`'s `kStates`.
     const K_STATES: [&str; 50] = [
@@ -1725,9 +1725,6 @@ mod tests {
         "Wyoming",
     ];
 
-    /// The center of the 800 x 600 view, where `find.byType(PageView)` puts a gesture.
-    const CENTER: Offset = Offset::new(400.0, 300.0);
-
     fn index_of(state: &str) -> i32 {
         K_STATES
             .iter()
@@ -1735,12 +1732,11 @@ mod tests {
             .expect("a state") as i32
     }
 
-    /// `kStates.map((state) => Text(state))`: a page per state, each filling its page as the
-    /// `Text` does under the page's tight constraints.
+    /// `kStates.map((state) => Text(state))`.
     fn states() -> Vec<WidgetRef> {
         K_STATES
             .iter()
-            .map(|_| SizedBox::expand().into_widget())
+            .map(|&state| Text::new(state).into_widget())
             .collect()
     }
 
@@ -1757,94 +1753,6 @@ mod tests {
             .all::<RenderSliverFillViewport>()
             .first()
             .expect("a mounted page view")
-    }
-
-    /// The page index and box of every child the fill viewport has laid out.
-    fn pages(tester: &WidgetTester) -> Vec<(i32, AnyRenderBox)> {
-        let fill = fill_viewport(tester);
-        let app = tester.cell.borrow();
-        let mut pages = Vec::new();
-        let mut child = fill.first_child(&app);
-        while let Some(current) = child {
-            pages.push((fill.index_of(&app, current), current));
-            child = fill.child_after(&app, current);
-        }
-        pages
-    }
-
-    /// The pages `find.text(state)` finds onstage: the viewport's visible sliver's children whose
-    /// extent overlaps its paint region, as `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren`
-    /// tests.
-    fn onstage(tester: &WidgetTester) -> Vec<i32> {
-        let fill = fill_viewport(tester);
-        let pages = pages(tester);
-        let app = tester.cell.borrow();
-        let padding = fill
-            .as_object()
-            .parent(&app)
-            .and_then(|parent| parent.as_sliver())
-            .expect("the fill viewport sits in its fractional padding");
-        if !padding.geometry(&app).visible {
-            return Vec::new();
-        }
-        let constraints = fill.constraints(&app);
-        pages
-            .into_iter()
-            .filter(|(_, child)| {
-                let layout_offset = child
-                    .as_object()
-                    .parent_data_of::<SliverMultiBoxAdaptorParentData>(&app)
-                    .layout_offset();
-                let size = child.size(&app);
-                let item_extent = match constraints.axis() {
-                    Axis::Horizontal => size.width(),
-                    Axis::Vertical => size.height(),
-                };
-                layout_offset.is_some_and(|offset| {
-                    offset < constraints.scroll_offset + constraints.remaining_paint_extent
-                        && offset + item_extent > constraints.scroll_offset
-                })
-            })
-            .map(|(index, _)| index)
-            .collect()
-    }
-
-    /// `find.text(state)` finds one widget.
-    fn finds(tester: &WidgetTester, state: &str) -> bool {
-        onstage(tester).contains(&index_of(state))
-    }
-
-    /// `find.text(state, skipOffstage: false)` finds one widget.
-    fn finds_built(tester: &WidgetTester, state: &str) -> bool {
-        pages(tester)
-            .iter()
-            .any(|(index, _)| *index == index_of(state))
-    }
-
-    fn page_box(tester: &WidgetTester, index: i32) -> AnyRenderBox {
-        pages(tester)
-            .into_iter()
-            .find(|(page, _)| *page == index)
-            .map(|(_, child)| child)
-            .expect("the page is laid out")
-    }
-
-    /// `tester.getTopLeft(find.text(state))`.
-    fn top_left(tester: &WidgetTester, state: &str) -> Offset {
-        let child = page_box(tester, index_of(state));
-        child.local_to_global(&tester.cell.borrow(), Offset::ZERO, None)
-    }
-
-    /// `tester.getCenter(..)` of the page at `index`.
-    fn center_of(tester: &WidgetTester, index: i32) -> Offset {
-        let child = page_box(tester, index);
-        let app = tester.cell.borrow();
-        let size = child.size(&app);
-        child.local_to_global(
-            &app,
-            Offset::new(size.width() / 2.0, size.height() / 2.0),
-            None,
-        )
     }
 
     fn page(tester: &WidgetTester, controller: Handle<PageController>) -> Option<f64> {
@@ -1886,55 +1794,61 @@ mod tests {
                     GestureDetector::new()
                         .drag_start_behavior(DragStartBehavior::Down)
                         .on_tap(Listener::new(move |_| log.borrow_mut().push(state)))
-                        // The test's `Text` fills the container, which fills the page.
-                        .child(Container::new().height(200.0).color(Color::new(0xFF0000FF)))
+                        .child(
+                            Container::new()
+                                .height(200.0)
+                                .color(K_BLUE)
+                                .child(Text::new(state)),
+                        )
                         .into_widget()
                 }))));
 
-            let alabama = center_of(tester, index_of("Alabama"));
-            tester.tap(alabama, 1);
+            tester.tap(find::text("Alabama"));
             assert_eq!(*log.borrow(), ["Alabama"]);
             log.borrow_mut().clear();
 
-            assert!(!finds(tester, "Alaska"));
+            expect(tester, &find::text("Alaska"), finds_nothing());
 
-            tester.drag_from(CENTER, Offset::new(-20.0, 0.0), 1);
+            tester.drag(find::by_type::<PageView>(), Offset::new(-20.0, 0.0));
             tester.pump();
 
-            assert!(finds(tester, "Alabama"));
-            assert!(finds(tester, "Alaska"));
-            assert!(!finds(tester, "Arizona"));
+            expect(tester, &find::text("Alabama"), finds_one_widget());
+            expect(tester, &find::text("Alaska"), finds_one_widget());
+            expect(tester, &find::text("Arizona"), finds_nothing());
 
             tester.pump_and_settle();
 
-            assert!(finds(tester, "Alabama"));
-            assert!(!finds(tester, "Alaska"));
+            expect(tester, &find::text("Alabama"), finds_one_widget());
+            expect(tester, &find::text("Alaska"), finds_nothing());
 
-            tester.drag_from(CENTER, Offset::new(-401.0, 0.0), 1);
+            tester.drag(find::by_type::<PageView>(), Offset::new(-401.0, 0.0));
             tester.pump_and_settle();
 
-            assert!(!finds(tester, "Alabama"));
-            assert!(finds(tester, "Alaska"));
-            assert!(!finds(tester, "Arizona"));
+            expect(tester, &find::text("Alabama"), finds_nothing());
+            expect(tester, &find::text("Alaska"), finds_one_widget());
+            expect(tester, &find::text("Arizona"), finds_nothing());
 
-            let alaska = center_of(tester, index_of("Alaska"));
-            tester.tap(alaska, 1);
+            tester.tap(find::text("Alaska"));
             assert_eq!(*log.borrow(), ["Alaska"]);
             log.borrow_mut().clear();
 
-            tester.fling_from(CENTER, Offset::new(-200.0, 0.0), 1000.0, 1);
+            tester.fling(
+                find::by_type::<PageView>(),
+                Offset::new(-200.0, 0.0),
+                1000.0,
+            );
             tester.pump_and_settle();
 
-            assert!(!finds(tester, "Alabama"));
-            assert!(!finds(tester, "Alaska"));
-            assert!(finds(tester, "Arizona"));
+            expect(tester, &find::text("Alabama"), finds_nothing());
+            expect(tester, &find::text("Alaska"), finds_nothing());
+            expect(tester, &find::text("Arizona"), finds_one_widget());
 
-            tester.fling_from(CENTER, Offset::new(200.0, 0.0), 1000.0, 1);
+            tester.fling(find::by_type::<PageView>(), Offset::new(200.0, 0.0), 1000.0);
             tester.pump_and_settle();
 
-            assert!(!finds(tester, "Alabama"));
-            assert!(finds(tester, "Alaska"));
-            assert!(!finds(tester, "Arizona"));
+            expect(tester, &find::text("Alabama"), finds_nothing());
+            expect(tester, &find::text("Alaska"), finds_one_widget());
+            expect(tester, &find::text("Arizona"), finds_nothing());
         });
     }
 
@@ -1950,7 +1864,7 @@ mod tests {
                     .children(states()),
             ));
 
-            assert!(finds(tester, "California"));
+            expect(tester, &find::text("California"), finds_one_widget());
 
             drop(controller.next_page(
                 &mut tester.cell.borrow_mut(),
@@ -1959,7 +1873,7 @@ mod tests {
             ));
             tester.pump_and_settle();
 
-            assert!(finds(tester, "Colorado"));
+            expect(tester, &find::text("Colorado"), finds_one_widget());
 
             tester.pump_widget(centered(
                 300.0,
@@ -1969,7 +1883,7 @@ mod tests {
                     .children(states()),
             ));
 
-            assert!(finds(tester, "Colorado"));
+            expect(tester, &find::text("Colorado"), finds_one_widget());
 
             drop(controller.previous_page(
                 &mut tester.cell.borrow_mut(),
@@ -1978,7 +1892,7 @@ mod tests {
             ));
             tester.pump_and_settle();
 
-            assert!(finds(tester, "California"));
+            expect(tester, &find::text("California"), finds_one_widget());
         });
     }
 
@@ -1987,20 +1901,20 @@ mod tests {
         test_widgets(|tester| {
             tester.pump_widget(centered(600.0, 400.0, PageView::new().children(states())));
 
-            assert!(finds(tester, "Alabama"));
+            expect(tester, &find::text("Alabama"), finds_one_widget());
 
-            tester.drag_from(CENTER, Offset::new(-1250.0, 0.0), 1);
+            tester.drag(find::by_type::<PageView>(), Offset::new(-1250.0, 0.0));
             tester.pump_and_settle();
 
-            assert!(finds(tester, "Arizona"));
+            expect(tester, &find::text("Arizona"), finds_one_widget());
 
             tester.pump_widget(centered(250.0, 100.0, PageView::new().children(states())));
 
-            assert!(finds(tester, "Arizona"));
+            expect(tester, &find::text("Arizona"), finds_one_widget());
 
             tester.pump_widget(centered(450.0, 400.0, PageView::new().children(states())));
 
-            assert!(finds(tester, "Arizona"));
+            expect(tester, &find::text("Arizona"), finds_one_widget());
         });
     }
 
@@ -2045,11 +1959,15 @@ mod tests {
                 .pump_widget(ltr(Center::new()
                     .child(SizedBox::shrink().child(PageView::new().children(states())))));
 
-            assert!(finds_built(tester, "Alabama"));
+            expect(
+                tester,
+                &find::text("Alabama").skip_offstage(false),
+                finds_one_widget(),
+            );
 
             tester.pump_widget(centered(200.0, 200.0, PageView::new().children(states())));
 
-            assert!(finds(tester, "Alabama"));
+            expect(tester, &find::text("Alabama"), finds_one_widget());
         });
     }
 
@@ -2071,26 +1989,30 @@ mod tests {
 
             // The pageView have a zero viewport, so nothing display.
             tester.pump_widget(sized_page_view(Size::ZERO, &controller));
-            assert!(!finds(tester, "Alabama"));
-            assert!(finds_built(tester, "Alabama"));
+            expect(tester, &find::text("Alabama"), finds_nothing());
+            expect(
+                tester,
+                &find::text("Alabama").skip_offstage(false),
+                finds_one_widget(),
+            );
 
             // Resize from zero viewport to non-zero, the controller's initialPage 1 will display.
             tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), &controller));
-            assert!(finds(tester, "Alaska"));
+            expect(tester, &find::text("Alaska"), finds_one_widget());
 
             // Jump to page 'Iowa'.
             controller.jump_to_page(&mut tester.cell.borrow_mut(), index_of("Iowa"));
             tester.pump();
-            assert!(finds(tester, "Iowa"));
+            expect(tester, &find::text("Iowa"), finds_one_widget());
 
             // Resize to zero viewport again, nothing display.
             tester.pump_widget(sized_page_view(Size::ZERO, &controller));
-            assert!(!finds(tester, "Iowa"));
+            expect(tester, &find::text("Iowa"), finds_nothing());
 
             // Resize from zero to non-zero, the pageView should not lose state, so the page 'Iowa'
             // show again.
             tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), &controller));
-            assert!(finds(tester, "Iowa"));
+            expect(tester, &find::text("Iowa"), finds_one_widget());
         });
     }
 
@@ -2101,11 +2023,13 @@ mod tests {
 
             // The pageView have a zero viewport, so nothing display.
             tester.pump_widget(sized_page_view(Size::ZERO, &controller));
-            let page_view = tester.render_box_of(tester.find_by_type::<PageView>()[0]);
-            let size = page_view.size(&tester.cell.borrow());
-            assert_eq!(size, Size::ZERO);
-            assert!(!finds(tester, "Alabama"));
-            assert!(finds_built(tester, "Alabama"));
+            assert_eq!(tester.get_size(find::by_type::<PageView>()), Size::ZERO);
+            expect(tester, &find::text("Alabama"), finds_nothing());
+            expect(
+                tester,
+                &find::text("Alabama").skip_offstage(false),
+                finds_one_widget(),
+            );
 
             // Change the page through the page controller when zero viewport
             drop(controller.animate_to_page(
@@ -2131,7 +2055,7 @@ mod tests {
                 page(tester, controller.handle()),
                 Some(f64::from(index_of("Illinois")))
             );
-            assert!(finds(tester, "Illinois"));
+            expect(tester, &find::text("Illinois"), finds_one_widget());
         });
     }
 
@@ -2154,23 +2078,23 @@ mod tests {
             let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(100.0, 100.0));
             // The page view is 800.0 wide, so this move is just short of halfway.
-            move_by(tester, &mut gesture, Offset::new(-380.0, 0.0));
+            tester.move_by(&mut gesture, Offset::new(-380.0, 0.0), true);
 
             assert!(log.borrow().is_empty());
 
             // We've crossed the halfway mark.
-            move_by(tester, &mut gesture, Offset::new(-40.0, 0.0));
+            tester.move_by(&mut gesture, Offset::new(-40.0, 0.0), true);
 
             assert_eq!(*log.borrow(), vec![1]);
             log.borrow_mut().clear();
 
             // Moving a bit more should not generate redundant notifications.
-            move_by(tester, &mut gesture, Offset::new(-40.0, 0.0));
+            tester.move_by(&mut gesture, Offset::new(-40.0, 0.0), true);
 
             assert!(log.borrow().is_empty());
 
             for _ in 0..3 {
-                move_by(tester, &mut gesture, Offset::new(-40.0, 0.0));
+                tester.move_by(&mut gesture, Offset::new(-40.0, 0.0), true);
                 tester.pump();
             }
 
@@ -2181,8 +2105,8 @@ mod tests {
 
             assert!(log.borrow().is_empty());
 
-            assert!(!finds(tester, "Alabama"));
-            assert!(finds(tester, "Alaska"));
+            expect(tester, &find::text("Alabama"), finds_nothing());
+            expect(tester, &find::text("Alaska"), finds_one_widget());
         });
     }
 
@@ -2215,59 +2139,102 @@ mod tests {
 
             // Fling right to move to a non-existent page at the beginning of the
             // PageView, and confirm that the PageView settles back on the first page.
-            tester.fling_from(CENTER, Offset::new(100.0, 0.0), 800.0, 1);
+            tester.fling(find::by_type::<PageView>(), Offset::new(100.0, 0.0), 800.0);
             tester.pump_and_settle();
             assert!(log.borrow().is_empty());
 
-            assert!(finds(tester, "Alabama"));
-            assert!(finds(tester, "Alaska"));
-            assert!(!finds(tester, "Arizona"));
+            expect(tester, &find::text("Alabama"), finds_one_widget());
+            expect(tester, &find::text("Alaska"), finds_one_widget());
+            expect(tester, &find::text("Arizona"), finds_nothing());
 
             // Try again with a Cupertino "Plus" device size.
             tester.pump_widget(build(Some(Size::new(414.0, 736.0))));
             assert!(log.borrow().is_empty());
 
-            tester.fling_from(CENTER, Offset::new(100.0, 0.0), 800.0, 1);
+            tester.fling(find::by_type::<PageView>(), Offset::new(100.0, 0.0), 800.0);
             tester.pump_and_settle();
             assert!(log.borrow().is_empty());
 
-            assert!(finds(tester, "Alabama"));
-            assert!(finds(tester, "Alaska"));
-            assert!(!finds(tester, "Arizona"));
+            expect(tester, &find::text("Alabama"), finds_one_widget());
+            expect(tester, &find::text("Alaska"), finds_one_widget());
+            expect(tester, &find::text("Arizona"), finds_nothing());
         });
     }
 
-    fn built_page_view(controller: &Ref<PageController>, item_count: i32) -> WidgetRef {
-        ltr(
-            PageView::builder(|_, _, _| Some(SizedBox::expand().into_widget()))
-                .item_count(item_count)
-                .build()
-                .controller(controller.clone()),
-        )
+    /// The viewport fraction tests' `PageView.builder`: a page per label, a `Container` of
+    /// height 200, blue or green by the index's parity, showing the label.
+    fn built_page_view(controller: &Ref<PageController>, labels: Vec<String>) -> WidgetRef {
+        let item_count = labels.len() as i32;
+        ltr(PageView::builder(move |_, _, index| {
+            Some(
+                Container::new()
+                    .height(200.0)
+                    .color(if index % 2 == 0 { K_BLUE } else { K_GREEN })
+                    .child(Text::new(labels[index as usize].clone()))
+                    .into_widget(),
+            )
+        })
+        .item_count(item_count)
+        .build()
+        .controller(controller.clone()))
+    }
+
+    /// `kStates`, as the viewport fraction tests label their pages.
+    fn state_labels() -> Vec<String> {
+        K_STATES.iter().map(|state| state.to_string()).collect()
+    }
+
+    /// `index.toString()` for `count` pages.
+    fn index_labels(count: i32) -> Vec<String> {
+        (0..count).map(|index| index.to_string()).collect()
     }
 
     #[test]
     fn pages_fill_their_viewport_fraction() {
         test_widgets(|tester| {
             let controller = new_controller(tester, 0, 7.0 / 8.0);
-            tester.pump_widget(built_page_view(&controller, K_STATES.len() as i32));
+            tester.pump_widget(built_page_view(&controller, state_labels()));
 
-            assert_eq!(top_left(tester, "Alabama"), Offset::new(50.0, 0.0));
-            assert_eq!(top_left(tester, "Alaska"), Offset::new(750.0, 0.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Alabama")),
+                Offset::new(50.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Alaska")),
+                Offset::new(750.0, 0.0)
+            );
 
             controller.jump_to_page(&mut tester.cell.borrow_mut(), 10);
             tester.pump();
 
-            assert_eq!(top_left(tester, "Georgia"), Offset::new(-650.0, 0.0));
-            assert_eq!(top_left(tester, "Hawaii"), Offset::new(50.0, 0.0));
-            assert_eq!(top_left(tester, "Idaho"), Offset::new(750.0, 0.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Georgia")),
+                Offset::new(-650.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Hawaii")),
+                Offset::new(50.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Idaho")),
+                Offset::new(750.0, 0.0)
+            );
 
             let controller = new_controller(tester, 0, 39.0 / 40.0);
-            tester.pump_widget(built_page_view(&controller, K_STATES.len() as i32));
+            tester.pump_widget(built_page_view(&controller, state_labels()));
 
-            assert_eq!(top_left(tester, "Georgia"), Offset::new(-770.0, 0.0));
-            assert_eq!(top_left(tester, "Hawaii"), Offset::new(10.0, 0.0));
-            assert_eq!(top_left(tester, "Idaho"), Offset::new(790.0, 0.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Georgia")),
+                Offset::new(-770.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Hawaii")),
+                Offset::new(10.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Idaho")),
+                Offset::new(790.0, 0.0)
+            );
         });
     }
 
@@ -2282,7 +2249,7 @@ mod tests {
             let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(100.0, 100.0));
             // The page view is 800.0 wide, so this move is just beyond halfway.
-            move_by(tester, &mut gesture, Offset::new(-420.0, 0.0));
+            tester.move_by(&mut gesture, Offset::new(-420.0, 0.0), true);
 
             assert_eq!(*log.borrow(), vec![1]);
             log.borrow_mut().clear();
@@ -2291,15 +2258,15 @@ mod tests {
             tester.up(&gesture);
             tester.pump_and_settle();
 
-            assert!(!finds(tester, "Alabama"));
-            assert!(finds(tester, "Alaska"));
+            expect(tester, &find::text("Alabama"), finds_nothing());
+            expect(tester, &find::text("Alaska"), finds_one_widget());
 
             // Disable page snapping, and try moving halfway. Confirm it doesn't snap.
             tester.pump_widget(logged_page_view(&log, false));
             let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(100.0, 100.0));
             // Move just beyond halfway, again.
-            move_by(tester, &mut gesture, Offset::new(-420.0, 0.0));
+            tester.move_by(&mut gesture, Offset::new(-420.0, 0.0), true);
 
             // Page notifications still get sent.
             assert_eq!(*log.borrow(), vec![2]);
@@ -2309,10 +2276,10 @@ mod tests {
             tester.up(&gesture);
             tester.pump_and_settle();
 
-            assert!(!finds(tester, "Alabama"));
-            assert!(finds(tester, "Alaska"));
-            assert!(finds(tester, "Arizona"));
-            assert!(!finds(tester, "Arkansas"));
+            expect(tester, &find::text("Alabama"), finds_nothing());
+            expect(tester, &find::text("Alaska"), finds_one_widget());
+            expect(tester, &find::text("Arizona"), finds_one_widget());
+            expect(tester, &find::text("Arkansas"), finds_nothing());
 
             // Now re-enable snapping, confirm that we've settled on a page.
             tester.pump_widget(logged_page_view(&log, true));
@@ -2320,9 +2287,9 @@ mod tests {
 
             assert!(log.borrow().is_empty());
 
-            assert!(!finds(tester, "Alaska"));
-            assert!(finds(tester, "Arizona"));
-            assert!(!finds(tester, "Arkansas"));
+            expect(tester, &find::text("Alaska"), finds_nothing());
+            expect(tester, &find::text("Arizona"), finds_one_widget());
+            expect(tester, &find::text("Arkansas"), finds_nothing());
         });
     }
 
@@ -2330,26 +2297,68 @@ mod tests {
     fn a_small_viewport_fraction_shows_several_pages() {
         test_widgets(|tester| {
             let controller = new_controller(tester, 0, 1.0 / 8.0);
-            tester.pump_widget(built_page_view(&controller, K_STATES.len() as i32));
+            tester.pump_widget(built_page_view(&controller, state_labels()));
 
-            assert_eq!(top_left(tester, "Alabama"), Offset::new(350.0, 0.0));
-            assert_eq!(top_left(tester, "Alaska"), Offset::new(450.0, 0.0));
-            assert_eq!(top_left(tester, "Arizona"), Offset::new(550.0, 0.0));
-            assert_eq!(top_left(tester, "Arkansas"), Offset::new(650.0, 0.0));
-            assert_eq!(top_left(tester, "California"), Offset::new(750.0, 0.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Alabama")),
+                Offset::new(350.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Alaska")),
+                Offset::new(450.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Arizona")),
+                Offset::new(550.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Arkansas")),
+                Offset::new(650.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("California")),
+                Offset::new(750.0, 0.0)
+            );
 
             controller.jump_to_page(&mut tester.cell.borrow_mut(), 10);
             tester.pump();
 
-            assert_eq!(top_left(tester, "Connecticut"), Offset::new(-50.0, 0.0));
-            assert_eq!(top_left(tester, "Delaware"), Offset::new(50.0, 0.0));
-            assert_eq!(top_left(tester, "Florida"), Offset::new(150.0, 0.0));
-            assert_eq!(top_left(tester, "Georgia"), Offset::new(250.0, 0.0));
-            assert_eq!(top_left(tester, "Hawaii"), Offset::new(350.0, 0.0));
-            assert_eq!(top_left(tester, "Idaho"), Offset::new(450.0, 0.0));
-            assert_eq!(top_left(tester, "Illinois"), Offset::new(550.0, 0.0));
-            assert_eq!(top_left(tester, "Indiana"), Offset::new(650.0, 0.0));
-            assert_eq!(top_left(tester, "Iowa"), Offset::new(750.0, 0.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Connecticut")),
+                Offset::new(-50.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Delaware")),
+                Offset::new(50.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Florida")),
+                Offset::new(150.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Georgia")),
+                Offset::new(250.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Hawaii")),
+                Offset::new(350.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Idaho")),
+                Offset::new(450.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Illinois")),
+                Offset::new(550.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Indiana")),
+                Offset::new(650.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_top_left(find::text("Iowa")),
+                Offset::new(750.0, 0.0)
+            );
         });
     }
 
@@ -2357,18 +2366,24 @@ mod tests {
     fn a_large_viewport_fraction_centers_pages_wider_than_the_viewport() {
         test_widgets(|tester| {
             let controller = new_controller(tester, 0, 5.0 / 4.0);
-            tester.pump_widget(built_page_view(&controller, K_STATES.len() as i32));
+            tester.pump_widget(built_page_view(&controller, state_labels()));
 
-            assert_eq!(top_left(tester, "Alabama"), Offset::new(-100.0, 0.0));
-            let alabama = page_box(tester, 0);
-            let bottom_right =
-                alabama.local_to_global(&tester.cell.borrow(), Offset::new(1000.0, 600.0), None);
-            assert_eq!(bottom_right, Offset::new(900.0, 600.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Alabama")),
+                Offset::new(-100.0, 0.0)
+            );
+            assert_eq!(
+                tester.get_bottom_right(find::text("Alabama")),
+                Offset::new(900.0, 600.0)
+            );
 
             controller.jump_to_page(&mut tester.cell.borrow_mut(), 10);
             tester.pump();
 
-            assert_eq!(top_left(tester, "Hawaii"), Offset::new(-100.0, 0.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Hawaii")),
+                Offset::new(-100.0, 0.0)
+            );
         });
     }
 
@@ -2376,17 +2391,20 @@ mod tests {
     fn a_new_controller_with_a_larger_viewport_fraction_centers_its_page() {
         test_widgets(|tester| {
             let old_controller = new_controller(tester, 0, 5.0 / 4.0);
-            tester.pump_widget(built_page_view(&old_controller, K_STATES.len() as i32));
+            tester.pump_widget(built_page_view(&old_controller, state_labels()));
 
-            assert_eq!(top_left(tester, "Alabama"), Offset::new(-100.0, 0.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Alabama")),
+                Offset::new(-100.0, 0.0)
+            );
 
             let new_controller = new_controller(tester, 0, 4.0);
-            tester.pump_widget(built_page_view(&new_controller, K_STATES.len() as i32));
+            tester.pump_widget(built_page_view(&new_controller, state_labels()));
             new_controller.jump_to_page(&mut tester.cell.borrow_mut(), 10);
             tester.pump();
 
             assert_eq!(
-                top_left(tester, "Hawaii"),
+                tester.get_top_left(find::text("Hawaii")),
                 Offset::new(-(4.0 - 1.0) * 800.0 / 2.0, 0.0)
             );
         });
@@ -2396,15 +2414,21 @@ mod tests {
     fn a_large_viewport_fraction_scrolls_to_the_last_page_and_snaps() {
         test_widgets(|tester| {
             let controller = new_controller(tester, 0, 5.0 / 4.0);
-            tester.pump_widget(built_page_view(&controller, 3));
+            tester.pump_widget(built_page_view(&controller, index_labels(3)));
 
-            assert_eq!(center_of(tester, 0), Offset::new(400.0, 300.0));
+            assert_eq!(
+                tester.get_center(find::text("0")),
+                Offset::new(400.0, 300.0)
+            );
 
             controller.jump_to_page(&mut tester.cell.borrow_mut(), 2);
             tester.pump();
             tester.pump_and_settle();
 
-            assert_eq!(center_of(tester, 2), Offset::new(400.0, 300.0));
+            assert_eq!(
+                tester.get_center(find::text("2")),
+                Offset::new(400.0, 300.0)
+            );
         });
     }
 
@@ -2415,15 +2439,18 @@ mod tests {
     fn a_large_viewport_fraction_settles_on_the_page_dragged_past_halfway() {
         test_widgets(|tester| {
             let controller = new_controller(tester, 0, 5.0 / 4.0);
-            tester.pump_widget(built_page_view(&controller, 3));
+            tester.pump_widget(built_page_view(&controller, index_labels(3)));
 
             // Pages are 1000 wide and start 100 in: 600 dragged is past halfway to page 1, whose
             // pixels are 1100, where whole viewports would have counted page 1 at 800.
-            tester.drag_from(CENTER, Offset::new(-600.0, 0.0), 1);
+            tester.drag(find::by_type::<PageView>(), Offset::new(-600.0, 0.0));
             tester.pump_and_settle();
 
             assert_eq!(page(tester, controller.handle()), Some(1.0));
-            assert_eq!(center_of(tester, 1), Offset::new(400.0, 300.0));
+            assert_eq!(
+                tester.get_center(find::text("1")),
+                Offset::new(400.0, 300.0)
+            );
         });
     }
 
@@ -2431,25 +2458,23 @@ mod tests {
     fn the_current_item_remains_centered_on_constraint_change() {
         test_widgets(|tester| {
             let controller = new_controller(tester, K_STATES.len() as i32 - 1, 0.5);
-            let last = K_STATES.len() as i32 - 1;
+            // Verifies that the last item is centered on screen.
+            let verify_centered = |tester: &WidgetTester| {
+                assert_more_or_less_equals(
+                    tester.get_center(find::text(K_STATES[K_STATES.len() - 1])),
+                    Offset::new(400.0, 300.0),
+                );
+            };
 
             tester.pump_widget(sized_page_view(Size::new(300.0, 300.0), &controller));
             tester.pump_and_settle();
 
-            let center = center_of(tester, last);
-            assert!(
-                (center - Offset::new(400.0, 300.0)).distance() < 1e-10,
-                "{center:?}"
-            );
+            verify_centered(tester);
 
             tester.pump_widget(sized_page_view(Size::new(200.0, 300.0), &controller));
             tester.pump_and_settle();
 
-            let center = center_of(tester, last);
-            assert!(
-                (center - Offset::new(400.0, 300.0)).distance() < 1e-10,
-                "{center:?}"
-            );
+            verify_centered(tester);
         });
     }
 
@@ -2578,13 +2603,17 @@ mod tests {
         test_widgets(|tester| {
             // PageView() defaults to true.
             tester.pump_widget(ltr(PageView::new()));
-            let fill = tester.find_by_type::<SliverFillViewport>()[0];
-            assert!(tester.widget(fill, |fill: &SliverFillViewport| fill.pad_ends));
+            assert!(tester.widget(
+                find::by_type::<SliverFillViewport>().skip_offstage(false),
+                |fill: &SliverFillViewport| fill.pad_ends
+            ));
 
             // PageView(padEnds: false) is propagated properly.
             tester.pump_widget(ltr(PageView::new().pad_ends(false)));
-            let fill = tester.find_by_type::<SliverFillViewport>()[0];
-            assert!(!tester.widget(fill, |fill: &SliverFillViewport| fill.pad_ends));
+            assert!(!tester.widget(
+                find::by_type::<SliverFillViewport>().skip_offstage(false),
+                |fill: &SliverFillViewport| fill.pad_ends
+            ));
         });
     }
 
@@ -2632,7 +2661,7 @@ mod tests {
     ) -> WidgetRef {
         let mut page_view = PageView::new()
             .key(key.clone().into())
-            .children((0..3).map(|_| Center::new().into_widget()));
+            .children((0..3).map(|i| Center::new().child(Text::new(i.to_string())).into_widget()));
         if let Some(controller) = controller {
             page_view = page_view.controller(controller.clone());
         }
@@ -2646,18 +2675,27 @@ mod tests {
         controller: Ref<PageController>,
         controls: bool,
     ) {
-        let initial_page_in_view = onstage(tester)[0];
+        let current_visible_page = |tester: &WidgetTester| -> i32 {
+            tester
+                .widget(find::by_type::<Text>().first(), |text: &Text| {
+                    text.data.clone()
+                })
+                .expect("the page's Text has data")
+                .parse()
+                .expect("the page's Text is its index")
+        };
+        let initial_page_in_view = current_visible_page(tester);
         for i in 0..3 {
             if controls {
                 controller.jump_to_page(&mut tester.cell.borrow_mut(), i);
                 tester.pump_and_settle();
-                assert_eq!(onstage(tester)[0], i);
+                assert_eq!(current_visible_page(tester), i);
             } else {
                 let jumped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     controller.jump_to_page(&mut tester.cell.borrow_mut(), i);
                 }));
                 assert!(jumped.is_err());
-                assert_eq!(onstage(tester)[0], initial_page_in_view);
+                assert_eq!(current_visible_page(tester), initial_page_in_view);
             }
         }
     }
@@ -2718,15 +2756,21 @@ mod tests {
         let mut page_view = PageView::new()
             .controller(controller.clone())
             .allow_implicit_scrolling(allow_implicit_scrolling)
-            .children((0..3).map(|_| SizedBox::expand().into_widget()));
+            .children((0..3).map(|i| {
+                SizedBox::new()
+                    .key(ValueKey::new(i).into())
+                    .child(Text::new(format!("Page {i}")))
+                    .into_widget()
+            }));
         if let Some(scroll_cache_extent) = scroll_cache_extent {
             page_view = page_view.scroll_cache_extent(scroll_cache_extent);
         }
         ltr(page_view)
     }
 
-    fn built_indices(tester: &WidgetTester) -> Vec<i32> {
-        pages(tester).into_iter().map(|(index, _)| index).collect()
+    /// Dart's `find.text(text, skipOffstage: false)`.
+    fn built_text(text: &str) -> Finder {
+        find::text(text).skip_offstage(false)
     }
 
     #[test]
@@ -2739,8 +2783,9 @@ mod tests {
                 Some(ScrollCacheExtent::Viewport(1.0)),
             ));
 
-            assert_eq!(onstage(tester), vec![0]);
-            assert_eq!(built_indices(tester), vec![0, 1]);
+            expect(tester, &find::text("Page 0"), finds_one_widget());
+            expect(tester, &built_text("Page 1"), finds_one_widget());
+            expect(tester, &built_text("Page 2"), finds_nothing());
         });
     }
 
@@ -2751,11 +2796,11 @@ mod tests {
 
             // Default (allowImplicitScrolling: false) -> scrollCacheExtent: viewport(0.0)
             tester.pump_widget(cached_page_view(controller.clone(), false, None));
-            assert!(!built_indices(tester).contains(&1));
+            expect(tester, &built_text("Page 1"), finds_nothing());
 
             // allowImplicitScrolling: true -> scrollCacheExtent: viewport(1.0)
             tester.pump_widget(cached_page_view(controller, true, None));
-            assert!(built_indices(tester).contains(&1));
+            expect(tester, &built_text("Page 1"), finds_one_widget());
         });
     }
 
@@ -2770,7 +2815,7 @@ mod tests {
                 true,
                 Some(ScrollCacheExtent::Viewport(1.0)),
             ));
-            assert!(built_indices(tester).contains(&1));
+            expect(tester, &built_text("Page 1"), finds_one_widget());
 
             // Update to viewport(2.0)
             tester.pump_widget(cached_page_view(
@@ -2778,8 +2823,8 @@ mod tests {
                 true,
                 Some(ScrollCacheExtent::Viewport(2.0)),
             ));
-            assert!(built_indices(tester).contains(&1));
-            assert!(built_indices(tester).contains(&2));
+            expect(tester, &built_text("Page 1"), finds_one_widget());
+            expect(tester, &built_text("Page 2"), finds_one_widget());
 
             // Update back to viewport(1.0)
             tester.pump_widget(cached_page_view(
@@ -2787,8 +2832,8 @@ mod tests {
                 true,
                 Some(ScrollCacheExtent::Viewport(1.0)),
             ));
-            assert!(built_indices(tester).contains(&1));
-            assert!(!built_indices(tester).contains(&2));
+            expect(tester, &built_text("Page 1"), finds_one_widget());
+            expect(tester, &built_text("Page 2"), finds_nothing());
         });
     }
 
@@ -2837,7 +2882,10 @@ mod tests {
                     .axis_direction,
                 AxisDirection::Left
             );
-            assert_eq!(top_left(tester, "Alabama"), Offset::new(0.0, 0.0));
+            assert_eq!(
+                tester.get_top_left(find::text("Alabama")),
+                Offset::new(0.0, 0.0)
+            );
 
             tester.pump_widget(ltr(PageView::new()
                 .scroll_direction(Axis::Vertical)
@@ -2888,18 +2936,22 @@ mod tests {
         let variant = TargetPlatformVariant::new([TargetPlatform::IOS, TargetPlatform::MacOS]);
         test_widgets_variant(variant, |tester| {
             let platform = tester.target_platform();
-            tester.pump_widget(ltr(
-                PageView::new().children((0..10).map(|_| SizedBox::expand().into_widget()))
-            ));
+            tester.pump_widget(ltr(PageView::new().children((0..10).map(|i| {
+                Container::new()
+                    .key(ValueKey::new(i).into())
+                    .color(K_BLUE)
+                    .into_widget()
+            }))));
             let size_of_first =
-                |tester: &WidgetTester| page_box(tester, 0).size(&tester.cell.borrow());
-            let left_of_first = |tester: &WidgetTester| top_left_of(tester, 0).dx();
+                |tester: &WidgetTester| tester.get_size(find::by_key(ValueKey::new(0)));
+            let left_of_first =
+                |tester: &WidgetTester| tester.get_top_left(find::by_key(ValueKey::new(0))).dx();
 
             assert_eq!(left_of_first(tester), 0.0);
             assert_eq!(size_of_first(tester), Size::new(800.0, 600.0));
 
             // Going into overscroll.
-            tester.drag_from(CENTER, Offset::new(100.0, 0.0), 1);
+            tester.drag(find::by_type::<PageView>(), Offset::new(100.0, 0.0));
             tester.pump();
 
             assert!(left_of_first(tester) > 0.0);
@@ -2911,22 +2963,12 @@ mod tests {
             } else {
                 -200.0
             };
-            tester.drag_from(CENTER, Offset::new(back, 0.0), 1);
+            tester.drag(find::by_type::<PageView>(), Offset::new(back, 0.0));
             tester.pump();
 
             assert!(left_of_first(tester) < 0.0);
             assert_eq!(size_of_first(tester), Size::new(800.0, 600.0));
         });
-    }
-
-    fn top_left_of(tester: &WidgetTester, index: i32) -> Offset {
-        page_box(tester, index).local_to_global(&tester.cell.borrow(), Offset::ZERO, None)
-    }
-
-    /// Dart's `gesture.moveBy(offset)`.
-    fn move_by(tester: &mut WidgetTester, gesture: &mut TestPointer, offset: Offset) {
-        let to = gesture.position + offset;
-        tester.move_to(gesture, to, true);
     }
 
     #[test]
@@ -2940,8 +2982,7 @@ mod tests {
                 Some(
                     GestureDetector::new()
                         .on_tap(Listener::new(move |_| tapped.set(index)))
-                        // The test's `Text` is what the tap hits; a colored box hits the same way.
-                        .child(SizedBox::expand().child(ColoredBox::new(Color::new(0xFF0000FF))))
+                        .child(SizedBox::expand().child(Text::new(index.to_string())))
                         .into_widget(),
                 )
             })
@@ -2951,11 +2992,13 @@ mod tests {
 
             // The first 3 items should be visible and tappable.
             for index in [0, 1, 2] {
-                assert!(onstage(tester).contains(&index));
+                expect(tester, &find::text(&index.to_string()), finds_one_widget());
                 // The center of page 2's x-coordinate is 800, so we have to manually
                 // offset it a bit to make sure the tap lands within the screen.
-                let center = center_of(tester, index) - Offset::new(3.0, 0.0);
-                tester.tap(center, 1);
+                let center =
+                    tester.get_center(find::text(&index.to_string())) - Offset::new(3.0, 0.0);
+                let pointer = tester.next_pointer();
+                tester.tap_at(center, pointer);
                 assert_eq!(tapped_index.get(), index);
             }
 
@@ -2963,9 +3006,8 @@ mod tests {
             tester.pump();
             // The last 3 items should be visible and tappable.
             for index in [17, 18, 19] {
-                assert!(onstage(tester).contains(&index));
-                let center = center_of(tester, index);
-                tester.tap(center, 1);
+                expect(tester, &find::text(&index.to_string()), finds_one_widget());
+                tester.tap(find::text(&index.to_string()));
                 assert_eq!(tapped_index.get(), index);
             }
         });
@@ -3244,8 +3286,10 @@ mod tests {
                 ));
 
                 // Page 2 (index 1) is within the implicit cache extent.
-                let target = page_box(tester, 1);
-                target.as_object().show_on_screen(
+                let target_finder = find::text("Page 2").skip_offstage(false);
+                expect(tester, &target_finder, finds_one_widget());
+                let target = tester.render_object(target_finder);
+                target.show_on_screen(
                     &mut tester.cell.borrow_mut(),
                     None,
                     None,
@@ -3275,7 +3319,7 @@ mod tests {
         }
         ltr(page_view
             .allow_implicit_scrolling(true)
-            .children((0..page_count).map(|_| SizedBox::expand().into_widget())))
+            .children((1..=page_count).map(|i| Text::new(format!("Page {i}")).into_widget())))
     }
 
     // ---- not in page_view_test.dart: `PageScrollPhysics` targets ----
@@ -3318,13 +3362,17 @@ mod tests {
             tester.pump_widget(ltr(PageView::new()
                 .controller(controller.clone())
                 .children(states())));
-            tester.drag_from(CENTER, Offset::new(-300.0, 0.0), 1);
+            tester.drag(find::by_type::<PageView>(), Offset::new(-300.0, 0.0));
             tester.pump_and_settle();
             assert_eq!(page(tester, controller.handle()), Some(0.0));
-            tester.drag_from(CENTER, Offset::new(-500.0, 0.0), 1);
+            tester.drag(find::by_type::<PageView>(), Offset::new(-500.0, 0.0));
             tester.pump_and_settle();
             assert_eq!(page(tester, controller.handle()), Some(1.0));
-            tester.fling_from(CENTER, Offset::new(-100.0, 0.0), 1000.0, 1);
+            tester.fling(
+                find::by_type::<PageView>(),
+                Offset::new(-100.0, 0.0),
+                1000.0,
+            );
             tester.pump_and_settle();
             assert_eq!(page(tester, controller.handle()), Some(2.0));
         });

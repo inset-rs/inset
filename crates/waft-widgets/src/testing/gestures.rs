@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use super::WidgetTester;
+use super::{RenderTarget, WidgetTester};
 
 /// One pointer a [`WidgetTester`] drives, as Dart's `TestGesture`: its device, buttons and
 /// where it is, in logical coordinates.
@@ -115,6 +115,27 @@ impl WidgetTester {
         self.send(pointer, waft_embedder::PointerChange::Cancel);
     }
 
+    /// Dart's `gesture.removePointer()`: a `PointerRemovedEvent` with the pointer's id handed
+    /// to the gesture binding, as `TestGesture` hands it, so a recognizer tracking the pointer
+    /// sees it even while the pointer is down.
+    pub fn remove_pointer(&mut self, pointer: &TestPointer) {
+        use waft_gestures::{GestureBinding, PointerEvent, PointerRemovedEvent};
+        let mut app = self.cell.borrow_mut();
+        GestureBinding::instance(&mut app).handle_pointer_event(
+            &mut app,
+            PointerEvent::Removed(PointerRemovedEvent {
+                kind: pointer.kind,
+                device: pointer.id,
+                pointer: pointer.id,
+                position: pointer.position,
+                ..PointerRemovedEvent::default()
+            }),
+        );
+        app.drain_microtasks();
+        drop(app);
+        self.cell.checkpoint();
+    }
+
     /// Dart's `gesture.addPointer()` for a mouse, at `at`.
     pub fn add_pointer(&mut self, pointer: &mut TestPointer, at: waft_embedder::Offset) {
         pointer.position = at;
@@ -148,11 +169,34 @@ impl WidgetTester {
         self.cell.checkpoint();
     }
 
-    /// Dart's `tester.tap(at)`: down and up with no frame between.
-    pub fn tap(&mut self, at: waft_embedder::Offset, pointer: i64) {
+    /// Dart's `tester.tap(finder)`: a tap at the centre of the one widget `target` finds,
+    /// with the next pointer.
+    pub fn tap(&mut self, target: impl RenderTarget) {
+        let at = self.center_for(target, "tap");
+        let pointer = self.next_pointer();
+        self.tap_at(at, pointer);
+    }
+
+    /// Dart's `tester.tapAt(at)`: down and up with no frame between.
+    pub fn tap_at(&mut self, at: waft_embedder::Offset, pointer: i64) {
         let mut touch = TestPointer::touch(pointer);
         self.down(&mut touch, at);
         self.up(&touch);
+    }
+
+    /// Dart's `gesture.moveBy(offset)`: a move by `by` from where the pointer is, while down,
+    /// or a hover while up.
+    pub fn move_by(&mut self, pointer: &mut TestPointer, by: waft_embedder::Offset, down: bool) {
+        let at = pointer.position + by;
+        self.move_to(pointer, at, down);
+    }
+
+    /// Dart's `tester.fling(finder, offset, speed)`: [`fling_from`](Self::fling_from) the
+    /// centre of the one widget `target` finds, with the next pointer.
+    pub fn fling(&mut self, target: impl RenderTarget, offset: waft_embedder::Offset, speed: f64) {
+        let start = self.center_for(target, "fling");
+        let pointer = self.next_pointer();
+        self.fling_from(start, offset, speed, pointer);
     }
 
     /// Dart's `tester.flingFrom(start, offset, speed)`: a touch down at `start`, 51 moves to
@@ -164,6 +208,28 @@ impl WidgetTester {
         offset: waft_embedder::Offset,
         speed: f64,
         pointer: i64,
+    ) {
+        self.fling_from_after(
+            start,
+            offset,
+            speed,
+            pointer,
+            waft_embedder::Offset::ZERO,
+            Duration::from_secs(1),
+        );
+    }
+
+    /// Dart's `tester.flingFrom(start, offset, speed, initialOffset:, initialOffsetDelay:)`: the
+    /// touch first moves by `initial_offset` and waits `initial_offset_delay`, a frame of it,
+    /// before the fling's moves.
+    pub fn fling_from_after(
+        &mut self,
+        start: waft_embedder::Offset,
+        offset: waft_embedder::Offset,
+        speed: f64,
+        pointer: i64,
+        initial_offset: waft_embedder::Offset,
+        initial_offset_delay: Duration,
     ) {
         use waft_embedder::{Offset, PointerChange};
         debug_assert!(offset.distance() > 0.0);
@@ -182,8 +248,20 @@ impl WidgetTester {
             Offset::ZERO,
             micros(time_stamp.round()),
         );
+        if initial_offset.distance() > 0.0 {
+            touch.position = start + initial_offset;
+            self.send_at(
+                &touch,
+                PointerChange::Move,
+                initial_offset,
+                micros(time_stamp.round()),
+            );
+            time_stamp += initial_offset_delay.as_micros() as f64;
+            self.pump_by(initial_offset_delay);
+        }
         for i in 0..=K_MOVE_COUNT {
             let location = start
+                + initial_offset
                 + Offset::lerp(
                     Some(Offset::ZERO),
                     Some(offset),
@@ -210,6 +288,14 @@ impl WidgetTester {
             Offset::ZERO,
             micros(time_stamp.round()),
         );
+    }
+
+    /// Dart's `tester.drag(finder, offset)`: [`drag_from`](Self::drag_from) the centre of the
+    /// one widget `target` finds, with the next pointer.
+    pub fn drag(&mut self, target: impl RenderTarget, offset: waft_embedder::Offset) {
+        let start = self.center_for(target, "drag");
+        let pointer = self.next_pointer();
+        self.drag_from(start, offset, pointer);
     }
 
     /// Dart's `tester.dragFrom(start, offset)`: a touch down at `start`, moves that cross
@@ -322,8 +408,16 @@ impl WidgetTester {
         self.up(&gesture);
     }
 
+    /// Dart's `tester.longPress(finder)`: a long press at the centre of the one widget
+    /// `target` finds, with the next pointer.
+    pub fn long_press(&mut self, target: impl RenderTarget) {
+        let at = self.center_for(target, "longPress");
+        let pointer = self.next_pointer();
+        self.long_press_at(at, pointer);
+    }
+
     /// Dart's `tester.longPressAt(at)`: down, a `kLongPressTimeout + kPressTimeout` wait, and up.
-    pub fn long_press(&mut self, at: waft_embedder::Offset, pointer: i64) {
+    pub fn long_press_at(&mut self, at: waft_embedder::Offset, pointer: i64) {
         let mut touch = TestPointer::touch(pointer);
         self.down(&mut touch, at);
         self.pump_by(waft_gestures::K_LONG_PRESS_TIMEOUT + waft_gestures::K_PRESS_TIMEOUT);

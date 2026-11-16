@@ -1797,7 +1797,10 @@ pub(crate) mod tests {
     use waft_painting::EdgeInsets;
     use waft_widgets::{AnyElement, Icon, IconData, MediaQueryData, Opacity};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget,
+        test_widgets,
+    };
 
     use super::*;
     use crate::color_scheme::ColorScheme;
@@ -1835,8 +1838,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn first_text(tester: &WidgetTester, text: &str) -> AnyElement {
-        *tester
-            .find_text(text)
+        *find::text(text)
+            .evaluate(tester)
             .first()
             .expect("a Text showing the text")
     }
@@ -1862,12 +1865,13 @@ pub(crate) mod tests {
 
     /// Dart's `_iconStyle(tester, icon)`.
     pub(crate) fn icon_style(tester: &WidgetTester, icon: IconData) -> TextStyle {
-        tester.glyph_style(tester.find_by_icon(&icon))
+        tester.glyph_style(tester.element(find::by_icon(&icon).first()))
     }
 
     /// Dart's `_itemPadding(tester, icon)`.
     fn item_padding(tester: &WidgetTester, icon: IconData) -> EdgeInsets {
-        let ink_response = tester.ancestor_of_type::<InkResponse>(tester.find_by_icon(&icon));
+        let ink_response = tester
+            .element(find::ancestor(find::by_icon(&icon), find::by_type::<InkResponse>()).first());
         let padding = tester.descendants_of_type::<Padding>(ink_response)[0];
         tester.widget(padding, |padding: &Padding| {
             padding.padding.resolve(Some(TextDirection::Ltr))
@@ -1883,7 +1887,7 @@ pub(crate) mod tests {
 
     /// Dart's `_getMaterial(tester)`.
     pub(crate) fn material_of<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let bar = tester.find_by_type::<BottomNavigationBar>()[0];
+        let bar = find::by_type::<BottomNavigationBar>().evaluate(tester)[0];
         let material = tester.descendants_of_type::<Material>(bar)[0];
         tester.widget(material, read)
     }
@@ -1895,12 +1899,12 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn descendants_of_bar<W: 'static>(tester: &WidgetTester) -> usize {
-        let bar = tester.find_by_type::<BottomNavigationBar>()[0];
+        let bar = find::by_type::<BottomNavigationBar>().evaluate(tester)[0];
         tester.descendants_of_type::<W>(bar).len()
     }
 
     fn bar_box(tester: &WidgetTester) -> waft_rendering::AnyRenderBox {
-        tester.render_box_of(tester.find_by_type::<BottomNavigationBar>()[0])
+        tester.render_box_of(find::by_type::<BottomNavigationBar>().evaluate(tester)[0])
     }
 
     #[test]
@@ -1913,8 +1917,8 @@ pub(crate) mod tests {
                     .on_tap(move |_app, index| seen.set(Some(index)))
             });
 
-            let at = tester.global_rect(tester.render_box_of(first_text(tester, "Alarm")));
-            tester.tap(at.center(), 1);
+            let at = tester.get_rect(first_text(tester, "Alarm"));
+            tester.tap_at(at.center(), 1);
 
             assert_eq!(mutated_index.get(), Some(1));
         });
@@ -1927,8 +1931,8 @@ pub(crate) mod tests {
 
             let size = bar_box(tester).size(&tester.cell.borrow());
             assert_eq!(size.height(), K_BOTTOM_NAVIGATION_BAR_HEIGHT);
-            assert_eq!(tester.find_text("AC").len(), 1);
-            assert_eq!(tester.find_text("Alarm").len(), 1);
+            expect(tester, &find::text("AC"), finds_one_widget());
+            expect(tester, &find::text("Alarm"), finds_one_widget());
         });
     }
 
@@ -1940,8 +1944,8 @@ pub(crate) mod tests {
             let size = bar_box(tester).size(&tester.cell.borrow());
             // kBottomNavigationBarHeight is a minimum dimension.
             assert!(size.height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
-            assert_eq!(tester.find_text("AC").len(), 1);
-            assert_eq!(tester.find_text("Alarm").len(), 1);
+            expect(tester, &find::text("AC"), finds_one_widget());
+            expect(tester, &find::text("Alarm"), finds_one_widget());
         });
     }
 
@@ -2700,8 +2704,8 @@ pub(crate) mod tests {
 
     /// Dart's `tester.renderObjectList(find.byType(InkResponse))`.
     fn actions(tester: &WidgetTester) -> Vec<waft_rendering::AnyRenderBox> {
-        tester
-            .find_by_type::<InkResponse>()
+        find::by_type::<InkResponse>()
+            .evaluate(tester)
             .into_iter()
             .map(|element| tester.render_box_of(element))
             .collect()
@@ -2712,9 +2716,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn text_center(tester: &WidgetTester, text: &str) -> Offset {
-        tester
-            .global_rect(tester.render_box_of(first_text(tester, text)))
-            .center()
+        tester.get_rect(first_text(tester, text)).center()
     }
 
     #[test]
@@ -2768,7 +2770,7 @@ pub(crate) mod tests {
 
             for (pointer, label) in [(1, "AC"), (2, "Alarm"), (3, "Time")] {
                 let at = text_center(tester, label);
-                tester.tap(at, pointer);
+                tester.tap_at(at, pointer);
                 tester.pump();
                 tester.pump_by(Duration::from_millis(100));
 
@@ -2797,7 +2799,7 @@ pub(crate) mod tests {
         );
 
         let at = text_center(tester, "Alarm");
-        tester.tap(at, 1);
+        tester.tap_at(at, 1);
         tester.pump_by(Duration::from_secs(1));
         let element = first_text(tester, "Alarm");
         let brightness = Theme::of(&mut tester.cell.borrow_mut(), element).brightness();
@@ -2836,7 +2838,7 @@ pub(crate) mod tests {
                 .icon_size(12.0)
             });
 
-            let icon = tester.find_by_type::<Icon>()[0];
+            let icon = find::by_type::<Icon>().evaluate(tester)[0];
             let size = tester.render_box_of(icon).size(&tester.cell.borrow());
             assert_eq!(size.width(), 12.0);
             assert_eq!(size.height(), 12.0);
@@ -2985,7 +2987,7 @@ pub(crate) mod tests {
     }
 
     fn last_text_size(tester: &WidgetTester, text: &str) -> Size {
-        let found = tester.find_text(text);
+        let found = find::text(text).evaluate(tester);
         let last = *found.last().expect("a Text showing the text");
         tester.render_box_of(last).size(&tester.cell.borrow())
     }
@@ -2996,17 +2998,17 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             let label = "Foo";
             pump_tooltip_app(tester, m2, waft_painting::TextScaler::linear(1.0));
-            assert_eq!(tester.find_text(label).len(), 1);
+            expect(tester, &find::text(label), finds_one_widget());
             let at = text_center(tester, label);
-            tester.long_press(at, 1);
-            assert_eq!(tester.find_text(label).len(), 2);
+            tester.long_press_at(at, 1);
+            expect(tester, &find::text(label), finds_n_widgets(2));
             assert_eq!(last_text_size(tester, label), Size::new(42.0, 14.0));
             tester.pump_and_settle_by(Duration::from_secs(2));
 
             pump_tooltip_app(tester, m2, waft_painting::TextScaler::linear(4.0));
-            assert_eq!(tester.find_text(label).len(), 1);
+            expect(tester, &find::text(label), finds_one_widget());
             let at = text_center(tester, label);
-            tester.long_press(at, 2);
+            tester.long_press_at(at, 2);
             assert_eq!(last_text_size(tester, label), Size::new(168.0, 56.0));
         });
     }
@@ -3017,25 +3019,25 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             let label = "Foo";
             pump_tooltip_app(tester, m3, waft_painting::TextScaler::NO_SCALING);
-            assert_eq!(tester.find_text(label).len(), 1);
+            expect(tester, &find::text(label), finds_one_widget());
             let at = text_center(tester, label);
-            tester.long_press(at, 1);
-            assert_eq!(tester.find_text(label).len(), 2);
+            tester.long_press_at(at, 1);
+            expect(tester, &find::text(label), finds_n_widgets(2));
             assert_eq!(last_text_size(tester, label).height(), 20.0);
             tester.pump_and_settle_by(Duration::from_secs(2));
 
             pump_tooltip_app(tester, m3, waft_painting::TextScaler::linear(4.0));
-            assert_eq!(tester.find_text(label).len(), 1);
+            expect(tester, &find::text(label), finds_one_widget());
             let at = text_center(tester, label);
-            tester.long_press(at, 2);
+            tester.long_press_at(at, 2);
             assert_eq!(last_text_size(tester, label).height(), 80.0);
         });
     }
 
     /// Dart's `findByTooltip(message)`: the tooltips showing `message`.
     fn tooltips_with(tester: &WidgetTester, message: &str) -> usize {
-        tester
-            .find_by_type::<Tooltip>()
+        find::by_type::<Tooltip>()
+            .evaluate(tester)
             .into_iter()
             .filter(|tooltip| {
                 tester.widget(*tooltip, |tooltip: &Tooltip| {
@@ -3056,19 +3058,19 @@ pub(crate) mod tests {
                 ])
             });
 
-            assert_eq!(tester.find_text("A").len(), 1);
+            expect(tester, &find::text("A"), finds_one_widget());
             let at = text_center(tester, "A");
-            tester.long_press(at, 1);
+            tester.long_press_at(at, 1);
             assert_eq!(tooltips_with(tester, "A tooltip"), 1);
 
-            assert_eq!(tester.find_text("B").len(), 1);
+            expect(tester, &find::text("B"), finds_one_widget());
             let at = text_center(tester, "B");
-            tester.long_press(at, 2);
+            tester.long_press_at(at, 2);
             assert_eq!(tooltips_with(tester, "B"), 0);
 
-            assert_eq!(tester.find_text("C").len(), 1);
+            expect(tester, &find::text("C"), finds_one_widget());
             let at = text_center(tester, "C");
-            tester.long_press(at, 3);
+            tester.long_press_at(at, 3);
             assert_eq!(tooltips_with(tester, "C"), 0);
         });
     }
@@ -3119,14 +3121,14 @@ pub(crate) mod tests {
             let (f, s) = (filled.clone(), stroked.clone());
             pump_bar(tester, m3, move || favorite_bar(0, &f, &s));
 
-            assert_eq!(tester.find_onstage_by_key(&filled).len(), 1);
-            assert_eq!(tester.find_onstage_by_key(&stroked).len(), 0);
+            expect(tester, &find::by_key(filled.clone()), finds_one_widget());
+            expect(tester, &find::by_key(stroked.clone()), finds_nothing());
 
             let (f, s) = (filled.clone(), stroked.clone());
             pump_bar(tester, m3, move || favorite_bar(1, &f, &s));
 
-            assert_eq!(tester.find_onstage_by_key(&filled).len(), 0);
-            assert_eq!(tester.find_onstage_by_key(&stroked).len(), 1);
+            expect(tester, &find::by_key(filled.clone()), finds_nothing());
+            expect(tester, &find::by_key(stroked.clone()), finds_one_widget());
         });
     }
 
@@ -3144,7 +3146,7 @@ pub(crate) mod tests {
                     .r#type(BottomNavigationBarType::Fixed)
                 });
             };
-            let found = |tester: &WidgetTester, text: &str| tester.find_onstage_text(text).len();
+            let found = |tester: &WidgetTester, text: &str| find::text(text).evaluate(tester).len();
 
             build_frame(tester, 3);
             assert_eq!(found(tester, "item 0"), 1);
@@ -3202,7 +3204,7 @@ pub(crate) mod tests {
             });
 
             let background_material_color = |tester: &WidgetTester| {
-                let bar = tester.find_by_type::<BottomNavigationBar>()[0];
+                let bar = find::by_type::<BottomNavigationBar>().evaluate(tester)[0];
                 tester
                     .descendants_of_type::<Material>(bar)
                     .into_iter()
@@ -3217,7 +3219,7 @@ pub(crate) mod tests {
             assert_eq!(background_color.get(), red);
             assert_eq!(background_material_color(tester), Some(red));
             let at = text_center(tester, "green");
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
             assert_eq!(background_color.get(), green);
             assert_eq!(background_material_color(tester), Some(green));
@@ -3245,9 +3247,9 @@ pub(crate) mod tests {
             .show_unselected_labels(false)
             .r#type(r#type)
         });
-        assert_eq!(tester.find_onstage_text("Red").len(), 1);
-        assert_eq!(tester.find_onstage_text("Green").len(), 1);
-        let visibilities = tester.find_onstage_by_type::<Visibility>();
+        expect(tester, &find::text("Red"), finds_one_widget());
+        expect(tester, &find::text("Green"), finds_one_widget());
+        let visibilities = find::by_type::<Visibility>().evaluate(tester);
         let visible = |element: AnyElement| {
             tester.widget(element, |visibility: &Visibility| visibility.visible)
         };
@@ -3332,7 +3334,7 @@ pub(crate) mod tests {
     }
 
     fn rect_of_key(tester: &WidgetTester, key: &KeyRef) -> Rect {
-        let element = tester.find_onstage_by_key(key)[0];
+        let element = tester.element(find::by_key(key.clone()));
         tester.get_rect(tester.render_box_of(element))
     }
 
@@ -3648,8 +3650,8 @@ pub(crate) mod tests {
                 ])
             });
 
-            assert_eq!(tester.find_onstage_by_key(&key1).len(), 1);
-            assert_eq!(tester.find_onstage_by_key(&key2).len(), 1);
+            expect(tester, &find::by_key(key1.clone()), finds_one_widget());
+            expect(tester, &find::by_key(key2.clone()), finds_one_widget());
         });
     }
 
@@ -3705,7 +3707,7 @@ pub(crate) mod tests {
             .into_widget()
         });
         let at = text_center(tester, "Green");
-        tester.tap(at, 1);
+        tester.tap_at(at, 1);
 
         for _ in 0..3 {
             tester.pump_by(Duration::from_millis(30));

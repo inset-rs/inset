@@ -652,7 +652,9 @@ mod tests {
         StatefulBuilder, Text, WidgetStateProperty, downcast_widget,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::checkbox_list_tile::tests::{
@@ -660,40 +662,40 @@ mod tests {
         check_default_horizontal_title_gap, check_horizontal_title_gap_0,
         check_horizontal_title_gap_with_visual_density, check_min_leading_width_60,
         check_min_tile_height, check_min_vertical_padding_80, check_on_focus_change,
-        expected_three_line_rects, focus_of, has_primary_focus, ink_rect_colors,
-        ink_well_custom_border, ink_well_enable_feedback, is_three_line_rects, nth,
-        pump_in_material, pump_wrapped, rect_of, right_rounded_border, text_center,
+        expected_three_line_rects, focus_of, has_primary_focus, ink_well_custom_border,
+        ink_well_enable_feedback, is_three_line_rects, nth, pump_in_material, pump_wrapped,
+        rect_of, right_rounded_border, text_center,
     };
     use crate::colors::Colors;
     use crate::constants::K_RADIAL_REACTION_ALPHA;
     use crate::icons::Icons;
-    use crate::list_tile::tests::{m2, m3, text_rect};
+    use crate::list_tile::tests::{m2, m3};
     use crate::list_tile_theme::ListTileThemeData;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::switch::tests::{Drawn, c, circles, drawn, hover, ignore, press, tap};
+    use crate::switch::tests::{
+        c, circles, color_of, drawn, glyph_origins, hover, ignore, press, stroke_of, tap,
+    };
     use crate::switch_theme::SwitchThemeData;
+    use crate::test_support::PaintInspection;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::pump_app;
 
     /// The colour of the last thing the switch draws: its thumb.
     fn thumb(tester: &WidgetTester) -> Option<u32> {
-        drawn(tester).last().and_then(Drawn::color)
+        drawn(tester).last().and_then(color_of)
     }
 
     /// The colour of the first thing the switch draws: its track.
     fn track(tester: &WidgetTester) -> Option<u32> {
-        drawn(tester).first().and_then(Drawn::color)
+        drawn(tester).first().and_then(color_of)
     }
 
     /// The colours of the outlines the switch strokes.
     fn strokes(tester: &WidgetTester) -> Vec<u32> {
         drawn(tester)
-            .into_iter()
-            .filter_map(|drawn| match drawn {
-                Drawn::Stroke(color, ..) => Some(color),
-                _ => None,
-            })
+            .iter()
+            .filter_map(|drawn| stroke_of(drawn).map(|(color, ..)| color))
             .collect()
     }
 
@@ -777,7 +779,7 @@ mod tests {
                     .into_widget()
             });
             let hello = text_center(tester, "Hello");
-            tester.tap(hello, 1);
+            tester.tap_at(hello, 1);
             log.borrow_mut().push(None);
             tap(tester);
             assert_eq!(*log.borrow(), [Some(false), None, Some(false)]);
@@ -893,15 +895,15 @@ mod tests {
                     |_app| host,
                 );
                 assert!(
-                    tester
-                        .find_by_type::<waft_cupertino::CupertinoSwitch>()
+                    find::by_type::<waft_cupertino::CupertinoSwitch>()
+                        .evaluate(tester)
                         .is_empty()
                 );
-                assert_eq!(tester.find_by_type::<Switch>().len(), 1);
+                expect(tester, &find::by_type::<Switch>(), finds_one_widget());
                 assert!(!value.get(), "on {platform:?}");
 
                 let at = rect_of::<SwitchListTile>(tester, 0).center();
-                tester.tap(at, 1);
+                tester.tap_at(at, 1);
                 assert!(value.get(), "on {platform:?}");
             }
         });
@@ -933,12 +935,12 @@ mod tests {
             };
 
             frame(tester, TextDirection::Ltr);
-            assert_eq!(text_rect(tester, "L").left, 10.0); // contentPadding.start = 10
+            assert_eq!(tester.get_rect(find::text("L")).left, 10.0); // contentPadding.start = 10
             assert_eq!(rect_of::<Switch>(tester, 0).right, 780.0); // 800 - contentPadding.end
 
             frame(tester, TextDirection::Rtl);
             assert_eq!(rect_of::<Switch>(tester, 0).left, 20.0); // contentPadding.end = 20
-            assert_eq!(text_rect(tester, "L").right, 790.0); // 800 - contentPadding.start
+            assert_eq!(tester.get_rect(find::text("L")).right, 790.0); // 800 - contentPadding.start
         });
     }
 
@@ -1063,7 +1065,10 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(tester).contains(&tile_color.to_argb32()));
+            waft_rendering::testing::assert_paints(
+                tester.ink_list().ops(),
+                &[waft_rendering::testing::PaintCall::rect(Some(tile_color))],
+            );
         });
     }
 
@@ -1081,7 +1086,12 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(tester).contains(&selected_tile_color.to_argb32()));
+            waft_rendering::testing::assert_paints(
+                tester.ink_list().ops(),
+                &[waft_rendering::testing::PaintCall::rect(Some(
+                    selected_tile_color,
+                ))],
+            );
         });
     }
 
@@ -1224,7 +1234,7 @@ mod tests {
 
             // Start hovering
             let mut gesture = TestPointer::mouse(1, 0);
-            let center = tester.center_of(&key);
+            let center = tester.get_center(&key);
             tester.add_pointer(&mut gesture, center);
             tester.pump();
             tester.pump_and_settle();
@@ -1237,12 +1247,13 @@ mod tests {
                 &mut canvas,
                 Offset::ZERO,
             );
-            assert!(crate::test_support::Drawn::draws(&canvas.build()).contains(
-                &crate::test_support::Drawn::Rect(
-                    orange.to_argb32(),
-                    waft_embedder::Rect::from_ltrb(0.0, 0.0, 500.0, 100.0)
-                )
-            ));
+            waft_rendering::testing::assert_paints(
+                canvas.build().ops(),
+                &[waft_rendering::testing::PaintCall::rect_at(
+                    waft_embedder::Rect::from_ltrb(0.0, 0.0, 500.0, 100.0),
+                    Some(orange),
+                )],
+            );
             tester.send(&gesture, PointerChange::Remove);
         });
     }
@@ -1431,13 +1442,7 @@ mod tests {
                     })
                 };
                 let selected: WidgetStates = [WidgetState::Selected].into_iter().collect();
-                let glyphs: Vec<(f64, f64)> = drawn(tester)
-                    .into_iter()
-                    .filter_map(|drawn| match drawn {
-                        Drawn::Glyphs(left, top) => Some((left, top)),
-                        _ => None,
-                    })
-                    .collect();
+                let glyphs: Vec<(f64, f64)> = glyph_origins(&drawn(tester));
                 (resolved(&selected), resolved(&WidgetStates::new()), glyphs)
             };
             // The glyph's ink is inside the 16x16 icon square Dart paints its paragraph at.
@@ -1531,11 +1536,11 @@ mod tests {
                         },
                     );
                     tester.pump_and_settle();
-                    assert_eq!(tester.find_by_type::<Switch>().len(), 1);
+                    expect(tester, &find::by_type::<Switch>(), finds_one_widget());
                     assert!(
                         drawn(tester)
                             .iter()
-                            .any(|drawn| drawn.color() == Some(expected)),
+                            .any(|drawn| color_of(drawn) == Some(expected)),
                         "{platform:?} {apply_cupertino_theme}: {:?}",
                         drawn(tester)
                     );
@@ -1561,11 +1566,11 @@ mod tests {
                         },
                     );
                     tester.pump_and_settle();
-                    assert_eq!(tester.find_by_type::<Switch>().len(), 1);
+                    expect(tester, &find::by_type::<Switch>(), finds_one_widget());
                     assert!(
                         drawn(tester)
                             .iter()
-                            .any(|drawn| drawn.color() == Some(expected)),
+                            .any(|drawn| color_of(drawn) == Some(expected)),
                         "{platform:?} {apply_cupertino_theme}: {:?}",
                         drawn(tester)
                     );
@@ -1746,7 +1751,11 @@ mod tests {
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert!(matches!(drawn(tester).first(), Some(Drawn::Fill(..))));
+                assert!(
+                    drawn(tester)
+                        .first()
+                        .is_some_and(|op| stroke_of(op).is_none() && color_of(op).is_some())
+                );
                 assert_eq!(strokes(tester), [c(expected)], "{enabled} {selected}");
             }
         });
@@ -1798,7 +1807,10 @@ mod tests {
                     .data(ListTileThemeData::new().control_affinity(control_affinity))
                     .into_widget()
                 });
-                assert_eq!(text_rect(tester, "SwitchListTile").top_left(), expected);
+                assert_eq!(
+                    tester.get_rect(find::text("SwitchListTile")).top_left(),
+                    expected
+                );
             }
         });
     }

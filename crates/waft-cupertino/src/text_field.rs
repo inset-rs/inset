@@ -1935,7 +1935,6 @@ fn debug_assert_widget_invariants(state: Handle<CupertinoTextFieldState>, app: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::any::TypeId;
     use std::time::Duration;
     use waft_widgets::TextEditingController;
 
@@ -1948,9 +1947,10 @@ mod tests {
         KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient,
     };
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_widgets,
+        test_widgets, test_widgets_variant,
     };
-    use waft_widgets::{AnyElement, Column, Expanded, Listener, SizedBox, WidgetsBinding};
+    use waft_widgets::{Column, Expanded, Listener, SizedBox};
 
     /// The platform of the mouse and keyboard cases: they pin the Apple key bindings and
     /// selection gestures, as Dart's cases of them run under `TargetPlatformVariant.only`.
@@ -1997,40 +1997,18 @@ mod tests {
         tester.pump();
     }
 
-    /// The first element of `element`'s subtree whose widget is a `W`, and that widget.
-    fn first_widget_of<W: 'static>(
-        app: &App,
-        element: AnyElement,
-    ) -> Option<(AnyElement, WidgetRef)> {
-        let widget = element.widget(app).clone();
-        if waft_widgets::downcast_widget::<W>(&*widget).is_some() {
-            return Some((element, widget));
-        }
-        let mut found = None;
-        element.visit_children(app, &mut |child| {
-            if found.is_none() {
-                found = first_widget_of::<W>(app, child);
-            }
-        });
-        found
-    }
-
     /// The magnifier the `EditableText` of `CupertinoApp(home: CupertinoTextField())` builds on
     /// the tester's platform, as the magnifier builder tests call its builder.
     fn default_magnifier(tester: &mut WidgetTester) -> Option<WidgetRef> {
         tester.pump_widget(CupertinoApp::new().home(CupertinoTextField::new()));
+        let context = tester.element(find::by_type::<CupertinoTextField>());
+        let magnifier_builder = tester.widget(
+            find::by_type::<EditableText>(),
+            |editable_text: &EditableText| {
+                editable_text.magnifier_configuration.magnifier_builder()
+            },
+        );
         let mut app = tester.cell.borrow_mut();
-        let root = WidgetsBinding::instance(&mut app)
-            .root_element(&app)
-            .expect("a mounted app");
-        let (context, _) =
-            first_widget_of::<CupertinoTextField>(&app, root).expect("a CupertinoTextField");
-        let (_, editable_text) =
-            first_widget_of::<EditableText>(&app, root).expect("an EditableText");
-        let magnifier_builder = waft_widgets::downcast_widget::<EditableText>(&*editable_text)
-            .expect("an EditableText")
-            .magnifier_configuration
-            .magnifier_builder();
         let controller = MagnifierController::new(&mut app);
         let magnifier_info = app.create(ValueNotifier::new(MagnifierInfo::EMPTY));
         magnifier_builder(&mut app, context, controller, magnifier_info)
@@ -2060,19 +2038,6 @@ mod tests {
             &CupertinoTextField::ios_magnifier_configuration().magnifier_builder(),
             &CupertinoTextField::ios_magnifier_configuration().magnifier_builder(),
         ));
-    }
-
-    fn tree_contains(app: &App, element: AnyElement, type_id: TypeId) -> bool {
-        if element.widget(app).widget_type() == type_id {
-            return true;
-        }
-        let mut found = false;
-        element.visit_children(app, &mut |child| {
-            if !found {
-                found = tree_contains(app, child, type_id);
-            }
-        });
-        found
     }
 
     fn field_point(app: &mut App, key: &GlobalKey, local: Offset) -> Offset {
@@ -2525,16 +2490,11 @@ mod tests {
             let at = field_point(&mut tester.cell.borrow_mut(), &key, Offset::new(16.0, 12.0));
             click(tester, at, 1, K_SECONDARY_BUTTON);
             tester.pump();
-            let mut app = tester.cell.borrow_mut();
-            let binding = WidgetsBinding::instance(&mut app);
-            let root = binding.root_element(&app).expect("the tree is attached");
-            assert!(
-                tree_contains(
-                    &app,
-                    root,
-                    TypeId::of::<CupertinoAdaptiveTextSelectionToolbar>(),
-                ),
-                "right-click should insert the adaptive selection toolbar"
+            // Right-click should insert the adaptive selection toolbar.
+            expect(
+                tester,
+                &find::by_type::<CupertinoAdaptiveTextSelectionToolbar>().skip_offstage(false),
+                finds_widgets(),
             );
         });
     }

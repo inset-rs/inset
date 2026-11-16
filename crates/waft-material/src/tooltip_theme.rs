@@ -437,22 +437,26 @@ impl InheritedWidget for TooltipTheme {
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use waft_embedder::{Offset, Rect, TextDecoration};
+    use waft_embedder::{Color, Offset, Rect, TextDecoration};
     use waft_gestures::K_LONG_PRESS_TIMEOUT;
     use waft_painting::AnyColor;
     use waft_rendering::AnyRenderBox;
+    use waft_rendering::testing::{PaintCall, assert_paints};
     use waft_widgets::{Center, GlobalKey, Padding, RawTooltip, SizedBox, Text};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::colors::Colors;
+    use crate::test_support::PaintInspection;
     use crate::theme_data::ThemeData;
     use crate::tooltip::Tooltip;
     use crate::tooltip::tests::{
         TOOLTIP_TEXT, custom_decoration, ensure_visible_and_fade_in, found, green_box, m2, m3,
-        overlay, paints_rrect_over, paragraph_size, positioned_at, pump_app, rect, size, text_box,
-        text_style, tooltip_center, tooltip_text,
+        overlay, paragraph_size, positioned_at, pump_app, rect, size, text_box, text_style,
+        tooltip_center, tooltip_text,
     };
 
     const CUSTOM_PADDING_VALUE: f64 = 10.0;
@@ -836,7 +840,10 @@ mod tests {
             size(tester, tip).width(),
             paragraph_size(tester).width() + 32.0
         );
-        assert!(paints_rrect_over(tester, tip, 0x80800000));
+        assert_paints(
+            &tester.painted_ops(tip.as_object()),
+            &[PaintCall::rrect(Some(Color::new(0x80800000)))],
+        );
     }
 
     #[test]
@@ -952,7 +959,7 @@ mod tests {
         tester.pump_by(Duration::from_millis(250));
         assert!(!found(tester, TOOLTIP_TEXT)); // Should not appear yet
         tester.pump_by(Duration::from_millis(250));
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1); // Should appear after customWaitDuration
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget()); // Should appear after customWaitDuration
 
         tester.move_to(&mut gesture, Offset::ZERO, false);
         tester.pump();
@@ -986,10 +993,10 @@ mod tests {
         tester.pump();
         tester.pump_by(K_LONG_PRESS_TIMEOUT);
         tester.up(&gesture);
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
         tester.pump();
         tester.pump_by(Duration::from_millis(2000)); // Tooltip should remain
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
         tester.pump_by(Duration::from_millis(1000));
         tester.pump_and_settle(); // Tooltip should fade out after
         assert!(!found(tester, TOOLTIP_TEXT));
@@ -1017,12 +1024,12 @@ mod tests {
         let at = tooltip_center(tester);
         tester.move_to(&mut gesture, at, false);
         tester.pump();
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
 
         tester.move_to(&mut gesture, Offset::ZERO, false);
         tester.pump_by(Duration::from_millis(200));
         tester.pump_and_settle();
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
 
         // Wait for it to disappear.
         tester.pump_by(CUSTOM_EXIT_DURATION);
@@ -1053,7 +1060,7 @@ mod tests {
         tester.up(&gesture);
         tester.pump();
         // Tooltip should show immediately after tap
-        assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+        expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
     }
 
     #[test]
@@ -1109,7 +1116,7 @@ mod tests {
                 |_app| tooltip,
             );
 
-            let raw_tooltips = tester.find_by_type::<RawTooltip>();
+            let raw_tooltips = find::by_type::<RawTooltip>().evaluate(tester);
             assert_eq!(raw_tooltips.len(), 1);
             let ignore_pointer = tester.widget(raw_tooltips[0], |raw_tooltip: &RawTooltip| {
                 raw_tooltip.ignore_pointer

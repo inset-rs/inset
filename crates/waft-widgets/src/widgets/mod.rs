@@ -55,6 +55,7 @@ pub mod navigation_toolbar;
 pub mod navigator;
 pub mod navigator_pop_handler;
 pub mod notification_listener;
+pub mod orientation_builder;
 pub mod overflow_bar;
 pub mod overlay;
 pub mod overscroll_indicator;

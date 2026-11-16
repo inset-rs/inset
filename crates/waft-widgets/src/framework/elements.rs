@@ -1398,6 +1398,16 @@ where
         SingleChildRenderObjectElementBase::visit_children(self, app, visitor);
     }
 
+    fn debug_visit_onstage_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        let children: Vec<AnyElement> = self.child(app).into_iter().collect();
+        Self::widget_of(self.as_element().widget(app))
+            .debug_visit_onstage_children(app, &children, visitor);
+    }
+
     fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
         SingleChildRenderObjectElementBase::forget_child(self, app, child);
     }
@@ -1794,6 +1804,19 @@ where
 
     fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
         MultiChildRenderObjectElementBase::visit_children(self, app, visitor);
+    }
+
+    fn debug_visit_onstage_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        let mut children = Vec::new();
+        MultiChildRenderObjectElementBase::visit_children(self, app, &mut |child| {
+            children.push(child);
+        });
+        Self::widget_of(self.as_element().widget(app))
+            .debug_visit_onstage_children(app, &children, visitor);
     }
 
     fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {

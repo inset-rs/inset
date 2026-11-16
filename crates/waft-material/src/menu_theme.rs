@@ -210,11 +210,13 @@ pub(crate) mod tests {
     use waft_rendering::BoxConstraints;
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::{
-        AnyElement, Axis, Builder, Column, ConstrainedBox, DefaultTextStyle, Expanded, Icon,
-        IconData, Text, WidgetState, WidgetStateProperty, WidgetStatePropertyAll, WidgetStates,
+        Axis, Builder, Column, ConstrainedBox, DefaultTextStyle, Expanded, Icon, Text, WidgetState,
+        WidgetStateProperty, WidgetStatePropertyAll, WidgetStates,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        Finder, TestPointer, WidgetTester, expect, find, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::button_style::ButtonStyle;
@@ -324,20 +326,12 @@ pub(crate) mod tests {
         ]
     }
 
-    pub(crate) fn only(found: Vec<AnyElement>) -> AnyElement {
-        assert_eq!(found.len(), 1, "one widget found");
-        found[0]
-    }
-
     /// Dart's `findMenuPanels(orientation)`.
-    pub(crate) fn menu_panels(tester: &WidgetTester, orientation: Axis) -> Vec<AnyElement> {
-        tester
-            .find_by_type::<MenuPanel>()
-            .into_iter()
-            .filter(|panel| {
-                tester.widget(*panel, |panel: &MenuPanel| panel.orientation) == orientation
-            })
-            .collect()
+    pub(crate) fn menu_panels(orientation: Axis) -> Finder {
+        find::by_widget_predicate("a _MenuPanel of the orientation", move |_app, widget| {
+            waft_widgets::downcast_widget::<MenuPanel>(widget)
+                .is_some_and(|panel| panel.orientation == orientation)
+        })
     }
 
     /// The first `Material` under the only panel of `orientation`, read through `read`.
@@ -346,26 +340,12 @@ pub(crate) mod tests {
         orientation: Axis,
         read: impl FnOnce(&Material) -> R,
     ) -> R {
-        let panel = menu_panels(tester, orientation)[0];
-        let material = tester.descendants_of_type::<Material>(panel)[0];
+        let material = find::descendant(
+            menu_panels(orientation).first(),
+            find::by_type::<Material>(),
+        )
+        .first();
         tester.widget(material, read)
-    }
-
-    /// Dart's `tester.getRect(finder)` of `element`.
-    pub(crate) fn rect(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.get_rect(tester.render_box_of(element))
-    }
-
-    /// Dart's `tester.tap(find.text(text))`; a menu is in an `OverlayPortal`, which the kit's
-    /// onstage finders do not see, so this finds every mounted `Text`.
-    pub(crate) fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let center = rect(tester, only(tester.find_text(text))).center();
-        tester.tap(center, 1);
-    }
-
-    /// Dart's `find.ancestor(of: find.text(text), matching: find.byType(W)).first`.
-    pub(crate) fn ancestor_of_text<W: 'static>(tester: &WidgetTester, text: &str) -> AnyElement {
-        tester.ancestor_of_type::<W>(only(tester.find_text(text)))
     }
 
     fn shape_is(material: &Material, expected: &dyn ShapeBorder) -> bool {
@@ -452,7 +432,7 @@ pub(crate) mod tests {
     pub(crate) fn assert_constructor_parameters_override_theme_parameters(tester: &WidgetTester) {
         use test_menu::*;
         assert_eq!(
-            rect(tester, menu_panels(tester, Axis::Horizontal)[0]),
+            tester.get_rect(menu_panels(Axis::Horizontal).first()),
             Rect::from_ltrb(226.0, 0.0, 574.0, 72.0)
         );
         panel_material(tester, Axis::Horizontal, |material| {
@@ -461,7 +441,7 @@ pub(crate) mod tests {
         });
 
         assert_eq!(
-            rect(tester, only(menu_panels(tester, Axis::Vertical))),
+            tester.get_rect(menu_panels(Axis::Vertical)),
             Rect::from_ltrb(332.0, 60.0, 574.0, 232.0)
         );
         panel_material(tester, Axis::Vertical, |material| {
@@ -470,25 +450,29 @@ pub(crate) mod tests {
             assert!(shape_is(material, &BeveledRectangleBorder::default()));
         });
 
-        let submenu_panel = *menu_panels(tester, Axis::Vertical)
-            .last()
-            .expect("a submenu panel");
-        let menu_item = tester.descendants_of_type::<MenuItemButton>(submenu_panel)[0];
+        let menu_item = find::descendant(
+            menu_panels(Axis::Vertical).last(),
+            find::by_type::<MenuItemButton>(),
+        )
+        .first();
         assert_eq!(
-            rect(tester, menu_item),
+            tester.get_rect(menu_item),
             Rect::from_ltrb(346.0, 74.0, 560.0, 122.0)
         );
-        let menu_item_material = ancestor_of_text::<Material>(tester, SUB_MENU_10);
+        let menu_item_material =
+            find::ancestor(find::text(SUB_MENU_10), find::by_type::<Material>()).first();
         tester.widget(menu_item_material, |material: &Material| {
             assert_eq!(material.color, Some(Colors::AMBER.primary()));
             assert_eq!(material.elevation, 0.0);
             assert!(shape_is(material, &StadiumBorder::default()));
         });
-        let label_style = ancestor_of_text::<DefaultTextStyle>(tester, SUB_MENU_10);
+        let label_style =
+            find::ancestor(find::text(SUB_MENU_10), find::by_type::<DefaultTextStyle>()).first();
         tester.widget(label_style, |style: &DefaultTextStyle| {
             assert_eq!(style.style.color, Some(Colors::GREY.primary().into()));
         });
-        let text_button = ancestor_of_text::<TextButton>(tester, SUB_MENU_10);
+        let text_button =
+            find::ancestor(find::text(SUB_MENU_10), find::by_type::<TextButton>()).first();
         let overlay = tester.widget(text_button, |button: &TextButton| {
             crate::button_style_button::ButtonStyleButton::button_style_button_data(button)
                 .style
@@ -533,10 +517,10 @@ pub(crate) mod tests {
             );
 
             // Open a test menu.
-            tap_text(tester, test_menu::MAIN_MENU_1);
+            tester.tap(find::text(test_menu::MAIN_MENU_1));
             tester.pump();
             assert_eq!(
-                rect(tester, menu_panels(tester, Axis::Horizontal)[0]),
+                tester.get_rect(menu_panels(Axis::Horizontal).first()),
                 Rect::from_ltrb(234.0, 0.0, 566.0, 48.0)
             );
             panel_material(tester, Axis::Horizontal, |material| {
@@ -545,7 +529,7 @@ pub(crate) mod tests {
             });
 
             assert_eq!(
-                rect(tester, only(menu_panels(tester, Axis::Vertical))),
+                tester.get_rect(menu_panels(Axis::Vertical)),
                 Rect::from_ltrb(336.0, 48.0, 570.0, 212.0)
             );
             panel_material(tester, Axis::Vertical, |material| {
@@ -567,7 +551,7 @@ pub(crate) mod tests {
             );
 
             // Open a test menu.
-            tap_text(tester, test_menu::MAIN_MENU_1);
+            tester.tap(find::text(test_menu::MAIN_MENU_1));
             tester.pump();
 
             assert_constructor_parameters_override_theme_parameters(tester);
@@ -580,16 +564,6 @@ pub(crate) mod tests {
             PhysicalKeyboardKey::ARROW_DOWN,
             LogicalKeyboardKey::ARROW_DOWN,
         );
-    }
-
-    fn count_icon(tester: &WidgetTester, icon: &IconData) -> usize {
-        tester
-            .find_by_type::<Icon>()
-            .into_iter()
-            .filter(|element| {
-                tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
-            })
-            .count()
     }
 
     // menu_theme_test.dart 'SubmenuButton.submenuIcon updates default arrow icon'.
@@ -666,10 +640,14 @@ pub(crate) mod tests {
             };
 
             build_menu(tester, None, true);
-            tap_text(tester, SUB_MENU_00);
+            tester.tap(find::text(SUB_MENU_00));
             tester.pump();
 
-            assert_eq!(count_icon(tester, &Icons::arrow_right()), 1);
+            expect(
+                tester,
+                &find::by_icon(&Icons::arrow_right()),
+                finds_one_widget(),
+            );
 
             controller.close(&mut tester.cell.borrow_mut());
             tester.pump();
@@ -677,35 +655,35 @@ pub(crate) mod tests {
             build_menu(tester, Some(Rc::clone(&submenu_icon)), true);
             tester.pump_and_settle();
 
-            tap_text(tester, SUB_MENU_00);
+            tester.tap(find::text(SUB_MENU_00));
             tester.pump();
-            assert_eq!(count_icon(tester, &default_icon), 1);
+            expect(tester, &find::by_icon(&default_icon), finds_one_widget());
 
             send_arrow_down(tester);
             tester.pump();
-            assert_eq!(count_icon(tester, &focused_icon), 1);
+            expect(tester, &find::by_icon(&focused_icon), finds_one_widget());
 
             controller.close(&mut tester.cell.borrow_mut());
             tester.pump();
 
-            tap_text(tester, SUB_MENU_00);
+            tester.tap(find::text(SUB_MENU_00));
             tester.pump();
             // Dart's `hoverOver`: a new mouse moved over the text, then a settle.
-            let at = rect(tester, only(tester.find_text(SUB_SUB_MENU_110))).center();
+            let at = tester.get_center(find::text(SUB_SUB_MENU_110));
             let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             tester.pump();
-            assert_eq!(count_icon(tester, &hovered_icon), 1);
+            expect(tester, &find::by_icon(&hovered_icon), finds_one_widget());
 
             controller.close(&mut tester.cell.borrow_mut());
             tester.pump();
 
             build_menu(tester, Some(submenu_icon), false);
-            tap_text(tester, SUB_MENU_00);
+            tester.tap(find::text(SUB_MENU_00));
             tester.pump();
-            assert_eq!(count_icon(tester, &disabled_icon), 1);
+            expect(tester, &find::by_icon(&disabled_icon), finds_one_widget());
         });
     }
 }

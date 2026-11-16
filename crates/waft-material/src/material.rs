@@ -1931,7 +1931,11 @@ mod tests {
             assert_eq!(model(tester).elevation(&tester.cell.borrow()), 0.0);
 
             tester.pump_by(Duration::from_millis(1));
-            assert!(model(tester).elevation(&tester.cell.borrow()).abs() < 0.001);
+            waft_widgets::testing::assert_more_or_less_equals_within(
+                model(tester).elevation(&tester.cell.borrow()),
+                0.0,
+                0.001,
+            );
 
             tester.pump_by(K_THEME_CHANGE_DURATION / 2);
             assert!(model(tester).elevation(&tester.cell.borrow()).abs() >= 0.001);
@@ -2461,7 +2465,7 @@ mod tests {
     }
 
     /// What the border painter of the material draws.
-    fn border_draws(tester: &WidgetTester) -> (bool, Vec<crate::test_support::Drawn>) {
+    fn border_draws(tester: &WidgetTester) -> (bool, Vec<waft_rendering::testing::RecordedCall>) {
         let paint = tester.first::<RenderCustomPaint>();
         let mut app = tester.cell.borrow_mut();
         let (foreground, painter) = match paint.foreground_painter(&app) {
@@ -2473,7 +2477,7 @@ mod tests {
         painter.paint(&mut app, &mut canvas, size);
         (
             foreground,
-            crate::test_support::Drawn::draws(&canvas.build()),
+            crate::test_support::draw_calls(canvas.build().ops()),
         )
     }
 
@@ -2876,8 +2880,8 @@ mod tests {
             )
             .into_widget();
             tester.pump_widget(widget);
-            let center = tester.center_of(&button);
-            tester.tap(center, 1);
+            let center = tester.get_center(&button);
+            tester.tap_at(center, 1);
             assert!(pressed.get());
         });
     }

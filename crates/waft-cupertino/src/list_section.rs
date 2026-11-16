@@ -575,16 +575,12 @@ mod tests {
     use std::rc::Rc;
 
     use waft_embedder::{Offset, TextDirection};
-    use waft_rendering::{
-        AnyRenderObject, RenderBox, RenderClipRSuperellipse, RenderCustomClip, RenderHandle,
-        RenderObject,
-    };
+    use waft_rendering::{RenderBox, RenderClipRSuperellipse, RenderCustomClip};
     use waft_widgets::{Builder, Directionality, GlobalKey};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, assert_f32_equals, test_widgets};
 
     use super::*;
-    use crate::test_support::{assert_near, assert_offset_near};
 
     /// A divider's thickness: one device pixel at the tester's 3.0.
     const HAIRLINE: f64 = 1.0 / 3.0;
@@ -596,37 +592,6 @@ mod tests {
     /// A `SizedBox` of `width` x `height`, findable through `key`.
     fn slot(key: &GlobalKey, width: f64, height: f64) -> SizedBox {
         SizedBox::new().key(key_of(key)).width(width).height(height)
-    }
-
-    fn offset_of(app: &mut App, key: &GlobalKey) -> Offset {
-        key.current_context(app)
-            .expect("the slot mounted")
-            .find_render_object(app)
-            .expect("the slot has been laid out")
-            .as_box()
-            .expect("a box")
-            .local_to_global(app, Offset::ZERO, None)
-    }
-
-    /// The first descendant render object of type `T`, from `node` down.
-    fn find<T: RenderObject>(app: &App, node: AnyRenderObject) -> Option<RenderHandle<T>> {
-        if let Some(found) = node.downcast::<T>(app) {
-            return Some(found);
-        }
-        let mut found = None;
-        node.visit_children(app, &mut |child| {
-            if found.is_none() {
-                found = find::<T>(app, child);
-            }
-        });
-        found
-    }
-
-    fn root(app: &mut App, key: &GlobalKey) -> AnyRenderObject {
-        key.current_context(app)
-            .expect("the section mounted")
-            .find_render_object(app)
-            .expect("the section has been laid out")
     }
 
     fn mount<K>(tester: &mut WidgetTester, section: impl IntoWidget<K>) {
@@ -646,8 +611,7 @@ mod tests {
     #[test]
     fn a_base_section_stacks_its_top_margin_header_dividers_and_footer() {
         test_widgets(|tester| {
-            let (section_key, header, first, second, footer) = (
-                GlobalKey::new(),
+            let (header, first, second, footer) = (
                 GlobalKey::new(),
                 GlobalKey::new(),
                 GlobalKey::new(),
@@ -656,7 +620,6 @@ mod tests {
             mount(
                 tester,
                 CupertinoListSection::new()
-                    .key(key_of(&section_key))
                     .header(slot(&header, 50.0, 10.0))
                     .footer(slot(&footer, 50.0, 10.0))
                     .children([
@@ -664,26 +627,23 @@ mod tests {
                         slot(&second, 50.0, 40.0).into_widget(),
                     ]),
             );
-            let mut app = tester.cell.borrow_mut();
-
             assert_eq!(
-                offset_of(&mut app, &header),
+                tester.get_top_left(&header),
                 Offset::new(20.0, 22.0),
                 "the top margin, then the header's start margin"
             );
             // The header margin's 6 below it, then the long divider, a device pixel at 3.0.
-            assert_offset_near(
-                offset_of(&mut app, &first),
+            assert_f32_equals(
+                tester.get_top_left(&first),
                 Offset::new(375.0, 38.0 + HAIRLINE),
             );
             // The first row and the short divider between them.
-            assert_near(offset_of(&mut app, &second).dy(), 78.0 + 2.0 * HAIRLINE);
+            assert_f32_equals(tester.get_top_left(&second).dy(), 78.0 + 2.0 * HAIRLINE);
             // The closing long divider and the rows' bottom margin.
-            assert_offset_near(offset_of(&mut app, &footer), Offset::new(20.0, 127.0));
+            assert_f32_equals(tester.get_top_left(&footer), Offset::new(20.0, 127.0));
 
-            let section = root(&mut app, &section_key);
             assert!(
-                find::<RenderClipRSuperellipse>(&app, section).is_none(),
+                tester.all::<RenderClipRSuperellipse>().is_empty(),
                 "the base section does not clip"
             );
         });
@@ -692,30 +652,24 @@ mod tests {
     #[test]
     fn an_inset_grouped_section_clips_its_rows_and_drops_the_long_dividers() {
         test_widgets(|tester| {
-            let (section_key, first, second) =
-                (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
+            let (first, second) = (GlobalKey::new(), GlobalKey::new());
             mount(
                 tester,
-                CupertinoListSection::inset_grouped()
-                    .key(key_of(&section_key))
-                    .children([
-                        slot(&first, 50.0, 40.0).into_widget(),
-                        slot(&second, 50.0, 40.0).into_widget(),
-                    ]),
+                CupertinoListSection::inset_grouped().children([
+                    slot(&first, 50.0, 40.0).into_widget(),
+                    slot(&second, 50.0, 40.0).into_widget(),
+                ]),
             );
-            let mut app = tester.cell.borrow_mut();
-
             assert_eq!(
-                offset_of(&mut app, &first).dy(),
+                tester.get_top_left(&first).dy(),
                 20.0,
                 "no top margin and no long divider, only the rows' own margin"
             );
             // One short divider between the rows.
-            assert_near(offset_of(&mut app, &second).dy(), 60.0 + HAIRLINE);
+            assert_f32_equals(tester.get_top_left(&second).dy(), 60.0 + HAIRLINE);
 
-            let section = root(&mut app, &section_key);
-            let clip =
-                find::<RenderClipRSuperellipse>(&app, section).expect("the rows are clipped");
+            let clip = tester.first::<RenderClipRSuperellipse>();
+            let app = tester.cell.borrow();
             assert_eq!(clip.clip_behavior(&app), Clip::HardEdge);
             assert_eq!(clip.size(&app).width(), 760.0, "inset by the rows' margin");
         });

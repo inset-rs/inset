@@ -1114,15 +1114,15 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use waft_painting::ShapeBorder;
 
-    use waft_embedder::{Offset, Radius, Rect, Size};
+    use waft_embedder::{Offset, Radius, Size};
     use waft_painting::{BorderRadius, BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
     use waft_rendering::AnyRenderBox;
     use waft_widgets::{
-        AnyElement, Builder, Center, Container, ListView, ModalBarrier, MouseRegion,
-        PreferredSizeWidgetRef, Text,
+        AnyElement, Builder, Center, Container, ListView, ModalBarrier, MouseRegion, Orientation,
+        OrientationBuilder, PreferredSizeWidgetRef, Text,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::app_bar::AppBar;
@@ -1171,15 +1171,18 @@ mod tests {
     }
 
     fn found(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_text(text).len()
+        find::text(text).evaluate(tester).len()
     }
 
     fn drawers(tester: &WidgetTester) -> usize {
-        tester.find_by_type::<Drawer>().len()
+        find::by_type::<Drawer>().evaluate(tester).len()
     }
 
     fn drawer_box(tester: &WidgetTester) -> AnyRenderBox {
-        let drawer = *tester.find_by_type::<Drawer>().first().expect("a drawer");
+        let drawer = *find::by_type::<Drawer>()
+            .evaluate(tester)
+            .first()
+            .expect("a drawer");
         tester.render_box_of(drawer)
     }
 
@@ -1189,9 +1192,12 @@ mod tests {
 
     /// `find.descendant(of: find.byType(Drawer), matching: find.byType(Material))`, first.
     fn drawer_material(tester: &WidgetTester) -> AnyElement {
-        let drawer = *tester.find_by_type::<Drawer>().first().expect("a drawer");
-        *tester
-            .find_by_type::<Material>()
+        let drawer = *find::by_type::<Drawer>()
+            .evaluate(tester)
+            .first()
+            .expect("a drawer");
+        *find::by_type::<Material>()
+            .evaluate(tester)
             .iter()
             .find(|material| tester.ancestors(**material).contains(&drawer))
             .expect("a material in the drawer")
@@ -1208,10 +1214,10 @@ mod tests {
     /// The scrim: the `ColoredBox` of a [`DrawerController`] outside its drawer, which Dart
     /// finds by its `Semantics` label.
     fn scrim_color(tester: &WidgetTester) -> Color {
-        let controllers = tester.find_by_type::<DrawerController>();
-        let drawers = tester.find_by_type::<Drawer>();
-        let scrim = *tester
-            .find_by_type::<ColoredBox>()
+        let controllers = find::by_type::<DrawerController>().evaluate(tester);
+        let drawers = find::by_type::<Drawer>().evaluate(tester);
+        let scrim = *find::by_type::<ColoredBox>()
+            .evaluate(tester)
             .iter()
             .find(|colored_box| {
                 let ancestors = tester.ancestors(**colored_box);
@@ -1225,12 +1231,7 @@ mod tests {
     }
 
     fn top_left(tester: &WidgetTester, element: AnyElement) -> Offset {
-        tester.global_rect(tester.render_box_of(element)).top_left()
-    }
-
-    fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        let text = *tester.find_text(text).first().expect("the text");
-        tester.global_rect(tester.render_box_of(text))
+        tester.get_rect(element).top_left()
     }
 
     fn rounded(border_radius: BorderRadius) -> RoundedRectangleBorder {
@@ -1303,8 +1304,8 @@ mod tests {
         tester.pump_by(Duration::from_secs(1));
         assert_eq!(found(tester, "Archive"), 1);
 
-        let header = *tester
-            .find_by_type::<DrawerHeader>()
+        let header = *find::by_type::<DrawerHeader>()
+            .evaluate(tester)
             .first()
             .expect("a header");
         let header_size = tester.render_box_of(header).size(&tester.cell.borrow());
@@ -1359,13 +1360,13 @@ mod tests {
             assert_eq!(found(tester, "drawer"), 1);
             tester.pump_by(Duration::from_secs(1)); // animation done
             assert_eq!(found(tester, "drawer"), 1);
-            let at = text_rect(tester, "drawer").center();
-            tester.tap(at, 1);
+            let at = tester.get_rect(find::text("drawer")).center();
+            tester.tap_at(at, 1);
             tester.pump(); // nothing should have happened
             assert_eq!(found(tester, "drawer"), 1);
             tester.pump_by(Duration::from_secs(1)); // ditto
             assert_eq!(found(tester, "drawer"), 1);
-            tester.tap(Offset::new(750.0, 100.0), 2); // on the mask
+            tester.tap_at(Offset::new(750.0, 100.0), 2); // on the mask
             tester.pump();
             tester.pump_by(Duration::from_millis(10));
             // drawer should be starting to animate away
@@ -1437,7 +1438,7 @@ mod tests {
             logs.borrow_mut().clear();
 
             // Close drawer, hover is interactable again
-            tester.tap(Offset::new(750.0, 100.0), 2); // on the mask
+            tester.tap_at(Offset::new(750.0, 100.0), 2); // on the mask
             tester.pump();
             tester.pump_by(Duration::from_secs(1)); // animation done
             assert_eq!(found(tester, "drawer"), 0);
@@ -1488,8 +1489,8 @@ mod tests {
                 tester.pump_and_settle();
                 assert!(is_same_color_as(scrim_color(tester), color));
 
-                let at = tester.global_rect(drawer_box(tester)).center();
-                tester.tap(at, 1);
+                let at = tester.get_rect(drawer_box(tester)).center();
+                tester.tap_at(at, 1);
                 tester.pump_and_settle();
                 assert_eq!(drawers(tester), 0);
             };
@@ -1583,7 +1584,7 @@ mod tests {
             let mut gesture = TestPointer::touch(1);
             let drawer_position = |tester: &WidgetTester| {
                 assert_eq!(drawers(tester), 1);
-                tester.global_rect(drawer_box(tester)).left
+                tester.get_rect(drawer_box(tester)).left
             };
             // `gesture.moveBy(by)`.
             let move_by = |tester: &mut WidgetTester, gesture: &mut TestPointer, by: Offset| {
@@ -1669,15 +1670,15 @@ mod tests {
 
             // Tap the close button to pop the drawer route.
             tester.pump_by(Duration::from_millis(100));
-            let at = text_rect(tester, "close").center();
-            tester.tap(at, 1);
+            let at = tester.get_rect(find::text("close")).center();
+            tester.tap_at(at, 1);
             tester.pump();
             tester.pump_by(Duration::from_secs(1));
             assert_eq!(found(tester, "drawer"), 0);
 
             // Confirm that a button in the scaffold body is still clickable.
-            let at = text_rect(tester, "button").center();
-            tester.tap(at, 2);
+            let at = tester.get_rect(find::text("button")).center();
+            tester.tap_at(at, 2);
             assert!(button_pressed.get());
         });
     }
@@ -1711,7 +1712,7 @@ mod tests {
         let ltr = text_direction == TextDirection::Ltr;
         // The edge of the text facing the drawer's edge.
         let text_edge = |tester: &WidgetTester| {
-            let rect = text_rect(tester, "drawer");
+            let rect = tester.get_rect(find::text("drawer"));
             if ltr { rect.left } else { rect.right }
         };
         assert_eq!(found(tester, "drawer"), 0);
@@ -1721,7 +1722,7 @@ mod tests {
         tester.pump_by(Duration::from_secs(1)); // animation done
         assert_eq!(found(tester, "drawer"), 1);
 
-        tester.tap(Offset::new(if ltr { 750.0 } else { 50.0 }, 100.0), 1); // on the mask
+        tester.tap_at(Offset::new(if ltr { 750.0 } else { 50.0 }, 100.0), 1); // on the mask
         tester.pump();
         tester.pump_by(Duration::from_millis(10));
         // drawer should be starting to animate away
@@ -1837,7 +1838,7 @@ mod tests {
             assert_eq!(found(tester, "drawer"), 1);
 
             let data = tester.restoration_data();
-            tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
+            tester.tap_at(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
             assert_eq!(found(tester, "drawer"), 0);
 
@@ -1871,7 +1872,7 @@ mod tests {
             assert_eq!(found(tester, "endDrawer"), 1);
 
             let data = tester.restoration_data();
-            tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
+            tester.tap_at(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
             assert_eq!(found(tester, "endDrawer"), 0);
 
@@ -1908,7 +1909,7 @@ mod tests {
             assert_eq!(shown(tester), (1, 0));
 
             let data = tester.restoration_data();
-            tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
+            tester.tap_at(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
             assert_eq!(shown(tester), (0, 0));
 
@@ -1916,7 +1917,7 @@ mod tests {
             let tester = &mut tester;
             assert_eq!(shown(tester), (1, 0));
 
-            tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
+            tester.tap_at(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
             assert_eq!(shown(tester), (0, 0));
 
@@ -1929,7 +1930,7 @@ mod tests {
             assert_eq!(shown(tester), (0, 1));
 
             let data = tester.restoration_data();
-            tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
+            tester.tap_at(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
             assert_eq!(shown(tester), (0, 0));
 
@@ -1996,6 +1997,76 @@ mod tests {
             close_end_drawer(tester, &key);
             tester.pump_and_settle();
             assert_eq!(found(tester, "endDrawer"), 0);
+        });
+    }
+
+    /// drawer_test's 'Disposing drawer/endDrawer does not crash if … is open and framework is
+    /// locked': a portrait scaffold with the drawer `drawer_of` gives it, opened by `open`, which
+    /// turning the view to landscape replaces, disposing the open drawer's controller while the
+    /// framework is locked.
+    fn dispose_open_drawer_on_rotation(
+        tester: &mut WidgetTester,
+        drawer_of: fn(Scaffold) -> Scaffold,
+        label: &'static str,
+        open: fn(&WidgetTester, &GlobalKey),
+    ) {
+        // Regression test for https://github.com/flutter/flutter/issues/34978
+        tester.view().set_physical_size(Size::new(1800.0, 2400.0));
+        let key = GlobalKey::new();
+        let portrait_key = key.clone();
+        pump_app(tester, m3, move |_app| {
+            let portrait_key = portrait_key.clone();
+            OrientationBuilder::new(move |_app, _context, orientation| match orientation {
+                Orientation::Portrait => {
+                    drawer_of(Scaffold::new().key(portrait_key.clone().into()))
+                        .body(Container::new())
+                        .into_widget()
+                }
+                Orientation::Landscape => Scaffold::new()
+                    .app_bar(PreferredSizeWidgetRef::new(AppBar::new()))
+                    .body(Container::new())
+                    .into_widget(),
+            })
+            .into_widget()
+        });
+        assert_eq!(found(tester, label), 0);
+
+        open(tester, &key);
+        tester.pump_and_settle();
+        assert_eq!(found(tester, label), 1);
+
+        // Change the orientation and cause the drawer controller to be disposed
+        // while the framework is locked.
+        tester.view().set_physical_size(Size::new(2400.0, 1800.0));
+        tester.pump_and_settle();
+        assert!(
+            find::by_type::<crate::action_buttons::BackButton>()
+                .evaluate(tester)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn disposing_drawer_does_not_crash_if_drawer_is_open_and_framework_is_locked() {
+        test_widgets(|tester| {
+            dispose_open_drawer_on_rotation(
+                tester,
+                |scaffold| scaffold.drawer(Text::new("drawer")),
+                "drawer",
+                open_drawer,
+            );
+        });
+    }
+
+    #[test]
+    fn disposing_end_drawer_does_not_crash_if_end_drawer_is_open_and_framework_is_locked() {
+        test_widgets(|tester| {
+            dispose_open_drawer_on_rotation(
+                tester,
+                |scaffold| scaffold.end_drawer(Text::new("endDrawer")),
+                "endDrawer",
+                open_end_drawer,
+            );
         });
     }
 
@@ -2071,7 +2142,7 @@ mod tests {
         assert_shape(tester, start_shape);
 
         // Close the opened drawer.
-        tester.tap(Offset::new(750.0, 300.0), 1);
+        tester.tap_at(Offset::new(750.0, 300.0), 1);
         tester.pump_and_settle();
 
         // Open the end drawer.
@@ -2240,7 +2311,7 @@ mod tests {
         });
 
         // Check the flag is set at the Scaffold level.
-        let scaffold = tester.find_by_type::<Scaffold>()[0];
+        let scaffold = find::by_type::<Scaffold>().evaluate(tester)[0];
         assert_eq!(
             tester.widget(scaffold, |scaffold: &Scaffold| scaffold
                 .drawer_barrier_dismissible),
@@ -2275,7 +2346,7 @@ mod tests {
         assert_eq!(drawers(tester), 1);
 
         // Find the ModalBarrier.
-        let modal_barriers = tester.find_by_type::<ModalBarrier>();
+        let modal_barriers = find::by_type::<ModalBarrier>().evaluate(tester);
         assert_eq!(modal_barriers.len(), 1);
 
         // Calculate a point to tap outside the Drawer.
@@ -2284,7 +2355,7 @@ mod tests {
         let tap_position = top_left(tester, modal_barriers[0]) + modal_barrier_center;
 
         // Tap on the ModalBarrier.
-        tester.tap(tap_position, 1);
+        tester.tap_at(tap_position, 1);
         tester.pump_and_settle();
 
         assert_eq!(
@@ -2358,7 +2429,10 @@ mod tests {
 
     /// The widget the one `Drawer`'s element built: a new one each time the drawer builds.
     fn drawer_built_child(tester: &WidgetTester) -> WidgetRef {
-        let drawer = *tester.find_by_type::<Drawer>().first().expect("a drawer");
+        let drawer = *find::by_type::<Drawer>()
+            .evaluate(tester)
+            .first()
+            .expect("a drawer");
         let app = tester.cell.borrow();
         drawer.children(&app)[0].widget(&app).clone()
     }
@@ -2441,8 +2515,8 @@ mod tests {
                     .into_widget()
             });
             assert_eq!(drawer_box(tester).size(&tester.cell.borrow()), Size::ZERO);
-            let header = *tester
-                .find_by_type::<DrawerHeader>()
+            let header = *find::by_type::<DrawerHeader>()
+                .evaluate(tester)
                 .first()
                 .expect("a header");
             assert_eq!(
@@ -2453,7 +2527,7 @@ mod tests {
     }
 
     fn will_handle_pop_internally(tester: &WidgetTester, text: &str) -> bool {
-        let element = *tester.find_text(text).first().expect("the text");
+        let element = *find::text(text).evaluate(tester).first().expect("the text");
         let mut app = tester.cell.borrow_mut();
         let route = AnyModalRoute::of(&mut app, element).expect("a modal route");
         route.as_route().will_handle_pop_internally(&app)
@@ -2461,7 +2535,7 @@ mod tests {
 
     /// Dart's `Scaffold.of(tester.element(find.text(text)))`.
     fn scaffold_of(tester: &WidgetTester, text: &str) -> Handle<ScaffoldState> {
-        let element = *tester.find_text(text).first().expect("the text");
+        let element = *find::text(text).evaluate(tester).first().expect("the text");
         Scaffold::of(&mut tester.cell.borrow_mut(), element)
     }
 
@@ -2502,14 +2576,14 @@ mod tests {
 
             // Rapid double tap on the scrim.
             // Use manual pointer events to simulate tapping the scrim twice rapidly.
-            tester.tap(Offset::new(10.0, 200.0), 1);
+            tester.tap_at(Offset::new(10.0, 200.0), 1);
 
             // Pump once to start the closing animation ticker.
             tester.pump();
             // Advance time by 150ms so the drawer is more than half closed.
             tester.pump_by(Duration::from_millis(150));
 
-            tester.tap(Offset::new(10.0, 200.0), 2);
+            tester.tap_at(Offset::new(10.0, 200.0), 2);
 
             tester.pump_and_settle();
 
@@ -2833,7 +2907,7 @@ mod tests {
             };
             pump(tester, true);
             assert_eq!(found(tester, "drawer"), 1);
-            assert_eq!(text_rect(tester, "drawer").left, 0.0);
+            assert_eq!(tester.get_rect(find::text("drawer")).left, 0.0);
 
             pump(tester, false);
             assert_eq!(found(tester, "drawer"), 0);

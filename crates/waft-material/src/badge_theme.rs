@@ -268,7 +268,7 @@ mod tests {
 
     use super::*;
     use crate::badge::Badge;
-    use crate::badge::tests::{add_icon, badge_paints_rrect, badge_rect, rect_of_text};
+    use crate::badge::tests::{add_icon, badge_paints_rrect, badge_rect};
     use crate::bottom_navigation_bar::tests::paragraph_style;
     use crate::colors::Colors;
     use crate::drawer_theme::tests::probe;
@@ -276,6 +276,7 @@ mod tests {
     use crate::scaffold::Scaffold;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m3, pump_app};
+    use waft_widgets::testing::find;
 
     const GREEN: Color = Color::new(0xff00ff00);
     const BLACK: Color = Color::new(0xff000000);
@@ -301,7 +302,7 @@ mod tests {
 
     fn assert_badge_uses_the_theme(tester: &WidgetTester) {
         // text width = 48 = fontSize * 4, text height = fontSize
-        let text_rect = rect_of_text(tester, "1234");
+        let text_rect = tester.get_rect(find::text("1234"));
         assert_eq!(text_rect.size(), Size::new(48.0, 12.0));
 
         assert_eq!(text_rect.top_left(), Offset::new(33.0, 2.0));

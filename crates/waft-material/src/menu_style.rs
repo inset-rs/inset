@@ -412,17 +412,15 @@ mod tests {
     use waft_embedder::Rect;
     use waft_rendering::BoxConstraints;
     use waft_widgets::{
-        AnyElement, Column, ConstrainedBox, Expanded, IntoWidget, Text, WidgetRef,
-        WidgetStatePropertyAll,
+        Column, ConstrainedBox, Expanded, IntoWidget, Text, WidgetRef, WidgetStatePropertyAll,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{Finder, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::material::Material;
     use crate::menu_anchor::{MenuBar, MenuItemButton, MenuPanel, SubmenuButton};
     use crate::menu_bar_theme::{MenuBarTheme, MenuBarThemeData};
-    use crate::menu_theme::tests::{only, rect, tap_text};
     use crate::menu_theme::{MenuTheme, MenuThemeData};
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
@@ -513,13 +511,13 @@ mod tests {
     }
 
     /// Dart's `findMenuPanels()`.
-    fn menu_panels(tester: &WidgetTester) -> Vec<AnyElement> {
-        tester.find_by_type::<MenuPanel>()
+    fn menu_panels() -> Finder {
+        find::by_type::<MenuPanel>()
     }
 
     /// Opens the first menu: Dart's "Have to open a menu initially to start things going."
     fn open_first_menu(tester: &mut WidgetTester) {
-        tap_text(tester, "Menu 0");
+        tester.tap(find::text("Menu 0"));
         tester.pump();
     }
 
@@ -544,23 +542,23 @@ mod tests {
             open_first_menu(tester);
 
             // MenuBarTheme affects MenuBar.
-            let panels = menu_panels(tester);
+            let panels = menu_panels();
             assert_eq!(
-                rect(tester, panels[0]),
+                tester.get_rect(panels.clone().at(0)),
                 Rect::from_ltrb(100.0, 0.0, 700.0, 60.0)
             );
             assert_eq!(
-                rect(tester, panels[0]).size(),
+                tester.get_rect(panels.clone().at(0)).size(),
                 waft_embedder::Size::new(600.0, 60.0)
             );
 
             // MenuTheme affects menus.
             assert_eq!(
-                rect(tester, panels[1]),
+                tester.get_rect(panels.clone().at(1)),
                 Rect::from_ltrb(104.0, 54.0, 204.0, 154.0)
             );
             assert_eq!(
-                rect(tester, panels[1]).size(),
+                tester.get_rect(panels.clone().at(1)).size(),
                 waft_embedder::Size::new(100.0, 100.0)
             );
         });
@@ -579,23 +577,23 @@ mod tests {
             open_first_menu(tester);
 
             // MenuBarTheme affects MenuBar.
-            let panels = menu_panels(tester);
+            let panels = menu_panels();
             assert_eq!(
-                rect(tester, panels[0]),
+                tester.get_rect(panels.clone().at(0)),
                 Rect::from_ltrb(275.0, 0.0, 525.0, 40.0)
             );
             assert_eq!(
-                rect(tester, panels[0]).size(),
+                tester.get_rect(panels.clone().at(0)).size(),
                 waft_embedder::Size::new(250.0, 40.0)
             );
 
             // MenuTheme affects menus.
             assert_eq!(
-                rect(tester, panels[1]),
+                tester.get_rect(panels.clone().at(1)),
                 Rect::from_ltrb(279.0, 44.0, 379.0, 144.0)
             );
             assert_eq!(
-                rect(tester, panels[1]).size(),
+                tester.get_rect(panels.clone().at(1)).size(),
                 waft_embedder::Size::new(100.0, 100.0)
             );
         });
@@ -614,23 +612,23 @@ mod tests {
             open_first_menu(tester);
 
             // MenuBarTheme affects MenuBar.
-            let panels = menu_panels(tester);
+            let panels = menu_panels();
             assert_eq!(
-                rect(tester, panels[0]),
+                tester.get_rect(panels.clone().at(0)),
                 Rect::from_ltrb(200.0, 0.0, 600.0, 60.0)
             );
             assert_eq!(
-                rect(tester, panels[0]).size(),
+                tester.get_rect(panels.clone().at(0)).size(),
                 waft_embedder::Size::new(400.0, 60.0)
             );
 
             // MenuTheme affects menus.
             assert_eq!(
-                rect(tester, panels[1]),
+                tester.get_rect(panels.clone().at(1)),
                 Rect::from_ltrb(204.0, 54.0, 504.0, 354.0)
             );
             assert_eq!(
-                rect(tester, panels[1]).size(),
+                tester.get_rect(panels.clone().at(1)).size(),
                 waft_embedder::Size::new(300.0, 300.0)
             );
         });
@@ -648,29 +646,27 @@ mod tests {
             );
             tester.pump();
 
-            let bar = only(tester.find_by_type::<MenuBar>());
-            assert_eq!(rect(tester, bar), Rect::from_ltrb(228.0, 0.0, 572.0, 48.0));
+            let bar = find::by_type::<MenuBar>();
+            assert_eq!(
+                tester.get_rect(&bar),
+                Rect::from_ltrb(228.0, 0.0, 572.0, 48.0)
+            );
 
             // Open and make sure things are the right size.
-            tap_text(tester, "Menu 1");
+            tester.tap(find::text("Menu 1"));
             tester.pump();
 
-            assert_eq!(rect(tester, bar), Rect::from_ltrb(228.0, 0.0, 572.0, 48.0));
             assert_eq!(
-                rect(tester, only(tester.find_text("Sub Menu 10"))),
+                tester.get_rect(&bar),
+                Rect::from_ltrb(228.0, 0.0, 572.0, 48.0)
+            );
+            assert_eq!(
+                tester.get_rect(find::text("Sub Menu 10")),
                 Rect::from_ltrb(372.0, 70.0, 565.0, 84.0)
             );
-            let label = only(tester.find_text("Sub Menu 10"));
-            let materials: Vec<AnyElement> = tester
-                .ancestors(label)
-                .into_iter()
-                .filter(|ancestor| {
-                    let app = tester.cell.borrow();
-                    waft_widgets::downcast_widget::<Material>(&**ancestor.widget(&app)).is_some()
-                })
-                .collect();
+            let materials = find::ancestor(find::text("Sub Menu 10"), find::by_type::<Material>());
             assert_eq!(
-                rect(tester, materials[1]),
+                tester.get_rect(materials.at(1)),
                 Rect::from_ltrb(352.0, 48.0, 585.0, 190.0)
             );
         });

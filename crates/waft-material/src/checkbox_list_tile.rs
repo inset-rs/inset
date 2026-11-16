@@ -651,19 +651,21 @@ pub(crate) mod tests {
         WidgetStateMouseCursor, WidgetStateProperty,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_rendering::testing::{PaintCall, PaintedStyle};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::checkbox::tests::{
-        Paints, assert_paints, checkbox_center, checkbox_size, hover, ignore, press,
+        assert_paints, checkbox_center, checkbox_size, hover, ignore, press,
     };
     use crate::checkbox_theme::CheckboxThemeData;
     use crate::colors::Colors;
     use crate::ink_well::InkWell;
-    use crate::list_tile::tests::{THIRTEEN_LINES, bare, m2, m3, text_rect};
+    use crate::list_tile::tests::{THIRTEEN_LINES, bare, m2, m3};
     use crate::list_tile_theme::ListTileThemeData;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
+    use crate::test_support::PaintInspection;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::pump_app;
 
@@ -694,18 +696,18 @@ pub(crate) mod tests {
 
     /// The `index`th element whose widget is a `W`: Dart's `find.byType(W).at(index)`.
     pub(crate) fn nth<W: 'static>(tester: &WidgetTester, index: usize) -> AnyElement {
-        tester.find_by_type::<W>()[index]
+        tester.element(find::by_type::<W>().at(index))
     }
 
     /// Dart's `tester.getRect(find.byType(W).at(index))`.
     pub(crate) fn rect_of<W: 'static>(tester: &WidgetTester, index: usize) -> Rect {
-        tester.global_rect(tester.render_box_of(nth::<W>(tester, index)))
+        tester.get_rect(nth::<W>(tester, index))
     }
 
     /// Dart's `tester.getRect(find.text(text))`, over `Text`s.
     pub(crate) fn text_center(tester: &WidgetTester, text: &str) -> Offset {
-        let found = tester.find_text(text);
-        tester.global_rect(tester.render_box_of(found[0])).center()
+        let found = find::text(text).evaluate(tester);
+        tester.get_rect(found[0]).center()
     }
 
     /// Dart's `Focus.of(key.currentContext!)`.
@@ -751,12 +753,6 @@ pub(crate) mod tests {
             BorderSide::NONE,
             BorderRadiusGeometry::horizontal(None, Some(Radius::circular(100.0)), None, None),
         )
-    }
-
-    /// The colours of the rects the material's ink features draw: Dart's
-    /// `find.byType(Material), paints..rect(color:)`.
-    pub(crate) fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
-        crate::list_tile::tests::ink_rect_colors(tester)
     }
 
     /// Dart's `tester.getSize(find.byType(ListTile))`.
@@ -875,7 +871,7 @@ pub(crate) mod tests {
 
     /// Where the `title` starts (LTR) or ends (RTL).
     pub(crate) fn title_edge(tester: &WidgetTester, text_direction: TextDirection) -> f64 {
-        let title = text_rect(tester, "title");
+        let title = tester.get_rect(find::text("title"));
         match text_direction {
             TextDirection::Ltr => title.left,
             TextDirection::Rtl => title.right,
@@ -906,11 +902,7 @@ pub(crate) mod tests {
     ) -> (f64, f64) {
         let tile = rect_of::<ListTile>(tester, 0);
         let control = rect_of::<C>(tester, 0);
-        let render = tester
-            .render_object(secondary_key)
-            .as_box()
-            .expect("a render box");
-        let secondary = tester.global_rect(render);
+        let secondary = tester.get_rect(secondary_key);
         (control.top - tile.top, secondary.top - tile.top)
     }
 
@@ -1031,10 +1023,10 @@ pub(crate) mod tests {
                     .into_widget()
             });
             let hello = text_center(tester, "Hello");
-            tester.tap(hello, 1);
+            tester.tap_at(hello, 1);
             log.borrow_mut().push(None);
             let checkbox = checkbox_center(tester);
-            tester.tap(checkbox, 2);
+            tester.tap_at(checkbox, 2);
             assert_eq!(*log.borrow(), [Some(Some(false)), None, Some(Some(false))]);
         });
     }
@@ -1068,8 +1060,8 @@ pub(crate) mod tests {
                 assert_paints(
                     tester,
                     &[
-                        Paints::Rrect(check_box_border_color),
-                        Paints::Path(check_color.unwrap_or(Color::new(0xFFFFFFFF))),
+                        PaintCall::rrect(Some(check_box_border_color)),
+                        PaintCall::path(Some(check_color.unwrap_or(Color::new(0xFFFFFFFF)))),
                     ],
                 );
             }
@@ -1106,7 +1098,7 @@ pub(crate) mod tests {
                     crate::theme::Theme::new(theme, tile).into_widget()
                 });
                 tester.pump_and_settle();
-                assert_paints(tester, &[Paints::Rrect(expected)]);
+                assert_paints(tester, &[PaintCall::rrect(Some(expected))]);
             }
         });
     }
@@ -1144,7 +1136,7 @@ pub(crate) mod tests {
             });
             let padding_rect = rect_of::<waft_widgets::SafeArea>(tester, 0);
             let checkbox_rect = rect_of::<Checkbox>(tester, 0);
-            let title_rect = text_rect(tester, "Title");
+            let title_rect = tester.get_rect(find::text("Title"));
             let taller = if checkbox_rect.height() > title_rect.height() {
                 checkbox_rect
             } else {
@@ -1184,12 +1176,12 @@ pub(crate) mod tests {
             };
             let tap_checkbox = |tester: &mut WidgetTester| {
                 let at = checkbox_center(tester);
-                tester.tap(at, 1);
+                tester.tap_at(at, 1);
                 tester.pump_and_settle();
             };
             let tap_tile = |tester: &mut WidgetTester| {
                 let at = rect_of::<ListTile>(tester, 0).center();
-                tester.tap(at, 1);
+                tester.tap_at(at, 1);
                 tester.pump_and_settle();
             };
             assert_eq!(shown(tester), Some(false));
@@ -1250,7 +1242,10 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(tester).contains(&tile_color.to_argb32()));
+            waft_rendering::testing::assert_paints(
+                tester.ink_list().ops(),
+                &[waft_rendering::testing::PaintCall::rect(Some(tile_color))],
+            );
         });
     }
 
@@ -1268,7 +1263,12 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(tester).contains(&selected_tile_color.to_argb32()));
+            waft_rendering::testing::assert_paints(
+                tester.ink_list().ops(),
+                &[waft_rendering::testing::PaintCall::rect(Some(
+                    selected_tile_color,
+                ))],
+            );
         });
     }
 
@@ -1358,10 +1358,10 @@ pub(crate) mod tests {
                 });
                 assert_paints(
                     tester,
-                    &[Paints::RingAt(
-                        side.color,
+                    &[PaintCall::drrect_between(
                         rrect(11.0, 11.0, 29.0, 29.0, 5.0),
                         inner,
+                        Some(side.color),
                     )],
                 );
             }
@@ -1482,11 +1482,11 @@ pub(crate) mod tests {
 
             // Tap the checkbox to disable CheckboxListTile
             let at = checkbox_center(tester);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
             assert_eq!(shown(tester), Some(true));
             assert!(!enabled.get());
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             tester.pump_and_settle();
             assert_eq!(shown(tester), Some(true));
         });
@@ -1590,7 +1590,7 @@ pub(crate) mod tests {
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert_paints(tester, &[Paints::Rrect(expected)]);
+                assert_paints(tester, &[PaintCall::rrect(Some(expected))]);
             }
         });
     }
@@ -1616,7 +1616,7 @@ pub(crate) mod tests {
             // Start hovering
             let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_paints(tester, &[Paints::Rrect(HOVERED_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(HOVERED_FILL_COLOR))]);
             tester.send(&gesture, PointerChange::Remove);
         });
     }
@@ -1637,22 +1637,52 @@ pub(crate) mod tests {
                 pump_wrapped(tester, |_app| host);
                 tester.pump_and_settle();
             };
-            let unhovered = [Paints::Rrect(
+            let unhovered = [PaintCall::rrect(Some(
                 m3(&tester.cell.borrow()).color_scheme.primary,
-            )];
+            ))];
             frame(tester, true);
-            assert_paints(tester, &[Paints::StrokeWidth(2.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(2.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
             assert_paints(tester, &unhovered);
 
             // Start hovering
             let gesture = hover(tester);
             frame(tester, true);
-            assert_paints(tester, &[Paints::Circle(orange), Paints::StrokeWidth(2.0)]);
+            assert_paints(
+                tester,
+                &[
+                    PaintCall::circle(Some(orange)),
+                    PaintCall::Path {
+                        color: None,
+                        style: Some(PaintedStyle::Stroke(Some(2.0))),
+                        includes: vec![],
+                        excludes: vec![],
+                    },
+                ],
+            );
 
             // Check what happens when disabled.
             frame(tester, false);
-            crate::checkbox::tests::assert_does_not_paint(tester, &[Paints::Circle(orange)]);
-            assert_paints(tester, &[Paints::StrokeWidth(2.0)]);
+            crate::checkbox::tests::assert_does_not_paint(
+                tester,
+                &[PaintCall::circle(Some(orange))],
+            );
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(2.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
             tester.send(&gesture, PointerChange::Remove);
         });
     }
@@ -1672,7 +1702,7 @@ pub(crate) mod tests {
     #[test]
     fn material2_checkbox_list_tile_respects_overlay_color_in_active_pressed_hovered_states() {
         test_widgets(|tester| {
-            use crate::radio::tests::{Paints, assert_paints, circle};
+            use crate::radio::tests::{CircleArguments, assert_paints, circle};
 
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const FILL_COLOR: Color = Color::new(0xFF000000);
@@ -1709,11 +1739,7 @@ pub(crate) mod tests {
                     tile.into_widget()
                 });
             };
-            let any_circle = || Paints::Circle {
-                color: None,
-                radius: None,
-                stroke_width: None,
-            };
+            let any_circle = || waft_rendering::testing::PaintCall::circle(None);
             let reaction = FILL_COLOR.with_alpha(crate::constants::K_RADIAL_REACTION_ALPHA);
             let mut presses = Vec::new();
             for (pointer, (active, use_overlay, expected)) in [
@@ -1808,7 +1834,16 @@ pub(crate) mod tests {
                 frame(tester, active, use_overlay);
                 presses.push(press(tester, pointer as i64 + 2));
                 tester.pump_and_settle();
-                assert_paints(tester, &[Paints::CircleRadius(expected, SPLASH_RADIUS)]);
+                assert_paints(
+                    tester,
+                    &[PaintCall::Circle {
+                        x: None,
+                        y: None,
+                        radius: Some(SPLASH_RADIUS),
+                        color: Some(expected),
+                        style: None,
+                    }],
+                );
             }
 
             // Start hovering
@@ -1819,7 +1854,13 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(HOVER_OVERLAY_COLOR, SPLASH_RADIUS)],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(HOVER_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             // Finish gestures to release resources.
@@ -1846,7 +1887,16 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_paints(tester, &[Paints::CircleRadius(orange, SPLASH_RADIUS)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(orange),
+                    style: None,
+                }],
+            );
             tester.send(&gesture, PointerChange::Remove);
         });
     }
@@ -1883,7 +1933,10 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert_paints(
                 tester,
-                &[Paints::Rrect(colors.error), Paints::Path(colors.on_error)],
+                &[
+                    PaintCall::rrect(Some(colors.error)),
+                    PaintCall::path(Some(colors.on_error)),
+                ],
             );
 
             // Start hovering
@@ -1892,8 +1945,8 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(colors.error.with_opacity(0.08)),
-                    Paints::Rrect(colors.error),
+                    PaintCall::circle(Some(colors.error.with_opacity(0.08))),
+                    PaintCall::rrect(Some(colors.error)),
                 ],
             );
             tester.send(&gesture, PointerChange::Remove);
@@ -1922,8 +1975,8 @@ pub(crate) mod tests {
                 );
                 tester.pump_and_settle();
                 assert_eq!(
-                    tester
-                        .find_by_type::<waft_cupertino::CupertinoCheckbox>()
+                    find::by_type::<waft_cupertino::CupertinoCheckbox>()
+                        .evaluate(tester)
                         .len(),
                     cupertino,
                     "{platform:?}"
@@ -2054,7 +2107,13 @@ pub(crate) mod tests {
                     .checkbox_scale_factor(SCALE)
                     .into_widget()
             });
-            let transform = tester.ancestor_of_type::<Transform>(nth::<Checkbox>(tester, 0));
+            let transform = tester.element(
+                find::ancestor(
+                    find::by_type::<Checkbox>().at(0),
+                    find::by_type::<Transform>(),
+                )
+                .first(),
+            );
             let matrix = tester.widget(transform, |transform: &Transform| transform.transform);
             assert_eq!(matrix, Matrix4::scale(SCALE as f32, SCALE as f32));
         });

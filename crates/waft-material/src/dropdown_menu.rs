@@ -2797,7 +2797,8 @@ pub(crate) mod tests {
     use waft_widgets::{AnyElement, EditableText, EditableTextState};
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_n_widgets,
+        finds_nothing, finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -2927,9 +2928,9 @@ pub(crate) mod tests {
 
     /// Dart's `find.widgetWithText(W, text)`: each `W` with a `Text` of `text` under it.
     fn widgets_with_text<W: 'static>(tester: &WidgetTester, text: &str) -> Vec<AnyElement> {
-        let texts = tester.find_text(text);
-        tester
-            .find_by_type::<W>()
+        let texts = find::text(text).evaluate(tester);
+        find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .filter(|widget| {
                 texts
@@ -2944,15 +2945,15 @@ pub(crate) mod tests {
         tester: &WidgetTester,
         icon: &waft_widgets::IconData,
     ) -> Vec<AnyElement> {
-        let icons: Vec<AnyElement> = tester
-            .find_by_type::<Icon>()
+        let icons: Vec<AnyElement> = find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| {
                 tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
             })
             .collect();
-        tester
-            .find_by_type::<W>()
+        find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .filter(|widget| {
                 icons
@@ -2990,28 +2991,19 @@ pub(crate) mod tests {
 
     /// Dart's `findMenuMaterial()`.
     fn menu_material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let panel = only(tester.find_by_type::<MenuPanel>());
+        let panel = tester.element(find::by_type::<MenuPanel>());
         let material = tester.descendants_of_type::<Material>(panel)[0];
         tester.widget::<Material, R>(material, read)
     }
 
-    fn size_of(tester: &WidgetTester, element: AnyElement) -> Size {
-        let render = tester.render_box_of(element);
-        render.size(&tester.cell.borrow())
-    }
-
-    fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.get_rect(tester.render_box_of(element))
-    }
-
     fn first<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        tester.find_by_type::<W>()[0]
+        find::by_type::<W>().evaluate(tester)[0]
     }
 
     /// Dart's `tester.tap(finder)`.
     fn tap(tester: &mut WidgetTester, element: AnyElement) {
-        let center = rect_of(tester, element).center();
-        tester.tap(center, 1);
+        let center = tester.get_rect(element).center();
+        tester.tap_at(center, 1);
     }
 
     /// Dart's `tester.tap(find.byType(DropdownMenu<T>))`.
@@ -3126,7 +3118,7 @@ pub(crate) mod tests {
             let icon_button = widgets_with_icon::<IconButton>(tester, &Icons::arrow_drop_down())[0];
             tap(tester, icon_button);
             pump(tester);
-            assert_eq!(tester.find_by_type::<MenuAnchor>().len(), 1);
+            expect(tester, &find::by_type::<MenuAnchor>(), finds_one_widget());
 
             menu_material(tester, |material| {
                 assert_eq!(material.color, Some(theme.color_scheme.surface_container()));
@@ -3162,7 +3154,7 @@ pub(crate) mod tests {
     // Each case but the last ends by hovering the two items and expecting each one's ink to
     // paint a rect of its overlay colour at alpha 0. The display list drops a draw with no
     // effect, as Flutter's engine does, and Dart's matcher sees it only through
-    // `TestRecordingCanvas`, so those expectations are Deferred and the cases end before the hover.
+    // `TestRecordingCanvas`, so those expectations are Skipped and the cases end before the hover.
 
     const FOCUSED_BACKGROUND_COLOR: Color = Color::new(0xffff0000);
     const FOCUSED_FOREGROUND_COLOR: Color = Color::new(0xff00ff00);
@@ -3448,8 +3440,8 @@ pub(crate) mod tests {
 
             let item_label_weight = |tester: &WidgetTester, label: &str| {
                 let button = find_menu_item_button(tester, label);
-                let text = *tester
-                    .find_text(label)
+                let text = *find::text(label)
+                    .evaluate(tester)
                     .iter()
                     .find(|text| tester.ancestors(**text).contains(&button))
                     .expect("the item's label");
@@ -3494,12 +3486,13 @@ pub(crate) mod tests {
 
     /// Dart's `find.byType(DropdownMenu<T>)`.
     fn dropdown_menu<T: 'static>(tester: &WidgetTester) -> AnyElement {
-        only(tester.find_by_type::<DropdownMenu<T>>())
+        tester.element(find::by_type::<DropdownMenu<T>>())
     }
 
     /// Dart's `find.ancestor(of: find.byType(SingleChildScrollView), matching: find.byType(W)).first`.
     fn menu_ancestor<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        let scroll_view = tester.find_by_type::<waft_widgets::SingleChildScrollView>()[0];
+        let scroll_view =
+            find::by_type::<waft_widgets::SingleChildScrollView>().evaluate(tester)[0];
         ancestors_of_type::<W>(tester, scroll_view)[0]
     }
 
@@ -3521,16 +3514,16 @@ pub(crate) mod tests {
                 assert_eq!(text_field.enabled, Some(false))
             });
             assert!(
-                tester
-                    .find_by_type::<waft_widgets::SingleChildScrollView>()
+                find::by_type::<waft_widgets::SingleChildScrollView>()
+                    .evaluate(tester)
                     .is_empty()
             );
 
             tap_first::<TextField>(tester);
             pump(tester);
             assert!(
-                tester
-                    .find_by_type::<waft_widgets::SingleChildScrollView>()
+                find::by_type::<waft_widgets::SingleChildScrollView>()
+                    .evaluate(tester)
                     .is_empty()
             );
         });
@@ -3565,7 +3558,7 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(
-                size_of(tester, first::<TextField>(tester)),
+                tester.get_size(first::<TextField>(tester)),
                 Size::new(180.0, 56.0)
             );
 
@@ -3573,7 +3566,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             let menu_material = menu_ancestor::<Material>(tester);
-            assert_eq!(size_of(tester, menu_material), Size::new(180.0, 304.0));
+            assert_eq!(tester.get_size(menu_material), Size::new(180.0, 304.0));
 
             // The text field should have same width as the menu
             // when the width property is not null.
@@ -3586,13 +3579,13 @@ pub(crate) mod tests {
             );
 
             let anchor = first::<TextField>(tester);
-            assert_eq!(size_of(tester, anchor).width(), 200.0);
+            assert_eq!(tester.get_size(anchor).width(), 200.0);
 
             tap(tester, anchor);
             tester.pump_and_settle();
 
             let updated_menu = menu_ancestor::<Material>(tester);
-            assert_eq!(size_of(tester, updated_menu).width(), 200.0);
+            assert_eq!(tester.get_size(updated_menu).width(), 200.0);
         });
     }
 
@@ -3607,13 +3600,13 @@ pub(crate) mod tests {
                 DropdownMenu::new(Rc::clone(&entries)),
             ));
 
-            let anchor_width = size_of(tester, first::<TextField>(tester)).width();
+            let anchor_width = tester.get_size(first::<TextField>(tester)).width();
             assert!((anchor_width - 184.5).abs() < 0.1, "{anchor_width}");
 
             tap_dropdown_menu::<TestMenu>(tester);
             tester.pump_and_settle();
 
-            let menu_width = size_of(tester, menu_ancestor::<Material>(tester)).width();
+            let menu_width = tester.get_size(menu_ancestor::<Material>(tester)).width();
             assert!((menu_width - 184.5).abs() < 0.1, "{menu_width}");
 
             // The text field should have same width as the menu
@@ -3627,13 +3620,13 @@ pub(crate) mod tests {
             );
 
             let anchor = first::<TextField>(tester);
-            assert_eq!(size_of(tester, anchor).width(), 200.0);
+            assert_eq!(tester.get_size(anchor).width(), 200.0);
 
             tap(tester, anchor);
             tester.pump_and_settle();
 
             let updated_menu = menu_ancestor::<Material>(tester);
-            assert_eq!(size_of(tester, updated_menu).width(), 200.0);
+            assert_eq!(tester.get_size(updated_menu).width(), 200.0);
         });
     }
 
@@ -3653,13 +3646,17 @@ pub(crate) mod tests {
                 .build(theme.clone(), Rc::clone(&short_menu_items)),
             );
             let menu = dropdown_menu::<ShortMenu>(tester);
-            assert_eq!(size_of(tester, menu).width(), custom_big_width);
+            assert_eq!(tester.get_size(menu).width(), custom_big_width);
 
             tap(tester, menu);
             pump(tester);
-            assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 6);
+            expect(
+                tester,
+                &find::by_type::<MenuItemButton>(),
+                finds_n_widgets(6),
+            );
             let button = find_menu_item_button(tester, "I0");
-            assert_eq!(size_of(tester, button).width(), custom_big_width);
+            assert_eq!(tester.get_size(button).width(), custom_big_width);
 
             // reset test
             tester.pump_widget(SizedBox::new().into_widget());
@@ -3672,13 +3669,17 @@ pub(crate) mod tests {
                 .build(theme, short_menu_items),
             );
             let menu = dropdown_menu::<ShortMenu>(tester);
-            assert_eq!(size_of(tester, menu).width(), custom_small_width);
+            assert_eq!(tester.get_size(menu).width(), custom_small_width);
 
             tap(tester, menu);
             pump(tester);
-            assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 6);
+            expect(
+                tester,
+                &find::by_type::<MenuItemButton>(),
+                finds_n_widgets(6),
+            );
             let button = find_menu_item_button(tester, "I0");
-            assert_eq!(size_of(tester, button).width(), custom_small_width);
+            assert_eq!(tester.get_size(button).width(), custom_small_width);
         });
     }
 
@@ -3697,7 +3698,7 @@ pub(crate) mod tests {
                 .build(theme.clone(), Rc::clone(&short_menu_items)),
             );
             let menu = dropdown_menu::<ShortMenu>(tester);
-            assert_eq!(size_of(tester, menu).width(), 250.0);
+            assert_eq!(tester.get_size(menu).width(), 250.0);
 
             // Update width
             tester.pump_widget(
@@ -3708,7 +3709,7 @@ pub(crate) mod tests {
                 .build(theme, short_menu_items),
             );
             let menu = dropdown_menu::<ShortMenu>(tester);
-            assert_eq!(size_of(tester, menu).width(), 400.0);
+            assert_eq!(tester.get_size(menu).width(), 400.0);
         });
     }
 
@@ -3726,7 +3727,7 @@ pub(crate) mod tests {
                 ]),
             ));
 
-            let width = size_of(tester, dropdown_menu::<i32>(tester)).width();
+            let width = tester.get_size(dropdown_menu::<i32>(tester)).width();
             let menu_entry_padding = 24.0; // See _kDefaultHorizontalPadding.
             let decoration_start_gap = 4.0; // See _kInputStartGap.
             let leading_width = 16.0;
@@ -3759,7 +3760,7 @@ pub(crate) mod tests {
                 .label(SizedBox::new().width(label_width)),
             ));
 
-            let width = size_of(tester, dropdown_menu::<i32>(tester)).width();
+            let width = tester.get_size(dropdown_menu::<i32>(tester)).width();
             let leading_width = 16.0;
             let trailing_width = 56.0;
             let label_padding = 8.0; // See RenderEditable.floatingCursorAddedMargin.
@@ -3803,16 +3804,16 @@ pub(crate) mod tests {
         tester.pump_widget(SizedBox::new().into_widget());
         pump_app(tester, sized_short_menu(Some(insets)));
         let field = first::<TextField>(tester);
-        assert_eq!(size_of(tester, field).width(), parent_width - 35.0 - 20.0);
-        let container_rect = rect_of(tester, first::<SizedBox>(tester));
-        let dropdown_menu_rect = rect_of(tester, field);
+        assert_eq!(tester.get_size(field).width(), parent_width - 35.0 - 20.0);
+        let container_rect = tester.get_rect(first::<SizedBox>(tester));
+        let dropdown_menu_rect = tester.get_rect(field);
         assert_eq!(dropdown_menu_rect.top, container_rect.top);
 
         tap(tester, field);
         tester.pump_and_settle();
 
         let button = find_menu_item_button(tester, "I0");
-        assert_eq!(size_of(tester, button).width(), parent_width - 35.0 - 20.0);
+        assert_eq!(tester.get_size(button).width(), parent_width - 35.0 - 20.0);
     }
 
     // 'The width of MenuAnchor respects MenuAnchor.expandedInsets'
@@ -3824,23 +3825,23 @@ pub(crate) mod tests {
             // By default, the width of the text field is determined by the menu children.
             pump_app(tester, sized_short_menu(None));
             let field = first::<TextField>(tester);
-            assert_eq!(size_of(tester, field).width(), 136.0);
+            assert_eq!(tester.get_size(field).width(), 136.0);
 
             tap(tester, field);
             tester.pump_and_settle();
             let button = find_menu_item_button(tester, "I0");
-            assert_eq!(size_of(tester, button).width(), 136.0);
+            assert_eq!(tester.get_size(button).width(), 136.0);
 
             // If expandedInsets is EdgeInsets.zero, the width should be the same as its parent.
             tester.pump_widget(SizedBox::new().into_widget());
             pump_app(tester, sized_short_menu(Some(EdgeInsetsGeometry::ZERO)));
             let field = first::<TextField>(tester);
-            assert_eq!(size_of(tester, field).width(), parent_width);
+            assert_eq!(tester.get_size(field).width(), parent_width);
 
             tap(tester, field);
             tester.pump_and_settle();
             let button = find_menu_item_button(tester, "I0");
-            assert_eq!(size_of(tester, button).width(), parent_width);
+            assert_eq!(tester.get_size(button).width(), parent_width);
 
             // If expandedInsets is not zero, the width of the text field should be adjusted
             // based on the EdgeInsets.left and EdgeInsets.right. The top and bottom values
@@ -3856,11 +3857,11 @@ pub(crate) mod tests {
             // By default, the width of the text field is determined by the menu children.
             pump_app(tester, sized_short_menu(None));
             let field = first::<TextField>(tester);
-            assert_eq!(size_of(tester, field).width(), 136.0);
+            assert_eq!(tester.get_size(field).width(), 136.0);
             tap(tester, field);
             tester.pump_and_settle();
             let button = find_menu_item_button(tester, "I0");
-            assert_eq!(size_of(tester, button).width(), 136.0);
+            assert_eq!(tester.get_size(button).width(), 136.0);
 
             assert_insets_narrow_the_field(tester, EdgeInsetsGeometry::only(35.0, 50.0, 20.0, 0.0));
             // Regression test for https://github.com/flutter/flutter/issues/151769.
@@ -3882,21 +3883,23 @@ pub(crate) mod tests {
                     .expanded_insets(EdgeInsetsGeometry::ZERO),
             ));
 
-            let dropdown_width = size_of(tester, dropdown_menu::<i32>(tester)).width();
+            let dropdown_width = tester.get_size(dropdown_menu::<i32>(tester)).width();
             assert_eq!(dropdown_width, 800.0);
 
             tap_dropdown_menu::<i32>(tester);
             pump(tester);
 
-            let menu_width = size_of(tester, find_menu_item_button(tester, "Flutter")).width();
+            let menu_width = tester
+                .get_size(find_menu_item_button(tester, "Flutter"))
+                .width();
             assert_eq!(dropdown_width, menu_width);
         });
     }
 
     /// The vertical extent of the items 'Item 0' to 'Item 5' in the open menu.
     fn items_extent(tester: &WidgetTester) -> f64 {
-        let first_rect = rect_of(tester, find_menu_item_button(tester, "Item 0"));
-        let last_rect = rect_of(tester, find_menu_item_button(tester, "Item 5"));
+        let first_rect = tester.get_rect(find_menu_item_button(tester, "Item 0"));
+        let last_rect = tester.get_rect(find_menu_item_button(tester, "Item 5"));
         last_rect.bottom - first_rect.top
     }
 
@@ -3917,7 +3920,7 @@ pub(crate) mod tests {
 
             let menu_view = menu_ancestor::<Padding>(tester);
             // 304 = 288 + vertical padding(2 * 8)
-            assert_eq!(size_of(tester, menu_view), Size::new(180.0, 304.0));
+            assert_eq!(tester.get_size(menu_view), Size::new(180.0, 304.0));
 
             // Constrains the menu height.
             tester.pump_widget(SizedBox::new().into_widget());
@@ -3934,7 +3937,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             let updated_menu = menu_ancestor::<Padding>(tester);
-            assert_eq!(size_of(tester, updated_menu), Size::new(180.0, 100.0));
+            assert_eq!(tester.get_size(updated_menu), Size::new(180.0, 100.0));
         });
     }
 
@@ -3955,7 +3958,7 @@ pub(crate) mod tests {
 
             let menu_view = menu_ancestor::<Padding>(tester);
             // 304 = 288 + vertical padding(2 * 8)
-            assert_eq!(size_of(tester, menu_view).height(), 304.0);
+            assert_eq!(tester.get_size(menu_view).height(), 304.0);
 
             // Constrains the menu height.
             tester.pump_widget(SizedBox::new().into_widget());
@@ -3972,7 +3975,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             let updated_menu = menu_ancestor::<Padding>(tester);
-            assert_eq!(size_of(tester, updated_menu).height(), 100.0);
+            assert_eq!(tester.get_size(updated_menu).height(), 100.0);
         });
     }
 
@@ -4018,7 +4021,7 @@ pub(crate) mod tests {
             assert!(widgets_with_icon::<IconButton>(tester, &Icons::arrow_drop_down()).is_empty());
 
             // Tap outside
-            tester.tap(Offset::new(500.0, 500.0), 1);
+            tester.tap_at(Offset::new(500.0, 500.0), 1);
             pump(tester);
 
             assert!(widgets_with_icon::<IconButton>(tester, &Icons::arrow_drop_up()).is_empty());
@@ -4037,7 +4040,7 @@ pub(crate) mod tests {
             tester.pump_widget(BuildTest::default().build(theme.clone(), Rc::clone(&entries)));
             pump(tester);
             let icon_button = arrow_drop_down_button(tester);
-            assert_eq!(size_of(tester, icon_button), Size::new(48.0, 48.0));
+            assert_eq!(tester.get_size(icon_button), Size::new(48.0, 48.0));
 
             // Custom suffix icon constraints.
             tester.pump_widget(
@@ -4053,7 +4056,7 @@ pub(crate) mod tests {
             );
             pump(tester);
             let icon_button = arrow_drop_down_button(tester);
-            assert_eq!(size_of(tester, icon_button), Size::new(66.0, 62.0));
+            assert_eq!(tester.get_size(icon_button), Size::new(66.0, 62.0));
         });
     }
 
@@ -4067,7 +4070,7 @@ pub(crate) mod tests {
             // Default height.
             tester.pump_widget(BuildTest::default().build(theme.clone(), Rc::clone(&entries)));
             pump(tester);
-            assert_eq!(size_of(tester, first::<TextField>(tester)).height(), 56.0);
+            assert_eq!(tester.get_size(first::<TextField>(tester)).height(), 56.0);
 
             // Collapsed height.
             tester.pump_widget(
@@ -4079,7 +4082,7 @@ pub(crate) mod tests {
             );
             pump(tester);
             // IconButton min height.
-            assert_eq!(size_of(tester, first::<TextField>(tester)).height(), 48.0);
+            assert_eq!(tester.get_size(first::<TextField>(tester)).height(), 48.0);
 
             // Collapsed height with custom suffix icon constraints.
             tester.pump_widget(
@@ -4096,7 +4099,7 @@ pub(crate) mod tests {
                 .build(theme, entries),
             );
             pump(tester);
-            assert_eq!(size_of(tester, first::<TextField>(tester)).height(), 24.0);
+            assert_eq!(tester.get_size(first::<TextField>(tester)).height(), 24.0);
         });
     }
 
@@ -4125,13 +4128,8 @@ pub(crate) mod tests {
 
             find_menu_item_button(tester, TestMenu::MainMenu0.label());
 
-            // didChangeMetrics: Dart's `tester.view.physicalSize = const Size(700.0, 700.0)`.
-            tester.view().resize(700.0, 700.0);
-            {
-                let mut app = tester.cell.borrow_mut();
-                waft_rendering::RendererBinding::instance(&mut app)
-                    .handle_metrics_changed(&mut app);
-            }
+            // didChangeMetrics.
+            tester.view().set_physical_size(Size::new(700.0, 700.0));
             pump(tester);
 
             // Go without throw.
@@ -4293,16 +4291,6 @@ pub(crate) mod tests {
             .collect()
     }
 
-    fn text_rect(tester: &WidgetTester, text: &str, last: bool) -> Rect {
-        let found = tester.find_text(text);
-        let element = if last {
-            *found.last().expect("a text")
-        } else {
-            found[0]
-        };
-        rect_of(tester, element)
-    }
-
     /// `MaterialApp(theme:, home: Scaffold(body: Directionality(textDirection:, child: menu)))`.
     fn directional_menu<T: Clone + PartialEq + 'static>(
         theme: ThemeData,
@@ -4323,7 +4311,7 @@ pub(crate) mod tests {
     /// `tester.getSize(find.widgetWithIcon(SizedBox, Icons.search).last).width`.
     fn search_icon_box_width(tester: &WidgetTester) -> f64 {
         let boxes = widgets_with_icon::<SizedBox>(tester, &Icons::search());
-        size_of(tester, *boxes.last().expect("a sized box")).width()
+        tester.get_size(*boxes.last().expect("a sized box")).width()
     }
 
     // 'The text in the menu button should be aligned with the text of the text field - LTR'
@@ -4341,10 +4329,10 @@ pub(crate) mod tests {
                 .build(theme.clone(), Rc::clone(&entries)),
             );
 
-            let label_top_left = text_rect(tester, "label", false).top_left();
+            let label_top_left = tester.get_rect(find::text("label").first()).top_left();
             tap_dropdown_menu::<TestMenu>(tester);
             tester.pump_and_settle();
-            let item_text_top_left = text_rect(tester, "Item 0", true).top_left();
+            let item_text_top_left = tester.get_rect(find::text("Item 0").last()).top_left();
             assert_eq!(label_top_left.dx(), item_text_top_left.dx());
 
             // Test when the text field has a leading icon.
@@ -4359,10 +4347,11 @@ pub(crate) mod tests {
             );
 
             let icon_width = search_icon_box_width(tester);
-            let updated_label_top_left = text_rect(tester, "label", false).top_left();
+            let updated_label_top_left = tester.get_rect(find::text("label").first()).top_left();
             tap_dropdown_menu::<TestMenu>(tester);
             tester.pump_and_settle();
-            let updated_item_text_top_left = text_rect(tester, "Item 0", true).top_left();
+            let updated_item_text_top_left =
+                tester.get_rect(find::text("Item 0").last()).top_left();
             assert_eq!(updated_label_top_left.dx(), updated_item_text_top_left.dx());
             assert_eq!(
                 updated_label_top_left.dx(),
@@ -4386,10 +4375,11 @@ pub(crate) mod tests {
             );
 
             let large_icon_width = search_icon_box_width(tester);
-            let updated_label_top_left1 = text_rect(tester, "label", false).top_left();
+            let updated_label_top_left1 = tester.get_rect(find::text("label").first()).top_left();
             tap_dropdown_menu::<TestMenu>(tester);
             tester.pump_and_settle();
-            let updated_item_text_top_left1 = text_rect(tester, "Item 0", true).top_left();
+            let updated_item_text_top_left1 =
+                tester.get_rect(find::text("Item 0").last()).top_left();
             assert_eq!(
                 updated_label_top_left1.dx(),
                 updated_item_text_top_left1.dx()
@@ -4414,10 +4404,10 @@ pub(crate) mod tests {
                 DropdownMenu::new(Rc::clone(&entries)).label(Text::new("label")),
             ));
 
-            let label_top_right = text_rect(tester, "label", false).top_right();
+            let label_top_right = tester.get_rect(find::text("label").first()).top_right();
             tap_dropdown_menu::<TestMenu>(tester);
             tester.pump_and_settle();
-            let item_text_top_right = text_rect(tester, "Item 0", true).top_right();
+            let item_text_top_right = tester.get_rect(find::text("Item 0").last()).top_right();
             assert_eq!(label_top_right.dx(), item_text_top_right.dx());
 
             // Test when the text field has a leading icon, then when the leading icon is a
@@ -4440,12 +4430,15 @@ pub(crate) mod tests {
                 pump(tester);
 
                 let icon_width = search_icon_box_width(tester);
-                let dropdown_menu_top_right =
-                    rect_of(tester, dropdown_menu::<TestMenu>(tester)).top_right();
-                let updated_label_top_right = text_rect(tester, "label", false).top_right();
+                let dropdown_menu_top_right = tester
+                    .get_rect(dropdown_menu::<TestMenu>(tester))
+                    .top_right();
+                let updated_label_top_right =
+                    tester.get_rect(find::text("label").first()).top_right();
                 tap_dropdown_menu::<TestMenu>(tester);
                 tester.pump_and_settle();
-                let updated_item_text_top_right = text_rect(tester, "Item 0", true).top_right();
+                let updated_item_text_top_right =
+                    tester.get_rect(find::text("Item 0").last()).top_right();
                 assert_eq!(
                     updated_label_top_right.dx(),
                     updated_item_text_top_right.dx()
@@ -4473,19 +4466,19 @@ pub(crate) mod tests {
                 .label(Text::new("label")),
         ));
 
-        let search_icon = tester.find_by_icon(&Icons::search());
+        let search_icon = tester.element(find::by_icon(&Icons::search()).first());
         let dropdown_icon = *tester
             .descendants_of_type::<waft_widgets::RichText>(search_icon)
             .last()
             .expect("the glyph of the search icon");
-        let dropdown_icon_rect = rect_of(tester, dropdown_icon);
+        let dropdown_icon_rect = tester.get_rect(dropdown_icon);
 
         tap_dropdown_menu::<TestMenu>(tester);
         tester.pump_and_settle();
         let item_leading_icon = *find_by_key(tester, &leading_icon_key(TestMenu::MainMenu0))
             .last()
             .expect("the first item's leading icon");
-        (dropdown_icon_rect, rect_of(tester, item_leading_icon))
+        (dropdown_icon_rect, tester.get_rect(item_leading_icon))
     }
 
     // 'The icon in the menu button should be aligned with the icon of the text field - LTR'
@@ -4811,7 +4804,7 @@ pub(crate) mod tests {
     /// Dart's `find.widgetWithText(TextField, text)` finding one widget: the field's text is
     /// `text`.
     fn text_field_shows(tester: &WidgetTester, text: &str) -> bool {
-        let fields = tester.find_by_type::<TextField>();
+        let fields = find::by_type::<TextField>().evaluate(tester);
         fields.len() == 1
             && editable(tester, |editable| {
                 editable.controller.text_value(&tester.cell.borrow()) == text
@@ -5167,7 +5160,7 @@ pub(crate) mod tests {
     }
 
     fn menu_controller_is_open(tester: &WidgetTester) -> bool {
-        let anchor = only(tester.find_by_type::<MenuAnchor>());
+        let anchor = tester.element(find::by_type::<MenuAnchor>());
         let controller = tester.widget(anchor, |anchor: &MenuAnchor| {
             anchor.controller.clone().expect("a controller")
         });
@@ -5459,7 +5452,7 @@ pub(crate) mod tests {
     /// A mouse over the centre of the text field: Dart's `createGesture(kind: mouse,
     /// pointer: 1)` and `moveTo(tester.getCenter(textFieldFinder))`.
     fn mouse_over_the_text_field(tester: &mut WidgetTester) -> TestPointer {
-        let center = rect_of(tester, first::<TextField>(tester)).center();
+        let center = tester.get_rect(first::<TextField>(tester)).center();
         let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, center);
         mouse
@@ -5557,10 +5550,10 @@ pub(crate) mod tests {
                 list_view_menu(DropdownMenu::new(Rc::clone(&entries))),
             );
 
-            let text_input = rect_of(tester, first::<TextField>(tester));
+            let text_input = tester.get_rect(first::<TextField>(tester));
             tap_first::<TextField>(tester);
             tester.pump_and_settle();
-            let menu = rect_of(tester, only(tester.find_by_type::<MenuPanel>()));
+            let menu = tester.get_rect(tester.element(find::by_type::<MenuPanel>()));
             assert_eq!(text_input.width(), menu.width());
 
             tester.pump_widget(SizedBox::new().into_widget());
@@ -5569,10 +5562,10 @@ pub(crate) mod tests {
                 list_view_menu(DropdownMenu::new(entries).width(200.0)),
             );
 
-            let text_input1 = rect_of(tester, first::<TextField>(tester));
+            let text_input1 = tester.get_rect(first::<TextField>(tester));
             tap_first::<TextField>(tester);
             tester.pump_and_settle();
-            let menu1 = rect_of(tester, only(tester.find_by_type::<MenuPanel>()));
+            let menu1 = tester.get_rect(tester.element(find::by_type::<MenuPanel>()));
             assert_eq!(text_input1.width(), 200.0);
             assert_eq!(menu1.width(), 200.0);
         });
@@ -5604,13 +5597,13 @@ pub(crate) mod tests {
             };
 
             tester.pump_widget(build_frame(false));
-            assert_eq!(tester.find_text(helper_text).len(), 1);
-            assert!(tester.find_text(error_text).is_empty());
+            expect(tester, &find::text(helper_text), finds_one_widget());
+            expect(tester, &find::text(error_text), finds_nothing());
 
             tester.pump_widget(build_frame(true));
             tester.pump_and_settle();
-            assert!(tester.find_text(helper_text).is_empty());
-            assert_eq!(tester.find_text(error_text).len(), 1);
+            expect(tester, &find::text(helper_text), finds_nothing());
+            expect(tester, &find::text(error_text), finds_one_widget());
         });
     }
 
@@ -5624,7 +5617,7 @@ pub(crate) mod tests {
                 theme,
                 DropdownMenu::new(menu_children()).helper_text(helper_text),
             ));
-            assert_eq!(tester.find_text(helper_text).len(), 1);
+            expect(tester, &find::text(helper_text), finds_one_widget());
         });
     }
 
@@ -5638,14 +5631,14 @@ pub(crate) mod tests {
                 theme,
                 DropdownMenu::new(menu_children()).error_text(error_text),
             ));
-            assert_eq!(tester.find_text(error_text).len(), 1);
+            expect(tester, &find::text(error_text), finds_one_widget());
         });
     }
 
     /// Dart's `find.text(text).hitTestable()` finding one widget.
     fn text_is_hit_testable(tester: &WidgetTester, text: &str) -> bool {
-        tester
-            .find_text(text)
+        find::text(text)
+            .evaluate(tester)
             .into_iter()
             .filter(|element| hit_testable(tester, *element))
             .count()
@@ -5751,14 +5744,14 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Check text location in text field.
-            assert_eq!(text_rect(tester, "Hint", false).left, 52.0);
+            assert_eq!(tester.get_rect(find::text("Hint").first()).left, 52.0);
 
             // By default, the text of item 0 should be aligned with the text of the text field.
-            assert_eq!(text_rect(tester, "Item 0", true).left, 52.0);
+            assert_eq!(tester.get_rect(find::text("Item 0").last()).left, 52.0);
 
             // By default, the text of item 1 should be aligned with the text of the text field,
             // so there are some extra padding before "Item 1".
-            assert_eq!(text_rect(tester, "Item 1", true).left, 52.0);
+            assert_eq!(tester.get_rect(find::text("Item 1").last()).left, 52.0);
         });
     }
 
@@ -5910,7 +5903,7 @@ pub(crate) mod tests {
                 )
             });
 
-            let list = rect_of(tester, first::<waft_widgets::ListView>(tester));
+            let list = tester.get_rect(first::<waft_widgets::ListView>(tester));
             tester.fling_from(list.center(), Offset::new(0.0, -20000.0), 200000.0, 1);
             tester.pump_and_settle();
         });
@@ -5936,10 +5929,10 @@ pub(crate) mod tests {
                 tap_dropdown_menu::<TestMenu>(tester);
                 tester.pump_and_settle();
 
-                assert_eq!(
-                    tester.find_by_type::<crate::scrollbar::Scrollbar>().len(),
-                    1,
-                    "{platform:?}"
+                expect(
+                    tester,
+                    &find::by_type::<crate::scrollbar::Scrollbar>(),
+                    finds_one_widget(),
                 );
             });
         }
@@ -6044,7 +6037,7 @@ pub(crate) mod tests {
             // Move the focus to the dropdown trailing icon.
             primary_focus_next(tester);
             pump(tester);
-            let icon_button = tester.find_by_icon(&Icons::arrow_drop_down());
+            let icon_button = tester.element(find::by_icon(&Icons::arrow_drop_down()).first());
             {
                 let mut app = tester.cell.borrow_mut();
                 assert!(Focus::of(&mut app, icon_button, false, true).has_focus(&mut app));
@@ -6152,7 +6145,7 @@ pub(crate) mod tests {
                     .into_widget(),
             ));
             pump(tester);
-            assert_eq!(size_of(tester, first::<TextField>(tester)).width(), 300.0);
+            assert_eq!(tester.get_size(first::<TextField>(tester)).width(), 300.0);
         });
     }
 
@@ -6174,8 +6167,8 @@ pub(crate) mod tests {
                     ),
             ));
             pump(tester);
-            let hint = text_rect(tester, "Hint text", false).center();
-            tester.tap(hint, 1);
+            let hint = tester.get_rect(find::text("Hint text").first()).center();
+            tester.tap_at(hint, 1);
             tester.pump_and_settle();
             // One is layout for the _DropdownMenuBody, the other one is the real button item in the menu.
             assert_eq!(
@@ -6215,7 +6208,7 @@ pub(crate) mod tests {
                     .into_widget(),
             ));
 
-            let fields = tester.find_by_type::<TextField>();
+            let fields = find::by_type::<TextField>().evaluate(tester);
             tester.widget(fields[0], |field: &TextField| {
                 assert_eq!(field.text_align, TextAlign::Start);
             });
@@ -6267,7 +6260,7 @@ pub(crate) mod tests {
                 .alignment_offset(alignment_offset),
             ));
 
-            let anchor = only(tester.find_by_type::<MenuAnchor>());
+            let anchor = tester.element(find::by_type::<MenuAnchor>());
             tester.widget(anchor, |anchor: &MenuAnchor| {
                 assert_eq!(anchor.alignment_offset, Some(alignment_offset));
             });
@@ -6403,15 +6396,15 @@ pub(crate) mod tests {
                             .into_widget(),
                     )
                 });
-                let text_field_position = rect_of(tester, first::<TextField>(tester)).top_left();
+                let text_field_position = tester.get_rect(first::<TextField>(tester)).top_left();
                 assert_eq!(text_field_position, expected);
             }
         });
     }
 
     fn last_menu_anchor_is_open(tester: &WidgetTester) -> bool {
-        let anchor = *tester
-            .find_by_type::<MenuAnchor>()
+        let anchor = *find::by_type::<MenuAnchor>()
+            .evaluate(tester)
             .last()
             .expect("a menu anchor");
         let controller = tester.widget(anchor, |anchor: &MenuAnchor| {
@@ -6466,14 +6459,22 @@ pub(crate) mod tests {
             // Tap the menu item to open the dropdown menu.
             tap_first::<TextField>(tester);
             tester.pump_and_settle();
-            assert_eq!(tester.find_by_type::<DropdownMenu<TestMenu>>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<DropdownMenu<TestMenu>>(),
+                finds_one_widget(),
+            );
             assert!(last_menu_anchor_is_open(tester));
             // Tap the dropdown menu item.
             tap_item(tester, TestMenu::MainMenu0.label());
             tester.pump_and_settle();
             // All menus should be closed.
-            assert!(tester.find_by_type::<DropdownMenu<TestMenu>>().is_empty());
-            assert_eq!(tester.find_by_type::<MenuAnchor>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<DropdownMenu<TestMenu>>(),
+                finds_nothing(),
+            );
+            expect(tester, &find::by_type::<MenuAnchor>(), finds_one_widget());
 
             // Test closeBehavior set to self, then none.
             for (close_behavior, stays_open) in [
@@ -6483,12 +6484,16 @@ pub(crate) mod tests {
                 pump_app(tester, build_dropdown_menu(close_behavior));
                 // Tap the button to open the root anchor.
                 tap_button(tester);
-                assert_eq!(tester.find_by_type::<DropdownMenu<TestMenu>>().len(), 1);
+                expect(
+                    tester,
+                    &find::by_type::<DropdownMenu<TestMenu>>(),
+                    finds_one_widget(),
+                );
                 // Tap the menu item to open the dropdown menu.
                 tap_first::<TextField>(tester);
                 tester.pump_and_settle();
-                let dropdown_menu_anchor = *tester
-                    .find_by_type::<MenuAnchor>()
+                let dropdown_menu_anchor = *find::by_type::<MenuAnchor>()
+                    .evaluate(tester)
                     .last()
                     .expect("a menu anchor");
                 let controller = tester.widget(dropdown_menu_anchor, |anchor: &MenuAnchor| {
@@ -6541,9 +6546,9 @@ pub(crate) mod tests {
         tap_first::<TextField>(tester);
         pump(tester);
 
-        let panel = only(tester.find_by_type::<MenuPanel>());
+        let panel = tester.element(find::by_type::<MenuPanel>());
         let material = tester.descendants_of_type::<Material>(panel)[0];
-        assert_eq!(rect_of(tester, material).top, text_field_bottom);
+        assert_eq!(tester.get_rect(material).top, text_field_bottom);
     }
 
     // 'The menu is attached at the bottom of the TextField' 'when given loose constraints and
@@ -6606,7 +6611,7 @@ pub(crate) mod tests {
         pump(tester);
 
         // Now the focus is on the icon button.
-        let icon_button = tester.find_by_icon(&Icons::arrow_drop_down());
+        let icon_button = tester.element(find::by_icon(&Icons::arrow_drop_down()).first());
         {
             let mut app = tester.cell.borrow_mut();
             assert!(
@@ -6669,12 +6674,12 @@ pub(crate) mod tests {
         // Move focus to the TextField and open the menu.
         tap_first::<TextField>(tester);
         pump(tester);
-        assert_eq!(tester.find_by_type::<MenuPanel>().len(), 1);
+        expect(tester, &find::by_type::<MenuPanel>(), finds_one_widget());
 
         // Press ESC to close the menu.
         send_key(tester, LogicalKeyboardKey::ESCAPE);
         pump(tester);
-        assert!(tester.find_by_type::<MenuPanel>().is_empty());
+        expect(tester, &find::by_type::<MenuPanel>(), finds_nothing());
     }
 
     // 'Pressing ESC key closes the menu when requestFocusOnTap is false'
@@ -6704,7 +6709,7 @@ pub(crate) mod tests {
                 // Move focus to the TextField and open the menu.
                 tap_first::<TextField>(tester);
                 pump(tester);
-                assert_eq!(tester.find_by_type::<MenuPanel>().len(), 1);
+                expect(tester, &find::by_type::<MenuPanel>(), finds_one_widget());
 
                 // Move the selection.
                 send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
@@ -6718,7 +6723,7 @@ pub(crate) mod tests {
                 send_key(tester, LogicalKeyboardKey::ESCAPE);
                 pump(tester);
                 assert!(
-                    tester.find_by_type::<MenuPanel>().is_empty(),
+                    find::by_type::<MenuPanel>().evaluate(tester).is_empty(),
                     "{platform:?}"
                 );
             });
@@ -6810,7 +6815,9 @@ pub(crate) mod tests {
             tap_first::<TextField>(tester);
             tester.pump_and_settle();
             assert_eq!(
-                size_of(tester, find_menu_item_button(tester, long_label)).width(),
+                tester
+                    .get_size(find_menu_item_button(tester, long_label))
+                    .width(),
                 150.0
             );
 
@@ -6827,7 +6834,9 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             let first_label = entries[0].label.clone();
             assert_eq!(
-                size_of(tester, find_menu_item_button(tester, &first_label)).width(),
+                tester
+                    .get_size(find_menu_item_button(tester, &first_label))
+                    .width(),
                 150.0
             );
 
@@ -6842,7 +6851,9 @@ pub(crate) mod tests {
             tap_first::<TextField>(tester);
             tester.pump_and_settle();
             assert_eq!(
-                size_of(tester, find_menu_item_button(tester, &first_label)).width(),
+                tester
+                    .get_size(find_menu_item_button(tester, &first_label))
+                    .width(),
                 200.0
             );
         });
@@ -6864,7 +6875,9 @@ pub(crate) mod tests {
             tap_first::<TextField>(tester);
             tester.pump_and_settle();
             assert_eq!(
-                size_of(tester, find_menu_item_button(tester, short_label)).width(),
+                tester
+                    .get_size(find_menu_item_button(tester, short_label))
+                    .width(),
                 200.0
             );
 
@@ -6885,7 +6898,9 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             // Default width is 800, so the expected width is 800 - padding (20 + 20).
             assert_eq!(
-                size_of(tester, find_menu_item_button(tester, short_label)).width(),
+                tester
+                    .get_size(find_menu_item_button(tester, short_label))
+                    .width(),
                 760.0
             );
         });
@@ -6903,7 +6918,7 @@ pub(crate) mod tests {
                     .request_focus_on_tap(true)
                     .restoration_id(restoration_id),
             ));
-            assert_eq!(tester.find_by_type::<TextField>().len(), 1);
+            expect(tester, &find::by_type::<TextField>(), finds_one_widget());
             text_field(tester, |text_field| {
                 assert_eq!(text_field.restoration_id.as_deref(), Some(restoration_id));
             });
@@ -7048,7 +7063,7 @@ pub(crate) mod tests {
         } else {
             // Ensure the trailing icon does not have focus.
             // If FocusNode is not created then the TextField will have focus.
-            let icon_button = tester.find_by_icon(&Icons::arrow_drop_down());
+            let icon_button = tester.element(find::by_icon(&Icons::arrow_drop_down()).first());
             let mut app = tester.cell.borrow_mut();
             assert!(Focus::of(&mut app, icon_button, false, true).has_focus(&mut app));
         }
@@ -7193,8 +7208,8 @@ pub(crate) mod tests {
 
     /// Dart's `find.byIcon(icon)` count.
     fn icon_count(tester: &WidgetTester, icon: &waft_widgets::IconData) -> usize {
-        tester
-            .find_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| {
                 tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
@@ -7250,7 +7265,7 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(icon_count(tester, &Icons::arrow_drop_down()), 2);
-            assert!(tester.find_by_type::<IconButton>().is_empty());
+            expect(tester, &find::by_type::<IconButton>(), finds_nothing());
         });
     }
 
@@ -7293,7 +7308,7 @@ pub(crate) mod tests {
                     .menu_controller(menu_controller)
                     .decoration_builder(build_decoration),
             ));
-            assert_eq!(tester.find_by_type::<IconButton>().len(), 2);
+            expect(tester, &find::by_type::<IconButton>(), finds_n_widgets(2));
         });
     }
 
@@ -7351,7 +7366,7 @@ pub(crate) mod tests {
                     },
                 ),
             ));
-            assert_eq!(size_of(tester, first::<TextField>(tester)).width(), 327.5);
+            assert_eq!(tester.get_size(first::<TextField>(tester)).width(), 327.5);
         });
     }
 
@@ -7368,7 +7383,7 @@ pub(crate) mod tests {
                     },
                 ),
             ));
-            assert_eq!(size_of(tester, first::<TextField>(tester)).width(), 280.0);
+            assert_eq!(tester.get_size(first::<TextField>(tester)).width(), 280.0);
         });
     }
 
@@ -7557,12 +7572,8 @@ pub(crate) mod tests {
     // 'DropdownMenu does not crash at zero area'
     #[test]
     fn a_menu_at_zero_area_does_not_panic() {
-        test_widgets(|_| {
-            let mut tester = WidgetTester::with_physical_size(
-                waft_test::TestPlatform::new().on(TargetPlatform::Android),
-                Size::ZERO,
-            );
-            let tester = &mut tester;
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
             let controller = {
                 let mut app = tester.cell.borrow_mut();
                 TextEditingController::new(&mut app)
@@ -7575,12 +7586,16 @@ pub(crate) mod tests {
                 DropdownMenu::new(menu_children()).controller(controller.clone()),
             ));
             assert_eq!(
-                size_of(tester, dropdown_menu::<TestMenu>(tester)),
+                tester.get_size(dropdown_menu::<TestMenu>(tester)),
                 Size::ZERO
             );
             controller.set_selection(&mut tester.cell.borrow_mut(), collapsed(0));
             pump(tester);
-            assert!(!tester.find_by_type::<MenuItemButton>().is_empty());
+            assert!(
+                !find::by_type::<MenuItemButton>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
         });
     }
 
@@ -7938,7 +7953,7 @@ pub(crate) mod tests {
                 tap_dropdown_menu::<TestMenu>(tester);
 
                 for label in ["Item 0", "Menu 1", "Item 2", "Item 3"] {
-                    let height = size_of(tester, menu_item_text(tester, label)).height();
+                    let height = tester.get_size(menu_item_text(tester, label)).height();
                     assert!(
                         (height - expected_height).abs() <= 0.05,
                         "{max_lines} {label}: {height}"
@@ -8157,7 +8172,11 @@ pub(crate) mod tests {
                 Scaffold::new().body(body).into_widget(),
             ));
 
-            assert_eq!(tester.find_by_type::<DropdownMenu<i32>>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<DropdownMenu<i32>>(),
+                finds_one_widget(),
+            );
         });
     }
 }

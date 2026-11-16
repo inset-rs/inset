@@ -398,14 +398,14 @@ mod tests {
     use waft_painting::{Alignment, Border, BorderSide, EdgeInsets};
     use waft_widgets::{Center, GlobalKey, Text};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
     use crate::expansion_tile::ExpansionTile;
     use crate::expansion_tile::tests::{
         animation_style_case, expand_more_rect, last_padding_rect, list_tile_rect, probe, pump_app,
-        rect_of, sized, test_icon, test_text, text_rect, tile_material,
+        sized, test_icon, test_text, tile_material,
     };
     use crate::material::Material;
     use crate::theme_data::ThemeData;
@@ -494,7 +494,7 @@ mod tests {
     /// The title and trailing positions both "ExpansionTileTheme" cases check after the
     /// theme's tile padding is applied.
     fn assert_tile_padding(tester: &WidgetTester, title: &str) {
-        let title_rect = text_rect(tester, title);
+        let title_rect = tester.get_rect(find::text(title));
         let trailing_rect = expand_more_rect(tester);
         let list_tile_rect = list_tile_rect(tester);
         let taller_widget = if title_rect.height() > trailing_rect.height() {
@@ -614,9 +614,9 @@ mod tests {
             assert_eq!(material_clip_behavior, clip_behavior);
 
             // Check the child position when expandedAlignment is applied.
-            let child = tester.find_text("Tile 1");
+            let child = find::text("Tile 1").evaluate(tester);
             assert_eq!(child.len(), 1, "one \"Tile 1\"");
-            let child_rect = rect_of(tester, child[0]);
+            let child_rect = tester.get_rect(child[0]);
             assert_eq!(child_rect.right, 800.0 - 20.0);
             assert_eq!(child_rect.left, 800.0 - child_rect.width() - 20.0);
 

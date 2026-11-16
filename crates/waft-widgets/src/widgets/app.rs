@@ -1862,8 +1862,10 @@ mod tests {
     use waft_services::LogicalKeyboardKey;
     use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
 
-    use crate::framework::{AnyElement, Notification, StatelessWidget, downcast_widget};
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::framework::{Notification, StatelessWidget};
+    use crate::testing::{
+        Finder, WidgetTester, expect, find, finds_nothing, finds_widgets, test_widgets,
+    };
     use crate::widgets::actions::IntentRef;
     use crate::widgets::basic::SizedBox;
     use crate::widgets::focus_manager::{AnyFocusNode, FocusManager, FocusNodeLeaf, primary_focus};
@@ -1932,35 +1934,9 @@ mod tests {
         WidgetsApp::new(COLOR).page_route_builder(page_route)
     }
 
-    fn root_element(app: &mut App) -> AnyElement {
-        WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("a mounted app")
-    }
-
-    /// Every element of the mounted tree, parents before children.
-    fn descendants(app: &App, root: AnyElement) -> Vec<AnyElement> {
-        let mut all = vec![root];
-        let mut visited = 0;
-        while visited < all.len() {
-            let element = all[visited];
-            element.visit_children(app, &mut |child| all.push(child));
-            visited += 1;
-        }
-        all
-    }
-
-    fn find_widget<W: 'static>(app: &App, root: AnyElement) -> Option<&W> {
-        for element in descendants(app, root) {
-            if let Some(widget) = downcast_widget::<W>(&**element.widget(app)) {
-                return Some(widget);
-            }
-        }
-        None
-    }
-
-    fn has_widget<W: 'static>(app: &App, root: AnyElement) -> bool {
-        find_widget::<W>(app, root).is_some()
+    /// Dart's `find.byType(W, skipOffstage: false)`.
+    fn built<W: 'static>() -> Finder {
+        find::by_type::<W>().skip_offstage(false)
     }
 
     /// The intents the shortcuts bind to `key`, in the table's order.
@@ -1981,13 +1957,10 @@ mod tests {
         test_widgets(|tester| {
             tester.pump_widget(widgets_app().home(Marker).into_widget());
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
-            assert!(has_widget::<Navigator>(&app, root), "the app builds one");
-            assert!(
-                has_widget::<Marker>(&app, root),
-                "the home route shows home"
-            );
+            // The app builds one.
+            expect(tester, &built::<Navigator>(), finds_widgets());
+            // The home route shows home.
+            expect(tester, &built::<Marker>(), finds_widgets());
         });
     }
 
@@ -2011,10 +1984,10 @@ mod tests {
 
             tester.pump_widget(widgets_app().home(OtherMarker).into_widget());
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
-            assert!(has_widget::<OtherMarker>(&app, root), "the new home shows");
-            assert!(!has_widget::<Marker>(&app, root), "the old home is gone");
+            // The new home shows.
+            expect(tester, &built::<OtherMarker>(), finds_widgets());
+            // The old home is gone.
+            expect(tester, &built::<Marker>(), finds_nothing());
         });
     }
 
@@ -2028,9 +2001,7 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
-            assert!(has_widget::<Marker>(&app, root));
+            expect(tester, &built::<Marker>(), finds_widgets());
         });
     }
 
@@ -2047,11 +2018,9 @@ mod tests {
                     })
                     .into_widget(),
             );
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
             assert!(!had_child.get(), "no routes, so the builder gets no child");
-            assert!(has_widget::<Marker>(&app, root));
-            assert!(!has_widget::<Navigator>(&app, root));
+            expect(tester, &built::<Marker>(), finds_widgets());
+            expect(tester, &built::<Navigator>(), finds_nothing());
         });
     }
 
@@ -2070,10 +2039,8 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
             assert!(had_child.get());
-            assert!(has_widget::<Navigator>(&app, root));
+            expect(tester, &built::<Navigator>(), finds_widgets());
         });
     }
 
@@ -2433,13 +2400,13 @@ mod tests {
         test_widgets(|tester| {
             tester.pump_widget(widgets_app().home(Marker).into_widget());
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
-            assert_eq!(
-                has_widget::<CheckedModeBanner>(&app, root),
-                cfg!(debug_assertions),
-                "the banner is a debug-mode widget"
-            );
+            // The banner is a debug-mode widget.
+            let banner = if cfg!(debug_assertions) {
+                finds_widgets()
+            } else {
+                finds_nothing()
+            };
+            expect(tester, &built::<CheckedModeBanner>(), banner);
         });
         test_widgets(|tester| {
             tester.pump_widget(
@@ -2449,9 +2416,7 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
-            assert!(!has_widget::<CheckedModeBanner>(&app, root));
+            expect(tester, &built::<CheckedModeBanner>(), finds_nothing());
         });
     }
 
@@ -2465,20 +2430,20 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
-            let scope =
-                find_widget::<RootRestorationScope>(&app, root).expect("the app always builds one");
-            assert_eq!(scope.restoration_id.as_deref(), Some("app"));
+            let restoration_id = tester.widget(
+                built::<RootRestorationScope>().first(),
+                |scope: &RootRestorationScope| scope.restoration_id.clone(),
+            );
+            assert_eq!(restoration_id.as_deref(), Some("app"));
         });
         test_widgets(|tester| {
             tester.pump_widget(widgets_app().home(Marker).into_widget());
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
-            let scope =
-                find_widget::<RootRestorationScope>(&app, root).expect("the app always builds one");
-            assert_eq!(scope.restoration_id, None, "restoration stays off");
+            let restoration_id = tester.widget(
+                built::<RootRestorationScope>().first(),
+                |scope: &RootRestorationScope| scope.restoration_id.clone(),
+            );
+            assert_eq!(restoration_id, None, "restoration stays off");
         });
     }
 
@@ -2502,8 +2467,6 @@ mod tests {
                 .into_widget(),
         );
         tester.pump_and_settle();
-        let mut app = tester.cell.borrow_mut();
-        let root = root_element(&mut app);
-        assert!(has_widget::<Marker>(&app, root));
+        expect(tester, &built::<Marker>(), finds_widgets());
     }
 }

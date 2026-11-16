@@ -10,7 +10,6 @@ use cupertino_gallery_lib::{Entry, entry_route, gallery, sub_route};
 use waft_cupertino::CupertinoNavigationBarBackButton;
 use waft_embedder::{Offset, Size, TargetPlatform};
 use waft_rendering::RenderParagraph;
-use waft_test::TestPlatform;
 use waft_widgets::testing::WidgetTester;
 use waft_widgets::{AnyElement, GlobalKey, NavigatorState, RouteRef, Text, downcast_widget};
 
@@ -35,13 +34,11 @@ struct Fixture {
 impl Fixture {
     fn new() -> Fixture {
         // The window at flutter_test's device pixel ratio, on the platform the gallery is for.
-        let mut tester = WidgetTester::with_physical_size(
-            TestPlatform::new().on(TargetPlatform::IOS),
-            Size::new(
-                VIEW[0] * WidgetTester::DEVICE_PIXEL_RATIO,
-                VIEW[1] * WidgetTester::DEVICE_PIXEL_RATIO,
-            ),
-        );
+        let mut tester = WidgetTester::on(TargetPlatform::IOS);
+        let ratio = tester.device_pixel_ratio();
+        tester
+            .view()
+            .set_physical_size(Size::new(VIEW[0] * ratio, VIEW[1] * ratio));
         let navigator = GlobalKey::new();
         tester.pump_widget(gallery().navigator_key(navigator.clone()));
 
@@ -217,7 +214,7 @@ impl Fixture {
     }
 
     fn tap_at(&mut self, point: Offset) {
-        self.tester.tap(point, 1);
+        self.tester.tap_at(point, 1);
         self.settle();
     }
 

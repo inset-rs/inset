@@ -1338,7 +1338,7 @@ mod tests {
     use crate::test_harness::Harness;
     use crate::test_harness::pump_every_view;
     use crate::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, find, test_widgets, test_widgets_variant,
     };
     use crate::widgets::basic::{Builder, Directionality, SizedBox, SliverToBoxAdapter};
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
@@ -1698,12 +1698,10 @@ mod tests {
     }
 
     fn scrollable(tester: &WidgetTester) -> Handle<ScrollableState> {
-        let scrollables = tester.find_by_type::<Scrollable>();
-        let app = tester.cell.borrow();
-        scrollables
-            .into_iter()
-            .find_map(|element| element.state_handle::<ScrollableState>(&app))
-            .expect("a Scrollable is mounted")
+        let scrollable = tester.element(find::by_type::<Scrollable>());
+        scrollable
+            .state_handle::<ScrollableState>(&tester.cell.borrow())
+            .expect("a Scrollable has a ScrollableState")
     }
 
     /// `scrollable_test.dart`'s `getScrollOffset`.

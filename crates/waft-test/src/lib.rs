@@ -57,6 +57,6 @@ pub use objects::{ObjectSnapshot, assert_no_new_objects, object_snapshot};
 pub use opener::{MockOpener, Opened};
 pub use platform::{TestDispatcher, TestPlatform};
 pub use test_font_manager::TestFontSource;
-pub use view::{IMPLICIT_VIEW_ID, TestView};
+pub use view::{IMPLICIT_VIEW_ID, MetricsListener, TestView};
 pub use view_host::{TestViewHost, TextInputCall};
 pub use windows::{TestWindow, TestWindows};

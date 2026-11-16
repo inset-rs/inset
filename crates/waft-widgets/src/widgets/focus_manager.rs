@@ -3169,7 +3169,7 @@ pub(crate) mod tests {
             assert_eq!(*seen.borrow(), vec![FocusHighlightMode::Traditional]);
             assert_eq!(highlight_mode(tester), FocusHighlightMode::Traditional);
 
-            tester.tap(Offset::ZERO, 1);
+            tester.tap_at(Offset::ZERO, 1);
             assert_eq!(
                 *seen.borrow(),
                 vec![FocusHighlightMode::Traditional, FocusHighlightMode::Touch]

@@ -514,7 +514,7 @@ mod tests {
         GlobalKey, ImplicitlyAnimatedWidget, Positioned, SizedBox, downcast_widget,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::app::MaterialApp;
@@ -586,7 +586,7 @@ mod tests {
     }
 
     fn magnifier_position(tester: &WidgetTester) -> Offset {
-        let positioned = tester.find_by_type::<Positioned>()[0];
+        let positioned = find::by_type::<Positioned>().evaluate(tester)[0];
         tester.widget::<Positioned, _>(positioned, |positioned| {
             Offset::new(
                 positioned.left.unwrap_or(0.0),
@@ -596,14 +596,14 @@ mod tests {
     }
 
     fn magnifier_additional_focal_point(tester: &WidgetTester) -> Offset {
-        let magnifier = tester.find_by_type::<Magnifier>()[0];
+        let magnifier = find::by_type::<Magnifier>().evaluate(tester)[0];
         tester.widget::<Magnifier, _>(magnifier, |magnifier| {
             magnifier.additional_focal_point_offset
         })
     }
 
     fn is_animated(tester: &WidgetTester) -> bool {
-        let positioned = tester.find_by_type::<AnimatedPositioned>()[0];
+        let positioned = find::by_type::<AnimatedPositioned>().evaluate(tester)[0];
         tester.widget::<AnimatedPositioned, _>(positioned, |positioned| {
             !positioned
                 .implicitly_animated_widget_data()
@@ -955,7 +955,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                let raw = tester.find_by_type::<RawMagnifier>()[0];
+                let raw = find::by_type::<RawMagnifier>().evaluate(tester)[0];
                 tester.widget::<RawMagnifier, _>(raw, |raw| {
                     assert_eq!(raw.size, Magnifier::K_DEFAULT_MAGNIFIER_SIZE);
                     assert_eq!(raw.size, Size::new(77.37, 37.9));
@@ -996,7 +996,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                let raw = tester.find_by_type::<RawMagnifier>()[0];
+                let raw = find::by_type::<RawMagnifier>().evaluate(tester)[0];
                 let focal_point_offset =
                     tester.widget::<RawMagnifier, _>(raw, |raw| raw.focal_point_offset);
                 assert_eq!(
@@ -1019,7 +1019,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                let raw = tester.find_by_type::<RawMagnifier>()[0];
+                let raw = find::by_type::<RawMagnifier>().evaluate(tester)[0];
                 assert_eq!(
                     tester.widget::<RawMagnifier, _>(raw, |raw| raw.size),
                     Size::ZERO

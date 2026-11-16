@@ -1898,8 +1898,9 @@ mod tests {
         StatefulBuilder, Text, WidgetBuilder,
     };
 
+    use waft_rendering::testing::{PaintCall, assert_paints};
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, TestVSync, WidgetTester, test_widgets,
+        TargetPlatformVariant, TestPointer, TestVSync, WidgetTester, find, test_widgets,
         test_widgets_variant,
     };
 
@@ -1974,36 +1975,17 @@ mod tests {
         }
     }
 
-    /// Dart's `tester.tap(find.text(text))`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let element = *tester
-            .find_onstage_text(text)
-            .first()
-            .expect("the text is onstage");
-        let center = tester.global_rect(tester.render_box_of(element)).center();
-        tester.tap(center, 1);
-    }
-
     fn count_onstage_text(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
-    }
-
-    /// Dart's `find.byType(W)` with its default `skipOffstage`.
-    fn find_onstage_by_type<W: 'static>(tester: &WidgetTester) -> Vec<AnyElement> {
-        tester
-            .find_by_type::<W>()
-            .into_iter()
-            .filter(|element| tester.is_onstage(*element))
-            .collect()
+        find::text(text).evaluate(tester).len()
     }
 
     fn count_of<W: 'static>(tester: &WidgetTester) -> usize {
-        find_onstage_by_type::<W>(tester).len()
+        find::by_type::<W>().evaluate(tester).len()
     }
 
     fn navigator(tester: &WidgetTester) -> Handle<NavigatorState> {
-        let element = *tester
-            .find_by_type::<Navigator>()
+        let element = *find::by_type::<Navigator>()
+            .evaluate(tester)
             .first()
             .expect("a navigator");
         let app = tester.cell.borrow();
@@ -2013,7 +1995,8 @@ mod tests {
     }
 
     fn last_colored_box_color(tester: &WidgetTester) -> Color {
-        let element = *find_onstage_by_type::<ColoredBox>(tester)
+        let element = *find::by_type::<ColoredBox>()
+            .evaluate(tester)
             .last()
             .expect("a ColoredBox");
         tester.widget::<ColoredBox, _>(element, |colored_box| colored_box.color.color())
@@ -2064,7 +2047,7 @@ mod tests {
                 pump_app(tester, ThemeData::new, |app| app.routes(push_routes()));
                 assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
-                tap_text(tester, "push");
+                tester.tap(find::text("push"));
                 tester.pump_and_settle();
                 assert_eq!(count_onstage_text(tester, "page b"), 1);
                 assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
@@ -2078,7 +2061,7 @@ mod tests {
             pump_app(tester, ThemeData::new, |app| app.routes(push_routes()));
             assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
 
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_and_settle();
             assert_eq!(count_onstage_text(tester, "page b"), 1);
             assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
@@ -2109,7 +2092,7 @@ mod tests {
             );
             assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
 
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_by(Duration::from_millis(400));
             color = last_colored_box_color(tester);
 
@@ -2183,8 +2166,8 @@ mod tests {
     /// The opacity of the `FadeTransition` nearest above the `SizedBox`: Dart's
     /// `findAncestorRenderObjectOfType<RenderAnimatedOpacity>()?.opacity.value`.
     fn opacity(tester: &WidgetTester) -> f64 {
-        let sized_box = *tester
-            .find_by_type::<SizedBox>()
+        let sized_box = *find::by_type::<SizedBox>()
+            .evaluate(tester)
             .first()
             .expect("the SizedBox");
         let fade = tester.ancestor_of_type::<FadeTransition>(sized_box);
@@ -2263,7 +2246,8 @@ mod tests {
                 move |app| app.routes([("/".to_string(), home)]),
             );
             let no_light_green_box = |tester: &WidgetTester| {
-                find_onstage_by_type::<ColoredBox>(tester)
+                find::by_type::<ColoredBox>()
+                    .evaluate(tester)
                     .into_iter()
                     .all(|element| {
                         tester.widget::<ColoredBox, _>(element, |colored_box| {
@@ -2272,10 +2256,10 @@ mod tests {
                     })
             };
 
-            tap_text(tester, "push a");
+            tester.tap(find::text("push a"));
             tester.pump_and_settle();
 
-            tap_text(tester, "push b");
+            tester.tap(find::text("push b"));
             tester.pump_by(Duration::from_millis(400));
 
             // Check that ColoredBox is not used for non-opaque route.
@@ -2283,7 +2267,10 @@ mod tests {
 
             tester.pump_and_settle();
 
-            let page_b = *tester.find_onstage_text("page b").first().expect("page b");
+            let page_b = *find::text("page b")
+                .evaluate(tester)
+                .first()
+                .expect("page b");
             Navigator::pop(&mut tester.cell.borrow_mut(), page_b, None);
 
             tester.pump_and_settle_by(Duration::from_millis(400));
@@ -2361,10 +2348,13 @@ mod tests {
             tester.cell.checkpoint();
             assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         };
-        tap_text(&mut tester, "push");
+        tester.tap(find::text("push"));
         assert_a_frame_leaves_nothing(&mut tester);
         tester.pump_and_settle();
-        let page_b = *tester.find_onstage_text("page b").first().expect("page b");
+        let page_b = *find::text("page b")
+            .evaluate(&tester)
+            .first()
+            .expect("page b");
         Navigator::pop(&mut tester.cell.borrow_mut(), page_b, None);
         assert_a_frame_leaves_nothing(&mut tester);
     }
@@ -2406,7 +2396,7 @@ mod tests {
             );
             assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
 
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_by(Duration::from_millis(799));
             assert_eq!(count_onstage_text(tester, "page b"), 0);
             // Color is not transparent during animation.
@@ -2429,7 +2419,7 @@ mod tests {
             );
             assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump();
             tester.pump_by(Duration::from_millis(499));
             let running = |tester: &WidgetTester| {
@@ -2486,7 +2476,7 @@ mod tests {
             );
             assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
 
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_by(Duration::from_millis(799));
             assert_eq!(count_onstage_text(tester, "page b"), 0);
             // The color is not transparent during animation.
@@ -2518,7 +2508,7 @@ mod tests {
                     .count(),
                 1
             );
-            tap_text(tester, "pop");
+            tester.tap(find::text("pop"));
             tester.pump_by(Duration::from_millis(299));
             assert_eq!(count_onstage_text(tester, "page b"), 1);
             // ColoredBox doesn't exist in FadeUpwardsPageTransition.
@@ -2545,7 +2535,7 @@ mod tests {
             );
             assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_and_settle();
             assert_eq!(count_onstage_text(tester, "page b"), 1);
             assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
@@ -2565,7 +2555,7 @@ mod tests {
             );
             assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_and_settle();
             assert_eq!(count_onstage_text(tester, "page b"), 1);
             assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
@@ -2581,7 +2571,7 @@ mod tests {
             tester.pump_and_settle_by(Duration::from_secs(60));
 
             assert_eq!(count_onstage_text(tester, "push"), 1);
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_and_settle();
             assert_eq!(count_onstage_text(tester, "page b"), 1);
         });
@@ -2752,11 +2742,11 @@ mod tests {
             );
 
             // No matter push or pop was called, the child widget should built only once.
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_and_settle();
             assert_eq!(built_count.get(), 1);
 
-            tap_text(tester, "pop");
+            tester.tap(find::text("pop"));
             tester.pump_and_settle();
             assert_eq!(built_count.get(), 1);
         });
@@ -2765,7 +2755,7 @@ mod tests {
     /// The layers under the `SnapshotWidget` nearest above `text`: Dart's
     /// `tester.layerListOf(find.ancestor(of: text, matching: find.byType(SnapshotWidget)).first)`.
     fn layers_above(tester: &WidgetTester, text: &str) -> Vec<AnyLayer> {
-        let text = *tester.find_text(text).first().expect("the text");
+        let text = *find::text(text).evaluate(tester).first().expect("the text");
         let snapshot: AnyElement = tester.ancestor_of_type::<SnapshotWidget>(text);
         tester.layer_list_of(snapshot)
     }
@@ -2869,8 +2859,8 @@ mod tests {
         builder: ZoomPageTransitionsBuilder,
         surface: Color,
         at: Duration,
-    ) -> Vec<u32> {
-        let drawn = std::sync::Mutex::new(Vec::new());
+        expected: Color,
+    ) {
         test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
             pump_app(
                 tester,
@@ -2893,12 +2883,12 @@ mod tests {
                 |app| app.routes(push_routes()),
             );
 
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump();
             tester.pump_by(at);
 
-            let enter = *tester
-                .find_by_type::<ZoomEnterTransition>()
+            let enter = *find::by_type::<ZoomEnterTransition>()
+                .evaluate(tester)
                 .iter()
                 .find(|element| {
                     let app = tester.cell.borrow();
@@ -2908,19 +2898,12 @@ mod tests {
                 })
                 .expect("the entering page's zoom transition");
             let render = tester.render_box_of(enter).as_object();
-            *drawn.lock().expect("the colors") = tester
-                .painted(render)
-                .into_iter()
-                .filter_map(|drawn| match drawn {
-                    crate::test_support::Drawn::Rect(color, _) => Some(color),
-                    _ => None,
-                })
-                .collect();
+            let ops = tester.painted_ops(render);
+            assert_paints(&ops, &[PaintCall::rect(Some(expected))]);
 
             tester.pump_and_settle();
             assert_eq!(count_onstage_text(tester, "page b"), 1);
         });
-        drawn.into_inner().expect("the colors")
     }
 
     // 'ZoomPageTransitionsBuilder uses theme color during transition effects', on the page
@@ -2929,16 +2912,16 @@ mod tests {
     fn the_zoom_page_transition_scrim_is_the_color_scheme_surface() {
         let surface = Color::from_argb(255, 195, 255, 0);
         for platform in TARGET_PLATFORM_VALUES {
-            let drawn = zoom_scrim_color(
+            // Expect the color to be at exactly 12.2% opacity at this time.
+            #[allow(deprecated)]
+            let expected = surface.with_opacity(0.122);
+            zoom_scrim_color(
                 platform,
                 ZoomPageTransitionsBuilder::new(),
                 surface,
                 Duration::from_millis(75),
+                expected,
             );
-            // Expect the color to be at exactly 12.2% opacity at this time.
-            #[allow(deprecated)]
-            let expected = surface.with_opacity(0.122).to_argb32();
-            assert!(drawn.contains(&expected), "{platform:?}: {drawn:x?}");
         }
     }
 
@@ -2946,16 +2929,16 @@ mod tests {
     fn the_zoom_page_transition_scrim_is_the_builders_background_color() {
         let red = Colors::RED.primary();
         for platform in TARGET_PLATFORM_VALUES {
-            let drawn = zoom_scrim_color(
+            // Expect the color to be at exactly 59.6% opacity at this time.
+            #[allow(deprecated)]
+            let expected = red.with_opacity(0.596);
+            zoom_scrim_color(
                 platform,
                 ZoomPageTransitionsBuilder::new().background_color(red),
                 Colors::BLUE.primary(),
                 Duration::from_millis(125),
+                expected,
             );
-            // Expect the color to be at exactly 59.6% opacity at this time.
-            #[allow(deprecated)]
-            let expected = red.with_opacity(0.596).to_argb32();
-            assert!(drawn.contains(&expected), "{platform:?}: {drawn:x?}");
         }
     }
 
@@ -3002,7 +2985,7 @@ mod tests {
             assert_eq!(count_onstage_text(tester, "go back"), 0);
 
             // Go to the second route.
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump();
             tester.pump_by(Duration::from_millis(801));
 
@@ -3010,7 +2993,7 @@ mod tests {
             assert_eq!(count_onstage_text(tester, "go back"), 1);
 
             // Tap to go back to the first route.
-            tap_text(tester, "go back");
+            tester.tap(find::text("go back"));
             tester.pump();
             tester.pump_by(Duration::from_millis(400));
 
@@ -3018,7 +3001,7 @@ mod tests {
             assert_eq!(count_onstage_text(tester, "go back"), 1);
 
             // In the middle of the transition, tap to go back to the second route.
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
 
             tester.pump();
             tester.pump_by(Duration::from_millis(401));
@@ -3036,7 +3019,7 @@ mod tests {
 
     /// Whether any `SnapshotWidget` above `text` is set to take a snapshot.
     fn is_snapshotting(tester: &WidgetTester, text: &str) -> bool {
-        let text = *tester.find_text(text).first().expect("the text");
+        let text = *find::text(text).evaluate(tester).first().expect("the text");
         let ancestors = tester.ancestors(text);
         let app = tester.cell.borrow();
         ancestors.into_iter().any(|ancestor| {

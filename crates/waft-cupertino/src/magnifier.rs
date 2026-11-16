@@ -640,7 +640,9 @@ impl StatelessWidget for CupertinoMagnifier {
 
 #[cfg(test)]
 mod tests {
-    use waft_widgets::testing::{TestVSync, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestVSync, WidgetTester, assert_more_or_less_equals, find, test_widgets,
+    };
     use waft_widgets::{Center, GlobalKey, ListenableBuilder, SizedBox};
 
     use super::*;
@@ -657,19 +659,16 @@ mod tests {
     );
     const REASONABLE_TEXT_FIELD: Rect = Rect::from_ltrb(0.0, 100.0, 200.0, 200.0);
 
-    /// `tester.widget<W>(find.byType(W))`, read through `read`.
-    fn read_widget<W: 'static, R>(tester: &WidgetTester, read: impl FnOnce(&W) -> R) -> R {
-        let found = *tester.find_by_type::<W>().first().expect("a mounted W");
-        tester.widget(found, read)
-    }
-
     fn magnifier_position(tester: &WidgetTester) -> Offset {
-        read_widget::<AnimatedPositioned, _>(tester, |positioned| {
-            Offset::new(
-                positioned.left.unwrap_or(0.0),
-                positioned.top.unwrap_or(0.0),
-            )
-        })
+        tester.widget(
+            find::by_type::<AnimatedPositioned>(),
+            |positioned: &AnimatedPositioned| {
+                Offset::new(
+                    positioned.left.unwrap_or(0.0),
+                    positioned.top.unwrap_or(0.0),
+                )
+            },
+        )
     }
 
     /// Dart's `CupertinoApp(home: Placeholder())`; the home's context is the magnifier's.
@@ -734,12 +733,8 @@ mod tests {
             let context = placeholder
                 .current_context(&tester.cell.borrow())
                 .expect("mounted");
-            let fake_text_field_rect = tester.global_rect(
-                tester
-                    .render_object(&fake_text_field)
-                    .as_box()
-                    .expect("laid out"),
-            );
+            let fake_text_field_rect =
+                tester.get_top_left(&fake_text_field) & tester.get_size(&fake_text_field);
             let magnifier = tester.update(|app| {
                 app.create(ValueNotifier::new(MagnifierInfo::new(
                     fake_text_field_rect.center(),
@@ -758,10 +753,10 @@ mod tests {
             );
 
             // Magnifier border color should inherit from CupertinoTheme.of(context).primaryColor.
-            let magnifier_border_color =
-                read_widget::<CupertinoMagnifier, _>(tester, |magnifier| {
-                    magnifier.border_side.color
-                });
+            let magnifier_border_color = tester.widget(
+                find::by_type::<CupertinoMagnifier>(),
+                |magnifier: &CupertinoMagnifier| magnifier.border_side.color,
+            );
             assert_eq!(
                 magnifier_border_color,
                 CupertinoColors::ACTIVE_GREEN.color()
@@ -930,7 +925,9 @@ mod tests {
     fn cupertino_magnifier_magnification_scale_defaults_to_1() {
         test_widgets(|tester| {
             mount_magnifier(tester, CupertinoMagnifier::new());
-            let scale = read_widget::<RawMagnifier, _>(tester, |raw| raw.magnification_scale);
+            let scale = tester.widget(find::by_type::<RawMagnifier>(), |raw: &RawMagnifier| {
+                raw.magnification_scale
+            });
             assert_eq!(scale, 1.0);
         });
     }
@@ -939,7 +936,9 @@ mod tests {
     fn magnification_scale_argument_is_passed_to_the_raw_magnifier() {
         test_widgets(|tester| {
             mount_magnifier(tester, CupertinoMagnifier::new().magnification_scale(2.0));
-            let scale = read_widget::<RawMagnifier, _>(tester, |raw| raw.magnification_scale);
+            let scale = tester.widget(find::by_type::<RawMagnifier>(), |raw: &RawMagnifier| {
+                raw.magnification_scale
+            });
             assert_eq!(scale, 2.0);
         });
     }
@@ -949,7 +948,9 @@ mod tests {
         test_widgets(|tester| {
             let focal_point_offset_for = |tester: &mut WidgetTester, size: Size| {
                 mount_magnifier(tester, CupertinoMagnifier::new().size(size));
-                read_widget::<RawMagnifier, _>(tester, |raw| raw.focal_point_offset)
+                tester.widget(find::by_type::<RawMagnifier>(), |raw: &RawMagnifier| {
+                    raw.focal_point_offset
+                })
             };
 
             assert_eq!(
@@ -976,9 +977,10 @@ mod tests {
             tester.pump_widget(CupertinoApp::new().home(Center::new().child(
                 SizedBox::shrink().child(CupertinoMagnifier::new().magnification_scale(2.0)),
             )));
-            let magnifier = tester.find_by_type::<CupertinoMagnifier>()[0];
-            let size = tester.render_box_of(magnifier).size(&tester.cell.borrow());
-            assert_eq!(size, Size::ZERO);
+            assert_eq!(
+                tester.get_size(find::by_type::<CupertinoMagnifier>()),
+                Size::ZERO
+            );
         });
     }
 
@@ -1013,20 +1015,9 @@ mod tests {
             // The global position the lens is magnifying: lens center (which includes
             // the in/out translation) plus the focal point offset.
             let magnified_point = |tester: &WidgetTester| {
-                let raw = tester.find_by_type::<RawMagnifier>()[0];
-                let render_box = tester.render_box_of(raw);
-                let center = {
-                    let app = tester.cell.borrow();
-                    let size = render_box.size(&app);
-                    render_box.local_to_global(
-                        &app,
-                        Offset::new(size.width() / 2.0, size.height() / 2.0),
-                        None,
-                    )
-                };
-                let focal_point_offset =
-                    read_widget::<RawMagnifier, _>(tester, |raw| raw.focal_point_offset);
-                center + focal_point_offset
+                let finder = find::by_type::<RawMagnifier>();
+                tester.get_center(&finder)
+                    + tester.widget(&finder, |raw: &RawMagnifier| raw.focal_point_offset)
             };
 
             tester.update(|app| controller.set_value(app, 1.0));
@@ -1035,12 +1026,7 @@ mod tests {
             for value in [0.0, 0.25, 0.5, 0.75] {
                 tester.update(|app| controller.set_value(app, value));
                 tester.pump();
-                let point = magnified_point(tester);
-                assert!(
-                    (point.dx() - at_rest.dx()).abs() < 1e-10
-                        && (point.dy() - at_rest.dy()).abs() < 1e-10,
-                    "value={value}: {point:?} is not {at_rest:?}"
-                );
+                assert_more_or_less_equals(magnified_point(tester), at_rest);
             }
         });
     }

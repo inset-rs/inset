@@ -1059,12 +1059,11 @@ mod tests {
     use waft_embedder::Color;
     use waft_foundation::AppCell;
     use waft_gestures::HitTestResult;
-    use waft_painting::{TextSpan, TextStyle};
+    use waft_painting::{AlignmentGeometry, TextSpan, TextStyle};
 
     use super::*;
-    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer};
-    use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::RenderRepaintBoundary;
+    use crate::testing::{EnginePhase, layout_with, pump_frame, test_render_root};
 
     /// What the shell does at start-up: the app-wide fonts, here the OS fonts.
     fn install_fonts(app: &mut App) {
@@ -1087,33 +1086,35 @@ mod tests {
         app: &mut App,
         text: &str,
         constraints: BoxConstraints,
-    ) -> (
-        RenderHandle<RenderParagraph>,
-        RenderHandle<RenderRepaintBoundary>,
-    ) {
+    ) -> RenderHandle<RenderParagraph> {
         laid_out_span(app, span(text), constraints)
     }
 
+    /// A paragraph of `text` laid out within `constraints` at the test view's top left, so that
+    /// its positions are the view's.
     fn laid_out_span(
         app: &mut App,
         text: InlineSpanRef,
         constraints: BoxConstraints,
-    ) -> (
-        RenderHandle<RenderParagraph>,
-        RenderHandle<RenderRepaintBoundary>,
-    ) {
+    ) -> RenderHandle<RenderParagraph> {
         install_fonts(app);
         let paragraph = RenderParagraph::new(app, text, TextDirection::Ltr, None);
-        let root = RenderRepaintBoundary::new(app, Some(paragraph.as_box()));
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.schedule_initial_layout(app);
-        root.layout(app, constraints, false);
-        let paint_root = OffsetLayer::new(app, Offset::ZERO);
-        paint_root.as_layer().attach(app, root.as_object().id());
-        root.as_object()
-            .schedule_initial_paint(app, paint_root.as_container_layer());
-        (paragraph, root)
+        lay_out_at_the_top_left(app, paragraph, constraints);
+        paragraph
+    }
+
+    fn lay_out_at_the_top_left(
+        app: &mut App,
+        paragraph: RenderHandle<RenderParagraph>,
+        constraints: BoxConstraints,
+    ) {
+        layout_with(
+            app,
+            paragraph.as_box(),
+            Some(constraints),
+            AlignmentGeometry::TOP_LEFT,
+            EnginePhase::Layout,
+        );
     }
 
     /// `paragraph_test.dart`: the minimum intrinsic width is the widest word, the maximum is the
@@ -1160,7 +1161,7 @@ mod tests {
                 .as_box()
                 .get_dry_baseline(&mut app, constraints, TextBaseline::Alphabetic);
 
-        let (paragraph, _root) = laid_out(&mut app, "one two three", constraints);
+        let paragraph = laid_out(&mut app, "one two three", constraints);
         assert_eq!(dry, paragraph.size(&app));
         let baseline =
             paragraph
@@ -1175,7 +1176,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
-        let (paragraph, _root) = laid_out(&mut app, "Hello", loose);
+        let paragraph = laid_out(&mut app, "Hello", loose);
         let size = paragraph.size(&app);
         assert!(size.width() > 0.0 && size.width() < 1000.0);
         assert_eq!(size, paragraph.text_size(&app));
@@ -1187,12 +1188,12 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
-        let (wide, _root) = laid_out(&mut app, "one two three four", loose);
+        let wide = laid_out(&mut app, "one two three four", loose);
         let natural = wide.size(&app);
         let narrow = BoxConstraints::new()
             .max_width(natural.width() / 2.0)
             .max_height(1000.0);
-        let (wrapped, _root) = laid_out(&mut app, "one two three four", narrow);
+        let wrapped = laid_out(&mut app, "one two three four", narrow);
         assert!(wrapped.size(&app).height() > natural.height());
         assert!(wrapped.size(&app).width() <= natural.width() / 2.0);
     }
@@ -1202,7 +1203,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
-        let (wide, _root) = laid_out(&mut app, "one two three four", loose);
+        let wide = laid_out(&mut app, "one two three four", loose);
         let natural = wide.size(&app);
         install_fonts(&mut app);
         let paragraph = RenderParagraph::new(
@@ -1212,14 +1213,10 @@ mod tests {
             None,
         );
         paragraph.set_soft_wrap(&mut app, false);
-        let root = RenderRepaintBoundary::new(&mut app, Some(paragraph.as_box()));
-        let owner = PipelineOwner::new(&mut app, None, None);
-        owner.set_root_node(&mut app, Some(root.as_object()));
-        root.schedule_initial_layout(&mut app);
         let narrow = BoxConstraints::new()
             .max_width(natural.width() / 2.0)
             .max_height(1000.0);
-        root.layout(&mut app, narrow, false);
+        lay_out_at_the_top_left(&mut app, paragraph, narrow);
         assert_eq!(paragraph.size(&app).width(), natural.width() / 2.0);
         assert_eq!(
             paragraph.text_size(&app).width(),
@@ -1229,7 +1226,7 @@ mod tests {
         assert!(paragraph.get(&app).needs_clipping);
 
         paragraph.set_overflow(&mut app, TextOverflow::Visible);
-        owner.flush_layout(&mut app);
+        pump_frame(&mut app, EnginePhase::Layout);
         assert!(!paragraph.get(&app).needs_clipping);
     }
 
@@ -1238,7 +1235,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
-        let (wide, _root) = laid_out(&mut app, "one two three four", loose);
+        let wide = laid_out(&mut app, "one two three four", loose);
         let natural = wide.size(&app);
         install_fonts(&mut app);
         let paragraph = RenderParagraph::new(
@@ -1249,16 +1246,12 @@ mod tests {
         );
         paragraph.set_max_lines(&mut app, Some(1));
         paragraph.set_overflow(&mut app, TextOverflow::Ellipsis);
-        let root = RenderRepaintBoundary::new(&mut app, Some(paragraph.as_box()));
-        let owner = PipelineOwner::new(&mut app, None, None);
-        owner.set_root_node(&mut app, Some(root.as_object()));
-        root.schedule_initial_layout(&mut app);
-        root.layout(
+        lay_out_at_the_top_left(
             &mut app,
+            paragraph,
             BoxConstraints::new()
                 .max_width(natural.width() / 2.0)
                 .max_height(1000.0),
-            false,
         );
         assert!(paragraph.did_exceed_max_lines(&app));
         assert_eq!(paragraph.size(&app).height(), natural.height());
@@ -1269,10 +1262,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
-        let (paragraph, root) = laid_out(&mut app, "Hello", loose);
-        let owner = root.owner(&app).unwrap();
-        owner.flush_compositing_bits(&mut app);
-        owner.flush_paint(&mut app);
+        let paragraph = laid_out(&mut app, "Hello", loose);
+        pump_frame(&mut app, EnginePhase::Paint);
         assert!(!paragraph.debug_needs_layout(&app));
 
         let recolored = TextSpan::new()
@@ -1299,10 +1290,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
-        let (paragraph, root) = laid_out(&mut app, "Hello", loose);
-        let owner = root.owner(&app).unwrap();
-        owner.flush_compositing_bits(&mut app);
-        owner.flush_paint(&mut app);
+        let paragraph = laid_out(&mut app, "Hello", loose);
+        pump_frame(&mut app, EnginePhase::Paint);
         assert!(!paragraph.as_object().debug_needs_paint(&app));
 
         let mut result = HitTestResult::new();
@@ -1380,8 +1369,7 @@ mod tests {
                     .into_span(),
             ])
             .into_span();
-        let (paragraph, _root) =
-            laid_out_span(&mut app, text, BoxConstraints::tight_for(Some(300.0), None));
+        let paragraph = laid_out_span(&mut app, text, BoxConstraints::tight_for(Some(300.0), None));
 
         let first_a = center_of(&boxes_of(&mut app, paragraph, 0, 1)[0]);
         let last_a = center_of(&boxes_of(&mut app, paragraph, 9, 10)[0]);
@@ -1414,7 +1402,7 @@ mod tests {
         );
     }
 
-    /// Plays `RendererBinding`'s part: hit-tests the paragraph's root before the gesture binding
+    /// Plays `RendererBinding`'s part: hit-tests the test view's root before the gesture binding
     /// adds itself to the path.
     struct RootHitTester {
         root: RenderHandle<RenderRepaintBoundary>,
@@ -1490,11 +1478,12 @@ mod tests {
                 TextSpan::new().text(" please").into_span(),
             ])
             .into_span();
-        let (paragraph, root) = laid_out_span(
+        let paragraph = laid_out_span(
             &mut app,
             text,
             BoxConstraints::new().max_width(1000.0).max_height(1000.0),
         );
+        let root = test_render_root(&mut app);
         let hit_tester = app.create(RootHitTester { root });
         GestureBinding::instance(&mut app).set_overrides(&mut app, Rc::new(hit_tester));
 
@@ -1537,11 +1526,12 @@ mod tests {
                     .into_span(),
             ])
             .into_span();
-        let (paragraph, root) = laid_out_span(
+        let paragraph = laid_out_span(
             &mut app,
             text,
             BoxConstraints::new().max_width(1000.0).max_height(1000.0),
         );
+        let root = test_render_root(&mut app);
         let tracker = MouseTracker::new(
             &mut app,
             Rc::new(move |app: &mut App, position: Offset, _view| {
@@ -1611,7 +1601,7 @@ mod tests {
                 exit_log.borrow_mut().push("exit")
             }))
             .into_span();
-        let (paragraph, root) = laid_out_span(
+        let paragraph = laid_out_span(
             &mut app,
             text,
             BoxConstraints::new().max_width(120.0).max_height(1000.0),
@@ -1624,6 +1614,7 @@ mod tests {
             .unwrap();
         assert!(last_box.top > boxes[0].bottom - 1.0, "the span wraps");
         let last_line = center_of(&last_box);
+        let root = test_render_root(&mut app);
         let tracker = MouseTracker::new(
             &mut app,
             Rc::new(move |app: &mut App, position: Offset, _view| {

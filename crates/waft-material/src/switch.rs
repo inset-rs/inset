@@ -2703,90 +2703,110 @@ pub(crate) mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
     use crate::icons::Icons;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
+    use crate::test_support::PaintInspection;
     use crate::theme_data::AdaptationRef;
     use crate::tooltip::tests::{m2, m3, pump_app};
+    use waft_embedder::{RRect, Radius};
+    use waft_rendering::testing::{PaintCall, PaintedStyle, RecordedCall, assert_paints, paints};
 
-    /// One recorded op, reduced to what Dart's `paints` matchers compare.
-    #[derive(Clone, Debug, PartialEq)]
-    pub(crate) enum Drawn {
-        /// A filled shape (`rrect`, `circle`): its colour as `0xAARRGGBB` and its bounds.
-        Fill(u32, Rect),
-        /// A stroked shape: its colour, its stroke width and the bounds of its path.
-        Stroke(u32, f32, Rect),
-        /// A blurred shadow.
-        Shadow(u32),
-        Clip,
-        /// A laid-out paragraph: the left and top of its ink.
-        Glyphs(f64, f64),
+    fn argb(color: waft_embedder::Color) -> u32 {
+        color.to_argb32()
     }
 
-    fn argb(color: waft_embedder::valo::Color) -> u32 {
-        let channel = |value: f32| (value * 255.0).round() as u32;
-        (channel(color.a) << 24)
-            | (channel(color.r) << 16)
-            | (channel(color.g) << 8)
-            | channel(color.b)
-    }
-
-    fn rect_of(rect: waft_embedder::valo::Rect) -> Rect {
-        Rect::from_ltwh(
-            f64::from(rect.x),
-            f64::from(rect.y),
-            f64::from(rect.width),
-            f64::from(rect.height),
-        )
-    }
-
-    impl Drawn {
-        fn of(op: &Op) -> Option<Drawn> {
-            match op {
-                Op::DrawPath { path, paint, .. } => Some(match &paint.style {
-                    PaintStyle::Stroke(stroke) => {
-                        Drawn::Stroke(argb(paint.color), stroke.width, rect_of(path.bounds()))
-                    }
-                    PaintStyle::Fill => Drawn::Fill(argb(paint.color), rect_of(path.bounds())),
-                }),
-                Op::DrawRect { paint, rect, .. } => {
-                    Some(Drawn::Fill(argb(paint.color), rect_of(*rect)))
-                }
-                Op::RRectBlur { paint, .. } => Some(Drawn::Shadow(argb(paint.color))),
-                Op::ClipPath { .. } => Some(Drawn::Clip),
-                Op::GlyphRun { content_bounds, .. } => Some(Drawn::Glyphs(
-                    f64::from(content_bounds.x),
-                    f64::from(content_bounds.y),
-                )),
-                _ => None,
-            }
+    /// The colour of a call as `0xAARRGGBB`, if it has one: Dart's `color:` argument.
+    fn call_color(call: &RecordedCall) -> Option<u32> {
+        match call {
+            RecordedCall::Rect { color, .. }
+            | RecordedCall::Circle { color, .. }
+            | RecordedCall::RRect { color, .. }
+            | RecordedCall::DRRect { color }
+            | RecordedCall::Line { color, .. }
+            | RecordedCall::Path { color, .. }
+            | RecordedCall::Shadow { color, .. } => Some(argb(*color)),
+            _ => None,
         }
+    }
 
-        pub(crate) fn color(&self) -> Option<u32> {
-            match self {
-                Drawn::Fill(color, _) | Drawn::Stroke(color, _, _) | Drawn::Shadow(color) => {
-                    Some(*color)
-                }
-                Drawn::Clip | Drawn::Glyphs(..) => None,
-            }
+    /// The colour of a drawn op as `0xAARRGGBB`, if it has one.
+    pub(crate) fn color_of(op: &Op) -> Option<u32> {
+        call_color(&RecordedCall::of(op))
+    }
+
+    /// The bounds of a drawn shape.
+    fn bounds_of(call: &RecordedCall) -> Option<Rect> {
+        match call {
+            RecordedCall::Rect { rect, .. } => Some(*rect),
+            RecordedCall::RRect { bounds, .. } | RecordedCall::Path { bounds, .. } => Some(*bounds),
+            RecordedCall::Circle { center, radius, .. } => Some(Rect::from_ltrb(
+                center.dx() - radius,
+                center.dy() - radius,
+                center.dx() + radius,
+                center.dy() + radius,
+            )),
+            _ => None,
         }
+    }
+
+    /// A filled shape: its colour and bounds.
+    fn call_fill(call: &RecordedCall) -> Option<(u32, Rect)> {
+        let stroke = match call {
+            RecordedCall::Circle { stroke_width, .. }
+            | RecordedCall::RRect { stroke_width, .. }
+            | RecordedCall::Path { stroke_width, .. } => *stroke_width,
+            RecordedCall::Rect { .. } => None,
+            _ => return None,
+        };
+        match stroke {
+            None => Some((call_color(call)?, bounds_of(call)?)),
+            Some(_) => None,
+        }
+    }
+
+    /// A stroked shape: its colour, stroke width and bounds.
+    fn call_stroke(call: &RecordedCall) -> Option<(u32, f32, Rect)> {
+        match call {
+            RecordedCall::Circle { stroke_width, .. }
+            | RecordedCall::RRect { stroke_width, .. }
+            | RecordedCall::Path { stroke_width, .. } => {
+                Some((call_color(call)?, (*stroke_width)? as f32, bounds_of(call)?))
+            }
+            _ => None,
+        }
+    }
+
+    /// The colour, stroke width and bounds of a stroked op.
+    pub(crate) fn stroke_of(op: &Op) -> Option<(u32, f32, Rect)> {
+        call_stroke(&RecordedCall::of(op))
     }
 
     /// The colours of what was drawn, clips and glyphs left out.
-    pub(crate) fn colors(drawn: &[Drawn]) -> Vec<u32> {
-        drawn.iter().filter_map(Drawn::color).collect()
+    pub(crate) fn colors(drawn: &[Op]) -> Vec<u32> {
+        drawn.iter().filter_map(color_of).collect()
+    }
+
+    /// The left and top of every glyph run's ink.
+    pub(crate) fn glyph_origins(drawn: &[Op]) -> Vec<(f64, f64)> {
+        drawn
+            .iter()
+            .filter_map(|op| match op {
+                Op::GlyphRun { content_bounds, .. } => {
+                    Some((f64::from(content_bounds.x), f64::from(content_bounds.y)))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     pub(crate) fn c(color: Color) -> u32 {
         color.to_argb32()
-    }
-
-    fn ltrb(left: f64, top: f64, right: f64, bottom: f64) -> Rect {
-        Rect::from_ltrb(left, top, right, bottom)
     }
 
     fn find<T: RenderObject>(app: &App, node: AnyRenderObject) -> Option<RenderHandle<T>> {
@@ -2803,17 +2823,20 @@ pub(crate) mod tests {
     }
 
     fn switch_element(tester: &WidgetTester) -> AnyElement {
-        *tester.find_by_type::<Switch>().first().expect("a Switch")
+        *find::by_type::<Switch>()
+            .evaluate(tester)
+            .first()
+            .expect("a Switch")
     }
 
     /// Dart's `tester.getRect(find.byType(Switch))`.
     pub(crate) fn switch_rect(tester: &WidgetTester) -> Rect {
-        tester.global_rect(tester.render_box_of(switch_element(tester)))
+        tester.get_rect(switch_element(tester))
     }
 
     /// What the switch's painter draws, in paint order: Dart's `paints` matcher on the
     /// switch's `Material`.
-    pub(crate) fn drawn(tester: &WidgetTester) -> Vec<Drawn> {
+    pub(crate) fn drawn(tester: &WidgetTester) -> Vec<Op> {
         let render = tester.render_box_of(switch_element(tester)).as_object();
         let mut app = tester.cell.borrow_mut();
         let custom = find::<RenderCustomPaint>(&app, render).expect("the switch's CustomPaint");
@@ -2821,7 +2844,25 @@ pub(crate) mod tests {
         let size = custom.size(&app);
         let mut canvas = Canvas::new();
         painter.paint(&mut app, &mut canvas, size);
-        canvas.build().ops().iter().filter_map(Drawn::of).collect()
+        canvas
+            .build()
+            .ops()
+            .iter()
+            .filter(|op| {
+                matches!(
+                    RecordedCall::of(op),
+                    RecordedCall::Rect { .. }
+                        | RecordedCall::Circle { .. }
+                        | RecordedCall::RRect { .. }
+                        | RecordedCall::DRRect { .. }
+                        | RecordedCall::Line { .. }
+                        | RecordedCall::Path { .. }
+                        | RecordedCall::Shadow { .. }
+                        | RecordedCall::Clip
+                ) || matches!(op, Op::GlyphRun { .. })
+            })
+            .cloned()
+            .collect()
     }
 
     /// The opacity the switch is painted with.
@@ -2835,8 +2876,8 @@ pub(crate) mod tests {
 
     /// Dart's `tester.state<ToggleableStateMixin>(find.byWidgetPredicate(... '_MaterialSwitch'))`.
     fn state(tester: &WidgetTester) -> Handle<MaterialSwitchState> {
-        let element = *tester
-            .find_by_type::<MaterialSwitch>()
+        let element = *find::by_type::<MaterialSwitch>()
+            .evaluate(tester)
             .first()
             .expect("a _MaterialSwitch");
         let app = tester.cell.borrow();
@@ -2890,6 +2931,81 @@ pub(crate) mod tests {
         .into_widget()
     }
 
+    /// Dart's `Material.of(tester.element(find.byType(Switch)))`, which its cases hand
+    /// `paints`: what the switch's `Material` and its subtree draw.
+    pub(crate) fn material_ops(tester: &WidgetTester) -> Vec<Op> {
+        tester.nearest_material_ops(switch_element(tester))
+    }
+
+    /// [`assert_paints`] with Dart's `reason:`.
+    #[track_caller]
+    fn assert_paints_because(ops: &[Op], pattern: &[PaintCall], reason: &str) {
+        if let Err(mismatch) = paints(ops, pattern) {
+            panic!("{reason}: {mismatch}");
+        }
+    }
+
+    /// Dart's `..rrect(rrect:, color:, style:)`.
+    fn rrect(rrect: Option<RRect>, color: Option<Color>, style: Option<PaintedStyle>) -> PaintCall {
+        PaintCall::RRect {
+            rrect,
+            color,
+            style,
+            has_mask_filter: None,
+        }
+    }
+
+    /// Dart's `RRect.fromLTRBR(left, top, right, bottom, Radius.circular(radius))`.
+    fn ltrbr(left: f64, top: f64, right: f64, bottom: f64, radius: f64) -> RRect {
+        RRect::from_ltrbr(left, top, right, bottom, Radius::circular(radius))
+    }
+
+    /// The M2 track Dart's cases name: `RRect.fromLTRBR(13.0, 17.0, 46.0, 31.0, Radius.circular(7.0))`.
+    fn m2_track(color: Color) -> PaintCall {
+        rrect(Some(ltrbr(13.0, 17.0, 46.0, 31.0, 7.0)), Some(color), None)
+    }
+
+    /// The M3 track Dart's cases name: `RRect.fromLTRBR(4.0, 8.0, 56.0, 40.0, Radius.circular(16.0))`.
+    fn m3_track(color: Color, style: Option<PaintedStyle>) -> PaintCall {
+        rrect(Some(ltrbr(4.0, 8.0, 56.0, 40.0, 16.0)), Some(color), style)
+    }
+
+    /// The M3 outline Dart's cases name: `RRect.fromLTRBR(5.0, 9.0, 55.0, 39.0, Radius.circular(16.0))`.
+    fn m3_outline(color: Color) -> PaintCall {
+        rrect(
+            Some(ltrbr(5.0, 9.0, 55.0, 39.0, 16.0)),
+            Some(color),
+            Some(PaintedStyle::Stroke(None)),
+        )
+    }
+
+    /// Dart's M2 pattern: the track, the reaction (`..circle(color:)`, or a transparent
+    /// `..rrect` the module doc leaves out when `None`), the thumb's three shadows and the thumb.
+    fn m2_pattern(track: Color, reaction: Option<Color>, thumb: Color) -> Vec<PaintCall> {
+        let mut pattern = vec![m2_track(track)];
+        pattern.extend(reaction.map(|color| PaintCall::circle(Some(color))));
+        pattern.extend([
+            PaintCall::rrect(Some(Color::new(0x33000000))),
+            PaintCall::rrect(Some(Color::new(0x24000000))),
+            PaintCall::rrect(Some(Color::new(0x1f000000))),
+            PaintCall::rrect(Some(thumb)),
+        ]);
+        pattern
+    }
+
+    /// Dart's adaptive (Cupertino) pattern: the track, the thumb's two shadows and its border
+    /// (only Cupertino's), and the thumb, after the transparent reaction the module doc leaves
+    /// out.
+    fn cupertino_pattern(track: PaintCall, thumb: PaintCall) -> Vec<PaintCall> {
+        vec![
+            track,
+            PaintCall::rrect(Some(Color::new(0x26000000))),
+            PaintCall::rrect(Some(Color::new(0x0f000000))),
+            PaintCall::rrect(Some(Color::new(0x0a000000))), // Thumb border color(only cupertino)
+            thumb,
+        ]
+    }
+
     /// `Directionality(textDirection: direction, child: Material(child: Center(child: child)))`.
     fn in_material(direction: TextDirection, child: WidgetRef) -> WidgetRef {
         Directionality::new(direction, Material::new().child(Center::new().child(child)))
@@ -2905,7 +3021,10 @@ pub(crate) mod tests {
     fn an_adaptive_switch_given_its_colors_does_not_depend_on_high_contrast() {
         test_widgets(|_| {
             let built_child = |tester: &WidgetTester| -> WidgetRef {
-                let element = *tester.find_by_type::<Switch>().first().expect("a switch");
+                let element = *find::by_type::<Switch>()
+                    .evaluate(tester)
+                    .first()
+                    .expect("a switch");
                 let app = tester.cell.borrow();
                 let material_switch = element.children(&app)[0];
                 material_switch.children(&app)[0].widget(&app).clone()
@@ -2981,7 +3100,7 @@ pub(crate) mod tests {
     /// Dart's `tester.tap(find.byType(Switch))`.
     pub(crate) fn tap(tester: &mut WidgetTester) {
         let at = center(tester);
-        tester.tap(at, 1);
+        tester.tap_at(at, 1);
     }
 
     /// Dart's `tester.drag(find.byType(Switch), Offset(dx, 0.0))`.
@@ -3027,16 +3146,6 @@ pub(crate) mod tests {
     ];
 
     pub(crate) const M2_SHADOWS: [u32; 3] = [0x33000000, 0x24000000, 0x1f000000];
-    const CUPERTINO_SHADOWS_AND_BORDER: [u32; 3] = [0x26000000, 0x0f000000, 0x0a000000];
-    const M2_TRACK: Rect = Rect::from_ltrb(13.0, 17.0, 46.0, 31.0);
-    const M3_TRACK: Rect = Rect::from_ltrb(4.0, 8.0, 56.0, 40.0);
-    const M3_OUTLINE: Rect = Rect::from_ltrb(5.0, 9.0, 55.0, 39.0);
-
-    /// An M2 switch's draws: the track, the reaction circles in `between`, the thumb's three
-    /// shadows and the thumb.
-    fn m2_sequence(track: u32, between: &[u32], thumb: u32) -> Vec<u32> {
-        [&[track][..], between, &M2_SHADOWS[..], &[thumb][..]].concat()
-    }
 
     #[test]
     fn a_tap_toggles_the_switch() {
@@ -3209,21 +3318,17 @@ pub(crate) mod tests {
                     Switch::new(value, on_changed).drag_start_behavior(DragStartBehavior::Down)
                 },
             );
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(0x52000000, M2_TRACK));
-            assert_eq!(
-                colors(&painted),
-                m2_sequence(0x52000000, &[], c(Colors::GREY.shade50())),
-                "Inactive enabled switch should match these colors"
+            // Inactive enabled switch should match these colors.
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Color::new(0x52000000), None, Colors::GREY.shade50()),
             );
             drag(tester, -30.0);
             tester.pump();
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
-            assert_eq!(
-                colors(&painted),
-                m2_sequence(0x802196f3, &[], 0xff2196f3),
-                "Active enabled switch should match these colors"
+            // Active enabled switch should match these colors.
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Color::new(0x802196f3), None, Color::new(0xff2196f3)),
             );
         });
     }
@@ -3251,23 +3356,30 @@ pub(crate) mod tests {
                         switch.drag_start_behavior(DragStartBehavior::Down)
                     },
                 );
-                assert_eq!(
-                    drawn(tester),
-                    [
-                        Drawn::Fill(c(colors_.surface_container_highest()), M3_TRACK),
-                        Drawn::Stroke(c(colors_.outline()), 2.0, M3_OUTLINE),
-                        Drawn::Fill(c(colors_.outline()), ltrb(32.0, 16.0, 48.0, 32.0)),
+                // Inactive enabled switch should match these colors.
+                assert_paints(
+                    &material_ops(tester),
+                    &[
+                        PaintCall::Save,
+                        m3_track(
+                            colors_.surface_container_highest(),
+                            Some(PaintedStyle::Fill),
+                        ),
+                        m3_outline(colors_.outline()),
+                        PaintCall::rrect(Some(colors_.outline())), // thumb color
                     ],
-                    "Inactive enabled switch should match these colors"
                 );
                 drag(tester, -30.0);
                 tester.pump();
-                let painted = drawn(tester);
-                assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
-                assert_eq!(
-                    colors(&painted),
-                    [c(colors_.primary), c(colors_.on_primary)],
-                    "Active enabled switch should match these colors"
+                // Active enabled switch should match these colors.
+                assert_paints(
+                    &material_ops(tester),
+                    &[
+                        PaintCall::Save,
+                        m3_track(colors_.primary, Some(PaintedStyle::Fill)),
+                        // The transparent track outline (module doc).
+                        PaintCall::rrect(Some(colors_.on_primary)), // thumb color
+                    ],
                 );
             });
         }
@@ -3283,12 +3395,10 @@ pub(crate) mod tests {
                 )
                 .into_widget();
                 pump_app(tester, m2, move |_app| home);
-                let painted = drawn(tester);
-                assert_eq!(painted[0], Drawn::Fill(c(Colors::BLACK12), M2_TRACK));
-                assert_eq!(
-                    colors(&painted),
-                    m2_sequence(c(Colors::BLACK12), &[], c(Colors::GREY.shade400())),
-                    "value {value}"
+                // Inactive and active disabled switches should match these colors.
+                assert_paints(
+                    &material_ops(tester),
+                    &m2_pattern(Colors::BLACK12, None, Colors::GREY.shade400()),
                 );
             });
         }
@@ -3300,59 +3410,54 @@ pub(crate) mod tests {
             let colors_ = colors_of(&tester.cell.borrow(), m3);
             let home = in_material(TextDirection::Rtl, Switch::new(false, None).into_widget());
             pump_app(tester, m3, move |_app| home);
-            let painted = drawn(tester);
-            assert_eq!(
-                painted,
-                [
-                    Drawn::Fill(
-                        c(with_opacity(colors_.surface_container_highest(), 0.12)),
-                        M3_TRACK
+            // Inactive disabled switch should match these colors.
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    PaintCall::Save,
+                    m3_track(
+                        with_opacity(colors_.surface_container_highest(), 0.12),
+                        Some(PaintedStyle::Fill),
                     ),
-                    Drawn::Stroke(c(with_opacity(colors_.on_surface, 0.12)), 2.0, M3_OUTLINE),
-                    Drawn::Fill(
-                        c(Color::alpha_blend(
-                            with_opacity(colors_.on_surface, 0.38),
-                            colors_.surface
-                        )),
-                        painted[2].clone().rect(),
-                    ),
+                    m3_outline(with_opacity(colors_.on_surface, 0.12)),
+                    // thumb color
+                    PaintCall::rrect(Some(Color::alpha_blend(
+                        with_opacity(colors_.on_surface, 0.38),
+                        colors_.surface,
+                    ))),
                 ],
-                "Inactive disabled switch should match these colors"
             );
 
             let home = in_material(TextDirection::Rtl, Switch::new(true, None).into_widget());
             pump_app(tester, m3, move |_app| home);
             // Dart runs the active switch as a case of its own, on a tree that has not animated.
             tester.pump_and_settle();
-            let painted = drawn(tester);
-            assert_eq!(
-                painted[0],
-                Drawn::Fill(c(with_opacity(colors_.on_surface, 0.12)), M3_TRACK)
-            );
-            assert_eq!(
-                colors(&painted),
-                [
-                    c(with_opacity(colors_.on_surface, 0.12)),
-                    c(colors_.surface)
+            // Active disabled switch should match these colors.
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    PaintCall::Save,
+                    m3_track(
+                        with_opacity(colors_.on_surface, 0.12),
+                        Some(PaintedStyle::Fill),
+                    ),
+                    // The transparent track outline (module doc).
+                    PaintCall::rrect(Some(colors_.surface)), // thumb color
                 ],
-                "Active disabled switch should match these colors"
             );
         });
     }
 
     /// The reaction circles drawn: Dart's `paints..circle()`, told from an `rrect` by being
     /// a square of the splash radius's diameter centred on the thumb's row.
-    pub(crate) fn circles(painted: &[Drawn], radius: f64) -> Vec<u32> {
+    pub(crate) fn circles(painted: &[Op], radius: f64) -> Vec<u32> {
         painted
             .iter()
-            .filter_map(|drawn| match drawn {
-                Drawn::Fill(color, rect)
-                    if (rect.width() - 2.0 * radius).abs() < 1e-6
-                        && (rect.height() - 2.0 * radius).abs() < 1e-6 =>
-                {
-                    Some(*color)
-                }
-                _ => None,
+            .filter_map(|op| {
+                let (color, rect) = call_fill(&RecordedCall::of(op))?;
+                ((rect.width() - 2.0 * radius).abs() < 1e-6
+                    && (rect.height() - 2.0 * radius).abs() < 1e-6)
+                    .then_some(color)
             })
             .collect()
     }
@@ -3380,25 +3485,12 @@ pub(crate) mod tests {
                 } else {
                     (data.focus_color, data.hover_color)
                 };
-                let radius = if use_material3 {
-                    20.0
-                } else {
-                    K_RADIAL_REACTION_RADIUS
-                };
-                assert_eq!(
-                    circles(&drawn(tester), radius),
-                    [c(focused)],
-                    "M3 {use_material3}"
-                );
+                assert_paints(&material_ops(tester), &[PaintCall::circle(Some(focused))]);
 
                 // On both hovered and focused, the overlay color should show hovered overlay color.
                 hover(tester);
                 tester.pump_and_settle();
-                assert_eq!(
-                    circles(&drawn(tester), radius),
-                    [c(hovered)],
-                    "M3 {use_material3}"
-                );
+                assert_paints(&material_ops(tester), &[PaintCall::circle(Some(hovered))]);
             });
         }
     }
@@ -3423,29 +3515,15 @@ pub(crate) mod tests {
                         .inactive_track_color(Colors::BLUE.shade500())
                 },
             );
-            let painted = drawn(tester);
-            assert_eq!(
-                painted[0],
-                Drawn::Fill(c(Colors::BLUE.shade500()), M2_TRACK)
-            );
-            assert_eq!(
-                colors(&painted),
-                m2_sequence(
-                    c(Colors::BLUE.shade500()),
-                    &[],
-                    c(Colors::YELLOW.shade500())
-                )
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Colors::BLUE.shade500(), None, Colors::YELLOW.shade500()),
             );
             drag(tester, -30.0);
             tester.pump();
-            let painted = drawn(tester);
-            assert_eq!(
-                painted[0],
-                Drawn::Fill(c(Colors::GREEN.shade500()), M2_TRACK)
-            );
-            assert_eq!(
-                colors(&painted),
-                m2_sequence(c(Colors::GREEN.shade500()), &[], c(Colors::RED.shade500()))
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Colors::GREEN.shade500(), None, Colors::RED.shade500()),
             );
         });
     }
@@ -3471,25 +3549,27 @@ pub(crate) mod tests {
                         .inactive_track_color(Colors::BLUE.shade500())
                 },
             );
-            let painted = drawn(tester);
-            assert_eq!(
-                painted[0],
-                Drawn::Fill(c(Colors::BLUE.shade500()), M3_TRACK)
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    m3_track(Colors::BLUE.shade500(), Some(PaintedStyle::Fill)),
+                    rrect(
+                        None,
+                        Some(colors_.outline()),
+                        Some(PaintedStyle::Stroke(None)),
+                    ),
+                    PaintCall::rrect(Some(Colors::YELLOW.shade500())), // thumb color
+                ],
             );
-            assert!(
-                matches!(painted[1], Drawn::Stroke(color, ..) if color == c(colors_.outline()))
-            );
-            assert_eq!(painted[2].color(), Some(c(Colors::YELLOW.shade500())));
             drag(tester, -30.0);
             tester.pump();
-            let painted = drawn(tester);
-            assert_eq!(
-                painted[0],
-                Drawn::Fill(c(Colors::GREEN.shade500()), M3_TRACK)
-            );
-            assert_eq!(
-                colors(&painted),
-                [c(Colors::GREEN.shade500()), c(Colors::RED.shade500())]
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    m3_track(Colors::GREEN.shade500(), Some(PaintedStyle::Fill)),
+                    // The transparent track outline (module doc).
+                    PaintCall::rrect(Some(Colors::RED.shade500())), // thumb color
+                ],
             );
         });
     }
@@ -3623,10 +3703,10 @@ pub(crate) mod tests {
                 .child(Center::new().child(home))
                 .into_widget();
             pump_app(tester, adaptive_on(platform), move |_app| home);
-            assert_eq!(tester.find_by_type::<Switch>().len(), 1, "on {platform:?}");
+            expect(tester, &find::by_type::<Switch>(), finds_one_widget());
             assert!(
-                tester
-                    .find_by_type::<waft_cupertino::CupertinoSwitch>()
+                find::by_type::<waft_cupertino::CupertinoSwitch>()
+                    .evaluate(tester)
                     .is_empty()
             );
             tester.widget(switch_element(tester), |switch: &Switch| {
@@ -3767,21 +3847,23 @@ pub(crate) mod tests {
     fn an_adaptive_cupertino_switch_has_its_default_thumb_and_track_colors_and_size() {
         for platform in CUPERTINO_PLATFORMS {
             test_widgets(|_| {
-                const THUMB_COLOR: u32 = 0xffffffff;
-                const INACTIVE_TRACK_COLOR: u32 = 0x28787880; // Default inactive track color.
-                const ACTIVE_TRACK_COLOR: u32 = 0xff34c759; // Default active track color.
+                const THUMB_COLOR: Color = Colors::WHITE;
+                // Default inactive track color.
+                const INACTIVE_TRACK_COLOR: Color = Color::from_argb(40, 120, 120, 128);
+                // Default active track color.
+                const ACTIVE_TRACK_COLOR: Color = Color::from_argb(255, 52, 199, 89);
                 // Switches have same sizes on both platform but they are more compact on macOS.
                 let (track, inactive_thumb, active_thumb) = if platform == TargetPlatform::IOS {
                     (
-                        ltrb(4.5, 8.5, 55.5, 39.5),
-                        ltrb(6.0, 10.0, 34.0, 38.0),
-                        ltrb(26.0, 10.0, 54.0, 38.0),
+                        ltrbr(4.5, 8.5, 55.5, 39.5, 15.5),
+                        ltrbr(6.0, 10.0, 34.0, 38.0, 14.0),
+                        ltrbr(26.0, 10.0, 54.0, 38.0, 14.0),
                     )
                 } else {
                     (
-                        ltrb(4.5, 4.5, 55.5, 35.5),
-                        ltrb(6.0, 6.0, 34.0, 34.0),
-                        ltrb(26.0, 6.0, 54.0, 34.0),
+                        ltrbr(4.5, 4.5, 55.5, 35.5, 15.5),
+                        ltrbr(6.0, 6.0, 34.0, 34.0, 14.0),
+                        ltrbr(26.0, 6.0, 54.0, 34.0, 14.0),
                     )
                 };
                 for (disabled, off, expected_opacity) in [
@@ -3804,17 +3886,13 @@ pub(crate) mod tests {
                     } else {
                         (ACTIVE_TRACK_COLOR, active_thumb)
                     };
-                    assert_eq!(
-                        drawn(tester),
-                        [
-                            Drawn::Fill(track_color, track),
-                            Drawn::Clip,
-                            Drawn::Shadow(CUPERTINO_SHADOWS_AND_BORDER[0]),
-                            Drawn::Shadow(CUPERTINO_SHADOWS_AND_BORDER[1]),
-                            Drawn::Fill(CUPERTINO_SHADOWS_AND_BORDER[2], thumb.inflate(0.5)),
-                            Drawn::Fill(THUMB_COLOR, thumb),
-                        ],
-                        "{platform:?}, disabled {disabled}, off {off}"
+                    // The switch should have the default track and thumb color.
+                    assert_paints(
+                        &material_ops(tester),
+                        &cupertino_pattern(
+                            rrect(Some(track), Some(track_color), None),
+                            rrect(Some(thumb), Some(THUMB_COLOR), None),
+                        ),
                     );
                     assert_eq!(opacity(tester), expected_opacity);
                 }
@@ -3826,9 +3904,9 @@ pub(crate) mod tests {
     fn an_adaptive_cupertino_switch_ignores_the_switch_themes() {
         for overall in [true, false] {
             test_widgets(|tester| {
-                const DEFAULT_THUMB_COLOR: u32 = 0xffffffff;
-                const DEFAULT_INACTIVE_TRACK_COLOR: u32 = 0x28787880;
-                const DEFAULT_ACTIVE_TRACK_COLOR: u32 = 0xff34c759;
+                const DEFAULT_THUMB_COLOR: Color = Colors::WHITE;
+                const DEFAULT_INACTIVE_TRACK_COLOR: Color = Color::from_argb(40, 120, 120, 128);
+                const DEFAULT_ACTIVE_TRACK_COLOR: Color = Color::from_argb(255, 52, 199, 89);
                 let updated_thumb_color = Colors::RED.primary();
                 let updated_track_color = Colors::GREEN.primary();
                 let theme = SwitchThemeData::new()
@@ -3867,24 +3945,26 @@ pub(crate) mod tests {
                             ..AdaptiveSwitch::default()
                         })
                         .pump(tester, platform);
-                        assert_eq!(
-                            colors(&drawn(tester)),
-                            [
-                                &[track][..],
-                                &CUPERTINO_SHADOWS_AND_BORDER[..],
-                                &[DEFAULT_THUMB_COLOR][..]
-                            ]
-                            .concat(),
-                            "overall {overall}, {platform:?}, disabled {disabled}, off {off}"
+                        // The switch should still have the default track and thumb color.
+                        assert_paints(
+                            &material_ops(tester),
+                            &cupertino_pattern(
+                                PaintCall::rrect(Some(track)),
+                                PaintCall::rrect(Some(DEFAULT_THUMB_COLOR)),
+                            ),
                         );
                     }
                 }
 
                 with_theme(AdaptiveSwitch::default()).pump(tester, TargetPlatform::Android);
-                assert_eq!(
-                    colors(&drawn(tester)),
-                    [c(updated_track_color), c(updated_thumb_color)],
-                    "Switch.adaptive is affected by SwitchTheme on other platforms"
+                // Switch.adaptive is affected by SwitchTheme on other platforms.
+                assert_paints(
+                    &material_ops(tester),
+                    &[
+                        PaintCall::rrect(Some(Color::new(updated_track_color.to_argb32()))),
+                        // The transparent track outline (module doc).
+                        PaintCall::rrect(Some(Color::new(updated_thumb_color.to_argb32()))),
+                    ],
                 );
             });
         }
@@ -3908,24 +3988,31 @@ pub(crate) mod tests {
                 ..AdaptiveSwitch::default()
             }
             .pump(tester, platform);
-            let painted = colors(&drawn(tester));
             if CUPERTINO_PLATFORMS.contains(&platform) {
-                assert_eq!(
-                    painted,
-                    [
-                        &[c(Colors::DEEP_PURPLE.primary())][..],
-                        &CUPERTINO_SHADOWS_AND_BORDER[..],
-                        &[c(Colors::LIGHT_GREEN.primary())][..]
-                    ]
-                    .concat(),
-                    "{platform:?}"
+                // The transparent reaction is left out (module doc).
+                assert_paints(
+                    &material_ops(tester),
+                    &[
+                        PaintCall::rrect(Some(Color::new(
+                            Colors::DEEP_PURPLE.primary().to_argb32(),
+                        ))),
+                        PaintCall::rrect(None),
+                        PaintCall::rrect(None),
+                        PaintCall::rrect(None),
+                        PaintCall::rrect(Some(Color::new(
+                            Colors::LIGHT_GREEN.primary().to_argb32(),
+                        ))),
+                    ],
                 );
             } else {
                 // Other platforms should not be affected by the adaptive switch theme.
-                assert_eq!(
-                    painted,
-                    [c(Colors::BROWN.primary()), c(Colors::YELLOW.primary())],
-                    "{platform:?}"
+                assert_paints(
+                    &material_ops(tester),
+                    &[
+                        PaintCall::rrect(Some(Color::new(Colors::BROWN.primary().to_argb32()))),
+                        // The transparent track outline (module doc).
+                        PaintCall::rrect(Some(Color::new(Colors::YELLOW.primary().to_argb32()))),
+                    ],
                 );
             }
         });
@@ -3935,8 +4022,11 @@ pub(crate) mod tests {
     fn an_adaptive_cupertino_switch_has_its_default_focus_color() {
         test_widgets(|_| {
             for (focus_color, ring) in [
-                (None, 0xcc6ef28f),
-                (Some(Colors::RED.primary()), c(Colors::RED.primary())),
+                (None, Color::new(0xcc6ef28f)),
+                (
+                    Some(Colors::RED.primary()),
+                    Color::new(Colors::RED.primary().to_argb32()),
+                ),
             ] {
                 let mut tester = WidgetTester::on(TargetPlatform::MacOS);
                 let tester = &mut tester;
@@ -3951,14 +4041,18 @@ pub(crate) mod tests {
                 .pump(tester, TargetPlatform::MacOS);
                 tester.pump_and_settle();
                 assert!(node.has_primary_focus(&tester.cell.borrow()));
-                let painted = drawn(tester);
-                assert_eq!(painted[0].color(), Some(0xff34c759)); // Track color
-                assert!(
-                    matches!(painted[1], Drawn::Stroke(color, width, _) if color == ring && width == 3.5),
-                    "{:?}",
-                    painted[1]
-                ); // Focused outline
-                assert_eq!(painted.last().and_then(Drawn::color), Some(0xffffffff)); // Thumb color
+                assert_paints(
+                    &material_ops(tester),
+                    &[
+                        PaintCall::rrect(Some(Color::new(0xff34c759))), // Track color
+                        // The transparent reaction is left out (module doc).
+                        rrect(None, Some(ring), Some(PaintedStyle::Stroke(Some(3.5)))), // Focused outline
+                        PaintCall::rrect(None),
+                        PaintCall::rrect(None),
+                        PaintCall::rrect(None),
+                        PaintCall::rrect(Some(Color::new(0xffffffff))), // Thumb color
+                    ],
+                );
             }
         });
     }
@@ -3985,40 +4079,50 @@ pub(crate) mod tests {
                     }
                 });
                 tester.pump_and_settle();
-                let painted = drawn(tester);
+                let painted = material_ops(tester);
                 if !enabled {
                     // Check what happens when disabled: inactive disabled switch.
                     assert!(!node.has_primary_focus(&tester.cell.borrow()));
-                    assert_eq!(
-                        colors(&painted),
-                        [
-                            c(with_opacity(colors_.surface_container_highest(), 0.12)),
-                            c(with_opacity(colors_.on_surface, 0.12)),
-                            c(Color::alpha_blend(
+                    assert_paints(
+                        &painted,
+                        &[
+                            m3_track(
+                                with_opacity(colors_.surface_container_highest(), 0.12),
+                                Some(PaintedStyle::Fill),
+                            ),
+                            m3_outline(with_opacity(colors_.on_surface, 0.12)),
+                            PaintCall::rrect(Some(Color::alpha_blend(
                                 with_opacity(colors_.on_surface, 0.38),
-                                colors_.surface
-                            )),
-                        ]
+                                colors_.surface,
+                            ))),
+                        ],
                     );
                     break;
                 }
                 assert!(node.has_primary_focus(&tester.cell.borrow()));
                 if value.get() {
                     // active, enabled switch
-                    assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
-                    assert_eq!(circles(&painted, 20.0), [c(orange)]);
+                    assert_paints(
+                        &painted,
+                        &[
+                            m3_track(colors_.primary, Some(PaintedStyle::Fill)),
+                            PaintCall::circle(Some(orange)),
+                        ],
+                    );
                     // Check the false value: inactive enabled switch
                     value.set(false);
                 } else {
-                    assert_eq!(
-                        painted[0],
-                        Drawn::Fill(c(colors_.surface_container_highest()), M3_TRACK)
+                    assert_paints(
+                        &painted,
+                        &[
+                            m3_track(
+                                colors_.surface_container_highest(),
+                                Some(PaintedStyle::Fill),
+                            ),
+                            m3_outline(colors_.outline()),
+                            PaintCall::circle(Some(orange)),
+                        ],
                     );
-                    assert_eq!(
-                        painted[1],
-                        Drawn::Stroke(c(colors_.outline()), 2.0, M3_OUTLINE)
-                    );
-                    assert_eq!(circles(&painted, 20.0), [c(orange)]);
                 }
             }
         });
@@ -4038,9 +4142,15 @@ pub(crate) mod tests {
                     .splash_radius(SPLASH_RADIUS),
             );
             tester.pump_and_settle();
-            assert_eq!(
-                circles(&drawn(tester), SPLASH_RADIUS),
-                [c(Colors::ORANGE.shade500())]
+            assert_paints(
+                &material_ops(tester),
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(Colors::ORANGE.shade500()),
+                    style: None,
+                }],
             );
         });
     }
@@ -4054,27 +4164,27 @@ pub(crate) mod tests {
             let make = move |value, on_changed| Switch::new(value, on_changed).hover_color(orange);
             pump_host(tester, m2, TextDirection::Ltr, &value, true, make);
             tester.pump_and_settle();
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
-            assert_eq!(colors(&painted), m2_sequence(0x802196f3, &[], 0xff2196f3));
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Color::new(0x802196f3), None, Color::new(0xff2196f3)),
+            );
 
             // Start hovering
             hover(tester);
             pump_host(tester, m2, TextDirection::Ltr, &value, true, make);
             tester.pump_and_settle();
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
-            assert_eq!(
-                colors(&painted),
-                m2_sequence(0x802196f3, &[c(orange)], 0xff2196f3)
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Color::new(0x802196f3), Some(orange), Color::new(0xff2196f3)),
             );
 
             // Check what happens when disabled.
             pump_host(tester, m2, TextDirection::Ltr, &value, false, make);
             tester.pump_and_settle();
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(0x1f000000, M2_TRACK));
-            assert_eq!(colors(&painted), m2_sequence(0x1f000000, &[], 0xffbdbdbd));
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Color::new(0x1f000000), None, Color::new(0xffbdbdbd)),
+            );
         });
     }
 
@@ -4090,32 +4200,37 @@ pub(crate) mod tests {
             // active enabled switch
             pump_host(tester, m3, TextDirection::Ltr, &value, true, make);
             tester.pump_and_settle();
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
-            assert_eq!(
-                colors(&painted),
-                [c(colors_.primary), c(colors_.on_primary)]
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    m3_track(colors_.primary, None),
+                    // The transparent track outline (module doc).
+                    PaintCall::rrect(Some(colors_.on_primary)),
+                ],
             );
 
             // Start hovering
             hover(tester);
             pump_host(tester, m3, TextDirection::Ltr, &value, true, make);
             tester.pump_and_settle();
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
-            assert_eq!(circles(&painted, 20.0), [c(orange)]);
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    m3_track(colors_.primary, None),
+                    PaintCall::circle(Some(orange)),
+                ],
+            );
 
             // Check what happens for disabled active switch
             pump_host(tester, m3, TextDirection::Ltr, &value, false, make);
             tester.pump_and_settle();
-            let painted = drawn(tester);
-            assert_eq!(
-                painted[0],
-                Drawn::Fill(c(with_opacity(colors_.on_surface, 0.12)), M3_TRACK)
-            );
-            assert_eq!(
-                painted.last().and_then(Drawn::color),
-                Some(c(colors_.surface))
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    m3_track(with_opacity(colors_.on_surface, 0.12), None),
+                    // The transparent track outline (module doc).
+                    PaintCall::rrect(Some(with_opacity(colors_.surface, 1.0))),
+                ],
             );
         });
     }
@@ -4253,13 +4368,18 @@ pub(crate) mod tests {
                 );
                 pump_app(tester, m3, move |_app| home);
                 tester.pump_and_settle();
-                let painted = drawn(tester);
-                assert_eq!(
-                    painted[0],
-                    Drawn::Fill(c(track), M3_TRACK),
-                    "{enabled} {active}"
-                );
-                assert_eq!(painted.last().and_then(Drawn::color), Some(c(thumb)));
+                let mut pattern = vec![m3_track(track, Some(PaintedStyle::Fill))];
+                match (enabled, active) {
+                    (false, false) => {
+                        pattern.push(m3_outline(with_opacity(colors_.on_surface, 0.12)))
+                    }
+                    // The inactive enabled switch's outline.
+                    (true, false) => pattern.push(PaintCall::rrect(None)),
+                    // The transparent track outline (module doc).
+                    (_, true) => {}
+                }
+                pattern.push(PaintCall::rrect(Some(thumb)));
+                assert_paints(&material_ops(tester), &pattern);
             }
         });
     }
@@ -4293,24 +4413,26 @@ pub(crate) mod tests {
             pump_app(tester, m3, move |_app| home);
             tester.pump_and_settle();
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
-            assert_eq!(
-                circles(&painted, 20.0),
-                [c(with_opacity(colors_.primary, 0.1))]
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    m3_track(colors_.primary, Some(PaintedStyle::Fill)),
+                    PaintCall::circle(Some(with_opacity(colors_.primary, 0.1))),
+                    PaintCall::rrect(Some(FOCUSED)),
+                ],
             );
-            assert_eq!(painted.last().and_then(Drawn::color), Some(c(FOCUSED)));
 
             // Start hovering
             hover(tester);
             tester.pump_and_settle();
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
-            assert_eq!(
-                circles(&painted, 20.0),
-                [c(with_opacity(colors_.primary, 0.08))]
+            assert_paints(
+                &material_ops(tester),
+                &[
+                    m3_track(colors_.primary, Some(PaintedStyle::Fill)),
+                    PaintCall::circle(Some(with_opacity(colors_.primary, 0.08))),
+                    PaintCall::rrect(Some(HOVERED)),
+                ],
             );
-            assert_eq!(painted.last().and_then(Drawn::color), Some(c(HOVERED)));
         });
     }
 
@@ -4326,6 +4448,19 @@ pub(crate) mod tests {
             const HOVER: Color = Color::new(0xFF000005);
             const FOCUS: Color = Color::new(0xFF000006);
             const SPLASH_RADIUS: f64 = 24.0;
+            // Dart's `paints..rrect()..circle(color: color, radius: splashRadius)`.
+            let overlay = |color: Color| {
+                [
+                    PaintCall::rrect(None),
+                    PaintCall::Circle {
+                        x: None,
+                        y: None,
+                        radius: Some(SPLASH_RADIUS),
+                        color: Some(color),
+                        style: None,
+                    },
+                ]
+            };
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let node = focus_node(tester);
             let pump =
@@ -4385,11 +4520,7 @@ pub(crate) mod tests {
                 pump(tester, active, false, use_overlay);
                 let touch = press(tester);
                 tester.pump_and_settle();
-                assert_eq!(
-                    circles(&drawn(tester), SPLASH_RADIUS),
-                    [c(expected)],
-                    "active {active}, overlay {use_overlay}"
-                );
+                assert_paints(&material_ops(tester), &overlay(expected));
                 tester.up(&touch);
                 tester.pump_and_settle();
             }
@@ -4397,12 +4528,12 @@ pub(crate) mod tests {
             pump(tester, false, true, true);
             tester.pump_and_settle();
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            assert_eq!(circles(&drawn(tester), SPLASH_RADIUS), [c(FOCUS_OVERLAY)]);
+            assert_paints(&material_ops(tester), &overlay(FOCUS_OVERLAY));
 
             // Start hovering
             hover(tester);
             tester.pump_and_settle();
-            assert_eq!(circles(&drawn(tester), SPLASH_RADIUS), [c(HOVER_OVERLAY)]);
+            assert_paints(&material_ops(tester), &overlay(HOVER_OVERLAY));
         });
     }
 
@@ -4451,34 +4582,34 @@ pub(crate) mod tests {
                         true,
                         colors_.primary,
                         None,
-                        Drawn::Fill(c(colors_.primary_container()), ltrb(26.0, 10.0, 54.0, 38.0)),
+                        PaintCall::rrect_at(
+                            ltrbr(26.0, 10.0, 54.0, 38.0, 14.0),
+                            Some(colors_.primary_container()),
+                        ),
                     ),
                     (
                         true,
                         false,
                         colors_.surface_container_highest(),
                         Some(colors_.outline()),
-                        Drawn::Fill(c(colors_.on_surface_variant()), ltrb(6.0, 10.0, 34.0, 38.0)),
+                        PaintCall::rrect(Some(colors_.on_surface_variant())),
                     ),
                     (
                         false,
                         true,
                         with_opacity(colors_.on_surface, 0.12),
                         None,
-                        Drawn::Fill(c(colors_.surface), ltrb(28.0, 12.0, 52.0, 36.0)),
+                        PaintCall::rrect(Some(with_opacity(colors_.surface, 1.0))),
                     ),
                     (
                         false,
                         false,
                         with_opacity(colors_.surface_container_highest(), 0.12),
                         Some(with_opacity(colors_.on_surface, 0.12)),
-                        Drawn::Fill(
-                            c(Color::alpha_blend(
-                                with_opacity(colors_.on_surface, 0.38),
-                                colors_.surface,
-                            )),
-                            ltrb(12.0, 16.0, 28.0, 32.0),
-                        ),
+                        PaintCall::rrect(Some(Color::alpha_blend(
+                            with_opacity(colors_.on_surface, 0.38),
+                            colors_.surface,
+                        ))),
                     ),
                 ] {
                     let mut tester = WidgetTester::on(platform);
@@ -4494,26 +4625,13 @@ pub(crate) mod tests {
                     );
                     let _touch = press(tester);
                     tester.pump_and_settle();
-                    let painted = drawn(tester);
-                    let case = format!("{platform:?}, enabled {enabled}, value {value}");
-                    assert_eq!(painted[0].color(), Some(c(track)), "{case}");
-                    match outline {
-                        Some(outline) => {
-                            assert!(
-                                matches!(painted[1], Drawn::Stroke(color, ..) if color == c(outline)),
-                                "{case}: {:?}",
-                                painted[1]
-                            );
-                        }
-                        // The transparent outline is not recorded.
-                        None => assert!(
-                            !painted
-                                .iter()
-                                .any(|drawn| matches!(drawn, Drawn::Stroke(..))),
-                            "{case}"
-                        ),
-                    }
-                    assert_eq!(painted.last(), Some(&thumb), "{case}");
+                    let mut pattern = vec![rrect(None, Some(track), Some(PaintedStyle::Fill))];
+                    // A transparent track outline is left out (module doc).
+                    pattern.extend(outline.map(|outline| {
+                        rrect(None, Some(outline), Some(PaintedStyle::Stroke(None)))
+                    }));
+                    pattern.push(thumb);
+                    assert_paints(&material_ops(tester), &pattern);
                 }
             });
         }
@@ -4557,13 +4675,21 @@ pub(crate) mod tests {
                 );
                 pump_app(tester, m3, move |_app| home);
                 tester.pump_and_settle();
-                let painted = drawn(tester);
-                assert!(matches!(painted[0], Drawn::Fill(..)), "{:?}", painted[0]);
-                assert!(
-                    matches!(painted[1], Drawn::Stroke(color, width, _)
-                        if color == expected_color && f64::from(width) == expected_width),
-                    "enabled {enabled}, active {active}: {:?}",
-                    painted[1]
+                // Dart's color case leaves out `style:` on the enabled switches' outline step.
+                let outline_style = (!enabled).then_some(PaintedStyle::Stroke(None));
+                assert_paints(
+                    &material_ops(tester),
+                    &[
+                        rrect(None, None, Some(PaintedStyle::Fill)),
+                        rrect(None, Some(Color::new(expected_color)), outline_style),
+                    ],
+                );
+                assert_paints(
+                    &material_ops(tester),
+                    &[
+                        rrect(None, None, Some(PaintedStyle::Fill)),
+                        rrect(None, None, Some(PaintedStyle::Stroke(Some(expected_width)))),
+                    ],
                 );
             }
         });
@@ -4606,18 +4732,32 @@ pub(crate) mod tests {
             pump_app(tester, m3, move |_app| home);
             tester.pump_and_settle();
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            assert!(matches!(
-                drawn(tester)[1],
-                Drawn::Stroke(0xFF000002, 6.0, _)
-            ));
+            let outline = |color: u32, width: f64| {
+                [
+                    [
+                        rrect(None, None, Some(PaintedStyle::Fill)),
+                        rrect(
+                            None,
+                            Some(Color::new(color)),
+                            Some(PaintedStyle::Stroke(None)),
+                        ),
+                    ],
+                    [
+                        rrect(None, None, Some(PaintedStyle::Fill)),
+                        rrect(None, None, Some(PaintedStyle::Stroke(Some(width)))),
+                    ],
+                ]
+            };
+            for pattern in outline(0xFF000002, 6.0) {
+                assert_paints(&material_ops(tester), &pattern);
+            }
 
             // Start hovering
             hover(tester);
             tester.pump_and_settle();
-            assert!(matches!(
-                drawn(tester)[1],
-                Drawn::Stroke(0xFF000001, 4.0, _)
-            ));
+            for pattern in outline(0xFF000001, 4.0) {
+                assert_paints(&material_ops(tester), &pattern);
+            }
         });
     }
 
@@ -4655,13 +4795,7 @@ pub(crate) mod tests {
                     .into_widget();
                     pump_app(tester, theme, move |_app| home);
                     tester.pump_and_settle();
-                    drawn(tester)
-                        .into_iter()
-                        .filter_map(|drawn| match drawn {
-                            Drawn::Glyphs(left, top) => Some((left, top)),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
+                    glyph_origins(&drawn(tester))
                 };
             // The glyph's ink is inside the 16x16 icon square Dart paints its paragraph at.
             let inside = |glyphs: &[(f64, f64)], left: f64, top: f64| matches!(glyphs, [(x, y)] if *x >= left && *x < left + 16.0 && *y >= top && *y < top + 16.0);
@@ -4706,34 +4840,39 @@ pub(crate) mod tests {
                 pump_app(tester, adaptive_on(TargetPlatform::IOS), move |_app| home);
                 tester.pump_and_settle();
             };
-            let thumb = [0x26000000, 0x0f000000, 0x0a000000, 0xffffffff];
+            // Dart's `paints` on `find.byType(Switch)`: the track, the focus ring when focused
+            // (after the transparent reaction the module doc leaves out), the clip, and the
+            // thumb's two shadows, border and fill.
+            let pattern = |track: u32, focused: bool| {
+                let mut pattern = vec![PaintCall::rrect(Some(Color::new(track)))];
+                if focused {
+                    pattern.push(PaintCall::rrect(Some(Color::new(FOCUS_COLOR))));
+                }
+                pattern.push(PaintCall::Clip);
+                pattern.extend(
+                    [0x26000000, 0x0f000000, 0x0a000000, 0xffffffff]
+                        .map(|color| PaintCall::rrect(Some(Color::new(color)))),
+                );
+                pattern
+            };
+            let switch_ops = |tester: &WidgetTester| {
+                tester.painted_ops_deep(tester.render_object(find::by_type::<Switch>()))
+            };
 
             pump(tester, true);
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(tester);
-            assert_eq!(
-                colors(&painted),
-                [&[0xff34c759, FOCUS_COLOR][..], &thumb[..]].concat()
-            );
-            assert_eq!(painted[2], Drawn::Clip);
+            assert_paints(&switch_ops(tester), &pattern(0xff34c759, true));
 
             // Check the false value.
             value.set(false);
             pump(tester, true);
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(tester);
-            assert_eq!(
-                colors(&painted),
-                [&[0x28787880, FOCUS_COLOR][..], &thumb[..]].concat()
-            );
-            assert_eq!(painted[2], Drawn::Clip);
+            assert_paints(&switch_ops(tester), &pattern(0x28787880, true));
 
             // Check what happens when disabled.
             pump(tester, false);
             assert!(!node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(tester);
-            assert_eq!(colors(&painted), [&[0x28787880][..], &thumb[..]].concat());
-            assert_eq!(painted[1], Drawn::Clip);
+            assert_paints(&switch_ops(tester), &pattern(0x28787880, false));
         });
     }
 
@@ -4806,18 +4945,19 @@ pub(crate) mod tests {
                 tester.widget(switch_element(tester), |switch: &Switch| {
                     assert_eq!(switch.active_thumb_color, Some(ACTIVE_THUMB_COLOR));
                 });
-                let painted = drawn(tester);
                 if use_material3 {
-                    assert_eq!(painted[0], Drawn::Fill(c(ACTIVE_TRACK_COLOR), M3_TRACK));
-                    assert_eq!(
-                        colors(&painted),
-                        [c(ACTIVE_TRACK_COLOR), c(ACTIVE_THUMB_COLOR)]
+                    assert_paints(
+                        &material_ops(tester),
+                        &[
+                            m3_track(ACTIVE_TRACK_COLOR, Some(PaintedStyle::Fill)),
+                            // The transparent track outline (module doc).
+                            PaintCall::rrect(Some(ACTIVE_THUMB_COLOR)),
+                        ],
                     );
                 } else {
-                    assert_eq!(painted[0], Drawn::Fill(c(ACTIVE_TRACK_COLOR), M2_TRACK));
-                    assert_eq!(
-                        colors(&painted),
-                        m2_sequence(c(ACTIVE_TRACK_COLOR), &[], c(ACTIVE_THUMB_COLOR))
+                    assert_paints(
+                        &material_ops(tester),
+                        &m2_pattern(ACTIVE_TRACK_COLOR, None, ACTIVE_THUMB_COLOR),
                     );
                 }
             });
@@ -4856,49 +4996,48 @@ pub(crate) mod tests {
                         },
                     );
                     let compact = !MOBILE.contains(&platform) && platform != TargetPlatform::IOS;
-                    let (track, sequence) = if CUPERTINO_PLATFORMS.contains(&platform) {
+                    let thumb = PaintCall::rrect(Some(ACTIVE_THUMB_COLOR));
+                    let pattern = if CUPERTINO_PLATFORMS.contains(&platform) {
                         let (left, right) = if use_material3 {
                             (4.5, 55.5)
                         } else {
                             (4.0, 55.0)
                         };
                         let (top, bottom) = if compact { (4.5, 35.5) } else { (8.5, 39.5) };
-                        (
-                            ltrb(left, top, right, bottom),
-                            [
-                                &[c(ACTIVE_TRACK_COLOR)][..],
-                                &CUPERTINO_SHADOWS_AND_BORDER[..],
-                                &[c(ACTIVE_THUMB_COLOR)][..],
-                            ]
-                            .concat(),
+                        cupertino_pattern(
+                            rrect(
+                                Some(ltrbr(left, top, right, bottom, 15.5)),
+                                Some(ACTIVE_TRACK_COLOR),
+                                None,
+                            ),
+                            thumb,
                         )
                     } else if use_material3 {
-                        (
-                            if compact {
-                                ltrb(4.0, 4.0, 56.0, 36.0)
-                            } else {
-                                M3_TRACK
-                            },
-                            vec![c(ACTIVE_TRACK_COLOR), c(ACTIVE_THUMB_COLOR)],
-                        )
+                        let track = if compact {
+                            ltrbr(4.0, 4.0, 56.0, 36.0, 16.0)
+                        } else {
+                            ltrbr(4.0, 8.0, 56.0, 40.0, 16.0)
+                        };
+                        vec![
+                            rrect(
+                                Some(track),
+                                Some(ACTIVE_TRACK_COLOR),
+                                Some(PaintedStyle::Fill),
+                            ),
+                            // The transparent track outline (module doc).
+                            thumb,
+                        ]
                     } else {
-                        (
-                            if compact {
-                                ltrb(13.0, 13.0, 46.0, 27.0)
-                            } else {
-                                M2_TRACK
-                            },
-                            m2_sequence(c(ACTIVE_TRACK_COLOR), &[], c(ACTIVE_THUMB_COLOR)),
-                        )
+                        let track = if compact {
+                            ltrbr(13.0, 13.0, 46.0, 27.0, 7.0)
+                        } else {
+                            ltrbr(13.0, 17.0, 46.0, 31.0, 7.0)
+                        };
+                        let mut pattern = m2_pattern(ACTIVE_TRACK_COLOR, None, ACTIVE_THUMB_COLOR);
+                        pattern[0] = rrect(Some(track), Some(ACTIVE_TRACK_COLOR), None);
+                        pattern
                     };
-                    let painted = drawn(tester);
-                    let case = format!("M3 {use_material3}, {platform:?}");
-                    assert_eq!(
-                        painted[0],
-                        Drawn::Fill(c(ACTIVE_TRACK_COLOR), track),
-                        "{case}"
-                    );
-                    assert_eq!(colors(&painted), sequence, "{case}");
+                    assert_paints(&material_ops(tester), &pattern);
                 });
             }
         }
@@ -4937,7 +5076,7 @@ pub(crate) mod tests {
                     switch,
                 );
                 assert_eq!(
-                    drawn(tester)[0].color(),
+                    color_of(&drawn(tester)[0]),
                     Some(expected),
                     "apply to all {apply_to_all}, apply {apply:?}"
                 );
@@ -4957,7 +5096,7 @@ pub(crate) mod tests {
             // While the pointer is down, the widget disappears.
             let home = in_material(TextDirection::Ltr, Container::new().into_widget());
             pump_app(tester, m3, move |_app| home);
-            assert!(tester.find_by_type::<Switch>().is_empty());
+            expect(tester, &find::by_type::<Switch>(), finds_nothing());
             // Release pointer after widget disappeared.
             tester.up(&gesture);
         });
@@ -5094,30 +5233,27 @@ pub(crate) mod tests {
 
             pump(tester, true);
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
-            assert_eq!(
-                colors(&painted),
-                m2_sequence(0x802196f3, &[c(orange)], 0xff2196f3)
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Color::new(0x802196f3), Some(orange), Color::new(0xff2196f3)),
             );
 
             // Check the false value.
             value.set(false);
             pump(tester, true);
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(0x52000000, M2_TRACK));
-            assert_eq!(
-                colors(&painted),
-                m2_sequence(0x52000000, &[c(orange)], 0xfffafafa)
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Color::new(0x52000000), Some(orange), Color::new(0xfffafafa)),
             );
 
             // Check what happens when disabled.
             pump(tester, false);
             assert!(!node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(tester);
-            assert_eq!(painted[0], Drawn::Fill(0x1f000000, M2_TRACK));
-            assert_eq!(colors(&painted), m2_sequence(0x1f000000, &[], 0xffbdbdbd));
+            assert_paints(
+                &material_ops(tester),
+                &m2_pattern(Color::new(0x1f000000), None, Color::new(0xffbdbdbd)),
+            );
         });
     }
 
@@ -5239,12 +5375,10 @@ pub(crate) mod tests {
                 if index > 0 {
                     tester.pump_and_settle();
                 }
-                let painted = drawn(tester);
-                assert_eq!(painted[0], Drawn::Fill(track, M2_TRACK), "{reason}");
-                assert_eq!(
-                    colors(&painted),
-                    m2_sequence(track, &[], c(thumb)),
-                    "{reason}"
+                assert_paints_because(
+                    &material_ops(tester),
+                    &m2_pattern(Color::new(track), None, thumb),
+                    reason,
                 );
             }
         });
@@ -5279,14 +5413,9 @@ pub(crate) mod tests {
             assert!(node.has_primary_focus(&tester.cell.borrow()));
             // The track, the radial reaction, the thumb's three shadows and the thumb.
             let assert_painted = |tester: &WidgetTester, thumb: Color| {
-                let painted = drawn(tester);
-                assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
-                let reactions = circles(&painted, K_RADIAL_REACTION_RADIUS);
-                assert_eq!(reactions.len(), 1, "{painted:?}");
-                assert_eq!(
-                    colors(&painted),
-                    m2_sequence(0x802196f3, &reactions, c(thumb))
-                );
+                let mut pattern = m2_pattern(Color::new(0x802196f3), None, thumb);
+                pattern.insert(1, PaintCall::circle(None)); // Radial reaction
+                assert_paints(&material_ops(tester), &pattern);
             };
             assert_painted(tester, FOCUSED);
 
@@ -5325,13 +5454,13 @@ pub(crate) mod tests {
                 let (direction, track, last) = if use_material3 {
                     (
                         TextDirection::Rtl,
-                        M3_TRACK,
+                        ltrbr(4.0, 8.0, 56.0, 40.0, 16.0),
                         (true, true, ACTIVE_ENABLED, "Active enabled switch"),
                     )
                 } else {
                     (
                         TextDirection::Ltr,
-                        M2_TRACK,
+                        ltrbr(13.0, 17.0, 46.0, 31.0, 7.0),
                         (false, false, INACTIVE_DISABLED, "Inactive disabled switch"),
                     )
                 };
@@ -5359,10 +5488,10 @@ pub(crate) mod tests {
                     if index > 0 {
                         tester.pump_and_settle();
                     }
-                    assert_eq!(
-                        drawn(tester)[0],
-                        Drawn::Fill(c(expected), track),
-                        "M3 {use_material3}: {reason}"
+                    assert_paints_because(
+                        &material_ops(tester),
+                        &[rrect(Some(track), Some(expected), None)],
+                        reason,
                     );
                 }
             });
@@ -5373,7 +5502,13 @@ pub(crate) mod tests {
     /// Material 3 twin.
     #[test]
     fn the_track_color_resolves_in_the_hovered_and_focused_states() {
-        for (theme, track) in [(m2 as fn(&App) -> ThemeData, M2_TRACK), (m3, M3_TRACK)] {
+        for (theme, track) in [
+            (
+                m2 as fn(&App) -> ThemeData,
+                ltrbr(13.0, 17.0, 46.0, 31.0, 7.0),
+            ),
+            (m3, ltrbr(4.0, 8.0, 56.0, 40.0, 16.0)),
+        ] {
             test_widgets(|tester| {
                 const HOVERED: Color = Color::new(0xFF000001);
                 const FOCUSED: Color = Color::new(0xFF000002);
@@ -5400,12 +5535,18 @@ pub(crate) mod tests {
                 pump_app(tester, theme, move |_app| home);
                 tester.pump_and_settle();
                 assert!(node.has_primary_focus(&tester.cell.borrow()));
-                assert_eq!(drawn(tester)[0], Drawn::Fill(c(FOCUSED), track));
+                assert_paints(
+                    &material_ops(tester),
+                    &[rrect(Some(track), Some(FOCUSED), None)],
+                );
 
                 // Start hovering
                 hover(tester);
                 tester.pump_and_settle();
-                assert_eq!(drawn(tester)[0], Drawn::Fill(c(HOVERED), track));
+                assert_paints(
+                    &material_ops(tester),
+                    &[rrect(Some(track), Some(HOVERED), None)],
+                );
             });
         }
     }
@@ -5433,34 +5574,22 @@ pub(crate) mod tests {
                         .into_widget(),
                 );
                 pump_app(tester, theme, move |_app| home);
-                let expected_thumb_color = c(Color::alpha_blend(
-                    active_disabled_thumb_color,
-                    colors_.surface,
-                ));
-                let painted = drawn(tester);
-                let reason =
-                    "Active disabled thumb color should be blended on top of surface color";
+                let expected_thumb_color =
+                    Color::alpha_blend(active_disabled_thumb_color, colors_.surface);
+                // Active disabled thumb color should be blended on top of surface color.
                 if use_material3 {
-                    assert_eq!(
-                        painted[0],
-                        Drawn::Fill(c(with_opacity(colors_.on_surface, 0.12)), M3_TRACK),
-                        "{reason}"
-                    );
-                    assert_eq!(
-                        painted.last().and_then(Drawn::color),
-                        Some(expected_thumb_color),
-                        "{reason}"
+                    assert_paints(
+                        &material_ops(tester),
+                        &[
+                            m3_track(with_opacity(colors_.on_surface, 0.12), None),
+                            // The transparent track outline (module doc).
+                            PaintCall::rrect(Some(expected_thumb_color)),
+                        ],
                     );
                 } else {
-                    assert_eq!(
-                        painted[0],
-                        Drawn::Fill(c(Colors::BLACK12), M2_TRACK),
-                        "{reason}"
-                    );
-                    assert_eq!(
-                        colors(&painted),
-                        m2_sequence(c(Colors::BLACK12), &[], expected_thumb_color),
-                        "{reason}"
+                    assert_paints(
+                        &material_ops(tester),
+                        &m2_pattern(Colors::BLACK12, None, expected_thumb_color),
                     );
                 }
             });
@@ -5480,8 +5609,8 @@ pub(crate) mod tests {
                 );
             };
             let tooltip_center = |tester: &WidgetTester| {
-                let tooltip = tester.find_by_type::<crate::tooltip::Tooltip>()[0];
-                tester.global_rect(tester.render_box_of(tooltip)).center()
+                let tooltip = find::by_type::<crate::tooltip::Tooltip>().evaluate(tester)[0];
+                tester.get_rect(tooltip).center()
             };
             frame(
                 tester,
@@ -5489,12 +5618,12 @@ pub(crate) mod tests {
             );
 
             // Default tooltip shows up after long pressed.
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
             let center = tooltip_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_by(Duration::from_millis(10));
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
             let mut gesture_long_press = TestPointer::touch(2);
             tester.down(&mut gesture_long_press, center);
@@ -5503,7 +5632,7 @@ pub(crate) mod tests {
             tester.up(&gesture_long_press);
             tester.pump();
 
-            assert_eq!(tester.find_text(LONG_PRESS_TOOLTIP).len(), 1);
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_one_widget());
 
             // Tooltip shows up after tapping when set triggerMode to TooltipTriggerMode.tap.
             frame(
@@ -5515,22 +5644,13 @@ pub(crate) mod tests {
 
             tester.pump_by(Duration::from_secs(24 * 60 * 60));
             tester.pump_and_settle();
-            assert!(tester.find_text(TAP_TOOLTIP).is_empty());
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(TAP_TOOLTIP), finds_nothing());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
             let center = tooltip_center(tester);
-            tester.tap(center, 3);
+            tester.tap_at(center, 3);
             tester.pump_by(Duration::from_millis(10));
-            assert_eq!(tester.find_text(TAP_TOOLTIP).len(), 1);
+            expect(tester, &find::text(TAP_TOOLTIP), finds_one_widget());
         });
-    }
-
-    impl Drawn {
-        fn rect(self) -> Rect {
-            match self {
-                Drawn::Fill(_, rect) | Drawn::Stroke(_, _, rect) => rect,
-                _ => panic!("{self:?} has no rect"),
-            }
-        }
     }
 }

@@ -253,7 +253,7 @@ mod tests {
         Center, Icon, IconData, WidgetState, WidgetStateProperty, WidgetStatePropertyRef,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
@@ -347,17 +347,20 @@ mod tests {
     }
 
     fn check_segment(tester: &WidgetTester, text: &str, expected: Expected) {
-        let text_element = tester.find_text(text)[0];
-        let parent = tester.ancestor_of_type::<Material>(text_element);
-        let icons = tester
-            .descendants_of_type::<Icon>(parent)
-            .into_iter()
-            .filter(|icon| {
-                tester.widget(*icon, |icon: &Icon| {
-                    expected.selected_icon.is_some() && icon.icon == expected.selected_icon
-                })
+        let parent =
+            tester.element(find::ancestor(find::text(text), find::by_type::<Material>()).first());
+        let icons = find::descendant(
+            find::ancestor(find::text(text), find::by_type::<Material>()).first(),
+            find::by_type::<Icon>(),
+        )
+        .evaluate(tester)
+        .into_iter()
+        .filter(|icon| {
+            tester.widget(*icon, |icon: &Icon| {
+                expected.selected_icon.is_some() && icon.icon == expected.selected_icon
             })
-            .count();
+        })
+        .count();
         tester.widget(parent, |material: &Material| {
             if expected.animation_duration {
                 assert_eq!(material.animation_duration, Duration::from_millis(200));

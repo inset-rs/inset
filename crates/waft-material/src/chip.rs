@@ -3826,13 +3826,17 @@ pub(crate) mod tests {
         Row, SizedBox, Text, Wrap,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        WidgetTester, assert_more_or_less_equals_within, find, test_widgets,
+    };
 
     use super::*;
     use crate::circle_avatar::CircleAvatar;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{PaintCall, PaintInspection, paints_calls};
+    use crate::test_support::PaintInspection;
+
     use crate::tooltip::tests::m3;
+    use waft_rendering::testing::{PaintCall, paints};
 
     /// Dart's `wrapForChip`: the basic requirements for a chip.
     pub(crate) fn wrap_for_chip(
@@ -3881,27 +3885,23 @@ pub(crate) mod tests {
         )
     }
 
-    pub(crate) fn size_of(tester: &WidgetTester, element: AnyElement) -> Size {
-        tester.render_box_of(element).size(&tester.cell.borrow())
-    }
-
     pub(crate) fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
         tester.get_rect(tester.render_box_of(element))
     }
 
     pub(crate) fn center_of(tester: &WidgetTester, element: AnyElement) -> Offset {
-        rect_of(tester, element).center()
+        tester.get_rect(element).center()
     }
 
     pub(crate) fn only<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        let elements = tester.find_by_type::<W>();
+        let elements = find::by_type::<W>().evaluate(tester);
         assert_eq!(elements.len(), 1, "one {}", std::any::type_name::<W>());
         elements[0]
     }
 
     pub(crate) fn text(tester: &WidgetTester, text: &str) -> AnyElement {
-        *tester
-            .find_text(text)
+        *find::text(text)
+            .evaluate(tester)
             .first()
             .unwrap_or_else(|| panic!("a Text showing {text:?}"))
     }
@@ -3921,7 +3921,7 @@ pub(crate) mod tests {
     pub(crate) fn material_box_paints(tester: &WidgetTester, calls: &[PaintCall]) -> bool {
         let custom_paint = tester.descendants_of_type::<CustomPaint>(only::<RawChip>(tester))[0];
         let ops = tester.painted_ops_deep(tester.render_box_of(custom_paint).as_object());
-        paints_calls(&ops, calls)
+        paints(&ops, calls).is_ok()
     }
 
     pub(crate) fn material_of_raw_chip(tester: &WidgetTester) -> AnyElement {
@@ -3954,8 +3954,8 @@ pub(crate) mod tests {
 
     /// Dart's `tester.tap(find.byTooltip(message))` target: the element of the `Tooltip`.
     pub(crate) fn by_tooltip(tester: &WidgetTester, message: &str) -> AnyElement {
-        *tester
-            .find_by_type::<Tooltip>()
+        *find::by_type::<Tooltip>()
+            .evaluate(tester)
             .iter()
             .find(|element| {
                 tester.widget(**element, |tooltip: &Tooltip| {
@@ -3998,11 +3998,11 @@ pub(crate) mod tests {
             );
             tester.pump_widget(root);
 
-            let label_size = size_of(tester, by_key(tester, &label_key));
+            let label_size = tester.get_size(by_key(tester, &label_key));
             assert!(label_size.width() < chip_parent_width);
             assert!(label_size.height() <= chip_parent_height);
 
-            let chip_size = size_of(tester, only::<Chip>(tester));
+            let chip_size = tester.get_size(only::<Chip>(tester));
             assert_eq!(chip_size.width(), chip_parent_width);
             assert_eq!(chip_size.height(), chip_parent_height);
         });
@@ -4048,7 +4048,7 @@ pub(crate) mod tests {
             );
             tester.pump_widget(root);
 
-            let label_size = size_of(tester, by_key(tester, &label_key));
+            let label_size = tester.get_size(by_key(tester, &label_key));
             assert_eq!(label_size.width(), 50.0);
             assert_eq!(label_size.height(), 30.0);
         });
@@ -4064,23 +4064,23 @@ pub(crate) mod tests {
             let chip = || Chip::new(Text::new("Test")).label_style(style.clone());
             let root = wrap_with_theme(tester, theme, Row::new().children([chip().into_widget()]));
             tester.pump_widget(root);
-            assert_eq!(size_of(tester, only::<Text>(tester)), Size::new(40.0, 10.0));
-            assert_eq!(size_of(tester, only::<Chip>(tester)), Size::new(64.0, 48.0));
+            assert_eq!(tester.get_size(only::<Text>(tester)), Size::new(40.0, 10.0));
+            assert_eq!(tester.get_size(only::<Chip>(tester)), Size::new(64.0, 48.0));
             let root = wrap_ltr(
                 tester,
                 Row::new().children([Flexible::new(chip()).into_widget()]),
             );
             tester.pump_widget(root);
-            assert_eq!(size_of(tester, only::<Text>(tester)), Size::new(40.0, 10.0));
-            assert_eq!(size_of(tester, only::<Chip>(tester)), Size::new(64.0, 48.0));
+            assert_eq!(tester.get_size(only::<Text>(tester)), Size::new(40.0, 10.0));
+            assert_eq!(tester.get_size(only::<Chip>(tester)), Size::new(64.0, 48.0));
             let root = wrap_ltr(
                 tester,
                 Row::new().children([Expanded::new(chip()).into_widget()]),
             );
             tester.pump_widget(root);
-            assert_eq!(size_of(tester, only::<Text>(tester)), Size::new(40.0, 10.0));
+            assert_eq!(tester.get_size(only::<Text>(tester)), Size::new(40.0, 10.0));
             assert_eq!(
-                size_of(tester, only::<Chip>(tester)),
+                tester.get_size(only::<Chip>(tester)),
                 Size::new(800.0, 48.0)
             );
         });
@@ -4105,9 +4105,9 @@ pub(crate) mod tests {
                 ]),
             );
             tester.pump_widget(root);
-            let chips = tester.find_by_type::<Chip>();
-            assert_eq!(size_of(tester, chips[0]), Size::new(48.0, 48.0));
-            assert_eq!(size_of(tester, chips[1]), Size::new(38.0, 32.0));
+            let chips = find::by_type::<Chip>().evaluate(tester);
+            assert_eq!(tester.get_size(chips[0]), Size::new(48.0, 48.0));
+            assert_eq!(tester.get_size(chips[1]), Size::new(38.0, 32.0));
         });
     }
 
@@ -4126,8 +4126,8 @@ pub(crate) mod tests {
                 ]),
             );
             tester.pump_widget(root);
-            let chips = tester.find_by_type::<Chip>();
-            let (first, last) = (size_of(tester, chips[0]), size_of(tester, chips[1]));
+            let chips = find::by_type::<Chip>().evaluate(tester);
+            let (first, last) = (tester.get_size(chips[0]), tester.get_size(chips[1]));
             assert!((first.width() - 48.1).abs() < 0.01);
             assert_eq!(first.height(), 48.0);
             assert!((last.width() - 48.1).abs() < 0.01);
@@ -4273,13 +4273,13 @@ pub(crate) mod tests {
             );
             tester.pump_widget(root);
 
-            let delete_a = center_of(tester, by_tooltip(tester, "Delete chip A"));
-            let delete_b = center_of(tester, by_tooltip(tester, "Delete chip B"));
+            let delete_a = tester.get_center(by_tooltip(tester, "Delete chip A"));
+            let delete_b = tester.get_center(by_tooltip(tester, "Delete chip B"));
             assert!(deleted.borrow().is_empty());
-            tester.tap(delete_a, 1);
+            tester.tap_at(delete_a, 1);
             assert_eq!(*deleted.borrow(), vec!["A"]);
             tester.pump_and_settle();
-            tester.tap(delete_b, 1);
+            tester.tap_at(delete_b, 1);
             assert_eq!(*deleted.borrow(), vec!["A", "B"]);
         });
     }
@@ -4309,15 +4309,15 @@ pub(crate) mod tests {
             tester.pump_widget(root);
 
             // Test correct tap target size.
-            let center = center_of(tester, by_key(tester, &delete_key));
+            let center = tester.get_center(by_key(tester, &delete_key));
             // Half the width of the delete button + right label padding.
-            tester.tap(center - Offset::new(18.0, 0.0), 1);
+            tester.tap_at(center - Offset::new(18.0, 0.0), 1);
             tester.pump();
             assert!(called_delete.get());
             called_delete.set(false);
 
             // Test incorrect tap target size.
-            tester.tap(center - Offset::new(19.0, 0.0), 1);
+            tester.tap_at(center - Offset::new(19.0, 0.0), 1);
             tester.pump();
             assert!(!called_delete.get());
             called_delete.set(false);
@@ -4330,13 +4330,13 @@ pub(crate) mod tests {
             // chip, which is at 12 + 8 = 20 from the right side. Since the split is just
             // slightly less than 50%, 8 from the center of the delete button should hit the
             // chip, not the delete button.
-            let center = center_of(tester, by_key(tester, &delete_key));
-            tester.tap(center - Offset::new(7.0, 0.0), 1);
+            let center = tester.get_center(by_key(tester, &delete_key));
+            tester.tap_at(center - Offset::new(7.0, 0.0), 1);
             tester.pump();
             assert!(called_delete.get());
             called_delete.set(false);
 
-            tester.tap(center - Offset::new(8.0, 0.0), 1);
+            tester.tap_at(center - Offset::new(8.0, 0.0), 1);
             tester.pump();
             assert!(!called_delete.get());
         });
@@ -4365,28 +4365,21 @@ pub(crate) mod tests {
             tester.pump_widget(root);
             tester.pump_and_settle();
             assert!(
-                center_of(tester, text(tester, "ABC")).dx()
-                    > center_of(tester, by_key(tester, &icon_key)).dx()
+                tester.get_center(text(tester, "ABC")).dx()
+                    > tester.get_center(by_key(tester, &icon_key)).dx()
             );
             let root = test(tester, TextDirection::Ltr);
             tester.pump_widget(root);
             tester.pump_and_settle();
             assert!(
-                center_of(tester, text(tester, "ABC")).dx()
-                    < center_of(tester, by_key(tester, &icon_key)).dx()
+                tester.get_center(text(tester, "ABC")).dx()
+                    < tester.get_center(by_key(tester, &icon_key)).dx()
             );
         });
     }
 
-    pub(crate) fn close_to(actual: f64, expected: f64, epsilon: f64) {
-        assert!(
-            (actual - expected).abs() <= epsilon,
-            "{actual} is not within {epsilon} of {expected}"
-        );
-    }
-
     pub(crate) fn top_left_of(tester: &WidgetTester, element: AnyElement) -> Offset {
-        rect_of(tester, element).top_left()
+        tester.get_rect(element).top_left()
     }
 
     pub(crate) fn pump_ms(tester: &mut WidgetTester, ms: u64) {
@@ -4413,21 +4406,21 @@ pub(crate) mod tests {
                 let root = wrap_ltr(tester, Wrap::new().children([chip.into_widget()]));
                 tester.pump_widget(root);
             };
-            let width = |tester: &WidgetTester| size_of(tester, only::<RawChip>(tester)).width();
-            let height = |tester: &WidgetTester| size_of(tester, only::<RawChip>(tester)).height();
+            let width = |tester: &WidgetTester| tester.get_size(only::<RawChip>(tester)).width();
+            let height = |tester: &WidgetTester| tester.get_size(only::<RawChip>(tester)).height();
             let avatar = |tester: &WidgetTester| by_key(tester, &avatar_key);
             let label = |tester: &WidgetTester| by_key(tester, &label_key);
 
             // No avatar
             push_chip(tester, false);
-            close_to(width(tester), 90.4, 0.1);
+            assert_more_or_less_equals_within(width(tester), 90.4, 0.1);
 
             // Add an avatar
             push_chip(tester, true);
             // Avatar drawer should start out closed.
-            close_to(width(tester), 90.4, 0.1);
+            assert_more_or_less_equals_within(width(tester), 90.4, 0.1);
             assert_eq!(height(tester), 48.0);
-            assert_eq!(size_of(tester, avatar(tester)), Size::new(20.0, 20.0));
+            assert_eq!(tester.get_size(avatar(tester)), Size::new(20.0, 20.0));
             assert_eq!(
                 top_left_of(tester, avatar(tester)),
                 Offset::new(-11.0, 14.0)
@@ -4441,25 +4434,33 @@ pub(crate) mod tests {
                 (106.6, 5.2, 33.2),
             ] {
                 pump_ms(tester, 20);
-                close_to(width(tester), chip_width, 0.1);
+                assert_more_or_less_equals_within(width(tester), chip_width, 0.1);
                 assert_eq!(height(tester), 48.0);
-                assert_eq!(size_of(tester, avatar(tester)), Size::new(20.0, 20.0));
-                close_to(top_left_of(tester, avatar(tester)).dx(), avatar_dx, 0.1);
-                close_to(top_left_of(tester, label(tester)).dx(), label_dx, 0.1);
+                assert_eq!(tester.get_size(avatar(tester)), Size::new(20.0, 20.0));
+                assert_more_or_less_equals_within(
+                    top_left_of(tester, avatar(tester)).dx(),
+                    avatar_dx,
+                    0.1,
+                );
+                assert_more_or_less_equals_within(
+                    top_left_of(tester, label(tester)).dx(),
+                    label_dx,
+                    0.1,
+                );
             }
 
             // Wait for being done with animation, and make sure it didn't change height.
             tester.pump_and_settle_by(Duration::from_millis(200));
-            close_to(width(tester), 110.4, 0.1);
+            assert_more_or_less_equals_within(width(tester), 110.4, 0.1);
             assert_eq!(height(tester), 48.0);
-            assert_eq!(size_of(tester, avatar(tester)), Size::new(20.0, 20.0));
+            assert_eq!(tester.get_size(avatar(tester)), Size::new(20.0, 20.0));
             assert_eq!(top_left_of(tester, avatar(tester)), Offset::new(9.0, 14.0));
             assert_eq!(top_left_of(tester, label(tester)), Offset::new(37.0, 14.0));
 
             // Remove the avatar again
             push_chip(tester, false);
             // Avatar drawer should start out open.
-            close_to(width(tester), 110.4, 0.1);
+            assert_more_or_less_equals_within(width(tester), 110.4, 0.1);
             assert_eq!(height(tester), 48.0);
             assert_eq!(top_left_of(tester, avatar(tester)), Offset::new(9.0, 14.0));
             assert_eq!(top_left_of(tester, label(tester)), Offset::new(37.0, 14.0));
@@ -4471,17 +4472,25 @@ pub(crate) mod tests {
                 (90.4, -11.0, 17.0),
             ] {
                 pump_ms(tester, 20);
-                close_to(width(tester), chip_width, 0.1);
+                assert_more_or_less_equals_within(width(tester), chip_width, 0.1);
                 assert_eq!(height(tester), 48.0);
-                assert_eq!(size_of(tester, avatar(tester)), Size::new(20.0, 20.0));
-                close_to(top_left_of(tester, avatar(tester)).dx(), avatar_dx, 0.1);
-                close_to(top_left_of(tester, label(tester)).dx(), label_dx, 0.1);
+                assert_eq!(tester.get_size(avatar(tester)), Size::new(20.0, 20.0));
+                assert_more_or_less_equals_within(
+                    top_left_of(tester, avatar(tester)).dx(),
+                    avatar_dx,
+                    0.1,
+                );
+                assert_more_or_less_equals_within(
+                    top_left_of(tester, label(tester)).dx(),
+                    label_dx,
+                    0.1,
+                );
             }
 
             // Wait for being done with animation, make sure it didn't change height, and make
             // sure that the avatar is no longer drawn.
             tester.pump_and_settle_by(Duration::from_millis(200));
-            close_to(width(tester), 90.4, 0.1);
+            assert_more_or_less_equals_within(width(tester), 90.4, 0.1);
             assert_eq!(height(tester), 48.0);
             assert_eq!(top_left_of(tester, label(tester)), Offset::new(17.0, 14.0));
             let avatar_key_ref: KeyRef = avatar_key.clone().into();
@@ -4512,75 +4521,83 @@ pub(crate) mod tests {
                 let root = wrap_ltr(tester, Wrap::new().children([chip.into_widget()]));
                 tester.pump_widget(root);
             };
-            let width = |tester: &WidgetTester| size_of(tester, only::<RawChip>(tester)).width();
-            let height = |tester: &WidgetTester| size_of(tester, only::<RawChip>(tester)).height();
+            let width = |tester: &WidgetTester| tester.get_size(only::<RawChip>(tester)).width();
+            let height = |tester: &WidgetTester| tester.get_size(only::<RawChip>(tester)).height();
             let delete = |tester: &WidgetTester| by_key(tester, &delete_key);
             let label = |tester: &WidgetTester| by_key(tester, &label_key);
 
             // No delete button
             push_chip(tester, false);
-            close_to(width(tester), 90.4, 0.01);
+            assert_more_or_less_equals_within(width(tester), 90.4, 0.01);
             assert_eq!(height(tester), 48.0);
 
             // Add a delete button
             push_chip(tester, true);
             // Delete button drawer should start out closed.
-            close_to(width(tester), 90.4, 0.01);
+            assert_more_or_less_equals_within(width(tester), 90.4, 0.01);
             assert_eq!(height(tester), 48.0);
-            assert_eq!(size_of(tester, delete(tester)), Size::new(20.0, 20.0));
+            assert_eq!(tester.get_size(delete(tester)), Size::new(20.0, 20.0));
             let top_left = top_left_of(tester, delete(tester));
-            close_to(top_left.dx(), 61.4, 0.01);
-            close_to(top_left.dy(), 14.0, 0.01);
+            assert_more_or_less_equals_within(top_left.dx(), 61.4, 0.01);
+            assert_more_or_less_equals_within(top_left.dy(), 14.0, 0.01);
             assert_eq!(top_left_of(tester, label(tester)), Offset::new(17.0, 14.0));
 
             for (chip_width, delete_dx) in
                 [(91.3, 62.3), (95.9, 66.9), (102.6, 73.6), (106.6, 77.6)]
             {
                 pump_ms(tester, 20);
-                close_to(width(tester), chip_width, 0.1);
-                assert_eq!(size_of(tester, delete(tester)), Size::new(20.0, 20.0));
-                close_to(top_left_of(tester, delete(tester)).dx(), delete_dx, 0.1);
+                assert_more_or_less_equals_within(width(tester), chip_width, 0.1);
+                assert_eq!(tester.get_size(delete(tester)), Size::new(20.0, 20.0));
+                assert_more_or_less_equals_within(
+                    top_left_of(tester, delete(tester)).dx(),
+                    delete_dx,
+                    0.1,
+                );
             }
 
             // Wait for being done with animation, and make sure it didn't change height.
             tester.pump_and_settle_by(Duration::from_millis(200));
-            close_to(width(tester), 110.4, 0.1);
+            assert_more_or_less_equals_within(width(tester), 110.4, 0.1);
             assert_eq!(height(tester), 48.0);
-            assert_eq!(size_of(tester, delete(tester)), Size::new(20.0, 20.0));
+            assert_eq!(tester.get_size(delete(tester)), Size::new(20.0, 20.0));
             let top_left = top_left_of(tester, delete(tester));
-            close_to(top_left.dx(), 81.4, 0.01);
-            close_to(top_left.dy(), 14.0, 0.01);
+            assert_more_or_less_equals_within(top_left.dx(), 81.4, 0.01);
+            assert_more_or_less_equals_within(top_left.dy(), 14.0, 0.01);
             assert_eq!(top_left_of(tester, label(tester)), Offset::new(17.0, 14.0));
 
             // Test the tap work for the delete button, but not the rest of the chip.
             assert!(!was_deleted.get());
-            tester.tap(center_of(tester, label(tester)), 1);
+            tester.tap_at(tester.get_center(label(tester)), 1);
             assert!(!was_deleted.get());
-            tester.tap(center_of(tester, delete(tester)), 1);
+            tester.tap_at(tester.get_center(delete(tester)), 1);
             assert!(was_deleted.get());
 
             // Remove the delete button again
             push_chip(tester, false);
             // Delete button drawer should start out open.
-            close_to(width(tester), 110.4, 0.1);
+            assert_more_or_less_equals_within(width(tester), 110.4, 0.1);
             assert_eq!(height(tester), 48.0);
             let top_left = top_left_of(tester, delete(tester));
-            close_to(top_left.dx(), 81.4, 0.01);
+            assert_more_or_less_equals_within(top_left.dx(), 81.4, 0.01);
             assert_eq!(top_left_of(tester, label(tester)), Offset::new(17.0, 14.0));
 
             for (chip_width, delete_dx) in
                 [(110.1, 81.1), (109.4, 80.4), (107.9, 78.9), (104.9, 75.9)]
             {
                 pump_ms(tester, 20);
-                close_to(width(tester), chip_width, 0.1);
-                assert_eq!(size_of(tester, delete(tester)), Size::new(20.0, 20.0));
-                close_to(top_left_of(tester, delete(tester)).dx(), delete_dx, 0.1);
+                assert_more_or_less_equals_within(width(tester), chip_width, 0.1);
+                assert_eq!(tester.get_size(delete(tester)), Size::new(20.0, 20.0));
+                assert_more_or_less_equals_within(
+                    top_left_of(tester, delete(tester)).dx(),
+                    delete_dx,
+                    0.1,
+                );
             }
 
             // Wait for being done with animation, make sure it didn't change height, and make
             // sure that the delete button is no longer drawn.
             tester.pump_and_settle_by(Duration::from_millis(200));
-            close_to(width(tester), 90.4, 0.1);
+            assert_more_or_less_equals_within(width(tester), 90.4, 0.1);
             assert_eq!(height(tester), 48.0);
             assert_eq!(top_left_of(tester, label(tester)), Offset::new(17.0, 14.0));
             let delete_key_ref: KeyRef = delete_key.clone().into();
@@ -4610,14 +4627,14 @@ pub(crate) mod tests {
             );
             tester.pump_widget(root);
 
-            let center = center_of(tester, by_key(tester, &chip_key));
-            tester.tap(center, 1);
+            let center = tester.get_center(by_key(tester, &chip_key));
+            tester.tap_at(center, 1);
             tester.pump();
             assert!(chip_pressed.get());
             assert!(!delete_pressed.get());
             chip_pressed.set(false);
 
-            tester.tap(center + Offset::new(1.0, 0.0), 1);
+            tester.tap_at(center + Offset::new(1.0, 0.0), 1);
             tester.pump();
             assert!(!chip_pressed.get());
             assert!(delete_pressed.get());
@@ -4630,7 +4647,9 @@ pub(crate) mod tests {
         //!
         //! Dart's `FeedbackTester` clicks (`feedback.clickSoundCount`) are not asserted in the control
         //! test: `SystemSound` is not ported (see `PORTING.md`).
-        use waft_widgets::testing::{WidgetTester, test_widgets};
+        use waft_widgets::testing::{
+            WidgetTester, assert_more_or_less_equals_within, find, test_widgets,
+        };
 
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
@@ -4643,8 +4662,8 @@ pub(crate) mod tests {
         };
 
         use super::{
-            by_key, by_tooltip, center_of, close_to, only, pump_ms, size_of, text, top_left_of,
-            wrap_for_chip, wrap_ltr, wrap_with_theme,
+            by_key, by_tooltip, only, pump_ms, text, top_left_of, wrap_for_chip, wrap_ltr,
+            wrap_with_theme,
         };
         use crate::chip::{Chip, RawChip};
         use crate::circle_avatar::CircleAvatar;
@@ -4665,7 +4684,7 @@ pub(crate) mod tests {
         }
 
         fn sizes_of(tester: &WidgetTester, elements: &[waft_widgets::AnyElement]) -> Vec<Size> {
-            elements.iter().map(|e| size_of(tester, *e)).collect()
+            elements.iter().map(|e| tester.get_size(*e)).collect()
         }
 
         #[test]
@@ -4693,12 +4712,12 @@ pub(crate) mod tests {
                 let delete_b = by_tooltip(tester, "Delete chip B");
 
                 assert!(deleted_chip_labels.borrow().is_empty());
-                tester.tap(center_of(tester, delete_a), 1);
+                tester.tap_at(tester.get_center(delete_a), 1);
                 assert_eq!(*deleted_chip_labels.borrow(), vec!["A"]);
 
                 tester.pump_and_settle_by(std::time::Duration::from_secs(1));
 
-                tester.tap(center_of(tester, delete_b), 1);
+                tester.tap_at(tester.get_center(delete_b), 1);
                 assert_eq!(*deleted_chip_labels.borrow(), vec!["A", "B"]);
 
                 tester.pump_and_settle_by(std::time::Duration::from_secs(1));
@@ -4713,11 +4732,11 @@ pub(crate) mod tests {
 
                 let root = wrap_ltr(tester, Row::new().children([chip().into_widget()]));
                 tester.pump_widget(root);
-                let text_size = size_of(tester, only::<Text>(tester));
-                close_to(text_size.width(), 40.4, 0.01);
+                let text_size = tester.get_size(only::<Text>(tester));
+                assert_more_or_less_equals_within(text_size.width(), 40.4, 0.01);
                 assert_eq!(text_size.height(), 14.0);
-                let chip_size = size_of(tester, only::<Chip>(tester));
-                close_to(chip_size.width(), 74.4, 0.01);
+                let chip_size = tester.get_size(only::<Chip>(tester));
+                assert_more_or_less_equals_within(chip_size.width(), 74.4, 0.01);
                 assert_eq!(chip_size.height(), 48.0);
 
                 let root = wrap_ltr(
@@ -4725,11 +4744,11 @@ pub(crate) mod tests {
                     Row::new().children([Flexible::new(chip()).into_widget()]),
                 );
                 tester.pump_widget(root);
-                let text_size = size_of(tester, only::<Text>(tester));
-                close_to(text_size.width(), 40.4, 0.01);
+                let text_size = tester.get_size(only::<Text>(tester));
+                assert_more_or_less_equals_within(text_size.width(), 40.4, 0.01);
                 assert_eq!(text_size.height(), 14.0);
-                let chip_size = size_of(tester, only::<Chip>(tester));
-                close_to(chip_size.width(), 74.4, 0.01);
+                let chip_size = tester.get_size(only::<Chip>(tester));
+                assert_more_or_less_equals_within(chip_size.width(), 74.4, 0.01);
                 assert_eq!(chip_size.height(), 48.0);
 
                 let root = wrap_ltr(
@@ -4737,11 +4756,11 @@ pub(crate) mod tests {
                     Row::new().children([Expanded::new(chip()).into_widget()]),
                 );
                 tester.pump_widget(root);
-                let text_size = size_of(tester, only::<Text>(tester));
-                close_to(text_size.width(), 40.4, 0.01);
+                let text_size = tester.get_size(only::<Text>(tester));
+                assert_more_or_less_equals_within(text_size.width(), 40.4, 0.01);
                 assert_eq!(text_size.height(), 14.0);
                 assert_eq!(
-                    size_of(tester, only::<Chip>(tester)),
+                    tester.get_size(only::<Chip>(tester)),
                     Size::new(800.0, 48.0)
                 );
             });
@@ -4771,10 +4790,10 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 let size_of_text =
-                    |tester: &WidgetTester, label: &str| size_of(tester, text(tester, label));
+                    |tester: &WidgetTester, label: &str| tester.get_size(text(tester, label));
                 assert_eq!(size_of_text(tester, "Chip A"), Size::new(84.0, 14.0));
                 assert_eq!(size_of_text(tester, "Chip B"), Size::new(84.0, 14.0));
-                let chips = tester.find_by_type::<Chip>();
+                let chips = find::by_type::<Chip>().evaluate(tester);
                 assert_eq!(
                     sizes_of(tester, &[chips[0], chips[1]]),
                     vec![Size::new(132.0, 48.0); 2]
@@ -4791,7 +4810,7 @@ pub(crate) mod tests {
 
                 assert_eq!(size_of_text(tester, "Chip A"), Size::new(252.0, 42.0));
                 assert_eq!(size_of_text(tester, "Chip B"), Size::new(252.0, 42.0));
-                let chips = tester.find_by_type::<Chip>();
+                let chips = find::by_type::<Chip>().evaluate(tester);
                 assert_eq!(
                     sizes_of(tester, &[chips[0], chips[1]]),
                     vec![Size::new(310.0, 50.0); 2]
@@ -4803,9 +4822,9 @@ pub(crate) mod tests {
 
                 assert_eq!(size_of_text(tester, "Chip A"), Size::new(252.0, 42.0));
                 assert_eq!(size_of_text(tester, "Chip B"), Size::new(84.0, 14.0));
-                let chips = tester.find_by_type::<Chip>();
-                assert_eq!(size_of(tester, chips[0]), Size::new(318.0, 50.0));
-                assert_eq!(size_of(tester, chips[1]), Size::new(132.0, 48.0));
+                let chips = find::by_type::<Chip>().evaluate(tester);
+                assert_eq!(tester.get_size(chips[0]), Size::new(318.0, 50.0));
+                assert_eq!(tester.get_size(chips[1]), Size::new(132.0, 48.0));
             });
         }
 
@@ -4816,10 +4835,18 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 let size_of_text =
-                    |tester: &WidgetTester, label: &str| size_of(tester, text(tester, label));
-                close_to(size_of_text(tester, "Chip A").width(), 84.5, 0.1);
+                    |tester: &WidgetTester, label: &str| tester.get_size(text(tester, label));
+                assert_more_or_less_equals_within(
+                    size_of_text(tester, "Chip A").width(),
+                    84.5,
+                    0.1,
+                );
                 assert_eq!(size_of_text(tester, "Chip A").height(), 20.0);
-                close_to(size_of_text(tester, "Chip B").width(), 84.5, 0.1);
+                assert_more_or_less_equals_within(
+                    size_of_text(tester, "Chip B").width(),
+                    84.5,
+                    0.1,
+                );
                 assert_eq!(size_of_text(tester, "Chip B").height(), 20.0);
 
                 let root = wrap_for_chip(
@@ -4831,30 +4858,46 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(root);
 
-                close_to(size_of_text(tester, "Chip A").width(), 252.6, 0.1);
+                assert_more_or_less_equals_within(
+                    size_of_text(tester, "Chip A").width(),
+                    252.6,
+                    0.1,
+                );
                 assert_eq!(size_of_text(tester, "Chip A").height(), 60.0);
-                close_to(size_of_text(tester, "Chip B").width(), 252.6, 0.1);
+                assert_more_or_less_equals_within(
+                    size_of_text(tester, "Chip B").width(),
+                    252.6,
+                    0.1,
+                );
                 assert_eq!(size_of_text(tester, "Chip B").height(), 60.0);
-                let chips = tester.find_by_type::<Chip>();
-                let (first, last) = (size_of(tester, chips[0]), size_of(tester, chips[1]));
-                close_to(first.width(), 338.6, 0.1);
+                let chips = find::by_type::<Chip>().evaluate(tester);
+                let (first, last) = (tester.get_size(chips[0]), tester.get_size(chips[1]));
+                assert_more_or_less_equals_within(first.width(), 338.6, 0.1);
                 assert_eq!(first.height(), 78.0);
-                close_to(last.width(), 338.6, 0.1);
+                assert_more_or_less_equals_within(last.width(), 338.6, 0.1);
                 assert_eq!(last.height(), 78.0);
 
                 // Check that individual text scales are taken into account.
                 let root = wrap_ltr(tester, two_avatar_chips(true));
                 tester.pump_widget(root);
 
-                close_to(size_of_text(tester, "Chip A").width(), 252.6, 0.01);
+                assert_more_or_less_equals_within(
+                    size_of_text(tester, "Chip A").width(),
+                    252.6,
+                    0.01,
+                );
                 assert_eq!(size_of_text(tester, "Chip A").height(), 60.0);
-                close_to(size_of_text(tester, "Chip B").width(), 84.59, 0.01);
+                assert_more_or_less_equals_within(
+                    size_of_text(tester, "Chip B").width(),
+                    84.59,
+                    0.01,
+                );
                 assert_eq!(size_of_text(tester, "Chip B").height(), 20.0);
-                let chips = tester.find_by_type::<Chip>();
-                let (first, last) = (size_of(tester, chips[0]), size_of(tester, chips[1]));
-                close_to(first.width(), 346.6, 0.01);
+                let chips = find::by_type::<Chip>().evaluate(tester);
+                let (first, last) = (tester.get_size(chips[0]), tester.get_size(chips[1]));
+                assert_more_or_less_equals_within(first.width(), 346.6, 0.01);
                 assert_eq!(first.height(), 78.0);
-                close_to(last.width(), 138.59, 0.01);
+                assert_more_or_less_equals_within(last.width(), 138.59, 0.01);
                 assert_eq!(last.height(), 48.0);
             });
         }
@@ -4887,16 +4930,16 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 assert_eq!(
-                    size_of(tester, by_key(tester, &key_a)),
+                    tester.get_size(by_key(tester, &key_a)),
                     Size::new(84.0, 14.0)
                 );
                 assert_eq!(
-                    size_of(tester, by_key(tester, &key_b)),
+                    tester.get_size(by_key(tester, &key_b)),
                     Size::new(10.0, 10.0)
                 );
-                let chips = tester.find_by_type::<Chip>();
-                assert_eq!(size_of(tester, chips[0]), Size::new(132.0, 48.0));
-                assert_eq!(size_of(tester, chips[1]), Size::new(58.0, 48.0));
+                let chips = find::by_type::<Chip>().evaluate(tester);
+                assert_eq!(tester.get_size(chips[0]), Size::new(132.0, 48.0));
+                assert_eq!(tester.get_size(chips[1]), Size::new(58.0, 48.0));
             });
         }
 
@@ -4907,18 +4950,18 @@ pub(crate) mod tests {
                 let root = wrap_ltr(tester, labels_with_non_text_widget(&key_a, &key_b));
                 tester.pump_widget(root);
 
-                let label_a = size_of(tester, by_key(tester, &key_a));
-                close_to(label_a.width(), 84.5, 0.1);
+                let label_a = tester.get_size(by_key(tester, &key_a));
+                assert_more_or_less_equals_within(label_a.width(), 84.5, 0.1);
                 assert_eq!(label_a.height(), 20.0);
                 assert_eq!(
-                    size_of(tester, by_key(tester, &key_b)),
+                    tester.get_size(by_key(tester, &key_b)),
                     Size::new(10.0, 10.0)
                 );
-                let chips = tester.find_by_type::<Chip>();
-                let first = size_of(tester, chips[0]);
-                close_to(first.width(), 138.5, 0.1);
+                let chips = find::by_type::<Chip>().evaluate(tester);
+                let first = tester.get_size(chips[0]);
+                assert_more_or_less_equals_within(first.width(), 138.5, 0.1);
                 assert_eq!(first.height(), 48.0);
-                assert_eq!(size_of(tester, chips[1]), Size::new(60.0, 48.0));
+                assert_eq!(tester.get_size(chips[1]), Size::new(60.0, 48.0));
             });
         }
 
@@ -4940,7 +4983,7 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 assert_eq!(
-                    size_of(tester, by_key(tester, &key_a)),
+                    tester.get_size(by_key(tester, &key_a)),
                     Size::new(20.0, 20.0)
                 );
             });
@@ -4965,7 +5008,7 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 assert_eq!(
-                    size_of(tester, by_key(tester, &key_a)),
+                    tester.get_size(by_key(tester, &key_a)),
                     Size::new(20.0, 20.0)
                 );
             });
@@ -5064,20 +5107,20 @@ pub(crate) mod tests {
         ) {
             for frame in frames {
                 pump_ms(tester, 20);
-                let chip = size_of(tester, only::<RawChip>(tester));
-                close_to(chip.width(), frame.chip_width, 0.1);
+                let chip = tester.get_size(only::<RawChip>(tester));
+                assert_more_or_less_equals_within(chip.width(), frame.chip_width, 0.1);
                 assert_eq!(chip.height(), 48.0);
                 assert_eq!(
-                    size_of(tester, by_key(tester, item_key)),
+                    tester.get_size(by_key(tester, item_key)),
                     Size::new(24.0, 24.0)
                 );
-                close_to(
+                assert_more_or_less_equals_within(
                     top_left_of(tester, by_key(tester, item_key)).dx(),
                     frame.item_dx,
                     0.1,
                 );
                 if let Some(label_dx) = frame.label_dx {
-                    close_to(
+                    assert_more_or_less_equals_within(
                         top_left_of(tester, by_key(tester, label_key)).dx(),
                         label_dx,
                         0.1,
@@ -5111,7 +5154,7 @@ pub(crate) mod tests {
                     );
                     tester.pump_widget(root);
                 };
-                let chip_size = |tester: &WidgetTester| size_of(tester, only::<RawChip>(tester));
+                let chip_size = |tester: &WidgetTester| tester.get_size(only::<RawChip>(tester));
                 let avatar = |tester: &WidgetTester| by_key(tester, &avatar_key);
                 let label = |tester: &WidgetTester| by_key(tester, &label_key);
 
@@ -5123,7 +5166,7 @@ pub(crate) mod tests {
                 push_chip(tester, true);
                 // Avatar drawer should start out closed.
                 assert_eq!(chip_size(tester), Size::new(80.0, 48.0));
-                assert_eq!(size_of(tester, avatar(tester)), Size::new(24.0, 24.0));
+                assert_eq!(tester.get_size(avatar(tester)), Size::new(24.0, 24.0));
                 assert_eq!(
                     top_left_of(tester, avatar(tester)),
                     Offset::new(-20.0, 12.0)
@@ -5147,7 +5190,7 @@ pub(crate) mod tests {
                 tester.pump_and_settle_by(std::time::Duration::from_millis(200));
                 assert_eq!(chip_size(tester), Size::new(104.0, 48.0));
                 assert_eq!(chip_size(tester).height(), 48.0);
-                assert_eq!(size_of(tester, avatar(tester)), Size::new(24.0, 24.0));
+                assert_eq!(tester.get_size(avatar(tester)), Size::new(24.0, 24.0));
                 assert_eq!(top_left_of(tester, avatar(tester)), Offset::new(4.0, 12.0));
                 assert_eq!(top_left_of(tester, label(tester)), Offset::new(36.0, 17.0));
 
@@ -5155,7 +5198,7 @@ pub(crate) mod tests {
                 push_chip(tester, false);
                 // Avatar drawer should start out open.
                 assert_eq!(chip_size(tester), Size::new(104.0, 48.0));
-                assert_eq!(size_of(tester, avatar(tester)), Size::new(24.0, 24.0));
+                assert_eq!(tester.get_size(avatar(tester)), Size::new(24.0, 24.0));
                 assert_eq!(top_left_of(tester, avatar(tester)), Offset::new(4.0, 12.0));
                 assert_eq!(top_left_of(tester, label(tester)), Offset::new(36.0, 17.0));
 
@@ -5210,7 +5253,7 @@ pub(crate) mod tests {
                     );
                     tester.pump_widget(root);
                 };
-                let chip_size = |tester: &WidgetTester| size_of(tester, only::<RawChip>(tester));
+                let chip_size = |tester: &WidgetTester| tester.get_size(only::<RawChip>(tester));
                 let delete = |tester: &WidgetTester| by_key(tester, &delete_key);
                 let label = |tester: &WidgetTester| by_key(tester, &label_key);
 
@@ -5222,56 +5265,72 @@ pub(crate) mod tests {
                 push_chip(tester, true);
                 // Delete button drawer should start out closed.
                 assert_eq!(chip_size(tester), Size::new(80.0, 48.0));
-                assert_eq!(size_of(tester, delete(tester)), Size::new(24.0, 24.0));
+                assert_eq!(tester.get_size(delete(tester)), Size::new(24.0, 24.0));
                 assert_eq!(top_left_of(tester, delete(tester)), Offset::new(52.0, 12.0));
                 assert_eq!(top_left_of(tester, label(tester)), Offset::new(12.0, 17.0));
 
                 // Delete button drawer should start expanding.
                 pump_ms(tester, 20);
-                close_to(chip_size(tester).width(), 81.2, 0.1);
-                assert_eq!(size_of(tester, delete(tester)), Size::new(24.0, 24.0));
-                close_to(top_left_of(tester, delete(tester)).dx(), 53.2, 0.1);
+                assert_more_or_less_equals_within(chip_size(tester).width(), 81.2, 0.1);
+                assert_eq!(tester.get_size(delete(tester)), Size::new(24.0, 24.0));
+                assert_more_or_less_equals_within(
+                    top_left_of(tester, delete(tester)).dx(),
+                    53.2,
+                    0.1,
+                );
                 assert_eq!(top_left_of(tester, label(tester)), Offset::new(12.0, 17.0));
                 for (chip_width, delete_dx) in [(86.7, 58.7), (94.7, 66.7), (99.5, 71.5)] {
                     pump_ms(tester, 20);
-                    close_to(chip_size(tester).width(), chip_width, 0.1);
-                    assert_eq!(size_of(tester, delete(tester)), Size::new(24.0, 24.0));
-                    close_to(top_left_of(tester, delete(tester)).dx(), delete_dx, 0.1);
+                    assert_more_or_less_equals_within(chip_size(tester).width(), chip_width, 0.1);
+                    assert_eq!(tester.get_size(delete(tester)), Size::new(24.0, 24.0));
+                    assert_more_or_less_equals_within(
+                        top_left_of(tester, delete(tester)).dx(),
+                        delete_dx,
+                        0.1,
+                    );
                 }
 
                 // Wait for being done with animation, and make sure it didn't change height.
                 tester.pump_and_settle_by(std::time::Duration::from_millis(200));
                 assert_eq!(chip_size(tester), Size::new(104.0, 48.0));
-                assert_eq!(size_of(tester, delete(tester)), Size::new(24.0, 24.0));
+                assert_eq!(tester.get_size(delete(tester)), Size::new(24.0, 24.0));
                 assert_eq!(top_left_of(tester, delete(tester)), Offset::new(76.0, 12.0));
                 assert_eq!(top_left_of(tester, label(tester)), Offset::new(12.0, 17.0));
 
                 // Test the tap work for the delete button, but not the rest of the chip.
                 assert!(!was_deleted.get());
-                tester.tap(center_of(tester, label(tester)), 1);
+                tester.tap_at(tester.get_center(label(tester)), 1);
                 assert!(!was_deleted.get());
-                tester.tap(center_of(tester, delete(tester)), 1);
+                tester.tap_at(tester.get_center(delete(tester)), 1);
                 assert!(was_deleted.get());
 
                 // Remove the delete button again
                 push_chip(tester, false);
                 // Delete button drawer should start out open.
                 assert_eq!(chip_size(tester), Size::new(104.0, 48.0));
-                assert_eq!(size_of(tester, delete(tester)), Size::new(24.0, 24.0));
+                assert_eq!(tester.get_size(delete(tester)), Size::new(24.0, 24.0));
                 assert_eq!(top_left_of(tester, delete(tester)), Offset::new(76.0, 12.0));
                 assert_eq!(top_left_of(tester, label(tester)), Offset::new(12.0, 17.0));
 
                 // Delete button drawer should start contracting.
                 pump_ms(tester, 20);
-                close_to(chip_size(tester).width(), 103.8, 0.1);
-                assert_eq!(size_of(tester, delete(tester)), Size::new(24.0, 24.0));
-                close_to(top_left_of(tester, delete(tester)).dx(), 75.8, 0.1);
+                assert_more_or_less_equals_within(chip_size(tester).width(), 103.8, 0.1);
+                assert_eq!(tester.get_size(delete(tester)), Size::new(24.0, 24.0));
+                assert_more_or_less_equals_within(
+                    top_left_of(tester, delete(tester)).dx(),
+                    75.8,
+                    0.1,
+                );
                 assert_eq!(top_left_of(tester, label(tester)), Offset::new(12.0, 17.0));
                 for (chip_width, delete_dx) in [(102.9, 74.9), (101.0, 73.0), (97.5, 69.5)] {
                     pump_ms(tester, 20);
-                    close_to(chip_size(tester).width(), chip_width, 0.1);
-                    assert_eq!(size_of(tester, delete(tester)), Size::new(24.0, 24.0));
-                    close_to(top_left_of(tester, delete(tester)).dx(), delete_dx, 0.1);
+                    assert_more_or_less_equals_within(chip_size(tester).width(), chip_width, 0.1);
+                    assert_eq!(tester.get_size(delete(tester)), Size::new(24.0, 24.0));
+                    assert_more_or_less_equals_within(
+                        top_left_of(tester, delete(tester)).dx(),
+                        delete_dx,
+                        0.1,
+                    );
                 }
 
                 // Wait for being done with animation, make sure it didn't change height, and make sure
@@ -5288,7 +5347,10 @@ pub(crate) mod tests {
     mod ink_and_selection {
         //! chip_test.dart: the ink splash cases of the delete button and the
         //! label, and the selection and activation cases of `RawChip`.
-        use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+        use waft_widgets::testing::{
+            TestPointer, WidgetTester, assert_more_or_less_equals_within, expect, find,
+            finds_nothing, finds_one_widget, test_widgets,
+        };
 
         use std::time::Duration;
 
@@ -5298,15 +5360,15 @@ pub(crate) mod tests {
         };
 
         use crate::chip::RawChip;
-        use crate::chip::tests::{by_key, center_of, only, rect_of, size_of, wrap_for_chip};
+        use crate::chip::tests::{by_key, only, wrap_for_chip};
         use crate::icons::Icons;
         use crate::ink_well::{InkResponse, InkWell};
         use crate::material::RenderInkFeatures;
-        use crate::test_support::{CanvasCall, canvas_call_of};
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::m2;
         use waft_foundation::Listener;
         use waft_painting::TextScaler;
+        use waft_rendering::testing::CanvasMethod;
 
         /// Dart's `chipWithOptionalDeleteButton`.
         struct ChipWithOptionalDeleteButton {
@@ -5383,7 +5445,7 @@ pub(crate) mod tests {
                 .build()
                 .ops()
                 .iter()
-                .filter(|op| canvas_call_of(op) == CanvasCall::DrawCircle)
+                .filter(|op| CanvasMethod::of(op) == CanvasMethod::DrawCircle)
                 .filter_map(|op| match op {
                     waft_embedder::valo::Op::DrawPath { path, .. } => path.as_oval(),
                     _ => None,
@@ -5440,8 +5502,8 @@ pub(crate) mod tests {
 
         /// Dart's `findTooltipContainer(text).length`: the `Container`s above the text.
         fn tooltip_containers(tester: &WidgetTester, tooltip_text: &str) -> usize {
-            tester
-                .find_text(tooltip_text)
+            find::text(tooltip_text)
+                .evaluate(tester)
                 .into_iter()
                 .flat_map(|text| tester.ancestors(text))
                 .filter(|ancestor| {
@@ -5478,7 +5540,7 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 // Taps at a location close to the center of the label.
-                let center_of_label = center_of(tester, by_key(tester, &label_key));
+                let center_of_label = tester.get_center(by_key(tester, &label_key));
                 let tap_location_of_label = center_of_label + Offset::new(-10.0, -10.0);
                 let gesture = start_gesture(tester, tap_location_of_label);
                 tester.pump();
@@ -5527,7 +5589,7 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 // Taps at a location close to the center of the label.
-                let center_of_label = center_of(tester, by_key(tester, &label_key));
+                let center_of_label = tester.get_center(by_key(tester, &label_key));
                 let gesture = start_gesture(tester, center_of_label + Offset::new(-10.0, -10.0));
                 tester.pump();
 
@@ -5616,7 +5678,7 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 // Taps at a location close to the center of the delete icon.
-                let center_of_delete_button = center_of(tester, by_key(tester, &delete_button_key));
+                let center_of_delete_button = tester.get_center(by_key(tester, &delete_button_key));
                 let gesture =
                     start_gesture(tester, center_of_delete_button + Offset::new(-10.0, -10.0));
                 tester.pump();
@@ -5694,8 +5756,8 @@ pub(crate) mod tests {
 
                 // Taps at a location close to the center of the delete icon,
                 // which is on the left side of the chip.
-                let first_ink_well: AnyElement = tester.find_by_type::<InkWell>()[0];
-                let top_left_of_ink_well = rect_of(tester, first_ink_well).top_left();
+                let first_ink_well: AnyElement = find::by_type::<InkWell>().evaluate(tester)[0];
+                let top_left_of_ink_well = tester.get_rect(first_ink_well).top_left();
                 let tap_location = top_left_of_ink_well + Offset::new(8.0, 8.0);
                 let gesture = start_gesture(tester, tap_location);
                 tester.pump();
@@ -5722,7 +5784,7 @@ pub(crate) mod tests {
 
                 // Taps at a location close to the bottom-right corner of the chip.
                 let ink_well = only::<InkWell>(tester);
-                let bottom_right_of_ink_well = rect_of(tester, ink_well).bottom_right();
+                let bottom_right_of_ink_well = tester.get_rect(ink_well).bottom_right();
                 let tap_location = bottom_right_of_ink_well + Offset::new(-10.0, -10.0);
                 let gesture = start_gesture(tester, tap_location);
                 tester.pump();
@@ -5731,8 +5793,8 @@ pub(crate) mod tests {
                 pump_ms(tester, 100);
 
                 // There should be exactly one ink-creating widget.
-                assert_eq!(tester.find_by_type::<InkWell>().len(), 1);
-                assert_eq!(tester.find_by_type::<InkResponse>().len(), 0);
+                expect(tester, &find::by_type::<InkWell>(), finds_one_widget());
+                expect(tester, &find::by_type::<InkResponse>(), finds_nothing());
 
                 // There should be one unique, centered ink ripple.
                 if !material3 {
@@ -5804,7 +5866,7 @@ pub(crate) mod tests {
                 match expected {
                     Progress::Exactly(expected) => assert_eq!(actual, expected),
                     Progress::About(expected) => {
-                        crate::chip::tests::close_to(actual, expected, 0.01)
+                        assert_more_or_less_equals_within(actual, expected, 0.01)
                     }
                 }
             }
@@ -5887,14 +5949,14 @@ pub(crate) mod tests {
 
             /// Simulates a tap on the label.
             fn tap_label(&self, tester: &mut WidgetTester) {
-                let at = center_of(tester, by_key(tester, &self.label_key));
-                tester.tap(at, 1);
+                let at = tester.get_center(by_key(tester, &self.label_key));
+                tester.tap_at(at, 1);
             }
         }
 
         /// Dart's `equals(size)`, to the f32 precision the text metrics of the platform fonts carry.
         fn assert_chip_size(tester: &WidgetTester, expected: waft_embedder::Size) {
-            let actual = size_of(tester, only::<RawChip>(tester));
+            let actual = tester.get_size(only::<RawChip>(tester));
             assert!(
                 (actual.width() - expected.width()).abs() < 1e-4
                     && (actual.height() - expected.height()).abs() < 1e-4,
@@ -6072,7 +6134,10 @@ pub(crate) mod tests {
         //! chip_test.dart: the ThemeData chip theme, the label style merge, the tap target size, the
         //! theme colors, taps outside the chip, elevation and shadow color, hit testing, clip behavior,
         //! the avatar scrim and `InkWell`.
-        use waft_widgets::testing::{WidgetTester, test_widgets};
+        use waft_widgets::testing::{
+            WidgetTester, assert_more_or_less_equals_within, expect, find, finds_one_widget,
+            test_widgets,
+        };
 
         use std::cell::Cell;
         use std::rc::Rc;
@@ -6085,8 +6150,7 @@ pub(crate) mod tests {
         };
 
         use crate::chip::tests::{
-            close_to, icon_data, label_style, material_box_paints, only, rect_of, size_of,
-            wrap_ltr, wrap_with_theme,
+            icon_data, label_style, material_box_paints, only, wrap_ltr, wrap_with_theme,
         };
         use crate::chip::{Chip, ChipRenderWidget, RawChip};
         use crate::chip_theme::{ChipTheme, ChipThemeData};
@@ -6096,9 +6160,9 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::input_chip::InputChip;
         use crate::material::Material;
-        use crate::test_support::PaintCall;
         use crate::theme::Theme;
         use crate::theme_data::{MaterialTapTargetSize, ThemeData};
+        use waft_rendering::testing::PaintCall;
 
         fn theme_builder() -> crate::theme_data::ThemeDataBuilder {
             ThemeData::builder()
@@ -6198,7 +6262,7 @@ pub(crate) mod tests {
                 Theme::new(theme, Center::new().child(RawChip::new(Text::new("test")))),
             );
             tester.pump_widget(root);
-            size_of(tester, only::<RawChip>(tester))
+            tester.get_size(only::<RawChip>(tester))
         }
 
         #[test]
@@ -6219,11 +6283,11 @@ pub(crate) mod tests {
         fn material3_chip_size_is_configurable_by_theme_data_material_tap_target_size() {
             test_widgets(|tester| {
                 let size = pump_sized_chip(tester, true, MaterialTapTargetSize::Padded);
-                close_to(size.width(), 90.4, 0.1);
+                assert_more_or_less_equals_within(size.width(), 90.4, 0.1);
                 assert_eq!(size.height(), 48.0);
 
                 let size = pump_sized_chip(tester, true, MaterialTapTargetSize::ShrinkWrap);
-                close_to(size.width(), 90.4, 0.1);
+                assert_more_or_less_equals_within(size.width(), 90.4, 0.1);
                 assert_eq!(size.height(), 38.0);
             });
         }
@@ -6289,10 +6353,10 @@ pub(crate) mod tests {
                 assert_eq!(icon_color(tester), Some(Color::new(0xde000000)));
                 assert_eq!(label_color(tester), Some(Colors::BLACK.with_alpha(0xde)));
                 let center = crate::chip::tests::center_of(tester, only::<RawChip>(tester));
-                tester.tap(center, 1);
+                tester.tap_at(center, 1);
                 tester.pump_and_settle();
                 assert!(paints(tester, default_chip_theme.selected_color.unwrap()));
-                tester.tap(center, 1);
+                tester.tap_at(center, 1);
                 tester.pump_and_settle();
 
                 // Check default theme with disabled widget.
@@ -6322,10 +6386,10 @@ pub(crate) mod tests {
                 assert!(paints(tester, custom_color1));
                 assert_eq!(icon_color(tester), Some(custom_color4));
                 assert_eq!(label_color(tester), Some(Colors::BLACK.with_alpha(0xde)));
-                tester.tap(center, 1);
+                tester.tap_at(center, 1);
                 tester.pump_and_settle();
                 assert!(paints(tester, custom_color3));
-                tester.tap(center, 1);
+                tester.tap_at(center, 1);
                 tester.pump_and_settle();
 
                 // Check custom theme with disabled widget.
@@ -6353,8 +6417,8 @@ pub(crate) mod tests {
                 let root = wrap_ltr(tester, Row::new().children([chip.into_widget()]));
                 tester.pump_widget(root);
 
-                let top_right = rect_of(tester, only::<Chip>(tester)).top_right();
-                tester.tap(top_right - Offset::new(2.0, -2.0), 1);
+                let top_right = tester.get_rect(only::<Chip>(tester)).top_right();
+                tester.tap_at(top_right - Offset::new(2.0, -2.0), 1);
                 tester.pump_and_settle();
                 assert!(deleted.get());
             });
@@ -6372,7 +6436,7 @@ pub(crate) mod tests {
                 ));
 
                 let center = crate::chip::tests::center_of(tester, only::<RawChip>(tester));
-                tester.tap(center, 1);
+                tester.tap_at(center, 1);
             });
         }
 
@@ -6461,8 +6525,8 @@ pub(crate) mod tests {
                 let root = wrap_ltr(tester, Row::new().children([chip.into_widget()]));
                 tester.pump_widget(root);
 
-                let top_center = rect_of(tester, only::<InputChip>(tester)).top_center();
-                tester.tap(top_center, 1);
+                let top_center = tester.get_rect(only::<InputChip>(tester)).top_center();
+                tester.tap_at(top_center, 1);
                 tester.pump_and_settle();
                 assert!(pressed.get());
             });
@@ -6503,7 +6567,7 @@ pub(crate) mod tests {
         }
 
         fn check_chip_material_clip_behavior(tester: &WidgetTester, clip: Clip) {
-            let materials = tester.find_by_type::<Material>();
+            let materials = find::by_type::<Material>().evaluate(tester);
             assert_eq!(materials.len(), 2);
             let last = *materials.last().expect("a Material");
             assert_eq!(
@@ -6590,7 +6654,11 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(tester.find_by_type::<crate::ink_well::InkWell>().len(), 1);
+                expect(
+                    tester,
+                    &find::by_type::<crate::ink_well::InkWell>(),
+                    finds_one_widget(),
+                );
             });
         }
 
@@ -6704,7 +6772,9 @@ pub(crate) mod tests {
         //! Dart's border side colours (`0x00000001` ... `0x00000007`) are fully transparent: the
         //! border-side cases, which assert those draws, and the paint half of the theme-deferral cases
         //! are deferred (`PORTING.md`), since the display list drops a draw with no effect.
-        use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+        use waft_widgets::testing::{
+            TestPointer, WidgetTester, assert_more_or_less_equals_within, test_widgets,
+        };
 
         use std::rc::Rc;
 
@@ -6719,7 +6789,7 @@ pub(crate) mod tests {
             WidgetStateOutlinedBorder, WidgetStates,
         };
 
-        use crate::chip::tests::{by_key, material_of_raw_chip, only, rect_of, wrap_with_theme};
+        use crate::chip::tests::{by_key, material_of_raw_chip, only, wrap_with_theme};
         use crate::choice_chip::ChoiceChip;
         use crate::icons::Icons;
         use crate::input_chip::InputChip;
@@ -7007,7 +7077,7 @@ pub(crate) mod tests {
         }
 
         fn rect_close(actual: f64, expected: f64) {
-            crate::chip::tests::close_to(actual, expected, 0.1);
+            assert_more_or_less_equals_within(actual, expected, 0.1);
         }
 
         struct DensityKeys {
@@ -7050,7 +7120,7 @@ pub(crate) mod tests {
             }
 
             fn rects(&self, tester: &WidgetTester) -> DensityRects {
-                let rect = |key: &GlobalKey| rect_of(tester, by_key(tester, key));
+                let rect = |key: &GlobalKey| tester.get_rect(by_key(tester, key));
                 DensityRects {
                     chip: rect(&self.chip),
                     text: rect(&self.text),
@@ -7193,7 +7263,7 @@ pub(crate) mod tests {
         //! chip_test.dart (lines 4747-5561): delete-button tooltips, the Ink background, RawChip colour
         //! states, shape and side, the icon theme, layout constraints of the avatar and delete icon,
         //! and the default delete button's InkWell and overlay.
-        use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+        use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
         use std::cell::Cell;
         use std::rc::Rc;
@@ -7212,17 +7282,19 @@ pub(crate) mod tests {
         };
 
         use crate::chip::tests::{
-            center_of, chip_material_of, icon_data, material_box_paints, material_of_raw_chip,
-            only, rect_of, size_of, text, wrap_ltr, wrap_with_theme,
+            chip_material_of, icon_data, material_box_paints, material_of_raw_chip, only, text,
+            wrap_ltr, wrap_with_theme,
         };
         use crate::chip::{Chip, RawChip};
         use crate::filter_chip::tests::tooltip_container_count;
         use crate::icons::Icons;
         use crate::ink_decoration::Ink;
         use crate::material::Material;
-        use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
+        use crate::test_support::{PaintInspection, material_app};
+
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::{m2, m3};
+        use waft_rendering::testing::{PaintCall, assert_paints, paints};
 
         /// Dart's `chipWithOptionalDeleteButton`.
         fn pump_chip_with_optional_delete_button(
@@ -7276,10 +7348,8 @@ pub(crate) mod tests {
                 );
 
                 // Hover over the delete icon of the chip
-                let center_of_delete_button = center_of(
-                    tester,
-                    crate::chip::tests::by_key(tester, &delete_button_key),
-                );
+                let center_of_delete_button =
+                    tester.get_center(crate::chip::tests::by_key(tester, &delete_button_key));
                 hover_over(tester, center_of_delete_button);
 
                 // There should be no delete button tooltip
@@ -7299,10 +7369,8 @@ pub(crate) mod tests {
                     Some(""),
                 );
 
-                let center_of_delete_button = center_of(
-                    tester,
-                    crate::chip::tests::by_key(tester, &delete_button_key),
-                );
+                let center_of_delete_button =
+                    tester.get_center(crate::chip::tests::by_key(tester, &delete_button_key));
                 hover_over(tester, center_of_delete_button);
 
                 // There should be no delete button tooltip
@@ -7324,10 +7392,8 @@ pub(crate) mod tests {
                     None,
                 );
 
-                let center_of_delete_button = center_of(
-                    tester,
-                    crate::chip::tests::by_key(tester, &delete_button_key),
-                );
+                let center_of_delete_button =
+                    tester.get_center(crate::chip::tests::by_key(tester, &delete_button_key));
                 hover_over(tester, center_of_delete_button);
 
                 // There should not be a chip tooltip
@@ -7442,15 +7508,15 @@ pub(crate) mod tests {
                     .last()
                     .expect("the chip's Material");
                 let ops = tester.painted_ops_deep(ink_features.as_object());
-                assert!(paints_calls(
+                assert_paints(
                     &ops,
                     &[
                         // Background color is drawn first.
                         PaintCall::rrect(Some(background_color)),
                         // Highlight color is drawn on top of the background color.
                         PaintCall::rect(Some(Color::new(0x1f000000))),
-                    ]
-                ));
+                    ],
+                );
             });
         }
 
@@ -7566,23 +7632,23 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
 
                 // Tap on the delete button.
-                let icon = center_of(tester, only::<Icon>(tester));
-                tester.tap(icon, 1);
+                let icon = tester.get_center(only::<Icon>(tester));
+                tester.tap_at(icon, 1);
                 tester.pump();
                 assert!(called_delete.get());
                 called_delete.set(false);
 
                 let label = text(tester, "Chip");
-                let label_center = center_of(tester, label);
+                let label_center = tester.get_center(label);
 
                 // Tap on the label.
-                tester.tap(label_center, 1);
+                tester.tap_at(label_center, 1);
                 tester.pump();
                 assert!(!called_delete.get());
 
                 // Tap before end of the label.
-                let label_size = size_of(tester, label);
-                tester.tap(
+                let label_size = tester.get_size(label);
+                tester.tap_at(
                     Offset::new(
                         label_center.dx() + (label_size.width() / 2.0) - 1.0,
                         label_center.dy(),
@@ -7593,7 +7659,7 @@ pub(crate) mod tests {
                 assert!(!called_delete.get());
 
                 // Tap after end of the label.
-                tester.tap(
+                tester.tap_at(
                     Offset::new(
                         label_center.dx() + (label_size.width() / 2.0) + 0.01,
                         label_center.dy(),
@@ -7780,14 +7846,14 @@ pub(crate) mod tests {
                 );
 
                 // Tap the elevated button to disable the chip with a tooltip.
-                let button = center_of(tester, text(tester, "Disable Chip"));
-                tester.tap(button, 1);
+                let button = tester.get_center(text(tester, "Disable Chip"));
+                tester.tap_at(button, 1);
                 tester.pump_and_settle();
                 assert!(!is_enabled.get());
 
                 // Tap the elevated button to enable the chip with a tooltip.
-                let button = center_of(tester, text(tester, "Enable Chip"));
-                tester.tap(button, 1);
+                let button = tester.get_center(text(tester, "Enable Chip"));
+                tester.tap_at(button, 1);
                 tester.pump_and_settle();
                 assert!(is_enabled.get());
             });
@@ -7809,7 +7875,7 @@ pub(crate) mod tests {
                 // Test enabled chip.
                 build_chip(tester, true);
 
-                let delete_button_location = center_of(tester, only::<Icon>(tester));
+                let delete_button_location = tester.get_center(only::<Icon>(tester));
                 let mut gesture = TestPointer::mouse(1, 0);
                 tester.move_to(&mut gesture, delete_button_location, false);
                 tester.pump();
@@ -7840,7 +7906,7 @@ pub(crate) mod tests {
         }
 
         fn chip_material_rect(tester: &WidgetTester) -> Rect {
-            rect_of(tester, material_of_raw_chip(tester))
+            tester.get_rect(material_of_raw_chip(tester))
         }
 
         /// The body of 'Chip avatar layout constraints can be customized' and its RawChip twin: the
@@ -7853,7 +7919,7 @@ pub(crate) mod tests {
                     let root = wrap_ltr(tester, Center::new().child(build_chip(constraints)));
                     tester.pump_widget(root);
                 };
-                let chip_size = |tester: &WidgetTester| size_of(tester, only::<W>(tester));
+                let chip_size = |tester: &WidgetTester| tester.get_size(only::<W>(tester));
 
                 // Test default avatar layout constraints.
                 pump(tester, None);
@@ -7863,7 +7929,8 @@ pub(crate) mod tests {
 
                 // Calculate the distance between avatar and chip edges.
                 let chip_top_left = chip_material_rect(tester).top_left();
-                let avatar_center = center_of(tester, tester.find_by_icon(&Icons::favorite()));
+                let avatar_center =
+                    tester.get_center(tester.element(find::by_icon(&Icons::favorite()).first()));
                 assert_eq!(
                     chip_top_left.dx(),
                     avatar_center.dx() - (LABEL_SIZE.width() / 2.0) - PADDING - BORDER
@@ -7874,7 +7941,7 @@ pub(crate) mod tests {
                 );
 
                 // Calculate the distance between avatar and label.
-                let label_top_left = rect_of(tester, only::<Container>(tester)).top_left();
+                let label_top_left = tester.get_rect(only::<Container>(tester)).top_left();
                 assert_eq!(
                     label_top_left.dx(),
                     avatar_center.dx() + (LABEL_SIZE.width() / 2.0) + LABEL_PADDING
@@ -7905,7 +7972,7 @@ pub(crate) mod tests {
                 );
 
                 // Calculate the distance between avatar and label.
-                let label_top_left = rect_of(tester, only::<Container>(tester)).top_left();
+                let label_top_left = tester.get_rect(only::<Container>(tester)).top_left();
                 assert_eq!(
                     label_top_left.dx(),
                     avatar_center.dx() + (ICON_SIZE / 2.0) + LABEL_PADDING
@@ -7922,7 +7989,7 @@ pub(crate) mod tests {
                     let root = wrap_ltr(tester, Center::new().child(build_chip(constraints)));
                     tester.pump_widget(root);
                 };
-                let chip_size = |tester: &WidgetTester| size_of(tester, only::<W>(tester));
+                let chip_size = |tester: &WidgetTester| tester.get_size(only::<W>(tester));
 
                 // Test default delete icon layout constraints.
                 pump(tester, None);
@@ -7932,7 +7999,8 @@ pub(crate) mod tests {
 
                 // Calculate the distance between delete icon and chip edges.
                 let chip_top_right = chip_material_rect(tester).top_right();
-                let delete_icon_center = center_of(tester, tester.find_by_icon(&Icons::cancel()));
+                let delete_icon_center =
+                    tester.get_center(tester.element(find::by_icon(&Icons::cancel()).first()));
                 assert_eq!(
                     chip_top_right.dx(),
                     delete_icon_center.dx() + (LABEL_SIZE.width() / 2.0) + PADDING + BORDER
@@ -7943,7 +8011,7 @@ pub(crate) mod tests {
                 );
 
                 // Calculate the distance between delete icon and label.
-                let label_top_right = rect_of(tester, only::<Container>(tester)).top_right();
+                let label_top_right = tester.get_rect(only::<Container>(tester)).top_right();
                 assert_eq!(
                     label_top_right.dx(),
                     delete_icon_center.dx() - (LABEL_SIZE.width() / 2.0) - LABEL_PADDING
@@ -7974,7 +8042,7 @@ pub(crate) mod tests {
                 );
 
                 // Calculate the distance between delete icon and label.
-                let label_top_right = rect_of(tester, only::<Container>(tester)).top_right();
+                let label_top_right = tester.get_rect(only::<Container>(tester)).top_right();
                 assert_eq!(
                     label_top_right.dx(),
                     delete_icon_center.dx() - (ICON_SIZE / 2.0) - LABEL_PADDING
@@ -8039,7 +8107,7 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(root);
 
-                let icon = tester.find_by_icon(&Icons::cancel());
+                let icon = tester.element(find::by_icon(&Icons::cancel()).first());
                 let delete_button_ink_well = tester
                     .ancestors(icon)
                     .into_iter()
@@ -8084,7 +8152,7 @@ pub(crate) mod tests {
                     tester.painted_ops_deep(ink_features.as_object())
                 };
                 let paints_hover_rect =
-                    |ops: &[Op]| paints_calls(ops, &[PaintCall::rect(Some(theme.hover_color))]);
+                    |ops: &[Op]| paints(ops, &[PaintCall::rect(Some(theme.hover_color))]).is_ok();
                 // Dart's `paintsExactlyCountTimes(#clipPath, n)`. Valo records a `clipRect` as an
                 // axis-aligned path clip, which Dart counts as `#clipRect`, not `#clipPath`.
                 let clip_paths = |ops: &[Op]| {
@@ -8105,7 +8173,7 @@ pub(crate) mod tests {
                 assert_eq!(clip_paths(&ops).len(), 0);
 
                 // Hover over the delete icon.
-                let center_of_delete_button = center_of(tester, only::<Icon>(tester));
+                let center_of_delete_button = tester.get_center(only::<Icon>(tester));
                 let mut hover_gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut hover_gesture, Offset::new(10.0, 10.0));
                 tester.pump();
@@ -8175,7 +8243,9 @@ pub(crate) mod tests {
     mod material2_and_misc {
         //! chip_test.dart: the 'Material 2' group, baseline, icon theme, animation
         //! styles, mouse cursors and zero area.
-        use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+        use waft_widgets::testing::{
+            TestPointer, WidgetTester, assert_more_or_less_equals_within, find, test_widgets,
+        };
 
         use std::cell::Cell;
         use std::rc::Rc;
@@ -8190,10 +8260,7 @@ pub(crate) mod tests {
             StatefulBuilder, Text,
         };
 
-        use super::{
-            center_of, close_to, icon_data, label_style, material_box_paints, only, rect_of,
-            size_of, text, wrap_ltr,
-        };
+        use super::{icon_data, label_style, material_box_paints, only, text, wrap_ltr};
         use crate::chip::*;
         use crate::chip_theme::{ChipTheme, ChipThemeData};
         use crate::circle_avatar::CircleAvatar;
@@ -8201,9 +8268,11 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::material::Material;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{PaintCall, material_app};
+        use crate::test_support::material_app;
+
         use crate::theme::Theme;
         use crate::theme_data::ThemeData;
+        use waft_rendering::testing::PaintCall;
 
         fn font_summary(style: &TextStyle) -> impl PartialEq + std::fmt::Debug {
             (
@@ -8247,7 +8316,7 @@ pub(crate) mod tests {
                 };
                 let check_common = |tester: &WidgetTester| {
                     assert_eq!(
-                        size_of(tester, only::<Chip>(tester)),
+                        tester.get_size(only::<Chip>(tester)),
                         Size::new(156.0, 48.0)
                     );
                     let material = super::tests::material_of_raw_chip(tester);
@@ -8377,8 +8446,8 @@ pub(crate) mod tests {
                         tester.pump_widget(root);
                     };
                 let tap_chip = |tester: &mut WidgetTester| {
-                    let center = center_of(tester, only::<RawChip>(tester));
-                    tester.tap(center, 1);
+                    let center = tester.get_center(only::<RawChip>(tester));
+                    tester.tap_at(center, 1);
                     tester.pump_and_settle();
                 };
                 let drawn_color = |tester: &WidgetTester, color: Option<Color>| {
@@ -8478,19 +8547,19 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(root);
 
-                let texts = tester.find_text("A");
+                let texts = find::text("A").evaluate(tester);
                 assert_eq!(texts.len(), 2);
                 // Baseline aligning text.
                 assert_eq!(
-                    rect_of(tester, texts[0]).top_left().dy(),
-                    rect_of(tester, texts[texts.len() - 1]).top_left().dy()
+                    tester.get_rect(texts[0]).top_left().dy(),
+                    tester.get_rect(texts[texts.len() - 1]).top_left().dy()
                 );
             });
         }
 
         fn icon_count(tester: &WidgetTester, icon: &waft_widgets::IconData) -> usize {
-            tester
-                .find_by_type::<Icon>()
+            find::by_type::<Icon>()
+                .evaluate(tester)
                 .into_iter()
                 .filter(|element| {
                     tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
@@ -8524,10 +8593,10 @@ pub(crate) mod tests {
                 );
 
                 // Test rendered icon size.
-                let avatar_icon = tester.find_by_icon(&Icons::favorite());
-                let delete_icon = tester.find_by_icon(&Icons::delete());
-                assert_eq!(size_of(tester, avatar_icon).width(), icon_size);
-                assert_eq!(size_of(tester, delete_icon).width(), icon_size);
+                let avatar_icon = tester.element(find::by_icon(&Icons::favorite()).first());
+                let delete_icon = tester.element(find::by_icon(&Icons::delete()).first());
+                assert_eq!(tester.get_size(avatar_icon).width(), icon_size);
+                assert_eq!(tester.get_size(delete_icon).width(), icon_size);
 
                 // Test rendered icon color.
                 assert_eq!(
@@ -8570,7 +8639,7 @@ pub(crate) mod tests {
                 };
                 let rendered_color = |tester: &WidgetTester| {
                     tester
-                        .glyph_style(tester.find_by_icon(&Icons::delete()))
+                        .glyph_style(tester.element(find::by_icon(&Icons::delete()).first()))
                         .color
                         .map(|color| color.color())
                 };
@@ -8617,11 +8686,6 @@ pub(crate) mod tests {
             );
         }
 
-        fn tap_text(tester: &mut WidgetTester, label: &str) {
-            let center = center_of(tester, text(tester, label));
-            tester.tap(center, 1);
-        }
-
         fn pump_ms(tester: &mut WidgetTester, ms: u64) {
             tester.pump_by(Duration::from_millis(ms));
         }
@@ -8666,7 +8730,7 @@ pub(crate) mod tests {
                 // Test background color when the chip is enabled.
                 paints(tester, background_color);
 
-                tap_text(tester, "Disable Chip");
+                tester.tap(find::text("Disable Chip"));
                 tester.pump();
                 pump_ms(tester, 75);
 
@@ -8677,7 +8741,7 @@ pub(crate) mod tests {
                 // Test background color when the chip is disabled.
                 paints(tester, disabled_color);
 
-                tap_text(tester, "Enable Chip");
+                tester.tap(find::text("Enable Chip"));
                 tester.pump();
                 pump_ms(tester, 150);
 
@@ -8722,7 +8786,7 @@ pub(crate) mod tests {
                 // Test background color when the chip is unselected.
                 paints(tester, background_color);
 
-                tap_text(tester, "Select Chip");
+                tester.tap(find::text("Select Chip"));
                 tester.pump();
                 pump_ms(tester, 300);
 
@@ -8733,7 +8797,7 @@ pub(crate) mod tests {
                 // Test background color when the chip is selected.
                 paints(tester, selected_color);
 
-                tap_text(tester, "Unselect Chip");
+                tester.tap(find::text("Unselect Chip"));
                 tester.pump();
                 pump_ms(tester, 150);
 
@@ -8767,40 +8831,40 @@ pub(crate) mod tests {
                     |selected| format!("{} Chip", if selected { "Unselect" } else { "Select" }),
                 );
                 let chip_width =
-                    |tester: &WidgetTester| size_of(tester, only::<RawChip>(tester)).width();
+                    |tester: &WidgetTester| tester.get_size(only::<RawChip>(tester)).width();
                 let checkmark_drawn = |tester: &WidgetTester| {
                     material_box_paints(tester, &[PaintCall::path(Some(checkmark_color))])
                 };
 
                 // Test the checkmark is not visible yet.
                 assert!(!checkmark_drawn(tester));
-                close_to(chip_width(tester), 132.6, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 132.6, 0.1);
 
-                tap_text(tester, "Select Chip");
+                tester.tap(find::text("Select Chip"));
                 tester.pump();
                 pump_ms(tester, 400);
 
                 assert!(checkmark_drawn(tester));
-                close_to(chip_width(tester), 148.2, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 148.2, 0.1);
 
                 pump_ms(tester, 400);
 
                 // Test the checkmark is fully visible.
                 assert!(checkmark_drawn(tester));
-                close_to(chip_width(tester), 152.6, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 152.6, 0.1);
 
-                tap_text(tester, "Unselect Chip");
+                tester.tap(find::text("Unselect Chip"));
                 tester.pump();
                 pump_ms(tester, 200);
 
                 assert!(!checkmark_drawn(tester));
-                close_to(chip_width(tester), 148.2, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 148.2, 0.1);
 
                 pump_ms(tester, 200);
 
                 // Test if checkmark is removed.
                 assert!(!checkmark_drawn(tester));
-                close_to(chip_width(tester), 132.6, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 132.6, 0.1);
             });
         }
 
@@ -8825,38 +8889,38 @@ pub(crate) mod tests {
                     |show| format!("{} delete icon", if show { "Hide" } else { "Show" }),
                 );
                 let chip_width =
-                    |tester: &WidgetTester| size_of(tester, only::<RawChip>(tester)).width();
+                    |tester: &WidgetTester| tester.get_size(only::<RawChip>(tester)).width();
                 let cancel_icons = |tester: &WidgetTester| icon_count(tester, &Icons::cancel());
 
                 // Test the delete icon is not visible yet.
                 assert_eq!(cancel_icons(tester), 0);
-                close_to(chip_width(tester), 132.6, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 132.6, 0.1);
 
-                tap_text(tester, "Show delete icon");
+                tester.tap(find::text("Show delete icon"));
                 tester.pump();
                 pump_ms(tester, 250);
 
                 assert_eq!(cancel_icons(tester), 1);
-                close_to(chip_width(tester), 148.2, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 148.2, 0.1);
 
                 pump_ms(tester, 250);
 
                 // Test the delete icon is fully visible.
                 assert_eq!(cancel_icons(tester), 1);
-                close_to(chip_width(tester), 152.6, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 152.6, 0.1);
 
-                tap_text(tester, "Hide delete icon");
+                tester.tap(find::text("Hide delete icon"));
                 tester.pump();
                 pump_ms(tester, 125);
 
                 assert_eq!(cancel_icons(tester), 1);
-                close_to(chip_width(tester), 148.2, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 148.2, 0.1);
 
                 pump_ms(tester, 125);
 
                 // Test if delete icon is removed.
                 assert_eq!(cancel_icons(tester), 0);
-                close_to(chip_width(tester), 132.6, 0.1);
+                assert_more_or_less_equals_within(chip_width(tester), 132.6, 0.1);
             });
         }
 
@@ -8942,7 +9006,7 @@ pub(crate) mod tests {
                 ));
 
                 // Hover over the chip.
-                let center = center_of(tester, only::<RawChip>(tester));
+                let center = tester.get_center(only::<RawChip>(tester));
                 let mut mouse = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut mouse, center);
                 tester.move_to(&mut mouse, center, false);
@@ -8997,7 +9061,7 @@ pub(crate) mod tests {
 
                 // Unfocused case.
                 let mut mouse = TestPointer::mouse(1, 0);
-                let chip = center_of(tester, text(tester, "Chip"));
+                let chip = tester.get_center(text(tester, "Chip"));
                 tester.add_pointer(&mut mouse, chip);
                 tester.pump();
                 tester.move_to(&mut mouse, chip, false);
@@ -9024,7 +9088,7 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert!(size_of(tester, text(tester, "X")).is_empty());
+                assert!(tester.get_size(text(tester, "X")).is_empty());
             });
         }
 
@@ -9041,7 +9105,7 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert!(size_of(tester, text(tester, "X")).is_empty());
+                assert!(tester.get_size(text(tester, "X")).is_empty());
             });
         }
     }

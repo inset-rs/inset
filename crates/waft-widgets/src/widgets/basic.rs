@@ -4170,6 +4170,18 @@ impl RenderObjectWidget for Offstage {
         self.key.as_ref()
     }
 
+    /// Dart's `_OffstageElement.debugVisitOnstageChildren`: no child while offstage.
+    fn debug_visit_onstage_children(
+        &self,
+        _app: &App,
+        children: &[crate::AnyElement],
+        visitor: &mut dyn FnMut(crate::AnyElement),
+    ) {
+        if !self.offstage {
+            children.iter().for_each(|child| visitor(*child));
+        }
+    }
+
     fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
         RenderOffstage::new(app, self.offstage, None).as_object()
     }
@@ -9443,6 +9455,23 @@ impl RenderObjectWidget for RawIndexedStack {
         self.key.as_ref()
     }
 
+    /// Dart's `_IndexedStackElement.debugVisitOnstageChildren`: if the index is null, no child
+    /// is onstage; otherwise only the child at the selected index is.
+    fn debug_visit_onstage_children(
+        &self,
+        _app: &App,
+        children: &[crate::AnyElement],
+        visitor: &mut dyn FnMut(crate::AnyElement),
+    ) {
+        if let Some(child) = self
+            .index
+            .and_then(|index| usize::try_from(index).ok())
+            .and_then(|index| children.get(index))
+        {
+            visitor(*child);
+        }
+    }
+
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
         self.debug_check_index();
         let render_object = RenderIndexedStack::new(app);
@@ -9518,7 +9547,7 @@ mod tests {
         GlobalKey, IntoWidget, State, StateData, StatefulWidget, downcast_widget,
     };
     use crate::test_harness::{Harness, padding_under_root};
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::testing::test_widgets;
 
     /// The render object directly under the test root, typed.
     fn render_object_under_root<T: RenderObject>(harness: &Harness, app: &App) -> RenderHandle<T> {
@@ -10638,13 +10667,15 @@ mod tests {
         }
     }
 
-    /// Dart's `moreOrLessEquals` on each entry, at the `f32` the matrix holds.
+    /// Dart's `moreOrLessEquals` on each entry. The filter's matrix is valo's `f32`, the product
+    /// of the transform and the translations about the view's centre, each rounded to `f32`
+    /// where Dart's are `f64`: an entry is within two `f32` steps of Dart's, relative to it.
     fn assert_matrix_near(actual: [f32; 16], expected: [f64; 16]) {
+        const F32_STEPS: f64 = 2.0;
         for (actual, expected) in actual.iter().zip(expected) {
-            assert!(
-                (f64::from(*actual) - expected).abs() <= 1e-4 * expected.abs().max(1.0),
-                "{actual:?} is not {expected:?}"
-            );
+            let step = f64::from(f32::EPSILON) * expected.abs().max(1.0);
+            let steps = (f64::from(*actual) - expected).abs() / step;
+            assert!(steps <= F32_STEPS, "{actual:?} is not {expected:?}");
         }
     }
 
@@ -11719,11 +11750,6 @@ mod tests {
         assert_eq!(shape.size(&app), Size::ZERO);
     }
 
-    /// A tester whose view has no area: Dart's `tester.view.physicalSize = Size.zero`.
-    pub(crate) fn zero_area_tester() -> WidgetTester {
-        WidgetTester::with_physical_size(waft_test::TestPlatform::new(), Size::ZERO)
-    }
-
     fn keyed_size(app: &mut App, key: &GlobalKey) -> Size {
         key.current_context(app)
             .expect("mounted")
@@ -11738,24 +11764,29 @@ mod tests {
     /// "PhysicalShape does not crash at zero area", in a view of no area.
     #[test]
     fn a_physical_model_and_shape_in_a_view_of_no_area_take_no_space() {
-        let key = GlobalKey::new();
-        let tester = &mut zero_area_tester();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            Center::new().child(PhysicalModel::new(Color::new(0xAABBCC00)).key(key.clone().into())),
-        ));
-        assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let key = GlobalKey::new();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                Center::new()
+                    .child(PhysicalModel::new(Color::new(0xAABBCC00)).key(key.clone().into())),
+            ));
+            assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
+        });
 
-        let key = GlobalKey::new();
-        let tester = &mut zero_area_tester();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            Center::new().child(
-                PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
-                    .key(key.clone().into()),
-            ),
-        ));
-        assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let key = GlobalKey::new();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(
+                    PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
+                        .key(key.clone().into()),
+                ),
+            ));
+            assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
+        });
     }
 
     fn list_children(width: f64, height: f64) -> Vec<WidgetRef> {

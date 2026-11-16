@@ -1305,7 +1305,7 @@ mod tests {
     mod tab_bar_cases {
         //! tab_bar_theme_test.dart's cases that build a `TabBar`; the four golden cases are
         //! not ported.
-        use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+        use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
         use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -1318,6 +1318,7 @@ mod tests {
             AlignmentGeometry, AnyColor, EdgeInsets, EdgeInsetsGeometry, TextScaler, TextStyle,
         };
         use waft_rendering::RenderBox as _;
+        use waft_rendering::testing::{PaintCall, paints};
         use waft_services::SystemMouseCursors;
         use waft_widgets::{
             AnyElement, Container, DefaultWidgetsLocalizations, GlobalKey, Icon, IconTheme,
@@ -1335,9 +1336,7 @@ mod tests {
         use crate::material_localizations::DefaultMaterialLocalizations;
         use crate::scaffold::Scaffold;
         use crate::tab_controller::{DefaultTabController, TabController};
-        use crate::tabs::tests::{
-            close, first_render_box, is_line, only, painted_lines, rect_of, size_of, text,
-        };
+        use crate::tabs::tests::{close, first_render_box, is_line, only, painted_lines, text};
         use crate::tabs::{Tab, TabAlignment, TabBar, TabBarIndicatorSize, TabIndicatorAnimation};
         use crate::test_support::{PaintInspection, material_app};
         use crate::theme_data::ThemeData;
@@ -1484,7 +1483,7 @@ mod tests {
 
         /// Dart's `_getIcon(tester, icon).text.style!.color`.
         fn icon_color(tester: &WidgetTester, icon: &waft_widgets::IconData) -> Option<Color> {
-            let element = tester.find_by_icon(icon);
+            let element = tester.element(find::by_icon(icon).first());
             color_of(&tester.glyph_style(element))
         }
 
@@ -1503,10 +1502,10 @@ mod tests {
         }
 
         fn tab_rects(tester: &WidgetTester) -> (Rect, Rect) {
-            let tabs: Vec<AnyElement> = tester.find_by_type::<Tab>();
+            let tabs: Vec<AnyElement> = find::by_type::<Tab>().evaluate(tester);
             (
-                rect_of(tester, tabs[0]),
-                rect_of(tester, *tabs.last().expect("a tab")),
+                tester.get_rect(tabs[0]),
+                tester.get_rect(*tabs.last().expect("a tab")),
             )
         }
 
@@ -1534,9 +1533,6 @@ mod tests {
             tester.render_box_of(paint).as_object()
         }
 
-        /// Whether the tab bar paints a line in `color`, `stroke_width` wide when given, and
-        /// its indicator then an rrect in `then_rrect_color` or a line in `then_line_color`:
-        /// Dart's `paints..line(..)..rrect(..)` / `..line(..)`.
         fn paints_line_then(
             tester: &WidgetTester,
             color: Color,
@@ -1544,55 +1540,34 @@ mod tests {
             then_rrect_color: Option<Color>,
             then_line_color: Option<Color>,
         ) -> bool {
-            use waft_embedder::valo::{Op, PaintStyle};
             let render = first_render_box::<TabBar>(tester).as_object();
-            let ops = tester.painted_ops(render);
-            let is_line = |op: &Op, expected: Color, width: Option<f64>| match op {
-                Op::DrawPath { path, paint, .. } => match &paint.style {
-                    PaintStyle::Stroke(stroke) => {
-                        path.elements().count() == 2
-                            && argb32(paint.color) == expected.to_argb32()
-                            && width.is_none_or(|width| close(f64::from(stroke.width), width, 1e-4))
-                    }
-                    _ => false,
-                },
-                _ => false,
-            };
-            let Some(line) = ops.iter().position(|op| is_line(op, color, stroke_width)) else {
-                return false;
-            };
-            let is_then = |op: &Op| {
-                then_line_color.is_some_and(|expected| is_line(op, expected, None))
-                    || then_rrect_color.is_some_and(|expected| match op {
-                        Op::DrawPath { path, paint, .. } => {
-                            !matches!(paint.style, PaintStyle::Stroke(_))
-                                && path.as_round_rect().is_some()
-                                && argb32(paint.color) == expected.to_argb32()
-                        }
-                        _ => false,
-                    })
-            };
-            // The indicator paints after the divider: later in the tab bar's own pictures, or
-            // in the scroll view's layer under the divider's.
-            ops[line + 1..].iter().any(is_then)
-                || tester
-                    .painted_ops(indicator_paint(tester))
-                    .iter()
-                    .any(is_then)
+            let mut pattern = vec![PaintCall::Line {
+                p1: None,
+                p2: None,
+                color: Some(color),
+                stroke_width,
+            }];
+            if let Some(color) = then_rrect_color {
+                pattern.push(PaintCall::rrect(Some(color)));
+            }
+            if let Some(color) = then_line_color {
+                pattern.push(PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: Some(color),
+                    stroke_width: None,
+                });
+            }
+            paints(&tester.painted_ops_deep(render), &pattern).is_ok()
         }
 
-        /// Whether the tab bar paints a filled rrect in `color` (Dart's `paints..rrect(color:)`).
         fn paints_rrect_color(tester: &WidgetTester, color: Color) -> bool {
-            use waft_embedder::valo::{Op, PaintStyle};
             let render = first_render_box::<TabBar>(tester).as_object();
-            tester.painted_ops(render).iter().any(|op| match op {
-                Op::DrawPath { path, paint, .. } => {
-                    !matches!(paint.style, PaintStyle::Stroke(_))
-                        && path.as_round_rect().is_some()
-                        && argb32(paint.color) == color.to_argb32()
-                }
-                _ => false,
-            })
+            paints(
+                &tester.painted_ops_deep(render),
+                &[PaintCall::rrect(Some(color))],
+            )
+            .is_ok()
         }
 
         // 'Local TabBarTheme overrides defaults'.
@@ -1648,7 +1623,7 @@ mod tests {
         ) {
             const INDICATOR_WEIGHT: f64 = 2.0;
             let padding = label_padding();
-            let tab_bar = rect_of(tester, only::<TabBar>(tester));
+            let tab_bar = tester.get_rect(only::<TabBar>(tester));
             let tab_one_rect = key_rect(tester, &keys[0]);
             let tab_two_rect = key_rect(tester, &keys[1]);
 
@@ -1803,7 +1778,7 @@ mod tests {
                 .build(tester);
                 tester.pump_widget(widget);
 
-                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
                 let tab_one_rect = key_rect(tester, &keys[0]);
                 let tab_two_rect = key_rect(tester, &keys[1]);
 
@@ -1956,7 +1931,7 @@ mod tests {
                         .into_widget(),
                 ));
 
-                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
                 let tab_one_rect = key_rect(tester, &keys[0]);
                 let tab_two_rect = key_rect(tester, &keys[1]);
 
@@ -2046,8 +2021,10 @@ mod tests {
                 .build(tester);
                 tester.pump_widget(widget);
 
-                let tab_bar = tester.ancestor_of_type::<TabBar>(text(tester, TAB_1_TEXT));
-                let center = rect_of(tester, tab_bar).center();
+                let tab_bar = tester.element(
+                    find::ancestor(find::text(TAB_1_TEXT), find::by_type::<TabBar>()).first(),
+                );
+                let center = tester.get_rect(tab_bar).center();
                 let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
@@ -2851,7 +2828,7 @@ mod tests {
                 let widget = build(tester, TextScaler::NO_SCALING);
                 tester.pump_widget(widget);
                 assert_eq!(
-                    size_of(tester, text(tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(70.5, 20.0)
                 );
 
@@ -2859,7 +2836,7 @@ mod tests {
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
                 assert_eq!(
-                    size_of(tester, text(tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(123.0, 35.0)
                 );
 
@@ -2867,7 +2844,7 @@ mod tests {
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
                 assert_eq!(
-                    size_of(tester, text(tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(140.5, 40.0)
                 );
             });
@@ -2875,7 +2852,11 @@ mod tests {
 
         /// Whether the indicator's `CustomPaint` paints `rrect`.
         fn indicator_paints_rrect(tester: &WidgetTester, rrect: RRect) -> bool {
-            tester.paints_rrect(first_render_box::<TabBar>(tester).as_object(), rrect, None)
+            waft_rendering::testing::paints(
+                &tester.painted_ops(first_render_box::<TabBar>(tester).as_object()),
+                &[waft_rendering::testing::PaintCall::rrect_at(rrect, None)],
+            )
+            .is_ok()
         }
 
         fn indicator_rrect(left: f64, right: f64, bottom: f64) -> RRect {
@@ -3092,12 +3073,12 @@ mod tests {
                 );
                 let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
-                let center = rect_of(tester, only::<Tab>(tester)).center();
+                let center = tester.get_rect(only::<Tab>(tester)).center();
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
 
                 let ink_well = only::<crate::ink_well::InkWell>(tester);
-                let ink_well_rect = rect_of(tester, ink_well);
+                let ink_well_rect = tester.get_rect(ink_well);
                 let material = {
                     let app = tester.cell.borrow();
                     Material::of(&app, ink_well)

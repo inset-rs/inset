@@ -2381,16 +2381,13 @@ dependencies = [
 name = "material-gallery"
 version = "0.5.0"
 dependencies = [
- "valo-system-fonts",
  "waft",
  "waft-embedder",
  "waft-embedder-default",
  "waft-foundation",
- "waft-gestures",
  "waft-material",
  "waft-painting",
  "waft-rendering",
- "waft-scheduler",
  "waft-shell",
  "waft-test",
  "waft-widgets",
@@ -5301,7 +5298,6 @@ dependencies = [
  "waft-embedder",
  "waft-foundation",
  "waft-scheduler",
- "web-time",
 ]
 
 [[package]]

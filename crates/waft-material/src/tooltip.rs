@@ -939,11 +939,13 @@ pub(crate) mod tests {
     use std::cell::Cell;
 
     use waft_embedder::{
-        Color, FontWeight, Offset, PointerChange, Rect, Size, TextDecoration, TextDecorationStyle,
+        Color, FontWeight, Offset, PointerChange, RRect, Rect, Size, TextDecoration,
+        TextDecorationStyle,
     };
     use waft_foundation::Listener;
     use waft_gestures::{GestureRecognizerLeaf, TapGestureRecognizer};
     use waft_painting::{AnyColor, BorderSide, ShapeDecoration, StadiumBorder, TextScaler};
+    use waft_rendering::testing::{PaintCall, assert_paints};
     use waft_rendering::{AnyRenderBox, RenderParagraph, RendererBinding};
     use waft_services::SystemMouseCursors;
     use waft_widgets::{
@@ -952,11 +954,12 @@ pub(crate) mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
-    use crate::test_support::{Drawn, PaintInspection, material_app};
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
 
     pub(crate) const TOOLTIP_TEXT: &str = "TIP";
@@ -1011,7 +1014,7 @@ pub(crate) mod tests {
 
     /// Dart's `find.text(tooltipText)`, found once.
     pub(crate) fn tooltip_text(tester: &WidgetTester) -> AnyElement {
-        let found = tester.find_text(TOOLTIP_TEXT);
+        let found = find::text(TOOLTIP_TEXT).evaluate(tester);
         assert_eq!(found.len(), 1, "one tooltip text");
         found[0]
     }
@@ -1037,7 +1040,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn rect(tester: &WidgetTester, render: AnyRenderBox) -> Rect {
-        tester.global_rect(render)
+        tester.get_rect(render)
     }
 
     pub(crate) fn size(tester: &WidgetTester, render: AnyRenderBox) -> Size {
@@ -1056,7 +1059,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn found(tester: &WidgetTester, text: &str) -> bool {
-        !tester.find_text(text).is_empty()
+        !find::text(text).evaluate(tester).is_empty()
     }
 
     pub(crate) fn center(tester: &WidgetTester, element: AnyElement) -> Offset {
@@ -1064,7 +1067,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn tooltip_center(tester: &WidgetTester) -> Offset {
-        center(tester, tester.find_by_type::<Tooltip>()[0])
+        center(tester, find::by_type::<Tooltip>().evaluate(tester)[0])
     }
 
     pub(crate) fn ensure_visible_and_fade_in(tester: &mut WidgetTester, key: &GlobalKey) {
@@ -1474,20 +1477,6 @@ pub(crate) mod tests {
         ensure_visible_and_fade_in(tester, &key);
     }
 
-    /// Dart's `paints..rrect(rrect: RRect.fromRectAndRadius(tip.paintBounds, ..), color:)`: a
-    /// path of `color` over the whole tip.
-    pub(crate) fn paints_rrect_over(tester: &WidgetTester, tip: AnyRenderBox, color: u32) -> bool {
-        let bounds = Rect::from_ltwh(
-            0.0,
-            0.0,
-            size(tester, tip).width(),
-            size(tester, tip).height(),
-        );
-        tester
-            .painted(tip.as_object())
-            .contains(&Drawn::Path(color, bounds))
-    }
-
     fn default_decoration() -> BoxDecoration {
         BoxDecoration::new()
             .color(Color::new(0xe6616161))
@@ -1496,7 +1485,21 @@ pub(crate) mod tests {
 
     fn assert_default_look(tester: &WidgetTester, padding: EdgeInsets) {
         let tip = tooltip_container(tester);
-        assert!(paints_rrect_over(tester, tip, 0xe6616161));
+        assert_paints(
+            &tester.painted_ops(tip.as_object()),
+            &[PaintCall::rrect_at(
+                RRect::from_rect_and_radius(
+                    Rect::from_ltwh(
+                        0.0,
+                        0.0,
+                        size(tester, tip).width(),
+                        size(tester, tip).height(),
+                    ),
+                    Radius::circular(4.0),
+                ),
+                Some(Color::new(0xe6616161)),
+            )],
+        );
         container_widget(tester, |container| {
             assert!(
                 container
@@ -1592,7 +1595,10 @@ pub(crate) mod tests {
             let tip = tooltip_container(tester);
             assert_eq!(size(tester, tip).height(), 32.0);
             assert_eq!(size(tester, tip).width(), 74.0);
-            assert!(paints_rrect_over(tester, tip, 0x80800000));
+            assert_paints(
+                &tester.painted_ops(tip.as_object()),
+                &[PaintCall::rrect(Some(Color::new(0x80800000)))],
+            );
         });
     }
 
@@ -1603,7 +1609,10 @@ pub(crate) mod tests {
             let tip = tooltip_container(tester);
             assert_eq!(size(tester, tip).height(), 32.0);
             assert_eq!(size(tester, tip).width(), 74.75);
-            assert!(paints_rrect_over(tester, tip, 0x80800000));
+            assert_paints(
+                &tester.painted_ops(tip.as_object()),
+                &[PaintCall::rrect(Some(Color::new(0x80800000)))],
+            );
         });
     }
 
@@ -1624,7 +1633,7 @@ pub(crate) mod tests {
                 .into_widget()
             });
             let at = tooltip_center(tester);
-            tester.long_press(at, 1);
+            tester.long_press_at(at, 1);
             assert!(found(tester, TOOLTIP_TEXT));
             (
                 paragraph_size(tester),
@@ -1675,7 +1684,7 @@ pub(crate) mod tests {
             pump_app(tester, m3, |_app| tooltip);
             ensure_visible_and_fade_in(tester, &key);
 
-            let rich_texts = tester.find_by_type::<RichText>();
+            let rich_texts = find::by_type::<RichText>().evaluate(tester);
             assert_eq!(rich_texts.len(), 1);
             let plain_text = tester.widget(rich_texts[0], |rich_text: &RichText| {
                 rich_text.text.to_plain_text(true, true)
@@ -1686,12 +1695,8 @@ pub(crate) mod tests {
 
     #[test]
     fn tooltip_does_not_crash_at_zero_area() {
-        test_widgets(|_| {
-            let mut tester = WidgetTester::with_physical_size(
-                waft_test::TestPlatform::new().on(TargetPlatform::Android),
-                Size::ZERO,
-            );
-            let tester = &mut tester;
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
             let key = GlobalKey::new();
             let tooltip = Tooltip::new().key(key.clone().into()).message("X");
             pump_app(tester, m3, |_app| {
@@ -1700,14 +1705,14 @@ pub(crate) mod tests {
             let tooltip_size = |tester: &WidgetTester| {
                 size(
                     tester,
-                    tester.render_box_of(tester.find_by_type::<Tooltip>()[0]),
+                    tester.render_box_of(find::by_type::<Tooltip>().evaluate(tester)[0]),
                 )
             };
             assert_eq!(tooltip_size(tester), Size::ZERO);
             ensure_tooltip_visible(tester, &key);
             tester.pump_and_settle();
             assert_eq!(tooltip_size(tester), Size::ZERO);
-            assert_eq!(tester.find_text("X").len(), 1);
+            expect(tester, &find::text("X"), finds_one_widget());
         });
     }
 
@@ -1738,13 +1743,13 @@ pub(crate) mod tests {
                     .child(Text::new(TOOLTIP_TEXT))
                     .into_widget()
             });
-            assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
-            assert_eq!(tester.find_by_type::<Tooltip>().len(), 1);
+            expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
+            expect(tester, &find::by_type::<Tooltip>(), finds_one_widget());
 
             let at = center(tester, tooltip_text(tester));
-            tester.long_press(at, 1);
-            assert_eq!(tester.find_by_type::<Tooltip>().len(), 1);
-            assert!(tester.find_by_type::<RawTooltip>().is_empty());
+            tester.long_press_at(at, 1);
+            expect(tester, &find::by_type::<Tooltip>(), finds_one_widget());
+            expect(tester, &find::by_type::<RawTooltip>(), finds_nothing());
         });
     }
 
@@ -1752,15 +1757,15 @@ pub(crate) mod tests {
     fn tooltip_should_not_be_shown_with_empty_message_without_child() {
         test_widgets(|tester| {
             pump_app(tester, m3, |_app| Tooltip::new().message("").into_widget());
-            assert_eq!(tester.find_by_type::<Tooltip>().len(), 1);
-            assert_eq!(tester.find_by_type::<SizedBox>().len(), 1);
-            assert!(tester.find_by_type::<RawTooltip>().is_empty());
+            expect(tester, &find::by_type::<Tooltip>(), finds_one_widget());
+            expect(tester, &find::by_type::<SizedBox>(), finds_one_widget());
+            expect(tester, &find::by_type::<RawTooltip>(), finds_nothing());
         });
     }
 
     /// Dart's `_testGestureTap`.
     pub(crate) fn test_gesture_tap(tester: &mut WidgetTester, at: Offset) {
-        tester.tap(at, 1);
+        tester.tap_at(at, 1);
         tester.pump_by(Duration::from_millis(10));
     }
 
@@ -1792,7 +1797,7 @@ pub(crate) mod tests {
 
             let at = tooltip_center(tester);
             test_gesture_tap(tester, at);
-            assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+            expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
 
             let at = center(tester, tooltip_text(tester));
             test_gesture_tap(tester, at);
@@ -1819,7 +1824,7 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            let element = tester.find_by_type::<Tooltip>()[0];
+            let element = find::by_type::<Tooltip>().evaluate(tester)[0];
             let state = element
                 .state_handle::<TooltipState>(&tester.cell.borrow())
                 .expect("a tooltip state");
@@ -1889,7 +1894,7 @@ pub(crate) mod tests {
             Center::new().child(tooltip).into_widget()
         });
 
-        let button = tester.find_text("Hover me");
+        let button = find::text("Hover me").evaluate(tester);
         assert_eq!(button.len(), 1);
 
         let mut gesture = TestPointer::mouse(1, 0);
@@ -1898,9 +1903,9 @@ pub(crate) mod tests {
         tester.move_to(&mut gesture, at, false);
         tester.pump_and_settle();
 
-        assert_eq!(tester.find_text(tooltip_message).len(), 1);
+        expect(tester, &find::text(tooltip_message), finds_one_widget());
 
-        let ignore_pointers = tester.find_by_type::<IgnorePointer>();
+        let ignore_pointers = find::by_type::<IgnorePointer>().evaluate(tester);
         let ignoring = tester.widget(
             *ignore_pointers.last().expect("an IgnorePointer"),
             |ignore_pointer: &IgnorePointer| ignore_pointer.ignoring,
@@ -2085,10 +2090,10 @@ pub(crate) mod tests {
             });
 
             let at = tooltip_center(tester);
-            tester.long_press(at, 1);
+            tester.long_press_at(at, 1);
             tester.pump_by(Duration::from_secs(1));
 
-            assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+            expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
 
             let target_center = tooltip_center(tester);
             let tooltip_position = rect(tester, tooltip_container(tester)).top_left();
@@ -2116,14 +2121,14 @@ pub(crate) mod tests {
             let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
 
-            let target = tester.find_text("Hover me")[0];
+            let target = find::text("Hover me").evaluate(tester)[0];
             let at = center(tester, target);
             tester.move_to(&mut gesture, at, false);
             tester.pump();
 
             // Wait for the tooltip to actually appear.
             tester.pump_by(Duration::from_millis(100));
-            assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
+            expect(tester, &find::text(TOOLTIP_TEXT), finds_one_widget());
 
             // Move the mouse to the tooltip overlay.
             let at = center(tester, tooltip_text(tester));
