@@ -706,7 +706,7 @@ Ported against: aa3207e6
 
 - Change: `SelectorBarItem` takes a `child` in place of its text, as Flutter's `Tab` does, and gives its state's foreground to the child, the text and the icon through the inherited text style and icon theme.
   Reason: framework — WinUI's `ItemContainer.Child` sits beside the template's icon and text and keeps its own foreground, so content such as a text with an `InfoBadge` would not follow the selected, pointer-over, pressed and disabled colours; Flutter's `TabBar` gives a tab's label its colour through `DefaultTextStyle.merge` and `IconTheme.merge`, which a child takes up without the application doing anything.
-  Affect: A child is drawn where the text would be, in the item's colours for its state; an item has a text or a child, not both.
+  Affect: A child, given with `SelectorBarItem::with_child`, is drawn where the text would be, in the item's colours for its state; an item has a text or a child, not both.
 
 ## item_container.rs → `ItemContainer`
 
