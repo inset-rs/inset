@@ -364,14 +364,32 @@ impl Abi {
     }
 }
 
-pub struct Apk {
+struct Apk {
     pub path: PathBuf,
     /// The package name the system knows the app by.
     pub package: String,
 }
 
+/// `build apk`: the `.apk` for 64-bit ARM devices and emulators.
+pub fn build_apk(project: &Project, profile: Profile) -> Result<PathBuf> {
+    Ok(build(project, profile, Abi::Arm64)?.path)
+}
+
+/// `run` on the emulator of `avd`, booted first.
+pub fn run_on_emulator(project: &Project, profile: Profile, avd: &str) -> Result<()> {
+    let device = boot_emulator(avd)?;
+    run_on_device(project, profile, &device)
+}
+
+/// `run` on `device`: the library for its own processor, packaged, installed and launched.
+pub fn run_on_device(project: &Project, profile: Profile, device: &Device) -> Result<()> {
+    let abi = device_abi(&device.serial)?;
+    let apk = build(project, profile, abi)?;
+    run(&apk, device)
+}
+
 /// Builds the library for `abi` and puts the `.apk` together around it.
-pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
+fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
     let library = project.library.as_deref().context(
         "the Android activity loads a library: add `crate-type = [\"cdylib\", \"rlib\"]` under [lib] in Cargo.toml",
     )?;
@@ -1216,7 +1234,7 @@ fn avd_name(adb: &Path, serial: &str) -> Option<String> {
 }
 
 /// Starts the emulator for `avd` and waits for it to boot; answers the device it is.
-pub fn boot_emulator(avd: &str) -> Result<Device> {
+fn boot_emulator(avd: &str) -> Result<Device> {
     let sdk = sdk()?;
     let emulator = sdk
         .emulator
@@ -1258,7 +1276,7 @@ fn booted(adb: &Path, serial: &str) -> bool {
 }
 
 /// The processor a device runs, for the library to build.
-pub fn device_abi(serial: &str) -> Result<Abi> {
+fn device_abi(serial: &str) -> Result<Abi> {
     let sdk = sdk()?;
     let product = tools::output(
         Command::new(&sdk.adb).args(["-s", serial, "shell", "getprop", "ro.product.cpu.abi"]),
@@ -1268,7 +1286,7 @@ pub fn device_abi(serial: &str) -> Result<Abi> {
 }
 
 /// Installs and launches the package, then follows its log until interrupted.
-pub fn run(apk: &Apk, device: &Device) -> Result<()> {
+fn run(apk: &Apk, device: &Device) -> Result<()> {
     let sdk = sdk()?;
     let adb = |args: &[&str]| {
         let mut command = Command::new(&sdk.adb);

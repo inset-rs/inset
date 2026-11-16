@@ -21,7 +21,7 @@ use crate::apple;
 use crate::project::Project;
 
 /// `app`, built for distribution, exported by Xcode for `method` into an `.ipa` in `out`.
-pub fn export_ipa(
+pub(super) fn export_ipa(
     project: &Project,
     app: &App,
     method: ExportMethod,

@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 
 use crate::android;
 use crate::ios::{self, IosDevice, Simulator};
-use crate::serve::Browser;
+use crate::web::Browser;
 
 pub struct Device {
     pub id: String,

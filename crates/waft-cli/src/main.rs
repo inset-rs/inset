@@ -10,23 +10,21 @@ mod android;
 mod apple;
 mod cargo;
 mod carried;
-mod desktop;
 mod devices;
 mod doctor;
 mod file_associations;
-mod freedesktop;
 mod icons;
 mod ios;
+mod linux;
 mod macos;
 mod new;
+mod packager;
 mod project;
-mod serve;
 mod tools;
 mod usage_descriptions;
 mod wasm;
 mod web;
-mod windows_resources;
-mod windows_signing;
+mod windows;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -34,9 +32,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::desktop::Format;
 use crate::devices::Target;
-use crate::ios::{ExportMethod, Signing};
+use crate::ios::ExportMethod;
 use crate::new::Template;
 use crate::project::{Profile, Project};
 
@@ -197,32 +194,14 @@ fn run_on(
     let project = Project::load(package)?;
     match target {
         Target::Desktop if cfg!(target_os = "macos") => macos::run(&project, profile, args),
-        Target::Desktop => desktop::run(&project, profile, args),
-        Target::Web { browser } => {
-            let out = web::build(&project, profile)?;
-            serve::serve_and_open(out, browser)
-        }
-        Target::IosSimulator(simulator) => {
-            let app = ios::build(&project, profile, Signing::Simulator)?;
-            ios::run_simulator(&app, &simulator)
-        }
-        Target::IosDevice(device) => {
-            let app = ios::build(&project, profile, Signing::Development(Some(&device)))?;
-            ios::run_device(&app, &device)
-        }
-        Target::AndroidEmulator(avd) => {
-            let device = android::boot_emulator(&avd)?;
-            run_android(&project, profile, &device)
-        }
-        Target::AndroidDevice(device) => run_android(&project, profile, &device),
+        Target::Desktop if cfg!(target_os = "windows") => windows::run(&project, profile, args),
+        Target::Desktop => linux::run(&project, profile, args),
+        Target::Web { browser } => web::run(&project, profile, browser),
+        Target::IosSimulator(simulator) => ios::run_on_simulator(&project, profile, &simulator),
+        Target::IosDevice(device) => ios::run_on_device(&project, profile, &device),
+        Target::AndroidEmulator(avd) => android::run_on_emulator(&project, profile, &avd),
+        Target::AndroidDevice(device) => android::run_on_device(&project, profile, &device),
     }
-}
-
-/// The library for the device's own processor, packaged, installed and launched.
-fn run_android(project: &Project, profile: Profile, device: &android::Device) -> Result<()> {
-    let abi = android::device_abi(&device.serial)?;
-    let apk = android::build(project, profile, abi)?;
-    android::run(&apk, device)
 }
 
 fn build(
@@ -236,27 +215,15 @@ fn build(
     let outputs = match target {
         BuildTarget::Macos => vec![macos::build_app(&project, profile)?],
         BuildTarget::Dmg => vec![macos::build_dmg(&project, profile)?],
-        BuildTarget::Windows | BuildTarget::Linux => {
-            desktop::build(&project, profile, Format::Folder)?
-        }
-        BuildTarget::Msi => desktop::build(&project, profile, Format::Msi)?,
-        BuildTarget::Nsis => desktop::build(&project, profile, Format::Nsis)?,
-        BuildTarget::Deb => desktop::build(&project, profile, Format::Deb)?,
-        BuildTarget::Appimage => desktop::build(&project, profile, Format::AppImage)?,
-        BuildTarget::Ios => {
-            let signing = if simulator {
-                Signing::Simulator
-            } else {
-                Signing::Development(None)
-            };
-            vec![ios::build(&project, profile, signing)?.path]
-        }
-        BuildTarget::Ipa => {
-            let app = ios::build(&project, profile, Signing::Distribution)?;
-            let out = project.out_dir("ipa", profile);
-            vec![ios::export_ipa(&project, &app, export_method, &out)?]
-        }
-        BuildTarget::Apk => vec![android::build(&project, profile, android::Abi::Arm64)?.path],
+        BuildTarget::Windows => windows::build(&project, profile, windows::Format::Folder)?,
+        BuildTarget::Msi => windows::build(&project, profile, windows::Format::Msi)?,
+        BuildTarget::Nsis => windows::build(&project, profile, windows::Format::Nsis)?,
+        BuildTarget::Linux => linux::build(&project, profile, linux::Format::Folder)?,
+        BuildTarget::Deb => linux::build(&project, profile, linux::Format::Deb)?,
+        BuildTarget::Appimage => linux::build(&project, profile, linux::Format::AppImage)?,
+        BuildTarget::Ios => vec![ios::build_app(&project, profile, simulator)?],
+        BuildTarget::Ipa => vec![ios::build_ipa(&project, profile, export_method)?],
+        BuildTarget::Apk => vec![android::build_apk(&project, profile)?],
         BuildTarget::Web => vec![web::build(&project, profile)?],
         BuildTarget::Wasm => vec![wasm::build(&project, profile)?],
     };

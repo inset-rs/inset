@@ -1,4 +1,7 @@
-//! The static web folder: the app's wasm module, its JS glue, and a page with one canvas.
+//! The web: the static folder of the app's wasm module, its JS glue, and a page with one canvas,
+//! which `run` serves here and opens in a browser (`serve.rs`).
+
+mod serve;
 
 use std::fs;
 use std::io::Write;
@@ -11,7 +14,15 @@ use crate::cargo::{self, Artifact, Build};
 use crate::project::{Profile, Project};
 use crate::tools;
 
+pub use serve::Browser;
+
 const WASM_TARGET: &str = "wasm32-unknown-unknown";
+
+/// The folder built, served here and opened in `browser`.
+pub fn run(project: &Project, profile: Profile, browser: Browser) -> Result<()> {
+    let out = build(project, profile)?;
+    serve::serve_and_open(out, browser)
+}
 
 pub fn build(project: &Project, profile: Profile) -> Result<PathBuf> {
     let library = project.library.as_deref().context(

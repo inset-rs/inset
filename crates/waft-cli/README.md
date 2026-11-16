@@ -191,7 +191,11 @@ The CLI puts the `.app` together itself, as it does an iOS app: the executable i
 
 ## Windows
 
-`build windows`, `build msi` and `build nsis` link the app's icon into its executable as a resource (`src/windows_resources.rs`): its sizes from 16 to 256 pixels, as the compiled resource file `rc.exe` would make, written by the CLI and passed to the linker for the app's own crate alone (`cargo rustc -- -Clink-arg=…`), so neither a resource compiler nor a build script is needed. Explorer, the shortcuts and the taskbar show it, and Waft's host gives it to every window whose configuration names no icon, at the title bar's size and at the taskbar's. cargo-packager puts the same icon on the installer. `cargo waft run` builds and runs the same executable; `cargo run` builds one without the icon. Cargo does not track the resource file, only the argument naming it, so the file is named after a hash of its content: a changed icon is a new argument, and the executable links again.
+`build windows`, `build msi` and `build nsis` link the app's icon into its executable as a resource (`src/windows/resources.rs`): its sizes from 16 to 256 pixels, as the compiled resource file `rc.exe` would make, written by the CLI and passed to the linker for the app's own crate alone (`cargo rustc -- -Clink-arg=…`), so neither a resource compiler nor a build script is needed. Explorer, the shortcuts and the taskbar show it, and Waft's host gives it to every window whose configuration names no icon, at the title bar's size and at the taskbar's. cargo-packager puts the same icon on the installer. `cargo waft run` builds and runs the same executable; `cargo run` builds one without the icon. Cargo does not track the resource file, only the argument naming it, so the file is named after a hash of its content: a changed icon is a new argument, and the executable links again.
+
+## Source layout
+
+One module per platform, each with what `build` makes for it, what `run` does there and how it signs: `macos/`, `ios/`, `android`, `windows/`, `linux/`, `web/` and `wasm`. `main.rs` only reads the command and hands it to the platform's module; `packager.rs` holds what Windows and Linux share through cargo-packager, `apple.rs` what macOS and iOS share, and `devices.rs` what `run -d` can name.
 
 ## Tools it fetches
 

@@ -21,8 +21,8 @@ use plist::{Dictionary, Value};
 pub use devices::{
     IosDevice, Simulator, connected_iphones, listed_devices, pick_simulator, simulators,
 };
-pub use export::export_ipa;
-pub use signing::{ExportMethod, Signing};
+pub use signing::ExportMethod;
+use signing::Signing;
 
 use crate::apple;
 use crate::cargo::{self, Artifact, Build};
@@ -38,7 +38,36 @@ pub struct App {
     pub bundle_id: String,
 }
 
-pub fn build(project: &Project, profile: Profile, signing: Signing) -> Result<App> {
+/// `build ios`: the `.app` for a device, signed for the team's development devices, or for the
+/// simulator.
+pub fn build_app(project: &Project, profile: Profile, simulator: bool) -> Result<PathBuf> {
+    let signing = if simulator {
+        Signing::Simulator
+    } else {
+        Signing::Development(None)
+    };
+    Ok(build(project, profile, signing)?.path)
+}
+
+/// `build ipa`: the `.ipa` Xcode signs as it exports the app for `method`.
+pub fn build_ipa(project: &Project, profile: Profile, method: ExportMethod) -> Result<PathBuf> {
+    let app = build(project, profile, Signing::Distribution)?;
+    export::export_ipa(project, &app, method, &project.out_dir("ipa", profile))
+}
+
+/// `run` on `simulator`: the app built for it, installed, and launched there.
+pub fn run_on_simulator(project: &Project, profile: Profile, simulator: &Simulator) -> Result<()> {
+    let app = build(project, profile, Signing::Simulator)?;
+    run_simulator(&app, simulator)
+}
+
+/// `run` on `device`: the app built and signed for it, installed, and launched there.
+pub fn run_on_device(project: &Project, profile: Profile, device: &IosDevice) -> Result<()> {
+    let app = build(project, profile, Signing::Development(Some(device)))?;
+    run_device(&app, device)
+}
+
+fn build(project: &Project, profile: Profile, signing: Signing) -> Result<App> {
     if !cfg!(target_os = "macos") {
         bail!("iOS builds need macOS with the Xcode command line tools");
     }
@@ -215,7 +244,7 @@ fn write_icons(project: &Project, app: &Path) -> Result<Vec<String>> {
     ])
 }
 
-pub fn run_simulator(app: &App, simulator: &Simulator) -> Result<()> {
+fn run_simulator(app: &App, simulator: &Simulator) -> Result<()> {
     let udid = simulator.udid.as_str();
     if simulator.state != "Booted" {
         println!("booting {} ({})", simulator.name, simulator.runtime);
@@ -251,7 +280,7 @@ pub fn run_simulator(app: &App, simulator: &Simulator) -> Result<()> {
     )
 }
 
-pub fn run_device(app: &App, device: &IosDevice) -> Result<()> {
+fn run_device(app: &App, device: &IosDevice) -> Result<()> {
     let device = device.id.as_str();
     tools::run(
         Command::new("xcrun")
