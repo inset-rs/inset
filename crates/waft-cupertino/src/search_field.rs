@@ -954,6 +954,8 @@ mod tests {
             .with_view(Rc::new(TestView::with_pixel_ratio(1600.0, 1200.0, 2.0)));
         let cell = AppCell::with_platform(Rc::new(platform));
         install_fonts(&mut cell.borrow_mut());
+        // The binding's root, which each `pump_app` replaces, as flutter_test's starts with one.
+        build(&cell, SizedBox::new().into_widget());
         cell
     }
 
@@ -966,8 +968,18 @@ mod tests {
         }
     }
 
+    /// Dart's `tester.pumpWidget`: makes `app_widget` the view's child and runs one frame.
+    ///
+    /// One frame only, as Dart's: a rebuild a state schedules after it, such as the field's when
+    /// its editable first reports its scroll metrics, waits for the test's next pump.
     fn pump_app(cell: &AppCell, app_widget: CupertinoApp) {
-        build(cell, app_widget.into_widget());
+        let mut app = cell.borrow_mut();
+        let view = app.platform().views().into_iter().next().expect("one view");
+        let root = waft_widgets::View::new(view, app_widget.into_widget()).into_widget();
+        WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
+        pump(&mut app, Duration::ZERO);
+        drop(app);
+        cell.checkpoint();
     }
 
     fn centered(field: CupertinoSearchTextField) -> CupertinoApp {
@@ -1614,8 +1626,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Flutter's field rebuilds on gaining focus from a scroll metrics notification its \
-                editable sends then, which Waft's editable does not send"]
     fn focused_search_field_hides_prefix_in_higher_accessibility_text_scale_modes() {
         let icon_size = 10.0;
         let field = |focus_node: &Ref<FocusNode>, scale_factor: f64| {
@@ -1671,6 +1681,7 @@ mod tests {
             .with_view(Rc::new(TestView::with_pixel_ratio(0.0, 0.0, 2.0)));
         let cell = AppCell::with_platform(Rc::new(platform));
         install_fonts(&mut cell.borrow_mut());
+        build(&cell, SizedBox::new().into_widget());
         let controller = controller_with(&mut cell.borrow_mut(), "X");
         pump_app(
             &cell,
