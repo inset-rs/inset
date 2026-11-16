@@ -223,6 +223,9 @@ pub struct ScrollMetricsObserver {
 
     /// A native ListView, CustomScrollView or other scrolling widget.
     pub child: WidgetRef,
+
+    /// How many viewports lie between the observer and the scroller it observes; 0 for its immediate descendant.
+    pub depth: u32,
 }
 
 impl ScrollMetricsObserver {
@@ -232,7 +235,14 @@ impl ScrollMetricsObserver {
             key: None,
             controller,
             child: child.into_widget(),
+            depth: 0,
         }
+    }
+
+    /// Observes a scroller `depth` viewports down, inside another scroller.
+    pub fn depth(mut self, depth: u32) -> Self {
+        self.depth = depth;
+        self
     }
 
     /// Sets this observer's identity.
@@ -249,6 +259,7 @@ impl StatelessWidget for ScrollMetricsObserver {
 
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let controller = self.controller.clone();
+        let depth = self.depth;
         let behavior = ScrollConfiguration::of(app, context)
             .copy_with()
             .scrollbars(false);
@@ -259,7 +270,7 @@ impl StatelessWidget for ScrollMetricsObserver {
                     .on_notification({
                         let controller = controller.clone();
                         move |app, notification| {
-                            if notification.depth() == 0 {
+                            if notification.depth() == depth {
                                 controller.schedule_report(app);
                             }
                             false
@@ -268,7 +279,7 @@ impl StatelessWidget for ScrollMetricsObserver {
                     .into_widget(),
             )
             .on_notification(move |app, notification| {
-                if notification.depth() == 0 {
+                if notification.depth() == depth {
                     controller.schedule_report(app);
                 }
                 false

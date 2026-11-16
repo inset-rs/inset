@@ -3,7 +3,7 @@
 //! WinUI makes the items through an `ItemsRepeater` that can make any item on demand. Here a vertical `StackLayout` is Waft's `ListView`, which builds only what is in sight and a margin around it; an item out of that range is brought into view by its estimated offset, from the extents measured so far, and focused once built. A horizontal `StackLayout`, as `SelectorBar` uses, builds every item in a row. The view keeps the built items by index ([`ItemsViewState::register`]), and a later editor must keep that registry exact: focus, Tab and page navigation read it.
 
 mod selection;
-mod selection_model;
+pub(crate) mod selection_model;
 mod selector;
 
 pub use selection::ItemsViewSource;

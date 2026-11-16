@@ -680,6 +680,72 @@ Ported against: aa3207e6
   Reason: framework — `ItemsView` asks only for a flat selection (`SelectAllFlat`), and Waft's list builder has no collection to observe.
   Affect: Inserting or removing items does not shift the selection; an application that does so adjusts the selection itself, and items past a shortened count are dropped. A new count is a new `ItemsSource`: `ItemsViewSource::set_items` clears the selection as `SelectionModel::Source` does.
 
+## sort_indicator.rs → `SortIndicator`
+
+- Change: `SortIndicator` draws the bundled font's `ChevronUp` and `ChevronDown` for an ascending and a descending column.
+  Reason: os — WinUI's `ScrollChevronUpLegacy` and `ScrollChevronDownLegacy` glyphs (U+E96D and U+E96E) are characters of Segoe Fluent Icons, which ships with Windows.
+  Affect: A sorted header's chevron has the Fluent System Icons shape.
+
+## resize_gripper.rs → `ResizeGripper`
+
+- Change: `ResizeGripper` measures a drag by Waft's drag recognizer in global coordinates rather than by a manipulation in its `ManipulationContainer`.
+  Reason: framework — Waft has no manipulation events; global coordinates, like WinUI's container frame, do not move while the drag resizes the column.
+  Affect: A table under a scale transform resizes its column by the pointer's unscaled distance.
+
+## table_view/mod.rs → `TableView`
+
+TableView keeps WinUI's own structure, its rows on the kit's lazy list as `ItemsView` stands in for `ItemsRepeater`, its selection on the kit's `SelectionModel`, and every row and the header laying their cells out in a port of `TableViewCellsPanel`. This replaces the earlier plan 9(a), which would have composed the table from `ItemsView` and `Grid`.
+
+- Change: `TableView` lays its rows out in Waft's lazy `ListView` inside a horizontal viewport as wide as the columns, and draws the vertical scroll bar at the table's own edge, where WinUI's `PART_BodyScroller` is one `ScrollViewer` that scrolls an `ItemsRepeater` both ways.
+  Reason: framework — Waft has no two-dimensional scroll viewer, and its slivers build only the rows in and near the view.
+  Affect: A pan scrolls the rows along one axis at a time, and the header band follows the body's horizontal offset.
+
+- Change: `TableView` resolves an `Auto` column's width from the cells measured so far and resolves it again after the frame in which a measured cell's width changed, where WinUI resolves it again within the same layout pass.
+  Reason: framework — WinUI's cell panel calls `InvalidateMeasure` on the table from inside layout and the layout manager measures the table again in the same tick, while a Waft render object cannot dirty an ancestor's layout during layout.
+  Affect: An `Auto` column shows the default 120 pixels in the table's first frame, and widens one frame after a wider row scrolls into view.
+
+- Change: `TableView` rounds an `Auto` column's width up to a whole device pixel rather than to the nearest.
+  Reason: framework — Waft measures text to fractions of a pixel, and a cell a fraction narrower than its text ellipsizes it, which XAML's whole-pixel text measure does not.
+  Affect: An `Auto` column is up to one pixel wider than XAML's rounding to the nearest pixel would make it.
+
+- Change: `TableView` takes its columns as `TableViewColumn` objects the application makes, keeps and gives it, and `TableViewTextColumn` and `TableViewTemplateColumn` are `TableViewColumn::text` and `TableViewColumn::template`, which take a closure for the cell's text or content in place of a `Binding` or a `DataTemplate`.
+  Reason: language — Rust has no derived classes and no data binding; a column is an object the table writes to, as WinUI's `DependencyObject` is.
+  Affect: An application writes `TableViewColumn::text(app, "Name", |p: &Person| p.name.clone())`, sets its properties with `set_width` and the like, and reads `actual_width` and `sort_direction` from it.
+
+- Change: `TableView`'s `Select`, `Deselect`, `IsSelected`, `DeselectAll`, `SelectedIndex` and `SelectedItem` are members of a `TableViewSelection` the application makes and gives the table, and a table given none selects nothing whatever its selection mode.
+  Reason: framework — a Waft application reaches a control's state through an object it holds, as `ItemsView`'s `ItemsViewSource` does, and a widget has no methods to call.
+  Affect: An application gives `.selection(..)` for selectable rows, calls `select` on the selection with a row of the view, and reads `selected_item` as an index into the source's items.
+
+- Change: `TableView`'s `SortByColumn`, `ToggleSortDirection` and `ClearSort` are members of a `TableViewSort` the application gives the table to sort from code; header clicks sort without one, the direction living on the column.
+  Reason: framework — a widget has no methods an application can call.
+  Affect: A request to a `TableViewSort` no mounted table holds answers false.
+
+- Change: `TableView`'s `SelectionChanged` reports the removed and added items by their indices in the source's items.
+  Reason: language — the items are values with no identity to pass as `Object`s.
+  Affect: A handler reads `removed_items` and `added_items` as `usize` indices into `TableViewSource::items`.
+
+- Change: `TableView`'s keyboard navigation brings a row that is not built into view at an offset estimated from the height of the nearest built row, and focuses it once built.
+  Reason: framework — Waft's `SliverList` cannot build an arbitrary row on demand as `ItemsRepeater::GetOrCreateElement` does.
+  Affect: End, Home, Page Down and Page Up reach every row; over rows of different heights a jump lands near the row and settles once it is built.
+
+- Change: A text column sorts by its cells' text in Rust's string order.
+  Reason: os — WinUI compares strings with Windows' `CompareStringEx` in the user's locale.
+  Affect: Text sorts by code point, so "Zoe" sorts before "anna" and accented letters after the unaccented alphabet.
+
+## table_view/source.rs → `TableViewSource`
+
+- Change: `TableViewSource` holds the items it is given, and `set_items` replaces them all, as the collection it wraps raising a reset, the filter and the sorts applied again to the new items.
+  Reason: framework — WinUI's source observes an `IObservableVector` and applies insertions and removals to its projection one by one, following each row by its object's identity, and the port has no collection to observe.
+  Affect: Giving a table new items clears its selection.
+
+- Change: `TableViewSource::sort` adds a sort axis on every call, where WinUI's `Sort` replaces the axis an earlier call declared with the same key selector.
+  Reason: language — a Rust closure has no identity by which a later call could name an earlier axis.
+  Affect: An application that sorts by the same key again calls `clear_sort` first, and `SortDirection::None` removes no axis.
+
+- Change: `TableViewSource` does not catch a filter predicate or key that panics.
+  Reason: language — WinUI catches a throwing predicate and leaves the item out, and Rust has no exceptions to catch.
+  Affect: A predicate that panics panics the application.
+
 ## page.rs → `Page`
 
 - Change: `Page` keeps its content clear of the system's bars by the ambient `MediaQuery`'s `padding`, and hands its content a `MediaQuery` with that padding removed, wherever the page sits.
@@ -749,3 +815,12 @@ Ported against: aa3207e6
 - `ItemsView`'s other layouts, `LinedFlowLayout` and `UniformGridLayout`, its `ItemTransitionProvider` and its `VerticalScrollController` remain deferred. Trigger: An application needs a grid or flow of items, or animated insertion and removal.
 - `ItemsView`'s and `ItemContainer`'s accessibility, their automation peers and selection patterns, remains deferred. Trigger: The kit gains accessibility support.
 - `ItemsView`'s gamepad and XY focus navigation remains deferred. Trigger: A host supplies gamepad or remote-control input.
+
+- The next step for `TableView`: `insert`, `remove` and `replace` on `TableViewSource`, with `SelectionNode::OnSourceListChanged`, so that a row's selection follows it as items are added and removed in place, as WinUI's projection follows an `IObservableVector`; until then `set_items` replaces the items and clears the selection. Trigger: The inspector's live panels, which refresh their rows while one is selected.
+- `TableView`'s cell editing remains deferred: `IsReadOnly` and `IsEditing`, `CommitEdit` and `CancelEdit`, `BeginningEdit` and `CellEditEnding`, a column's `IsReadOnly` and `CellEditingTemplate`, and the text column's editor. Trigger: An application edits cells in a table.
+- `TableView`'s grouping, `GroupHeaderTemplate` and `TableViewGroupHeader`, remains deferred. Trigger: An application groups a table's rows.
+- `TableView`'s cell tooltips, `CellToolTipBinding`, remain deferred. Trigger: An application shows a cell's full text on hover.
+- `TableView`'s accessibility, its automation peers and the announcements of a sort and a column's new width, remains deferred. Trigger: The kit gains accessibility support.
+- `TableViewColumn`'s `HeaderTemplate` and `HeaderTemplateSelector` remain deferred; a header is its text. Trigger: An application needs a header other than text.
+- `TableView`'s `IsEnabled`, with its rows' `Disabled` and `SelectedDisabled` states, remains deferred. Trigger: An application disables a table.
+- `TableView`'s right-to-left layout, its columns from the right and its header's trailing edge on the left, remains deferred. Trigger: A consumer needs right-to-left layout.

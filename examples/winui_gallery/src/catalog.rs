@@ -80,11 +80,13 @@ pub enum Feature {
     Page,
     /// Rows to select, one or several at a time, and invoke.
     ItemsView,
+    /// Rows of cells in columns to resize, sort and filter.
+    TableView,
 }
 
 impl Feature {
     /// Display order in the navigation pane.
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::Button,
         Self::DropDownButton,
         Self::SplitButton,
@@ -120,6 +122,7 @@ impl Feature {
         Self::TreeView,
         Self::SelectorBar,
         Self::ItemsView,
+        Self::TableView,
         Self::Page,
         Self::Typography,
         Self::Icons,
@@ -164,6 +167,7 @@ impl Feature {
             Self::SelectorBar => "SelectorBar",
             Self::Page => "Page",
             Self::ItemsView => "ItemsView",
+            Self::TableView => "TableView",
             Self::Typography => "Typography",
             Self::Icons => "Icons",
         }
@@ -208,6 +212,7 @@ impl Feature {
             Self::SelectorBar => FluentSymbol::Tabs,
             Self::Page => FluentSymbol::Document,
             Self::ItemsView => FluentSymbol::List,
+            Self::TableView => FluentSymbol::Table,
             Self::Typography => FluentSymbol::TextFont,
             Self::Icons => FluentSymbol::Apps,
         }
@@ -270,6 +275,7 @@ impl Feature {
             Self::SelectorBar => "Switch between a few views of the same page.",
             Self::Page => "Keep an app's content clear of the system's bars and the keyboard.",
             Self::ItemsView => "Show rows to select, one or several at a time, and to open.",
+            Self::TableView => "Show rows of cells in columns to resize, sort and filter.",
             Self::Typography => "Choose text styles and build a clear hierarchy.",
             Self::Icons => "Use Fluent symbols in navigation, actions and status indicators.",
         }

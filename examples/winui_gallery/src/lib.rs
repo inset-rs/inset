@@ -275,6 +275,7 @@ impl GalleryState {
             Feature::TreeView => sections::tree_view::build(resources),
             Feature::SelectorBar => sections::selector_bar::page(resources),
             Feature::ItemsView => sections::items_view::build(resources),
+            Feature::TableView => sections::table_view::build(resources),
             Feature::Typography => sections::typography::build(resources),
             Feature::Icons => sections::icons::build(resources),
             Feature::Page => {

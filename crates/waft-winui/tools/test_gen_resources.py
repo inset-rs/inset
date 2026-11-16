@@ -182,6 +182,14 @@ class ResourceGenerationTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 control_source(root, 'NavigationBackButton')
 
+    def test_control_source_reads_a_default_style_page_that_holds_the_dictionary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            page = root / 'controls/dev/ResizeGripper/ResizeGripper.xaml'
+            page.parent.mkdir(parents=True)
+            page.touch()
+            self.assertEqual(control_source(root, 'ResizeGripper'), page)
+
     def test_legacy_filter_preserves_requested_shared_dimensions(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'resources.xaml'
