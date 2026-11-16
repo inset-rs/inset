@@ -45,6 +45,8 @@ pub(crate) mod popup_menu_defaults_m3;
 pub(crate) mod progress_indicator_defaults_m3;
 pub(crate) mod radio_defaults_m3;
 pub(crate) mod range_slider_defaults_m3;
+pub(crate) mod search_bar_defaults_m3;
+pub(crate) mod search_view_defaults_m3;
 pub(crate) mod segmented_button_defaults_m3;
 pub(crate) mod slider_defaults_m3;
 pub(crate) mod snackbar_defaults_m3;
