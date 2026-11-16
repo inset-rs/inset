@@ -1,12 +1,14 @@
 //! Flutter counterpart: `widgets/app_lifecycle_listener.dart`.
 
 use std::fmt::{self, Debug};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use waft_foundation::{App, Handle, Ref, Task};
 use waft_scheduler::SchedulerBinding;
 
-use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
+use crate::binding::{
+    WidgetsBinding, WidgetsBindingObserver, WidgetsBindingObserverObject, WidgetsBindingObserverRef,
+};
 
 pub use waft_embedder::{AppExitResponse, AppLifecycleState};
 
@@ -116,7 +118,9 @@ pub struct AppLifecycleListener {
     ///
     /// This callback is only called on iOS and Android.
     pub on_detach: Option<Rc<dyn Fn(&mut App)>>,
-    observer: Option<WidgetsBindingObserverRef>,
+    /// The observer the binding holds, which keeps this listener, held weakly here so the two make
+    /// no ring; `dispose` removes it from the binding by it.
+    observer: Option<Weak<dyn WidgetsBindingObserver>>,
     debug_disposed: bool,
 }
 
@@ -148,11 +152,11 @@ impl AppLifecycleListener {
             observer: None,
             debug_disposed: false,
         });
-        // The binding names the listener without keeping it: the listener's own `observer` field
-        // holds this `Rc`, so a `Ref` in it would be a ring. One dropped without `dispose` is
-        // skipped once it is freed.
-        let observer: WidgetsBindingObserverRef = Rc::new(this.handle());
-        app.get_mut(&this).observer = Some(Rc::clone(&observer));
+        // Dart's `binding.addObserver(this)`: the binding's observer keeps the listener, as Dart's
+        // observer list keeps the listener itself, so one dropped without `dispose` still hears
+        // until `dispose` removes it, which then frees it.
+        let observer: WidgetsBindingObserverRef = Rc::new(this.clone());
+        app.get_mut(&this).observer = Some(Rc::downgrade(&observer));
         binding.add_observer(app, observer);
         this
     }
@@ -234,7 +238,7 @@ impl AppLifecycleListener {
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         debug_assert!(self.debug_assert_not_disposed(app));
         let binding = app.get(self).binding;
-        if let Some(observer) = app.get_mut(self).observer.take() {
+        if let Some(observer) = app.get_mut(self).observer.take().and_then(|o| o.upgrade()) {
             binding.remove_observer(app, &observer);
         }
         if cfg!(debug_assertions) {
@@ -380,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn a_listener_dropped_without_dispose_is_skipped_once_freed() {
+    fn a_listener_dropped_without_dispose_still_hears_a_lifecycle_change() {
         let cell = detached_app();
         let mut app = cell.borrow_mut();
         let fired = Rc::new(Cell::new(false));
@@ -393,10 +397,28 @@ mod tests {
         cell.checkpoint();
         let mut app = cell.borrow_mut();
         set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
-        assert!(!fired.get());
-        let skipped = app.debug_take_skipped_tear_offs();
-        assert_eq!(skipped.len(), 1, "{skipped:?}");
-        assert!(skipped[0].contains("AppLifecycleListener"), "{skipped:?}");
+        assert!(
+            fired.get(),
+            "the binding keeps the listener, as Dart's observer list does"
+        );
+        assert!(app.debug_take_skipped_tear_offs().is_empty());
+    }
+
+    #[test]
+    fn a_disposed_listener_is_freed_at_the_next_checkpoint() {
+        let cell = detached_app();
+        let mut app = cell.borrow_mut();
+        let listener = AppLifecycleListener::new(&mut app);
+        let handle = listener.handle();
+        drop(listener);
+        handle.dispose(&mut app);
+        assert_eq!(WidgetsBinding::instance(&mut app).observer_count(&app), 0);
+        drop(app);
+        cell.checkpoint();
+        assert!(
+            !cell.borrow().contains(handle),
+            "nothing keeps it once disposed"
+        );
     }
 
     /// The host reports `state`, as Dart's test sends it on `flutter/lifecycle`.

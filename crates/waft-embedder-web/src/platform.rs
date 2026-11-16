@@ -358,8 +358,10 @@ impl ViewHost for WebView {
     fn request_focus_change(&self, _state: ViewFocusState, _direction: ViewFocusDirection) {}
 }
 
-impl TextInputHost for WebView {
-    fn start(&self, configuration: &TextInputConfiguration) {
+impl WebView {
+    /// The field of a client configured with `configuration`, made and focused where the view has
+    /// none, else configured anew.
+    fn open_text_input(&self, configuration: &TextInputConfiguration) {
         if let Some(input) = self.text_input.borrow().as_ref() {
             input.apply_configuration(configuration);
             input.set_dpr(self.metrics.get().device_pixel_ratio);
@@ -376,10 +378,31 @@ impl TextInputHost for WebView {
         *self.text_input.borrow_mut() = Some(input);
     }
 
-    fn stop(&self) {
+    fn close_text_input(&self) {
         if let Some(input) = self.text_input.borrow_mut().take() {
             input.stop();
         }
+    }
+}
+
+impl TextInputHost for WebView {
+    fn set_client(&self, configuration: &TextInputConfiguration) {
+        self.open_text_input(configuration);
+    }
+
+    /// The field has the focus since `set_client`, which is what shows the browser's keyboard.
+    fn show(&self) {}
+
+    fn update_config(&self, configuration: &TextInputConfiguration) {
+        self.open_text_input(configuration);
+    }
+
+    fn clear_client(&self) {
+        self.close_text_input();
+    }
+
+    fn hide(&self) {
+        self.close_text_input();
     }
 
     fn set_editing_state(&self, value: &TextEditingValue) {

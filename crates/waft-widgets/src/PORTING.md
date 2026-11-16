@@ -108,9 +108,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the host reports the drag at the window, and the binding's observers are where window-level events reach the tree.
   Affect: any observer hears every drag over any view, an `on_dropped` callback starts each read it wants before it returns, as the HTML spec's drag data store is protected until the drop, and with a host that reports no position the whole view is the target.
 
-- Change: the binding keeps an observer as `Rc<dyn WidgetsBindingObserver>`. `DropListener` and `LocalizationsResolver` register an `Rc` that holds a `Ref` to themselves, which their `dispose` removes; `AppLifecycleListener` registers its bare handle, and a bare-handle observer whose object is freed is skipped as a tear-off is (`App::tear_off_receiver_is_live`).
-  Reason: language — Dart's `_observers` list holds each observer until `removeObserver`, which a `Ref` in the `Rc` is; `AppLifecycleListener` keeps that `Rc` in its own `observer` field, where a `Ref` would be a ring.
-  Affect: a `DropListener` or `LocalizationsResolver` never disposed is never freed, as in Dart; an `AppLifecycleListener` dropped without `dispose` stops hearing at the next checkpoint, and a debug build reports it once among the skipped tear-offs.
+- Change: the binding keeps an observer as `Rc<dyn WidgetsBindingObserver>`. `DropListener`, `LocalizationsResolver` and `AppLifecycleListener` register an `Rc` that holds a `Ref` to themselves, which their `dispose` removes; `AppLifecycleListener` holds that `Rc` weakly, to remove it by, and a bare-handle observer whose object is freed is skipped as a tear-off is (`App::tear_off_receiver_is_live`).
+  Reason: language — Dart's `_observers` list holds each observer until `removeObserver`, which a `Ref` in the `Rc` is; a strong `Rc` in the listener's own field would make a ring.
+  Affect: a `DropListener`, `LocalizationsResolver` or `AppLifecycleListener` never disposed is never freed and keeps hearing, as in Dart; one disposed is freed at the next checkpoint.
 
 - Change: `WidgetsBinding` follows the platform's caption settings itself and tells its observers each change through `WidgetsBindingObserver::did_change_caption_style`, which Flutter has no counterpart of.
   Reason: platform — the caption settings tell their changes by a future of their own, where the other system settings reach the binding through the dispatcher.

@@ -273,14 +273,29 @@ pub trait ViewHost {
     }
 }
 
-/// The host side of Flutter's text input connection for one view.
+/// The host side of Flutter's text input connection for one view: the calls Flutter's framework
+/// sends its engine on the `flutter/textinput` channel, one method each.
+///
+/// A client is one text field's connection: [`set_client`](Self::set_client) starts a new one,
+/// which a host whose input method keeps state by the field it edits, as UIKit does, gives a field
+/// of its own; [`update_config`](Self::update_config) changes the current one's configuration.
 pub trait TextInputHost {
-    /// Flutter `TextInput.attach` / `TextInputConnection.show`: start an IME
-    /// session for this view.
-    fn start(&self, configuration: &TextInputConfiguration);
+    /// Flutter `TextInput.setClient`: a new client, configured with `configuration`, has the
+    /// connection from now on. The keyboard shows only at [`show`](Self::show).
+    fn set_client(&self, configuration: &TextInputConfiguration);
 
-    /// Flutter `TextInputConnection.close`: end the IME session.
-    fn stop(&self);
+    /// Flutter `TextInput.show`: the input method shows for the current client.
+    fn show(&self);
+
+    /// Flutter `TextInput.updateConfig`: the current client's configuration changed.
+    fn update_config(&self, configuration: &TextInputConfiguration);
+
+    /// Flutter `TextInput.clearClient`: the current client gave the connection up. The keyboard
+    /// stays until [`hide`](Self::hide), so a field taking the connection next keeps it up.
+    fn clear_client(&self);
+
+    /// Flutter `TextInput.hide`: the input method goes.
+    fn hide(&self);
 
     /// Flutter `TextInputConnection.setEditingState`.
     fn set_editing_state(&self, value: &TextEditingValue);

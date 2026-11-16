@@ -88,15 +88,16 @@ define_class!(
             self.ivars().connected.get()
         }
 
-        /// Flutter's `resignFirstResponder`: where the framework did not close the connection
-        /// itself, the field is done with it and the framework hears it closed.
+        /// Flutter's `resignFirstResponder`: where the framework did not ask for it, the
+        /// framework hears its client's connection closed, which a field no client has any more,
+        /// as another field takes the first responder from it, says of none.
         #[unsafe(method(resignFirstResponder))]
         fn resign_first_responder(&self) -> bool {
             // SAFETY: the super call of the method overridden here.
             let resigned: bool = unsafe { msg_send![super(self), resignFirstResponder] };
-            if resigned && !self.ivars().resigning_from_framework.get() {
-                self.ivars().connected.set(false);
-                deliver(HostEvent::TextInputClosed(self.ivars().view));
+            let ivars = self.ivars();
+            if resigned && !ivars.resigning_from_framework.get() && ivars.connected.get() {
+                deliver(HostEvent::TextInputClosed(ivars.view));
             }
             resigned
         }
@@ -625,27 +626,42 @@ impl WaftTextField {
         unsafe { msg_send![super(this), initWithFrame: CGRect::ZERO] }
     }
 
-    /// The framework connected a field configured with `traits`: the keyboard takes them, and
-    /// shows. A field already showing it reloads it, so new traits take.
-    pub(crate) fn show(&self, traits: Traits) {
+    /// Flutter's `configureWithDictionary:` and `setTextInputClient:`: the field is the client's,
+    /// with its keyboard's `traits`.
+    pub(crate) fn configure(&self, traits: Traits) {
         *self.ivars().traits.borrow_mut() = traits;
         self.ivars().connected.set(true);
-        if self.isFirstResponder() {
+    }
+
+    /// Flutter's `updateConfig:`, of which iOS takes only whether the text is secure: the space
+    /// bar's cursor depends on it, so the keyboard reloads where it changed.
+    pub(crate) fn update_secure_text_entry(&self, secure: bool) {
+        let changed = {
+            let mut traits = self.ivars().traits.borrow_mut();
+            let changed = traits.secure_text_entry != secure;
+            traits.secure_text_entry = secure;
+            changed
+        };
+        if changed {
             self.reloadInputViews();
-        } else {
-            self.becomeFirstResponder();
         }
     }
 
-    /// Whether the field still has the connection it was shown for.
-    pub(crate) fn is_connected(&self) -> bool {
-        self.ivars().connected.get()
+    /// Flutter's `setTextInputClient:0` with its frame emptied, as `clearTextInputClient` does: no
+    /// client has the field any more.
+    pub(crate) fn disconnect(&self) {
+        self.ivars().connected.set(false);
+        self.setFrame(CGRect::ZERO);
     }
 
-    /// The framework closed the field's connection: the keyboard goes, and the framework does not
-    /// hear of it.
-    pub(crate) fn hide(&self) {
-        self.ivars().connected.set(false);
+    /// Flutter's `becomeFirstResponderFromFramework`: the keyboard shows for the field.
+    pub(crate) fn become_first_responder_from_framework(&self) {
+        self.becomeFirstResponder();
+    }
+
+    /// Flutter's `resignFirstResponderFromFramework`: the keyboard goes, and the framework, which
+    /// asked, does not hear of it.
+    pub(crate) fn resign_first_responder_from_framework(&self) {
         self.ivars().resigning_from_framework.set(true);
         self.resignFirstResponder();
         self.ivars().resigning_from_framework.set(false);

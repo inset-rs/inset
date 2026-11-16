@@ -29,17 +29,13 @@ Embedder implementation references: Flutter's iOS embedding under `flutter/engin
 
 ## text_input/ → `FlutterTextInputPlugin` and `FlutterTextInputView`
 
-- Change: the field sits in the view's `UIView` at the editable's origin, where Flutter's sits in an input hider beside it, and the view's `UIView` takes the first responder back when the framework closes a connection.
+- Change: the field sits in the view's `UIView` at the editable's origin, where Flutter's sits in an input hider beside it, and the view's `UIView` takes the first responder back when the framework hides the keyboard.
   Reason: architecture — a view's `UIView` is the responder the hardware keyboard's presses reach between fields (`ui_view.rs`), and the field's place in it is the one UIKit's autocorrection highlight needs on iOS 17.
   Affect: none an app sees.
 
 - Change: UIKit's `UITextInputStringTokenizer` answers the field's tokenizer questions, where Flutter's own takes line boundaries from the selection rects.
   Reason: simplification — the line granularity serves the iOS 16 Scribble highlight and caret movement by line, which the floating cursor and Scribble need first.
   Affect: a keyboard asking for the line around a position in a multiline field gets the string tokenizer's answer, which knows of no wrapping.
-
-- Change: a connection the framework replaces without closing it keeps the field of the one it replaces.
-  Reason: architecture — the framework's `TextInput::attach` starts the host as `show` and `update_config` do, so the host sees a new connection only after a closed one; Flutter's `setClient` names each.
-  Affect: a text field that takes another's connection before the other closes it gets the keyboard's state the other left, its suggestions and autocorrection among them.
 
 ## keys.rs → `FlutterEmbedderKeyResponder`
 

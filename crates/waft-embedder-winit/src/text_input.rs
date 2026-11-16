@@ -37,7 +37,8 @@ pub(crate) struct TextInput {
     /// The view's window, held weakly: the text input of a view with no window, before its
     /// window opens or once it closed, does nothing.
     window: RefCell<Option<Weak<dyn Window>>>,
-    /// Set from `TextInputHost::start` to `TextInputHost::stop`; an unhandled key types into it.
+    /// The current client's, from `TextInputHost::set_client` to `TextInputHost::clear_client` or
+    /// `TextInputHost::hide`; an unhandled key types into it.
     active: Cell<Option<ActiveTextInput>>,
     /// The editing value as the framework last set it, and as the IME's events changed it since.
     editing_value: RefCell<TextEditingValue>,
@@ -127,6 +128,36 @@ impl TextInput {
     }
 }
 
+impl TextInput {
+    /// Opens a client configured with `configuration` on the window's input method, its purpose a
+    /// password's where the text is obscured (`start_request`).
+    fn open(&self, configuration: &TextInputConfiguration) {
+        let active = ActiveTextInput::new(configuration);
+        self.active.set(Some(active));
+        self.request_input_method(active.purpose);
+    }
+
+    fn request_input_method(&self, purpose: ImePurpose) {
+        let Some(window) = self.window() else {
+            return;
+        };
+        let request = start_request(
+            window.ime_capabilities().is_some(),
+            purpose,
+            self.cursor_area.get(),
+        );
+        let _ = window.request_ime_update(request);
+    }
+
+    /// Closes the client, and the window's input method with it.
+    fn close(&self) {
+        self.active.set(None);
+        if let Some(window) = self.window() {
+            let _ = window.request_ime_update(ImeRequest::Disable);
+        }
+    }
+}
+
 impl TextInputHost for TextInput {
     /// While the system's menus send Edit's cut, copy and paste, as macOS's menu bar does while it
     /// holds those items, which a key the framework leaves reaches (`menus/`).
@@ -134,26 +165,28 @@ impl TextInputHost for TextInput {
         System::provides_edit_commands()
     }
 
-    /// Opens this input on the window's input method, its purpose a password's where the text is
-    /// obscured (`start_request`).
-    fn start(&self, configuration: &TextInputConfiguration) {
-        self.active.set(Some(ActiveTextInput::new(configuration)));
-        let Some(window) = self.window() else {
-            return;
-        };
-        let request = start_request(
-            window.ime_capabilities().is_some(),
-            purpose_of(configuration),
-            self.cursor_area.get(),
-        );
-        let _ = window.request_ime_update(request);
+    /// Opens the new client on the window's input method.
+    fn set_client(&self, configuration: &TextInputConfiguration) {
+        self.open(configuration);
     }
 
-    fn stop(&self) {
-        self.active.set(None);
-        if let Some(window) = self.window() {
-            let _ = window.request_ime_update(ImeRequest::Disable);
+    /// Asks the window's input method again for the current client.
+    fn show(&self) {
+        if let Some(active) = self.active.get() {
+            self.request_input_method(active.purpose);
         }
+    }
+
+    fn update_config(&self, configuration: &TextInputConfiguration) {
+        self.open(configuration);
+    }
+
+    fn clear_client(&self) {
+        self.close();
+    }
+
+    fn hide(&self) {
+        self.close();
     }
 
     fn set_editing_state(&self, value: &TextEditingValue) {
@@ -224,11 +257,12 @@ fn start_request(ime_on: bool, purpose: ImePurpose, cursor_area: Option<CursorAr
     )
 }
 
-/// The text input a view opened with `TextInputHost::start`, kept until `TextInputHost::stop`.
+/// The text input of a view's current client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ActiveTextInput {
     multiline: bool,
     input_action: TextInputAction,
+    purpose: ImePurpose,
 }
 
 impl ActiveTextInput {
@@ -238,6 +272,7 @@ impl ActiveTextInput {
             // flags do not make it a multiline one.
             multiline: configuration.input_type.index == TextInputType::MULTILINE.index,
             input_action: configuration.input_action,
+            purpose: purpose_of(configuration),
         }
     }
 
@@ -306,6 +341,7 @@ mod tests {
         ActiveTextInput {
             multiline: false,
             input_action: TextInputAction::Done,
+            purpose: ImePurpose::Normal,
         }
     }
 
@@ -313,6 +349,7 @@ mod tests {
         ActiveTextInput {
             multiline: true,
             input_action: TextInputAction::Newline,
+            purpose: ImePurpose::Normal,
         }
     }
 

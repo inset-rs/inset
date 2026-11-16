@@ -17,10 +17,8 @@ image-worker = ["valo-codec/worker"]
 # The text field without the host, for the tests that run in the simulator.
 test-support = []
 
-[dependencies]
-waft-embedder.workspace = true
-
 [target.'cfg(target_os = "ios")'.dependencies]
+waft-embedder.workspace = true
 # Core Animation's compositor and the layer a view draws into, IOSurface buffers, AVFoundation's
 # media, Image I/O's codecs and the notification center, which macOS shares.
 waft-embedder-apple = { workspace = true, default-features = false }
@@ -53,6 +51,8 @@ harness = false
 
 [dev-dependencies]
 waft-embedder-ios = { path = ".", features = ["test-support"] }
+# The keys, the lifecycle and the metrics are tested on any machine, in the framework's terms.
+waft-embedder.workspace = true
 
 [target.'cfg(target_os = "ios")'.dev-dependencies]
 objc2 = "0.6"
