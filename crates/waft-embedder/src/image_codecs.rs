@@ -4,8 +4,7 @@
 //! codecs as an app uses them itself, to read and write image files: Apple's Image I/O,
 //! Android's `AImageDecoder` and `AndroidBitmap_compress`, Windows' `BitmapDecoder` and
 //! `BitmapEncoder`, the web's `ImageDecoder`. They follow `wasdk:media/image-codecs` one to one,
-//! and are a module of their own, named as that interface is, since the crate's root holds
-//! dart:ui's `ImageFrame`, which this module's [`ImageFrame`] would collide with.
+//! and are a module of their own, named as that interface is.
 //!
 //! Pixels are in one of two kinds of memory, and every move between them is a call of its own, so
 //! an app sees each copy it makes. An image decodes into the app's memory, a [`PixelBuffer`], on
@@ -21,8 +20,10 @@
 //! buffer comes back to the app's memory only through [`HardwareBuffer::read_pixels`].
 //!
 //! An image is opened from its bytes, or from a file, which the system reads only as far as it
-//! needs; opening reads what the image says of itself, its format, size, frames, orientation and
-//! metadata, and its pixels are decoded when asked, upright, at the size asked. A photo's location
+//! needs; opening reads what the image says of itself, its format, size, orientation and metadata,
+//! and how its pictures go: one still picture, the frames of an animation played a number of times
+//! or forever, or the pages of a document, each its own picture ([`ImagePictures`]). Its pixels are
+//! decoded when asked, a picture at a time, upright, at the size asked. A photo's location
 //! is the user's location data, given as the file holds it to the app that holds the file; encoding
 //! writes no metadata, so pixels encoded again carry no location.
 //!
@@ -50,7 +51,7 @@ pub trait ImageCodecs {
     /// The formats it encodes, by MIME type.
     fn encoded_formats(&self) -> Vec<String>;
 
-    /// The image `data` encodes, read as far as its size, frames, orientation and metadata:
+    /// The image `data` encodes, read as far as its size, pictures, orientation and metadata:
     /// [`ImageErrorKind::Unsupported`] for bytes of no format it decodes,
     /// [`ImageErrorKind::Damaged`] for bytes it cannot read that far.
     fn open(&self, data: Arc<[u8]>) -> ImageFuture<Box<dyn ImageSource>>;
@@ -77,46 +78,49 @@ pub trait ImageCodecs {
 }
 
 /// An image opened by the system's codecs from its encoded bytes, as Apple's `CGImageSource` and
-/// Android's `ImageDecoder.Source` are: what it says of itself, read as it opened, and its frames
-/// decoded as the app asks for them. A frame it does not have fails, as [`ImageErrorKind::Other`].
+/// Android's `ImageDecoder.Source` are: what it says of itself, read as it opened, and its
+/// pictures decoded as the app asks for them. A picture it does not have fails, as
+/// [`ImageErrorKind::Other`].
 ///
 /// A host gets its own type back from an image it is given by downcasting through `Any`.
 pub trait ImageSource: Any {
     /// Its format's MIME type, one of the [`ImageCodecs::decoded_formats`].
     fn mime_type(&self) -> String;
 
-    /// Its size in pixels, upright, as its first frame decodes at full size; an animation's
-    /// frames share it.
+    /// Its size in pixels, upright, as its primary picture decodes at full size: a still image's
+    /// one, an animation's frames, which all share it, or a document's primary page.
     fn size(&self) -> Size;
 
-    /// Its frames, in order: one for a still image, an animation's each with how long it shows,
-    /// and the pages of a file of several.
-    fn frames(&self) -> Vec<ImageFrame>;
+    /// How its pictures go: one still picture, the frames of an animation, or the pages of a
+    /// document.
+    fn pictures(&self) -> ImagePictures;
 
-    /// How the file stores the picture turned from upright. It is decoded upright, and
+    /// How the file stores its primary picture turned from upright. It is decoded upright, and
     /// [`size`](Self::size) is upright, so an app reads it to show it or to keep it.
     fn orientation(&self) -> ImageOrientation;
 
-    /// What the file says of how it was taken.
+    /// What the file says of how its primary picture was taken.
     fn metadata(&self) -> ImageMetadata;
 
-    /// Frame `frame` of [`frames`](Self::frames) in the app's memory, upright, scaled down to fit
-    /// `max_size`, in pixels, keeping its shape, where given; in a layout the system picks, which
-    /// the buffer names.
-    fn decode_pixels(&self, frame: u32, max_size: Option<Size>) -> ImageFuture<PixelBuffer>;
+    /// Picture `index` in the app's memory, upright, scaled down to fit `max_size`, in pixels,
+    /// keeping its shape, where given; in a layout the system picks, which the buffer names. The
+    /// index is 0 for a still image, a frame's for an animation and a page's for a document
+    /// ([`pictures`](Self::pictures)).
+    fn decode_pixels(&self, index: u32, max_size: Option<Size>) -> ImageFuture<PixelBuffer>;
 }
 
 /// The system's codecs between encoded images and hardware buffers, with no copy through the
 /// app's memory, or `None` from [`ImageCodecs::hardware_image_codecs`] where it has none.
 pub trait HardwareImageCodecs {
-    /// Frame `frame` of `image`'s frames in a hardware buffer of the app's own, for sampling,
-    /// upright, scaled down to fit `max_size`, in pixels, keeping its shape, where given:
+    /// Picture `index` of `image`, as [`ImageSource::decode_pixels`] names it, in a hardware buffer
+    /// of the app's own, for sampling, upright, scaled down to fit `max_size`, in pixels, keeping
+    /// its shape, where given:
     /// [`ImageErrorKind::TooLarge`] where it is larger than a hardware buffer the system makes. An
     /// image another host opened fails, as [`ImageErrorKind::Unsupported`].
     fn decode(
         &self,
         image: &dyn ImageSource,
-        frame: u32,
+        index: u32,
         max_size: Option<Size>,
     ) -> ImageFuture<Arc<dyn HardwareBuffer>>;
 
@@ -133,12 +137,69 @@ pub trait HardwareImageCodecs {
     ) -> ImageFuture<Vec<u8>>;
 }
 
-/// One of an image's frames.
+/// How an image's pictures go together.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum ImagePictures {
+    /// One picture.
+    #[default]
+    Still,
+    /// Frames shown one after another, as a GIF's, an animated PNG's, WebP's or a HEIF
+    /// sequence's.
+    Animation(ImageAnimation),
+    /// Pictures each of its own, as a TIFF's pages or the images of a HEIF collection.
+    Pages(ImagePages),
+}
+
+/// An animation: its frames and how many times it plays through them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImageAnimation {
+    /// Its frames, in order; two at least.
+    pub frames: Vec<AnimationFrame>,
+    pub plays: AnimationPlays,
+}
+
+/// One frame of an animation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ImageFrame {
-    /// How long it shows in an animation; `None` for a still image's one frame, a page, and a
-    /// frame whose file says nothing, for which an app picks its own.
+pub struct AnimationFrame {
+    /// How long it shows; `None` where the file says nothing, for which an app picks its own.
     pub duration: Option<Duration>,
+}
+
+/// How many times an animation plays through its frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnimationPlays {
+    /// This many times, one at least.
+    Times(u32),
+    Forever,
+}
+
+/// A document's pages, and which of them the file names as its main picture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImagePages {
+    /// Its pages, in order; two at least.
+    pub pages: Vec<ImagePage>,
+    /// The index of the page the file names as its main picture: its first, except where a HEIF
+    /// names another.
+    pub primary: u32,
+}
+
+/// One page of a document, with a size and an orientation of its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ImagePage {
+    /// Its size in pixels, upright.
+    pub size: Size,
+    pub orientation: ImageOrientation,
+}
+
+impl ImagePictures {
+    /// How many pictures the image has: one still, an animation's frames or a document's pages.
+    pub fn count(&self) -> usize {
+        match self {
+            ImagePictures::Still => 1,
+            ImagePictures::Animation(animation) => animation.frames.len(),
+            ImagePictures::Pages(pages) => pages.pages.len(),
+        }
+    }
 }
 
 /// How the picture a file stores is turned from upright: EXIF's `Orientation`, mirrored left to

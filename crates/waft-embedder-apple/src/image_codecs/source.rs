@@ -1,6 +1,11 @@
 //! An image Image I/O opened: its `CGImageSource`, on the image's bytes or on its file's URL, and
-//! what the source's properties say of it, read as it opens: its format, its size upright, its
-//! frames with an animation's delays, its EXIF orientation and its metadata (`exif`).
+//! what the source's properties say of it, read as it opens: its format; how its pictures go; and
+//! its primary picture's size upright, EXIF orientation and metadata (`exif`).
+//!
+//! Image I/O gives every animation a loop count in its format's dictionary of the whole file, a
+//! GIF without a NETSCAPE extension included, which plays once: a count of plays, zero meaning
+//! forever. A file of several pictures with no loop count is a document of pages, as a TIFF and a
+//! HEIF collection are, each page with its own size and orientation, and one named its primary.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -12,18 +17,20 @@ use objc2_core_foundation::{CFData, CFDictionary, CFRetained, CFString, CFURL};
 use objc2_foundation::{NSDictionary, NSNumber, NSString};
 use objc2_image_io::{
     CGImageSource, CGImageSourceStatus, kCGImagePropertyAPNGDelayTime,
-    kCGImagePropertyAPNGUnclampedDelayTime, kCGImagePropertyGIFDelayTime,
-    kCGImagePropertyGIFDictionary, kCGImagePropertyGIFUnclampedDelayTime,
-    kCGImagePropertyHEICSDelayTime, kCGImagePropertyHEICSDictionary,
+    kCGImagePropertyAPNGLoopCount, kCGImagePropertyAPNGUnclampedDelayTime,
+    kCGImagePropertyGIFDelayTime, kCGImagePropertyGIFDictionary, kCGImagePropertyGIFLoopCount,
+    kCGImagePropertyGIFUnclampedDelayTime, kCGImagePropertyHEICSDelayTime,
+    kCGImagePropertyHEICSDictionary, kCGImagePropertyHEICSLoopCount,
     kCGImagePropertyHEICSUnclampedDelayTime, kCGImagePropertyOrientation,
     kCGImagePropertyPNGDictionary, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
-    kCGImagePropertyWebPDelayTime, kCGImagePropertyWebPDictionary,
+    kCGImagePropertyWebPDelayTime, kCGImagePropertyWebPDictionary, kCGImagePropertyWebPLoopCount,
     kCGImagePropertyWebPUnclampedDelayTime,
 };
 use waft_embedder::Size;
 use waft_embedder::image_codecs::{
-    ImageError, ImageErrorKind, ImageFrame, ImageFuture, ImageMetadata, ImageOrientation,
-    ImageRotation, ImageSource, PixelBuffer,
+    AnimationFrame, AnimationPlays, ImageAnimation, ImageError, ImageErrorKind, ImageFuture,
+    ImageMetadata, ImageOrientation, ImagePage, ImagePages, ImagePictures, ImageRotation,
+    ImageSource, PixelBuffer,
 };
 
 use super::decoding::Decoding;
@@ -54,26 +61,35 @@ pub(super) struct ImageIoImage {
     source: Arc<Source>,
     mime_type: String,
     size: Size,
-    frames: Vec<ImageFrame>,
+    pictures: ImagePictures,
     orientation: ImageOrientation,
     metadata: ImageMetadata,
 }
 
 impl ImageIoImage {
-    /// The work of decoding frame `frame` at `max_size`; why not, for a frame it does not have or
-    /// a size of no pixels.
+    /// The work of decoding picture `index` at `max_size`; why not, for a picture it does not
+    /// have or a size of no pixels.
     pub(super) fn decoding(
         &self,
-        frame: u32,
+        index: u32,
         max_size: Option<Size>,
     ) -> Result<Decoding, ImageError> {
-        if frame as usize >= self.frames.len() {
+        if index as usize >= self.pictures.count() {
             return Err(ImageError::new(
                 ImageErrorKind::Other,
-                format!("the image has no frame {frame}"),
+                format!("the image has no picture {index}"),
             ));
         }
-        Decoding::new(Arc::clone(&self.source), frame, self.size, max_size)
+        let size = self.size_of_picture(index);
+        Decoding::new(Arc::clone(&self.source), index, size, max_size)
+    }
+
+    /// The size picture `index` decodes at, upright: a page's own, and the image's otherwise.
+    fn size_of_picture(&self, index: u32) -> Size {
+        match &self.pictures {
+            ImagePictures::Pages(pages) => pages.pages[index as usize].size,
+            ImagePictures::Still | ImagePictures::Animation(_) => self.size,
+        }
     }
 }
 
@@ -86,8 +102,8 @@ impl ImageSource for ImageIoImage {
         self.size
     }
 
-    fn frames(&self) -> Vec<ImageFrame> {
-        self.frames.clone()
+    fn pictures(&self) -> ImagePictures {
+        self.pictures.clone()
     }
 
     fn orientation(&self) -> ImageOrientation {
@@ -98,8 +114,8 @@ impl ImageSource for ImageIoImage {
         self.metadata.clone()
     }
 
-    fn decode_pixels(&self, frame: u32, max_size: Option<Size>) -> ImageFuture<PixelBuffer> {
-        let decoding = self.decoding(frame, max_size);
+    fn decode_pixels(&self, index: u32, max_size: Option<Size>) -> ImageFuture<PixelBuffer> {
+        let decoding = self.decoding(index, max_size);
         in_background(move || decoding?.pixels())
     }
 }
@@ -136,19 +152,107 @@ fn read(source: Option<CFRetained<CGImageSource>>) -> Result<ImageIoImage, Image
     let source = source.ok_or_else(|| unsupported("Image I/O made no source of the image"))?;
     let mime_type = mime_type_of(&source)?;
     check_status(&source)?;
-    // SAFETY: plain queries of a source made just now.
-    let count = unsafe { source.count() };
-    let first = properties_at(&source, 0).ok_or_else(|| damaged("the image has no frame"))?;
-    let orientation = orientation_of(number_in(&first, unsafe { kCGImagePropertyOrientation }));
-    let size = upright_size(&first, orientation)?;
+    let pictures = pictures_of(&source)?;
+    let primary = properties_at(&source, primary_of(&pictures))
+        .ok_or_else(|| damaged("the image has no picture"))?;
+    let orientation = orientation_in(&primary);
+    let size = upright_size(&primary, orientation)?;
     Ok(ImageIoImage {
-        frames: frames_of(&source, count),
-        metadata: exif::metadata_of(&first),
+        pictures,
+        metadata: exif::metadata_of(&primary),
         source: Arc::new(Source::of(source)),
         mime_type,
         size,
         orientation,
     })
+}
+
+/// How `source`'s pictures go: an animation where its format's dictionary of the whole file has
+/// a loop count, a document of pages where it has several pictures and none, and one still
+/// picture otherwise.
+fn pictures_of(source: &CGImageSource) -> Result<ImagePictures, ImageError> {
+    // SAFETY: a plain query of a source made just now.
+    let count = unsafe { source.count() };
+    if count <= 1 {
+        return Ok(ImagePictures::Still);
+    }
+    Ok(match loop_count_of(source) {
+        Some(loop_count) => ImagePictures::Animation(ImageAnimation {
+            frames: frames_of(source, count),
+            plays: plays_of(loop_count),
+        }),
+        None => ImagePictures::Pages(pages_of(source, count)?),
+    })
+}
+
+/// The index of the picture the image's size, orientation and metadata are read from: a
+/// document's primary page, and the first picture otherwise.
+fn primary_of(pictures: &ImagePictures) -> usize {
+    match pictures {
+        ImagePictures::Pages(pages) => pages.primary as usize,
+        ImagePictures::Still | ImagePictures::Animation(_) => 0,
+    }
+}
+
+/// The loop count of `source`'s animation, from its format's dictionary of the whole file; none
+/// where it is not an animation.
+fn loop_count_of(source: &CGImageSource) -> Option<f64> {
+    // SAFETY: no options; the answer is a CF dictionary of CF strings to property lists.
+    let properties = properties_of(unsafe { source.properties(None) }?);
+    // SAFETY: constants Image I/O exports for the life of the process.
+    let formats = unsafe {
+        [
+            (kCGImagePropertyGIFDictionary, kCGImagePropertyGIFLoopCount),
+            (kCGImagePropertyPNGDictionary, kCGImagePropertyAPNGLoopCount),
+            (
+                kCGImagePropertyHEICSDictionary,
+                kCGImagePropertyHEICSLoopCount,
+            ),
+            (
+                kCGImagePropertyWebPDictionary,
+                kCGImagePropertyWebPLoopCount,
+            ),
+        ]
+    };
+    formats.into_iter().find_map(|(dictionary, loop_count)| {
+        number_in(&*dictionary_in(&properties, dictionary)?, loop_count)
+    })
+}
+
+/// How many times an animation with Image I/O's loop count plays: the count is of plays, and zero
+/// is forever.
+fn plays_of(loop_count: f64) -> AnimationPlays {
+    if loop_count >= 1.0 {
+        AnimationPlays::Times(loop_count as u32)
+    } else {
+        AnimationPlays::Forever
+    }
+}
+
+/// The document's `count` pages, each with its own size and orientation, and the one Image I/O
+/// names its primary.
+fn pages_of(source: &CGImageSource, count: usize) -> Result<ImagePages, ImageError> {
+    let pages = (0..count)
+        .map(|index| {
+            let page = properties_at(source, index)
+                .ok_or_else(|| damaged(&format!("the image says nothing of page {index}")))?;
+            let orientation = orientation_in(&page);
+            let size = upright_size(&page, orientation)?;
+            Ok(ImagePage { size, orientation })
+        })
+        .collect::<Result<Vec<_>, ImageError>>()?;
+    // SAFETY: a plain query; the first for every format but HEIF.
+    let primary = unsafe { source.primary_image_index() }.min(count - 1);
+    Ok(ImagePages {
+        pages,
+        primary: primary as u32,
+    })
+}
+
+/// The orientation `picture`'s properties give it.
+fn orientation_in(picture: &Properties) -> ImageOrientation {
+    // SAFETY: a constant Image I/O exports for the life of the process.
+    orientation_of(number_in(picture, unsafe { kCGImagePropertyOrientation }))
 }
 
 /// The MIME type of the format `source` read its bytes as; [`ImageErrorKind::Unsupported`] for
@@ -176,13 +280,13 @@ fn check_status(source: &CGImageSource) -> Result<(), ImageError> {
     }
 }
 
-/// The image's size upright, from its first frame's pixels and its orientation.
-fn upright_size(first: &Properties, orientation: ImageOrientation) -> Result<Size, ImageError> {
+/// A picture's size upright, from its pixels and its orientation.
+fn upright_size(picture: &Properties, orientation: ImageOrientation) -> Result<Size, ImageError> {
     // SAFETY: constants Image I/O exports for the life of the process.
     let (width, height) = unsafe {
         (
-            number_in(first, kCGImagePropertyPixelWidth),
-            number_in(first, kCGImagePropertyPixelHeight),
+            number_in(picture, kCGImagePropertyPixelWidth),
+            number_in(picture, kCGImagePropertyPixelHeight),
         )
     };
     let (Some(width), Some(height)) = (width, height) else {
@@ -211,14 +315,10 @@ pub(super) fn orientation_of(exif: Option<f64>) -> ImageOrientation {
     ImageOrientation { mirrored, rotation }
 }
 
-/// The source's `count` frames, each with its animation's delay where it is one of several and
-/// its file gives one.
-fn frames_of(source: &CGImageSource, count: usize) -> Vec<ImageFrame> {
-    if count <= 1 {
-        return vec![ImageFrame::default()];
-    }
+/// The animation's `count` frames, each with its delay where its file gives one.
+fn frames_of(source: &CGImageSource, count: usize) -> Vec<AnimationFrame> {
     (0..count)
-        .map(|index| ImageFrame {
+        .map(|index| AnimationFrame {
             duration: properties_at(source, index).and_then(|frame| delay_of(&frame)),
         })
         .collect()
@@ -267,7 +367,7 @@ fn delay_of(frame: &Properties) -> Option<Duration> {
 /// A dictionary of properties, as Image I/O answers them.
 pub(super) type Properties = NSDictionary<NSString, AnyObject>;
 
-/// The properties of the source's frame `index`; none where it has none.
+/// The properties of the source's picture `index`; none where it has none.
 fn properties_at(source: &CGImageSource, index: usize) -> Option<Retained<Properties>> {
     // SAFETY: no options; the answer is a CF dictionary of CF strings to property lists.
     let properties = unsafe { source.properties_at_index(index, None) }?;
@@ -324,6 +424,13 @@ fn damaged(why: &str) -> ImageError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_loop_count_is_of_plays_and_zero_is_forever() {
+        assert_eq!(plays_of(0.0), AnimationPlays::Forever);
+        assert_eq!(plays_of(1.0), AnimationPlays::Times(1));
+        assert_eq!(plays_of(4.0), AnimationPlays::Times(4));
+    }
 
     #[test]
     fn each_exif_orientation_is_a_mirroring_and_a_turn() {
