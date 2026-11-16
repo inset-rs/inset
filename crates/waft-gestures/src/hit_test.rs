@@ -5,7 +5,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Matrix4, Offset, ViewId};
-use waft_foundation::{App, HandleId, RetainedHandleId};
+use waft_foundation::{AnyRef, App, HandleId};
 
 use crate::events::PointerEvent;
 
@@ -44,8 +44,9 @@ pub trait HitTestTarget: Debug + Any {
     fn handle_event(&self, app: &mut App, event: &PointerEvent, entry: &HitTestEntry);
 
     /// The arena object this target delivers to, if it is one, so a result kept across turns
-    /// can [`retain`](App::retain) it: Dart keeps the object alive by holding it in the path.
-    fn retained_handle(&self) -> Option<HandleId> {
+    /// keeps it ([`HitTestResult::keep_targets`]): Dart keeps the object alive by holding it in
+    /// the path.
+    fn arena_id(&self) -> Option<HandleId> {
         None
     }
 }
@@ -135,9 +136,9 @@ impl TransformPart {
 /// `BoxHitTestResult`).
 pub struct HitTestResult {
     path: Vec<HitTestEntry>,
-    /// The retained handles that keep the path's targets while the result outlives its turn;
-    /// empty until [`retain_targets`](Self::retain_targets).
-    retained: Vec<RetainedHandleId>,
+    /// The references that keep the path's targets while the result outlives its turn;
+    /// empty until [`keep_targets`](Self::keep_targets).
+    kept: Vec<AnyRef>,
     // A stack of transform parts.
     //
     // The transform part stack leading from global to the current object is stored
@@ -159,33 +160,24 @@ impl HitTestResult {
     pub fn new() -> HitTestResult {
         HitTestResult {
             path: Vec::new(),
-            retained: Vec::new(),
+            kept: Vec::new(),
             transforms: vec![Matrix4::IDENTITY],
             local_transforms: Vec::new(),
         }
     }
 
-    /// Retains every object on the path, for a result kept past this turn (Dart keeps them alive
-    /// by holding the path). The retained handles live in the result: dropping it releases them
-    /// at the next checkpoint, [`release_targets`](Self::release_targets) releases them now.
-    pub fn retain_targets(&mut self, app: &mut App) {
-        if !self.retained.is_empty() {
+    /// Keeps every object on the path, for a result kept past this turn (Dart keeps them alive
+    /// by holding the path). The references live in the result: dropping it lets go of them.
+    pub fn keep_targets(&mut self, app: &App) {
+        if !self.kept.is_empty() {
             return;
         }
-        self.retained = self
+        self.kept = self
             .path
             .iter()
-            .filter_map(|entry| entry.target.retained_handle())
-            .map(|id| app.retain_id(id))
+            .filter_map(|entry| entry.target.arena_id())
+            .filter_map(|id| id.upgrade(app))
             .collect();
-    }
-
-    /// Releases what [`retain_targets`](Self::retain_targets) retained, without waiting for the
-    /// checkpoint.
-    pub fn release_targets(&mut self, app: &mut App) {
-        for handle in self.retained.drain(..) {
-            app.release_id(handle);
-        }
     }
 
     /// An unmodifiable list of [`HitTestEntry`] objects recorded during the hit test.

@@ -11,39 +11,6 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
 
-use waft_animation::Curves;
-use waft_embedder::{
-    Color, Offset, Size, TargetPlatform, TextAffinity, TextEditingValue, TextInputAction,
-    TextInputType, TextSelection,
-};
-use waft_foundation::{App, Handle, K_IS_WEB, Listener, ValueChanged};
-use waft_painting::{
-    AlignmentGeometry, EdgeInsets, EdgeInsetsDirectional, EdgeInsetsGeometry, TextAlign,
-    TextAlignVertical, TextDirection, TextStyle,
-};
-use waft_rendering::{
-    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
-    ContainerBoxParentData, ContainerParentData, ContainerParentDataMixin,
-    ContainerRenderObjectData, ContainerRenderObjectMixin, PaintingContext, ParentData,
-    PipelineOwner, RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData, RenderHandle,
-    RenderObject, RenderObjectData,
-};
-use waft_scheduler::{FrameCallback, SchedulerBinding};
-use waft_services::{
-    LogicalKeyboardKey, MouseCursorRef, SystemMouseCursors, TextInputFormatterRef,
-};
-use waft_widgets::{
-    Action, Actions, Align, AnyAction, AnyMenuController, AnyTextEditingController, BuildContext,
-    CallbackAction, ConstrainedBox, DefaultTextStyle, Directionality, DismissIntent,
-    DismissMenuAction, ExcludeFocus, ExcludeSemantics, ExtendSelectionByCharacterIntent, Focus,
-    FocusNode, FocusNodeLeaf, GlobalKey, Icon, Intent, IntentRef, IntoWidget, KeyRef,
-    MenuController, MenuControllerLeaf, MultiChildRenderObjectWidget, Padding, RenderObjectWidget,
-    ScrollPositionAlignmentPolicy, Scrollable, Semantics, ShortcutActivatorRef, ShortcutMap,
-    Shortcuts, SingleActivator, SizedBox, Stack, State, StateData, StatefulWidget, Text,
-    TextEditingController, TextEditingControllerLeaf, WidgetRef, WidgetState, WidgetStateProperty,
-    WidgetStatePropertyAll, WidgetStatePropertyRef, WidgetStates, WidgetStatesController,
-};
-
 use crate::button_style::ButtonStyle;
 use crate::dropdown_menu_theme::{
     DropdownMenuTheme, DropdownMenuThemeData, DropdownMenuThemeDataGetters,
@@ -60,6 +27,38 @@ use crate::text_field::TextField;
 use crate::theme::Theme;
 use crate::theme_data::VisualDensity;
 use crate::theme_data_getters::DefaultsContext;
+use waft_animation::Curves;
+use waft_embedder::{
+    Color, Offset, Size, TargetPlatform, TextAffinity, TextEditingValue, TextInputAction,
+    TextInputType, TextSelection,
+};
+use waft_foundation::{App, Handle, K_IS_WEB, Listener, OptionRetained, Ref, ValueChanged};
+use waft_painting::{
+    AlignmentGeometry, EdgeInsets, EdgeInsetsDirectional, EdgeInsetsGeometry, TextAlign,
+    TextAlignVertical, TextDirection, TextStyle,
+};
+use waft_rendering::{
+    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
+    ContainerBoxParentData, ContainerParentData, ContainerParentDataMixin,
+    ContainerRenderObjectData, ContainerRenderObjectMixin, PaintingContext, ParentData,
+    PipelineOwner, RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData, RenderHandle,
+    RenderObject, RenderObjectData,
+};
+use waft_scheduler::{FrameCallback, SchedulerBinding};
+use waft_services::{
+    LogicalKeyboardKey, MouseCursorRef, SystemMouseCursors, TextInputFormatterRef,
+};
+use waft_widgets::{
+    Action, ActionRef, Actions, Align, AnyFocusNode, AnyMenuController, AnyTextEditingController,
+    BuildContext, CallbackAction, ConstrainedBox, DefaultTextStyle, Directionality, DismissIntent,
+    DismissMenuAction, ExcludeFocus, ExcludeSemantics, ExtendSelectionByCharacterIntent, Focus,
+    FocusNode, FocusNodeLeaf, FocusNodeRef, GlobalKey, Icon, Intent, IntentRef, IntoWidget, KeyRef,
+    MenuController, MenuControllerRef, MultiChildRenderObjectWidget, Padding, RenderObjectWidget,
+    ScrollPositionAlignmentPolicy, Scrollable, Semantics, ShortcutActivatorRef, ShortcutMap,
+    Shortcuts, SingleActivator, SizedBox, Stack, State, StateData, StatefulWidget, Text,
+    TextEditingController, TextEditingControllerRef, WidgetRef, WidgetState, WidgetStateProperty,
+    WidgetStatePropertyAll, WidgetStatePropertyRef, WidgetStates, WidgetStatesController,
+};
 
 /// A callback function that returns the list of the items that matches the current applied
 /// filter.
@@ -289,7 +288,7 @@ pub struct DropdownMenu<T: 'static> {
     /// [`trailing_icon_focus_node`](Self::trailing_icon_focus_node) must be null.
     ///
     /// If null, this widget will create its own [`FocusNode`].
-    pub trailing_icon_focus_node: Option<Handle<FocusNode>>,
+    pub trailing_icon_focus_node: Option<FocusNodeRef>,
 
     /// Optional widget that describes the input field.
     ///
@@ -414,7 +413,7 @@ pub struct DropdownMenu<T: 'static> {
     ///
     ///  * [`initial_selection`](Self::initial_selection), which sets the initial selection
     ///    when the widget is first created.
-    pub controller: Option<AnyTextEditingController>,
+    pub controller: Option<TextEditingControllerRef>,
 
     /// The value used for an initial selection.
     ///
@@ -452,7 +451,7 @@ pub struct DropdownMenu<T: 'static> {
     /// If this is non-null, the behaviour of
     /// [`request_focus_on_tap`](Self::request_focus_on_tap) is overridden by the
     /// `FocusNode::can_request_focus` property.
-    pub focus_node: Option<Handle<FocusNode>>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// Determine if the dropdown menu requests focus and the on-screen virtual keyboard is
     /// shown in response to a touch event.
@@ -584,7 +583,7 @@ pub struct DropdownMenu<T: 'static> {
     pub restoration_id: Option<String>,
 
     /// An optional controller that allows opening and closing of the menu from other widgets.
-    pub menu_controller: Option<AnyMenuController>,
+    pub menu_controller: Option<MenuControllerRef>,
 
     /// {@macro flutter.widgets.editableText.scrollPadding}
     pub scroll_padding: EdgeInsets,
@@ -692,7 +691,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenu<T> {
     /// Dart `DropdownMenu(trailingIconFocusNode:)`.
     pub fn trailing_icon_focus_node(
         mut self,
-        trailing_icon_focus_node: Handle<FocusNode>,
+        trailing_icon_focus_node: FocusNodeRef,
     ) -> DropdownMenu<T> {
         self.trailing_icon_focus_node = Some(trailing_icon_focus_node);
         self
@@ -787,7 +786,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenu<T> {
     }
 
     /// Dart `DropdownMenu(controller:)`.
-    pub fn controller(mut self, controller: AnyTextEditingController) -> DropdownMenu<T> {
+    pub fn controller(mut self, controller: TextEditingControllerRef) -> DropdownMenu<T> {
         self.controller = Some(controller);
         self
     }
@@ -808,7 +807,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenu<T> {
     }
 
     /// Dart `DropdownMenu(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: Handle<FocusNode>) -> DropdownMenu<T> {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> DropdownMenu<T> {
         self.focus_node = Some(focus_node);
         self
     }
@@ -899,7 +898,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenu<T> {
     }
 
     /// Dart `DropdownMenu(menuController:)`.
-    pub fn menu_controller(mut self, menu_controller: AnyMenuController) -> DropdownMenu<T> {
+    pub fn menu_controller(mut self, menu_controller: MenuControllerRef) -> DropdownMenu<T> {
         self.menu_controller = Some(menu_controller);
         self
     }
@@ -961,8 +960,6 @@ impl<T: Clone + PartialEq + 'static> StatefulWidget for DropdownMenu<T> {
             focus_node_can_request_focus: None,
             highlighted_item_states_controller: None,
             local_trailing_icon_button_focus_node: None,
-            actions: HashMap::new(),
-            dismiss_menu_action: None,
         }
     }
 }
@@ -973,10 +970,10 @@ pub struct DropdownMenuState<T: Clone + PartialEq + 'static> {
     anchor_key: GlobalKey,
     leading_key: GlobalKey,
     button_item_keys: Vec<GlobalKey>,
-    controller: Option<AnyMenuController>,
+    controller: Option<MenuControllerRef>,
     /// The `MenuController` Dart's `widget.menuController ?? MenuController()` makes, which
-    /// this state frees.
-    internal_menu_controller: Option<Handle<MenuController>>,
+    /// this state holds.
+    internal_menu_controller: Option<Ref<MenuController>>,
     enable_filter: bool,
     enable_search: bool,
     filtered_entries: Rc<[DropdownMenuEntry<T>]>,
@@ -984,15 +981,11 @@ pub struct DropdownMenuState<T: Clone + PartialEq + 'static> {
     current_highlight: Option<usize>,
     leading_padding: Option<f64>,
     menu_has_enabled_item: bool,
-    local_text_editing_controller: Option<Handle<TextEditingController>>,
-    internal_focus_node: Option<Handle<FocusNode>>,
+    local_text_editing_controller: Option<Ref<TextEditingController>>,
+    internal_focus_node: Option<Ref<FocusNode>>,
     focus_node_can_request_focus: Option<bool>,
-    highlighted_item_states_controller: Option<Handle<WidgetStatesController>>,
-    local_trailing_icon_button_focus_node: Option<Handle<FocusNode>>,
-    /// The `CallbackAction`s of the arrow and enter intents, which Dart's `build` makes anew
-    /// each time; made once in `init_state`.
-    actions: HashMap<TypeId, AnyAction>,
-    dismiss_menu_action: Option<Handle<DismissMenuAction>>,
+    highlighted_item_states_controller: Option<Ref<WidgetStatesController>>,
+    local_trailing_icon_button_focus_node: Option<Ref<FocusNode>>,
 }
 
 /// Dart's `_editableShortcuts`.
@@ -1081,58 +1074,55 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
     fn effective_text_editing_controller(
         self: Handle<Self>,
         app: &mut App,
-    ) -> AnyTextEditingController {
-        if let Some(controller) = self.widget(app).controller {
+    ) -> TextEditingControllerRef {
+        if let Some(controller) = self.widget(app).controller.clone() {
             return controller;
         }
-        if let Some(controller) = app.get(self).local_text_editing_controller {
-            return controller.as_controller();
+        if let Some(controller) = app.get(self).local_text_editing_controller.as_ref() {
+            return controller.erase();
         }
         let controller = TextEditingController::new(app);
-        app.get_mut(self).local_text_editing_controller = Some(controller);
-        controller.as_controller()
+        app.get_mut(self).local_text_editing_controller = Some(controller.clone());
+        controller.into_erased()
     }
 
-    fn trailing_icon_button_focus_node(self: Handle<Self>, app: &mut App) -> Handle<FocusNode> {
-        if let Some(focus_node) = self.widget(app).trailing_icon_focus_node {
+    fn trailing_icon_button_focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
+        if let Some(focus_node) = self.widget(app).trailing_icon_focus_node.clone() {
             return focus_node;
         }
-        if let Some(focus_node) = app.get(self).local_trailing_icon_button_focus_node {
-            return focus_node;
+        if let Some(focus_node) = app.get(self).local_trailing_icon_button_focus_node.as_ref() {
+            return focus_node.erase();
         }
         let focus_node = FocusNode::new(app);
-        app.get_mut(self).local_trailing_icon_button_focus_node = Some(focus_node);
-        focus_node
+        app.get_mut(self).local_trailing_icon_button_focus_node = Some(focus_node.clone());
+        focus_node.into_erased()
     }
 
-    fn menu_controller(self: Handle<Self>, app: &App) -> AnyMenuController {
+    fn menu_controller(self: Handle<Self>, app: &App) -> &MenuControllerRef {
         app.get(self)
             .controller
+            .as_ref()
             .expect("init_state sets the menu controller")
     }
 
     fn internal_focus_node(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
         app.get(self)
             .internal_focus_node
+            .handle()
             .expect("init_state makes the internal focus node")
     }
 
     /// Dart's `_controller = widget.menuController ?? MenuController()`.
     fn set_menu_controller(self: Handle<Self>, app: &mut App) {
-        let controller = match self.widget(app).menu_controller {
+        let controller = match self.widget(app).menu_controller.clone() {
             Some(controller) => {
-                if let Some(replaced) = app.get_mut(self).internal_menu_controller.take() {
-                    app.destroy_lingering(replaced);
-                }
+                app.get_mut(self).internal_menu_controller = None;
                 controller
             }
             None => {
                 let internal = MenuController::new(app);
-                if let Some(replaced) = app.get_mut(self).internal_menu_controller.replace(internal)
-                {
-                    app.destroy_lingering(replaced);
-                }
-                internal.as_menu_controller()
+                app.get_mut(self).internal_menu_controller = Some(internal.clone());
+                internal.into_erased()
             }
         };
         app.get_mut(self).controller = Some(controller);
@@ -1170,8 +1160,8 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
     }
 
     fn can_request_focus(self: Handle<Self>, app: &mut App) -> bool {
-        if let Some(focus_node) = self.widget(app).focus_node {
-            return FocusNodeLeaf::as_node(focus_node).can_request_focus(app);
+        if let Some(focus_node) = self.widget(app).focus_node.clone() {
+            return focus_node.can_request_focus(app);
         }
         if let Some(request_focus_on_tap) = self.widget(app).request_focus_on_tap {
             return request_focus_on_tap;
@@ -1396,10 +1386,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
             if entry_is_selected {
                 if let Some(replaced) = app.get_mut(self).highlighted_item_states_controller.take()
                 {
-                    app.get_mut(replaced).dispose();
-                    // The item built with it still removes its listener when it updates to
-                    // this build's.
-                    app.destroy_lingering(replaced);
+                    replaced.dispose(app);
                 }
                 let focused: WidgetStates = [WidgetState::Focused].into_iter().collect();
                 let states_controller = WidgetStatesController::new(app, Some(focused.clone()));
@@ -1494,10 +1481,10 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
 
             let on_pressed = (entry.enabled && widget.enabled).then(|| {
                 let entry = entry.clone();
-                let controller = widget.controller;
+                let controller = widget.controller.clone();
                 let on_selected = widget.on_selected.clone();
                 Listener::new(move |app| {
-                    self.handle_entry_pressed(app, &entry, i, controller, &on_selected)
+                    self.handle_entry_pressed(app, &entry, i, controller.handle(), &on_selected)
                 })
             });
             let mut menu_item_button = MenuItemButton::new()
@@ -1521,7 +1508,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
             }
             if entry_is_selected {
                 menu_item_button.states_controller =
-                    app.get(self).highlighted_item_states_controller;
+                    app.get(self).highlighted_item_states_controller.clone();
             }
             menu_item_button.leading_icon = entry.leading_icon.clone();
             menu_item_button.trailing_icon = entry.trailing_icon.clone();
@@ -1569,7 +1556,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
         }
         app.get_mut(self).enable_filter = false;
         if self.widget(app).close_behavior == DropdownMenuCloseBehavior::SelfOnly {
-            self.menu_controller(app).close(app);
+            self.menu_controller(app).handle().close(app);
         }
     }
 
@@ -1584,7 +1571,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
     /// The `setState` body of Dart's `handleUpKey` and `handleDownKey`.
     fn move_highlight(self: Handle<Self>, app: &mut App, forward: bool) {
         let enabled = self.widget(app).enabled;
-        let is_open = self.menu_controller(app).is_open(app);
+        let is_open = self.menu_controller(app).handle().is_open(app);
         if enabled && app.get(self).menu_has_enabled_item && is_open {
             let state = app.get_mut(self);
             state.enable_filter = false;
@@ -1609,7 +1596,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
     }
 
     fn handle_enter_key(self: Handle<Self>, app: &mut App) {
-        let controller = self.menu_controller(app);
+        let controller = self.menu_controller(app).handle();
         if self.select_only(app) && !controller.is_open(app) {
             controller.open(app, None);
             return;
@@ -1647,7 +1634,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
     }
 
     fn handle_submitted(self: Handle<Self>, app: &mut App) {
-        let controller = self.menu_controller(app);
+        let controller = self.menu_controller(app).handle();
         if let Some(current_highlight) = app.get(self).current_highlight {
             let entry = app.get(self).filtered_entries[current_highlight].clone();
             if entry.enabled {
@@ -1709,9 +1696,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
                 .clone()
                 .unwrap_or_else(|| Icon::new(Some(Icons::arrow_drop_down())).into_widget()),
         )
-        .focus_node(FocusNodeLeaf::as_node(
-            self.trailing_icon_button_focus_node(app),
-        ))
+        .focus_node(self.trailing_icon_button_focus_node(app))
         .is_selected(controller.is_open(app))
         .selected_icon(
             widget
@@ -1785,7 +1770,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
         let localizations = <dyn MaterialLocalizations>::of(app, context);
         let is_button = self.is_button(app);
         let can_request_focus = self.can_request_focus(app);
-        let menu_controller = self.menu_controller(app);
+        let menu_controller = self.menu_controller(app).handle();
         let is_open = menu_controller.is_open(app);
         let mut semantics = Semantics::new().button(is_button);
         // This is set specifically for iOS because iOS does not have any native
@@ -1834,7 +1819,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
             .decoration(Some(text_field_decoration))
             .scroll_padding(widget.scroll_padding);
         text_field.mouse_cursor = anchor.effective_mouse_cursor.clone();
-        text_field.focus_node = widget.focus_node;
+        text_field.focus_node = widget.focus_node.clone();
         text_field.keyboard_type = widget.keyboard_type;
         text_field.text_input_action = widget.text_input_action;
         text_field.cursor_height = widget.cursor_height;
@@ -1948,7 +1933,8 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
         .into_widget()
     }
 
-    fn create_actions(self: Handle<Self>, app: &mut App) {
+    /// The `Actions` of `build`.
+    fn build_actions(self: Handle<Self>, app: &mut App) -> HashMap<TypeId, ActionRef> {
         let up = CallbackAction::<ArrowUpIntent>::new(
             app,
             Rc::new(move |app: &mut App, _intent: &ArrowUpIntent| {
@@ -1970,23 +1956,17 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
                 None
             }),
         );
-        let controller = self.menu_controller(app);
+        let controller = self.menu_controller(app).clone();
         let dismiss = DismissMenuAction::new(app, controller);
-        let state = app.get_mut(self);
-        state
-            .actions
-            .insert(TypeId::of::<ArrowUpIntent>(), up.as_action());
-        state
-            .actions
-            .insert(TypeId::of::<ArrowDownIntent>(), down.as_action());
-        state
-            .actions
-            .insert(TypeId::of::<EnterIntent>(), enter.as_action());
-        state.actions.insert(
+        let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
+        actions.insert(TypeId::of::<ArrowUpIntent>(), up.into_erased());
+        actions.insert(TypeId::of::<ArrowDownIntent>(), down.into_erased());
+        actions.insert(TypeId::of::<EnterIntent>(), enter.into_erased());
+        actions.insert(
             <DismissMenuAction as Action>::intent_type(),
-            Action::as_action(dismiss),
+            dismiss.into_erased(),
         );
-        state.dismiss_menu_action = Some(dismiss);
+        actions
     }
 }
 
@@ -2027,10 +2007,9 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let internal_focus_node = FocusNode::new(app);
         app.get_mut(self).internal_focus_node = Some(internal_focus_node);
-        let focus_node_can_request_focus = self
-            .widget(app)
-            .focus_node
-            .map(|focus_node| FocusNodeLeaf::as_node(focus_node).can_request_focus(app));
+        let widget_focus_node = self.widget(app).focus_node.clone();
+        let focus_node_can_request_focus =
+            widget_focus_node.map(|focus_node| focus_node.can_request_focus(app));
         let widget = self.widget(app);
         let enable_search = widget.enable_search;
         let entries = Rc::clone(&widget.dropdown_menu_entries);
@@ -2043,35 +2022,24 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
         self.show_initial_selection(app);
         self.refresh_leading_padding(app);
         self.set_menu_controller(app);
-        self.create_actions(app);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(controller) = app.get_mut(self).local_text_editing_controller.take() {
-            controller.as_controller().dispose(app);
-            app.destroy_lingering(controller);
+            controller.erase::<AnyTextEditingController>().dispose(app);
         }
         let internal_focus_node = self.internal_focus_node(app);
         FocusNodeLeaf::as_node(internal_focus_node).dispose(app);
-        app.destroy_lingering(internal_focus_node);
         if let Some(focus_node) = app
             .get_mut(self)
             .local_trailing_icon_button_focus_node
             .take()
         {
-            FocusNodeLeaf::as_node(focus_node).dispose(app);
-            app.destroy_lingering(focus_node);
+            focus_node.as_node().dispose(app);
         }
         if let Some(states_controller) = app.get_mut(self).highlighted_item_states_controller.take()
         {
-            app.get_mut(states_controller).dispose();
-            app.destroy(states_controller);
-        }
-        for action in std::mem::take(&mut app.get_mut(self).actions).into_values() {
-            app.destroy(action.id());
-        }
-        if let Some(internal_menu_controller) = app.get_mut(self).internal_menu_controller.take() {
-            app.destroy(internal_menu_controller);
+            states_controller.dispose(app);
         }
     }
 
@@ -2080,9 +2048,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
         if old_widget.controller != widget.controller
             && let Some(controller) = app.get_mut(self).local_text_editing_controller.take()
         {
-            controller.as_controller().dispose(app);
-            // The text field of the last build still listens to it until it updates.
-            app.destroy_lingering(controller);
+            controller.erase::<AnyTextEditingController>().dispose(app);
         }
         if old_widget.enable_filter != widget.enable_filter && !widget.enable_filter {
             app.get_mut(self).enable_filter = false;
@@ -2114,19 +2080,21 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
         if widget.focus_node != old_widget.focus_node {
             app.get_mut(self).focus_node_can_request_focus = widget
                 .focus_node
-                .map(|focus_node| FocusNodeLeaf::as_node(focus_node).can_request_focus(app));
+                .as_ref()
+                .map(|focus_node| focus_node.can_request_focus(app));
         }
         if old_widget.enabled && !widget.enabled {
             app.get_mut(self).focus_node_can_request_focus = widget
                 .focus_node
-                .map(|focus_node| FocusNodeLeaf::as_node(focus_node).can_request_focus(app));
+                .as_ref()
+                .map(|focus_node| focus_node.can_request_focus(app));
         }
         if !old_widget.enabled
             && widget.enabled
-            && let Some(focus_node) = widget.focus_node
+            && let Some(focus_node) = widget.focus_node.as_ref()
             && let Some(can_request_focus) = app.get(self).focus_node_can_request_focus
         {
-            FocusNodeLeaf::as_node(focus_node).set_can_request_focus(app, can_request_focus);
+            focus_node.set_can_request_focus(app, can_request_focus);
         }
     }
 
@@ -2162,7 +2130,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
                     let text = controller.text_value(app).to_owned();
                     filter_callback(app, &entries, &text)
                 }
-                None => Self::filter(&widget.dropdown_menu_entries, controller, app),
+                None => Self::filter(&widget.dropdown_menu_entries, controller.handle(), app),
             };
             app.get_mut(self).filtered_entries = Rc::from(filtered_entries);
         }
@@ -2182,7 +2150,8 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
                     self.should_update_current_highlight(app, &entries);
                 if should_update_current_highlight {
                     let controller = self.effective_text_editing_controller(app);
-                    app.get_mut(self).current_highlight = Self::search(&entries, controller, app);
+                    app.get_mut(self).current_highlight =
+                        Self::search(&entries, controller.handle(), app);
                 }
             }
             if app.get(self).current_highlight.is_some() {
@@ -2292,7 +2261,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
             false => None,
         };
 
-        let controller = self.menu_controller(app);
+        let controller = self.menu_controller(app).clone();
         let anchor_arguments = Rc::new(AnchorBuildArguments {
             effective_input_decoration_theme,
             effective_text_style,
@@ -2333,14 +2302,15 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
             .height_factor(1.0)
             .child(menu_anchor);
 
-        let dismiss_menu_action = app
+        let actions = self.build_actions(app);
+        let internal_focus_node = app
             .get(self)
-            .dismiss_menu_action
-            .expect("init_state makes the dismiss action");
-        app.get_mut(dismiss_menu_action).controller = controller;
-        let internal_focus_node = FocusNodeLeaf::as_node(self.internal_focus_node(app));
+            .internal_focus_node
+            .as_ref()
+            .expect("init_state makes the internal focus node")
+            .erase::<AnyFocusNode>();
         Actions::new(
-            app.get(self).actions.clone(),
+            actions,
             Stack::new().children([
                 // Handling keyboard navigation when the Textfield has no focus.
                 Shortcuts::new(
@@ -2829,6 +2799,7 @@ pub(crate) mod tests {
     use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m3, tester, tester_on};
+    use waft_widgets::FocusNodeLeaf;
 
     // ---- Dart's `TestMenu`, `ShortMenu` and the entry lists ----
 
@@ -4203,8 +4174,8 @@ pub(crate) mod tests {
         });
     }
 
-    /// Not a Dart case: Dart's collector frees the controllers and focus nodes the menu's state
-    /// makes for itself; here the state frees them when it is disposed.
+    /// Not a Dart case: what Dart's collector does with the controllers and focus nodes the
+    /// menu's state makes for itself, freed once the state goes.
     #[test]
     fn removing_the_menu_frees_what_its_state_made() {
         with_main_thread_stack(|| {
@@ -4224,11 +4195,19 @@ pub(crate) mod tests {
                     .expect("the menu's state");
                 let state = app.get(state);
                 [
-                    state.local_text_editing_controller.map(Into::into),
-                    state.internal_focus_node.map(Into::into),
-                    state.local_trailing_icon_button_focus_node.map(Into::into),
-                    state.internal_menu_controller.map(Into::into),
-                    state.dismiss_menu_action.map(Into::into),
+                    state
+                        .local_text_editing_controller
+                        .as_ref()
+                        .map(|node| node.into()),
+                    state.internal_focus_node.as_ref().map(|node| node.into()),
+                    state
+                        .local_trailing_icon_button_focus_node
+                        .as_ref()
+                        .map(|node| node.into()),
+                    state
+                        .internal_menu_controller
+                        .as_ref()
+                        .map(|node| node.into()),
                 ]
                 .into_iter()
                 .collect::<Option<Vec<_>>>()
@@ -4573,8 +4552,8 @@ pub(crate) mod tests {
         });
     }
 
-    fn controller(tester: &WidgetTester) -> AnyTextEditingController {
-        TextEditingController::new(&mut tester.cell.borrow_mut()).as_controller()
+    fn controller(tester: &WidgetTester) -> TextEditingControllerRef {
+        TextEditingController::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     fn controller_text(tester: &WidgetTester, controller: AnyTextEditingController) -> String {
@@ -4643,9 +4622,9 @@ pub(crate) mod tests {
                     .request_focus_on_tap(true)
                     .enable_filter(true)
                     .filter_callback(case_sensitive_filter)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ));
-            assert_left_and_right_keys_move_the_caret(&mut tester, controller);
+            assert_left_and_right_keys_move_the_caret(&mut tester, controller.handle());
         });
     }
 
@@ -4663,9 +4642,9 @@ pub(crate) mod tests {
                     .request_focus_on_tap(true)
                     .enable_filter(true)
                     .filter_callback(case_sensitive_filter)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ));
-            assert_left_and_right_keys_move_the_caret(&mut tester, controller);
+            assert_left_and_right_keys_move_the_caret(&mut tester, controller.handle());
         });
     }
 
@@ -4813,7 +4792,7 @@ pub(crate) mod tests {
                 ])
                 .request_focus_on_tap(true)
                 .enable_filter(true)
-                .controller(controller),
+                .controller(controller.clone()),
             ));
 
             // Open the menu.
@@ -4829,7 +4808,7 @@ pub(crate) mod tests {
             for expected in ["Good Match 2", "Good Match 3", "Good Match 1"] {
                 send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
                 pump(&mut tester);
-                assert_eq!(controller_text(&tester, controller), expected);
+                assert_eq!(controller_text(&tester, controller.handle()), expected);
             }
         });
     }
@@ -5181,7 +5160,7 @@ pub(crate) mod tests {
                     .request_focus_on_tap(true)
                     .enable_filter(true)
                     .filter_callback(case_sensitive_filter)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ));
 
             // Open the menu.
@@ -5189,7 +5168,7 @@ pub(crate) mod tests {
             pump(&mut tester);
 
             enter_text(&mut tester, "item");
-            assert_eq!(controller_text(&tester, controller), "item");
+            assert_eq!(controller_text(&tester, controller.handle()), "item");
             tester.pump_and_settle();
             for menu in TestMenu::VALUES {
                 let button = find_menu_item_button(&tester, menu.label());
@@ -5197,7 +5176,7 @@ pub(crate) mod tests {
             }
 
             enter_text(&mut tester, "Item");
-            assert_eq!(controller_text(&tester, controller), "Item");
+            assert_eq!(controller_text(&tester, controller.handle()), "Item");
             tester.pump_and_settle();
             for (label, shown) in [
                 ("Item 0", true),
@@ -5236,7 +5215,7 @@ pub(crate) mod tests {
                 DropdownMenu::new(menu_children())
                     .request_focus_on_tap(true)
                     .enable_filter(true)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ));
 
             // Open the menu
@@ -5245,17 +5224,17 @@ pub(crate) mod tests {
             tap_item(&mut tester, "Item 3");
             tester.pump_and_settle();
 
-            assert_eq!(controller_text(&tester, controller), "Item 3");
+            assert_eq!(controller_text(&tester, controller.handle()), "Item 3");
 
             enter_text(&mut tester, "New Item");
-            assert_eq!(controller_text(&tester, controller), "New Item");
+            assert_eq!(controller_text(&tester, controller.handle()), "New Item");
         });
     }
 
     fn menu_controller_is_open(tester: &WidgetTester) -> bool {
         let anchor = only(tester.find_by_type::<MenuAnchor>());
         let controller = tester.widget(anchor, |anchor: &MenuAnchor| {
-            anchor.controller.expect("a controller")
+            anchor.controller.clone().expect("a controller")
         });
         controller.is_open(&tester.cell.borrow())
     }
@@ -5305,7 +5284,7 @@ pub(crate) mod tests {
                         DropdownMenuEntry::new(TestMenu::MainMenu2, "Item 2"),
                         DropdownMenuEntry::new(TestMenu::MainMenu3, "Item 3"),
                     ])
-                    .controller(controller)
+                    .controller(controller.clone())
                     .on_selected(move |_app, _value| count.set(count.get() + 1)),
                 ));
 
@@ -5337,12 +5316,12 @@ pub(crate) mod tests {
                 // Disabled item doesn't trigger onSelected callback.
                 tap_item(&mut tester, "Item 1");
                 tester.pump_and_settle();
-                assert_eq!(controller_text(&tester, controller), "Item 0");
+                assert_eq!(controller_text(&tester, controller.handle()), "Item 0");
                 assert_eq!(selection_count.get(), expected_count, "{platform:?}");
 
                 tap_item(&mut tester, "Item 2");
                 tester.pump_and_settle();
-                assert_eq!(controller_text(&tester, controller), "Item 2");
+                assert_eq!(controller_text(&tester, controller.handle()), "Item 2");
                 expected_count += 1;
                 assert_eq!(selection_count.get(), expected_count, "{platform:?}");
 
@@ -5350,7 +5329,7 @@ pub(crate) mod tests {
                 pump(&mut tester);
                 tap_item(&mut tester, "Item 3");
                 tester.pump_and_settle();
-                assert_eq!(controller_text(&tester, controller), "Item 3");
+                assert_eq!(controller_text(&tester, controller.handle()), "Item 3");
                 expected_count += 1;
                 assert_eq!(selection_count.get(), expected_count, "{platform:?}");
 
@@ -5358,12 +5337,12 @@ pub(crate) mod tests {
                 // the onSelected should not be called.
                 if !is_mobile {
                     enter_text(&mut tester, "New Item");
-                    assert_eq!(controller_text(&tester, controller), "New Item");
+                    assert_eq!(controller_text(&tester, controller.handle()), "New Item");
                     assert_eq!(selection_count.get(), expected_count, "{platform:?}");
                     assert!(text_field_shows(&tester, "New Item"));
                     enter_text(&mut tester, "");
                     assert_eq!(selection_count.get(), expected_count, "{platform:?}");
-                    assert!(controller_text(&tester, controller).is_empty());
+                    assert!(controller_text(&tester, controller.handle()).is_empty());
                 }
             });
         }
@@ -5406,10 +5385,10 @@ pub(crate) mod tests {
                 theme,
                 DropdownMenu::new(menu_children())
                     .initial_selection(TestMenu::MainMenu3)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ));
             assert_eq!(
-                controller_text(&tester, controller),
+                controller_text(&tester, controller.handle()),
                 TestMenu::MainMenu3.label()
             );
         });
@@ -5427,9 +5406,9 @@ pub(crate) mod tests {
                 // Use a menu entries which does not contain TestMenu.mainMenu3.
                 DropdownMenu::new(menu_children()[0..1].to_vec())
                     .initial_selection(TestMenu::MainMenu3)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ));
-            assert!(controller_text(&tester, controller).is_empty());
+            assert!(controller_text(&tester, controller.handle()).is_empty());
         });
     }
 
@@ -5444,16 +5423,16 @@ pub(crate) mod tests {
                 let mut app = tester.cell.borrow_mut();
                 TextEditingController::new(&mut app)
                     .text(&mut app, "Flutter")
-                    .as_controller()
+                    .into_erased::<waft_widgets::AnyTextEditingController>()
             };
             tester.pump_widget(the_menu(
                 theme,
                 // Use a menu entries which does not contain TestMenu.mainMenu3.
                 DropdownMenu::new(menu_children()[0..1].to_vec())
                     .initial_selection(TestMenu::MainMenu3)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ));
-            assert_eq!(controller_text(&tester, controller), "Flutter");
+            assert_eq!(controller_text(&tester, controller.handle()), "Flutter");
         });
     }
 
@@ -6092,7 +6071,7 @@ pub(crate) mod tests {
             ]);
             tester.pump_widget(the_menu(
                 theme.clone(),
-                DropdownMenu::new(entries).focus_node(focus_node),
+                DropdownMenu::new(entries).focus_node(focus_node.erase()),
             ));
 
             let decorator =
@@ -6105,7 +6084,9 @@ pub(crate) mod tests {
                 theme.color_scheme.outline()
             ));
 
-            FocusNodeLeaf::as_node(focus_node).request_focus(&mut tester.cell.borrow_mut(), None);
+            focus_node
+                .as_node()
+                .request_focus(&mut tester.cell.borrow_mut(), None);
             pump(&mut tester);
             // Advance input decorator animation.
             tester.pump(Duration::from_millis(200));
@@ -6137,13 +6118,13 @@ pub(crate) mod tests {
                 Scaffold::new()
                     .body(waft_widgets::Column::new().children(vec![
                         DropdownMenu::new(menu_children())
-                            .focus_node(text_field_focus_node)
+                            .focus_node(text_field_focus_node.erase())
                             .into_widget(),
                         crate::elevated_button::ElevatedButton::new(
                             Some(Listener::new(|_app| {})),
                             Some(Text::new("Button")),
                         )
-                        .focus_node(FocusNodeLeaf::as_node(button_focus_node))
+                        .focus_node(button_focus_node.erase())
                         .into_widget(),
                     ]))
                     .into_widget(),
@@ -6162,7 +6143,8 @@ pub(crate) mod tests {
             primary_focus_next(&mut tester);
             pump(&mut tester);
             assert!(
-                FocusNodeLeaf::as_node(text_field_focus_node)
+                text_field_focus_node
+                    .as_node()
                     .has_focus(&mut tester.cell.borrow_mut())
             );
 
@@ -6170,7 +6152,9 @@ pub(crate) mod tests {
             primary_focus_next(&mut tester);
             pump(&mut tester);
             assert!(
-                FocusNodeLeaf::as_node(button_focus_node).has_focus(&mut tester.cell.borrow_mut())
+                button_focus_node
+                    .as_node()
+                    .has_focus(&mut tester.cell.borrow_mut())
             );
         });
     }
@@ -6197,7 +6181,7 @@ pub(crate) mod tests {
                     DropdownMenuEntry::new("Green".to_owned(), "Green"),
                 ])
                 .request_focus_on_tap(true)
-                .controller(controller)
+                .controller(controller.clone())
                 .input_formatters(vec![
                     formatter,
                     waft_services::TextInputFormatterRef(Rc::new(
@@ -6220,7 +6204,7 @@ pub(crate) mod tests {
                     TextEditingValue::new().text(text),
                 );
                 assert_eq!(called.get(), count);
-                assert_eq!(controller_text(&tester, controller), expected);
+                assert_eq!(controller_text(&tester, controller.handle()), expected);
             }
         });
     }
@@ -6445,39 +6429,41 @@ pub(crate) mod tests {
     fn scrolling_to_the_highlight_leaves_the_parent_scroll_view_alone() {
         with_main_thread_stack(|| {
             let mut tester = tester();
-            let controller = waft_widgets::ScrollControllerLeaf::as_controller(
-                waft_widgets::ScrollController::new(
-                    &mut tester.cell.borrow_mut(),
-                    0.0,
-                    true,
-                    None,
-                    None,
-                    None,
-                ),
-            );
+            let controller = waft_widgets::ScrollController::new(
+                &mut tester.cell.borrow_mut(),
+                0.0,
+                true,
+                None,
+                None,
+                None,
+            )
+            .into_erased::<waft_widgets::AnyScrollController>();
             let entries = menu_children();
-            pump_app(&mut tester, move |app| {
-                let last = entries.last().expect("entries").value;
-                material_app(
-                    m3(app),
-                    Scaffold::new()
-                        .body(
-                            waft_widgets::ListView::new()
-                                .controller(controller)
-                                .children(vec![
-                                    waft_widgets::ListView::new()
-                                        .shrink_wrap(true)
-                                        .children(vec![
-                                            DropdownMenu::new(entries)
-                                                .initial_selection(last)
-                                                .into_widget(),
-                                        ])
-                                        .into_widget(),
-                                    SizedBox::new().height(1000.0).into_widget(),
-                                ]),
-                        )
-                        .into_widget(),
-                )
+            pump_app(&mut tester, {
+                let controller = controller.clone();
+                move |app| {
+                    let last = entries.last().expect("entries").value;
+                    material_app(
+                        m3(app),
+                        Scaffold::new()
+                            .body(
+                                waft_widgets::ListView::new()
+                                    .controller(controller.clone())
+                                    .children(vec![
+                                        waft_widgets::ListView::new()
+                                            .shrink_wrap(true)
+                                            .children(vec![
+                                                DropdownMenu::new(entries)
+                                                    .initial_selection(last)
+                                                    .into_widget(),
+                                            ])
+                                            .into_widget(),
+                                        SizedBox::new().height(1000.0).into_widget(),
+                                    ]),
+                            )
+                            .into_widget(),
+                    )
+                }
             });
 
             tap_first::<TextField>(&mut tester);
@@ -6529,7 +6515,7 @@ pub(crate) mod tests {
             .last()
             .expect("a menu anchor");
         let controller = tester.widget(anchor, |anchor: &MenuAnchor| {
-            anchor.controller.expect("a controller")
+            anchor.controller.clone().expect("a controller")
         });
         controller.is_open(&tester.cell.borrow())
     }
@@ -6610,7 +6596,7 @@ pub(crate) mod tests {
                     .last()
                     .expect("a menu anchor");
                 let controller = tester.widget(dropdown_menu_anchor, |anchor: &MenuAnchor| {
-                    anchor.controller.expect("a controller")
+                    anchor.controller.clone().expect("a controller")
                 });
                 assert!(controller.is_open(&tester.cell.borrow()));
                 // Tap the dropdown menu item.
@@ -6708,7 +6694,7 @@ pub(crate) mod tests {
         let mut menu =
             DropdownMenu::new(menu_children()).on_selected(move |_app, menu| selected.set(menu));
         if with_focus_node {
-            menu = menu.focus_node(FocusNode::new(&mut tester.cell.borrow_mut()));
+            menu = menu.focus_node(FocusNode::new(&mut tester.cell.borrow_mut()).erase());
         }
         tester.pump_widget(material_app(
             theme,
@@ -7078,11 +7064,11 @@ pub(crate) mod tests {
             let entries = menu_children();
             tester.pump_widget(the_menu(
                 theme.clone(),
-                DropdownMenu::new(Rc::clone(&entries)).controller(controller1),
+                DropdownMenu::new(Rc::clone(&entries)).controller(controller1.clone()),
             ));
             tester.pump_widget(the_menu(
                 theme,
-                DropdownMenu::new(entries).controller(controller2),
+                DropdownMenu::new(entries).controller(controller2.clone()),
             ));
             let mut app = tester.cell.borrow_mut();
             controller1.dispose(&mut app);
@@ -7144,9 +7130,9 @@ pub(crate) mod tests {
                 FocusNode::new(&mut app),
             )
         };
-        let mut menu = DropdownMenu::new(menu_children()).focus_node(text_field_focus_node);
+        let mut menu = DropdownMenu::new(menu_children()).focus_node(text_field_focus_node.erase());
         if given_trailing_icon_focus_node {
-            menu = menu.trailing_icon_focus_node(trailing_icon_focus_node);
+            menu = menu.trailing_icon_focus_node(trailing_icon_focus_node.erase());
         }
         tester.pump_widget(material_app(
             theme,
@@ -7157,7 +7143,7 @@ pub(crate) mod tests {
                         Some(Listener::new(|_app| {})),
                         Some(Text::new("Button")),
                     )
-                    .focus_node(FocusNodeLeaf::as_node(button_focus_node))
+                    .focus_node(button_focus_node.erase())
                     .into_widget(),
                 ]))
                 .into_widget(),
@@ -7168,7 +7154,8 @@ pub(crate) mod tests {
         if given_trailing_icon_focus_node {
             // Ensure the trailing icon has focus.
             assert!(
-                FocusNodeLeaf::as_node(trailing_icon_focus_node)
+                trailing_icon_focus_node
+                    .as_node()
                     .has_focus(&mut tester.cell.borrow_mut())
             );
         } else {
@@ -7183,13 +7170,19 @@ pub(crate) mod tests {
         primary_focus_next(&mut tester);
         pump(&mut tester);
         assert!(
-            FocusNodeLeaf::as_node(text_field_focus_node).has_focus(&mut tester.cell.borrow_mut())
+            text_field_focus_node
+                .as_node()
+                .has_focus(&mut tester.cell.borrow_mut())
         );
 
         // Ensure the button has focus.
         primary_focus_next(&mut tester);
         pump(&mut tester);
-        assert!(FocusNodeLeaf::as_node(button_focus_node).has_focus(&mut tester.cell.borrow_mut()));
+        assert!(
+            button_focus_node
+                .as_node()
+                .has_focus(&mut tester.cell.borrow_mut())
+        );
     }
 
     // 'DropdownMenu trailingIconFocusNode is created when not provided'
@@ -7213,7 +7206,7 @@ pub(crate) mod tests {
         let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
         let _ = DropdownMenu::new(menu_children())
             .show_trailing_icon(false)
-            .trailing_icon_focus_node(focus_node)
+            .trailing_icon_focus_node(focus_node.erase())
             .into_widget();
     }
 
@@ -7268,11 +7261,11 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             let theme = theme(&tester);
-            let menu_controller =
-                MenuController::new(&mut tester.cell.borrow_mut()).as_menu_controller();
+            let menu_controller = MenuController::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyMenuController>();
             tester.pump_widget(the_menu(
                 theme,
-                DropdownMenu::new(menu_children()).menu_controller(menu_controller),
+                DropdownMenu::new(menu_children()).menu_controller(menu_controller.clone()),
             ));
             let item_0_is_hit_testable = |tester: &WidgetTester| {
                 let button = find_menu_item_button(tester, "Item 0");
@@ -7325,8 +7318,8 @@ pub(crate) mod tests {
             .count()
     }
 
-    fn new_menu_controller(tester: &WidgetTester) -> AnyMenuController {
-        MenuController::new(&mut tester.cell.borrow_mut()).as_menu_controller()
+    fn new_menu_controller(tester: &WidgetTester) -> MenuControllerRef {
+        MenuController::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     // 'DropdownMenu.decorationBuilder' 'Decoration properties set by decorationBuilder are
@@ -7558,8 +7551,8 @@ pub(crate) mod tests {
     }
 
     fn editable_has_focus(tester: &WidgetTester) -> bool {
-        let focus_node = editable(tester, |editable| editable.focus_node);
-        FocusNodeLeaf::as_node(focus_node).has_focus(&mut tester.cell.borrow_mut())
+        let focus_node = editable(tester, |editable| editable.focus_node.clone());
+        focus_node.has_focus(&mut tester.cell.borrow_mut())
     }
 
     // '… when true and requestFocusOnTap is false, does not make the text field focusable'
@@ -7601,14 +7594,16 @@ pub(crate) mod tests {
             tester.pump_widget(the_menu(
                 theme,
                 DropdownMenu::new(menu_children())
-                    .menu_controller(menu_controller)
-                    .focus_node(focus_node)
+                    .menu_controller(menu_controller.clone())
+                    .focus_node(focus_node.erase())
                     .select_only(true),
             ));
 
             // Focus the dropdownMenu.
             assert!(!editable_has_focus(&tester));
-            FocusNodeLeaf::as_node(focus_node).request_focus(&mut tester.cell.borrow_mut(), None);
+            focus_node
+                .as_node()
+                .request_focus(&mut tester.cell.borrow_mut(), None);
             pump(&mut tester);
             assert!(editable_has_focus(&tester));
 
@@ -7643,28 +7638,31 @@ pub(crate) mod tests {
             let mut tester = tester();
             let controller = controller(&tester);
             let entries = menu_children();
-            pump_app(&mut tester, move |app| {
-                material_app(
-                    m3(app),
-                    Scaffold::new()
-                        .body(waft_widgets::StatefulBuilder::new(
-                            move |_app, _context, set_state| {
-                                // A new list on each build, as Dart's `toList()` simulates a
-                                // list update.
-                                let new_entries: Vec<DropdownMenuEntry<TestMenu>> =
-                                    entries.to_vec();
-                                DropdownMenu::new(new_entries)
-                                    .controller(controller)
-                                    .request_focus_on_tap(true)
-                                    .enable_filter(true)
-                                    .on_selected(move |app, _value| {
-                                        set_state(app, &mut |_app| {});
-                                    })
-                                    .into_widget()
-                            },
-                        ))
-                        .into_widget(),
-                )
+            pump_app(&mut tester, {
+                let controller = controller.clone();
+                move |app| {
+                    material_app(
+                        m3(app),
+                        Scaffold::new()
+                            .body(waft_widgets::StatefulBuilder::new(
+                                move |_app, _context, set_state| {
+                                    // A new list on each build, as Dart's `toList()` simulates a
+                                    // list update.
+                                    let new_entries: Vec<DropdownMenuEntry<TestMenu>> =
+                                        entries.to_vec();
+                                    DropdownMenu::new(new_entries)
+                                        .controller(controller.clone())
+                                        .request_focus_on_tap(true)
+                                        .enable_filter(true)
+                                        .on_selected(move |app, _value| {
+                                            set_state(app, &mut |_app| {});
+                                        })
+                                        .into_widget()
+                                },
+                            ))
+                            .into_widget(),
+                    )
+                }
             });
 
             // Open the menu.
@@ -7680,7 +7678,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             assert_eq!(
-                controller_text(&tester, controller),
+                controller_text(&tester, controller.handle()),
                 TestMenu::MainMenu1.label()
             );
         });
@@ -7699,12 +7697,12 @@ pub(crate) mod tests {
                 let mut app = tester.cell.borrow_mut();
                 TextEditingController::new(&mut app)
                     .text(&mut app, "I")
-                    .as_controller()
+                    .into_erased::<waft_widgets::AnyTextEditingController>()
             };
             let theme = theme(&tester);
             tester.pump_widget(centered_menu(
                 theme,
-                DropdownMenu::new(menu_children()).controller(controller),
+                DropdownMenu::new(menu_children()).controller(controller.clone()),
             ));
             assert_eq!(
                 size_of(&tester, dropdown_menu::<TestMenu>(&tester)),
@@ -7749,26 +7747,26 @@ pub(crate) mod tests {
                         FocusNode::new(&mut app),
                     )
                 };
-                let text_button = |focus_node: Handle<FocusNode>, label: &str| {
+                let text_button = |focus_node: Ref<FocusNode>, label: &str| {
                     crate::text_button::TextButton::new(
                         Some(Listener::new(|_app| {})),
                         Some(Text::new(label)),
                     )
-                    .focus_node(FocusNodeLeaf::as_node(focus_node))
+                    .focus_node(focus_node.erase())
                     .into_widget()
                 };
                 tester.pump_widget(material_app(
                     theme,
                     Scaffold::new()
                         .body(waft_widgets::Column::new().children(vec![
-                            text_button(previous_focus_node, "Previous"),
+                            text_button(previous_focus_node.clone(), "Previous"),
                             DropdownMenu::new(menu_children())
-                                .focus_node(text_field_focus_node)
+                                .focus_node(text_field_focus_node.erase())
                                 .text_input_action(text_input_action)
                                 .request_focus_on_tap(true)
                                 .show_trailing_icon(false)
                                 .into_widget(),
-                            text_button(next_focus_node, "Next"),
+                            text_button(next_focus_node.clone(), "Next"),
                         ]))
                         .into_widget(),
                 ));
@@ -7776,28 +7774,28 @@ pub(crate) mod tests {
                 let has_focus = |tester: &WidgetTester, node: Handle<FocusNode>| {
                     FocusNodeLeaf::as_node(node).has_focus(&mut tester.cell.borrow_mut())
                 };
-                assert!(!has_focus(&tester, text_field_focus_node));
+                assert!(!has_focus(&tester, text_field_focus_node.handle()));
 
                 // Tap on DropdownMenu to request focus on the TextField.
                 tap_dropdown_menu::<TestMenu>(&mut tester);
                 tester.pump_and_settle();
-                assert!(has_focus(&tester, text_field_focus_node));
+                assert!(has_focus(&tester, text_field_focus_node.handle()));
 
                 receive_action(&mut tester, text_input_action);
                 tester.pump_and_settle();
 
                 assert_eq!(
-                    has_focus(&tester, previous_focus_node),
+                    has_focus(&tester, previous_focus_node.handle()),
                     should_focus_previous,
                     "{text_input_action:?}"
                 );
                 assert_eq!(
-                    has_focus(&tester, text_field_focus_node),
+                    has_focus(&tester, text_field_focus_node.handle()),
                     !should_lose_focus,
                     "{text_input_action:?}"
                 );
                 assert_eq!(
-                    has_focus(&tester, next_focus_node),
+                    has_focus(&tester, next_focus_node.handle()),
                     should_focus_next,
                     "{text_input_action:?}"
                 );
@@ -7817,24 +7815,27 @@ pub(crate) mod tests {
                 DropdownMenuEntry::new(Some("a".to_owned()), "A"),
                 DropdownMenuEntry::new(Some("b".to_owned()), "B"),
             ]);
-            pump_app(&mut tester, move |app| {
-                material_app(
-                    m3(app),
-                    Scaffold::new()
-                        .body(waft_widgets::StatefulBuilder::new(
-                            move |_app, _context, set_state| {
-                                DropdownMenu::new(Rc::clone(&nullable_menu_items))
-                                    .controller(controller)
-                                    .request_focus_on_tap(true)
-                                    .enable_filter(true)
-                                    .on_selected(move |app, _value| {
-                                        set_state(app, &mut |_app| {});
-                                    })
-                                    .into_widget()
-                            },
-                        ))
-                        .into_widget(),
-                )
+            pump_app(&mut tester, {
+                let controller = controller.clone();
+                move |app| {
+                    material_app(
+                        m3(app),
+                        Scaffold::new()
+                            .body(waft_widgets::StatefulBuilder::new(
+                                move |_app, _context, set_state| {
+                                    DropdownMenu::new(Rc::clone(&nullable_menu_items))
+                                        .controller(controller.clone())
+                                        .request_focus_on_tap(true)
+                                        .enable_filter(true)
+                                        .on_selected(move |app, _value| {
+                                            set_state(app, &mut |_app| {});
+                                        })
+                                        .into_widget()
+                                },
+                            ))
+                            .into_widget(),
+                    )
+                }
             });
 
             // Open the menu.
@@ -7845,7 +7846,10 @@ pub(crate) mod tests {
             tap_item(&mut tester, select_none_label);
             tester.pump_and_settle();
 
-            assert_eq!(controller_text(&tester, controller), select_none_label);
+            assert_eq!(
+                controller_text(&tester, controller.handle()),
+                select_none_label
+            );
         });
     }
 
@@ -7902,7 +7906,7 @@ pub(crate) mod tests {
             pump_app(
                 &mut tester,
                 menu_with_toggle(
-                    move |menu| menu.enabled(enabled.get()).focus_node(focus_node),
+                    move |menu| menu.enabled(enabled.get()).focus_node(focus_node.erase()),
                     move |_app| toggled.set(!toggled.get()),
                 ),
             );
@@ -7936,16 +7940,18 @@ pub(crate) mod tests {
             let (focus_node1, focus_node2) = {
                 let mut app = tester.cell.borrow_mut();
                 let focus_node2 = FocusNode::new(&mut app);
-                FocusNodeLeaf::as_node(focus_node2).set_can_request_focus(&mut app, false);
+                focus_node2.as_node().set_can_request_focus(&mut app, false);
                 (FocusNode::new(&mut app), focus_node2)
             };
-            let current_focus_node = Rc::new(std::cell::Cell::new(focus_node1));
+            let current_focus_node = Rc::new(std::cell::RefCell::new(
+                focus_node1.erase::<waft_widgets::AnyFocusNode>(),
+            ));
             let current = Rc::clone(&current_focus_node);
             pump_app(
                 &mut tester,
                 menu_with_toggle(
-                    move |menu| menu.focus_node(current.get()),
-                    move |_app| current_focus_node.set(focus_node2),
+                    move |menu| menu.focus_node(current.borrow().clone()),
+                    move |_app| *current_focus_node.borrow_mut() = focus_node2.erase(),
                 ),
             );
 
@@ -7969,8 +7975,11 @@ pub(crate) mod tests {
             pump_app(
                 &mut tester,
                 menu_with_toggle(
-                    move |menu| menu.focus_node(focus_node),
-                    move |app| FocusNodeLeaf::as_node(focus_node).set_can_request_focus(app, false),
+                    {
+                        let focus_node = focus_node.clone();
+                        move |menu| menu.focus_node(focus_node.erase())
+                    },
+                    move |app| focus_node.as_node().set_can_request_focus(app, false),
                 ),
             );
 
@@ -7991,29 +8000,34 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-            pump_app(&mut tester, move |app| {
-                material_app(
-                    ThemeData::builder()
-                        .platform(TargetPlatform::MacOS)
-                        .build(app),
-                    Scaffold::new()
-                        .body(
-                            DropdownMenu::new(vec![DropdownMenuEntry::new(1, "One")])
-                                .focus_node(focus_node),
-                        )
-                        .into_widget(),
-                )
+            pump_app(&mut tester, {
+                let focus_node = focus_node.clone();
+                move |app| {
+                    material_app(
+                        ThemeData::builder()
+                            .platform(TargetPlatform::MacOS)
+                            .build(app),
+                        Scaffold::new()
+                            .body(
+                                DropdownMenu::new(vec![DropdownMenuEntry::new(1, "One")])
+                                    .focus_node(focus_node.erase()),
+                            )
+                            .into_widget(),
+                    )
+                }
             });
 
             // set canRequestFocus
-            FocusNodeLeaf::as_node(focus_node)
+            focus_node
+                .as_node()
                 .set_can_request_focus(&mut tester.cell.borrow_mut(), false);
             // Opens the menu.
             tap_first::<IconButton>(&mut tester);
             pump(&mut tester);
 
             assert!(
-                !FocusNodeLeaf::as_node(focus_node)
+                !focus_node
+                    .as_node()
                     .can_request_focus(&mut tester.cell.borrow_mut())
             );
             text_field(&tester, |text_field| assert!(text_field.read_only));
@@ -8055,7 +8069,7 @@ pub(crate) mod tests {
                     theme.clone(),
                     DropdownMenu::new(long_entries(max_lines))
                         .key(waft_foundation::ValueKey::new(max_lines).into())
-                        .controller(controller)
+                        .controller(controller.clone())
                         .width(100.0),
                 ));
                 tap_dropdown_menu::<TestMenu>(&mut tester);
@@ -8071,7 +8085,7 @@ pub(crate) mod tests {
                 // Close the menu
                 tap_first::<TextField>(&mut tester);
                 tester.pump_and_settle();
-                assert_eq!(controller_text(&tester, controller), ""); // nothing selected
+                assert_eq!(controller_text(&tester, controller.handle()), ""); // nothing selected
             }
         });
     }

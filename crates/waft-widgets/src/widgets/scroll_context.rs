@@ -27,7 +27,8 @@ pub trait ScrollContext {
     fn type_name(&self) -> &'static str;
 
     /// The handle of the object that is this context, which a callback scheduled for later keeps
-    /// past the object's dispose with `App::retain_id`, as the callback's reference keeps it in Dart.
+    /// past the object's dispose by upgrading it (`HandleId::upgrade`), as the callback's
+    /// reference keeps it in Dart.
     fn handle_id(&self) -> HandleId;
 
     /// The [`BuildContext`] that should be used when dispatching

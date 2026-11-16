@@ -8,6 +8,8 @@ use waft_embedder::{Rect, SystemContextMenuItem};
 use waft_foundation::{App, Handle, Listener};
 
 use crate::text_input::TextInput;
+use waft_foundation::OptionRetained;
+use waft_foundation::Ref;
 
 /// Describes a context menu button that will be rendered in the system context
 /// menu.
@@ -124,7 +126,7 @@ impl PartialEq for IOSSystemContextMenuItemData {
 /// `ServicesBinding.systemContextMenuClient`.
 #[derive(Default)]
 struct SystemContextMenuRegistry {
-    last_shown: Option<Handle<SystemContextMenuController>>,
+    last_shown: Option<Ref<SystemContextMenuController>>,
 }
 
 impl SystemContextMenuRegistry {
@@ -168,7 +170,7 @@ impl SystemContextMenuController {
     /// Creates an instance of [`SystemContextMenuController`].
     ///
     /// Not shown until [`show`](Self::show) is called.
-    pub fn new(app: &mut App, on_system_hide: Option<Listener>) -> Handle<Self> {
+    pub fn new(app: &mut App, on_system_hide: Option<Listener>) -> Ref<Self> {
         app.create(SystemContextMenuController {
             on_system_hide,
             last_target_rect: None,
@@ -181,7 +183,7 @@ impl SystemContextMenuController {
 
     fn is_visible(self: Handle<Self>, app: &mut App) -> bool {
         let registry = SystemContextMenuRegistry::instance(app);
-        app.get(registry).last_shown == Some(self) && !app.get(self).hidden_by_system
+        app.get(registry).last_shown.handle() == Some(self) && !app.get(self).hidden_by_system
     }
 
     /// Called when the system has hidden the context menu.
@@ -191,7 +193,7 @@ impl SystemContextMenuController {
             return;
         }
         let registry = SystemContextMenuRegistry::instance(app);
-        if app.get(registry).last_shown == Some(self) {
+        if app.get(registry).last_shown.handle() == Some(self) {
             app.get_mut(registry).last_shown = None;
         }
         app.get_mut(self).hidden_by_system = true;
@@ -235,7 +237,7 @@ impl SystemContextMenuController {
         debug_assert!(
             {
                 let registry = SystemContextMenuRegistry::instance(app);
-                let last = app.get(registry).last_shown;
+                let last = app.get(registry).last_shown.handle();
                 last.is_none()
                     || last == Some(self)
                     || last.is_some_and(|last| !last.is_visible(app))
@@ -244,7 +246,8 @@ impl SystemContextMenuController {
         );
         let registry = SystemContextMenuRegistry::instance(app);
         app.get_mut(self).last_target_rect = Some(target_rect);
-        app.get_mut(registry).last_shown = Some(self);
+        let shown = self.upgrade(app);
+        app.get_mut(registry).last_shown = shown;
         app.get_mut(self).hidden_by_system = false;
         if let Some(menu) = app.platform().system_context_menu() {
             menu.show(target_rect, None);
@@ -274,7 +277,7 @@ impl SystemContextMenuController {
         debug_assert!(
             {
                 let registry = SystemContextMenuRegistry::instance(app);
-                let last = app.get(registry).last_shown;
+                let last = app.get(registry).last_shown.handle();
                 last.is_none()
                     || last == Some(self)
                     || last.is_some_and(|last| !last.is_visible(app))
@@ -300,7 +303,8 @@ impl SystemContextMenuController {
         app.get_mut(self).last_target_rect = Some(target_rect);
         app.get_mut(self).last_items = Some(items);
         let registry = SystemContextMenuRegistry::instance(app);
-        app.get_mut(registry).last_shown = Some(self);
+        let shown = self.upgrade(app);
+        app.get_mut(registry).last_shown = shown;
         app.get_mut(self).hidden_by_system = false;
         if let Some(menu) = app.platform().system_context_menu() {
             menu.show(target_rect, Some(&host_items));
@@ -311,7 +315,7 @@ impl SystemContextMenuController {
     pub fn hide(self: Handle<Self>, app: &mut App) {
         debug_assert!(!app.get(self).disposed);
         let registry = SystemContextMenuRegistry::instance(app);
-        if app.get(registry).last_shown != Some(self) {
+        if app.get(registry).last_shown.handle() != Some(self) {
             return;
         }
         app.get_mut(registry).last_shown = None;
@@ -331,7 +335,7 @@ impl SystemContextMenuController {
     /// Dispatch a system-hide from the host to the currently shown controller.
     pub fn dispatch_system_hide(app: &mut App) {
         let registry = SystemContextMenuRegistry::instance(app);
-        if let Some(shown) = app.get(registry).last_shown {
+        if let Some(shown) = app.get(registry).last_shown.handle() {
             shown.handle_system_hide(app);
         }
     }
@@ -339,7 +343,7 @@ impl SystemContextMenuController {
     /// Dispatch a custom action from the host to the currently shown controller.
     pub fn dispatch_custom_action(app: &mut App, callback_id: &str) {
         let registry = SystemContextMenuRegistry::instance(app);
-        if let Some(shown) = app.get(registry).last_shown {
+        if let Some(shown) = app.get(registry).last_shown.handle() {
             shown.handle_custom_context_menu_action(app, callback_id);
         }
     }

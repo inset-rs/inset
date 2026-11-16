@@ -7,6 +7,7 @@ use waft_foundation::{App, Handle, Listener, ValueChanged};
 use super::element::{AnyElement, ElementLifecycle};
 use super::widget::GlobalKey;
 use crate::widgets::focus_manager::FocusManager;
+use waft_foundation::Ref;
 
 /// A class that determines the scope of a `BuildOwner::build_scope` operation.
 ///
@@ -43,7 +44,7 @@ pub struct BuildScope {
 
 impl BuildScope {
     /// Creates a [`BuildScope`] with an optional `schedule_rebuild` callback.
-    pub fn new(app: &mut App, schedule_rebuild: Option<Listener>) -> Handle<BuildScope> {
+    pub fn new(app: &mut App, schedule_rebuild: Option<Listener>) -> Ref<BuildScope> {
         app.create(BuildScope {
             build_scheduled: false,
             building: false,
@@ -221,7 +222,7 @@ pub type BuildScheduledCallback = ValueChanged<AnyElement>;
 pub struct BuildOwner {
     /// Called for each element marked dirty outside a build pass.
     on_build_scheduled: Option<BuildScheduledCallback>,
-    focus_manager: Handle<FocusManager>,
+    focus_manager: Ref<FocusManager>,
     inactive_elements: InactiveElements,
     /// [`build_scope`](Self::build_scope) is running: it builds the elements marked dirty
     /// meanwhile, so none is scheduled.
@@ -242,7 +243,7 @@ impl BuildOwner {
     pub fn new(
         app: &mut App,
         on_build_scheduled: Option<BuildScheduledCallback>,
-    ) -> Handle<BuildOwner> {
+    ) -> Ref<BuildOwner> {
         let focus_manager = FocusManager::new(app);
         focus_manager.register_global_handlers(app);
         BuildOwner::with_focus_manager(app, on_build_scheduled, focus_manager)
@@ -253,8 +254,8 @@ impl BuildOwner {
     pub fn with_focus_manager(
         app: &mut App,
         on_build_scheduled: Option<BuildScheduledCallback>,
-        focus_manager: Handle<FocusManager>,
-    ) -> Handle<BuildOwner> {
+        focus_manager: Ref<FocusManager>,
+    ) -> Ref<BuildOwner> {
         app.create(BuildOwner {
             on_build_scheduled,
             focus_manager,
@@ -272,15 +273,11 @@ impl BuildOwner {
     /// Rarely used directly. Instead, consider using `FocusScope::of` to obtain the
     /// `FocusScopeNode` for a given `BuildContext`.
     pub fn focus_manager(self: Handle<Self>, app: &App) -> Handle<FocusManager> {
-        app.get(self).focus_manager
+        app.get(self).focus_manager.handle()
     }
 
     /// Replaces the object in charge of the focus tree (Dart's mutable `focusManager` field).
-    pub fn set_focus_manager(
-        self: Handle<Self>,
-        app: &mut App,
-        focus_manager: Handle<FocusManager>,
-    ) {
+    pub fn set_focus_manager(self: Handle<Self>, app: &mut App, focus_manager: Ref<FocusManager>) {
         app.get_mut(self).focus_manager = focus_manager;
     }
 
@@ -542,6 +539,9 @@ fn unmount_recursively(app: &mut App, element: AnyElement) {
     }
     element.unmount(app);
     debug_assert!(element.lifecycle(app) == ElementLifecycle::Defunct);
+    // Dart drops a defunct element. A handle to it kept past this frame (a callback's
+    // `BuildContext`) still reads it until the next checkpoint, then finds it unmounted.
+    app.release_tree_node(element.id());
 }
 
 fn deactivate_recursively(app: &mut App, element: AnyElement) {
@@ -572,7 +572,7 @@ mod tests {
         let focus = FocusManager::new(&mut app);
         let owner = BuildOwner::with_focus_manager(&mut app, None, focus);
         for element in [pending, cleaned] {
-            element.assign_owner(&mut app, owner);
+            element.assign_owner(&mut app, owner.handle());
             let handle = element
                 .downcast::<SingleChildRenderObjectElement<SizedBox>>(&app)
                 .unwrap();
@@ -581,14 +581,14 @@ mod tests {
         pending.set_dirty(&mut app, true);
         cleaned.set_dirty(&mut app, false);
         let scope = BuildScope::new(&mut app, None);
-        app.get_mut(scope).dirty_elements = vec![pending, cleaned];
-        app.get_mut(scope).dirty_elements_needs_resorting = Some(true);
+        app.get_mut(&scope).dirty_elements = vec![pending, cleaned];
+        app.get_mut(&scope).dirty_elements_needs_resorting = Some(true);
         let next = scope.dirty_element_index_after(&mut app, 0);
-        assert_eq!(app.get(scope).dirty_elements, [cleaned, pending]);
+        assert_eq!(app.get(&scope).dirty_elements, [cleaned, pending]);
         assert_eq!(
             next, 1,
             "the resume index must point after the last clean sibling"
         );
-        assert!(app.get(scope).dirty_elements[next].dirty(&app));
+        assert!(app.get(&scope).dirty_elements[next].dirty(&app));
     }
 }

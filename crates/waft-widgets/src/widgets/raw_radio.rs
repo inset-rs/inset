@@ -9,7 +9,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::TargetPlatform;
-use waft_foundation::{App, Handle, ValueChanged};
+use waft_foundation::{App, Handle, Ref, ValueChanged};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::MouseCursorRef;
 
@@ -17,7 +17,7 @@ use crate::framework::{
     BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::widgets::basic::Semantics;
-use crate::widgets::focus_manager::AnyFocusNode;
+use crate::widgets::focus_manager::{AnyFocusNode, FocusNodeRef};
 use crate::widgets::localizations::WidgetsLocalizations;
 use crate::widgets::radio_group::{AnyRadioGroupRegistry, RadioClient, RadioClientData};
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
@@ -89,7 +89,7 @@ pub struct RawRadio<T: Clone + PartialEq + 'static> {
     /// The default is false.
     pub toggleable: bool,
     /// The focus node of the radio.
-    pub focus_node: AnyFocusNode,
+    pub focus_node: FocusNodeRef,
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
     pub autofocus: bool,
@@ -119,7 +119,7 @@ impl<T: Clone + PartialEq + 'static> RawRadio<T> {
         value: T,
         mouse_cursor: WidgetStatePropertyRef<MouseCursorRef>,
         toggleable: bool,
-        focus_node: AnyFocusNode,
+        focus_node: FocusNodeRef,
         autofocus: bool,
         group_registry: Option<AnyRadioGroupRegistry<T>>,
         enabled: bool,
@@ -229,7 +229,7 @@ impl<T: Clone + PartialEq + 'static> TickerProviderStateMixin for RawRadioState<
 
 /// Dart's `vsync: this`.
 impl<T: Clone + PartialEq + 'static> TickerProviderObject for RawRadioState<T> {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -250,7 +250,7 @@ impl<T: Clone + PartialEq + 'static> RadioClient<T> for RawRadioState<T> {
     }
 
     fn focus_node(self: Handle<Self>, app: &App) -> AnyFocusNode {
-        self.widget(app).focus_node
+        self.widget(app).focus_node.handle()
     }
 }
 
@@ -338,7 +338,7 @@ impl<T: Clone + PartialEq + 'static> State for RawRadioState<T> {
         }
 
         let widget = self.widget(app);
-        let focus_node = widget.focus_node;
+        let focus_node = widget.focus_node.clone();
         let autofocus = widget.autofocus;
         let mouse_cursor = Rc::clone(&widget.mouse_cursor);
         let builder = Rc::clone(&widget.builder);
@@ -371,6 +371,7 @@ mod tests {
     use std::any::Any;
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
+    use waft_foundation::Ref;
 
     use waft_embedder::PointerDeviceKind;
     use waft_embedder::{Canvas, Offset, Size};
@@ -382,7 +383,7 @@ mod tests {
     use crate::framework::IntoWidget;
     use crate::test_harness::{binding_mount, binding_pump};
     use crate::widgets::basic::{Builder, Center, CustomPaint, Directionality, SizedBox};
-    use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf};
+    use crate::widgets::focus_manager::FocusNode;
     use crate::widgets::radio_group::{AnyRadioClient, RadioGroup, RadioGroupRegistry};
     use crate::widgets::widget_state::WidgetStateProperty;
     use waft_embedder::TextDirection;
@@ -421,7 +422,7 @@ mod tests {
         }
     }
 
-    fn registry(app: &mut App) -> Handle<TestRegistry> {
+    fn registry(app: &mut App) -> Ref<TestRegistry> {
         app.create(TestRegistry {
             group_value: None,
             clients: Vec::new(),
@@ -429,7 +430,7 @@ mod tests {
     }
 
     fn raw_radio(
-        node: AnyFocusNode,
+        node: FocusNodeRef,
         registry: Option<Handle<TestRegistry>>,
         enabled: bool,
         toggleable: bool,
@@ -507,8 +508,8 @@ mod tests {
         binding_pump(&mut cell.borrow_mut(), at);
     }
 
-    fn focus_node(cell: &AppCell) -> AnyFocusNode {
-        FocusNode::new(&mut cell.borrow_mut()).as_node()
+    fn focus_node(cell: &AppCell) -> FocusNodeRef {
+        FocusNode::new(&mut cell.borrow_mut()).erase()
     }
 
     #[test]
@@ -519,8 +520,8 @@ mod tests {
         let captured = Rc::new(Cell::new(None));
         let build = |captured: &Rc<Cell<Option<AnyToggleableState>>>| {
             raw_radio(
-                node,
-                Some(registry),
+                node.clone(),
+                Some(registry.handle()),
                 true,
                 true,
                 Rc::clone(captured),
@@ -535,12 +536,16 @@ mod tests {
             let app = cell.borrow();
             assert!(actual_state.tristate(&app));
             assert_eq!(actual_state.value(&app), Some(false));
-            assert_eq!(app.get(registry).group_value, None);
+            assert_eq!(app.get(&registry).group_value, None);
 
             let state = app
                 .handle::<RawRadioState<u32>>(actual_state.id())
                 .expect("the radio's state");
-            assert!(app.get(registry).clients.contains(&state.as_radio_client()));
+            assert!(
+                app.get(&registry)
+                    .clients
+                    .contains(&state.as_radio_client())
+            );
         }
 
         tap(&cell);
@@ -548,7 +553,7 @@ mod tests {
         binding_mount(&cell, build(&captured));
 
         let app = cell.borrow();
-        assert_eq!(app.get(registry).group_value, Some(0));
+        assert_eq!(app.get(&registry).group_value, Some(0));
         assert_eq!(actual_state.value(&app), Some(true));
     }
 
@@ -561,12 +566,20 @@ mod tests {
 
         binding_mount(
             &cell,
-            raw_radio(node, Some(registry), false, true, captured, painted_box).into_widget(),
+            raw_radio(
+                node,
+                Some(registry.handle()),
+                false,
+                true,
+                captured,
+                painted_box,
+            )
+            .into_widget(),
         );
         tap(&cell);
 
         // onChanged won't fire
-        assert_eq!(cell.borrow().get(registry).group_value, None);
+        assert_eq!(cell.borrow().get(&registry).group_value, None);
     }
 
     #[test]
@@ -588,7 +601,7 @@ mod tests {
     /// A `RawRadio<String>` under a `RadioGroup<String>`, as Material's `Radio<String>` builds
     /// one: the radio takes its registry from the group above it.
     fn string_radio_group(
-        node: AnyFocusNode,
+        node: FocusNodeRef,
         group_value: Option<String>,
         changes: Rc<RefCell<Vec<Option<String>>>>,
         captured: Rc<Cell<Option<AnyToggleableState>>>,
@@ -603,7 +616,7 @@ mod tests {
                         SystemMouseCursors::CLICK.into(),
                     ),
                     true,
-                    node,
+                    node.clone(),
                     false,
                     RadioGroup::<String>::maybe_of(app, context),
                     true,
@@ -630,7 +643,12 @@ mod tests {
 
         binding_mount(
             &cell,
-            string_radio_group(node, None, Rc::clone(&changes), Rc::clone(&captured)),
+            string_radio_group(
+                node.clone(),
+                None,
+                Rc::clone(&changes),
+                Rc::clone(&captured),
+            ),
         );
         let state = captured.get().expect("the builder ran");
         assert_eq!(state.value(&cell.borrow()), Some(false));
@@ -669,7 +687,7 @@ mod tests {
             &cell,
             raw_radio(
                 node,
-                Some(registry),
+                Some(registry.handle()),
                 true,
                 false,
                 Rc::new(Cell::new(None)),
@@ -685,9 +703,14 @@ mod tests {
         let node = focus_node(&cell);
         let registry = registry(&mut cell.borrow_mut());
         let captured = Rc::new(Cell::new(None));
-        let radio = raw_radio(node, Some(registry), true, false, captured.clone(), || {
-            SizedBox::square(Some(24.0)).into_widget()
-        });
+        let radio = raw_radio(
+            node,
+            Some(registry.handle()),
+            true,
+            false,
+            captured.clone(),
+            || SizedBox::square(Some(24.0)).into_widget(),
+        );
 
         binding_mount(
             &cell,

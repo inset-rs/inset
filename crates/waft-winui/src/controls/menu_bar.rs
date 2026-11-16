@@ -8,7 +8,7 @@ use std::{
     rc::Rc,
 };
 use waft_embedder::{FontWeight, Offset, Rect, TextDirection};
-use waft_foundation::{App, Handle, Listener, ValueKey};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref, ValueKey};
 use waft_painting::EdgeInsetsGeometry;
 use waft_rendering::{BoxConstraints, CrossAxisAlignment};
 use waft_services::{HardwareKeyboard, KeyEvent, LogicalKeyboardKey};
@@ -263,10 +263,10 @@ struct MenuHeaderState {
     state: StateData<MenuHeader>,
 
     /// Header focus, separate from the non-tab-stop ContentButton.
-    focus: Option<AnyFocusNode>,
+    focus: Option<FocusNodeRef>,
 
     /// The source MenuBarItemFlyout presenter and item collection.
-    menu: Option<Handle<MenuBarItemFlyout>>,
+    menu: Option<Ref<MenuBarItemFlyout>>,
 
     /// Context below FlyoutTarget, excluding the header's outer margin.
     target: Option<BuildContext>,
@@ -301,12 +301,12 @@ impl MenuHeaderState {
 
     /// The owned MenuBarItemFlyout collection.
     fn menu(self: Handle<Self>, app: &App) -> Handle<MenuFlyout> {
-        app.get(self).menu.unwrap()
+        app.get(self).menu.handle().unwrap()
     }
 
     /// The outer control's keyboard focus identity.
     fn focus(self: Handle<Self>, app: &App) -> AnyFocusNode {
-        app.get(self).focus.unwrap()
+        app.get(self).focus.handle().unwrap()
     }
 
     /// `Focus(FocusState)` on this header as MoveFocusTo calls it.
@@ -471,21 +471,22 @@ impl State for MenuHeaderState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app).clone();
-        let node = FocusNode::new(app).as_node();
+        let node: FocusNodeRef = FocusNode::new(app).into_erased();
         node.set_skip_traversal(app, !widget.tab_stop);
         node.set_on_key_event(
             app,
             Some(Rc::new(move |app, _, event| self.key(app, event, false))),
         );
-        app.get_mut(self).focus = Some(node);
+        app.get_mut(self).focus = Some(node.clone());
         let menu = MenuFlyout::new(app, widget.item.items.clone());
-        app.get_mut(self).menu = Some(menu);
+        app.get_mut(self).menu = Some(menu.clone());
+        let menu = menu.handle();
         app.get_mut(widget.owner)
             .headers
             .insert(widget.item.id.clone(), self);
-        let flyout = menu.as_flyout(app);
+        let flyout = menu.as_flyout(app).handle();
         app.get_mut(flyout).tap_region_group = Some(widget.owner.id());
-        flyout.return_focus_to(app, node);
+        flyout.return_focus_to(app, node.handle());
         app.get_mut(flyout).opening = Some(Listener::new(move |app| {
             self.focus(app).request_focus(app, None);
         }));
@@ -510,13 +511,12 @@ impl State for MenuHeaderState {
         self.menu(app).dispose(app);
         let node = self.focus(app);
         node.dispose(app);
-        app.destroy(node.id());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let r = ThemeResources::of(app, context);
         let widget = self.widget(app).clone();
-        let flyout = self.menu(app).as_flyout(app);
+        let flyout = self.menu(app).as_flyout(app).clone();
         let content = ListenableBuilder::new(Rc::new(flyout), move |app, context, _| {
             self.content(app, context)
         })
@@ -540,7 +540,7 @@ impl State for MenuHeaderState {
                     }))),
             );
         let content = FocusableActionDetector::new(content)
-            .focus_node(self.focus(app))
+            .focus_node(app.get(self).focus.clone().unwrap())
             .enabled(widget.enabled)
             .on_focus_change(move |app, focused| {
                 self.set_state(app, |state| state.focused = focused);

@@ -9,7 +9,7 @@ use waft_embedder::{
     Clip, FilterQuality, ImageFilter, Matrix4, Offset, Path, PathBuilder, PathFillType, Rect, Size,
     TextBaseline,
 };
-use waft_foundation::{App, Handle, Listener, ValueNotifier};
+use waft_foundation::{App, Handle, Listener, OptionRetained, ValueNotifier};
 use waft_painting::{
     Alignment, AlignmentGeometry, BoxShadow, RoundedRectangleBorder, ShapeBorderRef,
     ShapeDecoration,
@@ -31,6 +31,7 @@ use crate::widgets::container::DecoratedBox;
 use crate::widgets::inherited_theme::InheritedTheme;
 use crate::widgets::navigator::Navigator;
 use crate::widgets::overlay::{Overlay, OverlayEntry};
+use waft_foundation::Ref;
 
 /// Signature for a builder that builds a [`WidgetRef`] with a [`MagnifierController`].
 ///
@@ -47,8 +48,8 @@ pub type MagnifierBuilder = Rc<
     dyn Fn(
         &mut App,
         BuildContext,
-        Handle<MagnifierController>,
-        Handle<ValueNotifier<MagnifierInfo>>,
+        Ref<MagnifierController>,
+        Ref<ValueNotifier<MagnifierInfo>>,
     ) -> Option<WidgetRef>,
 >;
 
@@ -182,8 +183,8 @@ impl Default for TextMagnifierConfiguration {
 fn none(
     _app: &mut App,
     _context: BuildContext,
-    _controller: Handle<MagnifierController>,
-    _magnifier_info: Handle<ValueNotifier<MagnifierInfo>>,
+    _controller: Ref<MagnifierController>,
+    _magnifier_info: Ref<ValueNotifier<MagnifierInfo>>,
 ) -> Option<WidgetRef> {
     None
 }
@@ -202,14 +203,14 @@ fn none(
 pub struct MagnifierController {
     /// The controller that will be driven in / out when show / hide is triggered,
     /// respectively.
-    pub animation_controller: Option<Handle<AnimationController>>,
-    overlay_entry: Option<Handle<OverlayEntry>>,
+    pub animation_controller: Option<Ref<AnimationController>>,
+    overlay_entry: Option<Ref<OverlayEntry>>,
 }
 
 impl MagnifierController {
     /// If there is no in / out animation for the magnifier, [`animation_controller`](Self::animation_controller)
     /// should be left unset.
-    pub fn new(app: &mut App) -> Handle<MagnifierController> {
+    pub fn new(app: &mut App) -> Ref<MagnifierController> {
         app.create(MagnifierController {
             animation_controller: None,
             overlay_entry: None,
@@ -218,12 +219,12 @@ impl MagnifierController {
 
     /// Dart `MagnifierController(animationController:)`.
     pub fn animation_controller(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
-        animation_controller: Handle<AnimationController>,
-    ) -> Handle<Self> {
+        animation_controller: Ref<AnimationController>,
+    ) -> Ref<Self> {
         animation_controller.set_value(app, 0.0);
-        app.get_mut(self).animation_controller = Some(animation_controller);
+        app.get_mut(&self).animation_controller = Some(animation_controller);
         self
     }
 
@@ -239,7 +240,7 @@ impl MagnifierController {
     /// [`overlay_entry`](Self::overlay_entry) field may be non-null even when the magnifier is
     /// not visible.
     pub fn overlay_entry(self: Handle<Self>, app: &App) -> Option<Handle<OverlayEntry>> {
-        app.get(self).overlay_entry
+        app.get(self).overlay_entry.handle()
     }
 
     /// Whether the magnifier is currently being shown.
@@ -260,6 +261,7 @@ impl MagnifierController {
             && app
                 .get(self)
                 .animation_controller
+                .as_ref()
                 .is_none_or(|controller| controller.status(app).is_forward_or_completed())
     }
 
@@ -282,7 +284,7 @@ impl MagnifierController {
         builder: WidgetBuilder,
         below: Option<Handle<OverlayEntry>>,
     ) -> TickerFuture {
-        if let Some(entry) = app.get(self).overlay_entry {
+        if let Some(entry) = app.get(self).overlay_entry.handle() {
             entry.remove(app);
             entry.dispose(app);
         }
@@ -301,10 +303,10 @@ impl MagnifierController {
             false,
             false,
         );
-        app.get_mut(self).overlay_entry = Some(overlay_entry);
+        app.get_mut(self).overlay_entry = Some(overlay_entry.clone());
         overlay_state.insert(app, overlay_entry, below, None);
 
-        if let Some(controller) = app.get(self).animation_controller {
+        if let Some(controller) = app.get(self).animation_controller.handle() {
             controller.forward(app, None)
         } else {
             TickerFuture::complete()
@@ -330,7 +332,7 @@ impl MagnifierController {
             return TickerFuture::complete();
         }
 
-        if let Some(controller) = app.get(self).animation_controller {
+        if let Some(controller) = app.get(self).animation_controller.handle() {
             let future = controller.reverse(app, None);
             if remove_from_overlay {
                 future.when_complete(
@@ -357,7 +359,7 @@ impl MagnifierController {
     /// [`hide`](Self::hide) instead, with `remove_from_overlay` set to true, and optionally await
     /// the returned future.
     pub fn remove_from_overlay(self: Handle<Self>, app: &mut App) {
-        if let Some(entry) = app.get(self).overlay_entry {
+        if let Some(entry) = app.get(self).overlay_entry.handle() {
             entry.remove(app);
             entry.dispose(app);
         }
@@ -984,6 +986,7 @@ impl RenderBox for RenderMagnification {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+    use waft_foundation::Ref;
 
     use waft_animation::{AnimationBehavior, AnimationStatus};
     use waft_embedder::{BlurStyle, Color, Radius, TextDirection};
@@ -1005,7 +1008,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
             Ticker::new(app, on_tick, None)
         }
     }
@@ -1395,7 +1398,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let context = home.current_context(&app).expect("mounted");
         let duration = Duration::from_secs(120);
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             &mut app,
             None,
             Some(duration),
@@ -1405,8 +1408,8 @@ mod tests {
             AnimationBehavior::Normal,
             TestVSync,
         );
-        let magnifier_controller =
-            MagnifierController::new(&mut app).animation_controller(&mut app, animation_controller);
+        let magnifier_controller = MagnifierController::new(&mut app)
+            .animation_controller(&mut app, animation_controller.clone());
 
         magnifier_controller.show(
             &mut app,
@@ -1465,7 +1468,7 @@ mod tests {
         );
         Overlay::of(&mut app, context, false).insert(
             &mut app,
-            fake_before_overlay_entry,
+            fake_before_overlay_entry.clone(),
             None,
             None,
         );
@@ -1476,7 +1479,7 @@ mod tests {
             Rc::new(move |_app: &mut App, _context: BuildContext| {
                 SizedBox::new().key(magnifier_key.clone()).into_widget()
             }),
-            Some(fake_before_overlay_entry),
+            Some(fake_before_overlay_entry.handle()),
         );
         binding_pump(&mut app, at(0));
 

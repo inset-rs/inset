@@ -7,7 +7,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use waft_foundation::{App, CompleterFuture, Handle};
+use waft_foundation::{App, CompleterFuture, Ref};
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
 };
@@ -18,8 +18,8 @@ use winui_gallery::Feature;
 /// A window with one page whose context shows the dialogs, and what they reported.
 #[derive(Clone, Default)]
 struct Probe {
-    first: Rc<Cell<Option<Handle<ContentDialog>>>>,
-    second: Rc<Cell<Option<Handle<ContentDialog>>>>,
+    first: Rc<RefCell<Option<Ref<ContentDialog>>>>,
+    second: Rc<RefCell<Option<Ref<ContentDialog>>>>,
     page: Rc<Cell<Option<BuildContext>>>,
     events: Rc<RefCell<Vec<String>>>,
 }
@@ -36,8 +36,8 @@ fn fixture_with_keyboard(theme: Theme, keyboard: f64) -> (Fixture, Probe) {
         winui_gallery::install_fonts(app);
         let first = reporting_dialog(app, "First", &shared.events);
         let second = reporting_dialog(app, "Second", &shared.events);
-        shared.first.set(Some(first));
-        shared.second.set(Some(second));
+        *shared.first.borrow_mut() = Some(first.clone());
+        *shared.second.borrow_mut() = Some(second.clone());
         let page = shared.page.clone();
         run_app(
             app,
@@ -61,7 +61,7 @@ fn fixture_with_keyboard(theme: Theme, keyboard: f64) -> (Fixture, Probe) {
                         Rc::new(move |app, context, _, _| builder(app, context)),
                     )
                     .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                    PageRoute::as_page_route(route)
+                    route.into_erased()
                 })
                 .home(ThemeScope::new(
                     theme,
@@ -86,22 +86,22 @@ fn reporting_dialog(
     app: &mut App,
     name: &str,
     events: &Rc<RefCell<Vec<String>>>,
-) -> Handle<ContentDialog> {
-    let dialog = ContentDialog::new(app)
-        .title(app, Text::new(name.to_owned()))
-        .content(app, Text::new("Both answers keep the draft."))
-        .primary_button_text(app, "Keep")
-        .secondary_button_text(app, "Send")
-        .close_button_text(app, "Cancel")
-        .default_button(app, ContentDialogButton::Primary);
+) -> Ref<ContentDialog> {
+    let dialog = ContentDialog::new(app);
+    dialog.title(app, Text::new(name.to_owned()));
+    dialog.content(app, Text::new("Both answers keep the draft."));
+    dialog.primary_button_text(app, "Keep");
+    dialog.secondary_button_text(app, "Send");
+    dialog.close_button_text(app, "Cancel");
+    dialog.default_button(app, ContentDialogButton::Primary);
     let closing = events.clone();
-    app.get_mut(dialog).closing = Some(Rc::new(move |_, args| {
+    app.get_mut(&dialog).closing = Some(Rc::new(move |_, args| {
         closing
             .borrow_mut()
             .push(format!("closing {:?}", args.result()));
     }));
     let closed = events.clone();
-    app.get_mut(dialog).closed = Some(Rc::new(move |_, args| {
+    app.get_mut(&dialog).closed = Some(Rc::new(move |_, args| {
         closed
             .borrow_mut()
             .push(format!("closed {:?}", args.result));
@@ -111,7 +111,7 @@ fn reporting_dialog(
 
 fn show(
     f: &mut Fixture,
-    dialog: Handle<ContentDialog>,
+    dialog: &Ref<ContentDialog>,
     probe: &Probe,
 ) -> Result<CompleterFuture<ContentDialogResult>, ContentDialogError> {
     let context = probe.page.get().unwrap();
@@ -216,14 +216,17 @@ fn the_content_takes_the_initial_focus_and_closing_can_keep_the_dialog_open() {
 #[test]
 fn only_one_dialog_opens_in_a_window_until_the_first_is_closing() {
     let (mut f, probe) = fixture(Theme::Light);
-    let (first, second) = (probe.first.get().unwrap(), probe.second.get().unwrap());
-    let result = show(&mut f, first, &probe).expect("the first dialog opens");
+    let (first, second) = (
+        probe.first.borrow().clone().unwrap(),
+        probe.second.borrow().clone().unwrap(),
+    );
+    let result = show(&mut f, &first, &probe).expect("the first dialog opens");
     assert_eq!(
-        show(&mut f, first, &probe).err(),
+        show(&mut f, &first, &probe).err(),
         Some(ContentDialogError::MultipleOpen)
     );
     assert_eq!(
-        show(&mut f, second, &probe).err(),
+        show(&mut f, &second, &probe).err(),
         Some(ContentDialogError::MultipleOpen)
     );
     tap(&mut f, "Send");
@@ -232,15 +235,15 @@ fn only_one_dialog_opens_in_a_window_until_the_first_is_closing() {
         &*probe.events.borrow(),
         &["closing Secondary", "closed Secondary"]
     );
-    show(&mut f, second, &probe).expect("the second dialog opens once the first has closed");
+    show(&mut f, &second, &probe).expect("the second dialog opens once the first has closed");
     f.find("Second");
 }
 
 #[test]
 fn hide_closes_with_none_and_the_result_follows_the_transition() {
     let (mut f, probe) = fixture(Theme::Dark);
-    let dialog = probe.first.get().unwrap();
-    let result = show(&mut f, dialog, &probe).unwrap();
+    let dialog = probe.first.borrow().clone().unwrap();
+    let result = show(&mut f, &dialog, &probe).unwrap();
     f.capture("content_dialog_dark");
     dialog.hide(&mut f.cell.borrow_mut());
     f.cell.checkpoint();
@@ -253,21 +256,26 @@ fn hide_closes_with_none_and_the_result_follows_the_transition() {
 #[test]
 fn disposing_a_shown_dialog_closes_it_without_events() {
     let (mut f, probe) = fixture(Theme::Light);
-    let dialog = probe.first.get().unwrap();
-    let result = show(&mut f, dialog, &probe).unwrap();
+    let dialog = probe.first.borrow().clone().unwrap();
+    let result = show(&mut f, &dialog, &probe).unwrap();
     dialog.dispose(&mut f.cell.borrow_mut());
     f.cell.checkpoint();
     settle(&mut f);
     assert_eq!(result.peek(), Some(ContentDialogResult::None));
     assert!(probe.events.borrow().is_empty());
-    assert!(!f.cell.borrow().contains(dialog));
+    // Nothing keeps the dialog but the test: once it lets go, the dialog is freed.
+    let handle = dialog.handle();
+    drop(dialog);
+    *probe.first.borrow_mut() = None;
+    f.cell.checkpoint();
+    assert!(!f.cell.borrow().contains(handle));
     assert!(!shows(&f, "First"));
 }
 
 #[test]
 fn the_default_button_takes_the_initial_focus_without_focusable_content() {
     let (mut f, probe) = fixture(Theme::Light);
-    show(&mut f, probe.first.get().unwrap(), &probe).unwrap();
+    show(&mut f, &probe.first.borrow().clone().unwrap(), &probe).unwrap();
     key(
         &mut f,
         LogicalKeyboardKey::SPACE,
@@ -282,7 +290,7 @@ fn the_default_button_takes_the_initial_focus_without_focusable_content() {
 #[test]
 fn a_dialog_hidden_in_the_frame_it_was_shown_still_closes() {
     let (mut f, probe) = fixture(Theme::Light);
-    let dialog = probe.first.get().unwrap();
+    let dialog = probe.first.borrow().clone().unwrap();
     let result = {
         let mut app = f.cell.borrow_mut();
         let shown = dialog.show_async(&mut app, probe.page.get().unwrap());
@@ -293,19 +301,19 @@ fn a_dialog_hidden_in_the_frame_it_was_shown_still_closes() {
     settle(&mut f);
     assert_eq!(result.peek(), Some(ContentDialogResult::None));
     assert_eq!(&*probe.events.borrow(), &["closed None"]);
-    show(&mut f, dialog, &probe).expect("the dialog opens again");
+    show(&mut f, &dialog, &probe).expect("the dialog opens again");
 }
 
 #[test]
 fn a_deferred_click_closes_with_its_button_once_the_deferral_completes() {
     let (mut f, probe) = fixture(Theme::Light);
-    let dialog = probe.first.get().unwrap();
+    let dialog = probe.first.borrow().clone().unwrap();
     let pending = Rc::new(RefCell::new(None));
     let taken = pending.clone();
-    f.cell.borrow_mut().get_mut(dialog).primary_button_click = Some(Rc::new(move |_, args| {
+    f.cell.borrow_mut().get_mut(&dialog).primary_button_click = Some(Rc::new(move |_, args| {
         *taken.borrow_mut() = Some(args.get_deferral().expect("a deferral during the click"));
     }));
-    let result = show(&mut f, dialog, &probe).unwrap();
+    let result = show(&mut f, &dialog, &probe).unwrap();
     tap(&mut f, "Keep");
     assert!(shows(&f, "First"), "the click waits for its deferral");
     assert!(probe.events.borrow().is_empty());
@@ -327,14 +335,14 @@ fn a_deferred_click_closes_with_its_button_once_the_deferral_completes() {
 #[test]
 fn closing_waits_for_its_deferral_which_can_still_keep_the_dialog_open() {
     let (mut f, probe) = fixture(Theme::Light);
-    let dialog = probe.first.get().unwrap();
+    let dialog = probe.first.borrow().clone().unwrap();
     let pending = Rc::new(RefCell::new(None));
     let taken = pending.clone();
-    f.cell.borrow_mut().get_mut(dialog).closing = Some(Rc::new(move |_, args| {
+    f.cell.borrow_mut().get_mut(&dialog).closing = Some(Rc::new(move |_, args| {
         let deferral = args.get_deferral().expect("a deferral during Closing");
         *taken.borrow_mut() = Some((Rc::clone(args), deferral));
     }));
-    let result = show(&mut f, dialog, &probe).unwrap();
+    let result = show(&mut f, &dialog, &probe).unwrap();
     dialog.hide(&mut f.cell.borrow_mut());
     f.cell.checkpoint();
     settle(&mut f);
@@ -345,7 +353,7 @@ fn closing_waits_for_its_deferral_which_can_still_keep_the_dialog_open() {
     f.cell.checkpoint();
     settle(&mut f);
     assert!(shows(&f, "First"), "the canceled close keeps it open");
-    f.cell.borrow_mut().get_mut(dialog).closing = None;
+    f.cell.borrow_mut().get_mut(&dialog).closing = None;
     dialog.hide(&mut f.cell.borrow_mut());
     f.cell.checkpoint();
     settle(&mut f);
@@ -355,8 +363,8 @@ fn closing_waits_for_its_deferral_which_can_still_keep_the_dialog_open() {
 #[test]
 fn the_result_arrives_as_the_167_ms_close_transition_ends() {
     let (mut f, probe) = fixture(Theme::Light);
-    let dialog = probe.first.get().unwrap();
-    let result = show(&mut f, dialog, &probe).unwrap();
+    let dialog = probe.first.borrow().clone().unwrap();
+    let result = show(&mut f, &dialog, &probe).unwrap();
     dialog.hide(&mut f.cell.borrow_mut());
     f.cell.checkpoint();
     f.frame_after(std::time::Duration::from_millis(16));
@@ -369,7 +377,7 @@ fn the_result_arrives_as_the_167_ms_close_transition_ends() {
 #[test]
 fn arrow_keys_move_between_the_command_buttons() {
     let (mut f, probe) = fixture(Theme::Light);
-    show(&mut f, probe.first.get().unwrap(), &probe).unwrap();
+    show(&mut f, &probe.first.borrow().clone().unwrap(), &probe).unwrap();
     key(
         &mut f,
         LogicalKeyboardKey::ARROW_RIGHT,
@@ -389,8 +397,8 @@ fn arrow_keys_move_between_the_command_buttons() {
 #[test]
 fn the_dialog_and_its_buttons_keep_clear_of_the_keyboard() {
     let (mut f, probe) = fixture_with_keyboard(Theme::Light, 300.0);
-    let dialog = probe.first.get().unwrap();
-    let _shown = show(&mut f, dialog, &probe);
+    let dialog = probe.first.borrow().clone().unwrap();
+    let _shown = show(&mut f, &dialog, &probe);
     for button in ["Keep", "Send", "Cancel"] {
         let at = f.find(button);
         assert!(

@@ -22,6 +22,7 @@ use waft_foundation::{App, Handle, Listener, Timer};
 use crate::basic_types::TextDirection;
 use crate::image_cache::{ImageCache, ImageCacheKey};
 use crate::image_stream::{ImageInfo, ImageStream, ImageStreamCompleter};
+use waft_foundation::Ref;
 
 /// Bytes on their way from a bundle. Dart's `Future<ByteData>`.
 pub type AssetFuture = Pin<Box<dyn Future<Output = Result<Vec<u8>, String>>>>;
@@ -195,10 +196,10 @@ pub trait ImageProvider: Debug + 'static {
     /// `loadImage`.
     ///
     /// Called only when the cache has neither the image nor a decode of it already running.
-    fn load_image(&self, app: &mut App, key: &ImageCacheKey) -> Handle<ImageStreamCompleter>;
+    fn load_image(&self, app: &mut App, key: &ImageCacheKey) -> Ref<ImageStreamCompleter>;
 
     /// The stream for this image, sharing whatever the cache already has. Flutter `resolve`.
-    fn resolve(&self, app: &mut App, configuration: &ImageConfiguration) -> Handle<ImageStream> {
+    fn resolve(&self, app: &mut App, configuration: &ImageConfiguration) -> Ref<ImageStream> {
         let stream = ImageStream::new(app);
         let key = self.key(configuration);
         let cache = ImageCache::instance(app);
@@ -319,7 +320,7 @@ impl ImageProvider for MemoryImage {
         })
     }
 
-    fn load_image(&self, app: &mut App, key: &ImageCacheKey) -> Handle<ImageStreamCompleter> {
+    fn load_image(&self, app: &mut App, key: &ImageCacheKey) -> Ref<ImageStreamCompleter> {
         let key = key
             .downcast_ref::<MemoryImageKey>()
             .expect("MemoryImage must load its resolved key");
@@ -392,7 +393,7 @@ impl ImageProvider for AssetImage {
         })
     }
 
-    fn load_image(&self, app: &mut App, key: &ImageCacheKey) -> Handle<ImageStreamCompleter> {
+    fn load_image(&self, app: &mut App, key: &ImageCacheKey) -> Ref<ImageStreamCompleter> {
         let key = key
             .downcast_ref::<AssetImageKey>()
             .expect("AssetImage must load its resolved key");
@@ -406,13 +407,13 @@ impl ImageProvider for AssetImage {
         };
         let loading = bundle.load(&key.name);
         let scale = key.scale;
-        let retained = app.retain(completer);
+        let retained = completer.keep(app);
         // Not held: dropping the task does not cancel it, and the completer is what carries the
         // answer onwards.
         let _loading = app.spawn(async move |async_app| {
             let bytes = loading.await;
             async_app.update(move |app| {
-                let completer = retained.get();
+                let completer = retained.handle();
                 if !app.is_disposed(completer) {
                     match bytes {
                         Ok(bytes) => decode_into(app, completer, Arc::from(bytes), scale),
@@ -428,13 +429,9 @@ impl ImageProvider for AssetImage {
 }
 
 /// Asks the host to decode `bytes` and drives the answer into a fresh completer.
-fn decode_into_completer(
-    app: &mut App,
-    bytes: Arc<[u8]>,
-    scale: f64,
-) -> Handle<ImageStreamCompleter> {
+fn decode_into_completer(app: &mut App, bytes: Arc<[u8]>, scale: f64) -> Ref<ImageStreamCompleter> {
     let completer = ImageStreamCompleter::new(app);
-    decode_into(app, completer, bytes, scale);
+    decode_into(app, completer.handle(), bytes, scale);
     completer
 }
 
@@ -499,25 +496,26 @@ impl ImagePlayback {
             watched: false,
             timer: None,
         });
+        // The completer keeps the playback, Dart's completer and its frame state being one
+        // object: both callbacks hold it until the completer disposes and clears them.
+        let watching = playback.clone();
         completer.set_on_watched(
             app,
-            Rc::new(move |app: &mut App, watched| playback.set_watched(app, watched)),
+            Rc::new(move |app: &mut App, watched| watching.set_watched(app, watched)),
         );
-        completer.set_on_disposed(
-            app,
-            Listener::handle_method(playback, ImagePlayback::dispose),
-        );
+        let disposing = playback.clone();
+        completer.set_on_disposed(app, Listener::new(move |app| disposing.dispose(app)));
         // Asked for now rather than inside the task: a spawned body first runs at the next
         // checkpoint, and waiting until then would cost a frame before the host had even heard
         // of the image.
         let opening = app.platform().open_image_codec(bytes);
         // The task is not held: dropping it does not cancel it, and nothing waits on its result
         // — the completer is what carries the answer onwards.
-        let retained = app.retain(playback);
+        let retained = playback;
         let _opening = app.spawn(async move |async_app| {
             let opened = opening.await;
             async_app.update(move |app| {
-                let playback = retained.get();
+                let playback = retained.handle();
                 if !app.is_disposed(playback) {
                     playback.codec_opened(app, opened);
                 }
@@ -525,14 +523,14 @@ impl ImagePlayback {
         });
     }
 
-    /// Releases composed playback resources; in-flight tasks hold only arena retention.
+    /// Releases composed playback resources; an in-flight task keeps the object until it lands.
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(timer) = app.get_mut(self).timer.take() {
             timer.cancel(app);
         }
         app.get_mut(self).codec = None;
         app.get_mut(self).next_frame = None;
-        app.destroy(self);
+        app.mark_disposed(self);
     }
 
     /// The host answered the open. Dart's `_handleCodecReady`.
@@ -562,11 +560,11 @@ impl ImagePlayback {
         let Some(mut codec) = app.get_mut(self).codec.take() else {
             return;
         };
-        let retained = app.retain(self);
+        let retained = self.keep(app);
         let _decoding = app.spawn(async move |async_app| {
             let frame = codec.next_frame().await;
             async_app.update(move |app| {
-                let playback = retained.get();
+                let playback = retained.handle();
                 if !app.is_disposed(playback) {
                     playback.frame_decoded(app, codec, frame);
                 }
@@ -606,7 +604,6 @@ impl ImagePlayback {
 
     /// Puts a frame on screen, then starts both its time and the decode of the one after it.
     fn show(self: Handle<Self>, app: &mut App, frame: ImageFrame) {
-        let _retained = app.retain(self);
         let scale = app.get(self).scale;
         let completer = app.get(self).completer;
         completer.set_image(app, ImageInfo::new(frame.image).scale(scale));
@@ -663,7 +660,6 @@ impl ImagePlayback {
     /// An image scrolled out of view has no listeners, and decoding frames nobody sees would cost
     /// the whole animation's work for nothing.
     fn set_watched(self: Handle<Self>, app: &mut App, watched: bool) {
-        let _retained = app.retain(self);
         if app.get(self).watched == watched {
             return;
         }

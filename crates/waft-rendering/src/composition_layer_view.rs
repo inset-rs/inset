@@ -109,7 +109,7 @@ impl RenderBox for RenderCompositionLayerView {
 mod tests {
     use waft_embedder::test_support::idle_layer;
     use waft_embedder::{Clip, Matrix4, Mutator, Part, Rect, SceneBuilder};
-    use waft_foundation::{AppCell, Handle};
+    use waft_foundation::{AppCell, Ref};
 
     use super::*;
     use crate::layer::{ContainerLayer, OffsetLayer};
@@ -202,7 +202,7 @@ mod tests {
         app: &mut App,
         composition_layer: Arc<dyn CompositionLayer>,
         painting: ChildPainting,
-    ) -> (waft_embedder::Scene, Handle<PipelineOwner>) {
+    ) -> (waft_embedder::Scene, Ref<PipelineOwner>) {
         let owner = PipelineOwner::new(app, None, None);
         let child = RenderCompositionLayerView::new(app, composition_layer);
         let parent = RenderHandle::new_box(

@@ -43,10 +43,10 @@ pub type TextSelectionChangedCallback =
 #[derive(Clone)]
 pub struct TextBox {
     /// Owns the text, selection and composing range; the caller retains and disposes it.
-    pub controller: AnyTextEditingController,
+    pub controller: TextEditingControllerRef,
 
     /// An optional caller-owned focus node; otherwise the control creates one.
-    pub focus_node: Option<Handle<FocusNode>>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// Content above the editor, with the source header margin.
     pub header: Option<WidgetRef>,
@@ -127,7 +127,7 @@ pub struct TextBox {
 
 impl TextBox {
     /// Creates an editor using a caller-owned native editing controller.
-    pub fn new(controller: AnyTextEditingController) -> Self {
+    pub fn new(controller: TextEditingControllerRef) -> Self {
         Self {
             controller,
             focus_node: None,
@@ -160,7 +160,7 @@ impl TextBox {
     }
 
     /// Sets FocusNode.
-    pub fn focus_node(mut self, value: Handle<FocusNode>) -> Self {
+    pub fn focus_node(mut self, value: FocusNodeRef) -> Self {
         self.focus_node = Some(value);
         self
     }

@@ -4,7 +4,9 @@ use std::any::type_name;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use waft_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
+use waft_foundation::{
+    App, Handle, Listenable, Listener, OptionRetained, Ref, ValueListenable, ValueNotifier,
+};
 pub use waft_scheduler::TickerProvider;
 use waft_scheduler::{Ticker, TickerCallback};
 
@@ -131,7 +133,7 @@ impl TickerMode {
     pub fn get_notifier(app: &App, context: BuildContext) -> Rc<dyn ValueListenable<bool>> {
         let widget = context.get_inherited_widget_of_exact_type::<EffectiveTickerMode>(app);
         match widget {
-            Some(widget) => Rc::new(widget.notifier),
+            Some(widget) => Rc::new(widget.notifier.clone()),
             None => Rc::new(ConstantValueListenable::new(true)),
         }
     }
@@ -154,7 +156,7 @@ impl TickerMode {
     pub fn values_of(app: &mut App, context: BuildContext) -> TickerModeData {
         let values_notifier = context
             .depend_on_inherited_widget_of_exact_type::<EffectiveTickerMode>(app)
-            .map(|widget| widget.values_notifier);
+            .map(|widget| widget.values_notifier.handle());
         match values_notifier {
             Some(values_notifier) => *values_notifier.value(app),
             None => TickerModeData::FALLBACK,
@@ -209,7 +211,7 @@ impl TickerMode {
 
         let widget = context.get_inherited_widget_of_exact_type::<EffectiveTickerMode>(app);
         match widget {
-            Some(widget) => Rc::new(widget.values_notifier),
+            Some(widget) => Rc::new(widget.values_notifier.clone()),
             None => Rc::new(fallback),
         }
     }
@@ -240,20 +242,22 @@ pub struct TickerModeState {
     ancestor_force_frames: bool,
     // Dart's field initializers: the notifiers need a slot in the App, which the state
     // does not have until `init_state`; nothing reads them before that.
-    effective_mode: Option<Handle<ValueNotifier<bool>>>,
-    effective_values: Option<Handle<ValueNotifier<TickerModeData>>>,
+    effective_mode: Option<Ref<ValueNotifier<bool>>>,
+    effective_values: Option<Ref<ValueNotifier<TickerModeData>>>,
 }
 
 impl TickerModeState {
-    fn effective_mode(self: Handle<Self>, app: &App) -> Handle<ValueNotifier<bool>> {
+    fn effective_mode(self: Handle<Self>, app: &App) -> Ref<ValueNotifier<bool>> {
         app.get(self)
             .effective_mode
+            .clone()
             .expect("the notifier is created in init_state")
     }
 
-    fn effective_values(self: Handle<Self>, app: &App) -> Handle<ValueNotifier<TickerModeData>> {
+    fn effective_values(self: Handle<Self>, app: &App) -> Ref<ValueNotifier<TickerModeData>> {
         app.get(self)
             .effective_values
+            .clone()
             .expect("the notifier is created in init_state")
     }
 
@@ -306,10 +310,8 @@ impl State for TickerModeState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let effective_mode = self.effective_mode(app);
         let effective_values = self.effective_values(app);
-        app.get_mut(effective_mode).dispose();
-        app.get_mut(effective_values).dispose();
-        app.destroy(effective_mode);
-        app.destroy(effective_values);
+        effective_mode.dispose(app);
+        effective_values.dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -331,8 +333,8 @@ impl State for TickerModeState {
 struct EffectiveTickerMode {
     enabled: bool,
     force_frames: bool,
-    notifier: Handle<ValueNotifier<bool>>,
-    values_notifier: Handle<ValueNotifier<TickerModeData>>,
+    notifier: Ref<ValueNotifier<bool>>,
+    values_notifier: Ref<ValueNotifier<TickerModeData>>,
     child: WidgetRef,
 }
 
@@ -341,8 +343,8 @@ impl EffectiveTickerMode {
     fn new<K>(
         enabled: bool,
         force_frames: bool,
-        notifier: Handle<ValueNotifier<bool>>,
-        values_notifier: Handle<ValueNotifier<TickerModeData>>,
+        notifier: Ref<ValueNotifier<bool>>,
+        values_notifier: Ref<ValueNotifier<TickerModeData>>,
         child: impl IntoWidget<K>,
     ) -> EffectiveTickerMode {
         EffectiveTickerMode {
@@ -368,7 +370,7 @@ impl InheritedWidget for EffectiveTickerMode {
 /// The fields of Dart's `SingleTickerProviderStateMixin`.
 #[derive(Default)]
 pub struct SingleTickerProviderStateMixinData {
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
     ticker_mode_notifier: Option<Rc<dyn ValueListenable<TickerModeData>>>,
 }
 
@@ -413,7 +415,7 @@ pub trait SingleTickerProviderStateMixin: State {
     ) -> &mut SingleTickerProviderStateMixinData;
 
     /// [`TickerProvider::create_ticker`]: creates a ticker with the given callback.
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         debug_assert!(
             self.single_ticker_provider_data(app).ticker.is_none(),
             "{} is a SingleTickerProviderStateMixin but multiple tickers were created. A \
@@ -424,7 +426,7 @@ pub trait SingleTickerProviderStateMixin: State {
             type_name::<Self>()
         );
         let ticker = Ticker::new(app, on_tick, View::maybe_id_of(app, self.context(app)));
-        self.single_ticker_provider_data_mut(app).ticker = Some(ticker);
+        self.single_ticker_provider_data_mut(app).ticker = Some(ticker.clone());
         self.update_ticker_mode_notifier(app);
         self.update_ticker(app); // Sets _ticker.mute correctly.
         ticker
@@ -434,7 +436,7 @@ pub trait SingleTickerProviderStateMixin: State {
     /// `super.dispose()` would reach the mixin. The vended ticker must already be
     /// disposed (by disposing its `AnimationController`).
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let ticker = self.single_ticker_provider_data(app).ticker;
+        let ticker = self.single_ticker_provider_data(app).ticker.handle();
         debug_assert!(
             ticker.is_none_or(|ticker| !ticker.is_active(app)),
             "{name} was disposed with an active Ticker. {name} created a Ticker via its \
@@ -460,7 +462,7 @@ pub trait SingleTickerProviderStateMixin: State {
         // We may have a new TickerMode ancestor.
         self.update_ticker_mode_notifier(app);
         self.update_ticker(app);
-        if let Some(ticker) = self.single_ticker_provider_data(app).ticker {
+        if let Some(ticker) = self.single_ticker_provider_data(app).ticker.handle() {
             ticker.set_view(app, View::maybe_id_of(app, self.context(app)));
         }
     }
@@ -475,7 +477,7 @@ trait SingleTickerProviderStateMixinPrivate: SingleTickerProviderStateMixin {
             .as_ref()
             .expect("set before the ticker is vended")
             .value(app);
-        if let Some(ticker) = self.single_ticker_provider_data(app).ticker {
+        if let Some(ticker) = self.single_ticker_provider_data(app).ticker.handle() {
             ticker.set_muted(app, !values.enabled);
             app.get_mut(ticker).force_frames = values.force_frames;
         }
@@ -506,7 +508,7 @@ impl<S: SingleTickerProviderStateMixin> SingleTickerProviderStateMixinPrivate fo
 /// The fields of Dart's `TickerProviderStateMixin`.
 #[derive(Default)]
 pub struct TickerProviderStateMixinData {
-    tickers: Option<HashSet<Handle<Ticker>>>,
+    tickers: Option<HashSet<Ref<Ticker>>>,
     ticker_mode_notifier: Option<Rc<dyn ValueListenable<TickerModeData>>>,
 }
 
@@ -538,9 +540,8 @@ impl TickerProviderStateMixinData {
 /// [`SingleTickerProviderStateMixin`] describes, and its tickers follow the element's view as
 /// that one's does.
 ///
-/// A vended ticker stays in the state's set after it is disposed: Dart's `_WidgetTicker`
-/// overrides `Ticker.dispose` to unregister itself, and [`Ticker::dispose`] is not a
-/// hook here. Muting a disposed ticker is a no-op.
+/// A vended ticker leaves the state's set when it is disposed, as Dart's `_WidgetTicker`
+/// does.
 pub trait TickerProviderStateMixin: State {
     /// Mixin field access.
     fn ticker_provider_data(self: Handle<Self>, app: &App) -> &TickerProviderStateMixinData;
@@ -552,7 +553,7 @@ pub trait TickerProviderStateMixin: State {
     ) -> &mut TickerProviderStateMixinData;
 
     /// [`TickerProvider::create_ticker`]: creates a ticker with the given callback.
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         if self
             .ticker_provider_data(app)
             .ticker_mode_notifier
@@ -577,13 +578,24 @@ pub trait TickerProviderStateMixin: State {
             .expect("set above")
             .value(app);
         let result = Ticker::new(app, on_tick, View::maybe_id_of(app, self.context(app)));
+        // Dart's `_WidgetTicker`: disposing the ticker takes it out of this state's set. A
+        // state is freed when its element unmounts, where Dart's lives on for a ticker
+        // disposed after it; its set is gone with it, so there is nothing to take out.
+        result.set_remove_from_creator(
+            app,
+            Rc::new(move |app: &mut App, ticker: Handle<Ticker>| {
+                if app.contains(self) {
+                    self.remove_ticker(app, ticker);
+                }
+            }),
+        );
         result.set_muted(app, !values.enabled);
-        app.get_mut(result).force_frames = values.force_frames;
+        app.get_mut(&result).force_frames = values.force_frames;
         self.ticker_provider_data_mut(app)
             .tickers
             .as_mut()
             .expect("created above")
-            .insert(result);
+            .insert(result.clone());
         result
     }
 
@@ -600,7 +612,7 @@ pub trait TickerProviderStateMixin: State {
             .tickers
             .iter()
             .flatten()
-            .copied()
+            .map(|ticker| ticker.handle())
             .collect();
         for ticker in tickers {
             ticker.set_view(app, view);
@@ -614,7 +626,7 @@ pub trait TickerProviderStateMixin: State {
         if cfg!(debug_assertions)
             && let Some(tickers) = &self.ticker_provider_data(app).tickers
         {
-            for ticker in tickers.iter().copied() {
+            for ticker in tickers {
                 assert!(
                     !ticker.is_active(app),
                     "{name} was disposed with an active Ticker. {name} created a Ticker via its \
@@ -639,12 +651,22 @@ pub trait TickerProviderStateMixin: State {
 
 /// Dart's private members of `TickerProviderStateMixin`.
 trait TickerProviderStateMixinPrivate: TickerProviderStateMixin {
+    fn remove_ticker(self: Handle<Self>, app: &mut App, ticker: Handle<Ticker>) {
+        let tickers = self
+            .ticker_provider_data_mut(app)
+            .tickers
+            .as_mut()
+            .expect("a vended ticker is in the set");
+        debug_assert!(tickers.contains(&ticker));
+        tickers.remove(&ticker);
+    }
+
     fn update_tickers(self: Handle<Self>, app: &mut App) {
         let tickers: Option<Vec<Handle<Ticker>>> = self
             .ticker_provider_data(app)
             .tickers
             .as_ref()
-            .map(|tickers| tickers.iter().copied().collect());
+            .map(|tickers| tickers.iter().map(|ticker| ticker.handle()).collect());
         if let Some(tickers) = tickers {
             let values = *self
                 .ticker_provider_data(app)
@@ -680,9 +702,6 @@ trait TickerProviderStateMixinPrivate: TickerProviderStateMixin {
 }
 
 impl<S: TickerProviderStateMixin> TickerProviderStateMixinPrivate for S {}
-
-// Dart's `_WidgetTicker` (a `Ticker` whose `dispose` removes it from its creator's set)
-// waits for a dispose hook on `Ticker`; see the crate's PORTING.md.
 
 /// Dart's `_ConstantValueListenable<T>`: a value that never changes.
 struct ConstantValueListenable<T> {
@@ -789,6 +808,7 @@ mod tests {
     use std::cell::Cell;
     use std::time::Duration;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
     use waft_animation::{AnimationBehavior, AnimationController};
     use waft_embedder::Size;
@@ -831,8 +851,8 @@ mod tests {
         TickerMode::new(enabled, child).into_widget()
     }
 
-    fn new_controller(app: &mut App, vsync: impl TickerProvider) -> Handle<AnimationController> {
-        AnimationController::create(
+    fn new_controller(app: &mut App, vsync: impl TickerProvider) -> Ref<AnimationController> {
+        AnimationController::new(
             app,
             None,
             Some(Duration::from_millis(100)),
@@ -875,7 +895,7 @@ mod tests {
     struct SingleHostState {
         state: StateData<SingleHost>,
         single_ticker_provider: SingleTickerProviderStateMixinData,
-        controller: Option<Handle<AnimationController>>,
+        controller: Option<Ref<AnimationController>>,
         future: Option<TickerFuture>,
     }
 
@@ -885,7 +905,7 @@ mod tests {
             self: Handle<Self>,
             app: &mut App,
             on_tick: TickerCallback,
-        ) -> Handle<Ticker> {
+        ) -> Ref<Ticker> {
             SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
         }
     }
@@ -956,6 +976,7 @@ mod tests {
             .get(state)
             .single_ticker_provider
             .ticker
+            .clone()
             .expect("vended");
         assert!(ticker.muted(&app));
         assert!(ticker.is_active(&app), "time still elapses while muted");
@@ -982,7 +1003,7 @@ mod tests {
             .expect("the TickerMode's state");
         let values_notifier = mode_state.effective_values(&app);
         assert!(
-            app.get(values_notifier)
+            app.get(&values_notifier)
                 .change_notifier_data()
                 .has_listeners()
         );
@@ -991,6 +1012,7 @@ mod tests {
             .get(state)
             .single_ticker_provider
             .ticker
+            .clone()
             .expect("vended");
         let future = app.get(state).future.clone().expect("started");
         let canceled = Rc::new(Cell::new(false));
@@ -1005,6 +1027,9 @@ mod tests {
         harness.set_child(&mut app, ticker_mode(true, Sized.into_widget()));
         harness.pump(&mut app);
         app.drain_microtasks();
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
         assert!(!app.contains(state), "the state is gone");
         assert!(
             !ticker.is_active(&app),
@@ -1015,7 +1040,7 @@ mod tests {
             "the ticker was disposed, not merely stopped"
         );
         assert!(
-            !app.get(values_notifier)
+            !app.get(&values_notifier)
                 .change_notifier_data()
                 .has_listeners(),
             "the mixin's dispose unsubscribed from the TickerMode"
@@ -1043,7 +1068,7 @@ mod tests {
     struct MultiHostState {
         state: StateData<MultiHost>,
         ticker_provider: TickerProviderStateMixinData,
-        controllers: Vec<Handle<AnimationController>>,
+        controllers: Vec<Ref<AnimationController>>,
     }
 
     impl TickerProviderObject for MultiHostState {
@@ -1051,7 +1076,7 @@ mod tests {
             self: Handle<Self>,
             app: &mut App,
             on_tick: TickerCallback,
-        ) -> Handle<Ticker> {
+        ) -> Ref<Ticker> {
             TickerProviderStateMixin::create_ticker(self, app, on_tick)
         }
     }
@@ -1106,14 +1131,14 @@ mod tests {
         let state = descendant(&harness, &app, 2)
             .state_handle::<MultiHostState>(&app)
             .expect("the host's state");
-        let tickers: Vec<Handle<Ticker>> = app
+        let tickers: Vec<Ref<Ticker>> = app
             .get(state)
             .ticker_provider
             .tickers
             .as_ref()
             .expect("vended")
             .iter()
-            .copied()
+            .cloned()
             .collect();
         assert_eq!(tickers.len(), 2);
         assert!(tickers.iter().all(|ticker| ticker.muted(&app)));
@@ -1126,9 +1151,62 @@ mod tests {
 
         harness.set_child(&mut app, ticker_mode(true, Sized.into_widget()));
         harness.pump(&mut app);
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
         assert!(!app.contains(state));
         assert!(tickers.iter().all(|ticker| !ticker.is_active(&app)));
         assert_eq!(SchedulerBinding::transient_callback_count(&mut app), 0);
+    }
+
+    // Dart's `_WidgetTicker`: a ticker disposed with its controller leaves its provider's set.
+    #[test]
+    fn a_disposed_ticker_leaves_the_provider_s_set() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(&mut app, ticker_mode(true, MultiHost.into_widget()));
+        harness.pump(&mut app);
+        let state = descendant(&harness, &app, 2)
+            .state_handle::<MultiHostState>(&app)
+            .expect("the host's state");
+        let tickers = |app: &App| {
+            app.get(state)
+                .ticker_provider
+                .tickers
+                .as_ref()
+                .expect("vended")
+                .len()
+        };
+        assert_eq!(tickers(&app), 2);
+
+        let controller = app.get_mut(state).controllers.remove(0);
+        controller.dispose(&mut app);
+        assert_eq!(tickers(&app), 1);
+    }
+
+    // Dart's `_WidgetTicker` keeps its creator alive, so a ticker disposed after the state that
+    // vended it is gone still unregisters; here the state is freed at the checkpoint after its
+    // element unmounts, and the ticker's dispose finds no set to leave.
+    #[test]
+    fn a_ticker_disposed_after_its_provider_is_gone_disposes_quietly() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(&mut app, ticker_mode(true, MultiHost.into_widget()));
+        harness.pump(&mut app);
+        let state = descendant(&harness, &app, 2)
+            .state_handle::<MultiHostState>(&app)
+            .expect("the host's state");
+        let controller = app.get_mut(state).controllers.remove(0);
+        controller.stop(&mut app, true);
+
+        harness.set_child(&mut app, Sized.into_widget());
+        harness.pump(&mut app);
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
+        assert!(!app.contains(state), "the state is freed with its element");
+
+        controller.dispose(&mut app);
     }
 
     // ---- TickerMode.valuesOf ----

@@ -15,7 +15,7 @@ use super::view_model::NodeSelectionState;
 use crate::*;
 use std::{fmt, rc::Rc};
 use waft_embedder::{Color, FontWeight};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 use waft_gestures::K_PRIMARY_BUTTON;
 use waft_painting::{Alignment, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, HitTestBehavior};
@@ -87,7 +87,7 @@ pub(super) struct ItemDrag {
 #[derive(Clone, Debug)]
 pub(super) struct ItemFocus {
     /// The item's focus, which the tree owns.
-    pub(super) node: Handle<FocusNode>,
+    pub(super) node: Ref<FocusNode>,
     /// Whether Tab reaches the item: TreeViewList's `TabNavigation="Once"` gives the list one
     /// tab stop.
     pub(super) is_tab_stop: bool,
@@ -699,7 +699,7 @@ impl State for TreeViewItemContainerState {
         let owner = widget.owner;
         let id = widget.id.clone();
         Focus::new(interactive)
-            .focus_node(focus.node.as_node())
+            .focus_node(focus.node.erase())
             .can_request_focus(widget.is_enabled)
             .skip_traversal(!focus.is_tab_stop)
             .on_focus_change(move |app, focused| owner.item_focus_changed(app, &id, focused))

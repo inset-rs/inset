@@ -12,6 +12,7 @@
 //! ```
 //!
 //! Elsewhere it says so and quits: the library is Android's.
+#![feature(arbitrary_self_types)]
 
 #[cfg(target_os = "android")]
 mod greeter;

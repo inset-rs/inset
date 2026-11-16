@@ -12,41 +12,45 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::time::Duration;
+use waft_widgets::{
+    ActionRef, Actions, ActivateIntent, AnyFormFieldState, AutovalidateMode, BuildContext,
+    ButtonActivateIntent, CallbackAction, CapturedThemes, ClipRRect, Column, ConstrainedBox,
+    Container, CustomPaint, CustomSingleChildLayout, DefaultTextStyle, DirectionalFocusIntent,
+    Directionality, Expanded, FadeTransition, Focus, FocusHighlightMode, FocusManager, FocusNode,
+    FocusNodeLeaf, FocusNodeRef, FormFieldData, FormFieldLeaf, FormFieldState, FormFieldStateData,
+    FormFieldStateLeaf, GestureDetector, Icon, IconTheme, IconThemeData, IgnorePointer,
+    IndexedStack, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, LayoutBuilder, ListView,
+    LocalHistoryRoute, LocalHistoryRouteData, MediaQuery, ModalRoute, ModalRouteData, Navigator,
+    Orientation, OverlayRoute, OverlayRouteData, Padding, PopupRoute, Positioned,
+    PredictiveBackRoute, PrimaryScrollController, RenderObjectWidget, RestorationMixin,
+    RestorationMixinData, Route, RouteData, Row, ScrollConfiguration, ScrollController,
+    ScrollControllerLeaf, ScrollControllerRef, ScrollPhysicsRef, Semantics, Shortcuts,
+    SingleActivator, SingleChildRenderObjectWidget, SizedBox, Stack, State, StateData,
+    StatefulWidget, StatelessWidget, Text, TransitionRoute, TransitionRouteData,
+    TraversalDirection, View, WidgetRef, WidgetState, WidgetStateMouseCursor, WidgetStateProperty,
+    WidgetStates,
+};
 
-use waft_animation::{Animation, AnyAnimation, CurvedAnimation, Curves, Interval, Threshold};
+use waft_animation::{
+    Animation, AnimationRef, AnyAnimation, CurvedAnimation, Curves, Interval, Threshold,
+};
 use waft_embedder::{
     Brightness, Clip, Color, Offset, Rect, SemanticsRole, Size, TextBaseline, TextDirection,
 };
-use waft_foundation::{App, Handle, K_IS_WEB, Listenable, Listener, ValueChanged};
+use waft_foundation::{
+    App, Handle, K_IS_WEB, Listenable, Listener, OptionRetained, Ref, ValueChanged,
+};
 use waft_painting::{
     AlignmentGeometry, BorderRadius, BoxDecoration, BoxPainter, Decoration, EdgeInsets,
     EdgeInsetsGeometry, ImageConfiguration, TextStyle,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, CustomPainter,
-    PaintingContext, RenderBox, RenderBoxData, RenderHandle, RenderObject, RenderObjectData,
-    RenderObjectWithChildData, RenderObjectWithChildMixin, RenderProxyBoxMixin,
-    SingleChildLayoutDelegate,
+    MainAxisAlignment, MainAxisSize, PaintingContext, RenderBox, RenderBoxData, RenderHandle,
+    RenderObject, RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
+    RenderProxyBoxMixin, SingleChildLayoutDelegate,
 };
 use waft_services::{LogicalKeyboardKey, MouseCursorRef};
-use waft_widgets::{
-    Action, Actions, ActivateIntent, AnyAction, AnyFocusNode, AnyFormFieldState,
-    AnyScrollController, AutovalidateMode, BuildContext, ButtonActivateIntent, CallbackAction,
-    CapturedThemes, ClipRRect, Column, ConstrainedBox, Container, CustomPaint,
-    CustomSingleChildLayout, DefaultTextStyle, DirectionalFocusIntent, Directionality, Expanded,
-    FadeTransition, Focus, FocusHighlightMode, FocusManager, FocusNode, FocusNodeLeaf,
-    FormFieldData, FormFieldLeaf, FormFieldState, FormFieldStateData, FormFieldStateLeaf,
-    GestureDetector, Icon, IconTheme, IconThemeData, IgnorePointer, IndexedStack, InheritedTheme,
-    InheritedWidget, IntoWidget, KeyRef, LayoutBuilder, ListView, LocalHistoryRoute,
-    LocalHistoryRouteData, MainAxisAlignment, MainAxisSize, MediaQuery, ModalRoute, ModalRouteData,
-    Navigator, Orientation, OverlayRoute, OverlayRouteData, Padding, PopupRoute, Positioned,
-    PredictiveBackRoute, PrimaryScrollController, RenderObjectWidget, RestorationMixin,
-    RestorationMixinData, Route, RouteData, Row, ScrollConfiguration, ScrollController,
-    ScrollControllerLeaf, ScrollPhysicsRef, Semantics, Shortcuts, SingleActivator,
-    SingleChildRenderObjectWidget, SizedBox, Stack, State, StateData, StatefulWidget,
-    StatelessWidget, Text, TransitionRoute, TransitionRouteData, TraversalDirection, View,
-    WidgetRef, WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStates,
-};
 
 use crate::button_theme::ButtonTheme;
 use crate::colors::Colors;
@@ -90,7 +94,7 @@ struct DropdownMenuPainter {
     elevation: Option<i32>,
     selected_index: Option<usize>,
     border_radius: Option<BorderRadius>,
-    resize: Handle<CurvedAnimation>,
+    resize: Ref<CurvedAnimation>,
     repaint: Rc<dyn Listenable>,
     get_selected_item_offset: Rc<dyn Fn() -> f64>,
     painter: RefCell<Box<dyn BoxPainter>>,
@@ -102,7 +106,7 @@ impl DropdownMenuPainter {
         elevation: Option<i32>,
         selected_index: Option<usize>,
         border_radius: Option<BorderRadius>,
-        resize: Handle<CurvedAnimation>,
+        resize: Ref<CurvedAnimation>,
         get_selected_item_offset: Rc<dyn Fn() -> f64>,
     ) -> DropdownMenuPainter {
         // If you add an image here, you must provide a real
@@ -122,8 +126,8 @@ impl DropdownMenuPainter {
             elevation,
             selected_index,
             border_radius,
+            repaint: Rc::new(resize.erase::<AnyAnimation<f64>>()) as Rc<dyn Listenable>,
             resize,
-            repaint: Rc::new(resize.as_animation()) as Rc<dyn Listenable>,
             get_selected_item_offset,
             painter: RefCell::new(decoration.create_box_painter(None)),
         }
@@ -185,7 +189,7 @@ impl CustomPainter for DropdownMenuPainter {
 /// The widget that is the button wrapping the menu items; Dart's `_DropdownMenuItemButton<T>`.
 struct DropdownMenuItemButton<T: Clone + PartialEq + Debug + 'static> {
     route: Handle<DropdownRoute<T>>,
-    scroll_controller: Handle<ScrollController>,
+    scroll_controller: Ref<ScrollController>,
     padding: Option<EdgeInsets>,
     button_rect: Rect,
     constraints: BoxConstraints,
@@ -219,7 +223,7 @@ impl<T: Clone + PartialEq + Debug + 'static> StatefulWidget for DropdownMenuItem
 /// Dart's `_DropdownMenuItemButtonState<T>`.
 struct DropdownMenuItemButtonState<T: Clone + PartialEq + Debug + 'static> {
     state: StateData<DropdownMenuItemButton<T>>,
-    opacity_animation: Option<Handle<CurvedAnimation>>,
+    opacity_animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl<T: Clone + PartialEq + Debug + 'static> Debug for DropdownMenuItemButtonState<T> {
@@ -230,8 +234,11 @@ impl<T: Clone + PartialEq + Debug + 'static> Debug for DropdownMenuItemButtonSta
 }
 
 impl<T: Clone + PartialEq + Debug + 'static> DropdownMenuItemButtonState<T> {
-    fn opacity_animation(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
-        app.get(self).opacity_animation.expect("made in init_state")
+    fn opacity_animation(self: Handle<Self>, app: &App) -> Ref<CurvedAnimation> {
+        app.get(self)
+            .opacity_animation
+            .clone()
+            .expect("made in init_state")
     }
 
     fn set_opacity_animation(self: Handle<Self>, app: &mut App) {
@@ -240,14 +247,15 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownMenuItemButtonState<T> {
         let item_index = widget.item_index;
         let unit = 0.5 / (route.items.len() as f64 + 1.5);
         let selected_index = route.selected_index;
-        let animation =
-            ModalRoute::animation(widget.route, app).expect("an installed route has an animation");
+        let animation = ModalRoute::animation(widget.route, app)
+            .expect("an installed route has an animation")
+            .keep(app);
         let opacity_animation = if item_index == selected_index {
-            CurvedAnimation::create(app, animation, Rc::new(Threshold::new(0.0)), None)
+            CurvedAnimation::new(app, animation, Rc::new(Threshold::new(0.0)), None)
         } else {
             let start = (0.5 + (item_index as f64 + 1.0) * unit).clamp(0.0, 1.0);
             let end = (start + 1.5 * unit).clamp(0.0, 1.0);
-            CurvedAnimation::create(
+            CurvedAnimation::new(
                 app,
                 animation,
                 Rc::new(Interval::new(start, end, Curves::linear())),
@@ -341,8 +349,6 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuItemButtonSta
         {
             let replaced = self.opacity_animation(app);
             replaced.dispose(app);
-            // The `FadeTransition` of the last build still listens to it until it updates.
-            app.destroy_lingering(replaced);
             self.set_opacity_animation(app);
         }
     }
@@ -350,7 +356,6 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuItemButtonSta
     fn dispose(self: Handle<Self>, app: &mut App) {
         let opacity_animation = self.opacity_animation(app);
         opacity_animation.dispose(app);
-        app.destroy_lingering(opacity_animation);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -399,7 +404,7 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuItemButtonSta
                 FocusHighlightMode::Traditional => ink_well.child(child).into_widget(),
             };
         }
-        child = FadeTransition::new(self.opacity_animation(app).as_animation())
+        child = FadeTransition::new(self.opacity_animation(app).erase())
             .child(child)
             .into_widget();
         if K_IS_WEB && dropdown_menu_item.enabled {
@@ -424,7 +429,7 @@ struct DropdownMenu<T: Clone + PartialEq + Debug + 'static> {
     dropdown_color: Option<Color>,
     enable_feedback: bool,
     border_radius: Option<BorderRadius>,
-    scroll_controller: Handle<ScrollController>,
+    scroll_controller: Ref<ScrollController>,
     mouse_cursor: Option<MouseCursorRef>,
 }
 
@@ -454,8 +459,8 @@ impl<T: Clone + PartialEq + Debug + 'static> StatefulWidget for DropdownMenu<T> 
 /// Dart's `_DropdownMenuState<T>`.
 struct DropdownMenuState<T: Clone + PartialEq + Debug + 'static> {
     state: StateData<DropdownMenu<T>>,
-    fade_opacity: Option<Handle<CurvedAnimation>>,
-    resize: Option<Handle<CurvedAnimation>>,
+    fade_opacity: Option<Ref<CurvedAnimation>>,
+    resize: Option<Ref<CurvedAnimation>>,
 }
 
 impl<T: Clone + PartialEq + Debug + 'static> Debug for DropdownMenuState<T> {
@@ -474,15 +479,16 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuState<T> {
         // the CurvedAnimation objects in build, we'd lose
         // CurvedAnimation._curveDirection.
         let route = self.widget(app).route;
-        let animation: AnyAnimation<f64> =
-            ModalRoute::animation(route, app).expect("an installed route has an animation");
-        let fade_opacity = CurvedAnimation::create(
+        let animation: AnimationRef<f64> = ModalRoute::animation(route, app)
+            .expect("an installed route has an animation")
+            .keep(app);
+        let fade_opacity = CurvedAnimation::new(
             app,
-            animation,
+            animation.clone(),
             Rc::new(Interval::new(0.0, 0.25, Curves::linear())),
             Some(Rc::new(Interval::new(0.75, 1.0, Curves::linear()))),
         );
-        let resize = CurvedAnimation::create(
+        let resize = CurvedAnimation::new(
             app,
             animation,
             Rc::new(Interval::new(0.25, 0.5, Curves::linear())),
@@ -495,12 +501,10 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuState<T> {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let state = app.get(self);
-        let fade_opacity = state.fade_opacity.expect("made in init_state");
-        let resize = state.resize.expect("made in init_state");
+        let fade_opacity = state.fade_opacity.handle().expect("made in init_state");
+        let resize = state.resize.handle().expect("made in init_state");
         fade_opacity.dispose(app);
         resize.dispose(app);
-        app.destroy_lingering(fade_opacity);
-        app.destroy_lingering(resize);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -528,7 +532,7 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuState<T> {
                     constraints: widget.constraints,
                     item_index,
                     enable_feedback: widget.enable_feedback,
-                    scroll_controller: widget.scroll_controller,
+                    scroll_controller: widget.scroll_controller.clone(),
                     mouse_cursor: widget.mouse_cursor.clone(),
                 }
                 .into_widget()
@@ -544,13 +548,13 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuState<T> {
             Some(route.elevation),
             Some(route.selected_index),
             widget.border_radius,
-            state.resize.expect("made in init_state"),
+            state.resize.clone().expect("made in init_state"),
             // This offset is passed as a callback, not a value, because it must
             // be retrieved at paint time (after layout), not at build time.
             Rc::new(move || menu.get_item_offset(selected_index)),
         );
         let route_style = route.style.clone();
-        let fade_opacity = state.fade_opacity.expect("made in init_state");
+        let fade_opacity = state.fade_opacity.clone().expect("made in init_state");
 
         let behavior = scroll_behavior
             .copy_with()
@@ -558,9 +562,9 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuState<T> {
             .overscroll(false)
             .physics(Rc::new(waft_widgets::ClampingScrollPhysics::new()) as ScrollPhysicsRef)
             .platform(theme.platform);
-        let scroll_controller: AnyScrollController = widget.scroll_controller.as_controller();
+        let scroll_controller: ScrollControllerRef = widget.scroll_controller.erase();
 
-        FadeTransition::new(fade_opacity.as_animation())
+        FadeTransition::new(fade_opacity.erase())
             .child(
                 CustomPaint::new().painter(painter).child(
                     Semantics::new()
@@ -889,7 +893,7 @@ struct DropdownRouteArguments<T: Clone + PartialEq + Debug + 'static> {
 }
 
 impl<T: Clone + PartialEq + Debug + 'static> DropdownRoute<T> {
-    fn new(app: &mut App, arguments: DropdownRouteArguments<T>) -> Handle<DropdownRoute<T>> {
+    fn new(app: &mut App, arguments: DropdownRouteArguments<T>) -> Ref<DropdownRoute<T>> {
         let route = RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -997,8 +1001,8 @@ impl<T: Clone + PartialEq + Debug + 'static> ModalRoute for DropdownRoute<T> {
         self: Handle<Self>,
         _app: &mut App,
         _context: BuildContext,
-        _animation: AnyAnimation<f64>,
-        _secondary_animation: AnyAnimation<f64>,
+        _animation: AnimationRef<f64>,
+        _secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         LayoutBuilder::new(move |app, _context, constraints| {
             let route = app.get(self);
@@ -1072,7 +1076,7 @@ impl<T: Clone + PartialEq + Debug + 'static> StatefulWidget for DropdownRoutePag
 /// Dart's `_DropdownRoutePageState<T>`.
 struct DropdownRoutePageState<T: Clone + PartialEq + Debug + 'static> {
     state: StateData<DropdownRoutePage<T>>,
-    scroll_controller: Option<Handle<ScrollController>>,
+    scroll_controller: Option<Ref<ScrollController>>,
 }
 
 impl<T: Clone + PartialEq + Debug + 'static> Debug for DropdownRoutePageState<T> {
@@ -1119,7 +1123,11 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownRoutePageState<T>
             dropdown_color: widget.dropdown_color,
             enable_feedback: widget.enable_feedback,
             border_radius: widget.border_radius,
-            scroll_controller: app.get(self).scroll_controller.expect("made in init_state"),
+            scroll_controller: app
+                .get(self)
+                .scroll_controller
+                .clone()
+                .expect("made in init_state"),
             mouse_cursor: widget.mouse_cursor.clone(),
         }
         .into_widget();
@@ -1151,9 +1159,8 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownRoutePageState<T>
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(scroll_controller) = app.get(self).scroll_controller {
+        if let Some(scroll_controller) = app.get(self).scroll_controller.handle() {
             scroll_controller.dispose(app);
-            app.destroy_lingering(scroll_controller);
         }
     }
 }
@@ -1754,7 +1761,7 @@ pub struct DropdownButton<T: 'static> {
     /// The color for the button's [`Material`] when it has the input focus.
     pub focus_color: Option<Color>,
     /// {@macro flutter.widgets.Focus.focusNode}
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// {@macro flutter.widgets.Focus.autofocus}
     pub autofocus: bool,
     /// The background color of the dropdown.
@@ -1922,7 +1929,7 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownButton<T> {
             item_height: template.item_height,
             menu_width: None,
             focus_color: template.focus_color,
-            focus_node: template.focus_node,
+            focus_node: template.focus_node.clone(),
             autofocus: template.autofocus,
             dropdown_color: template.dropdown_color,
             menu_max_height: template.menu_max_height,
@@ -2054,7 +2061,7 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownButton<T> {
     }
 
     /// Dart `DropdownButton(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> DropdownButton<T> {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> DropdownButton<T> {
         self.focus_node = Some(focus_node);
         self
     }
@@ -2182,10 +2189,10 @@ impl<T: Clone + PartialEq + Debug + 'static> StatefulWidget for DropdownButton<T
 pub struct DropdownButtonState<T: Clone + PartialEq + Debug + 'static> {
     state: StateData<DropdownButton<T>>,
     selected_index: Option<usize>,
-    dropdown_route: Option<Handle<DropdownRoute<T>>>,
+    dropdown_route: Option<Ref<DropdownRoute<T>>>,
     last_orientation: Option<Orientation>,
-    internal_node: Option<AnyFocusNode>,
-    action_map: HashMap<TypeId, AnyAction>,
+    internal_node: Option<Ref<FocusNode>>,
+    action_map: HashMap<TypeId, ActionRef>,
     is_hovering: bool,
     has_primary_focus: bool,
     is_menu_expanded: bool,
@@ -2203,16 +2210,17 @@ impl<T: Clone + PartialEq + Debug + 'static> Debug for DropdownButtonState<T> {
 }
 
 impl<T: Clone + PartialEq + Debug + 'static> DropdownButtonState<T> {
-    fn focus_node(self: Handle<Self>, app: &App) -> AnyFocusNode {
+    fn focus_node(self: Handle<Self>, app: &App) -> FocusNodeRef {
         self.widget(app)
             .focus_node
-            .or(app.get(self).internal_node)
+            .clone()
+            .or_else(|| app.get(self).internal_node.as_ref().map(Ref::erase))
             .expect("an internal node exists without a widget's node")
     }
 
     // Only used if needed to create _internalNode.
-    fn create_focus_node(self: Handle<Self>, app: &mut App) -> AnyFocusNode {
-        let node = FocusNode::new(app).as_node();
+    fn create_focus_node(self: Handle<Self>, app: &mut App) -> Ref<FocusNode> {
+        let node = FocusNode::new(app);
         let debug_label = waft_widgets::short_type_name::<DropdownButton<T>>().to_owned();
         node.set_debug_label(app, Some(debug_label));
         node
@@ -2228,7 +2236,7 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownButtonState<T> {
     }
 
     fn remove_dropdown_route(self: Handle<Self>, app: &mut App) {
-        if let Some(route) = app.get(self).dropdown_route {
+        if let Some(route) = app.get(self).dropdown_route.handle() {
             route.dismiss(app);
         }
         let state = app.get_mut(self);
@@ -2304,7 +2312,7 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownButtonState<T> {
                         if !app.contains(self) {
                             return;
                         }
-                        let Some(route) = app.get(self).dropdown_route else {
+                        let Some(route) = app.get(self).dropdown_route.handle() else {
                             return;
                         };
 
@@ -2355,10 +2363,10 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownButtonState<T> {
                 value_type: PhantomData,
             },
         );
-        app.get_mut(self).dropdown_route = Some(route);
+        app.get_mut(self).dropdown_route = Some(route.clone());
 
         self.focus_node(app).request_focus(app, None);
-        let popped = navigator.push(app, Route::as_route(route));
+        let popped = navigator.push(app, route.into_erased());
         drop(app.spawn(async move |cx| {
             let new_value = popped.await;
             cx.update(|app| {
@@ -2476,10 +2484,10 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownButtonState<T> {
             }),
         );
         let action_map = &mut app.get_mut(self).action_map;
-        action_map.insert(TypeId::of::<ActivateIntent>(), activate.as_action());
+        action_map.insert(TypeId::of::<ActivateIntent>(), activate.into_erased());
         action_map.insert(
             TypeId::of::<ButtonActivateIntent>(),
-            button_activate.as_action(),
+            button_activate.into_erased(),
         );
         self.focus_node(app).add_listener(
             app,
@@ -2493,23 +2501,20 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownButtonState<T> {
             app,
             &Listener::handle_method(self, Self::handle_focus_changed),
         );
-        if let Some(internal_node) = app.get(self).internal_node {
+        if let Some(internal_node) = app.get(self).internal_node.handle() {
             internal_node.dispose(app);
-        }
-        for action in std::mem::take(&mut app.get_mut(self).action_map).into_values() {
-            app.destroy(action.id());
         }
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &DropdownButton<T>) {
         if self.widget(app).focus_node != old_widget.focus_node {
-            if let Some(old_node) = old_widget.focus_node {
+            if let Some(old_node) = old_widget.focus_node.clone() {
                 old_node.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_focus_changed),
                 );
             }
-            if let Some(internal_node) = app.get(self).internal_node
+            if let Some(internal_node) = app.get(self).internal_node.handle()
                 && self.widget(app).focus_node.is_some()
             {
                 internal_node.dispose(app);
@@ -3108,7 +3113,7 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownButtonFormField<T> {
     }
 
     /// Dart `DropdownButtonFormField(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> DropdownButtonFormField<T> {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> DropdownButtonFormField<T> {
         self.button = self.button.focus_node(focus_node);
         self
     }
@@ -3489,7 +3494,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use waft_embedder::{Locale, TargetPlatform};
-    use waft_foundation::{HandleId, ValueKey};
+    use waft_foundation::ValueKey;
     use waft_widgets::{
         AnyElement, Builder, Center, DefaultWidgetsLocalizations, Form, FormState, GlobalKey,
         Localizations, MediaQueryData, RepaintBoundary, RouteSettingsRef, Scrollable,
@@ -3502,6 +3507,7 @@ mod tests {
     use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, tester, tester_on};
+    use waft_widgets::AnyFocusNode;
 
     const MENU_ITEMS: [&str; 4] = ["one", "two", "three", "four"];
 
@@ -3555,7 +3561,7 @@ mod tests {
         alignment: AlignmentGeometry,
         text_direction: TextDirection,
         media_size: Option<Size>,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         autofocus: bool,
         focus_color: Option<Color>,
         dropdown_color: Option<Color>,
@@ -3651,7 +3657,7 @@ mod tests {
                 if let Some(color) = self.icon_enabled_color {
                     field = field.icon_enabled_color(color);
                 }
-                if let Some(focus_node) = self.focus_node {
+                if let Some(focus_node) = self.focus_node.clone() {
                     field = field.focus_node(focus_node);
                 }
                 if let Some(color) = self.focus_color {
@@ -3706,7 +3712,7 @@ mod tests {
             if let Some(underline) = &self.underline {
                 button = button.underline(underline.clone());
             }
-            if let Some(focus_node) = self.focus_node {
+            if let Some(focus_node) = self.focus_node.clone() {
                 button = button.focus_node(focus_node);
             }
             if let Some(color) = self.focus_color {
@@ -3867,8 +3873,10 @@ mod tests {
                                 app,
                                 Rc::new(move |app, _context| self.widget(app).child.clone()),
                             );
-                            route.settings(app, RouteSettingsRef::Settings(settings.clone()));
-                            Some(Route::as_route(route))
+                            route
+                                .clone()
+                                .settings(app, RouteSettingsRef::Settings(settings.clone()));
+                            Some(route.erase())
                         }),
                     ),
                 )
@@ -4119,7 +4127,7 @@ mod tests {
             self
         }
 
-        fn focus_node(mut self, focus_node: AnyFocusNode) -> Frame {
+        fn focus_node(mut self, focus_node: FocusNodeRef) -> Frame {
             self.focus_node = Some(focus_node);
             self
         }
@@ -4187,11 +4195,11 @@ mod tests {
                                             Material::new().child(page.clone()).into_widget()
                                         }),
                                     );
-                                    route.settings(
+                                    route.clone().settings(
                                         app,
                                         RouteSettingsRef::Settings(settings.clone()),
                                     );
-                                    Some(Route::as_route(route))
+                                    Some(route.erase())
                                 },
                             ),
                         )
@@ -5670,7 +5678,7 @@ mod tests {
                                 .into_widget()
                             }),
                         );
-                        Some(Route::as_route(route))
+                        Some(route.erase())
                     }))
                     .into_widget(),
             );
@@ -6138,8 +6146,8 @@ mod tests {
         tester.send_key_event(physical, logical);
     }
 
-    fn focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     fn has_primary_focus(tester: &WidgetTester, node: AnyFocusNode) -> bool {
@@ -6159,12 +6167,12 @@ mod tests {
                 &frame()
                     .button_key(&button_key)
                     .on_changed(on_changed())
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .autofocus(true)
                     .use_material3(false),
             );
             tester.pump_and_settle(); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node));
+            assert!(has_primary_focus(&tester, focus_node.handle()));
             assert!(
                 tester
                     .ink_drawn()
@@ -6179,7 +6187,7 @@ mod tests {
                 &frame()
                     .button_key(&button_key)
                     .on_changed(on_changed())
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .focus_color(Color::new(0xff00ff00))
                     .use_material3(false),
             );
@@ -6222,7 +6230,7 @@ mod tests {
                     .form_field(true)
                     .button_key(&button_key)
                     .on_changed(on_changed())
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
             };
 
             let mut first = form_field().autofocus(true);
@@ -6230,7 +6238,7 @@ mod tests {
             pump_frame(&mut tester, &first);
 
             tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node));
+            assert!(has_primary_focus(&tester, focus_node.handle()));
 
             // Default focus Color from InputDecorator defaults.
             let theme = decorator_theme(&tester);
@@ -6268,19 +6276,19 @@ mod tests {
             let mut tester = tester();
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let button_key = GlobalKey::new();
-            let build_form_field = |focus_node: AnyFocusNode| {
+            let build_form_field = |focus_node: FocusNodeRef| {
                 let mut frame = frame()
                     .form_field(true)
                     .button_key(&button_key)
                     .on_changed(on_changed())
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .focus_color(Color::new(0xff00ff00));
                 frame.decoration = Some(InputDecoration::new().filled(true));
                 frame
             };
             let mut node = focus_node(&tester);
 
-            pump_frame(&mut tester, &build_form_field(node));
+            pump_frame(&mut tester, &build_form_field(node.clone()));
             let default_border_color = decorator_theme(&tester)
                 .color_scheme
                 .surface_container_highest();
@@ -6291,7 +6299,7 @@ mod tests {
             node = focus_node(&tester);
             node.request_focus(&mut tester.cell.borrow_mut(), None);
 
-            pump_frame(&mut tester, &build_form_field(node));
+            pump_frame(&mut tester, &build_form_field(node.clone()));
             tester.pump(Duration::ZERO); // Wait for requestFocus to take effect.
             assert!(input_decorator_fills(&tester, Color::new(0xff00ff00)));
 
@@ -6300,7 +6308,7 @@ mod tests {
             node = focus_node(&tester);
             node.request_focus(&mut tester.cell.borrow_mut(), None);
 
-            pump_frame(&mut tester, &build_form_field(node));
+            pump_frame(&mut tester, &build_form_field(node.clone()));
             {
                 let mut app = tester.cell.borrow_mut();
                 let manager = FocusManager::instance(&mut app);
@@ -6361,12 +6369,12 @@ mod tests {
                 &mut tester,
                 &frame()
                     .button_key(&button_key)
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .autofocus(true)
                     .focus_color(Color::new(0xff00ff00)),
             );
             tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect (although it shouldn't).
-            assert!(!has_primary_focus(&tester, focus_node));
+            assert!(!has_primary_focus(&tester, focus_node.handle()));
             let button = tester.render_object(&button_key);
             assert!(!tester.paints_rrect(
                 button,
@@ -6380,7 +6388,7 @@ mod tests {
     /// whose `on_changed` sets `value`.
     fn keyboard_app(
         tester: &WidgetTester,
-        focus_node: AnyFocusNode,
+        focus_node: FocusNodeRef,
         value: &Rc<RefCell<Option<String>>>,
         text_key: fn(&str) -> String,
     ) -> WidgetRef {
@@ -6412,7 +6420,7 @@ mod tests {
                                 });
                             })),
                         )
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .autofocus(true)
                         .value(value.borrow().clone())
                         .item_height(None)
@@ -6428,11 +6436,13 @@ mod tests {
             let mut tester = tester();
             let focus_node = focus_node(&tester);
             let value = Rc::new(RefCell::new(Some("one".to_owned())));
-            let root = keyboard_app(&tester, focus_node, &value, |item| format!("{item}Text"));
+            let root = keyboard_app(&tester, focus_node.clone(), &value, |item| {
+                format!("{item}Text")
+            });
 
             tester.pump_widget(root);
             tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node));
+            assert!(has_primary_focus(&tester, focus_node.handle()));
 
             press(&mut tester, activator);
             settle_menu(&mut tester);
@@ -6521,11 +6531,13 @@ mod tests {
             let mut tester = tester();
             let focus_node = focus_node(&tester);
             let value = Rc::new(RefCell::new(Some("one".to_owned())));
-            let root = keyboard_app(&tester, focus_node, &value, |item| format!("Text {item}"));
+            let root = keyboard_app(&tester, focus_node.clone(), &value, |item| {
+                format!("Text {item}")
+            });
             tester.pump_widget(root);
 
             tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node));
+            assert!(has_primary_focus(&tester, focus_node.handle()));
 
             press(&mut tester, LogicalKeyboardKey::ENTER);
             settle_menu(&mut tester); // finish the menu open animation
@@ -6606,7 +6618,8 @@ mod tests {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 crate::scaffold::Scaffold::new()
-                    .body(Center::new().child(StatefulBuilder::new(
+                    .body(Center::new().child(StatefulBuilder::new({
+                        let focus_node = focus_node.clone();
                         move |_app, _context, set_state| {
                             let set_state = set_state.clone();
                             let set_value = Rc::clone(&state_value);
@@ -6628,19 +6641,19 @@ mod tests {
                                     set_state(app, &mut |_app| set_value.set(new_value));
                                 })),
                             )
-                            .focus_node(focus_node)
+                            .focus_node(focus_node.clone())
                             .autofocus(true)
                             .value(state_value.get())
                             .item_height(None)
                             .into_widget()
-                        },
-                    )))
+                        }
+                    })))
                     .into_widget(),
             );
             tester.pump_widget(root);
 
             tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node));
+            assert!(has_primary_focus(&tester, focus_node.handle()));
 
             press(&mut tester, LogicalKeyboardKey::ENTER);
             settle_menu(&mut tester); // finish the menu open animation
@@ -6682,7 +6695,8 @@ mod tests {
             let root = material_app(
                 m2(&tester.cell.borrow()),
                 crate::scaffold::Scaffold::new()
-                    .body(Center::new().child(StatefulBuilder::new(
+                    .body(Center::new().child(StatefulBuilder::new({
+                        let focus_node = focus_node.clone();
                         move |_app, _context, set_state| {
                             let set_state = set_state.clone();
                             let set_value = Rc::clone(&state_value);
@@ -6704,19 +6718,19 @@ mod tests {
                                     set_state(app, &mut |_app| set_value.set(new_value));
                                 })),
                             )
-                            .focus_node(focus_node)
+                            .focus_node(focus_node.clone())
                             .autofocus(true)
                             .value(state_value.get())
                             .item_height(None)
                             .into_widget()
-                        },
-                    )))
+                        }
+                    })))
                     .into_widget(),
             );
             tester.pump_widget(root);
 
             tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node));
+            assert!(has_primary_focus(&tester, focus_node.handle()));
 
             press(&mut tester, LogicalKeyboardKey::ENTER);
             tester.pump_and_settle();
@@ -6781,7 +6795,8 @@ mod tests {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 crate::scaffold::Scaffold::new()
-                    .body(Center::new().child(StatefulBuilder::new(
+                    .body(Center::new().child(StatefulBuilder::new({
+                        let focus_node = focus_node.clone();
                         move |_app, _context, set_state| {
                             let set_state = set_state.clone();
                             let set_value = Rc::clone(&state_value);
@@ -6800,18 +6815,18 @@ mod tests {
                                     set_state(app, &mut |_app| set_value.set(new_value));
                                 })),
                             )
-                            .focus_node(focus_node)
+                            .focus_node(focus_node.clone())
                             .value(state_value.get())
                             .item_height(None)
                             .into_widget()
-                        },
-                    )))
+                        }
+                    })))
                     .into_widget(),
             );
             tester.pump_widget(root);
 
             tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(!has_primary_focus(&tester, focus_node));
+            assert!(!has_primary_focus(&tester, focus_node.handle()));
 
             tap_text(&mut tester, "1");
             tester.pump_and_settle();
@@ -6820,7 +6835,7 @@ mod tests {
             tester.tap(Offset::new(1.0, 1.0), 1);
             tester.pump_and_settle();
 
-            assert!(has_primary_focus(&tester, focus_node));
+            assert!(has_primary_focus(&tester, focus_node.handle()));
         });
     }
 
@@ -6830,11 +6845,13 @@ mod tests {
             let mut tester = tester();
             let focus_node = focus_node(&tester);
             let value = Rc::new(RefCell::new(Some("one".to_owned())));
-            let root = keyboard_app(&tester, focus_node, &value, |item| format!("{item}Text"));
+            let root = keyboard_app(&tester, focus_node.clone(), &value, |item| {
+                format!("{item}Text")
+            });
 
             tester.pump_widget(root);
             tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node));
+            assert!(has_primary_focus(&tester, focus_node.handle()));
 
             press(&mut tester, LogicalKeyboardKey::ENTER);
             settle_menu(&mut tester);
@@ -8815,7 +8832,7 @@ mod tests {
             item_height: field.button.item_height,
             menu_width: field.button.menu_width,
             focus_color: field.button.focus_color,
-            focus_node: field.button.focus_node,
+            focus_node: field.button.focus_node.clone(),
             autofocus: field.button.autofocus,
             dropdown_color: field.button.dropdown_color,
             menu_max_height: field.button.menu_max_height,
@@ -9882,54 +9899,21 @@ mod tests {
         });
     }
 
-    /// Not a Dart case: Dart's collector frees the animations and the scroll controller the
-    /// menu's states make; here each state frees them when it is disposed.
+    /// Not a Dart case: what Flutter's leak tracking checks, that opening and closing the menu
+    /// leaves nothing in the arena.
     #[test]
-    fn closing_the_menu_frees_its_animations_and_scroll_controller() {
+    fn opening_and_closing_the_menu_leaves_nothing_behind() {
         with_main_thread_stack(|| {
             let mut tester = tester();
             pump_frame(&mut tester, &frame().on_changed(on_changed()));
-
-            tap_text(&mut tester, "two");
-            tester.pump_and_settle();
-            let owned: Vec<HandleId> = {
-                let menus = tester.find_by_type::<DropdownMenu<String>>();
-                let item_buttons = tester.find_by_type::<DropdownMenuItemButton<String>>();
-                let pages = tester.find_by_type::<DropdownRoutePage<String>>();
-                let app = tester.cell.borrow();
-                let mut owned = Vec::new();
-                for menu in menus {
-                    let state = menu
-                        .state_handle::<DropdownMenuState<String>>(&app)
-                        .expect("the menu's state");
-                    let state = app.get(state);
-                    owned.extend(state.fade_opacity.map(HandleId::from));
-                    owned.extend(state.resize.map(HandleId::from));
-                }
-                for item_button in item_buttons {
-                    let state = item_button
-                        .state_handle::<DropdownMenuItemButtonState<String>>(&app)
-                        .expect("the item's state");
-                    owned.extend(app.get(state).opacity_animation.map(HandleId::from));
-                }
-                for page in pages {
-                    let state = page
-                        .state_handle::<DropdownRoutePageState<String>>(&app)
-                        .expect("the page's state");
-                    owned.extend(app.get(state).scroll_controller.map(HandleId::from));
-                }
-                owned
-            };
-            assert_eq!(owned.len(), 2 + MENU_ITEMS.len() + 1);
-
-            tester.tap(Offset::ZERO, 1);
-            tester.pump_and_settle();
-            assert!(tester.find_by_type::<DropdownMenu<String>>().is_empty());
-
-            let app = tester.cell.borrow();
-            for handle in owned {
-                assert!(!app.contains(handle), "{handle:?} is still in the arena");
-            }
+            tester.assert_leaves_nothing_behind(|tester| {
+                tap_text(tester, "two");
+                tester.pump_and_settle();
+                assert!(!tester.find_by_type::<DropdownMenu<String>>().is_empty());
+                tester.tap(Offset::ZERO, 1);
+                tester.pump_and_settle();
+                assert!(tester.find_by_type::<DropdownMenu<String>>().is_empty());
+            });
         });
     }
 
@@ -10290,7 +10274,7 @@ mod tests {
                                             .into_widget()
                                     }),
                                 );
-                                Some(Route::as_route(route))
+                                Some(route.erase())
                             }))
                             .into_widget(),
                         ]))

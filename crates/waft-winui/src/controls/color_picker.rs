@@ -40,7 +40,7 @@ use waft_embedder::valo::{
     GradientStop, Matrix, Paint, PaintStyle, Point, Shader, SpreadMode, Stroke,
 };
 use waft_embedder::{Canvas, Color, FontWeight, Image, Rect, Size, TextAffinity, TextSelection};
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, Listener, Ref};
 use waft_painting::AlignmentGeometry;
 use waft_rendering::{BoxConstraints, CustomPainter};
 use waft_scheduler::FrameCallback;
@@ -451,8 +451,8 @@ impl ChannelTextBox {
 
 /// A text box of the template: its text, its focus and the listener on the focus.
 struct TextBoxPart {
-    controller: Handle<TextEditingController>,
-    focus: Handle<FocusNode>,
+    controller: Ref<TextEditingController>,
+    focus: Ref<FocusNode>,
     focus_listener: Listener,
 }
 
@@ -586,7 +586,7 @@ pub struct ColorPickerState {
     text_boxes: Vec<TextBoxPart>,
 
     /// Orders the focus by the template's `TabIndex`.
-    traversal_policy: Option<Handle<OrderedTraversalPolicy>>,
+    traversal_policy: Option<Ref<OrderedTraversalPolicy>>,
 
     /// `ColorPreviewRectangleGrid`'s size after the last layout.
     preview_size: Size,
@@ -615,14 +615,14 @@ impl ColorPickerState {
     }
 
     fn text(self: Handle<Self>, app: &App, text_box: ChannelTextBox) -> String {
-        let controller = self.part(app, text_box).controller;
+        let controller = self.part(app, text_box).controller.handle();
         controller.text_value(app).to_owned()
     }
 
     /// `TextBox.Text = text`: the box shows `text` with the caret at the start, when it shows
     /// other text.
     fn set_text(self: Handle<Self>, app: &mut App, text_box: ChannelTextBox, text: &str) {
-        let controller = self.part(app, text_box).controller;
+        let controller = self.part(app, text_box).controller.handle();
         if controller.text_value(app) != text {
             controller.set_value(
                 app,
@@ -913,7 +913,7 @@ impl ColorPickerState {
     /// `OnAlphaTextChanging`: text without a final `%` gets one, the caret staying where it
     /// was; a percentage from 0 to 100 is the alpha.
     fn alpha_text_changed(self: Handle<Self>, app: &mut App) {
-        let controller = self.part(app, ChannelTextBox::Alpha).controller;
+        let controller = self.part(app, ChannelTextBox::Alpha).controller.handle();
         let text = controller.text_value(app).to_owned();
         if !text.ends_with('%') {
             let cursor = controller.value(app).selection.end();
@@ -939,7 +939,7 @@ impl ColorPickerState {
     /// `OnHexTextChanging`: text without a leading `#` gets one, the caret going to the end;
     /// a hex colour, with its alpha while alpha is enabled, is the colour within the ranges.
     fn hex_text_changed(self: Handle<Self>, app: &mut App) {
-        let controller = self.part(app, ChannelTextBox::Hex).controller;
+        let controller = self.part(app, ChannelTextBox::Hex).controller.handle();
         let text = controller.text_value(app).to_owned();
         if !text.starts_with('#') {
             let text = format!("#{text}");
@@ -1144,9 +1144,7 @@ impl State for ColorPickerState {
         for part in std::mem::take(&mut app.get_mut(self).text_boxes) {
             part.focus.remove_listener(app, &part.focus_listener);
             part.focus.dispose(app);
-            app.destroy(part.focus);
-            app.get_mut(part.controller).dispose();
-            app.destroy(part.controller);
+            part.controller.dispose(app);
         }
     }
 
@@ -1235,9 +1233,10 @@ impl State for ColorPickerState {
         let policy = app
             .get(self)
             .traversal_policy
+            .clone()
             .expect("an initialized ColorPicker");
         FocusTraversalGroup::new(root)
-            .policy(policy.as_policy())
+            .policy(policy.erase())
             .into_widget()
     }
 }
@@ -1742,8 +1741,8 @@ impl ColorPickerState {
         max_length: i32,
     ) -> TextBox {
         let part = self.part(app, text_box);
-        TextBox::new(part.controller.as_controller())
-            .focus_node(part.focus)
+        TextBox::new(part.controller.erase())
+            .focus_node(part.focus.erase())
             .max_length(max_length)
             .is_enabled(self.widget(app).is_enabled)
             .text_changed(move |app, _| self.text_changed(app, text_box))

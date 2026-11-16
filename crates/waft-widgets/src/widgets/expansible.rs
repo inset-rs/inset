@@ -5,11 +5,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnimationStyle, AnyAnimation, Curve,
+    Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStyle, Curve,
     CurvedAnimation, Curves, Tween,
 };
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, ListenableObject, Listener, RetainedHandle,
+    App, ChangeNotifier, ChangeNotifierData, Handle, ListenableObject, Listener, OptionRetained,
 };
 use waft_rendering::MainAxisSize;
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
@@ -23,6 +23,8 @@ use crate::widgets::ticker_provider::{
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, TickerMode,
 };
 use crate::widgets::transitions::AnimatedBuilder;
+use waft_animation::Drive;
+use waft_foundation::Ref;
 
 /// The type of the callback that returns the header or body of an [`Expansible`].
 ///
@@ -37,7 +39,7 @@ use crate::widgets::transitions::AnimatedBuilder;
 ///   * [`Expansible::header_builder`], which is of this type.
 ///   * [`Expansible::body_builder`], which is also of this type.
 pub type ExpansibleComponentBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, AnyAnimation<f64>) -> WidgetRef>;
+    Rc<dyn Fn(&mut App, BuildContext, AnimationRef<f64>) -> WidgetRef>;
 
 /// The type of the callback that uses the header and body of an [`Expansible`]
 /// widget to build the widget.
@@ -56,7 +58,7 @@ pub type ExpansibleComponentBuilder =
 ///
 ///   * [`Expansible::expansible_builder`], which is of this type.
 pub type ExpansibleBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, &WidgetRef, &WidgetRef, AnyAnimation<f64>) -> WidgetRef>;
+    Rc<dyn Fn(&mut App, BuildContext, &WidgetRef, &WidgetRef, AnimationRef<f64>) -> WidgetRef>;
 
 /// A controller for managing the expansion state of an [`Expansible`].
 ///
@@ -80,7 +82,7 @@ pub struct ExpansibleController {
 
 impl ExpansibleController {
     /// Creates a controller to be used with [`Expansible::controller`].
-    pub fn new(app: &mut App) -> Handle<ExpansibleController> {
+    pub fn new(app: &mut App) -> Ref<ExpansibleController> {
         app.create(ExpansibleController::default())
     }
 
@@ -168,10 +170,9 @@ impl ExpansibleController {
         }
     }
 
-    /// Discards any resources used by the object; the handle is stale afterwards.
+    /// Discards any resources used by the object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
-        app.destroy(self);
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Finds the [`ExpansibleController`] for the closest [`Expansible`] instance
@@ -207,7 +208,7 @@ impl ExpansibleController {
     pub fn maybe_of(app: &App, context: BuildContext) -> Option<Handle<ExpansibleController>> {
         context
             .find_ancestor_state_of_type::<ExpansibleState>(app)
-            .map(|state| state.widget(app).controller)
+            .map(|state| state.widget(app).controller.handle())
     }
 }
 
@@ -257,7 +258,7 @@ pub struct Expansible {
     /// Expands and collapses the widget.
     ///
     /// The controller manages the expansion state and toggles the expansion.
-    pub controller: Handle<ExpansibleController>,
+    pub controller: Ref<ExpansibleController>,
 
     /// Builds the always-displayed header.
     ///
@@ -343,7 +344,7 @@ impl Expansible {
     pub fn new(
         header_builder: ExpansibleComponentBuilder,
         body_builder: ExpansibleComponentBuilder,
-        controller: Handle<ExpansibleController>,
+        controller: Ref<ExpansibleController>,
     ) -> Expansible {
         Expansible {
             key: None,
@@ -419,7 +420,7 @@ impl Expansible {
         _context: BuildContext,
         header: &WidgetRef,
         body: &WidgetRef,
-        _animation: AnyAnimation<f64>,
+        _animation: AnimationRef<f64>,
     ) -> WidgetRef {
         Column::new()
             .main_axis_size(MainAxisSize::Min)
@@ -451,7 +452,6 @@ impl StatefulWidget for Expansible {
             animation_controller: None,
             height_factor_tween: None,
             height_factor: None,
-            listened_controller: None,
         }
     }
 }
@@ -461,24 +461,24 @@ pub struct ExpansibleState {
     state: StateData<Expansible>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     /// Created in `init_state`, because a state is created without the [`App`].
-    animation_controller: Option<Handle<AnimationController>>,
-    height_factor_tween: Option<Handle<Tween<f64>>>,
-    height_factor: Option<Handle<CurvedAnimation>>,
-    /// The widget's controller, kept while this state listens to it: Dart's `didUpdateWidget`
-    /// still reads the old controller after its owner disposed it, as the widget above does
-    /// when it swaps its own controller for one it is given.
-    listened_controller: Option<RetainedHandle<Handle<ExpansibleController>>>,
+    animation_controller: Option<Ref<AnimationController>>,
+    height_factor_tween: Option<Ref<Tween<f64>>>,
+    height_factor: Option<Ref<CurvedAnimation>>,
 }
 
 impl ExpansibleState {
     fn animation_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .animation_controller
+            .handle()
             .expect("created in init_state")
     }
 
     fn height_factor(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
-        app.get(self).height_factor.expect("created in init_state")
+        app.get(self)
+            .height_factor
+            .handle()
+            .expect("created in init_state")
     }
 
     #[allow(deprecated)]
@@ -509,7 +509,7 @@ impl ExpansibleState {
     }
 
     fn toggle_expansion(self: Handle<Self>, app: &mut App) {
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.handle();
         let animation_controller = self.animation_controller(app);
         if controller.is_expanded(app) {
             animation_controller.forward(app, None);
@@ -556,7 +556,7 @@ impl SingleTickerProviderStateMixin for ExpansibleState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for ExpansibleState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -567,7 +567,7 @@ impl State for ExpansibleState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let duration = ExpansibleState::duration(self.widget(app));
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             app,
             None,
             Some(duration),
@@ -577,8 +577,8 @@ impl State for ExpansibleState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).animation_controller = Some(animation_controller);
-        let controller = self.widget(app).controller;
+        app.get_mut(self).animation_controller = Some(animation_controller.clone());
+        let controller = self.widget(app).controller.handle();
         let context = self.context(app);
         let stored = PageStorage::maybe_of(app, context)
             .and_then(|bucket| bucket.read_state(app, context, None))
@@ -591,16 +591,14 @@ impl State for ExpansibleState {
             controller.collapse(app);
         }
         let height_factor_tween = Tween::new(app, Some(0.0), Some(1.0));
-        let parent = animation_controller.drive(app, height_factor_tween);
+        let parent = animation_controller.drive(app, height_factor_tween.clone());
         let curve = ExpansibleState::curve(self.widget(app));
         let reverse_curve = ExpansibleState::reverse_curve(self.widget(app));
-        let height_factor = CurvedAnimation::create(app, parent, curve, reverse_curve);
+        let height_factor = CurvedAnimation::new(app, parent, curve, reverse_curve);
         let state = app.get_mut(self);
         state.height_factor_tween = Some(height_factor_tween);
         state.height_factor = Some(height_factor);
         controller.add_listener(app, Listener::handle_method(self, Self::toggle_expansion));
-        let listened_controller = app.retain(controller);
-        app.get_mut(self).listened_controller = Some(listened_controller);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &Expansible) {
@@ -621,22 +619,14 @@ impl State for ExpansibleState {
         if duration != old_duration {
             app.get_mut(self.animation_controller(app)).duration = Some(duration);
         }
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.handle();
         if controller != old_widget.controller {
-            let listened_controller = app.retain(controller);
-            let old_listened_controller = app
-                .get_mut(self)
-                .listened_controller
-                .replace(listened_controller);
             old_widget
                 .controller
                 .remove_listener(app, &Listener::handle_method(self, Self::toggle_expansion));
             controller.add_listener(app, Listener::handle_method(self, Self::toggle_expansion));
             if old_widget.controller.is_expanded(app) != controller.is_expanded(app) {
                 self.toggle_expansion(app);
-            }
-            if let Some(old_listened_controller) = old_listened_controller {
-                app.release(old_listened_controller);
             }
         }
     }
@@ -646,38 +636,31 @@ impl State for ExpansibleState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.handle();
         controller.remove_listener(app, &Listener::handle_method(self, Self::toggle_expansion));
-        if let Some(listened_controller) = app.get_mut(self).listened_controller.take() {
-            app.release(listened_controller);
-        }
         let animation_controller = self.animation_controller(app);
         animation_controller.dispose(app);
         let height_factor = self.height_factor(app);
         height_factor.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        let state = app.get_mut(self);
-        let height_factor_tween = state.height_factor_tween.take();
-        state.animation_controller = None;
-        state.height_factor = None;
-        app.destroy(animation_controller);
-        app.destroy(height_factor);
-        if let Some(height_factor_tween) = height_factor_tween {
-            app.destroy(height_factor_tween);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let animation_controller = self.animation_controller(app);
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.handle();
         let is_expanded = controller.is_expanded(app);
         debug_assert!(!animation_controller.is_dismissed(app) || !is_expanded);
         let closed = !is_expanded && animation_controller.is_dismissed(app);
         let should_remove_body = closed && !self.widget(app).maintain_state;
 
-        let animation = animation_controller.view();
+        let animation: AnimationRef<f64> = app
+            .get(self)
+            .animation_controller
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
         let body_builder = self.widget(app).body_builder.clone();
-        let body = body_builder(app, context, animation);
+        let body = body_builder(app, context, animation.clone());
         let result = Offstage::new()
             .offstage(closed)
             .child(TickerMode::new(!closed, body))
@@ -685,15 +668,20 @@ impl State for ExpansibleState {
 
         let header_builder = self.widget(app).header_builder.clone();
         let expansible_builder = self.widget(app).expansible_builder.clone();
-        let height_factor = self.height_factor(app);
-        let mut builder = AnimatedBuilder::new(Rc::new(animation), move |app, context, child| {
-            let header = header_builder(app, context, animation);
+        let height_factor = app
+            .get(self)
+            .height_factor
+            .clone()
+            .expect("created in init_state");
+        let listenable = Rc::new(animation.clone());
+        let mut builder = AnimatedBuilder::new(listenable, move |app, context, child| {
+            let header = header_builder(app, context, animation.clone());
             let mut align = Align::new().height_factor(height_factor.value(app));
             if let Some(child) = child {
                 align = align.child(child.clone());
             }
             let body = ClipRect::new().child(align).into_widget();
-            expansible_builder(app, context, &header, &body, animation)
+            expansible_builder(app, context, &header, &body, animation.clone())
         });
         if !should_remove_body {
             builder = builder.child(result);
@@ -771,7 +759,7 @@ mod tests {
         })
     }
 
-    fn expansible(controller: Handle<ExpansibleController>, builds: &Rc<Cell<u32>>) -> Expansible {
+    fn expansible(controller: Ref<ExpansibleController>, builds: &Rc<Cell<u32>>) -> Expansible {
         Expansible::new(header_builder(), body_builder(builds), controller)
     }
 
@@ -845,7 +833,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let controller = ExpansibleController::new(&mut app);
         let builds = Rc::new(Cell::new(0));
-        let harness = mount(&mut app, expansible(controller, &builds));
+        let harness = mount(&mut app, expansible(controller.clone(), &builds));
         harness.pump(&mut app);
         assert!(!controller.is_expanded(&app));
         assert_eq!(body_height(&harness, &app), 0.0);
@@ -876,7 +864,7 @@ mod tests {
         let builds = Rc::new(Cell::new(0));
         let harness = mount(
             &mut app,
-            expansible(controller, &builds).maintain_state(false),
+            expansible(controller.clone(), &builds).maintain_state(false),
         );
         harness.pump(&mut app);
         assert!(
@@ -902,7 +890,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let controller = ExpansibleController::new(&mut app);
         let builds = Rc::new(Cell::new(0));
-        let harness = mount(&mut app, expansible(controller, &builds));
+        let harness = mount(&mut app, expansible(controller.clone(), &builds));
         harness.pump(&mut app);
         assert_eq!(builds.get(), 1, "the body is built but offstage");
         assert!(offstage(&harness, &app));
@@ -920,7 +908,7 @@ mod tests {
         let builds = Rc::new(Cell::new(0));
         let page = |controller| {
             PageStorage::new(
-                bucket,
+                bucket.clone(),
                 Directionality::new(
                     TextDirection::Ltr,
                     expansible(controller, &builds).key(PageStorageKey::new("tile").into_key()),
@@ -928,7 +916,7 @@ mod tests {
             )
             .into_widget()
         };
-        let harness = Harness::mount(&mut app, page(controller));
+        let harness = Harness::mount(&mut app, page(controller.clone()));
         harness.pump(&mut app);
         controller.expand(&mut app);
         harness.pump(&mut app);
@@ -939,7 +927,7 @@ mod tests {
         let replacement = ExpansibleController::new(&mut app);
         harness.set_child(&mut app, SizedBox::new().into_widget());
         harness.pump(&mut app);
-        harness.set_child(&mut app, page(replacement));
+        harness.set_child(&mut app, page(replacement.clone()));
         harness.pump(&mut app);
         assert!(
             replacement.is_expanded(&app),
@@ -968,10 +956,10 @@ mod tests {
         let builds = Rc::new(Cell::new(0));
         let harness = mount(
             &mut app,
-            Expansible::new(header, body_builder(&builds), controller),
+            Expansible::new(header, body_builder(&builds), controller.clone()),
         );
         harness.pump(&mut app);
-        assert_eq!(found.get(), Some(controller));
+        assert_eq!(found.get(), Some(controller.handle()));
 
         controller.dispose(&mut app);
     }
@@ -982,7 +970,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let controller = ExpansibleController::new(&mut app);
         let builds = Rc::new(Cell::new(0));
-        let widget = expansible(controller, &builds).expansible_builder(Rc::new(
+        let widget = expansible(controller.clone(), &builds).expansible_builder(Rc::new(
             |_app, _context, _header, body, _animation| body.clone(),
         ));
         let harness = mount(&mut app, widget);

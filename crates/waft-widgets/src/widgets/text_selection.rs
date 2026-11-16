@@ -11,14 +11,14 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
 
-use waft_animation::{AnimationBehavior, AnimationController};
+use waft_animation::{AnimationBehavior, AnimationController, AnimationRef};
 use waft_embedder::{
     AppLifecycleState, Offset, PointerDeviceKind, Rect, Size, TargetPlatform, TextAffinity,
     TextDirection, TextEditingValue, TextPosition, TextRange, TextSelection,
 };
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listenable, Listener,
-    Task, ValueChanged, ValueListenable, ValueNotifier,
+    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listener, OptionRetained,
+    Task, ValueChanged, ValueNotifier,
 };
 use waft_gestures::{
     BaseTapAndDragGestureRecognizer, DeviceGestureSettings, DragEndDetails, DragGestureRecognizer,
@@ -77,6 +77,8 @@ use crate::widgets::ticker_provider::{
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData,
 };
 use crate::widgets::transitions::FadeTransition;
+use waft_foundation::ListenableObject;
+use waft_foundation::Ref;
 
 /// Which kind of selection handle to build.
 ///
@@ -243,12 +245,12 @@ impl Debug for ClipboardStatusNotifier {
 
 impl ClipboardStatusNotifier {
     /// Create a new ClipboardStatusNotifier.
-    pub fn new(app: &mut App) -> Handle<ClipboardStatusNotifier> {
+    pub fn new(app: &mut App) -> Ref<ClipboardStatusNotifier> {
         Self::from_value(app, ClipboardStatus::Unknown)
     }
 
     /// Dart `ClipboardStatusNotifier(value:)`.
-    pub fn from_value(app: &mut App, value: ClipboardStatus) -> Handle<ClipboardStatusNotifier> {
+    pub fn from_value(app: &mut App, value: ClipboardStatus) -> Ref<ClipboardStatusNotifier> {
         app.create(ClipboardStatusNotifier {
             change_notifier: ChangeNotifierData::new(),
             value,
@@ -260,7 +262,7 @@ impl ClipboardStatusNotifier {
 
     /// Dart's `_WebClipboardStatusNotifier()`: value is hardcoded to pasteable so web
     /// does not call [`Clipboard::has_strings`] (which would prompt for permission).
-    pub fn web(app: &mut App) -> Handle<ClipboardStatusNotifier> {
+    pub fn web(app: &mut App) -> Ref<ClipboardStatusNotifier> {
         app.create(ClipboardStatusNotifier {
             change_notifier: ChangeNotifierData::new(),
             value: ClipboardStatus::Pasteable,
@@ -337,7 +339,7 @@ impl ClipboardStatusNotifier {
         }
         self.stop_listening_to_the_clipboard(app);
         app.get_mut(self).disposed = true;
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -416,7 +418,7 @@ impl Debug for LiveTextInputStatusNotifier {
 
 impl LiveTextInputStatusNotifier {
     /// Create a new LiveTextStatusNotifier.
-    pub fn new(app: &mut App) -> Handle<LiveTextInputStatusNotifier> {
+    pub fn new(app: &mut App) -> Ref<LiveTextInputStatusNotifier> {
         Self::from_value(app, LiveTextInputStatus::Unknown)
     }
 
@@ -424,7 +426,7 @@ impl LiveTextInputStatusNotifier {
     pub fn from_value(
         app: &mut App,
         value: LiveTextInputStatus,
-    ) -> Handle<LiveTextInputStatusNotifier> {
+    ) -> Ref<LiveTextInputStatusNotifier> {
         app.create(LiveTextInputStatusNotifier {
             change_notifier: ChangeNotifierData::new(),
             value,
@@ -479,7 +481,7 @@ impl LiveTextInputStatusNotifier {
             WidgetsBinding::instance(app).remove_observer(app, &observer);
         }
         app.get_mut(self).disposed = true;
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -609,7 +611,7 @@ pub trait TextSelectionControls {
         selection_midpoint: Offset,
         endpoints: &[TextSelectionPoint],
         delegate: AnyTextSelectionDelegate,
-        clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+        clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
         last_secondary_tap_down_position: Option<Offset>,
     ) -> WidgetRef;
 
@@ -747,7 +749,7 @@ pub trait TextSelectionHandleControls: TextSelectionControls {
         selection_midpoint: Offset,
         endpoints: &[TextSelectionPoint],
         delegate: AnyTextSelectionDelegate,
-        clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+        clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
         last_secondary_tap_down_position: Option<Offset>,
     ) -> WidgetRef {
         let _ = (
@@ -840,18 +842,18 @@ pub struct TextSelectionOverlay {
     pub selection_controls: Option<Rc<dyn TextSelectionControls>>,
     /// The delegate for manipulating the current selection in the owning text field.
     pub selection_delegate: AnyTextSelectionDelegate,
-    selection_overlay: Handle<SelectionOverlay>,
+    selection_overlay: Ref<SelectionOverlay>,
     /// If not provided, no context menu will be built.
     pub context_menu_builder: Option<WidgetBuilder>,
     value: TextEditingValue,
-    effective_start_handle_visibility: Handle<ValueNotifier<bool>>,
-    effective_end_handle_visibility: Handle<ValueNotifier<bool>>,
-    effective_toolbar_visibility: Handle<ValueNotifier<bool>>,
+    effective_start_handle_visibility: Ref<ValueNotifier<bool>>,
+    effective_end_handle_visibility: Ref<ValueNotifier<bool>>,
+    effective_toolbar_visibility: Ref<ValueNotifier<bool>>,
     handles_visible: bool,
     debug_required_for: Option<WidgetRef>,
     drag_start_behavior: DragStartBehavior,
     on_selection_handle_tapped: Option<Listener>,
-    clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+    clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
     end_handle_drag_position: f64,
     end_handle_drag_target: f64,
     start_handle_drag_position: f64,
@@ -868,13 +870,13 @@ impl TextSelectionOverlay {
         app: &mut App,
         value: TextEditingValue,
         context: BuildContext,
-        toolbar_layer_link: Handle<LayerLink>,
-        start_handle_layer_link: Handle<LayerLink>,
-        end_handle_layer_link: Handle<LayerLink>,
+        toolbar_layer_link: Ref<LayerLink>,
+        start_handle_layer_link: Ref<LayerLink>,
+        end_handle_layer_link: Ref<LayerLink>,
         render_object: RenderHandle<RenderEditable>,
         selection_delegate: AnyTextSelectionDelegate,
         magnifier_configuration: TextMagnifierConfiguration,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         let effective_start = app.create(ValueNotifier::new(false));
         let effective_end = app.create(ValueNotifier::new(false));
         let effective_toolbar = app.create(ValueNotifier::new(false));
@@ -893,9 +895,9 @@ impl TextSelectionOverlay {
             end_handle_layer_link,
             toolbar_layer_link,
         )
-        .start_handles_visible(app, effective_start)
-        .end_handles_visible(app, effective_end)
-        .toolbar_visible(app, effective_toolbar)
+        .start_handles_visible(app, effective_start.clone())
+        .end_handles_visible(app, effective_end.clone())
+        .toolbar_visible(app, effective_toolbar.clone())
         .magnifier_configuration(app, magnifier_configuration);
         selection_overlay
             .set_toolbar_location(app, render_object.last_secondary_tap_down_position(app));
@@ -922,6 +924,9 @@ impl TextSelectionOverlay {
             start_handle_drag_target: 0.0,
             drag_start_selection: None,
         });
+        let selection_overlay = this.selection_overlay(app);
+        let overlay = this.clone();
+        let this = this.handle();
 
         selection_overlay.set_on_start_handle_drag_start(
             app,
@@ -971,82 +976,82 @@ impl TextSelectionOverlay {
             Listener::handle_method(this, Self::update_text_selection_overlay_visibilities),
         );
         this.update_text_selection_overlay_visibilities(app);
-        this
+        overlay
+    }
+
+    fn selection_overlay(self: Handle<Self>, app: &App) -> Handle<SelectionOverlay> {
+        app.get(self).selection_overlay.handle()
     }
 
     /// Dart `TextSelectionOverlay(debugRequiredFor:)`.
-    pub fn debug_required_for(
-        self: Handle<Self>,
-        app: &mut App,
-        widget: WidgetRef,
-    ) -> Handle<Self> {
-        app.get_mut(self).debug_required_for = Some(widget.clone());
-        let inner = app.get(self).selection_overlay;
+    pub fn debug_required_for(self: Ref<Self>, app: &mut App, widget: WidgetRef) -> Ref<Self> {
+        app.get_mut(&self).debug_required_for = Some(widget.clone());
+        let inner = self.selection_overlay(app);
         app.get_mut(inner).debug_required_for = Some(widget);
         self
     }
 
     /// Dart `TextSelectionOverlay(selectionControls:)`.
     pub fn selection_controls(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         controls: Rc<dyn TextSelectionControls>,
-    ) -> Handle<Self> {
-        app.get_mut(self).selection_controls = Some(Rc::clone(&controls));
-        let inner = app.get(self).selection_overlay;
+    ) -> Ref<Self> {
+        app.get_mut(&self).selection_controls = Some(Rc::clone(&controls));
+        let inner = self.selection_overlay(app);
         app.get_mut(inner).selection_controls = Some(controls);
         self
     }
 
     /// Dart `TextSelectionOverlay(handlesVisible:)`.
-    pub fn handles_visible(self: Handle<Self>, app: &mut App, visible: bool) -> Handle<Self> {
+    pub fn handles_visible(self: Ref<Self>, app: &mut App, visible: bool) -> Ref<Self> {
         self.set_handles_visible(app, visible);
         self
     }
 
     /// Dart `TextSelectionOverlay(dragStartBehavior:)`.
     pub fn drag_start_behavior(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         drag_start_behavior: DragStartBehavior,
-    ) -> Handle<Self> {
-        app.get_mut(self).drag_start_behavior = drag_start_behavior;
-        let inner = app.get(self).selection_overlay;
+    ) -> Ref<Self> {
+        app.get_mut(&self).drag_start_behavior = drag_start_behavior;
+        let inner = self.selection_overlay(app);
         app.get_mut(inner).drag_start_behavior = drag_start_behavior;
         self
     }
 
     /// Dart `TextSelectionOverlay(onSelectionHandleTapped:)`.
     pub fn on_selection_handle_tapped(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         on_selection_handle_tapped: Listener,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_selection_handle_tapped = Some(on_selection_handle_tapped.clone());
-        let inner = app.get(self).selection_overlay;
+    ) -> Ref<Self> {
+        app.get_mut(&self).on_selection_handle_tapped = Some(on_selection_handle_tapped.clone());
+        let inner = self.selection_overlay(app);
         app.get_mut(inner).on_selection_handle_tapped = Some(on_selection_handle_tapped);
         self
     }
 
     /// Dart `TextSelectionOverlay(clipboardStatus:)`.
     pub fn clipboard_status(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
-        clipboard_status: Handle<ClipboardStatusNotifier>,
-    ) -> Handle<Self> {
-        app.get_mut(self).clipboard_status = Some(clipboard_status);
-        let inner = app.get(self).selection_overlay;
+        clipboard_status: Ref<ClipboardStatusNotifier>,
+    ) -> Ref<Self> {
+        app.get_mut(&self).clipboard_status = Some(clipboard_status.clone());
+        let inner = self.selection_overlay(app);
         app.get_mut(inner).clipboard_status = Some(clipboard_status);
         self
     }
 
     /// Dart `TextSelectionOverlay(contextMenuBuilder:)`.
     pub fn context_menu_builder(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         context_menu_builder: WidgetBuilder,
-    ) -> Handle<Self> {
-        app.get_mut(self).context_menu_builder = Some(context_menu_builder);
+    ) -> Ref<Self> {
+        app.get_mut(&self).context_menu_builder = Some(context_menu_builder);
         self
     }
 
@@ -1064,9 +1069,9 @@ impl TextSelectionOverlay {
         let render_object = app.get(self).render_object;
         let start_in_view = *render_object.selection_start_in_viewport(app).value(app);
         let end_in_view = *render_object.selection_end_in_viewport(app).value(app);
-        let start = app.get(self).effective_start_handle_visibility;
-        let end = app.get(self).effective_end_handle_visibility;
-        let toolbar = app.get(self).effective_toolbar_visibility;
+        let start = app.get(self).effective_start_handle_visibility.handle();
+        let end = app.get(self).effective_end_handle_visibility.handle();
+        let toolbar = app.get(self).effective_toolbar_visibility.handle();
         start.set_value(app, handles_visible && start_in_view);
         end.set_value(app, handles_visible && end_in_view);
         toolbar.set_value(app, start_in_view || end_in_view);
@@ -1089,13 +1094,13 @@ impl TextSelectionOverlay {
     /// Builds the handles by inserting them into the [`context`](Self::context)'s overlay.
     pub fn show_handles(self: Handle<Self>, app: &mut App) {
         self.update_selection_overlay(app);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.show_handles(app);
     }
 
     /// Destroys the handles by removing them from overlay.
     pub fn hide_handles(self: Handle<Self>, app: &mut App) {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.hide_handles(app);
     }
 
@@ -1108,7 +1113,7 @@ impl TextSelectionOverlay {
             "showToolbar must not be called during the build or layout phase.",
         );
         self.update_selection_overlay(app);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         let context = app.get(self).context;
         if app
             .get(self)
@@ -1138,7 +1143,7 @@ impl TextSelectionOverlay {
         self.update_selection_overlay(app);
         let context = app.get(self).context;
         debug_assert!(context.mounted(app));
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.show_spell_check_suggestions_toolbar(
             app,
             Some(context),
@@ -1153,7 +1158,7 @@ impl TextSelectionOverlay {
         let position = render_object.get_position_for_point(app, position_to_show);
         self.update_selection_overlay(app);
         let info = self.build_magnifier(app, render_object, position_to_show, position);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.show_magnifier(app, info);
     }
 
@@ -1163,13 +1168,13 @@ impl TextSelectionOverlay {
         let position = render_object.get_position_for_point(app, position_to_show);
         self.update_selection_overlay(app);
         let info = self.build_magnifier(app, render_object, position_to_show, position);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.update_magnifier(app, info);
     }
 
     /// Hide the current magnifier.
     pub fn hide_magnifier(self: Handle<Self>, app: &mut App) {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.hide_magnifier(app);
     }
 
@@ -1180,7 +1185,7 @@ impl TextSelectionOverlay {
         }
         app.get_mut(self).value = new_value;
         self.update_selection_overlay(app);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.mark_needs_build(app);
     }
 
@@ -1223,7 +1228,7 @@ impl TextSelectionOverlay {
 
         let line_height_at_start = self.start_glyph_height(app);
         let line_height_at_end = self.end_glyph_height(app);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.set_start_handle_type(app, start_handle_type);
         overlay.set_line_height_at_start(app, line_height_at_start);
         overlay.set_end_handle_type(app, end_handle_type);
@@ -1235,55 +1240,55 @@ impl TextSelectionOverlay {
     /// Causes the overlay to update its rendering after a scroll or metrics change.
     pub fn update_for_scroll(self: Handle<Self>, app: &mut App) {
         self.update_selection_overlay(app);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.mark_needs_build(app);
     }
 
     /// Whether the handles are currently visible.
     pub fn handles_are_visible(self: Handle<Self>, app: &App) -> bool {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.has_handles(app) && app.get(self).handles_visible
     }
 
     /// Whether the toolbar is currently visible.
     pub fn toolbar_is_visible(self: Handle<Self>, app: &App) -> bool {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.toolbar_is_visible(app)
     }
 
     /// Whether the magnifier is currently visible.
     pub fn magnifier_is_visible(self: Handle<Self>, app: &App) -> bool {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.magnifier_is_visible(app)
     }
 
     /// Whether the magnifier currently exists in the overlay.
     pub fn magnifier_exists(self: Handle<Self>, app: &App) -> bool {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.magnifier_exists(app)
     }
 
     /// Whether the spell check menu is currently visible.
     pub fn spell_check_toolbar_is_visible(self: Handle<Self>, app: &App) -> bool {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.spell_check_toolbar_is_shown(app)
     }
 
     /// Hides the entire overlay including the toolbar and the handles.
     pub fn hide(self: Handle<Self>, app: &mut App) {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.hide(app);
     }
 
     /// Hides the toolbar part of the overlay.
     pub fn hide_toolbar(self: Handle<Self>, app: &mut App) {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.hide_toolbar(app);
     }
 
     /// Disposes this object and release resources.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         overlay.dispose(app);
         let render_object = app.get(self).render_object;
         // A field unmounted with its subtree loses its render object, and the notifiers on it,
@@ -1300,12 +1305,12 @@ impl TextSelectionOverlay {
                 &Listener::handle_method(self, Self::update_text_selection_overlay_visibilities),
             );
         }
-        app.get_mut(app.get(self).effective_toolbar_visibility)
-            .dispose();
-        app.get_mut(app.get(self).effective_start_handle_visibility)
-            .dispose();
-        app.get_mut(app.get(self).effective_end_handle_visibility)
-            .dispose();
+        let toolbar = app.get(self).effective_toolbar_visibility.handle();
+        let start = app.get(self).effective_start_handle_visibility.handle();
+        let end = app.get(self).effective_end_handle_visibility.handle();
+        toolbar.dispose(app);
+        start.dispose(app);
+        end.dispose(app);
         self.hide_toolbar(app);
     }
 
@@ -1412,7 +1417,7 @@ impl TextSelectionOverlay {
             return;
         }
         app.get_mut(self).end_handle_drag_position = details.global_position.dy();
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         let endpoints = overlay.selection_endpoints(app);
         let Some(last) = endpoints.last() else {
             return;
@@ -1492,7 +1497,7 @@ impl TextSelectionOverlay {
             app.get(self).end_handle_drag_position + app.get(self).end_handle_drag_target,
         );
         let position = render_object.get_position_for_point(app, handle_target_global);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         match app.platform().target_platform() {
             TargetPlatform::IOS | TargetPlatform::MacOS => {
                 let drag_start = app
@@ -1568,7 +1573,7 @@ impl TextSelectionOverlay {
             return;
         }
         app.get_mut(self).start_handle_drag_position = details.global_position.dy();
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         let endpoints = overlay.selection_endpoints(app);
         let Some(first) = endpoints.first() else {
             return;
@@ -1633,7 +1638,7 @@ impl TextSelectionOverlay {
             app.get(self).start_handle_drag_position + app.get(self).start_handle_drag_target,
         );
         let position = render_object.get_position_for_point(app, handle_target_global);
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         match app.platform().target_platform() {
             TargetPlatform::IOS | TargetPlatform::MacOS => {
                 let drag_start = app
@@ -1717,7 +1722,7 @@ impl TextSelectionOverlay {
             return;
         }
         app.get_mut(self).drag_start_selection = None;
-        let overlay = app.get(self).selection_overlay;
+        let overlay = self.selection_overlay(app);
         let dragging_handles =
             overlay.is_dragging_start_handle(app) || overlay.is_dragging_end_handle(app);
         if !self.has_handle_controls(app) {
@@ -1758,10 +1763,9 @@ impl TextSelectionOverlay {
 }
 
 /// A pair of overlay entries for the start and end selection handles.
-#[derive(Clone, Copy)]
 struct SelectionHandles {
-    start: Handle<OverlayEntry>,
-    end: Handle<OverlayEntry>,
+    start: Ref<OverlayEntry>,
+    end: Ref<OverlayEntry>,
 }
 
 /// An object that manages a pair of selection handles and a toolbar.
@@ -1776,7 +1780,7 @@ pub struct SelectionOverlay {
     start_handle_type: TextSelectionHandleType,
     line_height_at_start: f64,
     /// Whether the start handle is visible.
-    pub start_handles_visible: Option<Handle<ValueNotifier<bool>>>,
+    pub start_handles_visible: Option<Ref<ValueNotifier<bool>>>,
     /// Called when the users start dragging the start selection handles.
     pub on_start_handle_drag_start: Option<ValueChanged<DragStartDetails>>,
     /// Called when the users drag the start selection handles to new locations.
@@ -1786,7 +1790,7 @@ pub struct SelectionOverlay {
     end_handle_type: TextSelectionHandleType,
     line_height_at_end: f64,
     /// Whether the end handle is visible.
-    pub end_handles_visible: Option<Handle<ValueNotifier<bool>>>,
+    pub end_handles_visible: Option<Ref<ValueNotifier<bool>>>,
     /// Called when the users start dragging the end selection handles.
     pub on_end_handle_drag_start: Option<ValueChanged<DragStartDetails>>,
     /// Called when the users drag the end selection handles to new locations.
@@ -1794,20 +1798,20 @@ pub struct SelectionOverlay {
     /// Called when the users lift their fingers after dragging the end selection handles.
     pub on_end_handle_drag_end: Option<ValueChanged<DragEndDetails>>,
     /// Whether the toolbar is visible.
-    pub toolbar_visible: Option<Handle<ValueNotifier<bool>>>,
+    pub toolbar_visible: Option<Ref<ValueNotifier<bool>>>,
     selection_endpoints: Vec<TextSelectionPoint>,
     /// Builds text selection handles and toolbar.
     pub selection_controls: Option<Rc<dyn TextSelectionControls>>,
     /// The delegate for manipulating the current selection in the owning text field.
     pub selection_delegate: Option<AnyTextSelectionDelegate>,
     /// Maintains the status of the clipboard for determining if its contents can be pasted.
-    pub clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+    pub clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
     /// The objects supplied to the location of start selection handle.
-    pub start_handle_layer_link: Handle<LayerLink>,
+    pub start_handle_layer_link: Ref<LayerLink>,
     /// The objects supplied to the location of end selection handle.
-    pub end_handle_layer_link: Handle<LayerLink>,
+    pub end_handle_layer_link: Ref<LayerLink>,
     /// The object supplied to the location of the toolbar.
-    pub toolbar_layer_link: Handle<LayerLink>,
+    pub toolbar_layer_link: Ref<LayerLink>,
     /// Determines the way that drag start behavior is handled.
     pub drag_start_behavior: DragStartBehavior,
     /// A callback that's optionally invoked when a selection handle is tapped.
@@ -1815,17 +1819,17 @@ pub struct SelectionOverlay {
     toolbar_location: Option<Offset>,
     /// The configuration for the magnifier.
     pub magnifier_configuration: TextMagnifierConfiguration,
-    magnifier_info: Handle<ValueNotifier<MagnifierInfo>>,
-    magnifier_controller: Handle<MagnifierController>,
+    magnifier_info: Ref<ValueNotifier<MagnifierInfo>>,
+    magnifier_controller: Ref<MagnifierController>,
     start_handle_drag_in_progress: bool,
     is_dragging_start_handle: bool,
     end_handle_drag_in_progress: bool,
     is_dragging_end_handle: bool,
     handles: Option<SelectionHandles>,
-    toolbar: Option<Handle<OverlayEntry>>,
-    context_menu: Option<Handle<OverlayEntry>>,
+    toolbar: Option<Ref<OverlayEntry>>,
+    context_menu: Option<Ref<OverlayEntry>>,
     context_menu_builder: Option<WidgetBuilder>,
-    spell_check_toolbar: Option<Handle<OverlayEntry>>,
+    spell_check_toolbar: Option<Ref<OverlayEntry>>,
     spell_check_toolbar_builder: Option<WidgetBuilder>,
     build_scheduled: bool,
 }
@@ -1848,11 +1852,11 @@ impl SelectionOverlay {
         selection_endpoints: Vec<TextSelectionPoint>,
         selection_controls: Option<Rc<dyn TextSelectionControls>>,
         selection_delegate: Option<AnyTextSelectionDelegate>,
-        clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
-        start_handle_layer_link: Handle<LayerLink>,
-        end_handle_layer_link: Handle<LayerLink>,
-        toolbar_layer_link: Handle<LayerLink>,
-    ) -> Handle<Self> {
+        clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
+        start_handle_layer_link: Ref<LayerLink>,
+        end_handle_layer_link: Ref<LayerLink>,
+        toolbar_layer_link: Ref<LayerLink>,
+    ) -> Ref<Self> {
         let magnifier_info = app.create(ValueNotifier::new(MagnifierInfo::EMPTY));
         let magnifier_controller = MagnifierController::new(app);
         app.create(SelectionOverlay {
@@ -1900,81 +1904,73 @@ impl SelectionOverlay {
 
     /// Dart `SelectionOverlay(startHandlesVisible:)`.
     pub fn start_handles_visible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
-        start_handles_visible: Handle<ValueNotifier<bool>>,
-    ) -> Handle<Self> {
-        app.get_mut(self).start_handles_visible = Some(start_handles_visible);
+        start_handles_visible: Ref<ValueNotifier<bool>>,
+    ) -> Ref<Self> {
+        app.get_mut(&self).start_handles_visible = Some(start_handles_visible);
         self
     }
 
     /// Dart `SelectionOverlay(endHandlesVisible:)`.
     pub fn end_handles_visible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
-        end_handles_visible: Handle<ValueNotifier<bool>>,
-    ) -> Handle<Self> {
-        app.get_mut(self).end_handles_visible = Some(end_handles_visible);
+        end_handles_visible: Ref<ValueNotifier<bool>>,
+    ) -> Ref<Self> {
+        app.get_mut(&self).end_handles_visible = Some(end_handles_visible);
         self
     }
 
     /// Dart `SelectionOverlay(toolbarVisible:)`.
     pub fn toolbar_visible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
-        toolbar_visible: Handle<ValueNotifier<bool>>,
-    ) -> Handle<Self> {
-        app.get_mut(self).toolbar_visible = Some(toolbar_visible);
+        toolbar_visible: Ref<ValueNotifier<bool>>,
+    ) -> Ref<Self> {
+        app.get_mut(&self).toolbar_visible = Some(toolbar_visible);
         self
     }
 
     /// Dart `SelectionOverlay(magnifierConfiguration:)`.
     pub fn magnifier_configuration(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         magnifier_configuration: TextMagnifierConfiguration,
-    ) -> Handle<Self> {
-        app.get_mut(self).magnifier_configuration = magnifier_configuration;
+    ) -> Ref<Self> {
+        app.get_mut(&self).magnifier_configuration = magnifier_configuration;
         self
     }
 
     /// Dart `SelectionOverlay(toolbarLocation:)`.
-    pub fn toolbar_location(
-        self: Handle<Self>,
-        app: &mut App,
-        toolbar_location: Offset,
-    ) -> Handle<Self> {
+    pub fn toolbar_location(self: Ref<Self>, app: &mut App, toolbar_location: Offset) -> Ref<Self> {
         self.set_toolbar_location(app, Some(toolbar_location));
         self
     }
 
     /// Dart `SelectionOverlay(dragStartBehavior:)`.
     pub fn drag_start_behavior(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         drag_start_behavior: DragStartBehavior,
-    ) -> Handle<Self> {
-        app.get_mut(self).drag_start_behavior = drag_start_behavior;
+    ) -> Ref<Self> {
+        app.get_mut(&self).drag_start_behavior = drag_start_behavior;
         self
     }
 
     /// Dart `SelectionOverlay(onSelectionHandleTapped:)`.
     pub fn on_selection_handle_tapped(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         on_selection_handle_tapped: Listener,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_selection_handle_tapped = Some(on_selection_handle_tapped);
+    ) -> Ref<Self> {
+        app.get_mut(&self).on_selection_handle_tapped = Some(on_selection_handle_tapped);
         self
     }
 
     /// Dart `SelectionOverlay(debugRequiredFor:)`.
-    pub fn debug_required_for(
-        self: Handle<Self>,
-        app: &mut App,
-        widget: WidgetRef,
-    ) -> Handle<Self> {
-        app.get_mut(self).debug_required_for = Some(widget);
+    pub fn debug_required_for(self: Ref<Self>, app: &mut App, widget: WidgetRef) -> Ref<Self> {
+        app.get_mut(&self).debug_required_for = Some(widget);
         self
     }
 
@@ -2067,25 +2063,29 @@ impl SelectionOverlay {
         app: &mut App,
         initial_magnifier_info: MagnifierInfo,
     ) {
-        let controller = app.get(self).magnifier_controller;
+        let controller = app.get(self).magnifier_controller.handle();
         if controller.overlay_entry(app).is_some() {
             return;
         }
         if self.toolbar_is_visible(app) {
             self.hide_toolbar(app);
         }
-        let info = app.get(self).magnifier_info;
+        let info = app.get(self).magnifier_info.clone();
         info.set_value(app, initial_magnifier_info);
         let context = app.get(self).context;
         let configuration = app.get(self).magnifier_configuration.clone();
-        let built = (configuration.magnifier_builder())(app, context, controller, info);
+        let kept_controller = app.get(self).magnifier_controller.clone();
+        let built = (configuration.magnifier_builder())(app, context, kept_controller, info);
         let Some(built) = built else {
             return;
         };
         let below = if configuration.should_display_handles_in_magnifier {
             None
         } else {
-            app.get(self).handles.map(|handles| handles.start)
+            app.get(self)
+                .handles
+                .as_ref()
+                .map(|handles| handles.start.handle())
         };
         controller.show(
             app,
@@ -2097,7 +2097,7 @@ impl SelectionOverlay {
 
     /// Hide the current magnifier.
     pub fn hide_magnifier(self: Handle<Self>, app: &mut App) {
-        let controller = app.get(self).magnifier_controller;
+        let controller = app.get(self).magnifier_controller.handle();
         if controller.overlay_entry(app).is_none() {
             return;
         }
@@ -2387,7 +2387,10 @@ impl SelectionOverlay {
             false,
             false,
         );
-        app.get_mut(self).handles = Some(SelectionHandles { start, end });
+        app.get_mut(self).handles = Some(SelectionHandles {
+            start: start.clone(),
+            end: end.clone(),
+        });
         overlay.insert_all(app, vec![start, end], None, None);
     }
 
@@ -2421,9 +2424,13 @@ impl SelectionOverlay {
                 false,
                 false,
             );
-            app.get_mut(self).toolbar = Some(toolbar);
+            app.get_mut(self).toolbar = Some(toolbar.clone());
             let overlay_context = app.get(self).context;
-            let above = app.get(self).handles.map(|handles| handles.end);
+            let above = app
+                .get(self)
+                .handles
+                .as_ref()
+                .map(|handles| handles.end.handle());
             Overlay::of(app, overlay_context, true).insert(app, toolbar, None, above);
             return;
         };
@@ -2432,7 +2439,7 @@ impl SelectionOverlay {
         };
         if app.get(self).context_menu.is_some() {
             app.get_mut(self).context_menu_builder = Some(context_menu_builder);
-            if let Some(entry) = app.get(self).context_menu {
+            if let Some(entry) = app.get(self).context_menu.handle() {
                 entry.mark_needs_build(app);
             }
             return;
@@ -2449,8 +2456,8 @@ impl SelectionOverlay {
                     .clone()
                     .map(|builder| builder(app, overlay_context))
                     .unwrap_or_else(|| SizedBox::shrink().into_widget());
-                let visibility = app.get(this).toolbar_visible;
-                let layer_link = app.get(this).toolbar_layer_link;
+                let visibility = app.get(this).toolbar_visible.clone();
+                let layer_link = app.get(this).toolbar_layer_link.clone();
                 let offset = field_context
                     .find_render_object(app)
                     .and_then(|object| object.as_box())
@@ -2468,7 +2475,7 @@ impl SelectionOverlay {
             false,
             false,
         );
-        app.get_mut(self).context_menu = Some(entry);
+        app.get_mut(self).context_menu = Some(entry.clone());
         Overlay::of(app, context, true).insert(app, entry, None, None);
     }
 
@@ -2484,7 +2491,7 @@ impl SelectionOverlay {
         };
         app.get_mut(self).spell_check_toolbar_builder = Some(Rc::clone(&builder));
         if app.get(self).spell_check_toolbar.is_some() {
-            if let Some(entry) = app.get(self).spell_check_toolbar {
+            if let Some(entry) = app.get(self).spell_check_toolbar.handle() {
                 entry.mark_needs_build(app);
             }
             return;
@@ -2500,7 +2507,7 @@ impl SelectionOverlay {
                     .clone()
                     .map(|builder| builder(app, overlay_context))
                     .unwrap_or_else(|| SizedBox::shrink().into_widget());
-                let layer_link = app.get(this).toolbar_layer_link;
+                let layer_link = app.get(this).toolbar_layer_link.clone();
                 let offset = field_context
                     .find_render_object(app)
                     .and_then(|object| object.as_box())
@@ -2513,7 +2520,7 @@ impl SelectionOverlay {
             false,
             false,
         );
-        app.get_mut(self).spell_check_toolbar = Some(entry);
+        app.get_mut(self).spell_check_toolbar = Some(entry.clone());
         Overlay::of(app, context, true).insert(app, entry, None, None);
     }
 
@@ -2543,23 +2550,24 @@ impl SelectionOverlay {
     }
 
     fn rebuild_overlay_entries(self: Handle<Self>, app: &mut App) {
-        if let Some(handles) = app.get(self).handles {
-            handles.start.mark_needs_build(app);
-            handles.end.mark_needs_build(app);
+        if let Some(handles) = app.get(self).handles.as_ref() {
+            let (start, end) = (handles.start.handle(), handles.end.handle());
+            start.mark_needs_build(app);
+            end.mark_needs_build(app);
         }
-        if let Some(toolbar) = app.get(self).toolbar {
+        if let Some(toolbar) = app.get(self).toolbar.handle() {
             toolbar.mark_needs_build(app);
         }
-        if let Some(entry) = app.get(self).context_menu {
+        if let Some(entry) = app.get(self).context_menu.handle() {
             entry.mark_needs_build(app);
-        } else if let Some(entry) = app.get(self).spell_check_toolbar {
+        } else if let Some(entry) = app.get(self).spell_check_toolbar.handle() {
             entry.mark_needs_build(app);
         }
     }
 
     /// Hides the entire overlay including the toolbar and the handles.
     pub fn hide(self: Handle<Self>, app: &mut App) {
-        let controller = app.get(self).magnifier_controller;
+        let controller = app.get(self).magnifier_controller.handle();
         controller.hide(app, true);
         self.hide_handles(app);
         if app.get(self).toolbar.is_some()
@@ -2592,10 +2600,13 @@ impl SelectionOverlay {
     /// Disposes this object and release resources.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         self.hide(app);
-        app.get_mut(app.get(self).magnifier_info).dispose();
+        let magnifier_info = app.get(self).magnifier_info.handle();
+        magnifier_info.dispose(app);
     }
 
     fn build_start_handle(self: Handle<Self>, app: &App, _context: BuildContext) -> WidgetRef {
+        // The handle's callbacks keep this overlay, as Dart's closures do.
+        let overlay = self.keep(app);
         let this = app.get(self);
         let handle = match this.selection_controls.clone() {
             Some(selection_controls)
@@ -2604,21 +2615,30 @@ impl SelectionOverlay {
             {
                 SelectionHandleOverlay::new(
                     this.start_handle_type,
-                    this.start_handle_layer_link,
+                    this.start_handle_layer_link.clone(),
                     selection_controls,
                     this.line_height_at_start,
                 )
                 .on_selection_handle_tapped(this.on_selection_handle_tapped.clone())
-                .on_selection_handle_drag_start(Rc::new(move |app, details| {
-                    self.handle_start_handle_drag_start(app, details);
-                }))
-                .on_selection_handle_drag_update(Rc::new(move |app, details| {
-                    self.handle_start_handle_drag_update(app, details);
-                }))
-                .on_selection_handle_drag_end(Rc::new(move |app, details| {
-                    self.handle_start_handle_drag_end(app, details);
-                }))
-                .visibility(this.start_handles_visible)
+                .on_selection_handle_drag_start({
+                    let overlay = overlay.clone();
+                    Rc::new(move |app, details| {
+                        overlay.handle_start_handle_drag_start(app, details);
+                    })
+                })
+                .on_selection_handle_drag_update({
+                    let overlay = overlay.clone();
+                    Rc::new(move |app, details| {
+                        overlay.handle_start_handle_drag_update(app, details);
+                    })
+                })
+                .on_selection_handle_drag_end({
+                    let overlay = overlay.clone();
+                    Rc::new(move |app, details| {
+                        overlay.handle_start_handle_drag_end(app, details);
+                    })
+                })
+                .visibility(this.start_handles_visible.clone())
                 .drag_start_behavior(this.drag_start_behavior)
                 .into_widget()
             }
@@ -2630,6 +2650,8 @@ impl SelectionOverlay {
     }
 
     fn build_end_handle(self: Handle<Self>, app: &App, _context: BuildContext) -> WidgetRef {
+        // The handle's callbacks keep this overlay, as Dart's closures do.
+        let overlay = self.keep(app);
         let this = app.get(self);
         let collapsed = this.end_handle_type == TextSelectionHandleType::Collapsed;
         let handle = match this.selection_controls.clone() {
@@ -2641,21 +2663,30 @@ impl SelectionOverlay {
             {
                 SelectionHandleOverlay::new(
                     this.end_handle_type,
-                    this.end_handle_layer_link,
+                    this.end_handle_layer_link.clone(),
                     selection_controls,
                     this.line_height_at_end,
                 )
                 .on_selection_handle_tapped(this.on_selection_handle_tapped.clone())
-                .on_selection_handle_drag_start(Rc::new(move |app, details| {
-                    self.handle_end_handle_drag_start(app, details);
-                }))
-                .on_selection_handle_drag_update(Rc::new(move |app, details| {
-                    self.handle_end_handle_drag_update(app, details);
-                }))
-                .on_selection_handle_drag_end(Rc::new(move |app, details| {
-                    self.handle_end_handle_drag_end(app, details);
-                }))
-                .visibility(this.end_handles_visible)
+                .on_selection_handle_drag_start({
+                    let overlay = overlay.clone();
+                    Rc::new(move |app, details| {
+                        overlay.handle_end_handle_drag_start(app, details);
+                    })
+                })
+                .on_selection_handle_drag_update({
+                    let overlay = overlay.clone();
+                    Rc::new(move |app, details| {
+                        overlay.handle_end_handle_drag_update(app, details);
+                    })
+                })
+                .on_selection_handle_drag_end({
+                    let overlay = overlay.clone();
+                    Rc::new(move |app, details| {
+                        overlay.handle_end_handle_drag_end(app, details);
+                    })
+                })
+                .visibility(this.end_handles_visible.clone())
                 .drag_start_behavior(this.drag_start_behavior)
                 .into_widget()
             }
@@ -2703,7 +2734,7 @@ impl SelectionOverlay {
             (endpoints[0].point.dx() + endpoints[endpoints.len() - 1].point.dx()) / 2.0
         };
         let midpoint = Offset::new(mid_x, endpoints[0].point.dy() - line_height_at_start);
-        let clipboard_status = app.get(self).clipboard_status;
+        let clipboard_status = app.get(self).clipboard_status.clone();
         let toolbar_location = app.get(self).toolbar_location;
         let toolbar = controls.build_toolbar(
             app,
@@ -2721,11 +2752,11 @@ impl SelectionOverlay {
 
     /// Update the current magnifier with new selection data.
     pub fn update_magnifier(self: Handle<Self>, app: &mut App, magnifier_info: MagnifierInfo) {
-        let controller = app.get(self).magnifier_controller;
+        let controller = app.get(self).magnifier_controller.handle();
         if controller.overlay_entry(app).is_none() {
             return;
         }
-        let info = app.get(self).magnifier_info;
+        let info = app.get(self).magnifier_info.handle();
         info.set_value(app, magnifier_info);
     }
 }
@@ -2739,15 +2770,15 @@ impl SelectionOverlay {
 #[derive(Clone)]
 pub(crate) struct SelectionToolbarWrapper {
     pub key: Option<KeyRef>,
-    pub visibility: Option<Handle<ValueNotifier<bool>>>,
-    pub layer_link: Handle<LayerLink>,
+    pub visibility: Option<Ref<ValueNotifier<bool>>>,
+    pub layer_link: Ref<LayerLink>,
     pub offset: Offset,
     pub child: WidgetRef,
 }
 
 impl SelectionToolbarWrapper {
     pub fn new<K>(
-        layer_link: Handle<LayerLink>,
+        layer_link: Ref<LayerLink>,
         offset: Offset,
         child: impl IntoWidget<K>,
     ) -> SelectionToolbarWrapper {
@@ -2760,10 +2791,7 @@ impl SelectionToolbarWrapper {
         }
     }
 
-    pub fn visibility(
-        mut self,
-        visibility: Handle<ValueNotifier<bool>>,
-    ) -> SelectionToolbarWrapper {
+    pub fn visibility(mut self, visibility: Ref<ValueNotifier<bool>>) -> SelectionToolbarWrapper {
         self.visibility = Some(visibility);
         self
     }
@@ -2795,20 +2823,32 @@ impl StatefulWidget for SelectionToolbarWrapper {
 /// Dart's `_SelectionToolbarWrapperState`.
 pub(crate) struct SelectionToolbarWrapperState {
     state: StateData<SelectionToolbarWrapper>,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
 }
 
 impl SelectionToolbarWrapperState {
+    /// The controller, kept by the transition that fades with it.
+    fn opacity(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
+        app.get(self)
+            .controller
+            .as_ref()
+            .expect("the controller is created in initState")
+            .erase()
+    }
+
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .controller
+            .handle()
             .expect("the controller is created in initState")
     }
 
     fn toolbar_visibility_changed(self: Handle<Self>, app: &mut App) {
-        let visibility = self.widget(app).visibility;
-        let visible = visibility
+        let visible = self
+            .widget(app)
+            .visibility
+            .as_ref()
             .map(|visibility| *visibility.value(app))
             .unwrap_or(true);
         let controller = self.controller(app);
@@ -2837,7 +2877,7 @@ impl SingleTickerProviderStateMixin for SelectionToolbarWrapperState {
 }
 
 impl TickerProviderObject for SelectionToolbarWrapperState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2847,7 +2887,7 @@ impl State for SelectionToolbarWrapperState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(SelectionOverlay::FADE_DURATION),
@@ -2859,7 +2899,7 @@ impl State for SelectionToolbarWrapperState {
         );
         app.get_mut(self).controller = Some(controller);
         self.toolbar_visibility_changed(app);
-        if let Some(visibility) = self.widget(app).visibility {
+        if let Some(visibility) = self.widget(app).visibility.handle() {
             visibility.add_listener(
                 app,
                 Listener::handle_method(self, Self::toolbar_visibility_changed),
@@ -2871,14 +2911,14 @@ impl State for SelectionToolbarWrapperState {
         if old_widget.visibility == self.widget(app).visibility {
             return;
         }
-        if let Some(visibility) = old_widget.visibility {
+        if let Some(visibility) = old_widget.visibility.handle() {
             visibility.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::toolbar_visibility_changed),
             );
         }
         self.toolbar_visibility_changed(app);
-        if let Some(visibility) = self.widget(app).visibility {
+        if let Some(visibility) = self.widget(app).visibility.handle() {
             visibility.add_listener(
                 app,
                 Listener::handle_method(self, Self::toolbar_visibility_changed),
@@ -2891,7 +2931,7 @@ impl State for SelectionToolbarWrapperState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(visibility) = self.widget(app).visibility {
+        if let Some(visibility) = self.widget(app).visibility.handle() {
             visibility.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::toolbar_visibility_changed),
@@ -2900,14 +2940,16 @@ impl State for SelectionToolbarWrapperState {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        app.get_mut(self).controller = None;
-        app.destroy(controller);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
-        let opacity = self.controller(app).view();
+        let opacity = self.opacity(app);
         let widget = self.widget(app);
-        let (layer_link, offset, child) = (widget.layer_link, widget.offset, widget.child.clone());
+        let (layer_link, offset, child) = (
+            widget.layer_link.clone(),
+            widget.offset,
+            widget.child.clone(),
+        );
         let text_direction = Directionality::of(app, context);
         TextFieldTapRegion::new(Directionality::new(
             text_direction,
@@ -2927,13 +2969,13 @@ impl State for SelectionToolbarWrapperState {
 /// Dart's `_SelectionHandleOverlay`.
 #[derive(Clone)]
 struct SelectionHandleOverlay {
-    handle_layer_link: Handle<LayerLink>,
+    handle_layer_link: Ref<LayerLink>,
     on_selection_handle_tapped: Option<Listener>,
     on_selection_handle_drag_start: Option<ValueChanged<DragStartDetails>>,
     on_selection_handle_drag_update: Option<ValueChanged<DragUpdateDetails>>,
     on_selection_handle_drag_end: Option<ValueChanged<DragEndDetails>>,
     selection_controls: Rc<dyn TextSelectionControls>,
-    visibility: Option<Handle<ValueNotifier<bool>>>,
+    visibility: Option<Ref<ValueNotifier<bool>>>,
     preferred_line_height: f64,
     handle_type: TextSelectionHandleType,
     drag_start_behavior: DragStartBehavior,
@@ -2943,7 +2985,7 @@ impl SelectionHandleOverlay {
     /// Create selection overlay.
     fn new(
         handle_type: TextSelectionHandleType,
-        handle_layer_link: Handle<LayerLink>,
+        handle_layer_link: Ref<LayerLink>,
         selection_controls: Rc<dyn TextSelectionControls>,
         preferred_line_height: f64,
     ) -> SelectionHandleOverlay {
@@ -2995,7 +3037,7 @@ impl SelectionHandleOverlay {
     }
 
     /// Dart `_SelectionHandleOverlay(visibility:)`.
-    fn visibility(mut self, visibility: Option<Handle<ValueNotifier<bool>>>) -> Self {
+    fn visibility(mut self, visibility: Option<Ref<ValueNotifier<bool>>>) -> Self {
         self.visibility = visibility;
         self
     }
@@ -3035,7 +3077,7 @@ impl StatefulWidget for SelectionHandleOverlay {
 /// Dart's `_SelectionHandleOverlayState`.
 struct SelectionHandleOverlayState {
     state: StateData<SelectionHandleOverlay>,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
 }
 
@@ -3043,17 +3085,24 @@ impl SelectionHandleOverlayState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .controller
+            .handle()
             .expect("the controller is created in initState")
     }
 
-    fn opacity(self: Handle<Self>, app: &App) -> waft_animation::AnyAnimation<f64> {
-        self.controller(app).view()
+    /// The controller, kept by the transition that fades with it.
+    fn opacity(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
+        app.get(self)
+            .controller
+            .as_ref()
+            .expect("the controller is created in initState")
+            .erase()
     }
 
     fn handle_visibility_changed(self: Handle<Self>, app: &mut App) {
         let visible = self
             .widget(app)
             .visibility
+            .as_ref()
             .map(|visibility| *visibility.value(app))
             .unwrap_or(true);
         let controller = self.controller(app);
@@ -3101,7 +3150,7 @@ impl SingleTickerProviderStateMixin for SelectionHandleOverlayState {
 }
 
 impl TickerProviderObject for SelectionHandleOverlayState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -3111,7 +3160,7 @@ impl State for SelectionHandleOverlayState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(SelectionOverlay::FADE_DURATION),
@@ -3124,7 +3173,7 @@ impl State for SelectionHandleOverlayState {
         app.get_mut(self).controller = Some(controller);
 
         self.handle_visibility_changed(app);
-        if let Some(visibility) = self.widget(app).visibility {
+        if let Some(visibility) = self.widget(app).visibility.handle() {
             visibility.add_listener(
                 app,
                 Listener::handle_method(self, Self::handle_visibility_changed),
@@ -3133,14 +3182,14 @@ impl State for SelectionHandleOverlayState {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &SelectionHandleOverlay) {
-        if let Some(visibility) = old_widget.visibility {
+        if let Some(visibility) = old_widget.visibility.handle() {
             visibility.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::handle_visibility_changed),
             );
         }
         self.handle_visibility_changed(app);
-        if let Some(visibility) = self.widget(app).visibility {
+        if let Some(visibility) = self.widget(app).visibility.handle() {
             visibility.add_listener(
                 app,
                 Listener::handle_method(self, Self::handle_visibility_changed),
@@ -3153,7 +3202,7 @@ impl State for SelectionHandleOverlayState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(visibility) = self.widget(app).visibility {
+        if let Some(visibility) = self.widget(app).visibility.handle() {
             visibility.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::handle_visibility_changed),
@@ -3162,8 +3211,6 @@ impl State for SelectionHandleOverlayState {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        app.get_mut(self).controller = None;
-        app.destroy(controller);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -3206,15 +3253,17 @@ impl State for SelectionHandleOverlayState {
         let configured = widget.clone();
         let pan = GestureRecognizerFactoryWithHandlers::<PanGestureRecognizer>::new(
             |app| {
+                let recognizer = PanGestureRecognizer::new(app);
                 // Mouse events select the text and do not drag the cursor.
-                PanGestureRecognizer::new(app).supported_devices(
+                recognizer.supported_devices(
                     app,
                     [
                         PointerDeviceKind::Touch,
                         PointerDeviceKind::Stylus,
                         PointerDeviceKind::Unknown,
                     ],
-                )
+                );
+                recognizer
             },
             move |app, instance| {
                 DragGestureRecognizer::set_drag_start_behavior(
@@ -3242,7 +3291,7 @@ impl State for SelectionHandleOverlayState {
             widget.on_selection_handle_tapped.clone(),
         );
 
-        CompositedTransformFollower::new(widget.handle_layer_link)
+        CompositedTransformFollower::new(widget.handle_layer_link.clone())
             // Put the handle's anchor point on the leader's anchor point.
             .offset(-handle_anchor - Offset::new(padding.left, padding.top))
             .show_when_unlinked(false)
@@ -4503,77 +4552,180 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
     /// provided by this builder.
     fn build_gesture_detector(
         self: Handle<Self>,
-        _app: &mut App,
+        app: &mut App,
         key: Option<KeyRef>,
         behavior: Option<HitTestBehavior>,
         child: WidgetRef,
     ) -> TextSelectionGestureDetector {
-        let this = self;
-        let force_press = self.builder_data(_app).delegate.force_press_enabled(_app);
+        // The detector's callbacks keep the builder, as Dart's tear-offs do.
+        let this = self.keep(app);
+        let force_press = self.builder_data(app).delegate.force_press_enabled(app);
         let mut detector = TextSelectionGestureDetector::new(child)
-            .on_tap_track_start(Listener::new(move |app| {
-                TextSelectionGestureDetectorBuilder::on_tap_track_start(this, app)
+            .on_tap_track_start(Listener::new({
+                let this = this.clone();
+                move |app| {
+                    TextSelectionGestureDetectorBuilder::on_tap_track_start(this.handle(), app)
+                }
             }))
-            .on_tap_track_reset(Listener::new(move |app| {
-                TextSelectionGestureDetectorBuilder::on_tap_track_reset(this, app)
+            .on_tap_track_reset(Listener::new({
+                let this = this.clone();
+                move |app| {
+                    TextSelectionGestureDetectorBuilder::on_tap_track_reset(this.handle(), app)
+                }
             }))
-            .on_tap_down(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_tap_down(this, app, details)
+            .on_tap_down(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_tap_down(this.handle(), app, details)
+                }
             }))
-            .on_secondary_tap(Listener::new(move |app| {
-                TextSelectionGestureDetectorBuilder::on_secondary_tap(this, app)
+            .on_secondary_tap(Listener::new({
+                let this = this.clone();
+                move |app| TextSelectionGestureDetectorBuilder::on_secondary_tap(this.handle(), app)
             }))
-            .on_secondary_tap_down(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_secondary_tap_down(this, app, details)
+            .on_secondary_tap_down(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_secondary_tap_down(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_single_tap_up(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_single_tap_up(this, app, details)
+            .on_single_tap_up(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_single_tap_up(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_single_tap_cancel(Listener::new(move |app| {
-                TextSelectionGestureDetectorBuilder::on_single_tap_cancel(this, app)
+            .on_single_tap_cancel(Listener::new({
+                let this = this.clone();
+                move |app| {
+                    TextSelectionGestureDetectorBuilder::on_single_tap_cancel(this.handle(), app)
+                }
             }))
-            .on_user_tap(Listener::new(move |app| {
-                TextSelectionGestureDetectorBuilder::on_user_tap(this, app)
+            .on_user_tap(Listener::new({
+                let this = this.clone();
+                move |app| TextSelectionGestureDetectorBuilder::on_user_tap(this.handle(), app)
             }))
-            .on_single_long_tap_start(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_single_long_tap_start(this, app, details)
+            .on_single_long_tap_start(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_single_long_tap_start(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_single_long_tap_move_update(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_single_long_tap_move_update(
-                    this, app, details,
-                )
+            .on_single_long_tap_move_update(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_single_long_tap_move_update(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_single_long_tap_end(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_single_long_tap_end(this, app, details)
+            .on_single_long_tap_end(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_single_long_tap_end(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_single_long_tap_cancel(Listener::new(move |app| {
-                TextSelectionGestureDetectorBuilder::on_single_long_tap_cancel(this, app)
+            .on_single_long_tap_cancel(Listener::new({
+                let this = this.clone();
+                move |app| {
+                    TextSelectionGestureDetectorBuilder::on_single_long_tap_cancel(
+                        this.handle(),
+                        app,
+                    )
+                }
             }))
-            .on_double_tap_down(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_double_tap_down(this, app, details)
+            .on_double_tap_down(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_double_tap_down(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_triple_tap_down(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_triple_tap_down(this, app, details)
+            .on_triple_tap_down(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_triple_tap_down(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_drag_selection_start(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_drag_selection_start(this, app, details)
+            .on_drag_selection_start(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_drag_selection_start(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_drag_selection_update(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_drag_selection_update(this, app, details)
+            .on_drag_selection_update(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_drag_selection_update(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
-            .on_drag_selection_end(Rc::new(move |app, details| {
-                TextSelectionGestureDetectorBuilder::on_drag_selection_end(this, app, details)
+            .on_drag_selection_end(Rc::new({
+                let this = this.clone();
+                move |app, details| {
+                    TextSelectionGestureDetectorBuilder::on_drag_selection_end(
+                        this.handle(),
+                        app,
+                        details,
+                    )
+                }
             }))
             .on_user_tap_always_called(
-                TextSelectionGestureDetectorBuilder::on_user_tap_always_called(self, _app),
+                TextSelectionGestureDetectorBuilder::on_user_tap_always_called(self, app),
             );
         if force_press {
             detector = detector
-                .on_force_press_start(Rc::new(move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_force_press_start(this, app, details)
+                .on_force_press_start(Rc::new({
+                    let this = this.clone();
+                    move |app, details| {
+                        TextSelectionGestureDetectorBuilder::on_force_press_start(
+                            this.handle(),
+                            app,
+                            details,
+                        )
+                    }
                 }))
-                .on_force_press_end(Rc::new(move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_force_press_end(this, app, details)
+                .on_force_press_end(Rc::new({
+                    let this = this.clone();
+                    move |app, details| {
+                        TextSelectionGestureDetectorBuilder::on_force_press_end(
+                            this.handle(),
+                            app,
+                            details,
+                        )
+                    }
                 }));
         }
         if let Some(key) = key {
@@ -5402,6 +5554,7 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::rc::Rc;
+    use waft_foundation::ListenableObject;
 
     use waft_embedder::PointerDeviceKind;
     use waft_foundation::AppCell;
@@ -5702,7 +5855,7 @@ mod tests {
             _selection_midpoint: Offset,
             _endpoints: &[TextSelectionPoint],
             _delegate: AnyTextSelectionDelegate,
-            _clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+            _clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
             _last_secondary_tap_down_position: Option<Offset>,
         ) -> WidgetRef {
             SizedBox::shrink().into_widget()
@@ -5719,7 +5872,7 @@ mod tests {
 
         use crate::{
             Directionality, EditableText, FocusNode, ListenableBuilder, Overlay,
-            TextEditingController, TextEditingControllerLeaf, run_app,
+            TextEditingController, run_app,
         };
         use waft_embedder::{TargetPlatform, TextDirection};
         use waft_foundation::ValueNotifier;
@@ -5738,13 +5891,14 @@ mod tests {
             let shown = app.create(ValueNotifier::new(true));
             let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
             let focus_node = FocusNode::new(&mut app);
-            let field = ListenableBuilder::new(Rc::new(shown), move |app, _, _| {
-                if !*app.get(shown).value() {
+            let visible = shown.handle();
+            let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
+                if !*app.get(visible).value() {
                     return SizedBox::shrink().into_widget();
                 }
                 EditableText::new(
-                    controller.as_controller(),
-                    focus_node,
+                    controller.erase(),
+                    focus_node.erase(),
                     TextStyle::new(),
                     Color::from_argb(255, 0, 0, 0),
                     Color::from_argb(255, 128, 128, 128),
@@ -5809,7 +5963,7 @@ mod tests {
             _selection_midpoint: Offset,
             _endpoints: &[TextSelectionPoint],
             _delegate: AnyTextSelectionDelegate,
-            _clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+            _clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
             _last_secondary_tap_down_position: Option<Offset>,
         ) -> WidgetRef {
             SizedBox::shrink().into_widget()

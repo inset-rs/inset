@@ -7,12 +7,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, AnimationBehavior, AnimationController, AnimationStatus, AnimationStatusListener,
-    AnyAnimation, Curve, CurveTween, Curves, Tween, k_always_complete_animation,
-    k_always_dismissed_animation,
+    Animatable, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, AnyAnimation, Curve, CurveTween, Curves, Drive, Tween,
+    k_always_complete_animation, k_always_dismissed_animation,
 };
 use waft_embedder::{Color, Offset, Radius, SemanticsRole, Size};
-use waft_foundation::{App, Handle, K_IS_WEB, Listenable, Listener, ValueChanged, ValueKey};
+use waft_foundation::{
+    App, Handle, K_IS_WEB, Listenable, Listener, OptionRetained, Ref, ValueChanged, ValueKey,
+};
 use waft_painting::{
     AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder,
     ShapeBorderRef, ShapeDecoration, TextStyle,
@@ -647,7 +649,7 @@ impl StatelessWidget for NavigationDestination {
 
         let navigation_bar_theme = NavigationBarTheme::of(app, context);
         let defaults = defaults_for(app, context);
-        let animation = info.selected_animation;
+        let animation = info.selected_animation.clone();
 
         let enabled = self.enabled;
         let icon = self.icon.clone();
@@ -656,6 +658,7 @@ impl StatelessWidget for NavigationDestination {
             let navigation_bar_theme = navigation_bar_theme.clone();
             let defaults = Rc::clone(&defaults);
             let info = info.clone();
+            let animation = animation.clone();
             let (selected_state, unselected_state, disabled_state) = (
                 selected_state.clone(),
                 unselected_state.clone(),
@@ -701,7 +704,7 @@ impl StatelessWidget for NavigationDestination {
                 Stack::new()
                     .alignment(AlignmentGeometry::CENTER)
                     .children([
-                        NavigationIndicator::new(animation)
+                        NavigationIndicator::new(animation.clone())
                             .color(
                                 info.indicator_color
                                     .or(navigation_bar_theme.indicator_color)
@@ -716,16 +719,16 @@ impl StatelessWidget for NavigationDestination {
                                     .expect("the defaults give an indicator shape"),
                             )
                             .into_widget(),
-                        StatusTransitionWidgetBuilder::new(
-                            animation,
+                        StatusTransitionWidgetBuilder::new(animation.clone(), {
+                            let animation = animation.clone();
                             move |app, _context, _child| {
                                 if animation.is_forward_or_completed(app) {
                                     selected_icon_widget.clone()
                                 } else {
                                     unselected_icon_widget.clone()
                                 }
-                            },
-                        )
+                            }
+                        })
                         .into_widget(),
                     ])
                     .into_widget()
@@ -1064,7 +1067,7 @@ struct NavigationDestinationInfo {
 
     /// Indicates whether or not this destination is selected, from 0 (unselected)
     /// to 1 (selected).
-    selected_animation: AnyAnimation<f64>,
+    selected_animation: AnimationRef<f64>,
 
     /// Determines the behavior for how the labels will layout.
     ///
@@ -1174,7 +1177,7 @@ pub struct NavigationIndicator {
     ///
     /// When [`animation`](Self::animation) is 0, the indicator is not present. The indicator
     /// scales in as [`animation`](Self::animation) grows from 0 to 1.
-    pub animation: AnyAnimation<f64>,
+    pub animation: AnimationRef<f64>,
 
     /// The fill color of this indicator.
     ///
@@ -1210,7 +1213,7 @@ pub struct NavigationIndicator {
 impl NavigationIndicator {
     /// Builds an indicator, usually used in a stack behind the icon of a
     /// navigation bar destination.
-    pub fn new(animation: AnyAnimation<f64>) -> NavigationIndicator {
+    pub fn new(animation: AnimationRef<f64>) -> NavigationIndicator {
         NavigationIndicator {
             key: None,
             animation,
@@ -1278,13 +1281,14 @@ impl StatelessWidget for NavigationIndicator {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        let animation = self.animation;
+        let animation = self.animation.clone();
+        let status_animation = animation.clone();
         let width = self.width;
         let height = self.height;
         let border_radius = self.border_radius;
         let shape = self.shape.clone();
         let color = self.color;
-        AnimatedBuilder::new(Rc::new(animation), move |app, context, child| {
+        AnimatedBuilder::new(Rc::new(animation.clone()), move |app, context, child| {
             // The scale should be 0 when the animation is unselected, as soon as
             // the animation starts, the scale jumps to 40%, and then animates to
             // 100% along a curve.
@@ -1317,11 +1321,11 @@ impl StatelessWidget for NavigationIndicator {
         // Fade should be a 100ms animation whenever the parent animation changes
         // direction.
         .child(StatusTransitionWidgetBuilder::new(
-            animation,
+            status_animation.clone(),
             move |app, _context, _child| {
                 let shape = shape.clone();
                 SelectableAnimatedBuilder::new(
-                    animation.is_forward_or_completed(app),
+                    status_animation.is_forward_or_completed(app),
                     move |app, context, fade_animation| {
                         let shape = shape.clone().unwrap_or_else(|| {
                             ShapeBorderRef::new(RoundedRectangleBorder::new(
@@ -1385,7 +1389,7 @@ impl StatelessWidget for NavigationBarDestinationLayout {
         DestinationLayoutAnimationBuilder {
             builder: Rc::new(move |_app, _context, animation| {
                 CustomMultiChildLayout::new(Rc::new(NavigationDestinationLayoutDelegate::new(
-                    animation,
+                    animation.clone(),
                 )))
                 .children([
                     LayoutId::new(
@@ -1573,7 +1577,7 @@ struct NavigationDestinationLayoutDelegate {
     /// selected.
     ///
     /// See [`NavigationDestinationInfo::selected_animation`].
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
 
     /// Dart's `super(relayout: animation)`.
     relayout: Rc<dyn Listenable>,
@@ -1588,10 +1592,10 @@ impl Debug for NavigationDestinationLayoutDelegate {
 }
 
 impl NavigationDestinationLayoutDelegate {
-    fn new(animation: AnyAnimation<f64>) -> NavigationDestinationLayoutDelegate {
+    fn new(animation: AnimationRef<f64>) -> NavigationDestinationLayoutDelegate {
         NavigationDestinationLayoutDelegate {
+            relayout: Rc::new(animation.clone()),
             animation,
-            relayout: Rc::new(animation),
         }
     }
 
@@ -1689,7 +1693,7 @@ impl MultiChildLayoutDelegate for NavigationDestinationLayoutDelegate {
 /// only need to rebuild when the `Animation::status` changes, since
 /// `AnimatedBuilder` rebuilds every time the animation ticks.
 struct StatusTransitionWidgetBuilder {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
 
     /// Called every time the animation changes `AnimationStatus`.
     builder: TransitionBuilder,
@@ -1710,7 +1714,7 @@ struct StatusTransitionWidgetBuilder {
 impl StatusTransitionWidgetBuilder {
     /// Creates a widget that rebuilds when the given animation changes status.
     fn new(
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         builder: impl Fn(&mut App, BuildContext, Option<&WidgetRef>) -> WidgetRef + 'static,
     ) -> StatusTransitionWidgetBuilder {
         StatusTransitionWidgetBuilder {
@@ -1738,7 +1742,7 @@ impl Debug for StatusTransitionWidgetBuilder {
 
 impl StatusTransitionWidget for StatusTransitionWidgetBuilder {
     fn animation(&self) -> AnyAnimation<f64> {
-        self.animation
+        self.animation.handle()
     }
 
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1747,7 +1751,7 @@ impl StatusTransitionWidget for StatusTransitionWidgetBuilder {
 }
 
 /// Dart's `Widget Function(BuildContext, Animation<double>)` builders of this file.
-type AnimationWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, AnyAnimation<f64>) -> WidgetRef>;
+type AnimationWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, AnimationRef<f64>) -> WidgetRef>;
 
 // Builder widget for widgets that need to be animated from 0 (unselected) to
 // 1.0 (selected).
@@ -1800,7 +1804,7 @@ impl SelectableAnimatedBuilder {
     /// 1 and back depending on when [`is_selected`](Self::is_selected) is true.
     fn new(
         is_selected: bool,
-        builder: impl Fn(&mut App, BuildContext, AnyAnimation<f64>) -> WidgetRef + 'static,
+        builder: impl Fn(&mut App, BuildContext, AnimationRef<f64>) -> WidgetRef + 'static,
     ) -> SelectableAnimatedBuilder {
         SelectableAnimatedBuilder {
             is_selected,
@@ -1852,12 +1856,15 @@ impl StatefulWidget for SelectableAnimatedBuilder {
 struct SelectableAnimatedBuilderState {
     state: StateData<SelectableAnimatedBuilder>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
 }
 
 impl SelectableAnimatedBuilderState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 }
 
@@ -1878,7 +1885,7 @@ impl SingleTickerProviderStateMixin for SelectableAnimatedBuilderState {
 }
 
 impl TickerProviderObject for SelectableAnimatedBuilderState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1888,7 +1895,7 @@ impl State for SelectableAnimatedBuilderState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             None,
@@ -1898,11 +1905,11 @@ impl State for SelectableAnimatedBuilderState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         let widget = self.widget(app);
         let duration = widget.duration;
         let value = if widget.is_selected { 1.0 } else { 0.0 };
-        app.get_mut(controller).duration = Some(duration);
+        app.get_mut(&controller).duration = Some(duration);
         controller.set_value(app, value);
     }
 
@@ -1936,14 +1943,17 @@ impl State for SelectableAnimatedBuilderState {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        app.get_mut(self).controller = None;
-        app.destroy(controller);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let builder = Rc::clone(&self.widget(app).builder);
-        let controller = self.controller(app);
-        builder(app, context, controller.view())
+        let controller = app
+            .get(self)
+            .controller
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
+        builder(app, context, controller)
     }
 }
 
@@ -1962,7 +1972,7 @@ impl State for SelectableAnimatedBuilderState {
 /// This is similar to `CurvedAnimation` except the animation status listeners
 /// are removed when this widget is disposed.
 struct CurvedAnimationBuilder {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
     curve: Rc<dyn Curve>,
     reverse_curve: Rc<dyn Curve>,
     builder: AnimationWidgetBuilder,
@@ -1984,7 +1994,6 @@ impl StatefulWidget for CurvedAnimationBuilder {
             state: StateData::new(),
             animation_direction: AnimationStatus::Dismissed,
             preserved_direction: None,
-            curved_animations: CurvedAnimations::default(),
         }
     }
 }
@@ -1994,40 +2003,6 @@ struct CurvedAnimationBuilderState {
     state: StateData<CurvedAnimationBuilder>,
     animation_direction: AnimationStatus,
     preserved_direction: Option<AnimationStatus>,
-    curved_animations: CurvedAnimations,
-}
-
-/// The `CurveTween(..).animate(..)` objects Dart's build makes, kept until no widget reads
-/// them: the last build's are still listened to by the widgets it built until they update to
-/// this build's.
-#[derive(Default)]
-struct CurvedAnimations {
-    current: Option<(Handle<CurveTween>, AnyAnimation<f64>)>,
-    previous: Option<(Handle<CurveTween>, AnyAnimation<f64>)>,
-}
-
-impl CurvedAnimations {
-    /// Keeps `made` as the current build's, and frees the build's before the last.
-    fn push(&mut self, app: &mut App, made: (Handle<CurveTween>, AnyAnimation<f64>)) {
-        if let Some(stale) = self.previous.take() {
-            CurvedAnimations::free(app, stale);
-        }
-        self.previous = self.current.replace(made);
-    }
-
-    fn free(app: &mut App, (curve_tween, animation): (Handle<CurveTween>, AnyAnimation<f64>)) {
-        app.destroy(animation.id());
-        app.destroy(curve_tween);
-    }
-
-    fn free_all(&mut self, app: &mut App) {
-        for made in [self.current.take(), self.previous.take()]
-            .into_iter()
-            .flatten()
-        {
-            CurvedAnimations::free(app, made);
-        }
-    }
 }
 
 impl CurvedAnimationBuilderState {
@@ -2064,7 +2039,7 @@ impl State for CurvedAnimationBuilderState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         let status = animation.status(app);
         app.get_mut(self).animation_direction = status;
         self.update_status(app, status);
@@ -2075,13 +2050,11 @@ impl State for CurvedAnimationBuilderState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         animation.remove_status_listener(
             app,
             &AnimationStatusListener::handle_method(self, Self::update_status),
         );
-        let mut curved_animations = std::mem::take(&mut app.get_mut(self).curved_animations);
-        curved_animations.free_all(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -2097,13 +2070,10 @@ impl State for CurvedAnimationBuilderState {
         } else {
             Rc::clone(&widget.reverse_curve)
         };
-        let parent = widget.animation;
+        let parent = widget.animation.clone();
         let builder = Rc::clone(&widget.builder);
         let curve_tween = CurveTween::new(app, curve);
         let curved_animation = parent.drive(app, curve_tween);
-        let mut curved_animations = std::mem::take(&mut app.get_mut(self).curved_animations);
-        curved_animations.push(app, (curve_tween, curved_animation));
-        app.get_mut(self).curved_animations = curved_animations;
 
         builder(app, context, curved_animation)
     }
@@ -2197,17 +2167,13 @@ impl NavigationBarThemeDataGetters for NavigationBarDefaultsM2 {
 /// Dart's `CurveTween(curve: curve).transform(t)`.
 fn transform_curve_tween(app: &mut App, curve: Rc<dyn Curve>, t: f64) -> f64 {
     let curve_tween = CurveTween::new(app, curve);
-    let value = Animatable::transform(&curve_tween, app, t);
-    app.destroy(curve_tween);
-    value
+    Animatable::transform(&curve_tween, app, t)
 }
 
 /// Dart's `Tween<double>(begin: begin, end: end).transform(t)`.
 fn transform_tween(app: &mut App, begin: f64, end: f64, t: f64) -> f64 {
     let tween = Tween::new(app, Some(begin), Some(end));
-    let value = Animatable::transform(&tween, app, t);
-    app.destroy(tween);
-    value
+    Animatable::transform(&tween, app, t)
 }
 
 #[cfg(test)]

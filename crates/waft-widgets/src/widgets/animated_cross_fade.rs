@@ -5,11 +5,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    AnimationBehavior, AnimationController, AnimationStatusListener, AnyAnimation, Curve,
-    CurveTween, Curves, Tween,
+    AnimationBehavior, AnimationController, AnimationRef, AnimationStatusListener, Curve,
+    CurveTween, Curves, Drive, Tween,
 };
 use waft_embedder::Clip;
-use waft_foundation::{App, Handle, Listener, ValueKey};
+use waft_foundation::{App, Handle, Listener, OptionRetained, ValueKey};
 use waft_painting::AlignmentGeometry;
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 
@@ -23,6 +23,7 @@ use crate::widgets::ticker_provider::{
     TickerMode, TickerProviderStateMixin, TickerProviderStateMixinData,
 };
 use crate::widgets::transitions::FadeTransition;
+use waft_foundation::Ref;
 
 /// Specifies which of two children to show. See [`AnimatedCrossFade`].
 ///
@@ -340,9 +341,9 @@ impl StatefulWidget for AnimatedCrossFade {
 pub struct AnimatedCrossFadeState {
     state: StateData<AnimatedCrossFade>,
     ticker_provider: TickerProviderStateMixinData,
-    controller: Option<Handle<AnimationController>>,
-    first_animation: Option<AnyAnimation<f64>>,
-    second_animation: Option<AnyAnimation<f64>>,
+    controller: Option<Ref<AnimationController>>,
+    first_animation: Option<AnimationRef<f64>>,
+    second_animation: Option<AnimationRef<f64>>,
 }
 
 impl Debug for AnimatedCrossFadeState {
@@ -366,14 +367,17 @@ impl TickerProviderStateMixin for AnimatedCrossFadeState {
 }
 
 impl TickerProviderObject for AnimatedCrossFadeState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
 
 impl AnimatedCrossFadeState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 
     fn init_animation(
@@ -381,9 +385,14 @@ impl AnimatedCrossFadeState {
         app: &mut App,
         curve: Rc<dyn Curve>,
         inverted: bool,
-    ) -> AnyAnimation<f64> {
+    ) -> AnimationRef<f64> {
         let curve_tween = CurveTween::new(app, curve);
-        let mut result = self.controller(app).drive(app, curve_tween);
+        let controller = app
+            .get(self)
+            .controller
+            .clone()
+            .expect("created in init_state");
+        let mut result = controller.drive(app, curve_tween);
         if inverted {
             let tween = Tween::new(app, Some(1.0), Some(0.0));
             result = result.drive(app, tween);
@@ -403,7 +412,7 @@ impl State for AnimatedCrossFadeState {
         let cross_fade_state = widget.cross_fade_state;
         let first_curve = Rc::clone(&widget.first_curve);
         let second_curve = Rc::clone(&widget.second_curve);
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(duration),
@@ -413,7 +422,7 @@ impl State for AnimatedCrossFadeState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         if cross_fade_state == CrossFadeState::ShowSecond {
             controller.set_value(app, 1.0);
         }
@@ -497,10 +506,12 @@ impl State for AnimatedCrossFadeState {
         let first_animation = app
             .get(self)
             .first_animation
+            .clone()
             .expect("created in init_state");
         let second_animation = app
             .get(self)
             .second_animation
+            .clone()
             .expect("created in init_state");
         let controller = self.controller(app);
         let top_key;
@@ -823,7 +834,7 @@ mod tests {
             self: Handle<Self>,
             app: &mut App,
             on_tick: TickerCallback,
-        ) -> Handle<Ticker> {
+        ) -> Ref<Ticker> {
             SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
         }
     }
@@ -840,7 +851,7 @@ mod tests {
             );
             ticker.start(app);
             let widget = self.widget(app);
-            widget.ticker.set(Some(ticker));
+            widget.ticker.set(Some(ticker.handle()));
             widget.inits.set(widget.inits.get() + 1);
         }
 

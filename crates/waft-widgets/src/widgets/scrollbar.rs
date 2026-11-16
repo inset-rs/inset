@@ -13,17 +13,17 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnimationLocalStatusListenersMixin,
+    AnimationBehavior, AnimationController, AnimationLocalStatusListenersMixin, AnimationRef,
     AnimationStatus, AnimationStatusListener, AnyAnimation, CurvedAnimation, Curves,
 };
 use waft_embedder::{
     Canvas, Color, FillRule, Matrix4, Offset, Paint, PaintStyle, PathBuilder, PointerDeviceKind,
     RRect, Radius, Rect, Size, Stroke, TargetPlatform, TextDirection, clamp_double,
 };
-use waft_foundation::PRECISION_ERROR_TOLERANCE;
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, Timer,
 };
+use waft_foundation::{OptionRetained, PRECISION_ERROR_TOLERANCE};
 use waft_gestures::DragDirection;
 use waft_gestures::{
     BaseTapData, BaseTapGestureRecognizer, BaseTapLeaf, BaseTapLeafData, DeviceGestureSettings,
@@ -60,7 +60,7 @@ use crate::widgets::notification_listener::NotificationListener;
 use crate::widgets::primary_scroll_controller::PrimaryScrollController;
 use crate::widgets::scroll_activity::ScrollHoldController;
 use crate::widgets::scroll_configuration::ScrollConfiguration;
-use crate::widgets::scroll_controller::AnyScrollController;
+use crate::widgets::scroll_controller::ScrollControllerRef;
 use crate::widgets::scroll_metrics::ScrollMetrics;
 use crate::widgets::scroll_notification::{
     OverscrollNotification, ScrollEndNotification, ScrollNotification, ScrollNotificationPredicate,
@@ -70,6 +70,7 @@ use crate::widgets::scroll_position::ScrollMetricsNotification;
 use crate::widgets::scrollable::Scrollable;
 use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
+use waft_foundation::Ref;
 use waft_scheduler::{
     FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
 };
@@ -146,7 +147,7 @@ pub struct ScrollbarPainter {
     track_radius: Option<Radius>,
     text_direction: Option<TextDirection>,
     thickness: f64,
-    fadeout_opacity_animation: AnyAnimation<f64>,
+    fadeout_opacity_animation: AnimationRef<f64>,
     main_axis_margin: f64,
     cross_axis_margin: f64,
     radius: Option<Radius>,
@@ -178,8 +179,8 @@ impl ScrollbarPainter {
     pub fn new(
         app: &mut App,
         color: Color,
-        fadeout_opacity_animation: AnyAnimation<f64>,
-    ) -> Handle<ScrollbarPainter> {
+        fadeout_opacity_animation: AnimationRef<f64>,
+    ) -> Ref<ScrollbarPainter> {
         let this = app.create(ScrollbarPainter {
             change_notifier: ChangeNotifierData::new(),
             color,
@@ -188,7 +189,7 @@ impl ScrollbarPainter {
             track_radius: None,
             text_direction: None,
             thickness: K_SCROLLBAR_THICKNESS,
-            fadeout_opacity_animation,
+            fadeout_opacity_animation: fadeout_opacity_animation.clone(),
             main_axis_margin: 0.0,
             cross_axis_margin: 0.0,
             radius: None,
@@ -208,7 +209,7 @@ impl ScrollbarPainter {
         });
         fadeout_opacity_animation.add_listener(
             app,
-            Listener::handle_method(this, Handle::<ScrollbarPainter>::notify_listeners),
+            Listener::handle_method(this.handle(), Handle::<ScrollbarPainter>::notify_listeners),
         );
         this
     }
@@ -308,7 +309,7 @@ impl ScrollbarPainter {
     ///
     /// Changes in the value of this `Listenable` automatically trigger repaints.
     pub fn fadeout_opacity_animation(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).fadeout_opacity_animation
+        app.get(self).fadeout_opacity_animation.handle()
     }
 
     /// Distance from the scrollbar thumb's start and end to the edge of the
@@ -1116,7 +1117,7 @@ impl ScrollbarPainter {
             app,
             &Listener::handle_method(self, Handle::<ScrollbarPainter>::notify_listeners),
         );
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -1147,22 +1148,22 @@ fn need_paint(metrics: Option<&dyn ScrollMetrics>) -> bool {
 /// render object subscribes to.
 #[derive(Clone)]
 pub struct ScrollbarPainterRef {
-    painter: Handle<ScrollbarPainter>,
+    painter: Ref<ScrollbarPainter>,
     repaint: Rc<dyn Listenable>,
 }
 
 impl ScrollbarPainterRef {
     /// Wraps a [`ScrollbarPainter`] as a `CustomPainter`.
-    pub fn new(painter: Handle<ScrollbarPainter>) -> ScrollbarPainterRef {
+    pub fn new(painter: Ref<ScrollbarPainter>) -> ScrollbarPainterRef {
         ScrollbarPainterRef {
+            repaint: Rc::new(painter.clone()),
             painter,
-            repaint: Rc::new(painter),
         }
     }
 
     /// The painter itself.
     pub fn painter(&self) -> Handle<ScrollbarPainter> {
-        self.painter
+        self.painter.handle()
     }
 }
 
@@ -1180,7 +1181,7 @@ impl CustomPainter for ScrollbarPainterRef {
             .as_any()
             .downcast_ref::<ScrollbarPainterRef>()
             .expect("Dart's covariant parameter");
-        self.painter.should_repaint(app, old_delegate.painter)
+        self.painter.should_repaint(app, old_delegate.painter())
     }
 
     fn hit_test(&self, app: &App, position: Offset) -> Option<bool> {
@@ -1213,7 +1214,7 @@ pub struct RawScrollbarData {
     /// If nothing is passed, the default behavior is to automatically enable
     /// scrollbar dragging on the nearest scroll controller using
     /// [`PrimaryScrollController::of`].
-    pub controller: Option<AnyScrollController>,
+    pub controller: Option<ScrollControllerRef>,
 
     /// Indicates that the scrollbar thumb should be visible, even when a scroll
     /// is not underway.
@@ -1402,7 +1403,7 @@ macro_rules! raw_scrollbar_setters {
         }
 
         /// Dart `controller:`.
-        pub fn controller(mut self, controller: $crate::AnyScrollController) -> $name {
+        pub fn controller(mut self, controller: $crate::ScrollControllerRef) -> $name {
             self.raw_scrollbar.controller = Some(controller);
             self
         }
@@ -1651,11 +1652,11 @@ pub struct RawScrollbarStateData {
     start_drag_scrollbar_axis_offset: Option<Offset>,
     last_drag_update_offset: Option<Offset>,
     start_drag_thumb_offset: Option<f64>,
-    cached_controller: Option<AnyScrollController>,
+    cached_controller: Option<ScrollControllerRef>,
     fadeout_timer: Option<Timer>,
-    fadeout_animation_controller: Option<Handle<AnimationController>>,
-    fadeout_opacity_animation: Option<Handle<CurvedAnimation>>,
-    scrollbar_painter: Option<Handle<ScrollbarPainter>>,
+    fadeout_animation_controller: Option<Ref<AnimationController>>,
+    fadeout_opacity_animation: Option<Ref<CurvedAnimation>>,
+    scrollbar_painter: Option<Ref<ScrollbarPainter>>,
     scrollbar_painter_key: GlobalKey,
     hover_is_active: bool,
     thumb_drag: Option<Rc<dyn Drag>>,
@@ -1865,6 +1866,7 @@ impl RawScrollbarState {
     {
         this.raw_scrollbar_state_data(app)
             .scrollbar_painter
+            .handle()
             .expect("initState creates the painter")
     }
 
@@ -1878,17 +1880,18 @@ impl RawScrollbarState {
     {
         this.raw_scrollbar_state_data(app)
             .fadeout_animation_controller
+            .handle()
             .expect("initState creates the controller")
     }
 
     fn effective_scroll_controller<S: RawScrollbarStateLeaf>(
         this: Handle<S>,
         app: &mut App,
-    ) -> Option<AnyScrollController>
+    ) -> Option<ScrollControllerRef>
     where
         S::Widget: RawScrollbarLeaf,
     {
-        if let Some(controller) = this.widget(app).raw_scrollbar_data().controller {
+        if let Some(controller) = this.widget(app).raw_scrollbar_data().controller.clone() {
             return Some(controller);
         }
         let context = this.context(app);
@@ -1913,7 +1916,7 @@ impl RawScrollbarState {
         S::Widget: RawScrollbarLeaf,
     {
         let fade_duration = this.widget(app).raw_scrollbar_data().fade_duration;
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(fade_duration),
@@ -1924,16 +1927,16 @@ impl RawScrollbarState {
             this,
         );
         AnimationLocalStatusListenersMixin::add_status_listener(
-            controller,
+            controller.handle(),
             app,
             AnimationStatusListener::handle_method(this, validate_interactions::<S>),
         );
         let opacity =
-            CurvedAnimation::create(app, controller.view(), Curves::fast_out_slow_in(), None);
+            CurvedAnimation::new(app, controller.erase(), Curves::fast_out_slow_in(), None);
         this.raw_scrollbar_state_data_mut(app)
             .fadeout_animation_controller = Some(controller);
         this.raw_scrollbar_state_data_mut(app)
-            .fadeout_opacity_animation = Some(opacity);
+            .fadeout_opacity_animation = Some(opacity.clone());
 
         let widget = this.widget(app).raw_scrollbar_data();
         let color = widget.thumb_color.unwrap_or(K_DEFAULT_THUMB_COLOR);
@@ -1947,7 +1950,7 @@ impl RawScrollbarState {
         let min_length = widget.min_thumb_length;
         let min_overscroll_length = widget.min_overscroll_length.unwrap_or(min_length);
 
-        let painter = ScrollbarPainter::new(app, color, opacity.as_animation());
+        let painter = ScrollbarPainter::new(app, color, opacity.into_erased());
         painter.set_thickness(app, thickness);
         painter.set_radius(app, radius);
         painter.set_track_radius(app, track_radius);
@@ -2211,6 +2214,7 @@ impl RawScrollbarState {
         let data = this.raw_scrollbar_state_data(app);
         let cached_controller = data
             .cached_controller
+            .handle()
             .expect("a press caches the controller");
         let start_drag_scrollbar_axis_offset = data
             .start_drag_scrollbar_axis_offset
@@ -2303,7 +2307,7 @@ impl RawScrollbarState {
     {
         RawScrollbarState::debug_check_has_valid_scroll_position(this, app);
         let controller = RawScrollbarState::effective_scroll_controller(this, app);
-        this.raw_scrollbar_state_data_mut(app).cached_controller = controller;
+        this.raw_scrollbar_state_data_mut(app).cached_controller = controller.clone();
         if this.get_scrollbar_direction(app).is_none() {
             return;
         }
@@ -2338,6 +2342,7 @@ impl RawScrollbarState {
         let position = this
             .raw_scrollbar_state_data(app)
             .cached_controller
+            .handle()
             .expect("a press caches the controller")
             .position(app);
         let render_box = RawScrollbarState::painter_render_box(this, app);
@@ -2381,6 +2386,7 @@ impl RawScrollbarState {
         let position = this
             .raw_scrollbar_state_data(app)
             .cached_controller
+            .handle()
             .expect("a press caches the controller")
             .position(app);
         let metrics = position.copy_with(app);
@@ -2494,7 +2500,7 @@ impl RawScrollbarState {
         // The scrollbar should page towards the position of the tap on the track.
         RawScrollbarState::debug_check_has_valid_scroll_position(this, app);
         let controller = RawScrollbarState::effective_scroll_controller(this, app);
-        this.raw_scrollbar_state_data_mut(app).cached_controller = controller;
+        this.raw_scrollbar_state_data_mut(app).cached_controller = controller.clone();
 
         let position = controller.expect("a valid scroll position").position(app);
         let metrics = position.copy_with(app);
@@ -2967,6 +2973,7 @@ impl RawScrollbarState {
         let position = this
             .raw_scrollbar_state_data(app)
             .cached_controller
+            .handle()
             .expect("a pointer signal caches the controller")
             .position(app);
         let mut delta = if position.axis(app) == Axis::Horizontal {
@@ -2994,6 +3001,7 @@ impl RawScrollbarState {
         let position = this
             .raw_scrollbar_state_data(app)
             .cached_controller
+            .handle()
             .expect("a pointer signal caches the controller")
             .position(app);
         (position.pixels(app) + delta)
@@ -3013,7 +3021,7 @@ impl RawScrollbarState {
             return;
         };
         let controller = RawScrollbarState::effective_scroll_controller(this, app);
-        this.raw_scrollbar_state_data_mut(app).cached_controller = controller;
+        this.raw_scrollbar_state_data_mut(app).cached_controller = controller.clone();
         let delta = RawScrollbarState::pointer_signal_event_delta(this, app, event);
         let target_scroll_offset =
             RawScrollbarState::target_scroll_offset_for_pointer_scroll(this, app, delta);
@@ -3031,7 +3039,7 @@ impl RawScrollbarState {
         S::Widget: RawScrollbarLeaf,
     {
         let controller = RawScrollbarState::effective_scroll_controller(this, app);
-        this.raw_scrollbar_state_data_mut(app).cached_controller = controller;
+        this.raw_scrollbar_state_data_mut(app).cached_controller = controller.clone();
         // Only try to scroll if the bar absorbs the hit test.
         let painter = RawScrollbarState::scrollbar_painter(this, app);
         let hit = painter
@@ -3087,12 +3095,13 @@ impl RawScrollbarState {
         RawScrollbarState::cancel_fadeout_timer(this, app);
         let scrollbar_painter = RawScrollbarState::scrollbar_painter(this, app);
         scrollbar_painter.dispose(app);
-        if let Some(opacity) = this.raw_scrollbar_state_data(app).fadeout_opacity_animation {
+        if let Some(opacity) = this
+            .raw_scrollbar_state_data(app)
+            .fadeout_opacity_animation
+            .handle()
+        {
             opacity.dispose(app);
-            app.destroy_lingering(opacity);
         }
-        app.destroy_lingering(scrollbar_painter);
-        app.destroy_lingering(fadeout_animation_controller);
     }
 
     /// Dart's `build`, which a leaf's [`State::build`] calls.
@@ -3109,7 +3118,10 @@ impl RawScrollbarState {
         let data = this.raw_scrollbar_state_data(app);
         let painter_key = data.scrollbar_painter_key.clone();
         let gesture_detector_key = data.gesture_detector_key.clone();
-        let painter = RawScrollbarState::scrollbar_painter(this, app);
+        let painter = data
+            .scrollbar_painter
+            .clone()
+            .expect("initState creates the painter");
         let child = this.widget(app).raw_scrollbar_data().child.clone();
         let gestures = RawScrollbarState::gestures(this, app);
 
@@ -3287,7 +3299,7 @@ impl RawScrollbarStateLeaf for RawScrollbarState {
 }
 
 impl TickerProviderObject for RawScrollbarState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -3398,7 +3410,7 @@ macro_rules! thumb_drag_gesture_recognizer_leaf {
                 app: &mut App,
                 owner: Handle<BuildOwner>,
                 custom_paint_key: GlobalKey,
-            ) -> Handle<$name> {
+            ) -> Ref<$name> {
                 app.create($name {
                     recognizer: GestureRecognizerData::new(),
                     one_sequence: OneSequenceData::new(),
@@ -3651,7 +3663,7 @@ impl TrackTapGestureRecognizer {
         app: &mut App,
         owner: Handle<BuildOwner>,
         custom_paint_key: GlobalKey,
-    ) -> Handle<TrackTapGestureRecognizer> {
+    ) -> Ref<TrackTapGestureRecognizer> {
         app.create(TrackTapGestureRecognizer {
             recognizer: GestureRecognizerData::new(),
             one_sequence: OneSequenceData::new(),
@@ -3827,6 +3839,7 @@ impl BaseTapLeaf for TrackTapGestureRecognizer {
 mod tests {
     use waft_embedder::{Size, TextDirection};
     use waft_foundation::AppCell;
+    use waft_foundation::OptionRetained;
     use waft_gestures::HitTestResult;
     use waft_painting::EdgeInsets;
     use waft_rendering::{BoxHitTestEntry, RenderCustomPaint, RendererBinding};
@@ -3847,11 +3860,11 @@ mod tests {
         let key = GlobalKey::new();
         let controller = ScrollController::default(&mut cell.borrow_mut());
         let list = ListView::new()
-            .controller(controller.as_controller())
+            .controller(controller.erase())
             .children((0..ITEM_COUNT).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
         let scrollbar = RawScrollbar::new(list)
             .key(key.clone().into())
-            .controller(controller.as_controller());
+            .controller(controller.erase());
         let tree: WidgetRef = MediaQuery::new(
             MediaQueryData::new()
                 .size(Size::new(VIEW_WIDTH, VIEW_HEIGHT))
@@ -3866,7 +3879,7 @@ mod tests {
         // The metrics notification is dispatched from a microtask after layout, so the
         // painter only knows the metrics from the second frame on.
         binding_pump(&mut cell.borrow_mut(), Duration::from_millis(16));
-        (key, controller)
+        (key, controller.handle())
     }
 
     fn painter(app: &mut App, key: &GlobalKey) -> Handle<ScrollbarPainter> {
@@ -3915,8 +3928,8 @@ mod tests {
     }
 
     /// Dart's collector frees the fade controller, its `CurvedAnimation` and the painter
-    /// `RawScrollbarState` makes once the state is gone; here the state frees them in its
-    /// `dispose`.
+    /// `RawScrollbarState` makes once the state is gone; here they go at the checkpoint after
+    /// the state that keeps them is freed.
     #[test]
     fn a_disposed_raw_scrollbar_frees_its_fade_and_painter() {
         let cell = binding_cell();
@@ -3928,10 +3941,13 @@ mod tests {
                 .expect("the scrollbar is mounted");
             let data = RawScrollbarState::raw_scrollbar_state_data(state, &app);
             (
-                data.fadeout_opacity_animation.expect("made in init_state"),
-                data.fadeout_animation_controller
+                data.fadeout_opacity_animation
+                    .handle()
                     .expect("made in init_state"),
-                data.scrollbar_painter.expect("made in init_state"),
+                data.fadeout_animation_controller
+                    .handle()
+                    .expect("made in init_state"),
+                data.scrollbar_painter.handle().expect("made in init_state"),
             )
         };
 
@@ -4042,11 +4058,11 @@ mod tests {
         let key = GlobalKey::new();
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
-            .controller(controller.as_controller())
+            .controller(controller.erase())
             .children([SizedBox::new().height(ITEM_EXTENT).into_widget()]);
         let scrollbar = RawScrollbar::new(list)
             .key(key.clone().into())
-            .controller(controller.as_controller());
+            .controller(controller.erase());
         let tree: WidgetRef = MediaQuery::new(
             MediaQueryData::new().size(Size::new(VIEW_WIDTH, VIEW_HEIGHT)),
             scrollbar,

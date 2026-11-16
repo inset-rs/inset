@@ -30,13 +30,16 @@ impl FrameCallback {
     }
 
     /// A handle's associated function — Dart passing a method tear-off like
-    /// `Ticker._tick`.
+    /// `Ticker._tick`. Like [`Listener::handle_method`](waft_foundation::Listener::handle_method),
+    /// it does not keep its receiver, and is skipped once the receiver is freed.
     pub fn handle_method<T: 'static, F>(this: Handle<T>, f: F) -> FrameCallback
     where
         F: Fn(Handle<T>, &mut App, Duration) + 'static,
     {
         FrameCallback(Rc::new(move |app: &mut App, time_stamp| {
-            f(this, app, time_stamp)
+            if app.tear_off_receiver_is_live(this) {
+                f(this, app, time_stamp)
+            }
         }))
     }
 

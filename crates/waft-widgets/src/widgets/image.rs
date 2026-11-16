@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use waft_embedder::{ImageDecodeError, Size, TextDirection};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, OptionRetained, Ref};
 use waft_painting::{
     Alignment, BoxFit, ImageConfiguration, ImageInfo, ImageProviderRef, ImageRepeat, ImageStream,
     ImageStreamListener, MemoryImage,
@@ -407,7 +407,7 @@ impl StatefulWidget for Image {
 /// Listens for [`Image`]'s frame and rebuilds when it arrives. Flutter `_ImageState`.
 pub struct ImageState {
     state: StateData<Image>,
-    stream: Option<Handle<ImageStream>>,
+    stream: Option<Ref<ImageStream>>,
     listener: Option<ImageStreamListener>,
     resolved: Option<ImageInfo>,
     error: Option<ImageDecodeError>,
@@ -430,7 +430,7 @@ impl ImageState {
         let configuration = create_local_image_configuration(app, context, None);
         let provider = Rc::clone(&self.widget(app).image);
         let stream = provider.resolve(app, &configuration);
-        if let Some(previous) = app.get(self).stream
+        if let Some(previous) = app.get(self).stream.handle()
             && previous.completer(app) == stream.completer(app)
         {
             stream.dispose(app);
@@ -440,7 +440,7 @@ impl ImageState {
         if let Some(previous) = app.get_mut(self).stream.take() {
             previous.dispose(app);
         }
-        app.get_mut(self).stream = Some(stream);
+        app.get_mut(self).stream = Some(stream.clone());
 
         let on_image = self;
         let on_error = self;
@@ -464,9 +464,10 @@ impl ImageState {
     }
 
     fn stop_listening(self: Handle<Self>, app: &mut App) {
-        let (Some(stream), Some(listener)) =
-            (app.get(self).stream, app.get_mut(self).listener.take())
-        else {
+        let (Some(stream), Some(listener)) = (
+            app.get(self).stream.handle(),
+            app.get_mut(self).listener.take(),
+        ) else {
             return;
         };
         stream.remove_listener(app, &listener);
@@ -875,8 +876,10 @@ mod image_widget_tests {
                 stream.dispose(&mut app);
                 pump_every_view(&mut app, Duration::ZERO);
             }
+            let stream_handle = stream.handle();
+            drop(stream);
             cell.checkpoint();
-            assert!(!cell.borrow().contains(stream));
+            assert!(!cell.borrow().contains(stream_handle));
             assert!(!cell.borrow().contains(completer));
             assert_eq!(
                 host.dropped.get(),

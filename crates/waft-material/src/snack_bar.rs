@@ -3,13 +3,13 @@
 use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
+use waft_foundation::{App, Handle, Listenable, Listener, Ref, UniqueKey, VoidCallback};
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnimationStatus, AnimationStatusListener,
-    AnyAnimation, Curve, CurvedAnimation, Curves, Interval, Threshold,
+    Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, AnyAnimation, Curve, CurvedAnimation, Curves, Interval, Threshold,
 };
 use waft_embedder::{Brightness, Clip, Color, Radius, TextDirection};
-use waft_foundation::{App, Handle, Listenable, Listener, UniqueKey, VoidCallback};
 use waft_painting::{
     AlignmentGeometry, AnyColor, BorderRadiusGeometry, BorderSide, EdgeInsets, EdgeInsetsGeometry,
     PaintingBinding, RoundedRectangleBorder, ShapeBorderRef, TextPainter, TextSpan, TextStyle,
@@ -591,7 +591,7 @@ pub struct SnackBar {
     pub persist: Option<bool>,
 
     /// The animation driving the entrance and exit of the snack bar.
-    pub animation: Option<AnyAnimation<f64>>,
+    pub animation: Option<AnimationRef<f64>>,
 
     /// Called the first time that the snackbar is visible within a `Scaffold`.
     ///
@@ -750,7 +750,7 @@ impl SnackBar {
     }
 
     /// Dart `SnackBar(animation:)`.
-    pub fn animation(mut self, animation: AnyAnimation<f64>) -> SnackBar {
+    pub fn animation(mut self, animation: AnimationRef<f64>) -> SnackBar {
         self.animation = Some(animation);
         self
     }
@@ -787,8 +787,8 @@ impl SnackBar {
         vsync: impl TickerProvider,
         duration: Option<Duration>,
         reverse_duration: Option<Duration>,
-    ) -> Handle<AnimationController> {
-        AnimationController::create(
+    ) -> Ref<AnimationController> {
+        AnimationController::new(
             app,
             None,
             Some(duration.unwrap_or(SNACK_BAR_TRANSITION_DURATION)),
@@ -807,7 +807,7 @@ impl SnackBar {
     /// use the given fallback key.
     pub fn with_animation(
         &self,
-        new_animation: AnyAnimation<f64>,
+        new_animation: AnimationRef<f64>,
         fallback_key: Option<KeyRef>,
     ) -> SnackBar {
         SnackBar {
@@ -873,19 +873,20 @@ pub struct SnackBarState {
     state: StateData<SnackBar>,
     was_visible: bool,
 
-    height_animation: Option<Handle<CurvedAnimation>>,
-    fade_in_animation: Option<Handle<CurvedAnimation>>,
-    fade_in_m3_animation: Option<Handle<CurvedAnimation>>,
-    fade_out_animation: Option<Handle<CurvedAnimation>>,
-    height_m3_animation: Option<Handle<CurvedAnimation>>,
+    height_animation: Option<Ref<CurvedAnimation>>,
+    fade_in_animation: Option<Ref<CurvedAnimation>>,
+    fade_in_m3_animation: Option<Ref<CurvedAnimation>>,
+    fade_out_animation: Option<Ref<CurvedAnimation>>,
+    height_m3_animation: Option<Ref<CurvedAnimation>>,
 
     dismissible_key: KeyRef,
 }
 
 impl SnackBarState {
-    fn animation(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
+    fn animation(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
         self.widget(app)
             .animation
+            .clone()
             .expect("a SnackBar is shown with an animation")
     }
 
@@ -893,19 +894,19 @@ impl SnackBarState {
         debug_assert!(self.widget(app).animation.is_some());
         let animation = self.animation(app);
         let height_animation =
-            CurvedAnimation::create(app, animation, snack_bar_height_curve(), None);
+            CurvedAnimation::new(app, animation.clone(), snack_bar_height_curve(), None);
         let fade_in_animation =
-            CurvedAnimation::create(app, animation, snack_bar_fade_in_curve(), None);
+            CurvedAnimation::new(app, animation.clone(), snack_bar_fade_in_curve(), None);
         let fade_in_m3_animation =
-            CurvedAnimation::create(app, animation, snack_bar_m3_fade_in_curve(), None);
-        let fade_out_animation = CurvedAnimation::create(
+            CurvedAnimation::new(app, animation.clone(), snack_bar_m3_fade_in_curve(), None);
+        let fade_out_animation = CurvedAnimation::new(
             app,
-            animation,
+            animation.clone(),
             snack_bar_fade_out_curve(),
             Some(Rc::new(Threshold::new(0.0))),
         );
         // Material 3 Animation has a height animation on entry, but a direct fade out on exit.
-        let height_m3_animation = CurvedAnimation::create(
+        let height_m3_animation = CurvedAnimation::new(
             app,
             animation,
             snack_bar_m3_height_curve(),
@@ -930,7 +931,6 @@ impl SnackBarState {
         ];
         for animation in animations.into_iter().flatten() {
             animation.dispose(app);
-            app.destroy_lingering(animation);
         }
     }
 
@@ -968,6 +968,7 @@ impl State for SnackBarState {
         if self.widget(app).animation != old_widget.animation {
             let old_animation = old_widget
                 .animation
+                .clone()
                 .expect("a SnackBar is shown with an animation");
             old_animation.remove_status_listener(app, &self.status_listener());
             let animation = self.animation(app);
@@ -1269,8 +1270,9 @@ impl State for SnackBarState {
             let fade_out_animation = app
                 .get(self)
                 .fade_out_animation
+                .clone()
                 .expect("set by set_animations");
-            FadeTransition::new(fade_out_animation.as_animation())
+            FadeTransition::new(fade_out_animation.erase())
                 .child(snack_bar)
                 .into_widget()
         };
@@ -1338,16 +1340,23 @@ impl State for SnackBarState {
             let fade_in_animation = app
                 .get(self)
                 .fade_in_animation
+                .clone()
                 .expect("set by set_animations");
-            FadeTransition::new(fade_in_animation.as_animation())
+            FadeTransition::new(fade_in_animation.erase())
                 .child(snack_bar)
                 .into_widget()
             // Is Material 3 Floating Snack Bar.
         } else if is_floating_snack_bar && theme.use_material3 {
             let this = app.get(self);
-            let fade_in_m3_animation = this.fade_in_m3_animation.expect("set by set_animations");
-            let height_m3_animation = this.height_m3_animation.expect("set by set_animations");
-            FadeTransition::new(fade_in_m3_animation.as_animation())
+            let fade_in_m3_animation = this
+                .fade_in_m3_animation
+                .clone()
+                .expect("set by set_animations");
+            let height_m3_animation = this
+                .height_m3_animation
+                .clone()
+                .expect("set by set_animations");
+            FadeTransition::new(fade_in_m3_animation.erase())
                 .child(
                     height_factor_builder(height_m3_animation, AlignmentGeometry::BOTTOM_LEFT)
                         .child(snack_bar),
@@ -1357,6 +1366,7 @@ impl State for SnackBarState {
             let height_animation = app
                 .get(self)
                 .height_animation
+                .clone()
                 .expect("set by set_animations");
             height_factor_builder(height_animation, AlignmentGeometry::TOP_START)
                 .child(snack_bar)
@@ -1377,10 +1387,10 @@ impl State for SnackBarState {
 /// Dart's `ValueListenableBuilder<double>(valueListenable: animation, builder: ...)` that
 /// aligns the child at `alignment` with the animation's value as its height factor.
 fn height_factor_builder(
-    animation: Handle<CurvedAnimation>,
+    animation: Ref<CurvedAnimation>,
     alignment: AlignmentGeometry,
 ) -> ListenableBuilder {
-    let listenable: Rc<dyn Listenable> = Rc::new(animation.as_animation());
+    let listenable: Rc<dyn Listenable> = Rc::new(animation.erase::<AnyAnimation<f64>>());
     ListenableBuilder::new(listenable, move |app, _context, child| {
         let mut align = Align::new()
             .alignment(alignment)
@@ -4857,7 +4867,7 @@ mod tests {
     }
 
     /// Dart's collector frees the curved animations `_SnackBarState` makes once the snack bar
-    /// is gone; here the state frees them in its `dispose`.
+    /// is gone; here they are freed with the state's references to them.
     #[test]
     fn a_dismissed_snack_bar_frees_its_curved_animations() {
         with_main_thread_stack(|| {
@@ -4880,13 +4890,13 @@ mod tests {
                         .expect("a SnackBar is stateful"),
                 );
                 [
-                    state.height_animation,
-                    state.fade_in_animation,
-                    state.fade_in_m3_animation,
-                    state.fade_out_animation,
-                    state.height_m3_animation,
+                    state.height_animation.clone(),
+                    state.fade_in_animation.clone(),
+                    state.fade_in_m3_animation.clone(),
+                    state.fade_out_animation.clone(),
+                    state.height_m3_animation.clone(),
                 ]
-                .map(|animation| animation.expect("made in init_state"))
+                .map(|animation| animation.expect("made in init_state").handle())
             };
 
             tester.pump(ms(1500)); // the timer dismisses the snack bar

@@ -13,7 +13,7 @@ use crate::FocusState;
 use crate::*;
 use std::{collections::HashMap, fmt, rc::Rc};
 use waft_embedder::{Clip, Offset, Radius, Rect, Size, TextDirection};
-use waft_foundation::{App, Handle, ListenableObject, Listener};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, Ref};
 use waft_painting::{Axis, BorderRadius, EdgeInsetsGeometry};
 use waft_rendering::MainAxisSize;
 use waft_scheduler::FrameCallback;
@@ -58,7 +58,7 @@ pub struct ItemsView {
     /// `IsItemInvokedEnabled`.
     pub is_item_invoked_enabled: bool,
     /// The selection and current item; `None` makes the view keep its own.
-    pub selection: Option<Handle<ItemsViewSelection>>,
+    pub selection: Option<Ref<ItemsViewSelection>>,
     /// `ItemInvoked`.
     pub item_invoked: Option<ItemsViewItemInvoked>,
     /// `SelectionChanged`.
@@ -111,7 +111,7 @@ impl ItemsView {
     }
 
     /// Gives the view the application's selection.
-    pub fn selection(mut self, value: Handle<ItemsViewSelection>) -> Self {
+    pub fn selection(mut self, value: Ref<ItemsViewSelection>) -> Self {
         self.selection = Some(value);
         self
     }
@@ -224,12 +224,12 @@ struct BuiltItem {
 pub struct ItemsViewState {
     state: StateData<ItemsView>,
     /// The selection made for a view given none.
-    own_selection: Option<Handle<ItemsViewSelection>>,
+    own_selection: Option<Ref<ItemsViewSelection>>,
     /// The selection listened to, and the listener.
-    listening: Option<(Handle<ItemsViewSelection>, Listener)>,
+    listening: Option<(Ref<ItemsViewSelection>, Listener)>,
     /// The selection's revision `SelectionChanged` was last raised for.
     seen_revision: u64,
-    scroll: Option<Handle<ScrollViewportController>>,
+    scroll: Option<Ref<ScrollViewportController>>,
     /// The built containers by index.
     items: HashMap<usize, BuiltItem>,
     /// Each built item's extent along the layout, as last laid out.
@@ -246,7 +246,8 @@ impl ItemsViewState {
     pub(crate) fn selection(self: Handle<Self>, app: &App) -> Handle<ItemsViewSelection> {
         self.widget(app)
             .selection
-            .or(app.get(self).own_selection)
+            .handle()
+            .or(app.get(self).own_selection.handle())
             .expect("made in `init_state`")
     }
 
@@ -637,7 +638,7 @@ fn modifiers(app: &mut App) -> (bool, bool) {
 
 impl ItemsViewState {
     fn scroll(self: Handle<Self>, app: &App) -> Handle<ScrollViewportController> {
-        app.get(self).scroll.expect("made in `init_state`")
+        app.get(self).scroll.handle().expect("made in `init_state`")
     }
 
     fn axis(self: Handle<Self>, app: &App) -> Axis {
@@ -788,19 +789,18 @@ impl ItemsViewState {
             .get(self)
             .listening
             .as_ref()
-            .map(|(listened, _)| *listened)
+            .map(|(listened, _)| listened.handle())
             != Some(selection)
         {
-            if let Some((old, listener)) = app.get_mut(self).listening.take()
-                && app.contains(old)
-            {
+            if let Some((old, listener)) = app.get_mut(self).listening.take() {
                 old.remove_listener(app, &listener);
             }
             let listener = Listener::new(move |app| self.selection_heard(app));
             selection.add_listener(app, listener.clone());
             let revision = selection.revision(app);
+            let kept = selection.keep(app);
             let state = app.get_mut(self);
-            state.listening = Some((selection, listener));
+            state.listening = Some((kept, listener));
             state.seen_revision = revision;
         }
         let widget = self.widget(app).clone();
@@ -873,7 +873,11 @@ impl ItemsViewState {
                     Some(extent) => list.item_extent(extent + widget.layout.spacing),
                     None => list,
                 };
-                ScrollBarViewport::scroller(scroll, list).into_widget()
+                ScrollBarViewport::scroller(
+                    app.get(self).scroll.clone().expect("made in `init_state`"),
+                    list,
+                )
+                .into_widget()
             }
             Axis::Horizontal => {
                 let context = self.context(app);
@@ -882,9 +886,12 @@ impl ItemsViewState {
                     .collect();
                 let row = Padding::new(padding)
                     .child(Row::new().main_axis_size(MainAxisSize::Min).children(items));
-                ScrollBarViewport::new(scroll, row)
-                    .axis(Axis::Horizontal)
-                    .into_widget()
+                ScrollBarViewport::new(
+                    app.get(self).scroll.clone().expect("made in `init_state`"),
+                    row,
+                )
+                .axis(Axis::Horizontal)
+                .into_widget()
             }
         }
     }
@@ -914,18 +921,14 @@ impl State for ItemsViewState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some((selection, listener)) = app.get_mut(self).listening.take()
-            && app.contains(selection)
-        {
+        if let Some((selection, listener)) = app.get_mut(self).listening.take() {
             selection.remove_listener(app, &listener);
         }
         if let Some(own) = app.get_mut(self).own_selection.take() {
             own.dispose(app);
-            app.destroy(own);
         }
         if let Some(scroll) = app.get_mut(self).scroll.take() {
             scroll.dispose(app);
-            app.destroy(scroll);
         }
     }
 

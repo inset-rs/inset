@@ -96,7 +96,7 @@ fn fixture(selected: Option<usize>, direction: TextDirection) -> (Fixture, Rc<Pr
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
                 .builder(move |_, _, _| {
-                    FocusScope::new(Overlay::new().initial_entries([entry]))
+                    FocusScope::new(Overlay::new().initial_entries([entry.clone()]))
                         .autofocus(true)
                         .into_widget()
                 })

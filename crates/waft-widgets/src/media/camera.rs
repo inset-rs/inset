@@ -10,7 +10,7 @@ use waft_embedder::{
     CameraOutputs, CaptureSession, CaptureState, CompositionLayer, MediaChangeFuture, PhotoFuture,
     RecordingFuture, Size,
 };
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Task};
+use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Ref, Task};
 
 use super::at_size;
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
@@ -69,7 +69,7 @@ impl CameraSession {
         camera: &dyn CameraDevice,
         format: &CameraFormat,
         outputs: CameraOutputs,
-    ) -> Task<Result<Handle<CameraSession>, CameraError>> {
+    ) -> Task<Result<Ref<CameraSession>, CameraError>> {
         let preview_layer = outputs.preview.clone();
         let starting = camera.start(format, outputs);
         app.spawn(async move |cx| {
@@ -84,7 +84,7 @@ impl CameraSession {
         app: &mut App,
         host: Rc<dyn CaptureSession>,
         preview_layer: Option<Arc<dyn CompositionLayer>>,
-    ) -> Handle<CameraSession> {
+    ) -> Ref<CameraSession> {
         let changed = host.changed();
         let session = app.create(CameraSession {
             change_notifier: ChangeNotifierData::new(),
@@ -150,7 +150,7 @@ impl CameraSession {
         let session = app.get_mut(self);
         session.host = None;
         session.preview_layer = None;
-        session.change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// The host's session.
@@ -166,13 +166,17 @@ impl CameraSession {
     }
 
     /// Takes the host's state at each of its changes, from the one `changed` resolves at, until
-    /// the session is disposed.
+    /// the session is disposed or no longer kept.
     fn follow(self: Handle<Self>, app: &mut App, changed: MediaChangeFuture) {
         let _following = app.spawn(async move |cx| {
             let mut changed = changed;
             loop {
                 changed.await;
-                match cx.update(|app| self.take_host_state(app)) {
+                let next = cx.update(|app| {
+                    let session = self.upgrade(app)?;
+                    session.take_host_state(app)
+                });
+                match next {
                     Some(next) => changed = next,
                     None => return,
                 }
@@ -233,11 +237,11 @@ impl fmt::Debug for CameraSession {
 #[derive(Clone)]
 pub struct CameraPreview {
     pub key: Option<KeyRef>,
-    pub session: Handle<CameraSession>,
+    pub session: Ref<CameraSession>,
 }
 
 impl CameraPreview {
-    pub fn new(session: Handle<CameraSession>) -> CameraPreview {
+    pub fn new(session: Ref<CameraSession>) -> CameraPreview {
         CameraPreview { key: None, session }
     }
 
@@ -259,8 +263,8 @@ impl StatelessWidget for CameraPreview {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        let session = self.session;
-        ListenableBuilder::new(Rc::new(session), move |app, _context, _child| {
+        let session = self.session.clone();
+        ListenableBuilder::new(Rc::new(session.clone()), move |app, _context, _child| {
             let size = turned(
                 session.format(app).size,
                 session.video_rotation_angle_for_horizon_level_preview(app),
@@ -287,6 +291,7 @@ fn turned(size: Size, angle: u32) -> Size {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+    use waft_foundation::Ref;
 
     use waft_embedder::{
         CameraFacing, CameraId, CameraInterruption, MediaError, MovieOptions, Photo, Size,
@@ -354,7 +359,7 @@ mod tests {
         camera: &dyn CameraDevice,
         format: &CameraFormat,
         outputs: CameraOutputs,
-    ) -> Result<Handle<CameraSession>, CameraError> {
+    ) -> Result<Ref<CameraSession>, CameraError> {
         let starting = CameraSession::start(&cell.borrow(), camera, format, outputs);
         cell.checkpoint();
         now(starting)
@@ -557,7 +562,7 @@ mod tests {
         run_app(
             &mut cell.borrow_mut(),
             crate::Center::new()
-                .child(CameraPreview::new(session))
+                .child(CameraPreview::new(session.clone()))
                 .into_widget(),
         );
         cell.elapse(Duration::ZERO);

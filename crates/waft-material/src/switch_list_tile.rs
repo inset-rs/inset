@@ -8,12 +8,12 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::Color;
-use waft_foundation::{App, Handle, ValueChanged};
+use waft_foundation::{App, Ref, ValueChanged};
 use waft_gestures::{DragStartBehavior, GestureTapCallback};
 use waft_painting::{EdgeInsetsGeometry, ShapeBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnyFocusNode, BuildContext, ExcludeFocus, Icon, IntoWidget, KeyRef, MergeSemantics,
+    BuildContext, ExcludeFocus, FocusNodeRef, Icon, IntoWidget, KeyRef, MergeSemantics,
     StatelessWidget, WidgetRef, WidgetState, WidgetStatePropertyRef, WidgetStates,
     WidgetStatesController,
 };
@@ -215,9 +215,9 @@ pub struct SwitchListTile {
     /// is also null, then `K_RADIAL_REACTION_RADIUS` is used.
     pub splash_radius: Option<f64>,
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// Controls the interactive states of the backing [`ListTile`].
-    pub states_controller: Option<Handle<WidgetStatesController>>,
+    pub states_controller: Option<Ref<WidgetStatesController>>,
     /// Handler called when the focus changes.
     ///
     /// Called with true if this widget's node gains focus, and false if it loses
@@ -448,8 +448,8 @@ impl SwitchListTile {
         mouse_cursor: MouseCursorRef => "mouseCursor",
         overlay_color: WidgetStatePropertyRef<Option<Color>> => "overlayColor",
         splash_radius: f64 => "splashRadius",
-        focus_node: AnyFocusNode => "focusNode",
-        states_controller: Handle<WidgetStatesController> => "statesController",
+        focus_node: FocusNodeRef => "focusNode",
+        states_controller: Ref<WidgetStatesController> => "statesController",
         on_focus_change: ValueChanged<bool> => "onFocusChange",
         apply_cupertino_theme: bool => "applyCupertinoTheme",
         tile_color: Color => "tileColor",
@@ -626,8 +626,8 @@ impl StatelessWidget for SwitchListTile {
         list_tile.shape = self.shape.clone();
         list_tile.tile_color = self.tile_color;
         list_tile.visual_density = self.visual_density;
-        list_tile.focus_node = self.focus_node;
-        list_tile.states_controller = self.states_controller;
+        list_tile.focus_node = self.focus_node.clone();
+        list_tile.states_controller = self.states_controller.clone();
         list_tile.on_focus_change = self.on_focus_change.clone();
         list_tile.enable_feedback = self.enable_feedback;
         list_tile.horizontal_title_gap = self.horizontal_title_gap;
@@ -957,12 +957,12 @@ mod tests {
                 ListView::new()
                     .children([SwitchListTile::new(true, ignore())
                         .title(Text::new("Switch"))
-                        .states_controller(controller)
+                        .states_controller(controller.clone())
                         .into_widget()])
                     .into_widget()
             });
             let forwarded = tester.widget(nth::<ListTile>(&tester, 0), |tile: &ListTile| {
-                tile.states_controller
+                tile.states_controller.clone()
             });
             assert_eq!(forwarded, Some(controller));
         });

@@ -3,7 +3,7 @@
 use super::split_button::SplitButtonPresenter;
 use crate::{Flyout, SplitButton};
 use std::{fmt, rc::Rc};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Listener, Ref};
 use waft_widgets::*;
 
 /// Reports the requested checked value before the primary Click callback.
@@ -25,7 +25,7 @@ pub struct ToggleSplitButton {
     pub click: Option<Listener>,
 
     /// Flyout opened by the secondary button, F4 or Alt+Down.
-    pub flyout: Option<Handle<Flyout>>,
+    pub flyout: Option<Ref<Flyout>>,
 
     /// Enables both actions and keyboard focus.
     pub is_enabled: bool,
@@ -34,7 +34,7 @@ pub struct ToggleSplitButton {
     pub is_tab_stop: bool,
 
     /// Optional caller-owned focus identity for the whole control.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// Identity across parent rebuilds.
     pub key: Option<KeyRef>,
@@ -86,7 +86,7 @@ impl ToggleSplitButton {
     }
 
     /// Sets the flyout without changing its ownership.
-    pub fn flyout(mut self, flyout: Handle<Flyout>) -> Self {
+    pub fn flyout(mut self, flyout: Ref<Flyout>) -> Self {
         self.flyout = Some(flyout);
         self
     }
@@ -104,7 +104,7 @@ impl ToggleSplitButton {
     }
 
     /// Supplies a caller-owned focus node.
-    pub fn focus_node(mut self, value: AnyFocusNode) -> Self {
+    pub fn focus_node(mut self, value: FocusNodeRef) -> Self {
         self.focus_node = Some(value);
         self
     }
@@ -133,10 +133,10 @@ impl StatelessWidget for ToggleSplitButton {
                     click.call(app);
                 }
             }),
-            flyout: self.flyout,
+            flyout: self.flyout.clone(),
             is_enabled: self.is_enabled,
             is_tab_stop: self.is_tab_stop,
-            focus_node: self.focus_node,
+            focus_node: self.focus_node.clone(),
             key: None,
         };
         SplitButtonPresenter {

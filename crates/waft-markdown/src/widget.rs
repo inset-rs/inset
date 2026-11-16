@@ -5,10 +5,10 @@ use std::rc::Rc;
 
 use pulldown_cmark::Options;
 use waft_foundation::{App, Handle};
-use waft_gestures::AnyGestureRecognizer;
+use waft_gestures::RecognizerRef;
 use waft_painting::{EdgeInsets, TextSpan};
 use waft_widgets::{
-    AnyScrollController, BuildContext, IntoWidget, KeyRef, ListView, ScrollPhysicsRef, State,
+    BuildContext, IntoWidget, KeyRef, ListView, ScrollControllerRef, ScrollPhysicsRef, State,
     StateData, StatefulWidget, StatelessWidget, WidgetRef,
 };
 
@@ -190,7 +190,7 @@ pub struct Markdown {
     pub config: MarkdownConfig,
     /// Around the blocks, inside the scrolling area.
     pub padding: EdgeInsets,
-    pub controller: Option<AnyScrollController>,
+    pub controller: Option<ScrollControllerRef>,
     pub physics: Option<ScrollPhysicsRef>,
     /// Whether the list takes its content's height rather than all the height it is given.
     pub shrink_wrap: bool,
@@ -216,7 +216,7 @@ impl Markdown {
     }
 
     /// Sets the controller of the list's scroll position.
-    pub fn controller(mut self, controller: AnyScrollController) -> Markdown {
+    pub fn controller(mut self, controller: ScrollControllerRef) -> Markdown {
         self.controller = Some(controller);
         self
     }
@@ -246,7 +246,7 @@ impl StatelessWidget for Markdown {
             config: self.config.clone(),
             layout: Layout::List {
                 padding: self.padding,
-                controller: self.controller,
+                controller: self.controller.clone(),
                 physics: self.physics.clone(),
                 shrink_wrap: self.shrink_wrap,
             },
@@ -261,7 +261,7 @@ enum Layout {
     Column,
     List {
         padding: EdgeInsets,
-        controller: Option<AnyScrollController>,
+        controller: Option<ScrollControllerRef>,
         physics: Option<ScrollPhysicsRef>,
         shrink_wrap: bool,
     },
@@ -281,7 +281,7 @@ impl Layout {
                     .padding((*padding).into())
                     .shrink_wrap(*shrink_wrap);
                 if let Some(controller) = controller {
-                    list = list.controller(*controller);
+                    list = list.controller(controller.clone());
                 }
                 if let Some(physics) = physics {
                     list = list.physics(Rc::clone(physics));
@@ -329,7 +329,7 @@ struct MarkdownViewState {
     blocks: Vec<WidgetRef>,
     /// The recognizers of the links in [`blocks`](Self::blocks): disposed of when the blocks are
     /// made again, and on dispose.
-    recognizers: Vec<AnyGestureRecognizer>,
+    recognizers: Vec<RecognizerRef>,
 }
 
 impl MarkdownViewState {
@@ -898,8 +898,9 @@ fn main() {}
                 .1
                 .recognizer
                 .expect("a link with a hook has a recognizer")
+                .handle()
         };
-        let is_gone = |app: &App, recognizer: AnyGestureRecognizer| {
+        let is_gone = |app: &App, recognizer: waft_gestures::AnyGestureRecognizer| {
             !app.contains(recognizer.id()) || app.is_disposed(recognizer.id())
         };
 
@@ -944,6 +945,7 @@ fn main() {}
                 .1
                 .recognizer
                 .expect("a link with a hook has a recognizer")
+                .handle()
         };
         let first = recognizer_of(&cell.borrow());
 

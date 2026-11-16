@@ -8,7 +8,7 @@ use waft_animation::{
     Animation, AnimationBehavior, AnimationController, AnimationStatus, AnimationStatusListener,
 };
 use waft_embedder::{Clip, Color, TargetPlatform, TextDirection};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_gestures::{DragDownDetails, DragEndDetails, DragStartBehavior, DragUpdateDetails};
 use waft_painting::{AlignmentGeometry, ShapeBorderRef};
 use waft_rendering::{BoxConstraints, HitTestBehavior};
@@ -640,10 +640,10 @@ pub struct DrawerControllerState {
     state: StateData<DrawerController>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     disposed: bool,
-    history_entry: Option<Handle<LocalHistoryEntry>>,
+    history_entry: Option<Ref<LocalHistoryEntry>>,
     /// Dart's field initializer `FocusScopeNode()`, made where `init_state` starts.
-    focus_scope_node: Option<Handle<FocusScopeNode>>,
-    controller: Option<Handle<AnimationController>>,
+    focus_scope_node: Option<Ref<FocusScopeNode>>,
+    controller: Option<Ref<AnimationController>>,
     drawer_key: GlobalKey,
     previously_opened: bool,
     gesture_detector_key: GlobalKey,
@@ -651,12 +651,16 @@ pub struct DrawerControllerState {
 
 impl DrawerControllerState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 
     fn focus_scope_node(self: Handle<Self>, app: &App) -> Handle<FocusScopeNode> {
         app.get(self)
             .focus_scope_node
+            .handle()
             .expect("created in init_state")
     }
 
@@ -677,7 +681,7 @@ impl DrawerControllerState {
                         Listener::handle_method(self, Self::handle_history_entry_removed),
                     )
                     .implies_app_bar_dismissal(app, false);
-                app.get_mut(self).history_entry = Some(history_entry);
+                app.get_mut(self).history_entry = Some(history_entry.clone());
                 route.add_local_history_entry(app, history_entry);
                 let focus_scope_node = self.focus_scope_node(app);
                 FocusScope::of(app, context, true).set_first_focus(app, focus_scope_node);
@@ -686,7 +690,7 @@ impl DrawerControllerState {
     }
 
     fn remove_history_entry(self: Handle<Self>, app: &mut App) {
-        if let Some(history_entry) = app.get(self).history_entry {
+        if let Some(history_entry) = app.get(self).history_entry.handle() {
             history_entry.remove(app);
         }
         app.get_mut(self).history_entry = None;
@@ -928,7 +932,11 @@ impl DrawerControllerState {
             }
 
             let drawer_key = app.get(self).drawer_key.clone();
-            let focus_scope_node = self.focus_scope_node(app);
+            let focus_scope_node = app
+                .get(self)
+                .focus_scope_node
+                .clone()
+                .expect("created in init_state");
             let child = DrawerControllerScope {
                 controller: context.widget(app).clone(),
                 child: RepaintBoundary::new()
@@ -1004,7 +1012,7 @@ impl SingleTickerProviderStateMixin for DrawerControllerState {
 }
 
 impl TickerProviderObject for DrawerControllerState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1021,7 +1029,7 @@ impl State for DrawerControllerState {
         } else {
             0.0
         };
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             Some(value),
             Some(K_BASE_SETTLE_DURATION),
@@ -1031,7 +1039,7 @@ impl State for DrawerControllerState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         controller.add_listener(app, Listener::handle_method(self, Self::animation_changed));
         controller.add_status_listener(
             app,

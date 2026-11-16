@@ -367,7 +367,7 @@ impl fmt::Debug for Slider {
 /// The slider's own state (`Slider_Partial.h` members) and its thumb's (`Thumb_Partial.h`).
 pub struct SliderState {
     state: StateData<Slider>,
-    focus_node: Option<AnyFocusNode>,
+    focus_node: Option<FocusNodeRef>,
     /// `m_IsPointerOver`: a non-touch pointer is over the control.
     is_pointer_over: bool,
     /// `m_isPressed`: the track is pressed and the thumb follows the pointer.
@@ -688,7 +688,7 @@ impl State for SliderState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         crate::InputDevice::initialize(app);
-        let node = FocusNode::new(app).as_node();
+        let node: FocusNodeRef = FocusNode::new(app).into_erased();
         node.set_on_key_event(
             app,
             Some(Rc::new(
@@ -699,7 +699,7 @@ impl State for SliderState {
                 },
             )),
         );
-        app.get_mut(self).focus_node = Some(node);
+        app.get_mut(self).focus_node = Some(node.clone());
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old_widget: &Slider) {
@@ -718,7 +718,6 @@ impl State for SliderState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(node) = app.get_mut(self).focus_node.take() {
             node.dispose(app);
-            app.destroy(node.id());
         }
     }
 
@@ -788,7 +787,7 @@ impl State for SliderState {
                     }
                 })
             });
-        if let Some(node) = app.get(self).focus_node {
+        if let Some(node) = app.get(self).focus_node.clone() {
             detector = detector.focus_node(node);
         }
         detector.into_widget()

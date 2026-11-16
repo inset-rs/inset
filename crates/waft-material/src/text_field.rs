@@ -21,7 +21,10 @@ use waft_embedder::{
     SmartDashesType, SmartQuotesType, TargetPlatform, TextCapitalization, TextDecoration,
     TextDecorationStyle, TextEditingValue, TextInputAction, TextInputType, TextSelection,
 };
-use waft_foundation::{App, Handle, Listenable, Listener, MergingListenable, VoidCallback};
+use waft_foundation::{
+    App, Handle, Listenable, ListenableObject, Listener, MergingListenable, OptionRetained, Ref,
+    VoidCallback,
+};
 use waft_gestures::{DragStartBehavior, GestureTapCallback, PointerDownEvent, PointerUpEvent};
 use waft_painting::{
     AnyTextStyle, EdgeInsets, TextAlign, TextAlignVertical, TextDirection, TextStyle,
@@ -32,14 +35,14 @@ use waft_services::{
     RestorationBucket, SelectionChangedCause, TextInputFormatterRef,
 };
 use waft_widgets::{
-    AnimatedBuilder, AnyTextEditingController, AppPrivateCommandCallback, BuildContext,
-    ContentInsertionConfiguration, DefaultSelectionStyle, EditableText,
-    EditableTextContextMenuBuilder, EditableTextState, FocusNode, FocusNodeLeaf, GlobalKey,
-    IgnorePointer, IntoWidget, KeyRef, MediaQuery, MouseRegion, NavigationMode, RepaintBoundary,
-    RestorableListenable, RestorableProperty, RestorableTextEditingController, RestorationMixin,
-    RestorationMixinData, ScrollController, ScrollPhysicsRef, Semantics, SpellCheckConfiguration,
-    State, StateData, StatefulWidget, SystemContextMenu, TapRegionCallback, TapRegionUpCallback,
-    TextEditingControllerLeaf, TextFieldTapRegion, TextMagnifierConfiguration,
+    AnimatedBuilder, AppPrivateCommandCallback, BuildContext, ContentInsertionConfiguration,
+    DefaultSelectionStyle, EditableText, EditableTextContextMenuBuilder, EditableTextState,
+    FocusNode, FocusNodeLeaf, FocusNodeRef, GlobalKey, IgnorePointer, IntoWidget, KeyRef,
+    MediaQuery, MouseRegion, NavigationMode, RepaintBoundary, RestorableListenable,
+    RestorableProperty, RestorableTextEditingController, RestorationMixin, RestorationMixinData,
+    ScrollControllerRef, ScrollPhysicsRef, Semantics, SpellCheckConfiguration, State, StateData,
+    StatefulWidget, SystemContextMenu, TapRegionCallback, TapRegionUpCallback,
+    TextEditingControllerRef, TextFieldTapRegion, TextMagnifierConfiguration,
     TextSelectionControls, TextSelectionGestureDetectorBuilder,
     TextSelectionGestureDetectorBuilderBase, TextSelectionGestureDetectorBuilderData,
     TextSelectionGestureDetectorBuilderDelegate, ToolbarOptions, UndoHistoryController,
@@ -121,11 +124,11 @@ pub struct TextField {
     /// Controls the text being edited.
     ///
     /// If null, this widget will create its own `TextEditingController`.
-    pub controller: Option<AnyTextEditingController>,
+    pub controller: Option<TextEditingControllerRef>,
     /// Defines the keyboard focus for this widget.
     ///
     /// If null, this widget will create its own [`FocusNode`].
-    pub focus_node: Option<Handle<FocusNode>>,
+    pub focus_node: Option<FocusNodeRef>,
     /// The decoration to show around the text field.
     ///
     /// By default, draws a horizontal line under the text field but can be configured to show
@@ -162,7 +165,7 @@ pub struct TextField {
     /// Represents the interactive "state" of this widget in terms of a set of [`WidgetState`]s,
     /// including [`WidgetState::Disabled`], [`WidgetState::Hovered`], [`WidgetState::Error`],
     /// and [`WidgetState::Focused`].
-    pub states_controller: Option<Handle<MaterialStatesController>>,
+    pub states_controller: Option<Ref<MaterialStatesController>>,
     /// {@macro flutter.widgets.editableText.obscuringCharacter}
     pub obscuring_character: String,
     /// {@macro flutter.widgets.editableText.obscureText}
@@ -300,7 +303,7 @@ pub struct TextField {
     /// {@macro flutter.widgets.editableText.scrollPhysics}
     pub scroll_physics: Option<ScrollPhysicsRef>,
     /// {@macro flutter.widgets.editableText.scrollController}
-    pub scroll_controller: Option<Handle<ScrollController>>,
+    pub scroll_controller: Option<ScrollControllerRef>,
     /// {@macro flutter.widgets.editableText.autofillHints}
     pub autofill_hints: Vec<String>,
     /// {@macro cupertino_ui.Material.clipBehavior}
@@ -334,7 +337,7 @@ pub struct TextField {
     /// the text field with tab key.
     pub can_request_focus: bool,
     /// {@macro flutter.widgets.undoHistory.controller}
-    pub undo_controller: Option<Handle<UndoHistoryController>>,
+    pub undo_controller: Option<Ref<UndoHistoryController>>,
     /// {@macro flutter.services.TextInputConfiguration.hintLocales}
     pub hint_locales: Option<Vec<Locale>>,
     /// {@macro flutter.widgets.EditableText.spellCheckConfiguration}
@@ -440,19 +443,19 @@ impl TextField {
     }
 
     /// Dart `TextField(controller:)`.
-    pub fn controller(mut self, controller: AnyTextEditingController) -> TextField {
+    pub fn controller(mut self, controller: TextEditingControllerRef) -> TextField {
         self.controller = Some(controller);
         self
     }
 
     /// Dart `TextField(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: Handle<FocusNode>) -> TextField {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> TextField {
         self.focus_node = Some(focus_node);
         self
     }
 
     /// Dart `TextField(undoController:)`.
-    pub fn undo_controller(mut self, undo_controller: Handle<UndoHistoryController>) -> TextField {
+    pub fn undo_controller(mut self, undo_controller: Ref<UndoHistoryController>) -> TextField {
         self.undo_controller = Some(undo_controller);
         self
     }
@@ -533,7 +536,7 @@ impl TextField {
     /// Dart `TextField(statesController:)`.
     pub fn states_controller(
         mut self,
-        states_controller: Handle<MaterialStatesController>,
+        states_controller: Ref<MaterialStatesController>,
     ) -> TextField {
         self.states_controller = Some(states_controller);
         self
@@ -795,7 +798,7 @@ impl TextField {
     }
 
     /// Dart `TextField(scrollController:)`.
-    pub fn scroll_controller(mut self, scroll_controller: Handle<ScrollController>) -> TextField {
+    pub fn scroll_controller(mut self, scroll_controller: ScrollControllerRef) -> TextField {
         self.scroll_controller = Some(scroll_controller);
         self
     }
@@ -1150,40 +1153,43 @@ impl StatefulWidget for TextField {
 pub struct TextFieldState {
     state: StateData<TextField>,
     restoration: RestorationMixinData,
-    controller: Option<Handle<RestorableTextEditingController>>,
-    focus_node: Option<Handle<FocusNode>>,
+    controller: Option<Ref<RestorableTextEditingController>>,
+    focus_node: Option<Ref<FocusNode>>,
     is_hovering: bool,
     show_selection_handles: bool,
-    selection_gesture_detector_builder: Option<Handle<TextFieldSelectionGestureDetectorBuilder>>,
+    selection_gesture_detector_builder: Option<Ref<TextFieldSelectionGestureDetectorBuilder>>,
     // API for TextSelectionGestureDetectorBuilderDelegate.
     force_press_enabled: bool,
     editable_text_key: GlobalKey,
     // End of API for TextSelectionGestureDetectorBuilderDelegate.
-    internal_states_controller: Option<Handle<MaterialStatesController>>,
+    internal_states_controller: Option<Ref<MaterialStatesController>>,
 }
 
 impl TextFieldState {
-    fn effective_controller(self: Handle<Self>, app: &App) -> AnyTextEditingController {
-        if let Some(controller) = self.widget(app).controller {
+    fn effective_controller(self: Handle<Self>, app: &App) -> TextEditingControllerRef {
+        if let Some(controller) = self.widget(app).controller.clone() {
             return controller;
         }
         let restorable = app
             .get(self)
             .controller
+            .handle()
             .expect("a local controller exists when the widget does not supply one");
-        RestorableListenable::value(restorable, app).as_controller()
+        RestorableListenable::value(restorable, app)
+            .keep(app)
+            .into_erased()
     }
 
-    fn effective_focus_node(self: Handle<Self>, app: &mut App) -> Handle<FocusNode> {
-        if let Some(focus_node) = self.widget(app).focus_node {
+    fn effective_focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
+        if let Some(focus_node) = self.widget(app).focus_node.clone() {
             return focus_node;
         }
-        if let Some(focus_node) = app.get(self).focus_node {
-            return focus_node;
+        if let Some(focus_node) = app.get(self).focus_node.as_ref() {
+            return focus_node.erase();
         }
         let focus_node = FocusNode::new(app);
-        app.get_mut(self).focus_node = Some(focus_node);
-        focus_node
+        app.get_mut(self).focus_node = Some(focus_node.clone());
+        focus_node.into_erased()
     }
 
     fn effective_max_length_enforcement(self: Handle<Self>, app: &mut App) -> MaxLengthEnforcement {
@@ -1357,6 +1363,7 @@ impl TextFieldState {
         let controller = app
             .get(self)
             .controller
+            .handle()
             .expect("register_controller needs a local controller");
         self.register_for_restoration(app, controller.as_property(), "controller");
     }
@@ -1367,7 +1374,7 @@ impl TextFieldState {
             None => RestorableTextEditingController::new(app),
             Some(value) => RestorableTextEditingController::from_value(app, value),
         };
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         if !self.restore_pending(app) {
             self.register_controller(app);
         }
@@ -1394,6 +1401,7 @@ impl TextFieldState {
         let builder = app
             .get(self)
             .selection_gesture_detector_builder
+            .handle()
             .expect("created in init_state");
         if !builder.should_show_selection_toolbar(app)
             || !builder.should_show_selection_handles(app)
@@ -1505,7 +1513,8 @@ impl TextFieldState {
     fn states_controller(self: Handle<Self>, app: &App) -> Handle<MaterialStatesController> {
         self.widget(app)
             .states_controller
-            .or(app.get(self).internal_states_controller)
+            .handle()
+            .or(app.get(self).internal_states_controller.handle())
             .expect("created in init_states_controller")
     }
 
@@ -1611,12 +1620,14 @@ impl State for TextFieldState {
         if self.widget(app).controller.is_none() && old_widget.controller.is_some() {
             let value = old_widget
                 .controller
+                .as_ref()
                 .map(|controller| controller.value(app).clone());
             self.create_local_controller(app, value);
         } else if self.widget(app).controller.is_some() && old_widget.controller.is_none() {
             let controller = app
                 .get(self)
                 .controller
+                .handle()
                 .expect("a local controller while the old widget had none");
             self.unregister_from_restoration(app, controller.as_property());
             RestorableProperty::dispose(controller, app);
@@ -1624,13 +1635,22 @@ impl State for TextFieldState {
         }
 
         if self.widget(app).focus_node != old_widget.focus_node {
-            if let Some(old_focus) = old_widget.focus_node.or(app.get(self).focus_node) {
+            if let Some(old_focus) = old_widget
+                .focus_node
+                .clone()
+                .or_else(|| app.get(self).focus_node.as_ref().map(Ref::erase))
+            {
                 old_focus.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_focus_changed),
                 );
             }
-            if let Some(focus) = self.widget(app).focus_node.or(app.get(self).focus_node) {
+            if let Some(focus) = self
+                .widget(app)
+                .focus_node
+                .clone()
+                .or_else(|| app.get(self).focus_node.as_ref().map(Ref::erase))
+            {
                 focus.add_listener(
                     app,
                     Listener::handle_method(self, Self::handle_focus_changed),
@@ -1654,7 +1674,7 @@ impl State for TextFieldState {
         if self.widget(app).states_controller == old_widget.states_controller {
             self.update_states_controller(app);
         } else {
-            if let Some(old_states_controller) = old_widget.states_controller {
+            if let Some(old_states_controller) = old_widget.states_controller.clone() {
                 old_states_controller.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_states_controller_change),
@@ -1663,8 +1683,7 @@ impl State for TextFieldState {
             if self.widget(app).states_controller.is_some()
                 && let Some(internal) = app.get_mut(self).internal_states_controller.take()
             {
-                app.get_mut(internal).dispose();
-                app.destroy(internal);
+                internal.dispose(app);
             }
             self.init_states_controller(app);
         }
@@ -1675,10 +1694,10 @@ impl State for TextFieldState {
             app,
             &Listener::handle_method(self, Self::handle_focus_changed),
         );
-        if let Some(focus_node) = app.get(self).focus_node {
+        if let Some(focus_node) = app.get(self).focus_node.handle() {
             focus_node.dispose(app);
         }
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             RestorableProperty::dispose(controller, app);
         }
         self.states_controller(app).remove_listener(
@@ -1686,11 +1705,7 @@ impl State for TextFieldState {
             &Listener::handle_method(self, Self::handle_states_controller_change),
         );
         if let Some(internal) = app.get_mut(self).internal_states_controller.take() {
-            app.get_mut(internal).dispose();
-            app.destroy(internal);
-        }
-        if let Some(builder) = app.get_mut(self).selection_gesture_detector_builder.take() {
-            app.destroy(builder);
+            internal.dispose(app);
         }
         self.dispose_restoration(app);
     }
@@ -1904,8 +1919,8 @@ impl State for TextFieldState {
 
         let widget = self.widget(app);
         let mut editable = EditableText::new(
-            controller,
-            focus_node,
+            controller.clone(),
+            focus_node.clone(),
             style,
             cursor_color,
             CupertinoColors::INACTIVE_GRAY.color(),
@@ -1962,7 +1977,7 @@ impl State for TextFieldState {
         if let Some(show_cursor) = widget.show_cursor {
             editable = editable.show_cursor(show_cursor);
         }
-        if let Some(undo_controller) = widget.undo_controller {
+        if let Some(undo_controller) = widget.undo_controller.clone() {
             editable = editable.undo_controller(undo_controller);
         }
         if let Some(text_input_action) = widget.text_input_action {
@@ -2012,7 +2027,7 @@ impl State for TextFieldState {
         if let Some(select_all_on_focus) = widget.select_all_on_focus {
             editable = editable.select_all_on_focus(select_all_on_focus);
         }
-        if let Some(scroll_controller) = widget.scroll_controller {
+        if let Some(scroll_controller) = widget.scroll_controller.clone() {
             editable = editable.scroll_controller(scroll_controller);
         }
         if let Some(scroll_physics) = widget.scroll_physics.clone() {
@@ -2036,15 +2051,17 @@ impl State for TextFieldState {
             editable = editable.hint_locales(hint_locales);
         }
 
-        let bucket = self.bucket(app);
+        let bucket = self.bucket(app).and_then(|bucket| bucket.upgrade(app));
         let mut child = RepaintBoundary::new()
             .child(UnmanagedRestorationScope::new(editable).bucket(bucket))
             .into_widget();
 
         if self.widget(app).decoration.is_some() {
+            let focus_node = focus_node.clone();
+            let controller = controller.clone();
             let animation: Rc<dyn Listenable> = Rc::new(MergingListenable::new(vec![
-                Some(Rc::new(focus_node) as Rc<dyn Listenable>),
-                Some(Rc::new(controller) as Rc<dyn Listenable>),
+                Some(Rc::new(focus_node.clone()) as Rc<dyn Listenable>),
+                Some(Rc::new(controller.clone()) as Rc<dyn Listenable>),
             ]));
             child = AnimatedBuilder::new(animation, move |app, _context, child| {
                 let widget = this.widget(app);
@@ -2098,6 +2115,7 @@ impl State for TextFieldState {
         let builder = app
             .get(self)
             .selection_gesture_detector_builder
+            .handle()
             .expect("created in init_state");
         let gesture_detector = TextSelectionGestureDetectorBuilder::build_gesture_detector(
             builder,
@@ -2117,7 +2135,7 @@ impl State for TextFieldState {
             .child(TextFieldTapRegion::new(
                 IgnorePointer::new().ignoring(ignoring).child(
                     AnimatedBuilder::new(
-                        Rc::new(controller), // changes the _currentLength
+                        Rc::new(controller.clone()), // changes the _currentLength
                         move |app, _context, child| {
                             this.build_semantics(
                                 app,
@@ -2335,6 +2353,8 @@ mod tests {
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;
 
+    use waft_widgets::{FocusNodeLeaf, TextEditingControllerLeaf};
+
     const ALL_PLATFORMS: [TargetPlatform; 6] = [
         TargetPlatform::Android,
         TargetPlatform::Fuchsia,
@@ -2394,7 +2414,7 @@ mod tests {
         material_app(theme, Material::new().child(child).into_widget())
     }
 
-    fn controller_with(tester: &WidgetTester, text: &str) -> Handle<TextEditingController> {
+    fn controller_with(tester: &WidgetTester, text: &str) -> Ref<TextEditingController> {
         let mut app = tester.cell.borrow_mut();
         let controller = TextEditingController::new(&mut app);
         controller.set_text(&mut app, text);
@@ -2785,13 +2805,10 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester_on(TargetPlatform::Android);
             let controller = controller_with(&tester, "");
-            let root = overlay(
-                &tester,
-                TextField::new().controller(controller.as_controller()),
-            );
+            let root = overlay(&tester, TextField::new().controller(controller.erase()));
             tester.pump_widget(root);
-            assert_eq!(selection(&tester, controller).base_offset, -1);
-            assert_eq!(selection(&tester, controller).extent_offset, -1);
+            assert_eq!(selection(&tester, controller.handle()).base_offset, -1);
+            assert_eq!(selection(&tester, controller.handle()).extent_offset, -1);
 
             let test_value = "abc def ghi";
             enter_text(&mut tester, test_value);
@@ -2803,8 +2820,14 @@ mod tests {
             tester.tap(e_pos, 1);
             tester.pump(Duration::ZERO);
 
-            assert_eq!(selection(&tester, controller).base_offset, tap_index);
-            assert_eq!(selection(&tester, controller).extent_offset, tap_index);
+            assert_eq!(
+                selection(&tester, controller.handle()).base_offset,
+                tap_index
+            );
+            assert_eq!(
+                selection(&tester, controller.handle()).extent_offset,
+                tap_index
+            );
         });
     }
 
@@ -2816,12 +2839,12 @@ mod tests {
             let root = overlay(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .enable_interactive_selection(false),
             );
             tester.pump_widget(root);
-            assert_eq!(selection(&tester, controller).base_offset, -1);
-            assert_eq!(selection(&tester, controller).extent_offset, -1);
+            assert_eq!(selection(&tester, controller.handle()).base_offset, -1);
+            assert_eq!(selection(&tester, controller.handle()).extent_offset, -1);
 
             let test_value = "abc def ghi";
             enter_text(&mut tester, test_value);
@@ -2834,10 +2857,10 @@ mod tests {
             tester.pump(Duration::ZERO);
 
             assert_eq!(
-                selection(&tester, controller).base_offset,
+                selection(&tester, controller.handle()).base_offset,
                 test_value.len() as i32
             );
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
         });
     }
 
@@ -2846,18 +2869,15 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester_on(TargetPlatform::Android);
             let controller = controller_with(&tester, "");
-            let root = overlay(
-                &tester,
-                TextField::new().controller(controller.as_controller()),
-            );
+            let root = overlay(&tester, TextField::new().controller(controller.erase()));
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
             enter_text(&mut tester, test_value);
-            assert_eq!(text(&tester, controller), test_value);
+            assert_eq!(text(&tester, controller.handle()), test_value);
             skip_past_scrolling_animation(&mut tester);
 
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
 
             // Long press the 'e' to select 'def'.
             let e_pos = text_offset_to_position(&tester, test_value.find('e').unwrap() as i32);
@@ -2866,11 +2886,11 @@ mod tests {
 
             // 'def' is selected.
             assert_eq!(
-                selection(&tester, controller).base_offset,
+                selection(&tester, controller.handle()).base_offset,
                 test_value.find('d').unwrap() as i32
             );
             assert_eq!(
-                selection(&tester, controller).extent_offset,
+                selection(&tester, controller.handle()).extent_offset,
                 test_value.find('f').unwrap() as i32 + 1
             );
 
@@ -2879,9 +2899,9 @@ mod tests {
             tester.tap(h_pos, 8);
             tester.pump(Duration::ZERO);
 
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
             assert_eq!(
-                selection(&tester, controller).base_offset,
+                selection(&tester, controller.handle()).base_offset,
                 test_value.find('h').unwrap() as i32
             );
         });
@@ -2892,18 +2912,15 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester_on(TargetPlatform::Android);
             let controller = controller_with(&tester, "");
-            let root = overlay(
-                &tester,
-                TextField::new().controller(controller.as_controller()),
-            );
+            let root = overlay(&tester, TextField::new().controller(controller.erase()));
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
             enter_text(&mut tester, test_value);
-            assert_eq!(text(&tester, controller), test_value);
+            assert_eq!(text(&tester, controller.handle()), test_value);
             skip_past_scrolling_animation(&mut tester);
 
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
 
             // Long press the 'e' using a mouse device.
             let e_index = test_value.find('e').unwrap() as i32;
@@ -2915,8 +2932,11 @@ mod tests {
             tester.pump(Duration::ZERO);
 
             // The cursor is placed just like a regular tap.
-            assert_eq!(selection(&tester, controller).base_offset, e_index);
-            assert_eq!(selection(&tester, controller).extent_offset, e_index);
+            assert_eq!(selection(&tester, controller.handle()).base_offset, e_index);
+            assert_eq!(
+                selection(&tester, controller.handle()).extent_offset,
+                e_index
+            );
         });
     }
 
@@ -2939,7 +2959,7 @@ mod tests {
             let root = overlay(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .read_only(true),
             );
             tester.pump_widget(root);
@@ -2965,26 +2985,26 @@ mod tests {
             let root = overlay(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .enable_interactive_selection(false),
             );
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
             enter_text(&mut tester, test_value);
-            assert_eq!(text(&tester, controller), test_value);
+            assert_eq!(text(&tester, controller.handle()), test_value);
             skip_past_scrolling_animation(&mut tester);
 
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
 
             // Long press the 'e' to select 'def'.
             let e_pos = text_offset_to_position(&tester, test_value.find('e').unwrap() as i32);
             tester.long_press(e_pos, 7);
             tester.pump_and_settle();
 
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
             assert_eq!(
-                selection(&tester, controller).base_offset,
+                selection(&tester, controller.handle()).base_offset,
                 test_value.len() as i32
             );
         });
@@ -2998,7 +3018,7 @@ mod tests {
                 let controller = controller_with(&tester, "");
                 let root = material_home(
                     theme(&tester),
-                    TextField::new().controller(controller.as_controller()),
+                    TextField::new().controller(controller.erase()),
                 );
                 tester.pump_widget(root);
 
@@ -3012,12 +3032,12 @@ mod tests {
                 tester.down(&mut gesture, e_pos);
                 tester.pump_and_settle();
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     5,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     5,
                     "{platform:?}"
                 );
@@ -3029,12 +3049,12 @@ mod tests {
                 tester.send(&gesture, waft_embedder::PointerChange::Down);
                 tester.pump_and_settle();
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     8,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     8,
                     "{platform:?}"
                 );
@@ -3042,12 +3062,12 @@ mod tests {
                 // This should do nothing. The selection is set on tap down on desktop platforms.
                 tester.up(&gesture);
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     8,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     8,
                     "{platform:?}"
                 );
@@ -3064,7 +3084,7 @@ mod tests {
                 let is_target_platform_apple = platform == TargetPlatform::IOS;
                 let root = material_home(
                     theme(&tester),
-                    TextField::new().controller(controller.as_controller()),
+                    TextField::new().controller(controller.erase()),
                 );
                 tester.pump_widget(root);
 
@@ -3083,12 +3103,12 @@ mod tests {
                 tester.send(&gesture, waft_embedder::PointerChange::Down);
                 tester.pump_and_settle();
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     5,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     5,
                     "{platform:?}"
                 );
@@ -3096,12 +3116,12 @@ mod tests {
                 tester.up(&gesture);
                 tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     8,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     8,
                     "{platform:?}"
                 );
@@ -3113,12 +3133,12 @@ mod tests {
                 // On iOS a tap to select, selects the word edge instead of the exact tap position.
                 let expected = if is_target_platform_apple { 7 } else { 5 };
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     expected,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     expected,
                     "{platform:?}"
                 );
@@ -3128,12 +3148,12 @@ mod tests {
                 tester.send(&touch_gesture, waft_embedder::PointerChange::Down);
                 tester.pump(Duration::ZERO);
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     expected,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     expected,
                     "{platform:?}"
                 );
@@ -3141,12 +3161,12 @@ mod tests {
                 tester.up(&touch_gesture);
                 tester.pump_and_settle();
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     8,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     8,
                     "{platform:?}"
                 );
@@ -3163,19 +3183,19 @@ mod tests {
             let root = overlay(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .obscure_text(true),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "abcdefghi");
             skip_past_scrolling_animation(&mut tester);
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
 
             // Long press does select text.
             let e_pos = text_offset_to_position(&tester, 1);
             tester.long_press(e_pos, 7);
             tester.pump_and_settle();
-            assert!(!selection(&tester, controller).is_collapsed());
+            assert!(!selection(&tester, controller.handle()).is_collapsed());
         });
     }
 
@@ -3188,20 +3208,20 @@ mod tests {
             let root = overlay(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .obscure_text(true)
                     .enable_interactive_selection(false),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "abcdefghi");
             skip_past_scrolling_animation(&mut tester);
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
 
             // Long press doesn't select text.
             let e_pos2 = text_offset_to_position(&tester, 1);
             tester.long_press(e_pos2, 7);
             tester.pump_and_settle();
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
         });
     }
 
@@ -3214,20 +3234,20 @@ mod tests {
             let root = overlay(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .obscure_text(true)
                     .read_only(true),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "abcdefghi");
             skip_past_scrolling_animation(&mut tester);
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
 
             // Long press doesn't select text.
             let e_pos2 = text_offset_to_position(&tester, 1);
             tester.long_press(e_pos2, 7);
             tester.pump_and_settle();
-            assert!(selection(&tester, controller).is_collapsed());
+            assert!(selection(&tester, controller.handle()).is_collapsed());
         });
     }
 
@@ -3239,7 +3259,7 @@ mod tests {
             let root = overlay(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .obscure_text(true),
             );
             tester.pump_widget(root);
@@ -3250,7 +3270,7 @@ mod tests {
             let b_pos = text_offset_to_position(&tester, 1);
             tester.long_press(b_pos, 7);
             tester.pump_and_settle();
-            let selection = selection(&tester, controller);
+            let selection = selection(&tester, controller.handle());
             assert!(!selection.is_collapsed());
             assert_eq!(selection.base_offset, 0);
             assert_eq!(selection.extent_offset, 10);
@@ -3283,12 +3303,12 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .decoration(None),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "abc\ndef");
-            assert_eq!(text(&tester, controller), "abcdef");
+            assert_eq!(text(&tester, controller.handle()), "abcdef");
         });
     }
 
@@ -3300,14 +3320,14 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .decoration(None)
                     .input_formatters(vec![formatter(DenyLowercase("#"))]),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "a一b二c三\nd四e五f六");
             // The default single line formatter replaces \n with empty string.
-            assert_eq!(text(&tester, controller), "#一#二#三#四#五#六");
+            assert_eq!(text(&tester, controller.handle()), "#一#二#三#四#五#六");
         });
     }
 
@@ -3319,7 +3339,7 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .decoration(None)
                     .max_lines(Some(2))
                     .input_formatters(vec![
@@ -3334,7 +3354,7 @@ mod tests {
             // The second formatter turns it into
             // \n1\n2\n3
             // Multiline is allowed since maxLine != 1.
-            assert_eq!(text(&tester, controller), "\n1\n2\n3");
+            assert_eq!(text(&tester, controller.handle()), "\n1\n2\n3");
         });
     }
 
@@ -3369,7 +3389,7 @@ mod tests {
                 &tester,
                 DefaultSelectionStyle::new(Column::new().children(vec![
                     TextField::new()
-                        .controller(controller1.as_controller())
+                        .controller(controller1.erase())
                         .into_widget(),
                     TextField::new().into_widget(),
                 ]))
@@ -3395,7 +3415,7 @@ mod tests {
             tester.tap(first, 3);
             controller1.set_selection(&mut tester.cell.borrow_mut(), TextSelection::new(0, 4));
             tester.pump(Duration::ZERO);
-            assert_eq!(selection(&tester, controller1), expected);
+            assert_eq!(selection(&tester, controller1.handle()), expected);
             assert_eq!(
                 editable_at(&tester, 0, |widget| widget.selection_color),
                 Some(selection_color)
@@ -3428,12 +3448,12 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .max_length(10),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "0123456789101112");
-            assert_eq!(text(&tester, controller), "0123456789");
+            assert_eq!(text(&tester, controller.handle()), "0123456789");
         });
     }
 
@@ -3445,14 +3465,14 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .max_length(10),
             );
             tester.pump_widget(root);
             let surrogate_pair = "😆";
             enter_text(&mut tester, &format!("{surrogate_pair}0123456789101112"));
             assert_eq!(
-                text(&tester, controller),
+                text(&tester, controller.handle()),
                 format!("{surrogate_pair}012345678")
             );
         });
@@ -3466,14 +3486,14 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .max_length(10),
             );
             tester.pump_widget(root);
             let grapheme_cluster = "👨\u{200d}👩\u{200d}👦";
             enter_text(&mut tester, &format!("{grapheme_cluster}0123456789101112"));
             assert_eq!(
-                text(&tester, controller),
+                text(&tester, controller.handle()),
                 format!("{grapheme_cluster}012345678")
             );
         });
@@ -3488,22 +3508,22 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .max_length(10),
             );
             tester.pump_widget(root);
 
             // Max out the character limit in the field.
             enter_text(&mut tester, test_value);
-            assert_eq!(text(&tester, controller), test_value);
+            assert_eq!(text(&tester, controller.handle()), test_value);
 
             // Entering more characters at the end does nothing.
             enter_text(&mut tester, &format!("{test_value}9999999"));
-            assert_eq!(text(&tester, controller), test_value);
+            assert_eq!(text(&tester, controller.handle()), test_value);
 
             // Entering text in the middle of the field also does nothing.
             enter_text(&mut tester, "0123455555555556789");
-            assert_eq!(text(&tester, controller), test_value);
+            assert_eq!(text(&tester, controller.handle()), test_value);
         });
     }
 
@@ -3515,13 +3535,13 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .decoration(None)
                     .max_length(10),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "0123456789101112");
-            assert_eq!(text(&tester, controller), "0123456789");
+            assert_eq!(text(&tester, controller.handle()), "0123456789");
         });
     }
 
@@ -3533,14 +3553,14 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .max_length(10)
                     .input_formatters(vec![formatter(DenyLowercase("#"))]),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "a一b二c三\nd四e五f六");
             // The default single line formatter replaces \n with empty string.
-            assert_eq!(text(&tester, controller), "#一#二#三#四#五");
+            assert_eq!(text(&tester, controller.handle()), "#一#二#三#四#五");
         });
     }
 
@@ -3552,13 +3572,13 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .max_length(10)
                     .max_length_enforcement(MaxLengthEnforcement::None),
             );
             tester.pump_widget(root);
             enter_text(&mut tester, "0123456789101112");
-            assert_eq!(text(&tester, controller), "0123456789101112");
+            assert_eq!(text(&tester, controller.handle()), "0123456789101112");
         });
     }
 
@@ -3575,7 +3595,7 @@ mod tests {
                         InputDecoration::new()
                             .error_style(TextStyle::new().color(deep_purple_accent)),
                     ))
-                    .controller(controller.as_controller())
+                    .controller(controller.erase())
                     .max_length(10)
                     .max_length_enforcement(MaxLengthEnforcement::None),
             );
@@ -3584,14 +3604,14 @@ mod tests {
             enter_text(&mut tester, "0123456789101112");
             tester.pump(Duration::ZERO);
 
-            assert_eq!(text(&tester, controller), "0123456789101112");
+            assert_eq!(text(&tester, controller.handle()), "0123456789101112");
             assert_eq!(tester.find_onstage_text("16/10").len(), 1);
             assert_eq!(text_color(&tester, "16/10"), Some(deep_purple_accent));
 
             enter_text(&mut tester, "0123456789");
             tester.pump(Duration::ZERO);
 
-            assert_eq!(text(&tester, controller), "0123456789");
+            assert_eq!(text(&tester, controller.handle()), "0123456789");
             assert_eq!(tester.find_onstage_text("10/10").len(), 1);
             assert_ne!(text_color(&tester, "10/10"), Some(deep_purple_accent));
         });
@@ -3609,7 +3629,7 @@ mod tests {
                 .decoration(Some(
                     InputDecoration::new().error_style(TextStyle::new().color(deep_purple_accent)),
                 ))
-                .controller(controller.as_controller())
+                .controller(controller.erase())
                 .max_length(10)
                 .max_length_enforcement(MaxLengthEnforcement::None),
         );
@@ -3619,7 +3639,7 @@ mod tests {
         enter_text(&mut tester, &long);
         tester.pump(Duration::ZERO);
 
-        assert_eq!(text(&tester, controller), long);
+        assert_eq!(text(&tester, controller.handle()), long);
         assert_eq!(tester.find_onstage_text("16/10").len(), 1);
         assert_eq!(text_color(&tester, "16/10"), Some(deep_purple_accent));
 
@@ -3627,7 +3647,7 @@ mod tests {
         enter_text(&mut tester, &full);
         tester.pump(Duration::ZERO);
 
-        assert_eq!(text(&tester, controller), full);
+        assert_eq!(text(&tester, controller.handle()), full);
         assert_eq!(tester.find_onstage_text("10/10").len(), 1);
         assert_ne!(text_color(&tester, "10/10"), Some(deep_purple_accent));
     }
@@ -3656,7 +3676,7 @@ mod tests {
                     .child(
                         Material::new().child(
                             TextField::new()
-                                .controller(controller.as_controller())
+                                .controller(controller.erase())
                                 .max_length(10)
                                 .max_length_enforcement(MaxLengthEnforcement::None),
                         ),
@@ -3668,14 +3688,14 @@ mod tests {
             enter_text(&mut tester, "0123456789101112");
             tester.pump(Duration::ZERO);
 
-            assert_eq!(text(&tester, controller), "0123456789101112");
+            assert_eq!(text(&tester, controller.handle()), "0123456789101112");
             assert_eq!(tester.find_onstage_text("16/10").len(), 1);
             assert_eq!(text_color(&tester, "16/10"), Some(deep_purple_accent));
 
             enter_text(&mut tester, "0123456789");
             tester.pump(Duration::ZERO);
 
-            assert_eq!(text(&tester, controller), "0123456789");
+            assert_eq!(text(&tester, controller.handle()), "0123456789");
             assert_eq!(tester.find_onstage_text("10/10").len(), 1);
             assert_ne!(text_color(&tester, "10/10"), Some(deep_purple_accent));
         });
@@ -3839,7 +3859,7 @@ mod tests {
                 m2_theme(&tester),
                 Center::new().child(
                     TextField::new()
-                        .controller(controller.as_controller())
+                        .controller(controller.erase())
                         .enabled(false),
                 ),
             );
@@ -3868,7 +3888,7 @@ mod tests {
                 theme,
                 Center::new().child(
                     TextField::new()
-                        .controller(controller.as_controller())
+                        .controller(controller.erase())
                         .enabled(false),
                 ),
             );
@@ -3914,8 +3934,8 @@ mod tests {
                     theme(tester),
                     Center::new().child(
                         field
-                            .states_controller(states_controller)
-                            .controller(text_editing_controller.as_controller()),
+                            .states_controller(states_controller.clone())
+                            .controller(text_editing_controller.erase()),
                     ),
                 )
             };
@@ -3931,14 +3951,14 @@ mod tests {
             tester.move_to(&mut gesture, center, false);
             tester.pump(Duration::ZERO);
             assert_eq!(
-                states(&tester, states_controller),
+                states(&tester, states_controller.handle()),
                 state_set(&[WidgetState::Hovered])
             );
             assert_eq!(count.get(), 1);
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump(Duration::ZERO);
-            assert_eq!(states(&tester, states_controller), state_set(&[]));
+            assert_eq!(states(&tester, states_controller.handle()), state_set(&[]));
             assert_eq!(count.get(), 2);
 
             tester.move_to(&mut gesture, center, false);
@@ -3947,7 +3967,7 @@ mod tests {
             tester.up(&gesture);
             tester.pump(Duration::ZERO);
             assert_eq!(
-                states(&tester, states_controller),
+                states(&tester, states_controller.handle()),
                 state_set(&[WidgetState::Hovered, WidgetState::Focused])
             );
             assert_eq!(count.get(), 4); // adds hovered and pressed - two changes.
@@ -3955,14 +3975,14 @@ mod tests {
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump(Duration::ZERO);
             assert_eq!(
-                states(&tester, states_controller),
+                states(&tester, states_controller.handle()),
                 state_set(&[WidgetState::Focused])
             );
             assert_eq!(count.get(), 5);
 
             tester.send(&gesture, waft_embedder::PointerChange::Down);
             tester.pump(Duration::ZERO);
-            assert_eq!(states(&tester, states_controller), state_set(&[]));
+            assert_eq!(states(&tester, states_controller.handle()), state_set(&[]));
             assert_eq!(count.get(), 6);
             tester.up(&gesture);
             tester.pump(Duration::ZERO);
@@ -3973,7 +3993,7 @@ mod tests {
             tester.up(&gesture);
             tester.pump(Duration::ZERO);
             assert_eq!(
-                states(&tester, states_controller),
+                states(&tester, states_controller.handle()),
                 state_set(&[WidgetState::Hovered, WidgetState::Focused])
             );
             assert_eq!(count.get(), 8); // adds hovered and pressed - two changes.
@@ -3984,7 +4004,7 @@ mod tests {
             tester.pump_widget(root);
             tester.pump_and_settle();
             assert_eq!(
-                states(&tester, states_controller),
+                states(&tester, states_controller.handle()),
                 state_set(&[WidgetState::Hovered, WidgetState::Disabled])
             );
             assert_eq!(count.get(), 10); // removes focused and adds disabled - two changes.
@@ -3992,7 +4012,7 @@ mod tests {
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump(Duration::ZERO);
             assert_eq!(
-                states(&tester, states_controller),
+                states(&tester, states_controller.handle()),
                 state_set(&[WidgetState::Disabled])
             );
             assert_eq!(count.get(), 11);
@@ -4006,7 +4026,7 @@ mod tests {
             tester.pump_widget(root);
             tester.pump_and_settle();
             assert_eq!(
-                states(&tester, states_controller),
+                states(&tester, states_controller.handle()),
                 state_set(&[WidgetState::Error])
             );
             assert_eq!(count.get(), 13); // removes disabled and adds error - two changes.
@@ -4016,7 +4036,7 @@ mod tests {
             let root = build(&tester, TextField::new());
             tester.pump_widget(root);
             tester.pump_and_settle();
-            assert_eq!(states(&tester, states_controller), state_set(&[]));
+            assert_eq!(states(&tester, states_controller.handle()), state_set(&[]));
             assert_eq!(count.get(), 14);
         });
     }
@@ -4040,13 +4060,13 @@ mod tests {
                 theme(&tester),
                 Center::new().child(
                     TextField::new()
-                        .states_controller(controller)
+                        .states_controller(controller.clone())
                         .enabled(false),
                 ),
             );
             tester.pump_widget(root);
             assert_eq!(
-                states(&tester, controller),
+                states(&tester, controller.handle()),
                 state_set(&[WidgetState::Disabled])
             );
             assert_eq!(count.get(), 1);
@@ -4065,7 +4085,7 @@ mod tests {
                     theme(tester),
                     Center::new().child(
                         TextField::new()
-                            .controller(controller.as_controller())
+                            .controller(controller.erase())
                             .enabled(enabled)
                             .style(WidgetStateTextStyle::resolve_with(
                                 move |states: &WidgetStates| {
@@ -4105,13 +4125,13 @@ mod tests {
                 theme(&tester),
                 FocusScope::new(Center::new().child(Column::new().children(vec![
                     TextField::new()
-                        .focus_node(focus_node1)
+                        .focus_node(focus_node1.erase())
                         .autofocus(true)
                         .max_length(10)
                         .enabled(true)
                         .into_widget(),
                     TextField::new()
-                        .focus_node(focus_node2)
+                        .focus_node(focus_node2.erase())
                         .max_length(10)
                         .enabled(false)
                         .into_widget(),
@@ -4144,36 +4164,39 @@ mod tests {
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.erase())
                     .autofocus(true)
                     .enabled(true),
             );
             tester.pump_widget(root);
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
 
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.erase())
                     .autofocus(true)
                     .enabled(false),
             );
             tester.pump_widget(root);
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
 
             let directional = |enabled: bool| {
-                Builder::new(move |app, context| {
-                    let data: MediaQueryData = MediaQuery::of(app, context)
-                        .copy_with()
-                        .navigation_mode(NavigationMode::Directional);
-                    MediaQuery::new(
-                        data,
-                        TextField::new()
-                            .focus_node(focus_node)
-                            .autofocus(true)
-                            .enabled(enabled),
-                    )
-                    .into_widget()
+                Builder::new({
+                    let focus_node = focus_node.clone();
+                    move |app, context| {
+                        let data: MediaQueryData = MediaQuery::of(app, context)
+                            .copy_with()
+                            .navigation_mode(NavigationMode::Directional);
+                        MediaQuery::new(
+                            data,
+                            TextField::new()
+                                .focus_node(focus_node.clone().erase())
+                                .autofocus(true)
+                                .enabled(enabled),
+                        )
+                        .into_widget()
+                    }
                 })
             };
             let root = boilerplate(&tester, directional(true));
@@ -4181,13 +4204,13 @@ mod tests {
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump(Duration::ZERO);
 
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
 
             let root = boilerplate(&tester, directional(false));
             tester.pump_widget(root);
             tester.pump(Duration::ZERO);
 
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
         });
     }
 
@@ -4369,7 +4392,7 @@ mod tests {
             let controller = controller_with(&tester, "abc def ghi");
             let root = material_home(
                 theme(&tester),
-                TextField::new().controller(controller.as_controller()),
+                TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
@@ -4389,7 +4412,7 @@ mod tests {
             let controller = controller_with(&tester, "");
             let root = material_home(
                 theme(&tester),
-                TextField::new().controller(controller.as_controller()),
+                TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
@@ -4409,7 +4432,7 @@ mod tests {
             let controller = controller_with(&tester, "abc def ghi");
             let root = material_home(
                 theme(&tester),
-                TextField::new().controller(controller.as_controller()),
+                TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
@@ -4432,7 +4455,7 @@ mod tests {
             let controller = controller_with(&tester, "abc def ghi");
             let root = material_home(
                 theme(&tester),
-                TextField::new().controller(controller.as_controller()),
+                TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
@@ -4452,7 +4475,7 @@ mod tests {
             let controller = controller_with(&tester, "");
             let root = material_home(
                 theme(&tester),
-                TextField::new().controller(controller.as_controller()),
+                TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
@@ -4472,7 +4495,7 @@ mod tests {
         let controller = controller_with(&tester, text);
         let root = material_home(
             theme(&tester),
-            TextField::new().controller(controller.as_controller()),
+            TextField::new().controller(controller.erase()),
         );
         tester.pump_widget(root);
 
@@ -4533,7 +4556,7 @@ mod tests {
                     &tester,
                     TextField::new()
                         .drag_start_behavior(DragStartBehavior::Down)
-                        .controller(controller.as_controller()),
+                        .controller(controller.erase()),
                 );
                 tester.pump_widget(root);
 
@@ -4551,7 +4574,7 @@ mod tests {
                 // skip past the frame where the opacity is zero
                 tester.pump(Duration::from_millis(200));
 
-                let long_pressed = selection(&tester, controller);
+                let long_pressed = selection(&tester, controller.handle());
                 assert_eq!(long_pressed.base_offset, 4, "{platform:?}");
                 assert_eq!(long_pressed.extent_offset, 7, "{platform:?}");
 
@@ -4571,12 +4594,12 @@ mod tests {
                 drag_handle(&mut tester, handle_pos, new_handle_pos);
 
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     4,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     11,
                     "{platform:?}"
                 );
@@ -4587,29 +4610,29 @@ mod tests {
                 drag_handle(&mut tester, handle_pos, new_handle_pos);
 
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     2,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     11,
                     "{platform:?}"
                 );
 
                 // Drag the left handle 2 letters to the left again.
-                let endpoints = global_endpoints(&tester, selection(&tester, controller));
+                let endpoints = global_endpoints(&tester, selection(&tester, controller.handle()));
                 let handle_pos = endpoints[0] + Offset::new(-1.0, 1.0);
                 let new_handle_pos = text_offset_to_position(&tester, 0);
                 drag_handle(&mut tester, handle_pos, new_handle_pos);
 
                 assert_eq!(
-                    selection(&tester, controller).base_offset,
+                    selection(&tester, controller.handle()).base_offset,
                     0,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller).extent_offset,
+                    selection(&tester, controller.handle()).extent_offset,
                     11,
                     "{platform:?}"
                 );
@@ -4624,7 +4647,7 @@ mod tests {
             let controller = controller_with(&tester, "abc def ghi");
             let root = material_home(
                 theme(&tester),
-                TextField::new().controller(controller.as_controller()),
+                TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
@@ -4635,7 +4658,7 @@ mod tests {
 
             assert_eq!(selection_overlay_visibility(&tester), (true, false));
 
-            let endpoints = global_endpoints(&tester, selection(&tester, controller));
+            let endpoints = global_endpoints(&tester, selection(&tester, controller.handle()));
             assert_eq!(endpoints.len(), 1);
 
             // Tap the handle to show the toolbar.
@@ -4658,7 +4681,7 @@ mod tests {
             let controller = controller_with(&tester, "abc def ghi");
             let root = material_home(
                 theme(&tester),
-                TextField::new().controller(controller.as_controller()),
+                TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
@@ -4681,7 +4704,7 @@ mod tests {
             let controller = controller_with(&tester, "abc def ghi");
             let root = material_home(
                 theme(&tester),
-                TextField::new().controller(controller.as_controller()),
+                TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
@@ -5092,42 +5115,42 @@ mod tests {
 
             // Default test. The canRequestFocus is true by default and the text field can be
             // focused
-            let root = boilerplate(&tester, TextField::new().focus_node(focus_node));
+            let root = boilerplate(&tester, TextField::new().focus_node(focus_node.erase()));
             tester.pump_widget(root);
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
 
             // Set canRequestFocus to false: the text field cannot be focused when it is
             // tapped/long pressed.
             let root = boilerplate(
                 &tester,
                 TextField::new()
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.erase())
                     .can_request_focus(false),
             );
             tester.pump_widget(root);
 
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump(Duration::ZERO);
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
 
             // The text field cannot be focused if it is tapped.
             let center = text_field_center(&tester, 0);
             tester.tap(center, 1);
             tester.pump(Duration::ZERO);
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
 
             // The text field cannot be focused if it is long pressed.
             tester.long_press(center, 2);
             tester.pump(Duration::ZERO);
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
         });
     }
 
-    fn tap_region_frame(tester: &WidgetTester, focus_node: Handle<FocusNode>) -> WidgetRef {
+    fn tap_region_frame(tester: &WidgetTester, focus_node: FocusNodeRef) -> WidgetRef {
         material_app(
             theme(tester),
             Scaffold::new()
@@ -5157,7 +5180,7 @@ mod tests {
             with_main_thread_stack(|| {
                 let mut tester = tester_on(platform);
                 let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-                let root = tap_region_frame(&tester, focus_node);
+                let root = tap_region_frame(&tester, focus_node.erase());
                 tester.pump_widget(root);
                 tester.pump(Duration::ZERO);
                 assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
@@ -5179,7 +5202,7 @@ mod tests {
             with_main_thread_stack(|| {
                 let mut tester = tester_on(platform);
                 let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-                let root = tap_region_frame(&tester, focus_node);
+                let root = tap_region_frame(&tester, focus_node.erase());
                 tester.pump_widget(root);
                 tester.pump(Duration::ZERO);
                 assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
@@ -5225,10 +5248,10 @@ mod tests {
 
     /// text_field_restoration_test's `TestWidget`: a field of three lines in a 50 wide box,
     /// with an outside controller when `use_external`.
-    fn restoration_widget(controller: Option<AnyTextEditingController>) -> WidgetRef {
+    fn restoration_widget(controller: Option<TextEditingControllerRef>) -> WidgetRef {
         let mut field = TextField::new().restoration_id("text").max_lines(Some(3));
         if let Some(controller) = controller {
-            field = field.controller(controller);
+            field = field.controller(controller.clone());
         }
         Material::new()
             .child(waft_widgets::Align::new().child(SizedBox::new().width(50.0).child(field)))

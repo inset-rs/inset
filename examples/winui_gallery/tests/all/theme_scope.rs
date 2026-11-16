@@ -41,7 +41,7 @@ fn an_override_reaches_a_text_box() {
                     Align::new().alignment(AlignmentGeometry::TOP_LEFT).child(
                         SizedBox::new()
                             .width(160.0)
-                            .child(TextBox::new(controller.as_controller())),
+                            .child(TextBox::new(controller.erase())),
                     ),
                 )
                 .any(|r| r.text_control_background = RED),

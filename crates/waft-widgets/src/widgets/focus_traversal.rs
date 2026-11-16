@@ -18,7 +18,7 @@ use waft_animation::{Curve, Curves};
 use waft_embedder::{Offset, Rect, TextDirection};
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, ListenableObject, Listener,
-    ValueChanged,
+    OptionRetained, Ref, Retained, ValueChanged,
 };
 use waft_painting::Axis;
 
@@ -29,8 +29,8 @@ use crate::framework::{
 use crate::widgets::actions::{Action, ActionData, Intent};
 use crate::widgets::basic::Directionality;
 use crate::widgets::focus_manager::{
-    AnyFocusNode, FocusManager, FocusNodeData, FocusNodeLeaf, FocusScopeNode, KeyEventResult,
-    TraversalEdgeBehavior, primary_focus,
+    AnyFocusNode, FocusManager, FocusNodeData, FocusNodeLeaf, FocusNodeRef, FocusScopeNode,
+    KeyEventResult, TraversalEdgeBehavior, primary_focus,
 };
 use crate::widgets::focus_scope::Focus;
 use crate::widgets::scroll_position::ScrollPositionAlignmentPolicy;
@@ -556,7 +556,7 @@ pub trait FocusTraversalPolicy: Sized + 'static {
                 }
                 TraversalEdgeBehavior::ParentScope => {
                     let parent_scope = nearest_scope.enclosing_scope(app);
-                    let root_scope = FocusManager::instance(app).root_scope(app);
+                    let root_scope = FocusManager::instance(app).root_scope(app).handle();
                     if let Some(parent_scope) = parent_scope
                         && parent_scope != root_scope
                     {
@@ -602,7 +602,7 @@ pub trait FocusTraversalPolicy: Sized + 'static {
                 }
                 TraversalEdgeBehavior::ParentScope => {
                     let parent_scope = nearest_scope.enclosing_scope(app);
-                    let root_scope = FocusManager::instance(app).root_scope(app);
+                    let root_scope = FocusManager::instance(app).root_scope(app).handle();
                     if let Some(parent_scope) = parent_scope
                         && parent_scope != root_scope
                     {
@@ -688,7 +688,7 @@ fn get_descendants_without_expanding_scope(app: &App, node: AnyFocusNode) -> Vec
 /// A structure to temporarily hold information about [`FocusTraversalGroup`]s when sorting their
 /// contents.
 struct FocusTraversalGroupInfo {
-    policy: AnyFocusTraversalPolicy,
+    policy: FocusTraversalPolicyRef,
     members: Vec<AnyFocusNode>,
 }
 
@@ -700,8 +700,8 @@ fn find_groups(
     current_node: AnyFocusNode,
 ) -> HashMap<Option<AnyFocusNode>, FocusTraversalGroupInfo> {
     let default_policy = match scope_group_node {
-        Some(group) => app.get(group).policy,
-        None => ReadingOrderTraversalPolicy::new(app).as_policy(),
+        Some(group) => app.get(group).policy.clone(),
+        None => ReadingOrderTraversalPolicy::new(app).into_erased(),
     };
     let mut groups: HashMap<Option<AnyFocusNode>, FocusTraversalGroupInfo> = HashMap::new();
     for node in get_descendants_without_expanding_scope(app, scope.as_node()) {
@@ -721,8 +721,8 @@ fn find_groups(
                 .entry(key)
                 .or_insert_with(|| FocusTraversalGroupInfo {
                     policy: match parent_group {
-                        Some(group) => app.get(group).policy,
-                        None => default_policy,
+                        Some(group) => app.get(group).policy.clone(),
+                        None => default_policy.clone(),
                     },
                     members: Vec::new(),
                 });
@@ -738,8 +738,8 @@ fn find_groups(
         if node == current_node || (node.can_request_focus(app) && !node.skip_traversal(app)) {
             let key = group_node.map(|group| group.as_node());
             let policy = match group_node {
-                Some(group) => app.get(group).policy,
-                None => default_policy,
+                Some(group) => app.get(group).policy.clone(),
+                None => default_policy.clone(),
             };
             let info = groups
                 .entry(key)
@@ -770,7 +770,7 @@ fn sort_all_descendants(
     for key in keys {
         let (policy, members) = {
             let info = groups.get(&key).expect("a key of this map");
-            (info.policy, info.members.clone())
+            (info.policy.clone(), info.members.clone())
         };
         let sorted_members = policy.sort_descendants(app, members, current_node);
         let info = groups.get_mut(&key).expect("a key of this map");
@@ -872,13 +872,10 @@ pub struct AnyFocusTraversalPolicy {
     vtable: &'static FocusTraversalPolicyVTable,
 }
 
-impl PartialEq for AnyFocusTraversalPolicy {
-    fn eq(&self, other: &AnyFocusTraversalPolicy) -> bool {
-        self.id == other.id
-    }
-}
+/// A field Dart types as the erased object, kept: AnyFocusTraversalPolicy with its count.
+pub type FocusTraversalPolicyRef = Retained<AnyFocusTraversalPolicy>;
 
-impl Eq for AnyFocusTraversalPolicy {}
+waft_foundation::erased_handle!(AnyFocusTraversalPolicy: FocusTraversalPolicy => FocusTraversalPolicy::as_policy);
 
 impl fmt::Debug for AnyFocusTraversalPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -978,10 +975,10 @@ impl AnyFocusTraversalPolicy {
 
 /// A policy data object for use by [`DirectionalFocusTraversalPolicyMixin`] so it can keep track
 /// of the traversal history.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct DirectionalPolicyDataEntry {
     direction: TraversalDirection,
-    node: AnyFocusNode,
+    node: FocusNodeRef,
 }
 
 /// A queue of entries that describe the path taken to the current node.
@@ -992,7 +989,7 @@ struct DirectionalPolicyData {
 /// The fields Dart's `DirectionalFocusTraversalPolicyMixin` declares; a policy that mixes it in
 /// carries this bag under the field `directional`.
 pub struct DirectionalFocusTraversalPolicyMixinData {
-    policy_data: HashMap<Handle<FocusScopeNode>, DirectionalPolicyData>,
+    policy_data: HashMap<Ref<FocusScopeNode>, DirectionalPolicyData>,
 }
 
 impl DirectionalFocusTraversalPolicyMixinData {
@@ -1063,7 +1060,8 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
                 .policy_data
                 .get_mut(&old_scope)
         {
-            data.history.retain(|entry| Some(entry.node) != node);
+            data.history
+                .retain(|entry| Some(entry.node.handle()) != node);
         }
     }
 
@@ -1218,7 +1216,7 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
             .directional_data(app)
             .policy_data
             .get(&nearest_scope)
-            .and_then(|data| data.history.first().copied());
+            .and_then(|data| data.history.first().cloned());
         if let Some(head) = history_head
             && head.direction != direction
         {
@@ -1226,7 +1224,7 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
                 .directional_data(app)
                 .policy_data
                 .get(&nearest_scope)
-                .and_then(|data| data.history.last().copied())
+                .and_then(|data| data.history.last().cloned())
                 .expect("a non-empty history has a last entry")
                 .node;
             if last_node.parent(app).is_none() {
@@ -1303,7 +1301,7 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
                 ScrollPositionAlignmentPolicy::KeepVisibleAtEnd
             }
         };
-        self.request_focus(app, last_node, Some(alignment_policy), group_node);
+        self.request_focus(app, last_node.handle(), Some(alignment_policy), group_node);
         true
     }
 
@@ -1316,9 +1314,10 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
         focused_child: AnyFocusNode,
     ) {
         let new_entry = DirectionalPolicyDataEntry {
-            node: focused_child,
+            node: focused_child.keep(app),
             direction,
         };
+        let nearest_scope = nearest_scope.keep(app);
         self.directional_data_mut(app)
             .policy_data
             .entry(nearest_scope)
@@ -1387,6 +1386,7 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
         group_node: Option<Handle<FocusTraversalGroupNode>>,
     ) {
         if let Some(group_node) = group_node {
+            let node = node.keep(app);
             app.get_mut(group_node).last_requested_focus = Some(node);
         }
         let request_focus_callback = self.request_focus_callback(app);
@@ -1416,7 +1416,7 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
             }
             TraversalEdgeBehavior::ParentScope => {
                 let parent_scope = nearest_scope.enclosing_scope(app);
-                let root_scope = FocusManager::instance(app).root_scope(app);
+                let root_scope = FocusManager::instance(app).root_scope(app).handle();
                 if let Some(parent_scope) = parent_scope
                     && parent_scope != root_scope
                 {
@@ -1838,7 +1838,7 @@ impl WidgetOrderTraversalPolicy {
     ///
     /// Dart's optional `requestFocusCallback` argument is
     /// [`FocusTraversalPolicy::set_request_focus_callback`].
-    pub fn new(app: &mut App) -> Handle<WidgetOrderTraversalPolicy> {
+    pub fn new(app: &mut App) -> Ref<WidgetOrderTraversalPolicy> {
         app.create(WidgetOrderTraversalPolicy {
             policy: FocusTraversalPolicyData::new(),
             directional: DirectionalFocusTraversalPolicyMixinData::new(),
@@ -2025,7 +2025,7 @@ impl ReadingOrderTraversalPolicy {
     ///
     /// Dart's optional `requestFocusCallback` argument is
     /// [`FocusTraversalPolicy::set_request_focus_callback`].
-    pub fn new(app: &mut App) -> Handle<ReadingOrderTraversalPolicy> {
+    pub fn new(app: &mut App) -> Ref<ReadingOrderTraversalPolicy> {
         app.create(ReadingOrderTraversalPolicy {
             policy: FocusTraversalPolicyData::new(),
             directional: DirectionalFocusTraversalPolicyMixinData::new(),
@@ -2361,7 +2361,7 @@ struct OrderedFocusInfo {
 pub struct OrderedTraversalPolicy {
     policy: FocusTraversalPolicyData,
     directional: DirectionalFocusTraversalPolicyMixinData,
-    secondary: Option<AnyFocusTraversalPolicy>,
+    secondary: Option<FocusTraversalPolicyRef>,
 }
 
 impl OrderedTraversalPolicy {
@@ -2369,7 +2369,7 @@ impl OrderedTraversalPolicy {
     /// explicit order.
     ///
     /// Dart's optional `secondary` and `requestFocusCallback` arguments are the setters.
-    pub fn new(app: &mut App) -> Handle<OrderedTraversalPolicy> {
+    pub fn new(app: &mut App) -> Ref<OrderedTraversalPolicy> {
         app.create(OrderedTraversalPolicy {
             policy: FocusTraversalPolicyData::new(),
             directional: DirectionalFocusTraversalPolicyMixinData::new(),
@@ -2387,11 +2387,11 @@ impl OrderedTraversalPolicy {
     ///
     /// Nodes with no order specified will be sorted after nodes with an explicit order.
     pub fn secondary(self: Handle<Self>, app: &App) -> Option<AnyFocusTraversalPolicy> {
-        app.get(self).secondary
+        app.get(self).secondary.handle()
     }
 
     /// Dart `OrderedTraversalPolicy(secondary:)`.
-    pub fn set_secondary(self: Handle<Self>, app: &mut App, secondary: AnyFocusTraversalPolicy) {
+    pub fn set_secondary(self: Handle<Self>, app: &mut App, secondary: FocusTraversalPolicyRef) {
         app.get_mut(self).secondary = Some(secondary);
     }
 }
@@ -2406,9 +2406,9 @@ impl FocusTraversalPolicy for OrderedTraversalPolicy {
         descendants: Vec<AnyFocusNode>,
         current_node: AnyFocusNode,
     ) -> Vec<AnyFocusNode> {
-        let secondary_policy = match app.get(self).secondary {
+        let secondary_policy = match app.get(self).secondary.clone() {
             Some(secondary) => secondary,
-            None => ReadingOrderTraversalPolicy::new(app).as_policy(),
+            None => ReadingOrderTraversalPolicy::new(app).into_erased(),
         };
         let sorted_descendants = secondary_policy.sort_descendants(app, descendants, current_node);
         let mut unordered: Vec<AnyFocusNode> = Vec::new();
@@ -2547,14 +2547,14 @@ pub struct FocusTraversalGroupNode {
     change_notifier: ChangeNotifierData,
     focus_node: FocusNodeData,
     /// The policy this group imposes.
-    pub policy: AnyFocusTraversalPolicy,
+    pub policy: FocusTraversalPolicyRef,
     /// The node the policy last requested focus for.
-    pub last_requested_focus: Option<AnyFocusNode>,
+    pub last_requested_focus: Option<FocusNodeRef>,
 }
 
 impl FocusTraversalGroupNode {
     /// Creates a [`FocusTraversalGroupNode`] with the given policy.
-    pub fn new(app: &mut App, policy: AnyFocusTraversalPolicy) -> Handle<FocusTraversalGroupNode> {
+    pub fn new(app: &mut App, policy: FocusTraversalPolicyRef) -> Ref<FocusTraversalGroupNode> {
         app.create(FocusTraversalGroupNode {
             change_notifier: ChangeNotifierData::new(),
             focus_node: FocusNodeData::new(),
@@ -2609,7 +2609,7 @@ pub struct FocusTraversalGroup {
     ///    they are added to the widget tree.
     ///  * [`ReadingOrderTraversalPolicy`] for a traversal policy that traverses nodes in the
     ///    reading order defined in the widget tree, and then top to bottom.
-    pub policy: Option<AnyFocusTraversalPolicy>,
+    pub policy: Option<FocusTraversalPolicyRef>,
 
     /// If false, will make this widget's descendants unfocusable.
     pub descendants_are_focusable: bool,
@@ -2631,7 +2631,7 @@ pub struct FocusTraversalGroup {
     /// focus root).
     ///
     /// Defaults to `None`.
-    pub parent_node: Option<AnyFocusNode>,
+    pub parent_node: Option<FocusNodeRef>,
 
     /// The child widget of this [`FocusTraversalGroup`].
     pub child: WidgetRef,
@@ -2658,7 +2658,7 @@ impl FocusTraversalGroup {
     }
 
     /// Dart `FocusTraversalGroup(policy:)`.
-    pub fn policy(mut self, policy: AnyFocusTraversalPolicy) -> FocusTraversalGroup {
+    pub fn policy(mut self, policy: FocusTraversalPolicyRef) -> FocusTraversalGroup {
         self.policy = Some(policy);
         self
     }
@@ -2691,7 +2691,7 @@ impl FocusTraversalGroup {
     }
 
     /// Dart `FocusTraversalGroup(parentNode:)`.
-    pub fn parent_node(mut self, parent_node: AnyFocusNode) -> FocusTraversalGroup {
+    pub fn parent_node(mut self, parent_node: FocusNodeRef) -> FocusTraversalGroup {
         self.parent_node = Some(parent_node);
         self
     }
@@ -2709,7 +2709,7 @@ impl FocusTraversalGroup {
     /// This function differs from [`maybe_of`](Self::maybe_of) in that it takes a `FocusNode`
     /// and only traverses the focus tree to determine the policy in effect.
     pub fn maybe_of_node(app: &App, node: AnyFocusNode) -> Option<AnyFocusTraversalPolicy> {
-        FocusTraversalGroup::get_group_node(app, node).map(|group| app.get(group).policy)
+        FocusTraversalGroup::get_group_node(app, node).map(|group| app.get(group).policy.handle())
     }
 
     /// Dart's `FocusTraversalGroup._getGroupNode`.
@@ -2795,7 +2795,7 @@ impl StatefulWidget for FocusTraversalGroup {
 /// Dart's `_FocusTraversalGroupState`.
 pub struct FocusTraversalGroupState {
     state: StateData<FocusTraversalGroup>,
-    focus_node: Option<Handle<FocusTraversalGroupNode>>,
+    focus_node: Option<Ref<FocusTraversalGroupNode>>,
 }
 
 impl FocusTraversalGroupState {
@@ -2804,18 +2804,21 @@ impl FocusTraversalGroupState {
     /// focus node just so that it can be identified when walking the focus tree during
     /// traversal, and hold the current policy.
     pub fn focus_node(self: Handle<Self>, app: &App) -> Handle<FocusTraversalGroupNode> {
-        app.get(self).focus_node.expect("created in init_state")
+        app.get(self)
+            .focus_node
+            .handle()
+            .expect("created in init_state")
     }
 
     fn handle_focus_changed(self: Handle<Self>, app: &mut App) {
         let focus_node = self.focus_node(app);
         let primary_focus = FocusManager::instance(app).primary_focus(app);
-        let Some(last_requested_focus) = app.get(focus_node).last_requested_focus else {
+        let Some(last_requested_focus) = app.get(focus_node).last_requested_focus.handle() else {
             return;
         };
 
         if primary_focus != Some(last_requested_focus) {
-            let policy = app.get(focus_node).policy;
+            let policy = app.get(focus_node).policy.handle();
             let mut scope = primary_focus.and_then(|node| node.nearest_scope(app));
             while let Some(current) = scope {
                 policy.invalidate_scope_data(app, current);
@@ -2831,13 +2834,13 @@ impl State for FocusTraversalGroupState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let policy = match self.widget(app).policy {
+        let policy = match self.widget(app).policy.clone() {
             Some(policy) => policy,
-            None => ReadingOrderTraversalPolicy::new(app).as_policy(),
+            None => ReadingOrderTraversalPolicy::new(app).into_erased(),
         };
         let focus_node = FocusTraversalGroupNode::new(app, policy);
         focus_node.set_debug_label(app, Some("FocusTraversalGroup".to_string()));
-        app.get_mut(self).focus_node = Some(focus_node);
+        app.get_mut(self).focus_node = Some(focus_node.clone());
         let listener =
             Listener::handle_method(self, FocusTraversalGroupState::handle_focus_changed);
         FocusManager::instance(app).add_listener(app, listener);
@@ -2856,7 +2859,7 @@ impl State for FocusTraversalGroupState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &FocusTraversalGroup) {
         if old_widget.policy != self.widget(app).policy
-            && let Some(policy) = self.widget(app).policy
+            && let Some(policy) = self.widget(app).policy.clone()
         {
             let focus_node = self.focus_node(app);
             app.get_mut(focus_node).policy = policy;
@@ -2864,16 +2867,21 @@ impl State for FocusTraversalGroupState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let focus_node = self.focus_node(app);
+        let focus_node: FocusNodeRef = app
+            .get(self)
+            .focus_node
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
         let widget = self.widget(app);
         let (parent_node, descendants_are_focusable, descendants_are_traversable, child) = (
-            widget.parent_node,
+            widget.parent_node.clone(),
             widget.descendants_are_focusable,
             widget.descendants_are_traversable,
             widget.child.clone(),
         );
         let mut focus = Focus::new(child)
-            .focus_node(focus_node.as_node())
+            .focus_node(focus_node)
             .can_request_focus(false)
             .skip_traversal(true)
             .include_semantics(false)
@@ -2897,12 +2905,12 @@ pub struct RequestFocusIntent {
     pub request_focus_callback: TraversalRequestFocusCallback,
 
     /// The `FocusNode` that is to be focused.
-    pub focus_node: AnyFocusNode,
+    pub focus_node: FocusNodeRef,
 }
 
 impl RequestFocusIntent {
     /// Creates an intent used with [`RequestFocusAction`].
-    pub fn new(focus_node: AnyFocusNode) -> RequestFocusIntent {
+    pub fn new(focus_node: FocusNodeRef) -> RequestFocusIntent {
         RequestFocusIntent {
             request_focus_callback: Rc::new(default_traversal_request_focus_callback),
             focus_node,
@@ -2949,7 +2957,7 @@ pub struct RequestFocusAction {
 
 impl RequestFocusAction {
     /// Creates a [`RequestFocusAction`].
-    pub fn new(app: &mut App) -> Handle<RequestFocusAction> {
+    pub fn new(app: &mut App) -> Ref<RequestFocusAction> {
         app.create(RequestFocusAction {
             action: ActionData::new(),
         })
@@ -2966,7 +2974,7 @@ impl Action for RequestFocusAction {
         intent: &RequestFocusIntent,
     ) -> Option<Rc<dyn Any>> {
         let callback = Rc::clone(&intent.request_focus_callback);
-        callback(app, intent.focus_node, None, None, None, None);
+        callback(app, intent.focus_node.handle(), None, None, None, None);
         None
     }
 }
@@ -2999,7 +3007,7 @@ pub struct NextFocusAction {
 
 impl NextFocusAction {
     /// Creates a [`NextFocusAction`].
-    pub fn new(app: &mut App) -> Handle<NextFocusAction> {
+    pub fn new(app: &mut App) -> Ref<NextFocusAction> {
         app.create(NextFocusAction {
             action: ActionData::new(),
         })
@@ -3073,7 +3081,7 @@ pub struct PreviousFocusAction {
 
 impl PreviousFocusAction {
     /// Creates a [`PreviousFocusAction`].
-    pub fn new(app: &mut App) -> Handle<PreviousFocusAction> {
+    pub fn new(app: &mut App) -> Ref<PreviousFocusAction> {
         app.create(PreviousFocusAction {
             action: ActionData::new(),
         })
@@ -3168,7 +3176,7 @@ pub struct DirectionalFocusAction {
 
 impl DirectionalFocusAction {
     /// Creates a [`DirectionalFocusAction`].
-    pub fn new(app: &mut App) -> Handle<DirectionalFocusAction> {
+    pub fn new(app: &mut App) -> Ref<DirectionalFocusAction> {
         app.create(DirectionalFocusAction {
             action: ActionData::new(),
             is_for_text_field: false,
@@ -3177,7 +3185,7 @@ impl DirectionalFocusAction {
 
     /// Creates a [`DirectionalFocusAction`] that ignores [`DirectionalFocusIntent`]s whose
     /// `ignore_text_fields` field is true.
-    pub fn for_text_field(app: &mut App) -> Handle<DirectionalFocusAction> {
+    pub fn for_text_field(app: &mut App) -> Ref<DirectionalFocusAction> {
         app.create(DirectionalFocusAction {
             action: ActionData::new(),
             is_for_text_field: true,
@@ -3285,7 +3293,7 @@ mod tests {
     }
 
     /// Mounts the given children in a `Stack` under a [`FocusTraversalGroup`] with `policy`.
-    fn mount_group(cell: &AppCell, policy: AnyFocusTraversalPolicy, children: Vec<WidgetRef>) {
+    fn mount_group(cell: &AppCell, policy: FocusTraversalPolicyRef, children: Vec<WidgetRef>) {
         mount(
             cell,
             Directionality::new(
@@ -3344,7 +3352,7 @@ mod tests {
     fn widget_order_traverses_in_widget_creation_order() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = WidgetOrderTraversalPolicy::new(&mut app).as_policy();
+        let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
         drop(app);
         mount_group(&cell, policy, scattered());
         let mut app = cell.borrow_mut();
@@ -3357,7 +3365,7 @@ mod tests {
     fn reading_order_traverses_top_to_bottom_in_the_reading_direction() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = ReadingOrderTraversalPolicy::new(&mut app).as_policy();
+        let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
         drop(app);
         mount_group(&cell, policy, scattered());
         let mut app = cell.borrow_mut();
@@ -3371,7 +3379,7 @@ mod tests {
     fn reading_order_follows_the_directionality_in_force() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = ReadingOrderTraversalPolicy::new(&mut app).as_policy();
+        let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
         drop(app);
         mount(
             &cell,
@@ -3391,7 +3399,7 @@ mod tests {
     fn ordered_traversal_follows_the_numeric_order() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = OrderedTraversalPolicy::new(&mut app).as_policy();
+        let policy = OrderedTraversalPolicy::new(&mut app).into_erased();
         let ordered = |label: &'static str, rect: Rect, order: f64| -> WidgetRef {
             FocusTraversalOrder::new(
                 Rc::new(NumericFocusOrder::new(order)),
@@ -3418,7 +3426,7 @@ mod tests {
     fn ordered_traversal_follows_the_lexical_order() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = OrderedTraversalPolicy::new(&mut app).as_policy();
+        let policy = OrderedTraversalPolicy::new(&mut app).into_erased();
         let ordered = |label: &'static str, rect: Rect, order: &'static str| -> WidgetRef {
             FocusTraversalOrder::new(
                 Rc::new(LexicalFocusOrder::new(order)),
@@ -3445,7 +3453,7 @@ mod tests {
     fn the_traversal_edge_behavior_decides_what_happens_at_the_last_node() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = WidgetOrderTraversalPolicy::new(&mut app).as_policy();
+        let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
         drop(app);
         mount_group(&cell, policy, scattered());
         let mut app = cell.borrow_mut();
@@ -3473,7 +3481,7 @@ mod tests {
     fn directional_focus_moves_to_the_neighbour_in_that_direction() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = ReadingOrderTraversalPolicy::new(&mut app).as_policy();
+        let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
         drop(app);
         mount_group(&cell, policy, scattered());
         let mut app = cell.borrow_mut();
@@ -3510,13 +3518,13 @@ mod tests {
             HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
         };
 
-        use crate::widgets::actions::Actions;
+        use crate::widgets::actions::{ActionRef, Actions};
         use crate::widgets::shortcuts::{ShortcutMap, Shortcuts, SingleActivator};
 
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = WidgetOrderTraversalPolicy::new(&mut app).as_policy();
-        let action = Action::as_action(NextFocusAction::new(&mut app));
+        let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
+        let action: ActionRef = NextFocusAction::new(&mut app).into_erased();
         let shortcuts: ShortcutMap = vec![(
             Rc::new(SingleActivator::new(LogicalKeyboardKey::TAB)),
             Rc::new(NextFocusIntent::new()),
@@ -3557,7 +3565,7 @@ mod tests {
     fn exclude_focus_traversal_keeps_its_descendants_out_of_the_order() {
         let cell = app_with_view();
         let mut app = cell.borrow_mut();
-        let policy = WidgetOrderTraversalPolicy::new(&mut app).as_policy();
+        let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
         drop(app);
         mount_group(
             &cell,

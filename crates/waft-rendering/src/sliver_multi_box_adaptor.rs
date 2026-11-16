@@ -1235,7 +1235,7 @@ pub(crate) mod viewport_test_support {
     use std::rc::Rc;
 
     use waft_embedder::{Size, View, ViewId, ViewMetrics, ViewRef};
-    use waft_foundation::Handle;
+    use waft_foundation::{Handle, Ref};
 
     use super::*;
     use crate::box_::RenderBox;
@@ -1270,7 +1270,7 @@ pub(crate) mod viewport_test_support {
     /// The scrolling machinery a lazy sliver needs: a viewport inside a [`RenderView`] rooted in
     /// a [`PipelineOwner`], laid out once.
     pub(crate) struct ScrollHarness {
-        pub(crate) owner: Handle<PipelineOwner>,
+        pub(crate) owner: Ref<PipelineOwner>,
         pub(crate) viewport: RenderHandle<RenderViewport>,
         pub(crate) offset: Handle<FixedViewportOffset>,
     }
@@ -1282,7 +1282,7 @@ pub(crate) mod viewport_test_support {
             let viewport = RenderViewport::new(
                 app,
                 AxisDirection::Right,
-                offset.as_viewport_offset(),
+                offset.erase(),
                 Some(vec![sliver]),
                 None,
             );
@@ -1301,7 +1301,7 @@ pub(crate) mod viewport_test_support {
             ScrollHarness {
                 owner,
                 viewport,
-                offset,
+                offset: offset.handle(),
             }
         }
 

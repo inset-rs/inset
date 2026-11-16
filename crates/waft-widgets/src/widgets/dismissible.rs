@@ -12,11 +12,13 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnimationStatus, AnimationStatusListener,
-    AnyAnimation, CurveTween, Curves, Interval, Tween,
+    Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, CurveTween, Curves, Drive, Interval, Tween,
 };
 use waft_embedder::{Offset, Rect, Size, TextDirection};
-use waft_foundation::{App, AsyncApp, Handle, Listenable, Listener, Task, VoidCallback};
+use waft_foundation::{
+    App, AsyncApp, Handle, Listenable, Listener, OptionRetained, Task, VoidCallback,
+};
 use waft_gestures::{
     DragEndDetails, DragStartBehavior, DragStartDetails, DragUpdateDetails, Velocity,
 };
@@ -34,6 +36,7 @@ use crate::widgets::basic::{ClipRect, Directionality, KeyedSubtree, Positioned, 
 use crate::widgets::gesture_detector::GestureDetector;
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
 use crate::widgets::transitions::{SizeTransition, SlideTransition};
+use waft_foundation::Ref;
 
 /// Dart's `_kResizeTimeCurve`.
 fn k_resize_time_curve() -> Interval {
@@ -442,16 +445,16 @@ impl Default for DismissUpdateDetails {
 /// Dart's `_DismissibleClipper`.
 struct DismissibleClipper {
     axis: Axis,
-    move_animation: AnyAnimation<Offset>,
+    move_animation: AnimationRef<Offset>,
     reclip: Rc<dyn Listenable>,
 }
 
 impl DismissibleClipper {
-    fn new(axis: Axis, move_animation: AnyAnimation<Offset>) -> DismissibleClipper {
+    fn new(axis: Axis, move_animation: AnimationRef<Offset>) -> DismissibleClipper {
         DismissibleClipper {
             axis,
+            reclip: Rc::new(move_animation.clone()),
             move_animation,
-            reclip: Rc::new(move_animation),
         }
     }
 }
@@ -529,10 +532,10 @@ pub struct DismissibleState {
     ticker_provider: TickerProviderStateMixinData,
     automatic_keep_alive_client: AutomaticKeepAliveClientMixinData,
     // Dart's `late final`: created in `init_state`, which has the `App`.
-    move_controller: Option<Handle<AnimationController>>,
-    move_animation: Option<AnyAnimation<Offset>>,
-    resize_controller: Option<Handle<AnimationController>>,
-    resize_animation: Option<AnyAnimation<f64>>,
+    move_controller: Option<Ref<AnimationController>>,
+    move_animation: Option<AnimationRef<Offset>>,
+    resize_controller: Option<Ref<AnimationController>>,
+    resize_animation: Option<AnimationRef<f64>>,
     drag_extent: f64,
     confirming: bool,
     drag_underway: bool,
@@ -545,11 +548,8 @@ impl DismissibleState {
     fn move_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .move_controller
+            .handle()
             .expect("created in init_state")
-    }
-
-    fn move_animation(self: Handle<Self>, app: &App) -> AnyAnimation<Offset> {
-        app.get(self).move_animation.expect("created in init_state")
     }
 
     fn direction_is_x_axis(self: Handle<Self>, app: &App) -> bool {
@@ -731,7 +731,12 @@ impl DismissibleState {
             Offset::new(cross_axis_end_offset, end)
         };
         let tween = Tween::new(app, Some(Offset::ZERO), Some(end_offset));
-        let move_animation = self.move_controller(app).drive(app, tween);
+        let move_controller = app
+            .get(self)
+            .move_controller
+            .clone()
+            .expect("created in init_state");
+        let move_animation = move_controller.drive(app, tween);
         app.get_mut(self).move_animation = Some(move_animation);
     }
 
@@ -895,7 +900,7 @@ impl DismissibleState {
                 }
             }
             Some(resize_duration) => {
-                let resize_controller = AnimationController::create(
+                let resize_controller = AnimationController::new(
                     app,
                     None,
                     Some(resize_duration),
@@ -913,7 +918,7 @@ impl DismissibleState {
                     app,
                     AnimationStatusListener::new(move |_status, app| self.update_keep_alive(app)),
                 );
-                app.get_mut(self).resize_controller = Some(resize_controller);
+                app.get_mut(self).resize_controller = Some(resize_controller.clone());
                 resize_controller.forward(app, None);
                 let size_prior_to_collapse = self.context(app).size(app);
                 let curve_tween = CurveTween::new(app, Rc::new(k_resize_time_curve()));
@@ -931,6 +936,7 @@ impl DismissibleState {
         let resize_controller = app
             .get(self)
             .resize_controller
+            .handle()
             .expect("listening to the resize controller");
         if resize_controller.status(app).is_completed() {
             if let Some(on_dismissed) = self.widget(app).on_dismissed.clone() {
@@ -963,7 +969,7 @@ impl Drop for ConfirmingGuard {
 }
 
 impl TickerProviderObject for DismissibleState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1002,7 +1008,10 @@ impl AutomaticKeepAliveClientMixin for DismissibleState {
             || app
                 .get(self)
                 .resize_controller
-                .is_some_and(|resize_controller| Animation::is_animating(resize_controller, app))
+                .as_ref()
+                .is_some_and(|resize_controller| {
+                    Animation::is_animating(resize_controller.handle(), app)
+                })
     }
 }
 
@@ -1012,7 +1021,7 @@ impl State for DismissibleState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let movement_duration = self.widget(app).movement_duration;
-        let move_controller = AnimationController::create(
+        let move_controller = AnimationController::new(
             app,
             None,
             Some(movement_duration),
@@ -1022,7 +1031,7 @@ impl State for DismissibleState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).move_controller = Some(move_controller);
+        app.get_mut(self).move_controller = Some(move_controller.clone());
         AutomaticKeepAliveClientMixin::init_state(self, app);
         move_controller.add_status_listener(
             app,
@@ -1047,7 +1056,7 @@ impl State for DismissibleState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.move_controller(app).dispose(app);
-        if let Some(resize_controller) = app.get(self).resize_controller {
+        if let Some(resize_controller) = app.get(self).resize_controller.handle() {
             resize_controller.dispose(app);
         }
         TickerProviderStateMixin::dispose(self, app);
@@ -1065,7 +1074,7 @@ impl State for DismissibleState {
             }
         }
 
-        if let Some(resize_animation) = app.get(self).resize_animation {
+        if let Some(resize_animation) = app.get(self).resize_animation.clone() {
             // we've been dragged aside, and are now resizing.
             if cfg!(debug_assertions) && resize_animation.status(app) != AnimationStatus::Forward {
                 assert!(resize_animation.is_completed(app));
@@ -1096,10 +1105,14 @@ impl State for DismissibleState {
                 .into_widget();
         }
 
-        let move_animation = self.move_animation(app);
+        let move_animation = app
+            .get(self)
+            .move_animation
+            .clone()
+            .expect("created in init_state");
         let content_key = app.get(self).content_key.clone();
         let child = self.widget(app).child.clone();
-        let mut content = SlideTransition::new(move_animation)
+        let mut content = SlideTransition::new(move_animation.clone())
             .child(KeyedSubtree::new(child).key(content_key.into()))
             .into_widget();
 
@@ -1566,7 +1579,7 @@ mod tests {
         start_to_end_threshold: Option<f64>,
         text_direction: TextDirection,
         confirm_dismiss: Option<ConfirmDismissCallback>,
-        controller: Option<Handle<ScrollController>>,
+        controller: Option<Ref<ScrollController>>,
         scroll_physics: Option<ScrollPhysicsRef>,
         background: Option<&'static str>,
     }
@@ -1660,8 +1673,8 @@ mod tests {
                 if let Some(physics) = options.scroll_physics.clone() {
                     list = list.physics(physics);
                 }
-                if let Some(controller) = options.controller {
-                    list = list.controller(controller.as_controller());
+                if let Some(controller) = &options.controller {
+                    list = list.controller(controller.erase());
                 }
                 Container::new()
                     .padding(EdgeInsetsGeometry::all(10.0))
@@ -2720,7 +2733,7 @@ mod tests {
         tester.pump_widget(build_test(
             &results,
             BuildTest {
-                controller: Some(controller),
+                controller: Some(controller.clone()),
                 dismiss_direction: DismissDirection::None,
                 ..BuildTest::default()
             },

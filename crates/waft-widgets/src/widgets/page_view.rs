@@ -12,15 +12,15 @@ use std::time::Duration;
 use waft_animation::Curve;
 use waft_embedder::{Clip, clamp_double};
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, PRECISION_ERROR_TOLERANCE,
-    ValueChanged,
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, OptionRetained,
+    PRECISION_ERROR_TOLERANCE, ValueChanged,
 };
 use waft_gestures::DragStartBehavior;
 use waft_painting::{Axis, AxisDirection, flip_axis_direction, text_direction_to_axis_direction};
 use waft_physics::{ScrollSpringSimulation, Simulation, Tolerance};
 use waft_rendering::{
-    AnyRenderObject, AnyViewportOffset, HitTestBehavior, ScrollCacheExtent, ScrollDirection,
-    ViewportOffset,
+    AnyRenderObject, HitTestBehavior, ScrollCacheExtent, ScrollDirection, ViewportOffset,
+    ViewportOffsetRef,
 };
 
 use crate::framework::{
@@ -44,7 +44,7 @@ use crate::widgets::scroll_notification::{ScrollNotification, ScrollUpdateNotifi
 use crate::widgets::scroll_physics::{ScrollPhysics, ScrollPhysicsBase, ScrollPhysicsRef};
 use crate::widgets::scroll_position::{
     AnyScrollPosition, ScrollPosition, ScrollPositionAlignmentPolicy, ScrollPositionBase,
-    ScrollPositionData,
+    ScrollPositionData, ScrollPositionRef,
 };
 use crate::widgets::scroll_position_with_single_context::{
     ScrollPositionWithSingleContext, ScrollPositionWithSingleContextData,
@@ -53,6 +53,7 @@ use crate::widgets::scroll_position_with_single_context::{
 use crate::widgets::scrollable::{Scrollable, ViewportBuilder};
 use crate::widgets::sliver_fill::SliverFillViewport;
 use crate::widgets::viewport::Viewport;
+use waft_foundation::Ref;
 
 // ---------------------------------------------------------------------------------------------
 // PageController
@@ -87,7 +88,7 @@ impl PageController {
         viewport_fraction: f64,
         on_attach: Option<ScrollControllerCallback>,
         on_detach: Option<ScrollControllerCallback>,
-    ) -> Handle<PageController> {
+    ) -> Ref<PageController> {
         debug_assert!(viewport_fraction > 0.0);
         app.create(PageController {
             change_notifier: ChangeNotifierData::new(),
@@ -99,7 +100,7 @@ impl PageController {
     }
 
     /// Dart's `PageController()`, with every argument at its default.
-    pub fn default(app: &mut App) -> Handle<PageController> {
+    pub fn default(app: &mut App) -> Ref<PageController> {
         PageController::new(app, 0, true, 1.0, None, None)
     }
 
@@ -285,7 +286,7 @@ impl ScrollControllerLeaf for PageController {
         physics: ScrollPhysicsRef,
         context: Rc<dyn ScrollContext>,
         old_position: Option<AnyScrollPosition>,
-    ) -> AnyScrollPosition {
+    ) -> ScrollPositionRef {
         let this = app.get(self);
         let (initial_page, keep_page, viewport_fraction) =
             (this.initial_page, this.keep_page, this.viewport_fraction);
@@ -298,12 +299,13 @@ impl ScrollControllerLeaf for PageController {
             viewport_fraction,
             old_position,
         )
-        .as_scroll_position()
+        .into_erased()
     }
 
-    fn attach(self: Handle<Self>, app: &mut App, position: AnyScrollPosition) {
+    fn attach(self: Handle<Self>, app: &mut App, position: ScrollPositionRef) {
+        let attached = position.handle();
         ScrollController::attach(self.as_controller(), app, position);
-        let page_position = position
+        let page_position = attached
             .downcast::<PagePosition>(app)
             .expect("a PageController attaches the positions it creates");
         let viewport_fraction = app.get(self).viewport_fraction;
@@ -537,7 +539,7 @@ impl PagePosition {
         keep_page: bool,
         viewport_fraction: f64,
         old_position: Option<AnyScrollPosition>,
-    ) -> Handle<PagePosition> {
+    ) -> Ref<PagePosition> {
         debug_assert!(viewport_fraction > 0.0);
         let scroll_position = ScrollPositionData::new(app, physics, context, keep_page, None);
         let this = app.create(PagePosition {
@@ -548,7 +550,7 @@ impl PagePosition {
             cached_page: None,
             viewport_fraction,
         });
-        ScrollPositionWithSingleContext::init(this, app, None, old_position);
+        ScrollPositionWithSingleContext::init(this.handle(), app, None, old_position);
         this
     }
 
@@ -1142,7 +1144,7 @@ pub struct PageView {
     pub reverse: bool,
 
     /// An object that can be used to control the position to which this page view is scrolled.
-    pub controller: Option<Handle<PageController>>,
+    pub controller: Option<Ref<PageController>>,
 
     /// How the page view should respond to user input.
     ///
@@ -1291,7 +1293,7 @@ impl PageView {
     }
 
     /// Dart `PageView(controller:)`.
-    pub fn controller(mut self, controller: Handle<PageController>) -> PageView {
+    pub fn controller(mut self, controller: Ref<PageController>) -> PageView {
         self.controller = Some(controller);
         self
     }
@@ -1464,18 +1466,19 @@ impl IntoWidget<crate::framework::StatefulKind> for PageViewBuilder {
 pub struct PageViewState {
     state: StateData<PageView>,
     last_reported_page: i32,
-    controller: Option<Handle<PageController>>,
+    controller: Option<Ref<PageController>>,
 }
 
 impl PageViewState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<PageController> {
         app.get(self)
             .controller
+            .handle()
             .expect("the controller is set in init_state")
     }
 
     fn init_controller(self: Handle<Self>, app: &mut App) {
-        let controller = match self.widget(app).controller {
+        let controller = match self.widget(app).controller.clone() {
             Some(controller) => controller,
             None => PageController::default(app),
         };
@@ -1591,11 +1594,15 @@ impl State for PageViewState {
                     .scrollbars(false),
             ),
         };
-        let controller = self.controller(app);
+        let controller = app
+            .get(self)
+            .controller
+            .clone()
+            .expect("the controller is set in init_state");
         let viewport_fraction = controller.viewport_fraction(app);
 
         let viewport_builder: ViewportBuilder =
-            Rc::new(move |_app, _context, position: AnyViewportOffset| {
+            Rc::new(move |_app, _context, position: ViewportOffsetRef| {
                 Viewport::new(position)
                     .scroll_cache_extent(scroll_cache_extent)
                     .axis_direction(axis_direction)
@@ -1612,7 +1619,7 @@ impl State for PageViewState {
         let mut scrollable = Scrollable::new(viewport_builder)
             .drag_start_behavior(drag_start_behavior)
             .axis_direction(axis_direction)
-            .controller(controller.as_controller())
+            .controller(controller.into_erased())
             .physics(physics)
             .hit_test_behavior(hit_test_behavior)
             .scroll_behavior(scroll_behavior);
@@ -2116,7 +2123,7 @@ mod tests {
         tester: &WidgetTester,
         initial_page: i32,
         viewport_fraction: f64,
-    ) -> Handle<PageController> {
+    ) -> Ref<PageController> {
         PageController::new(
             &mut tester.cell.borrow_mut(),
             initial_page,
@@ -2132,7 +2139,7 @@ mod tests {
     fn a_page_controller_cannot_return_its_page_while_unattached() {
         let tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        page(&tester, controller);
+        page(&tester, controller.handle());
     }
 
     #[test]
@@ -2204,7 +2211,9 @@ mod tests {
         tester.pump_widget(centered(
             600.0,
             400.0,
-            PageView::new().controller(controller).children(states()),
+            PageView::new()
+                .controller(controller.clone())
+                .children(states()),
         ));
 
         assert!(finds(&tester, "California"));
@@ -2221,7 +2230,9 @@ mod tests {
         tester.pump_widget(centered(
             300.0,
             400.0,
-            PageView::new().controller(controller).children(states()),
+            PageView::new()
+                .controller(controller.clone())
+                .children(states()),
         ));
 
         assert!(finds(&tester, "Colorado"));
@@ -2262,7 +2273,7 @@ mod tests {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
         tester.pump_widget(ltr(PageView::new()
-            .controller(controller)
+            .controller(controller.clone())
             .children(states())));
 
         let next_page = controller.next_page(
@@ -2304,11 +2315,11 @@ mod tests {
         assert!(finds(&tester, "Alabama"));
     }
 
-    fn sized_page_view(size: Size, controller: Handle<PageController>) -> WidgetRef {
+    fn sized_page_view(size: Size, controller: &Ref<PageController>) -> WidgetRef {
         ltr(Center::new().child(
             SizedBox::from_size(Some(size)).child(
                 PageView::new()
-                    .controller(controller)
+                    .controller(controller.clone())
                     .on_page_changed(|_, _| {})
                     .children(states()),
             ),
@@ -2321,12 +2332,12 @@ mod tests {
         let controller = new_controller(&tester, 1, 1.0);
 
         // The pageView have a zero viewport, so nothing display.
-        tester.pump_widget(sized_page_view(Size::ZERO, controller));
+        tester.pump_widget(sized_page_view(Size::ZERO, &controller));
         assert!(!finds(&tester, "Alabama"));
         assert!(finds_built(&tester, "Alabama"));
 
         // Resize from zero viewport to non-zero, the controller's initialPage 1 will display.
-        tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), controller));
+        tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), &controller));
         assert!(finds(&tester, "Alaska"));
 
         // Jump to page 'Iowa'.
@@ -2335,12 +2346,12 @@ mod tests {
         assert!(finds(&tester, "Iowa"));
 
         // Resize to zero viewport again, nothing display.
-        tester.pump_widget(sized_page_view(Size::ZERO, controller));
+        tester.pump_widget(sized_page_view(Size::ZERO, &controller));
         assert!(!finds(&tester, "Iowa"));
 
         // Resize from zero to non-zero, the pageView should not lose state, so the page 'Iowa'
         // show again.
-        tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), controller));
+        tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), &controller));
         assert!(finds(&tester, "Iowa"));
     }
 
@@ -2350,7 +2361,7 @@ mod tests {
         let controller = new_controller(&tester, 1, 1.0);
 
         // The pageView have a zero viewport, so nothing display.
-        tester.pump_widget(sized_page_view(Size::ZERO, controller));
+        tester.pump_widget(sized_page_view(Size::ZERO, &controller));
         let page_view = tester.render_object_of::<PageView>();
         let size = page_view
             .as_box()
@@ -2367,18 +2378,21 @@ mod tests {
             Duration::from_millis(300),
             Curves::ease(),
         ));
-        assert_eq!(page(&tester, controller), Some(f64::from(index_of("Iowa"))));
+        assert_eq!(
+            page(&tester, controller.handle()),
+            Some(f64::from(index_of("Iowa")))
+        );
 
         controller.jump_to_page(&mut tester.cell.borrow_mut(), index_of("Illinois"));
         assert_eq!(
-            page(&tester, controller),
+            page(&tester, controller.handle()),
             Some(f64::from(index_of("Illinois")))
         );
 
         // Resize from zero viewport to non-zero, the latest state should not lost.
-        tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), controller));
+        tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), &controller));
         assert_eq!(
-            page(&tester, controller),
+            page(&tester, controller.handle()),
             Some(f64::from(index_of("Illinois")))
         );
         assert!(finds(&tester, "Illinois"));
@@ -2441,7 +2455,7 @@ mod tests {
         let build = |size: Option<Size>| -> WidgetRef {
             let log = Rc::clone(&log);
             let page_view = ltr(PageView::new()
-                .controller(controller)
+                .controller(controller.clone())
                 .on_page_changed(move |_, page| log.borrow_mut().push(page))
                 .physics(Rc::new(BouncingScrollPhysics::new()))
                 .children(states()));
@@ -2483,12 +2497,12 @@ mod tests {
         assert!(!finds(&tester, "Arizona"));
     }
 
-    fn built_page_view(controller: Handle<PageController>, item_count: i32) -> WidgetRef {
+    fn built_page_view(controller: &Ref<PageController>, item_count: i32) -> WidgetRef {
         ltr(
             PageView::builder(|_, _, _| Some(SizedBox::expand().into_widget()))
                 .item_count(item_count)
                 .build()
-                .controller(controller),
+                .controller(controller.clone()),
         )
     }
 
@@ -2496,7 +2510,7 @@ mod tests {
     fn pages_fill_their_viewport_fraction() {
         let mut tester = WidgetTester::new();
         let controller = new_controller(&tester, 0, 7.0 / 8.0);
-        tester.pump_widget(built_page_view(controller, K_STATES.len() as i32));
+        tester.pump_widget(built_page_view(&controller, K_STATES.len() as i32));
 
         assert_eq!(top_left(&tester, "Alabama"), Offset::new(50.0, 0.0));
         assert_eq!(top_left(&tester, "Alaska"), Offset::new(750.0, 0.0));
@@ -2509,7 +2523,7 @@ mod tests {
         assert_eq!(top_left(&tester, "Idaho"), Offset::new(750.0, 0.0));
 
         let controller = new_controller(&tester, 0, 39.0 / 40.0);
-        tester.pump_widget(built_page_view(controller, K_STATES.len() as i32));
+        tester.pump_widget(built_page_view(&controller, K_STATES.len() as i32));
 
         assert_eq!(top_left(&tester, "Georgia"), Offset::new(-770.0, 0.0));
         assert_eq!(top_left(&tester, "Hawaii"), Offset::new(10.0, 0.0));
@@ -2572,7 +2586,7 @@ mod tests {
     fn a_small_viewport_fraction_shows_several_pages() {
         let mut tester = WidgetTester::new();
         let controller = new_controller(&tester, 0, 1.0 / 8.0);
-        tester.pump_widget(built_page_view(controller, K_STATES.len() as i32));
+        tester.pump_widget(built_page_view(&controller, K_STATES.len() as i32));
 
         assert_eq!(top_left(&tester, "Alabama"), Offset::new(350.0, 0.0));
         assert_eq!(top_left(&tester, "Alaska"), Offset::new(450.0, 0.0));
@@ -2598,7 +2612,7 @@ mod tests {
     fn a_large_viewport_fraction_centers_pages_wider_than_the_viewport() {
         let mut tester = WidgetTester::new();
         let controller = new_controller(&tester, 0, 5.0 / 4.0);
-        tester.pump_widget(built_page_view(controller, K_STATES.len() as i32));
+        tester.pump_widget(built_page_view(&controller, K_STATES.len() as i32));
 
         assert_eq!(top_left(&tester, "Alabama"), Offset::new(-100.0, 0.0));
         let alabama = page_box(&tester, 0);
@@ -2616,12 +2630,12 @@ mod tests {
     fn a_new_controller_with_a_larger_viewport_fraction_centers_its_page() {
         let mut tester = WidgetTester::new();
         let old_controller = new_controller(&tester, 0, 5.0 / 4.0);
-        tester.pump_widget(built_page_view(old_controller, K_STATES.len() as i32));
+        tester.pump_widget(built_page_view(&old_controller, K_STATES.len() as i32));
 
         assert_eq!(top_left(&tester, "Alabama"), Offset::new(-100.0, 0.0));
 
         let new_controller = new_controller(&tester, 0, 4.0);
-        tester.pump_widget(built_page_view(new_controller, K_STATES.len() as i32));
+        tester.pump_widget(built_page_view(&new_controller, K_STATES.len() as i32));
         new_controller.jump_to_page(&mut tester.cell.borrow_mut(), 10);
         tester.pump(Duration::ZERO);
 
@@ -2635,7 +2649,7 @@ mod tests {
     fn a_large_viewport_fraction_scrolls_to_the_last_page_and_snaps() {
         let mut tester = WidgetTester::new();
         let controller = new_controller(&tester, 0, 5.0 / 4.0);
-        tester.pump_widget(built_page_view(controller, 3));
+        tester.pump_widget(built_page_view(&controller, 3));
 
         assert_eq!(center_of(&tester, 0), Offset::new(400.0, 300.0));
 
@@ -2653,14 +2667,14 @@ mod tests {
     fn a_large_viewport_fraction_settles_on_the_page_dragged_past_halfway() {
         let mut tester = WidgetTester::new();
         let controller = new_controller(&tester, 0, 5.0 / 4.0);
-        tester.pump_widget(built_page_view(controller, 3));
+        tester.pump_widget(built_page_view(&controller, 3));
 
         // Pages are 1000 wide and start 100 in: 600 dragged is past halfway to page 1, whose
         // pixels are 1100, where whole viewports would have counted page 1 at 800.
         tester.drag_from(CENTER, Offset::new(-600.0, 0.0));
         tester.settle();
 
-        assert_eq!(page(&tester, controller), Some(1.0));
+        assert_eq!(page(&tester, controller.handle()), Some(1.0));
         assert_eq!(center_of(&tester, 1), Offset::new(400.0, 300.0));
     }
 
@@ -2670,7 +2684,7 @@ mod tests {
         let controller = new_controller(&tester, K_STATES.len() as i32 - 1, 0.5);
         let last = K_STATES.len() as i32 - 1;
 
-        tester.pump_widget(sized_page_view(Size::new(300.0, 300.0), controller));
+        tester.pump_widget(sized_page_view(Size::new(300.0, 300.0), &controller));
         tester.settle();
 
         let center = center_of(&tester, last);
@@ -2679,7 +2693,7 @@ mod tests {
             "{center:?}"
         );
 
-        tester.pump_widget(sized_page_view(Size::new(200.0, 300.0), controller));
+        tester.pump_widget(sized_page_view(Size::new(200.0, 300.0), &controller));
         tester.settle();
 
         let center = center_of(&tester, last);
@@ -2696,7 +2710,7 @@ mod tests {
         let change_index = Rc::new(Cell::new(0));
         let changed = Rc::clone(&change_index);
         tester.pump_widget(ltr(PageView::new()
-            .controller(controller)
+            .controller(controller.clone())
             .children(states())
             .on_page_changed(move |_, page| changed.set(page))));
 
@@ -2709,9 +2723,9 @@ mod tests {
     }
 
     fn stored_page_view(
-        bucket: Handle<PageStorageBucket>,
+        bucket: Ref<PageStorageBucket>,
         key: &'static str,
-        controller: Handle<PageController>,
+        controller: Ref<PageController>,
     ) -> WidgetRef {
         ltr(PageStorage::new(
             bucket,
@@ -2739,28 +2753,42 @@ mod tests {
     fn a_page_view_restores_its_page_from_page_storage() {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        assert_eq!(page_assert_message(&tester, controller), PAGE_BEFORE_BUILD);
+        assert_eq!(
+            page_assert_message(&tester, controller.handle()),
+            PAGE_BEFORE_BUILD
+        );
         let bucket = PageStorageBucket::new(&mut tester.cell.borrow_mut());
-        tester.pump_widget(stored_page_view(bucket, "PageView", controller));
-        assert_eq!(page(&tester, controller), Some(0.0));
+        tester.pump_widget(stored_page_view(
+            bucket.clone(),
+            "PageView",
+            controller.clone(),
+        ));
+        assert_eq!(page(&tester, controller.handle()), Some(0.0));
         controller.jump_to_page(&mut tester.cell.borrow_mut(), 2);
         // Flutter settles in 2 pumps; its second is the semantics update the jump asks for, and
         // accessibility is deferred, so this settles in 1.
         assert_eq!(tester.pump_and_settle(Duration::from_secs(60)), 1);
-        assert_eq!(page(&tester, controller), Some(2.0));
-        tester.pump_widget(PageStorage::new(bucket, SizedBox::new()));
-        assert_eq!(page_assert_message(&tester, controller), PAGE_BEFORE_BUILD);
-        tester.pump_widget(stored_page_view(bucket, "PageView", controller));
-        assert_eq!(page(&tester, controller), Some(2.0));
+        assert_eq!(page(&tester, controller.handle()), Some(2.0));
+        tester.pump_widget(PageStorage::new(bucket.clone(), SizedBox::new()));
+        assert_eq!(
+            page_assert_message(&tester, controller.handle()),
+            PAGE_BEFORE_BUILD
+        );
+        tester.pump_widget(stored_page_view(
+            bucket.clone(),
+            "PageView",
+            controller.clone(),
+        ));
+        assert_eq!(page(&tester, controller.handle()), Some(2.0));
 
         let controller2 =
             PageController::new(&mut tester.cell.borrow_mut(), 0, false, 1.0, None, None);
         tester.pump_widget(stored_page_view(
             bucket,
             "Check it again against your list and see consistency!",
-            controller2,
+            controller2.clone(),
         ));
-        assert_eq!(page(&tester, controller2), Some(0.0));
+        assert_eq!(page(&tester, controller2.handle()), Some(0.0));
     }
 
     #[test]
@@ -2784,12 +2812,12 @@ mod tests {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
         tester.pump_widget(ltr(PageView::new()
-            .controller(controller)
+            .controller(controller.clone())
             .children((0..3).map(|_| SizedBox::expand().into_widget()))));
         // Simulate precision error.
         let position = controller.position(&tester.cell.borrow());
         position.jump_to(&mut tester.cell.borrow_mut(), 799.99999999999);
-        assert_eq!(page(&tester, controller), Some(1.0));
+        assert_eq!(page(&tester, controller.handle()), Some(1.0));
     }
 
     #[test]
@@ -2830,7 +2858,7 @@ mod tests {
         );
         tester.pump_widget(ltr(Center::new().child(
             PageView::new()
-                .controller(controller)
+                .controller(controller.clone())
                 .physics(
                     PageScrollPhysics::new().apply_to(Some(Rc::new(ClampingScrollPhysics::new()))),
                 )
@@ -2852,13 +2880,13 @@ mod tests {
 
     fn keyed_page_view(
         key: &crate::framework::GlobalKey,
-        controller: Option<Handle<PageController>>,
+        controller: Option<Ref<PageController>>,
     ) -> WidgetRef {
         let mut page_view = PageView::new()
             .key(key.clone().into())
             .children((0..3).map(|_| Center::new().into_widget()));
         if let Some(controller) = controller {
-            page_view = page_view.controller(controller);
+            page_view = page_view.controller(controller.clone());
         }
         ltr(page_view)
     }
@@ -2867,7 +2895,7 @@ mod tests {
     /// it controls the page view, and its jumps panic when it does not.
     fn check_page_view_with_controller(
         tester: &mut WidgetTester,
-        controller: Handle<PageController>,
+        controller: Ref<PageController>,
         controls: bool,
     ) {
         let initial_page_in_view = onstage(tester)[0];
@@ -2892,7 +2920,7 @@ mod tests {
         let key = crate::framework::GlobalKey::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
         tester.pump_widget(keyed_page_view(&key, None));
-        tester.pump_widget(keyed_page_view(&key, Some(controller)));
+        tester.pump_widget(keyed_page_view(&key, Some(controller.clone())));
         check_page_view_with_controller(&mut tester, controller, true);
     }
 
@@ -2902,9 +2930,9 @@ mod tests {
         let key = crate::framework::GlobalKey::new();
         let controller1 = PageController::default(&mut tester.cell.borrow_mut());
         let controller2 = PageController::default(&mut tester.cell.borrow_mut());
-        tester.pump_widget(keyed_page_view(&key, Some(controller1)));
-        check_page_view_with_controller(&mut tester, controller1, true);
-        tester.pump_widget(keyed_page_view(&key, Some(controller2)));
+        tester.pump_widget(keyed_page_view(&key, Some(controller1.clone())));
+        check_page_view_with_controller(&mut tester, controller1.clone(), true);
+        tester.pump_widget(keyed_page_view(&key, Some(controller2.clone())));
         check_page_view_with_controller(&mut tester, controller1, false);
         check_page_view_with_controller(&mut tester, controller2, true);
     }
@@ -2914,8 +2942,8 @@ mod tests {
         let mut tester = WidgetTester::new();
         let key = crate::framework::GlobalKey::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        tester.pump_widget(keyed_page_view(&key, Some(controller)));
-        check_page_view_with_controller(&mut tester, controller, true);
+        tester.pump_widget(keyed_page_view(&key, Some(controller.clone())));
+        check_page_view_with_controller(&mut tester, controller.clone(), true);
         tester.pump_widget(keyed_page_view(&key, None));
         check_page_view_with_controller(&mut tester, controller, false);
     }
@@ -2931,12 +2959,12 @@ mod tests {
     // ---- page_view_test.dart: scrollCacheExtent ----
 
     fn cached_page_view(
-        controller: Handle<PageController>,
+        controller: Ref<PageController>,
         allow_implicit_scrolling: bool,
         scroll_cache_extent: Option<ScrollCacheExtent>,
     ) -> WidgetRef {
         let mut page_view = PageView::new()
-            .controller(controller)
+            .controller(controller.clone())
             .allow_implicit_scrolling(allow_implicit_scrolling)
             .children((0..3).map(|_| SizedBox::expand().into_widget()));
         if let Some(scroll_cache_extent) = scroll_cache_extent {
@@ -2969,7 +2997,7 @@ mod tests {
         let controller = PageController::default(&mut tester.cell.borrow_mut());
 
         // Default (allowImplicitScrolling: false) -> scrollCacheExtent: viewport(0.0)
-        tester.pump_widget(cached_page_view(controller, false, None));
+        tester.pump_widget(cached_page_view(controller.clone(), false, None));
         assert!(!built_indices(&tester).contains(&1));
 
         // allowImplicitScrolling: true -> scrollCacheExtent: viewport(1.0)
@@ -2984,7 +3012,7 @@ mod tests {
 
         // Start with viewport(1.0)
         tester.pump_widget(cached_page_view(
-            controller,
+            controller.clone(),
             true,
             Some(ScrollCacheExtent::Viewport(1.0)),
         ));
@@ -2992,7 +3020,7 @@ mod tests {
 
         // Update to viewport(2.0)
         tester.pump_widget(cached_page_view(
-            controller,
+            controller.clone(),
             true,
             Some(ScrollCacheExtent::Viewport(2.0)),
         ));
@@ -3173,7 +3201,7 @@ mod tests {
         })
         .item_count(20)
         .build()
-        .controller(controller)));
+        .controller(controller.clone())));
 
         // The first 3 items should be visible and tappable.
         for index in [0, 1, 2] {
@@ -3233,7 +3261,7 @@ mod tests {
                     })
                     .item_count(366)
                     .build()
-                    .controller(controller))),
+                    .controller(controller.clone()))),
             ),
         );
 
@@ -3245,17 +3273,17 @@ mod tests {
         (0..3).map(|_| SizedBox::expand().into_widget())
     }
 
-    fn two_page_views(controller: Handle<PageController>) -> WidgetRef {
+    fn two_page_views(controller: &Ref<PageController>) -> WidgetRef {
         ltr(Column::new().children([
             Expanded::new(
                 PageView::new()
-                    .controller(controller)
+                    .controller(controller.clone())
                     .children(three_pages()),
             )
             .into_widget(),
             Expanded::new(
                 PageView::new()
-                    .controller(controller)
+                    .controller(controller.clone())
                     .children(three_pages()),
             )
             .into_widget(),
@@ -3267,7 +3295,7 @@ mod tests {
     fn animate_to_page_asserts_when_its_controller_has_two_page_views() {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        tester.pump_widget(two_page_views(controller));
+        tester.pump_widget(two_page_views(&controller));
 
         drop(controller.animate_to_page(
             &mut tester.cell.borrow_mut(),
@@ -3282,7 +3310,7 @@ mod tests {
     fn jump_to_page_asserts_when_its_controller_has_two_page_views() {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        tester.pump_widget(two_page_views(controller));
+        tester.pump_widget(two_page_views(&controller));
 
         controller.jump_to_page(&mut tester.cell.borrow_mut(), 2);
     }
@@ -3303,10 +3331,10 @@ mod tests {
         )
     }
 
-    fn page_view_with(controller: Option<Handle<PageController>>) -> WidgetRef {
+    fn page_view_with(controller: Option<&Ref<PageController>>) -> WidgetRef {
         let mut page_view = PageView::new().children(three_pages());
         if let Some(controller) = controller {
-            page_view = page_view.controller(controller);
+            page_view = page_view.controller(controller.clone());
         }
         ltr(page_view)
     }
@@ -3332,7 +3360,7 @@ mod tests {
         );
 
         // pageController is attached to PageView
-        tester.pump_widget(page_view_with(Some(controller)));
+        tester.pump_widget(page_view_with(Some(&controller)));
         assert_eq!(panic_message(|| animate(&tester)), None);
     }
 
@@ -3351,7 +3379,7 @@ mod tests {
         );
 
         // pageController is attached to PageView
-        tester.pump_widget(page_view_with(Some(controller)));
+        tester.pump_widget(page_view_with(Some(&controller)));
         assert_eq!(panic_message(|| jump(&tester)), None);
     }
 
@@ -3362,11 +3390,12 @@ mod tests {
         let current_page_is_none = Rc::new(Cell::new(None));
         let page_view = || {
             let current_page_is_none = Rc::clone(&current_page_is_none);
+            let observed = controller.handle();
             ltr(Column::new().children([Expanded::new(
                 PageView::new()
-                    .controller(controller)
+                    .controller(controller.clone())
                     .children([Builder::new(move |app, _| {
-                        current_page_is_none.set(Some(controller.page(app).is_none()));
+                        current_page_is_none.set(Some(observed.page(app).is_none()));
                         Center::new().into_widget()
                     })
                     .into_widget()]),
@@ -3379,21 +3408,21 @@ mod tests {
         // A rebuild, as the test's `setState` asks for.
         tester.pump_widget(page_view());
         assert_eq!(current_page_is_none.get(), Some(false));
-        assert!(page(&tester, controller).is_some());
+        assert!(page(&tester, controller.handle()).is_some());
     }
 
     /// A page view in an offstage overlay entry that keeps its state, under an opaque one: built
     /// and never laid out, as the page of a route under another route is.
     fn page_view_before_layout(
         tester: &WidgetTester,
-        controller: Handle<PageController>,
+        controller: Ref<PageController>,
     ) -> WidgetRef {
         let mut app = tester.cell.borrow_mut();
         let below = OverlayEntry::new(
             &mut app,
             Rc::new(move |_, _| {
                 PageView::new()
-                    .controller(controller)
+                    .controller(controller.clone())
                     .children((0..2).map(|_| SizedBox::expand().into_widget()))
                     .into_widget()
             }),
@@ -3415,7 +3444,7 @@ mod tests {
     fn jump_to_page_before_layout_does_not_panic() {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        let page_view = page_view_before_layout(&tester, controller);
+        let page_view = page_view_before_layout(&tester, controller.clone());
         tester.pump_widget(page_view);
         assert!(!viewport_was_laid_out(&tester));
 
@@ -3426,7 +3455,7 @@ mod tests {
     fn animate_to_page_before_layout_does_not_panic() {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        let page_view = page_view_before_layout(&tester, controller);
+        let page_view = page_view_before_layout(&tester, controller.clone());
         tester.pump_widget(page_view);
         assert!(!viewport_was_laid_out(&tester));
 
@@ -3451,7 +3480,11 @@ mod tests {
         for scroll_cache_extent in [Some(ScrollCacheExtent::Viewport(1.0)), None] {
             let mut tester = WidgetTester::new();
             let controller = PageController::default(&mut tester.cell.borrow_mut());
-            tester.pump_widget(cached_page_view_of(controller, scroll_cache_extent, 4));
+            tester.pump_widget(cached_page_view_of(
+                controller.clone(),
+                scroll_cache_extent,
+                4,
+            ));
 
             // Page 2 (index 1) is within the implicit cache extent.
             let target = page_box(&tester, 1);
@@ -3466,7 +3499,7 @@ mod tests {
 
             // Should scroll.
             assert_eq!(
-                page(&tester, controller),
+                page(&tester, controller.handle()),
                 Some(1.0),
                 "{scroll_cache_extent:?}"
             );
@@ -3474,11 +3507,11 @@ mod tests {
     }
 
     fn cached_page_view_of(
-        controller: Handle<PageController>,
+        controller: Ref<PageController>,
         scroll_cache_extent: Option<ScrollCacheExtent>,
         page_count: usize,
     ) -> WidgetRef {
-        let mut page_view = PageView::new().controller(controller);
+        let mut page_view = PageView::new().controller(controller.clone());
         if let Some(scroll_cache_extent) = scroll_cache_extent {
             page_view = page_view.scroll_cache_extent(scroll_cache_extent);
         }
@@ -3525,16 +3558,16 @@ mod tests {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
         tester.pump_widget(ltr(PageView::new()
-            .controller(controller)
+            .controller(controller.clone())
             .children(states())));
         tester.drag_from(CENTER, Offset::new(-300.0, 0.0));
         tester.settle();
-        assert_eq!(page(&tester, controller), Some(0.0));
+        assert_eq!(page(&tester, controller.handle()), Some(0.0));
         tester.drag_from(CENTER, Offset::new(-500.0, 0.0));
         tester.settle();
-        assert_eq!(page(&tester, controller), Some(1.0));
+        assert_eq!(page(&tester, controller.handle()), Some(1.0));
         tester.fling_from(CENTER, Offset::new(-100.0, 0.0), 1000.0);
         tester.settle();
-        assert_eq!(page(&tester, controller), Some(2.0));
+        assert_eq!(page(&tester, controller.handle()), Some(2.0));
     }
 }

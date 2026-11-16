@@ -6,11 +6,11 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_animation::{
-    Animatable, Animation as _, AnimationBehavior, AnimationController, AnimationStatusListener,
-    AnyAnimation, ColorTween, CurvedAnimation, Curves, Tween,
+    Animatable, Animation as _, AnimationBehavior, AnimationController, AnimationRef,
+    AnimationStatusListener, AnyAnimation, ColorTween, CurvedAnimation, Curves, Tween,
 };
 use waft_embedder::{Brightness, Canvas, Color, Offset, Paint, Rect, Size};
-use waft_foundation::{App, Handle, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listener, Ref, ValueChanged};
 use waft_painting::{
     AlignmentGeometry, EdgeInsetsGeometry, TextDirection, TextOverflow, TextStyle,
 };
@@ -622,11 +622,9 @@ impl StatefulWidget for BottomNavigationBar {
             ticker_provider: TickerProviderStateMixinData::new(),
             controllers: Vec::new(),
             animations: Vec::new(),
-            fade_out_animations: Vec::new(),
             circles: VecDeque::new(),
             background_color: None,
             flex_tween: None,
-            color_tweens: None,
         }
     }
 }
@@ -634,17 +632,13 @@ impl StatefulWidget for BottomNavigationBar {
 /// Dart's `Tween<double>(begin: begin, end: end).evaluate(animation)`.
 fn evaluate_tween(app: &mut App, begin: f64, end: f64, animation: AnyAnimation<f64>) -> f64 {
     let tween = Tween::new(app, Some(begin), Some(end));
-    let value = tween.evaluate(app, animation);
-    app.destroy(tween);
-    value
+    tween.evaluate(app, animation)
 }
 
 /// Dart's `Tween<double>(begin: begin, end: end).transform(t)`.
 fn transform_tween(app: &mut App, begin: f64, end: f64, t: f64) -> f64 {
     let tween = Tween::new(app, Some(begin), Some(end));
-    let value = tween.transform(app, t);
-    app.destroy(tween);
-    value
+    tween.transform(app, t)
 }
 
 // This represents a single tile in the bottom navigation bar. It is intended
@@ -652,15 +646,12 @@ fn transform_tween(app: &mut App, begin: f64, end: f64, t: f64) -> f64 {
 struct BottomNavigationTile {
     r#type: BottomNavigationBarType,
     item: BottomNavigationBarItem,
-    animation: AnyAnimation<f64>,
-    /// The state's `Tween<double>(begin: 1.0, end: 0.0).animate(animation)`, which `_Label`
-    /// fades selected labels out with.
-    fade_out_animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
     icon_size: f64,
     key: Option<KeyRef>,
     on_tap: Option<Listener>,
-    label_color_tween: Option<Handle<ColorTween>>,
-    icon_color_tween: Option<Handle<ColorTween>>,
+    label_color_tween: Option<Ref<ColorTween>>,
+    icon_color_tween: Option<Ref<ColorTween>>,
     flex: Option<f64>,
     selected: bool,
     selected_icon_theme: Option<IconThemeData>,
@@ -745,13 +736,13 @@ impl StatelessWidget for BottomNavigationTile {
                         app,
                         selected_icon_diff / 2.0,
                         selected_font_size / 2.0 - unselected_icon_diff / 2.0,
-                        self.animation,
+                        self.animation.handle(),
                     ),
                     evaluate_tween(
                         app,
                         selected_font_size + selected_icon_diff / 2.0,
                         selected_font_size / 2.0 - unselected_icon_diff / 2.0,
-                        self.animation,
+                        self.animation.handle(),
                     ),
                 )
             } else if !self.show_selected_labels && !self.show_unselected_labels {
@@ -760,13 +751,13 @@ impl StatelessWidget for BottomNavigationTile {
                         app,
                         selected_icon_diff / 2.0,
                         unselected_icon_diff / 2.0,
-                        self.animation,
+                        self.animation.handle(),
                     ),
                     evaluate_tween(
                         app,
                         selected_font_size + selected_icon_diff / 2.0,
                         selected_font_size + unselected_icon_diff / 2.0,
-                        self.animation,
+                        self.animation.handle(),
                     ),
                 )
             } else {
@@ -775,13 +766,13 @@ impl StatelessWidget for BottomNavigationTile {
                         app,
                         selected_font_size / 2.0 + selected_icon_diff / 2.0,
                         selected_font_size / 2.0 + unselected_icon_diff / 2.0,
-                        self.animation,
+                        self.animation.handle(),
                     ),
                     evaluate_tween(
                         app,
                         selected_font_size / 2.0 + selected_icon_diff / 2.0,
                         selected_font_size / 2.0 + unselected_icon_diff / 2.0,
-                        self.animation,
+                        self.animation.handle(),
                     ),
                 )
             };
@@ -812,8 +803,9 @@ impl StatelessWidget for BottomNavigationTile {
                     icon: TileIcon {
                         color_tween: self
                             .icon_color_tween
+                            .clone()
                             .expect("the bar gives each tile an icon color tween"),
-                        animation: self.animation,
+                        animation: self.animation.clone(),
                         icon_size: self.icon_size,
                         selected: self.selected,
                         item: self.item.clone(),
@@ -824,9 +816,9 @@ impl StatelessWidget for BottomNavigationTile {
                     label: Label {
                         color_tween: self
                             .label_color_tween
+                            .clone()
                             .expect("the bar gives each tile a label color tween"),
-                        animation: self.animation,
-                        fade_out_animation: self.fade_out_animation,
+                        animation: self.animation.clone(),
                         item: self.item.clone(),
                         selected_label_style: self.selected_label_style.clone(),
                         unselected_label_style: self.unselected_label_style.clone(),
@@ -908,8 +900,8 @@ impl StatelessWidget for Tile {
 }
 
 struct TileIcon {
-    color_tween: Handle<ColorTween>,
-    animation: AnyAnimation<f64>,
+    color_tween: Ref<ColorTween>,
+    animation: AnimationRef<f64>,
     icon_size: f64,
     selected: bool,
     item: BottomNavigationBarItem,
@@ -929,7 +921,7 @@ impl Debug for TileIcon {
 
 impl StatelessWidget for TileIcon {
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let icon_color = self.color_tween.evaluate(app, self.animation);
+        let icon_color = self.color_tween.evaluate(app, self.animation.handle());
         let mut default_icon_theme = IconThemeData::new().size(self.icon_size);
         default_icon_theme.color = icon_color.map(Into::into);
         let icon_theme_data = IconThemeData::lerp(
@@ -954,10 +946,8 @@ impl StatelessWidget for TileIcon {
 }
 
 struct Label {
-    color_tween: Handle<ColorTween>,
-    animation: AnyAnimation<f64>,
-    /// The state's `Tween<double>(begin: 1.0, end: 0.0).animate(animation)`.
-    fade_out_animation: AnyAnimation<f64>,
+    color_tween: Ref<ColorTween>,
+    animation: AnimationRef<f64>,
     item: BottomNavigationBarItem,
     selected_label_style: TextStyle,
     unselected_label_style: TextStyle,
@@ -990,7 +980,7 @@ impl StatelessWidget for Label {
         if let Some(selected_font_size) = selected_font_size {
             style = style.font_size(selected_font_size);
         }
-        if let Some(color) = self.color_tween.evaluate(app, self.animation) {
+        if let Some(color) = self.color_tween.evaluate(app, self.animation.handle()) {
             style = style.color(color);
         }
         let scale = evaluate_tween(
@@ -998,7 +988,7 @@ impl StatelessWidget for Label {
             unselected_font_size.expect("the bar gives its label styles a font size")
                 / selected_font_size.expect("the bar gives its label styles a font size"),
             1.0,
-            self.animation,
+            self.animation.handle(),
         );
         let mut label = Text::new(self.item.label.clone().expect("every item has a label"));
         if let Some(semantics_label) = &self.item.semantics_label {
@@ -1020,12 +1010,13 @@ impl StatelessWidget for Label {
             text = Visibility::maintain(text).visible(false).into_widget();
         } else if !self.show_unselected_labels {
             // Fade selected labels in.
-            text = FadeTransition::new(self.animation)
+            text = FadeTransition::new(self.animation.clone())
                 .child(text)
                 .into_widget();
         } else if !self.show_selected_labels {
             // Fade selected labels out.
-            text = FadeTransition::new(self.fade_out_animation)
+            let tween = Tween::new(app, Some(1.0), Some(0.0));
+            text = FadeTransition::new(tween.animate(app, self.animation.clone()))
                 .child(text)
                 .into_widget();
         }
@@ -1057,23 +1048,12 @@ fn diagonal3_all(scale: f64) -> Matrix4 {
     ])
 }
 
-/// The three `ColorTween`s a build of the bar hands its tiles: the legacy one for both
-/// labels and icons, and the label's and icon's of the newer colour scheme.
-struct ColorTweens {
-    color_tween: Handle<ColorTween>,
-    label_color_tween: Handle<ColorTween>,
-    icon_color_tween: Handle<ColorTween>,
-}
-
 /// Dart's `_BottomNavigationBarState`.
 pub struct BottomNavigationBarState {
     state: StateData<BottomNavigationBar>,
     ticker_provider: TickerProviderStateMixinData,
-    controllers: Vec<Handle<AnimationController>>,
-    animations: Vec<Handle<CurvedAnimation>>,
-    /// One `Tween<double>(begin: 1.0, end: 0.0).animate(animation)` per animation, which
-    /// Dart's `_Label` makes on every build.
-    fade_out_animations: Vec<(Handle<Tween<f64>>, AnyAnimation<f64>)>,
+    controllers: Vec<Ref<AnimationController>>,
+    animations: Vec<Ref<CurvedAnimation>>,
 
     // A queue of color splashes currently being animated.
     circles: VecDeque<Rc<Circle>>,
@@ -1083,10 +1063,7 @@ pub struct BottomNavigationBarState {
     background_color: Option<Color>,
 
     /// Dart's `static final Animatable<double> _flexTween`, one per state.
-    flex_tween: Option<Handle<Tween<f64>>>,
-
-    /// The colour tweens `_createTiles` sets for each build, made in `init_state`.
-    color_tweens: Option<ColorTweens>,
+    flex_tween: Option<Ref<Tween<f64>>>,
 }
 
 impl BottomNavigationBarState {
@@ -1095,22 +1072,14 @@ impl BottomNavigationBarState {
         let controllers = std::mem::take(&mut state.controllers);
         let circles = std::mem::take(&mut state.circles);
         let animations = std::mem::take(&mut state.animations);
-        let fade_out_animations = std::mem::take(&mut state.fade_out_animations);
         for controller in controllers {
             controller.dispose(app);
-            app.destroy(controller);
         }
         for circle in circles {
             circle.dispose(app);
-            circle.destroy(app);
         }
         for animation in animations {
             animation.dispose(app);
-            app.destroy(animation);
-        }
-        for (tween, animation) in fade_out_animations {
-            app.destroy(animation.id());
-            app.destroy(tween);
         }
     }
 
@@ -1118,9 +1087,9 @@ impl BottomNavigationBarState {
         self.dispose_animations(app);
 
         let items_length = self.widget(app).items.len();
-        let controllers: Vec<Handle<AnimationController>> = (0..items_length)
+        let controllers: Vec<Ref<AnimationController>> = (0..items_length)
             .map(|_| {
-                let controller = AnimationController::create(
+                let controller = AnimationController::new(
                     app,
                     None,
                     Some(K_THEME_ANIMATION_DURATION),
@@ -1134,22 +1103,15 @@ impl BottomNavigationBarState {
                 controller
             })
             .collect();
-        let animations: Vec<Handle<CurvedAnimation>> = controllers
+        let animations: Vec<Ref<CurvedAnimation>> = controllers
             .iter()
             .map(|controller| {
-                CurvedAnimation::create(
+                CurvedAnimation::new(
                     app,
-                    controller.as_animation(),
+                    controller.erase(),
                     Curves::fast_out_slow_in(),
                     Some(Rc::new(Curves::fast_out_slow_in().flipped())),
                 )
-            })
-            .collect();
-        let fade_out_animations = animations
-            .iter()
-            .map(|animation| {
-                let tween = Tween::new(app, Some(1.0), Some(0.0));
-                (tween, tween.animate(app, animation.as_animation()))
             })
             .collect();
         let current_index = self.widget(app).current_index;
@@ -1161,7 +1123,6 @@ impl BottomNavigationBarState {
         let state = app.get_mut(self);
         state.controllers = controllers;
         state.animations = animations;
-        state.fade_out_animations = fade_out_animations;
         state.background_color = background_color;
     }
 
@@ -1206,6 +1167,7 @@ impl BottomNavigationBarState {
     fn evaluate_flex(self: Handle<Self>, app: &App, animation: AnyAnimation<f64>) -> f64 {
         app.get(self)
             .flex_tween
+            .as_ref()
             .expect("made in init_state")
             .evaluate(app, animation)
     }
@@ -1234,7 +1196,6 @@ impl BottomNavigationBarState {
                     });
                     let circle = removed.expect("set_state runs its callback");
                     circle.dispose(app);
-                    circle.destroy_lingering(app);
                 }
             }),
         );
@@ -1405,24 +1366,17 @@ impl BottomNavigationBarState {
             ),
         };
 
-        let tweens = app
-            .get(self)
-            .color_tweens
-            .as_ref()
-            .expect("made in init_state");
-        let (color_tween, label_color_tween, icon_color_tween) = (
-            tweens.color_tween,
-            tweens.label_color_tween,
-            tweens.icon_color_tween,
+        let color_tween = ColorTween::new(app, Some(color_tween_ends.0), Some(color_tween_ends.1));
+        let label_color_tween = ColorTween::new(
+            app,
+            Some(label_color_tween_ends.0),
+            Some(label_color_tween_ends.1),
         );
-        for (tween, (begin, end)) in [
-            (color_tween, color_tween_ends),
-            (label_color_tween, label_color_tween_ends),
-            (icon_color_tween, icon_color_tween_ends),
-        ] {
-            tween.set_begin(app, Some(begin));
-            tween.set_end(app, Some(end));
-        }
+        let icon_color_tween = ColorTween::new(
+            app,
+            Some(icon_color_tween_ends.0),
+            Some(icon_color_tween_ends.1),
+        );
 
         let show_unselected_labels_default = self.default_show_unselected(app);
         let mut tiles = Vec::new();
@@ -1448,16 +1402,14 @@ impl BottomNavigationBarState {
                 .unwrap_or_else(|| WidgetStateMouseCursor::clickable().resolve(&states));
 
             let state = app.get(self);
-            let animation = state.animations[i].as_animation();
-            let fade_out_animation = state.fade_out_animations[i].1;
-            let flex = self.evaluate_flex(app, animation);
+            let animation: AnimationRef<f64> = state.animations[i].erase();
+            let flex = self.evaluate_flex(app, animation.handle());
             let widget = self.widget(app);
             tiles.push(
                 BottomNavigationTile {
                     r#type: effective_type,
                     item: widget.items[i].clone(),
                     animation,
-                    fade_out_animation,
                     icon_size: widget.icon_size,
                     key: widget.items[i].key.clone(),
                     selected_icon_theme: if widget.use_legacy_color_scheme {
@@ -1488,14 +1440,14 @@ impl BottomNavigationBarState {
                         }
                     })),
                     label_color_tween: Some(if widget.use_legacy_color_scheme {
-                        color_tween
+                        color_tween.clone()
                     } else {
-                        label_color_tween
+                        label_color_tween.clone()
                     }),
                     icon_color_tween: Some(if widget.use_legacy_color_scheme {
-                        color_tween
+                        color_tween.clone()
                     } else {
-                        icon_color_tween
+                        icon_color_tween.clone()
                     }),
                     flex: Some(flex),
                     selected: i == widget.current_index,
@@ -1535,7 +1487,7 @@ impl TickerProviderStateMixin for BottomNavigationBarState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for BottomNavigationBarState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1546,30 +1498,12 @@ impl State for BottomNavigationBarState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let flex_tween = Tween::new(app, Some(1.0), Some(1.5));
-        let color_tweens = ColorTweens {
-            color_tween: ColorTween::new(app, None, None),
-            label_color_tween: ColorTween::new(app, None, None),
-            icon_color_tween: ColorTween::new(app, None, None),
-        };
-        let state = app.get_mut(self);
-        state.flex_tween = Some(flex_tween);
-        state.color_tweens = Some(color_tweens);
+        app.get_mut(self).flex_tween = Some(flex_tween);
         self.reset_state(app);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_animations(app);
-        let state = app.get_mut(self);
-        let flex_tween = state.flex_tween.take();
-        let color_tweens = state.color_tweens.take();
-        if let Some(flex_tween) = flex_tween {
-            app.destroy(flex_tween);
-        }
-        if let Some(color_tweens) = color_tweens {
-            app.destroy(color_tweens.color_tween);
-            app.destroy(color_tweens.label_color_tween);
-            app.destroy(color_tweens.icon_color_tween);
-        }
         TickerProviderStateMixin::dispose(self, app);
     }
 
@@ -1591,8 +1525,8 @@ impl State for BottomNavigationBarState {
                 BottomNavigationBarType::Shifting => self.push_circle(app, current_index),
             }
             let state = app.get(self);
-            let old_controller = state.controllers[old_widget.current_index];
-            let controller = state.controllers[current_index];
+            let old_controller = state.controllers[old_widget.current_index].handle();
+            let controller = state.controllers[current_index].handle();
             old_controller.reverse(app, None);
             controller.forward(app, None);
         } else {
@@ -1722,8 +1656,8 @@ struct Circle {
     state: Handle<BottomNavigationBarState>,
     index: usize,
     color: Color,
-    controller: Handle<AnimationController>,
-    animation: Handle<CurvedAnimation>,
+    controller: Ref<AnimationController>,
+    animation: Ref<CurvedAnimation>,
 }
 
 impl Circle {
@@ -1734,7 +1668,7 @@ impl Circle {
         color: Color,
         vsync: impl waft_scheduler::TickerProvider,
     ) -> Circle {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(K_THEME_ANIMATION_DURATION),
@@ -1744,12 +1678,8 @@ impl Circle {
             AnimationBehavior::Normal,
             vsync,
         );
-        let animation = CurvedAnimation::create(
-            app,
-            controller.as_animation(),
-            Curves::fast_out_slow_in(),
-            None,
-        );
+        let animation =
+            CurvedAnimation::new(app, controller.erase(), Curves::fast_out_slow_in(), None);
         controller.forward(app, None);
         Circle {
             state,
@@ -1761,7 +1691,7 @@ impl Circle {
     }
 
     fn horizontal_leading_offset(&self, app: &App) -> f64 {
-        let weight_sum = |animations: &[Handle<CurvedAnimation>]| -> f64 {
+        let weight_sum = |animations: &[Ref<CurvedAnimation>]| -> f64 {
             // We're adding flex values instead of animation values to produce correct
             // ratios.
             animations
@@ -1787,19 +1717,6 @@ impl Circle {
     fn dispose(&self, app: &mut App) {
         self.controller.dispose(app);
         self.animation.dispose(app);
-    }
-
-    /// Frees what [`new`](Self::new) made, once [`dispose`](Self::dispose) has run.
-    fn destroy(&self, app: &mut App) {
-        app.destroy(self.animation);
-        app.destroy(self.controller);
-    }
-
-    /// [`destroy`](Self::destroy) from inside the controller's own status listener: both
-    /// stay readable until the next checkpoint.
-    fn destroy_lingering(&self, app: &mut App) {
-        app.destroy_lingering(self.animation);
-        app.destroy_lingering(self.controller);
     }
 }
 
@@ -1959,7 +1876,7 @@ pub(crate) mod tests {
     /// Dart's `_getOpacity(tester, text)`.
     fn opacity_of(tester: &WidgetTester, text: &str) -> f64 {
         let fade = tester.ancestor_of_type::<FadeTransition>(first_text(tester, text));
-        let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity);
+        let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity.clone());
         opacity.value(&tester.cell.borrow())
     }
 

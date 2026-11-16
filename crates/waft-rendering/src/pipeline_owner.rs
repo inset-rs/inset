@@ -9,6 +9,7 @@ use waft_foundation::{App, Handle, Listener, ValueChanged};
 use crate::layer::ErasedLayer;
 use crate::object::AnyRenderObject;
 use crate::painting_context::PaintingContext;
+use waft_foundation::Ref;
 
 /// Manages a tree of [`PipelineOwner`]s.
 ///
@@ -76,7 +77,7 @@ pub struct PipelineOwner {
     debug_doing_child_layout: bool,
     nodes_needing_paint: Vec<AnyRenderObject>,
     debug_doing_paint: bool,
-    children: Vec<Handle<PipelineOwner>>,
+    children: Vec<Ref<PipelineOwner>>,
     debug_parent: Option<Handle<PipelineOwner>>,
 }
 
@@ -89,7 +90,7 @@ impl PipelineOwner {
         app: &mut App,
         on_need_visual_update: Option<Listener>,
         on_flushed_paint: Option<FlushedPaintCallback>,
-    ) -> Handle<PipelineOwner> {
+    ) -> Ref<PipelineOwner> {
         app.create(PipelineOwner {
             on_need_visual_update,
             on_flushed_paint,
@@ -236,7 +237,12 @@ impl PipelineOwner {
         if cfg!(debug_assertions) {
             app.get_mut(self).debug_doing_child_layout = true;
         }
-        let children = app.get(self).children.clone();
+        let children: Vec<Handle<PipelineOwner>> = app
+            .get(self)
+            .children
+            .iter()
+            .map(|child| child.handle())
+            .collect();
         for child in children {
             child.flush_layout(app);
         }
@@ -264,7 +270,12 @@ impl PipelineOwner {
                 node.update_compositing_bits(app);
             }
         }
-        let children = app.get(self).children.clone();
+        let children: Vec<Handle<PipelineOwner>> = app
+            .get(self)
+            .children
+            .iter()
+            .map(|child| child.handle())
+            .collect();
         for child in children {
             child.flush_compositing_bits(app);
         }
@@ -306,7 +317,12 @@ impl PipelineOwner {
             app.get_mut(self).debug_doing_paint = true;
         }
         let is_dirty = self.paint_dirty_nodes(app);
-        let children = app.get(self).children.clone();
+        let children: Vec<Handle<PipelineOwner>> = app
+            .get(self)
+            .children
+            .iter()
+            .map(|child| child.handle())
+            .collect();
         for child in children {
             child.flush_paint(app);
         }
@@ -377,7 +393,12 @@ impl PipelineOwner {
     pub fn attach(self: Handle<Self>, app: &mut App, manifold: Rc<dyn PipelineManifold>) {
         debug_assert!(app.get(self).manifold.is_none());
         app.get_mut(self).manifold = Some(Rc::clone(&manifold));
-        let children = app.get(self).children.clone();
+        let children: Vec<Handle<PipelineOwner>> = app
+            .get(self)
+            .children
+            .iter()
+            .map(|child| child.handle())
+            .collect();
         for child in children {
             child.attach(app, Rc::clone(&manifold));
         }
@@ -391,21 +412,28 @@ impl PipelineOwner {
     pub fn detach(self: Handle<Self>, app: &mut App) {
         debug_assert!(app.get(self).manifold.is_some());
         app.get_mut(self).manifold = None;
-        let children = app.get(self).children.clone();
+        let children: Vec<Handle<PipelineOwner>> = app
+            .get(self)
+            .children
+            .iter()
+            .map(|child| child.handle())
+            .collect();
         for child in children {
             child.detach(app);
         }
     }
 
     /// Adds `child` to this [`PipelineOwner`].
-    pub fn adopt_child(self: Handle<Self>, app: &mut App, child: Handle<PipelineOwner>) {
-        debug_assert!(app.get(child).debug_parent.is_none());
+    pub fn adopt_child(self: Handle<Self>, app: &mut App, child: Ref<PipelineOwner>) {
+        debug_assert!(app.get(&child).debug_parent.is_none());
         debug_assert!(!app.get(self).children.contains(&child));
         debug_assert!(
             !app.get(self).debug_doing_child_layout,
             "Cannot modify child list after layout."
         );
-        app.get_mut(self).children.push(child);
+        let kept = child;
+        let child = kept.handle();
+        app.get_mut(self).children.push(kept);
         if cfg!(debug_assertions) {
             app.get_mut(child).debug_parent = Some(self);
         }
@@ -418,7 +446,7 @@ impl PipelineOwner {
     /// [`adopt_child`](Self::adopt_child).
     pub fn drop_child(self: Handle<Self>, app: &mut App, child: Handle<PipelineOwner>) {
         debug_assert_eq!(app.get(child).debug_parent, Some(self));
-        debug_assert!(app.get(self).children.contains(&child));
+        debug_assert!(app.get(self).children.iter().any(|kept| kept == child));
         debug_assert!(
             !app.get(self).debug_doing_child_layout,
             "Cannot modify child list after layout."
@@ -426,7 +454,7 @@ impl PipelineOwner {
         let children = &mut app.get_mut(self).children;
         let index = children
             .iter()
-            .position(|&candidate| candidate == child)
+            .position(|candidate| candidate == child)
             .expect("child was in the list");
         children.remove(index);
         if cfg!(debug_assertions) {
@@ -444,7 +472,7 @@ impl PipelineOwner {
         visitor: &mut dyn FnMut(Handle<PipelineOwner>),
     ) {
         for child in &app.get(self).children {
-            visitor(*child);
+            visitor(child.handle());
         }
     }
 }
@@ -540,7 +568,7 @@ mod tests {
         let second = RenderHandle::new_box(&mut app, leaf(None));
         owner.set_root_node(&mut app, Some(first.as_object()));
         assert!(first.attached(&app));
-        assert_eq!(first.owner(&app), Some(owner));
+        assert_eq!(first.owner(&app), Some(owner.handle()));
 
         owner.set_root_node(&mut app, Some(second.as_object()));
         assert!(!first.attached(&app));
@@ -581,7 +609,7 @@ mod tests {
         });
         let root = PipelineOwner::new(&mut app, None, None);
         let adopted_before = PipelineOwner::new(&mut app, None, None);
-        root.adopt_child(&mut app, adopted_before);
+        root.adopt_child(&mut app, adopted_before.clone());
 
         adopted_before.request_visual_update(&mut app);
         assert_eq!(
@@ -600,11 +628,11 @@ mod tests {
         );
 
         let adopted_after = PipelineOwner::new(&mut app, None, None);
-        root.adopt_child(&mut app, adopted_after);
+        root.adopt_child(&mut app, adopted_after.clone());
         adopted_after.request_visual_update(&mut app);
         assert_eq!(manifold.requests.get(), 3, "adopt_child attaches the child");
 
-        root.drop_child(&mut app, adopted_after);
+        root.drop_child(&mut app, adopted_after.handle());
         adopted_after.request_visual_update(&mut app);
         assert_eq!(manifold.requests.get(), 3, "drop_child detaches the child");
 

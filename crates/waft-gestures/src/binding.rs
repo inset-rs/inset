@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use waft_embedder::{Offset, PointerDataPacket, ViewId};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained};
 
 use crate::arena::GestureArenaManager;
 use crate::converter::PointerEventConverter;
@@ -13,6 +13,7 @@ use crate::events::{PointerCancelEvent, PointerEvent};
 use crate::hit_test::{HitTestEntry, HitTestResult, HitTestTarget, HitTestable};
 use crate::pointer_router::PointerRouter;
 use crate::pointer_signal_resolver::PointerSignalResolver;
+use waft_foundation::Ref;
 
 /// What Flutter's `RendererBinding` mixin adds on top of `GestureBinding`: it overrides
 /// `hitTestInView` to walk the render trees before this binding adds itself, and the start of
@@ -77,6 +78,30 @@ impl<T: GestureBindingOverridesObject> GestureBindingOverrides for Handle<T> {
     }
 }
 
+impl<T: GestureBindingOverridesObject> HitTestable for Ref<T> {
+    fn hit_test_in_view(
+        &self,
+        app: &mut App,
+        result: &mut HitTestResult,
+        position: Offset,
+        view_id: ViewId,
+    ) {
+        T::hit_test_in_view(self.handle(), app, result, position, view_id);
+    }
+}
+
+/// An override object the gesture binding keeps, for one nothing else keeps.
+impl<T: GestureBindingOverridesObject> GestureBindingOverrides for Ref<T> {
+    fn will_dispatch_event(
+        &self,
+        app: &mut App,
+        event: &PointerEvent,
+        hit_test_result: Option<&HitTestResult>,
+    ) {
+        T::will_dispatch_event(self.handle(), app, event, hit_test_result);
+    }
+}
+
 /// A binding for the gesture subsystem.
 ///
 /// Dart's `GestureBinding.instance` is [`GestureBinding::instance`], the App's
@@ -85,9 +110,9 @@ impl<T: GestureBindingOverridesObject> GestureBindingOverrides for Handle<T> {
 pub struct GestureBinding {
     pending_pointer_events: VecDeque<PointerEvent>,
     /// Filled on first [`GestureBinding::instance`]. `Default` cannot mint Handles.
-    pointer_router: Option<Handle<PointerRouter>>,
-    gesture_arena: Option<Handle<GestureArenaManager>>,
-    pointer_signal_resolver: Option<Handle<PointerSignalResolver>>,
+    pointer_router: Option<Ref<PointerRouter>>,
+    gesture_arena: Option<Ref<GestureArenaManager>>,
+    pointer_signal_resolver: Option<Ref<PointerSignalResolver>>,
     /// The path each pressed pointer was hit-tested to, its targets retained.
     hit_tests: HashMap<i64, HitTestResult>,
     /// Flutter's `hitTestInView` override point: the renderer binding registers itself here.
@@ -116,6 +141,7 @@ impl GestureBinding {
     pub fn pointer_router(self: Handle<Self>, app: &App) -> Handle<PointerRouter> {
         app.get(self)
             .pointer_router
+            .handle()
             .expect("GestureBinding::instance must run first")
     }
 
@@ -124,6 +150,7 @@ impl GestureBinding {
     pub fn gesture_arena(self: Handle<Self>, app: &App) -> Handle<GestureArenaManager> {
         app.get(self)
             .gesture_arena
+            .handle()
             .expect("GestureBinding::instance must run first")
     }
 
@@ -133,6 +160,7 @@ impl GestureBinding {
     pub fn pointer_signal_resolver(self: Handle<Self>, app: &App) -> Handle<PointerSignalResolver> {
         app.get(self)
             .pointer_signal_resolver
+            .handle()
             .expect("GestureBinding::instance must run first")
     }
 
@@ -202,7 +230,7 @@ impl GestureBinding {
         );
 
         // A cached result retains the objects on its path (Dart holds them; see
-        // `HitTestResult::retain_targets`), so a target a rebuild destroyed mid-press still
+        // `HitTestResult::keep_targets`), so a target a rebuild destroyed mid-press still
         // receives the pointer's later events, as it does in Flutter.
         let (hit_test_result, cache_after) = if is_new_hit_test {
             debug_assert!(
@@ -238,13 +266,11 @@ impl GestureBinding {
         {
             self.dispatch_event(app, event, hit_test_result.as_ref());
         }
-        if let Some(mut result) = hit_test_result {
-            if cache_after {
-                result.retain_targets(app);
-                app.get_mut(self).hit_tests.insert(pointer, result);
-            } else {
-                result.release_targets(app);
-            }
+        if let Some(mut result) = hit_test_result
+            && cache_after
+        {
+            result.keep_targets(app);
+            app.get_mut(self).hit_tests.insert(pointer, result);
         }
     }
 
@@ -311,10 +337,7 @@ impl GestureBinding {
     ///
     /// This is typically called between tests.
     pub fn reset_gesture_binding(self: Handle<Self>, app: &mut App) {
-        let hit_tests = std::mem::take(&mut app.get_mut(self).hit_tests);
-        for mut result in hit_tests.into_values() {
-            result.release_targets(app);
-        }
+        app.get_mut(self).hit_tests.clear();
     }
 }
 

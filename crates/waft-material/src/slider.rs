@@ -13,6 +13,16 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
+use waft_widgets::{
+    ActionRef, BuildContext, CallbackAction, CompositedTransformFollower,
+    CompositedTransformTarget, Directionality, FocusNode, FocusNodeLeaf, FocusNodeRef,
+    FocusableActionDetector, GlobalKey, Intent, IntentRef, IntoWidget, KeyRef,
+    LeafRenderObjectWidget, MediaQuery, NavigationMode, OverlayPortal, OverlayPortalController,
+    Padding, RenderObjectWidget, ShortcutActivatorRef, ShortcutMap, SingleActivator, SizedBox,
+    State, StateData, StatefulWidget, TickerProviderStateMixin, TickerProviderStateMixinData,
+    WidgetRef, WidgetState, WidgetStateColor, WidgetStateMouseCursor, WidgetStateProperty,
+    WidgetStatePropertyAll, WidgetStatePropertyRef, WidgetStates, debug_check_has_media_query,
+};
 
 use waft_animation::{
     AlwaysStoppedAnimation, Animation, AnimationBehavior, AnimationController, AnyAnimation,
@@ -22,7 +32,7 @@ use waft_cupertino::{CupertinoColors, CupertinoSlider};
 use waft_embedder::{
     Color, FontWeight, Offset, Rect, Size, TargetPlatform, TextDirection, clamp_double,
 };
-use waft_foundation::{App, Handle, Listener, Timer, ValueChanged};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref, Timer, ValueChanged};
 use waft_gestures::{
     DeviceGestureSettings, DragEndDetails, DragGestureRecognizer, DragStartDetails,
     DragUpdateDetails, GestureArenaTeam, HorizontalDragGestureRecognizer, PointerEvent,
@@ -39,16 +49,6 @@ use waft_rendering::{
 };
 use waft_scheduler::{SchedulerBinding, Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{LogicalKeyboardKey, MouseCursorRef};
-use waft_widgets::{
-    Action, AnyAction, AnyFocusNode, BuildContext, CallbackAction, CompositedTransformFollower,
-    CompositedTransformTarget, Directionality, FocusNode, FocusNodeLeaf, FocusableActionDetector,
-    GlobalKey, Intent, IntentRef, IntoWidget, KeyRef, LeafRenderObjectWidget, MediaQuery,
-    NavigationMode, OverlayPortal, OverlayPortalController, Padding, RenderObjectWidget,
-    ShortcutActivatorRef, ShortcutMap, SingleActivator, SizedBox, State, StateData, StatefulWidget,
-    TickerProviderStateMixin, TickerProviderStateMixinData, WidgetRef, WidgetState,
-    WidgetStateColor, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyAll,
-    WidgetStatePropertyRef, WidgetStates, debug_check_has_media_query,
-};
 
 use crate::colors::Colors;
 use crate::constants::K_RADIAL_REACTION_DURATION;
@@ -395,7 +395,7 @@ pub struct Slider {
     pub semantic_formatter_callback: Option<SemanticFormatterCallback>,
 
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// True if this widget will be selected as the initial focus when no other
     /// node in its scope is currently focused.
@@ -613,7 +613,7 @@ impl Slider {
     }
 
     /// Dart `Slider(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> Slider {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> Slider {
         self.focus_node = Some(focus_node);
         self
     }
@@ -754,19 +754,19 @@ pub struct SliderState {
     ticker_provider: TickerProviderStateMixinData,
     // Animation controller that is run when the overlay (a.k.a radial reaction)
     // is shown in response to user interaction.
-    overlay_controller: Option<Handle<AnimationController>>,
+    overlay_controller: Option<Ref<AnimationController>>,
     // Animation controller that is run when the value indicator is being shown
     // or hidden.
-    value_indicator_controller: Option<Handle<AnimationController>>,
+    value_indicator_controller: Option<Ref<AnimationController>>,
     // Animation controller that is run when enabling/disabling the slider.
-    enable_controller: Option<Handle<AnimationController>>,
+    enable_controller: Option<Ref<AnimationController>>,
     // Animation controller that is run when transitioning between one value
     // and the next on a discrete slider.
-    position_controller: Option<Handle<AnimationController>>,
+    position_controller: Option<Ref<AnimationController>>,
     interaction_timer: Option<Timer>,
     render_object_key: GlobalKey,
     // Action mapping for a focused slider.
-    action_map: HashMap<TypeId, AnyAction>,
+    action_map: HashMap<TypeId, ActionRef>,
     // Value Indicator Animation that appears on the Overlay.
     paint_value_indicator: Option<PaintValueIndicator>,
     dragging: bool,
@@ -774,13 +774,13 @@ pub struct SliderState {
     // multiple times. To avoid calling widget.onChanged repeatedly, the
     // value from _handleChanged is temporarily saved here.
     current_changed_value: Option<f64>,
-    focus_node: Option<AnyFocusNode>,
+    focus_node: Option<Ref<FocusNode>>,
     // Always keep the ValueIndicator visible on the Overlay; otherwise, it cannot be updated
     // during the build phase.
-    value_indicator_overlay_portal_controller: Option<Handle<OverlayPortalController>>,
+    value_indicator_overlay_portal_controller: Option<Ref<OverlayPortalController>>,
     focused: bool,
     hovering: bool,
-    layer_link: Option<Handle<LayerLink>>,
+    layer_link: Option<Ref<LayerLink>>,
 }
 
 thread_local! {
@@ -814,27 +814,31 @@ impl SliderState {
     const ENABLE_ANIMATION_DURATION: Duration = Duration::from_millis(75);
     const VALUE_INDICATOR_ANIMATION_DURATION: Duration = Duration::from_millis(100);
 
-    fn overlay_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn overlay_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .overlay_controller
+            .as_ref()
             .expect("init_state made the overlay controller")
     }
 
-    fn value_indicator_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn value_indicator_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .value_indicator_controller
+            .as_ref()
             .expect("init_state made the value indicator controller")
     }
 
-    fn enable_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn enable_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .enable_controller
+            .as_ref()
             .expect("init_state made the enable controller")
     }
 
     fn position_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .position_controller
+            .handle()
             .expect("init_state made the position controller")
     }
 
@@ -842,10 +846,11 @@ impl SliderState {
         self.widget(app).on_changed.is_some()
     }
 
-    fn effective_focus_node(self: Handle<Self>, app: &App) -> AnyFocusNode {
+    fn effective_focus_node(self: Handle<Self>, app: &App) -> FocusNodeRef {
         self.widget(app)
             .focus_node
-            .or(app.get(self).focus_node)
+            .clone()
+            .or_else(|| app.get(self).focus_node.as_ref().map(Ref::erase))
             .expect("init_state made a focus node when the widget has none")
     }
 
@@ -1216,6 +1221,7 @@ impl SliderState {
         let layer_link = app
             .get(self)
             .layer_link
+            .clone()
             .expect("init_state made the layer link");
         let show_value_indicator = slider_theme
             .show_value_indicator
@@ -1250,6 +1256,7 @@ impl SliderState {
         let controller = app
             .get(self)
             .value_indicator_overlay_portal_controller
+            .clone()
             .expect("init_state made the overlay portal controller");
         result = OverlayPortal::new(controller, move |app: &mut App, _context: BuildContext| {
             self.build_value_indicator(app, show_value_indicator)
@@ -1311,9 +1318,10 @@ impl SliderState {
         let layer_link = app
             .get(self)
             .layer_link
+            .clone()
             .expect("init_state made the layer link");
         let value_indicator = || {
-            CompositedTransformFollower::new(layer_link)
+            CompositedTransformFollower::new(layer_link.clone())
                 .child(ValueIndicatorRenderObjectWidget { state: self })
                 .into_widget()
         };
@@ -1357,7 +1365,7 @@ impl TickerProviderStateMixin for SliderState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for SliderState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1375,7 +1383,7 @@ impl State for SliderState {
         app.get_mut(self).layer_link = Some(layer_link);
 
         let controller = |app: &mut App, duration: Duration| {
-            AnimationController::create(
+            AnimationController::new(
                 app,
                 None,
                 Some(duration),
@@ -1393,8 +1401,8 @@ impl State for SliderState {
         let this = app.get_mut(self);
         this.overlay_controller = Some(overlay_controller);
         this.value_indicator_controller = Some(value_indicator_controller);
-        this.enable_controller = Some(enable_controller);
-        this.position_controller = Some(position_controller);
+        this.enable_controller = Some(enable_controller.clone());
+        this.position_controller = Some(position_controller.clone());
         let enabled = self.widget(app).on_changed.is_some();
         enable_controller.set_value(app, if enabled { 1.0 } else { 0.0 });
         let value = self.convert(app, self.widget(app).value);
@@ -1408,11 +1416,11 @@ impl State for SliderState {
         );
         app.get_mut(self)
             .action_map
-            .insert(TypeId::of::<AdjustSliderIntent>(), adjust.as_action());
+            .insert(TypeId::of::<AdjustSliderIntent>(), adjust.into_erased());
         if self.widget(app).focus_node.is_none() {
             // Only create a new node if the widget doesn't have one.
             if app.get(self).focus_node.is_none() {
-                let focus_node = FocusNode::new(app).as_node();
+                let focus_node = FocusNode::new(app);
                 app.get_mut(self).focus_node = Some(focus_node);
             }
         }
@@ -1427,34 +1435,18 @@ impl State for SliderState {
             timer.cancel(app);
         }
         let controllers = [
-            self.overlay_controller(app),
-            self.value_indicator_controller(app),
-            self.enable_controller(app),
+            self.overlay_controller(app).handle(),
+            self.value_indicator_controller(app).handle(),
+            self.enable_controller(app).handle(),
             self.position_controller(app),
         ];
         for controller in controllers {
             controller.dispose(app);
-            app.destroy(controller);
         }
-        if let Some(focus_node) = app.get(self).focus_node {
+        if let Some(focus_node) = app.get(self).focus_node.handle() {
             focus_node.dispose(app);
         }
-        for action in std::mem::take(&mut app.get_mut(self).action_map).into_values() {
-            app.destroy(action.id());
-        }
         TickerProviderStateMixin::dispose(self, app);
-        // Dart lets the portal controller and the link go with the state.
-        let this = app.get_mut(self);
-        let (portal_controller, layer_link) = (
-            this.value_indicator_overlay_portal_controller.take(),
-            this.layer_link.take(),
-        );
-        if let Some(portal_controller) = portal_controller {
-            app.destroy(portal_controller);
-        }
-        if let Some(layer_link) = layer_link {
-            app.destroy(layer_link);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1596,12 +1588,12 @@ pub(crate) struct RenderSlider {
     hovering: bool,
     hovering_thumb: bool,
     allowed_interaction: SliderInteraction,
-    overlay_animation: Handle<CurvedAnimation>,
-    value_indicator_animation: Handle<CurvedAnimation>,
-    enable_animation: Handle<CurvedAnimation>,
+    overlay_animation: Ref<CurvedAnimation>,
+    value_indicator_animation: Ref<CurvedAnimation>,
+    enable_animation: Ref<CurvedAnimation>,
     label_painter: TextPainter,
-    drag: Handle<HorizontalDragGestureRecognizer>,
-    tap: Handle<TapGestureRecognizer>,
+    drag: Ref<HorizontalDragGestureRecognizer>,
+    tap: Ref<TapGestureRecognizer>,
     active: bool,
     current_drag_value: f64,
     overlay_rect: Option<Rect>,
@@ -1649,21 +1641,21 @@ impl RenderSlider {
         debug_assert!(secondary_track_value.is_none_or(|value| (0.0..=1.0).contains(&value)));
         let drag = HorizontalDragGestureRecognizer::new(app);
         let tap = TapGestureRecognizer::new(app);
-        let overlay_animation = CurvedAnimation::create(
+        let overlay_animation = CurvedAnimation::new(
             app,
-            state.overlay_controller(app).as_animation(),
+            state.overlay_controller(app).erase(),
             Curves::fast_out_slow_in(),
             None,
         );
-        let value_indicator_animation = CurvedAnimation::create(
+        let value_indicator_animation = CurvedAnimation::new(
             app,
-            state.value_indicator_controller(app).as_animation(),
+            state.value_indicator_controller(app).erase(),
             Curves::fast_out_slow_in(),
             None,
         );
-        let enable_animation = CurvedAnimation::create(
+        let enable_animation = CurvedAnimation::new(
             app,
-            state.enable_controller(app).as_animation(),
+            state.enable_controller(app).erase(),
             Curves::ease_in_out(),
             None,
         );
@@ -1694,8 +1686,8 @@ impl RenderSlider {
                 value_indicator_animation,
                 enable_animation,
                 label_painter: TextPainter::new(),
-                drag,
-                tap,
+                drag: drag.clone(),
+                tap: tap.clone(),
                 active: false,
                 current_drag_value: 0.0,
                 overlay_rect: None,
@@ -1703,7 +1695,7 @@ impl RenderSlider {
         );
         this.update_label_painter(app);
         let team = GestureArenaTeam::new(app);
-        drag.set_team(app, team);
+        drag.set_team(app, team.clone());
         drag.set_on_start(
             app,
             Some(Rc::new(move |app: &mut App, details: DragStartDetails| {
@@ -1921,7 +1913,7 @@ impl RenderSlider {
         app: &mut App,
         gesture_settings: Option<DeviceGestureSettings>,
     ) {
-        let (drag, tap) = (self.get(app).drag, self.get(app).tap);
+        let (drag, tap) = (self.get(app).drag.handle(), self.get(app).tap.handle());
         drag.set_gesture_settings(app, gesture_settings);
         tap.set_gesture_settings(app, gesture_settings);
     }
@@ -2006,7 +1998,7 @@ impl RenderSlider {
         let was_interactive = self.is_interactive(app);
         self.get_mut(app).on_changed = value;
         if was_interactive != self.is_interactive(app) {
-            let enable_controller = self.get(app).state.enable_controller(app);
+            let enable_controller = self.get(app).state.enable_controller(app).handle();
             if self.is_interactive(app) {
                 enable_controller.forward(app, None);
             } else {
@@ -2288,14 +2280,15 @@ impl RenderSlider {
                     let time_dilation = SchedulerBinding::time_dilation(app);
                     // The timer keeps the render slider, as Dart's closure does: a slider
                     // replaced before it fires still reads `active`.
-                    let this = app.retain(self.handle());
+                    let this = self.handle().keep(app);
                     let timer = Timer::new(
                         app,
                         Self::MINIMUM_INTERACTION_TIME.mul_f64(time_dilation),
                         Listener::new(move |app: &mut App| {
                             app.get_mut(state).interaction_timer = None;
-                            let value_indicator_controller = state.value_indicator_controller(app);
-                            let active = app.get(this.get()).active;
+                            let value_indicator_controller =
+                                state.value_indicator_controller(app).handle();
+                            let active = app.get(&this).active;
                             if !active && value_indicator_controller.is_completed(app) {
                                 value_indicator_controller.reverse(app, None);
                             }
@@ -2541,9 +2534,9 @@ impl RenderObject for RenderSlider {
         let listener = Listener::handle_method(self.handle(), mark_slider_needs_paint);
         let this = self.get(app);
         let (overlay, value_indicator, enable) = (
-            this.overlay_animation,
-            this.value_indicator_animation,
-            this.enable_animation,
+            this.overlay_animation.clone(),
+            this.value_indicator_animation.clone(),
+            this.enable_animation.clone(),
         );
         let position_controller = this.state.position_controller(app);
         overlay.add_listener(app, listener.clone());
@@ -2556,9 +2549,9 @@ impl RenderObject for RenderSlider {
         let listener = Listener::handle_method(self.handle(), mark_slider_needs_paint);
         let this = self.get(app);
         let (overlay, value_indicator, enable) = (
-            this.overlay_animation,
-            this.value_indicator_animation,
-            this.enable_animation,
+            this.overlay_animation.clone(),
+            this.value_indicator_animation.clone(),
+            this.enable_animation.clone(),
         );
         let position_controller = this.state.position_controller(app);
         overlay.remove_listener(app, &listener);
@@ -2569,19 +2562,18 @@ impl RenderObject for RenderSlider {
     }
 
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
-        let (drag, tap) = (self.get(app).drag, self.get(app).tap);
+        let (drag, tap) = (self.get(app).drag.handle(), self.get(app).tap.handle());
         RecognizerLeaf::dispose(drag, app);
         RecognizerLeaf::dispose(tap, app);
         self.get_mut(app).label_painter.dispose();
         let this = self.get(app);
         let (enable, value_indicator, overlay) = (
-            this.enable_animation,
-            this.value_indicator_animation,
-            this.overlay_animation,
+            this.enable_animation.handle(),
+            this.value_indicator_animation.handle(),
+            this.overlay_animation.handle(),
         );
         for animation in [enable, value_indicator, overlay] {
             animation.dispose(app);
-            app.destroy(animation);
         }
         RenderObjectBase::dispose(self, app);
     }
@@ -2873,7 +2865,7 @@ impl RenderBox for RenderSlider {
             && self.is_interactive(app)
         {
             // We need to add the drag first so that it has priority.
-            let (drag, tap) = (self.get(app).drag, self.get(app).tap);
+            let (drag, tap) = (self.get(app).drag.handle(), self.get(app).tap.handle());
             drag.add_pointer(app, down.clone());
             tap.add_pointer(app, down.clone());
         }
@@ -2979,15 +2971,15 @@ pub(crate) struct RenderValueIndicator {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     system_fonts: RelayoutWhenSystemFontsChangeData,
-    value_indicator_animation: Handle<CurvedAnimation>,
+    value_indicator_animation: Ref<CurvedAnimation>,
     state: Handle<SliderState>,
 }
 
 impl RenderValueIndicator {
     fn new(app: &mut App, state: Handle<SliderState>) -> RenderHandle<RenderValueIndicator> {
-        let value_indicator_animation = CurvedAnimation::create(
+        let value_indicator_animation = CurvedAnimation::new(
             app,
-            state.value_indicator_controller(app).as_animation(),
+            state.value_indicator_controller(app).erase(),
             Curves::fast_out_slow_in(),
             None,
         );
@@ -3040,7 +3032,7 @@ impl RenderObject for RenderValueIndicator {
     fn did_attach(self: RenderHandle<Self>, app: &mut App, _owner: Handle<PipelineOwner>) {
         RelayoutWhenSystemFontsChangeMixin::attach_system_fonts(self, app);
         let listener = Listener::handle_method(self.handle(), mark_value_indicator_needs_paint);
-        let animation = self.get(app).value_indicator_animation;
+        let animation = self.get(app).value_indicator_animation.handle();
         let position_controller = self.get(app).state.position_controller(app);
         animation.add_listener(app, listener.clone());
         position_controller.add_listener(app, listener);
@@ -3048,7 +3040,7 @@ impl RenderObject for RenderValueIndicator {
 
     fn did_detach(self: RenderHandle<Self>, app: &mut App) {
         let listener = Listener::handle_method(self.handle(), mark_value_indicator_needs_paint);
-        let animation = self.get(app).value_indicator_animation;
+        let animation = self.get(app).value_indicator_animation.handle();
         let position_controller = self.get(app).state.position_controller(app);
         animation.remove_listener(app, &listener);
         position_controller.remove_listener(app, &listener);
@@ -3068,9 +3060,8 @@ impl RenderObject for RenderValueIndicator {
     }
 
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
-        let value_indicator_animation = self.get(app).value_indicator_animation;
+        let value_indicator_animation = self.get(app).value_indicator_animation.handle();
         value_indicator_animation.dispose(app);
-        app.destroy(value_indicator_animation);
         RenderObjectBase::dispose(self, app);
     }
 }
@@ -3088,19 +3079,19 @@ impl RenderBox for RenderValueIndicator {
 }
 
 /// Dart's `const AlwaysStoppedAnimation<double>(1)`, which Dart canonicalizes into one
-/// object, kept per [`App`] and made on first use; never destroyed.
+/// object, kept per [`App`] and made on first use; the `App` keeps it for its life.
 #[derive(Default)]
 struct AlwaysStoppedAtOne {
-    animation: Option<Handle<AlwaysStoppedAnimation<f64>>>,
+    animation: Option<Ref<AlwaysStoppedAnimation<f64>>>,
 }
 
 fn always_stopped_at_one(app: &mut App) -> AnyAnimation<f64> {
     let statics = app.singleton::<AlwaysStoppedAtOne>();
-    if let Some(animation) = app.get(statics).animation {
+    if let Some(animation) = app.get(statics).animation.handle() {
         return animation.as_animation();
     }
     let animation = app.create(AlwaysStoppedAnimation::new(1.0));
-    app.get_mut(statics).animation = Some(animation);
+    app.get_mut(statics).animation = Some(animation.clone());
     animation.as_animation()
 }
 
@@ -4184,8 +4175,8 @@ pub(crate) mod tests {
         )
     }
 
-    fn new_focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn new_focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
@@ -4203,8 +4194,9 @@ pub(crate) mod tests {
             let theme = default_theme(&tester);
             let value = Rc::new(Cell::new(0.5));
             let build_app = |enabled: bool| {
-                focusable_slider_app(theme.clone(), &value, enabled, move |slider| {
-                    slider.autofocus(true).focus_node(focus_node)
+                focusable_slider_app(theme.clone(), &value, enabled, {
+                    let focus_node = focus_node.clone();
+                    move |slider| slider.autofocus(true).focus_node(focus_node.clone())
                 })
             };
             tester.pump_widget(build_app(true));
@@ -4243,19 +4235,22 @@ pub(crate) mod tests {
             let value = Rc::new(Cell::new(0.5));
             let purple = Colors::PURPLE.get(&500).expect("a swatch shade");
             let build_app = |enabled: bool| {
-                focusable_slider_app(theme.clone(), &value, enabled, move |slider| {
-                    slider
-                        .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
-                            move |states: &WidgetStates| {
-                                if states.contains(&WidgetState::Focused) {
-                                    return Some(purple);
-                                }
+                focusable_slider_app(theme.clone(), &value, enabled, {
+                    let focus_node = focus_node.clone();
+                    move |slider| {
+                        slider
+                            .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+                                move |states: &WidgetStates| {
+                                    if states.contains(&WidgetState::Focused) {
+                                        return Some(purple);
+                                    }
 
-                                Some(Colors::TRANSPARENT)
-                            },
-                        ))
-                        .autofocus(true)
-                        .focus_node(focus_node)
+                                    Some(Colors::TRANSPARENT)
+                                },
+                            ))
+                            .autofocus(true)
+                            .focus_node(focus_node.clone())
+                    }
                 })
             };
             tester.pump_widget(build_app(true));
@@ -4342,8 +4337,9 @@ pub(crate) mod tests {
             let value = Rc::new(Cell::new(0.5));
             let focus_node = new_focus_node(&tester);
             let build_app = |enabled: bool| {
-                focusable_slider_app(theme.clone(), &value, enabled, move |slider| {
-                    slider.focus_node(focus_node)
+                focusable_slider_app(theme.clone(), &value, enabled, {
+                    let focus_node = focus_node.clone();
+                    move |slider| slider.focus_node(focus_node.clone())
                 })
             };
             tester.pump_widget(build_app(true));
@@ -4415,11 +4411,16 @@ pub(crate) mod tests {
             const ACTIVE_COLOR: Color = Color::new(0xffff0000);
             const OVERLAY_COLOR: Color = Color::new(0xff0000ff);
             let build_app = |enabled: bool| {
-                focusable_slider_app(theme.clone(), &value, enabled, move |slider| {
-                    slider
-                        .active_color(ACTIVE_COLOR)
-                        .overlay_color(Rc::new(WidgetStatePropertyAll::new(Some(OVERLAY_COLOR))))
-                        .focus_node(focus_node)
+                focusable_slider_app(theme.clone(), &value, enabled, {
+                    let focus_node = focus_node.clone();
+                    move |slider| {
+                        slider
+                            .active_color(ACTIVE_COLOR)
+                            .overlay_color(Rc::new(WidgetStatePropertyAll::new(Some(
+                                OVERLAY_COLOR,
+                            ))))
+                            .focus_node(focus_node.clone())
+                    }
                 })
             };
             tester.pump_widget(build_app(true));
@@ -7083,18 +7084,21 @@ pub(crate) mod tests {
             let focus_node = new_focus_node(&tester);
             let lime = Colors::LIME.get(&500).expect("a swatch shade");
             let build_app = |enabled: bool| {
-                focusable_slider_app(theme.clone(), &value, enabled, move |slider| {
-                    slider
-                        .focus_node(focus_node)
-                        .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
-                            move |states: &WidgetStates| {
-                                if states.contains(&WidgetState::Dragged) {
-                                    return Some(lime);
-                                }
+                focusable_slider_app(theme.clone(), &value, enabled, {
+                    let focus_node = focus_node.clone();
+                    move |slider| {
+                        slider.focus_node(focus_node.clone()).overlay_color(
+                            <dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+                                move |states: &WidgetStates| {
+                                    if states.contains(&WidgetState::Dragged) {
+                                        return Some(lime);
+                                    }
 
-                                Some(Colors::TRANSPARENT)
-                            },
-                        ))
+                                    Some(Colors::TRANSPARENT)
+                                },
+                            ),
+                        )
+                    }
                 })
             };
             tester.pump_widget(build_app(true));
@@ -7252,36 +7256,57 @@ pub(crate) mod tests {
         let app = tester.cell.borrow();
         let (render, value_indicator) = (render.get(&app), value_indicator.get(&app));
         let state = app.get(render.state);
-        let mut handles: Vec<waft_foundation::HandleId> = [
-            state.overlay_controller,
-            state.value_indicator_controller,
-            state.enable_controller,
-            state.position_controller,
-        ]
-        .into_iter()
-        .map(|controller| controller.expect("made in init_state").into())
-        .collect();
-        handles.push(
+        let mut handles: Vec<waft_foundation::HandleId> = vec![
+            state
+                .overlay_controller
+                .as_ref()
+                .expect("made in init_state")
+                .handle()
+                .into(),
+            state
+                .value_indicator_controller
+                .as_ref()
+                .expect("made in init_state")
+                .handle()
+                .into(),
+            state
+                .enable_controller
+                .as_ref()
+                .expect("made in init_state")
+                .handle()
+                .into(),
+            state
+                .position_controller
+                .as_ref()
+                .expect("made in init_state")
+                .handle()
+                .into(),
             state
                 .value_indicator_overlay_portal_controller
+                .as_ref()
                 .expect("made in init_state")
+                .handle()
                 .into(),
-        );
-        handles.push(state.layer_link.expect("made in init_state").into());
-        handles.extend(
-            [
-                render.overlay_animation,
-                render.value_indicator_animation,
-                render.enable_animation,
-                value_indicator.value_indicator_animation,
-            ]
-            .map(waft_foundation::HandleId::from),
-        );
+            state
+                .layer_link
+                .as_ref()
+                .expect("made in init_state")
+                .handle()
+                .into(),
+        ];
+        let animations: [waft_foundation::HandleId; 4] = [
+            render.overlay_animation.handle().into(),
+            render.value_indicator_animation.handle().into(),
+            render.enable_animation.handle().into(),
+            value_indicator.value_indicator_animation.handle().into(),
+        ];
+        handles.extend(animations);
         handles
     }
 
-    /// Not a Dart case: Dart's collector frees what a disposed slider owned; here the slider
-    /// destroys its controllers, portal controller, layer link and curved animations itself.
+    /// Not a Dart case: what Dart's collector frees once a slider is gone, its controllers,
+    /// portal controller, layer link and curved animations, is freed here with the last
+    /// reference to each.
     #[test]
     fn an_unmounted_slider_leaves_none_of_its_objects_alive() {
         with_main_thread_stack(|| {
@@ -7306,10 +7331,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             let app = tester.cell.borrow();
             for handle in handles {
-                assert!(
-                    !app.contains(handle) || app.is_disposed(handle),
-                    "{handle:?} is still alive"
-                );
+                assert!(!app.contains(handle), "{handle:?} is still alive");
             }
         });
     }
@@ -7383,7 +7405,7 @@ pub(crate) mod tests {
     #[test]
     fn a_slider_disposed_mid_indicator_removes_its_value_indicator_from_the_overlay() {
         with_main_thread_stack(|| {
-            use waft_widgets::{Builder, Column, Navigator, Route, Text, WidgetBuilder};
+            use waft_widgets::{Builder, Column, Navigator, Text, WidgetBuilder};
 
             use crate::elevated_button::ElevatedButton;
             use crate::page::MaterialPageRoute;
@@ -7432,7 +7454,7 @@ pub(crate) mod tests {
                                         Navigator::push_replacement(
                                             app,
                                             context,
-                                            Route::as_route(route),
+                                            route.erase(),
                                             None,
                                         );
                                     })),

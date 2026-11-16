@@ -9,16 +9,16 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Offset, TextEditingValue, TextInputAction, TextInputType};
-use waft_foundation::{App, Handle, ValueChanged};
+use waft_foundation::{App, Handle, OptionRetained, Ref, ValueChanged};
 use waft_painting::{EdgeInsets, EdgeInsetsGeometry, TextAlign, TextStyle};
 use waft_services::{RestorationBucket, TextInputFormatterRef};
 use waft_widgets::{
     AnyFormFieldState, AnyMenuController, AnyTextEditingController, AutovalidateMode, BuildContext,
-    FocusNode, FormFieldData, FormFieldLeaf, FormFieldState, FormFieldStateData,
-    FormFieldStateLeaf, IntoWidget, KeyRef, RestorableListenable, RestorableProperty,
-    RestorableTextEditingController, RestorationMixin, RestorationMixinData, State, StateData,
-    StatefulWidget, TextEditingController, TextEditingControllerLeaf, UnmanagedRestorationScope,
-    WidgetRef,
+    FocusNodeRef, FormFieldData, FormFieldLeaf, FormFieldState, FormFieldStateData,
+    FormFieldStateLeaf, IntoWidget, KeyRef, MenuControllerRef, RestorableListenable,
+    RestorableProperty, RestorableTextEditingController, RestorationMixin, RestorationMixinData,
+    State, StateData, StatefulWidget, TextEditingController, TextEditingControllerLeaf,
+    TextEditingControllerRef, UnmanagedRestorationScope, WidgetRef,
 };
 
 use crate::dropdown_menu::{
@@ -50,7 +50,7 @@ pub struct DropdownMenuFormField<T: Clone + PartialEq + 'static> {
     /// Controls the text being edited or selected in the menu.
     ///
     /// If null, this widget will create its own `TextEditingController`.
-    pub controller: Option<AnyTextEditingController>,
+    pub controller: Option<TextEditingControllerRef>,
 
     /// Descriptions of the menu items in the [`DropdownMenuFormField`].
     ///
@@ -144,7 +144,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuFormField<T> {
     /// Dart `DropdownMenuFormField(trailingIconFocusNode:)`.
     pub fn trailing_icon_focus_node(
         mut self,
-        trailing_icon_focus_node: Handle<FocusNode>,
+        trailing_icon_focus_node: FocusNodeRef,
     ) -> DropdownMenuFormField<T> {
         self.dropdown_menu = self
             .dropdown_menu
@@ -245,7 +245,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuFormField<T> {
     }
 
     /// Dart `DropdownMenuFormField(controller:)`.
-    pub fn controller(mut self, controller: AnyTextEditingController) -> DropdownMenuFormField<T> {
+    pub fn controller(mut self, controller: TextEditingControllerRef) -> DropdownMenuFormField<T> {
         self.controller = Some(controller);
         self
     }
@@ -266,7 +266,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuFormField<T> {
     }
 
     /// Dart `DropdownMenuFormField(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: Handle<FocusNode>) -> DropdownMenuFormField<T> {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> DropdownMenuFormField<T> {
         self.dropdown_menu = self.dropdown_menu.focus_node(focus_node);
         self
     }
@@ -363,7 +363,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuFormField<T> {
     /// Dart `DropdownMenuFormField(menuController:)`.
     pub fn menu_controller(
         mut self,
-        menu_controller: AnyMenuController,
+        menu_controller: MenuControllerRef,
     ) -> DropdownMenuFormField<T> {
         self.dropdown_menu = self.dropdown_menu.menu_controller(menu_controller);
         self
@@ -472,7 +472,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuFormField<T> {
         dropdown_menu.initial_selection = state.value(app).cloned();
 
         UnmanagedRestorationScope::new(dropdown_menu)
-            .bucket(state.bucket(app))
+            .bucket(state.bucket(app).and_then(|bucket| bucket.upgrade(app)))
             .into_widget()
     }
 }
@@ -516,22 +516,22 @@ pub struct DropdownMenuFormFieldState<T: Clone + PartialEq + 'static> {
     restoration: RestorationMixinData,
     form_field_state: FormFieldStateData<T>,
     // The controller used to restore the selected item.
-    restorable_controller: Option<Handle<RestorableTextEditingController>>,
+    restorable_controller: Option<Ref<RestorableTextEditingController>>,
     // The controller used to reset the content of the DropdownMenu inner TextField.
-    local_text_field_controller: Option<Handle<TextEditingController>>,
+    local_text_field_controller: Option<Ref<TextEditingController>>,
 }
 
 impl<T: Clone + PartialEq + 'static> DropdownMenuFormFieldState<T> {
-    fn text_field_controller(self: Handle<Self>, app: &mut App) -> AnyTextEditingController {
-        if let Some(controller) = self.widget(app).controller {
+    fn text_field_controller(self: Handle<Self>, app: &mut App) -> TextEditingControllerRef {
+        if let Some(controller) = self.widget(app).controller.clone() {
             return controller;
         }
-        if let Some(controller) = app.get(self).local_text_field_controller {
-            return controller.as_controller();
+        if let Some(controller) = app.get(self).local_text_field_controller.as_ref() {
+            return controller.erase();
         }
         let controller = TextEditingController::new(app);
-        app.get_mut(self).local_text_field_controller = Some(controller);
-        controller.as_controller()
+        app.get_mut(self).local_text_field_controller = Some(controller.clone());
+        controller.into_erased()
     }
 
     fn create_restorable_controller(self: Handle<Self>, app: &mut App, initial_value: Option<T>) {
@@ -539,14 +539,14 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuFormFieldState<T> {
         let label = self.find_label_by_value(app, initial_value.as_ref());
         let controller =
             RestorableTextEditingController::from_value(app, TextEditingValue::new().text(label));
-        app.get_mut(self).restorable_controller = Some(controller);
+        app.get_mut(self).restorable_controller = Some(controller.clone());
         if !self.restore_pending(app) {
             self.register_restorable_controller(app);
         }
     }
 
     fn update_restorable_controller(self: Handle<Self>, app: &mut App, value: Option<T>) {
-        if let Some(restorable_controller) = app.get(self).restorable_controller {
+        if let Some(restorable_controller) = app.get(self).restorable_controller.handle() {
             let label = self.find_label_by_value(app, value.as_ref());
             RestorableListenable::value(restorable_controller, app)
                 .as_controller()
@@ -558,6 +558,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuFormFieldState<T> {
         let controller = app
             .get(self)
             .restorable_controller
+            .handle()
             .expect("register_restorable_controller needs the restorable controller");
         self.register_for_restoration(app, controller.as_property(), "controller");
     }
@@ -594,7 +595,7 @@ impl<T: Clone + PartialEq + 'static> RestorationMixin for DropdownMenuFormFieldS
         initial_restore: bool,
     ) {
         FormFieldState::restore_state(self, app, old_bucket, initial_restore);
-        if let Some(restorable_controller) = app.get(self).restorable_controller {
+        if let Some(restorable_controller) = app.get(self).restorable_controller.handle() {
             self.register_restorable_controller(app);
             // Make sure to update the internal [DropdownMenuFieldState] value to sync up with
             // text editing controller value if it matches one of the item label.
@@ -654,9 +655,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuFormFieldState<T> {
         if old_widget.controller != self.widget(app).controller
             && let Some(controller) = app.get_mut(self).local_text_field_controller.take()
         {
-            controller.as_controller().dispose(app);
-            // The text field of the last build still listens to it until it updates.
-            app.destroy_lingering(controller);
+            controller.erase::<AnyTextEditingController>().dispose(app);
         }
     }
 
@@ -669,15 +668,11 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuFormFieldState<T> {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(restorable_controller) = app.get(self).restorable_controller {
-            let controller = RestorableListenable::value(restorable_controller, app);
+        if let Some(restorable_controller) = app.get(self).restorable_controller.handle() {
             RestorableProperty::dispose(restorable_controller, app);
-            app.destroy_lingering(controller);
-            app.destroy_lingering(restorable_controller);
         }
         if let Some(controller) = app.get_mut(self).local_text_field_controller.take() {
-            controller.as_controller().dispose(app);
-            app.destroy_lingering(controller);
+            controller.erase::<AnyTextEditingController>().dispose(app);
         }
         FormFieldState::dispose(self, app);
     }
@@ -707,6 +702,7 @@ mod tests {
     };
     use crate::text_field::TextField;
     use crate::tooltip::tests::{m3, tester};
+    use waft_widgets::FocusNode;
 
     // ---- Dart's `MenuItem` and `menuEntries` ----
 
@@ -978,12 +974,18 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             pump_field(&mut tester, field());
-            assert_eq!(menu(&tester, |menu| menu.trailing_icon_focus_node), None);
-            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-            pump_field(&mut tester, field().trailing_icon_focus_node(focus_node));
             assert_eq!(
-                menu(&tester, |menu| menu.trailing_icon_focus_node),
-                Some(focus_node)
+                menu(&tester, |menu| menu.trailing_icon_focus_node.clone()),
+                None
+            );
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
+            pump_field(
+                &mut tester,
+                field().trailing_icon_focus_node(focus_node.erase()),
+            );
+            assert_eq!(
+                menu(&tester, |menu| menu.trailing_icon_focus_node.clone()),
+                Some(focus_node.erase())
             );
         });
     }
@@ -1256,17 +1258,20 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             pump_field(&mut tester, field());
-            let controller =
-                TextEditingController::new(&mut tester.cell.borrow_mut()).as_controller();
+            let controller = TextEditingController::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyTextEditingController>();
 
             // Check default value.
-            let default = menu(&tester, |menu| menu.controller);
+            let default = menu(&tester, |menu| menu.controller.clone());
             // A default controller is created.
             assert!(default.is_some());
-            assert_ne!(default, Some(controller));
+            assert_ne!(default, Some(controller.clone()));
 
-            pump_field(&mut tester, field().controller(controller));
-            assert_eq!(menu(&tester, |menu| menu.controller), Some(controller));
+            pump_field(&mut tester, field().controller(controller.clone()));
+            assert_eq!(
+                menu(&tester, |menu| menu.controller.clone()),
+                Some(controller)
+            );
         });
     }
 
@@ -1275,10 +1280,13 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             pump_field(&mut tester, field());
-            assert_eq!(menu(&tester, |menu| menu.focus_node), None);
+            assert_eq!(menu(&tester, |menu| menu.focus_node.clone()), None);
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-            pump_field(&mut tester, field().focus_node(focus_node));
-            assert_eq!(menu(&tester, |menu| menu.focus_node), Some(focus_node));
+            pump_field(&mut tester, field().focus_node(focus_node.erase()));
+            assert_eq!(
+                menu(&tester, |menu| menu.focus_node.clone()),
+                Some(focus_node.erase())
+            );
         });
     }
 
@@ -1367,13 +1375,15 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             pump_field(&mut tester, field());
-            assert_eq!(menu(&tester, |menu| menu.menu_controller), None);
-            let menu_controller = waft_widgets::MenuControllerLeaf::as_menu_controller(
-                waft_widgets::MenuController::new(&mut tester.cell.borrow_mut()),
+            assert_eq!(menu(&tester, |menu| menu.menu_controller.clone()), None);
+            let menu_controller = waft_widgets::MenuController::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyMenuController>();
+            pump_field(
+                &mut tester,
+                field().menu_controller(menu_controller.clone()),
             );
-            pump_field(&mut tester, field().menu_controller(menu_controller));
             assert_eq!(
-                menu(&tester, |menu| menu.menu_controller),
+                menu(&tester, |menu| menu.menu_controller.clone()),
                 Some(menu_controller)
             );
         });
@@ -1517,15 +1527,17 @@ mod tests {
     fn assert_a_reset_clears_the_text_field(custom_controller: bool) {
         let mut tester = tester();
         let field_key = GlobalKey::new();
-        let controller = custom_controller
-            .then(|| TextEditingController::new(&mut tester.cell.borrow_mut()).as_controller());
+        let controller = custom_controller.then(|| {
+            TextEditingController::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyTextEditingController>()
+        });
         let mut form_field = field().key(field_key.clone().into());
-        if let Some(controller) = controller {
+        if let Some(controller) = controller.clone() {
             form_field = form_field.controller(controller);
         }
         pump_field(&mut tester, form_field);
 
-        let text_field_controller = text_field(&tester, |text_field| text_field.controller)
+        let text_field_controller = text_field(&tester, |text_field| text_field.controller.clone())
             .expect("the field's controller");
         if let Some(controller) = controller {
             // Custom controller is correctly passed to the inner TextField.
@@ -1884,8 +1896,8 @@ mod tests {
     fn an_entry_with_a_null_value_can_be_selected() {
         with_main_thread_stack(|| {
             let mut tester = tester();
-            let controller =
-                TextEditingController::new(&mut tester.cell.borrow_mut()).as_controller();
+            let controller = TextEditingController::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyTextEditingController>();
             let select_none_label = "Select none";
             let nullable_menu_items: Rc<[DropdownMenuEntry<Option<String>>]> = Rc::from(vec![
                 DropdownMenuEntry::new(None, select_none_label),
@@ -1896,18 +1908,19 @@ mod tests {
             tester.pump_widget(material_app(
                 theme,
                 Scaffold::new()
-                    .body(waft_widgets::StatefulBuilder::new(
+                    .body(waft_widgets::StatefulBuilder::new({
+                        let controller = controller.clone();
                         move |_app, _context, set_state| {
                             DropdownMenuFormField::new(Rc::clone(&nullable_menu_items))
-                                .controller(controller)
+                                .controller(controller.clone())
                                 .request_focus_on_tap(true)
                                 .enable_filter(true)
                                 .on_selected(move |app, _value| {
                                     set_state(app, &mut |_app| {});
                                 })
                                 .into_widget()
-                        },
-                    ))
+                        }
+                    }))
                     .into_widget(),
             ));
 

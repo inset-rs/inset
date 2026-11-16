@@ -5,11 +5,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationBehavior, AnimationController, AnyAnimation, Curve,
-    CurvedAnimation, Curves, Tween,
+    Animatable, AnimationBehavior, AnimationController, AnimationRef, Curve, CurvedAnimation,
+    Curves, Tween,
 };
 use waft_embedder::{BlurStyle, Clip, Color, Offset, Radius, Rect, Size};
-use waft_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref, ValueNotifier};
 use waft_painting::{BorderRadius, BorderSide, BorderStyle, BoxShadow, RoundedRectangleBorder};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
@@ -45,7 +45,7 @@ pub struct CupertinoTextMagnifier {
     /// The [`CupertinoTextMagnifier`] requires a [`MagnifierController`]
     /// in order to show / hide itself without removing itself from the
     /// overlay.
-    pub controller: Handle<MagnifierController>,
+    pub controller: Ref<MagnifierController>,
     /// A drag resistance on the downward Y position of the lens.
     pub drag_resistance: f64,
     /// The difference in Y between the gesture position and the caret center
@@ -63,7 +63,7 @@ pub struct CupertinoTextMagnifier {
     pub horizontal_screen_edge_padding: f64,
     /// [`CupertinoTextMagnifier`] will determine its own positioning
     /// based on the [`MagnifierInfo`] of this notifier.
-    pub magnifier_info: Handle<ValueNotifier<MagnifierInfo>>,
+    pub magnifier_info: Ref<ValueNotifier<MagnifierInfo>>,
 }
 
 impl CupertinoTextMagnifier {
@@ -73,8 +73,8 @@ impl CupertinoTextMagnifier {
     /// The default constructor parameters and constants were eyeballed on
     /// an iPhone XR iOS v15.5.
     pub fn new(
-        controller: Handle<MagnifierController>,
-        magnifier_info: Handle<ValueNotifier<MagnifierInfo>>,
+        controller: Ref<MagnifierController>,
+        magnifier_info: Ref<ValueNotifier<MagnifierInfo>>,
     ) -> CupertinoTextMagnifier {
         CupertinoTextMagnifier {
             key: None,
@@ -155,7 +155,6 @@ impl StatefulWidget for CupertinoTextMagnifier {
             vertical_focal_point_adjustment: 0.0,
             io_animation_controller: None,
             io_animation: None,
-            io_tween: None,
             io_curved_animation: None,
         }
     }
@@ -170,23 +169,23 @@ pub struct CupertinoTextMagnifierState {
     // set these values.
     current_adjusted_magnifier_position: Offset,
     vertical_focal_point_adjustment: f64,
-    io_animation_controller: Option<Handle<AnimationController>>,
-    io_animation: Option<AnyAnimation<f64>>,
-    // The tween `io_animation` drives, which Dart leaves to the collector; held to destroy it.
-    io_tween: Option<Handle<Tween<f64>>>,
-    io_curved_animation: Option<Handle<CurvedAnimation>>,
+    io_animation_controller: Option<Ref<AnimationController>>,
+    io_animation: Option<AnimationRef<f64>>,
+    io_curved_animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl CupertinoTextMagnifierState {
     fn io_animation_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .io_animation_controller
+            .handle()
             .expect("created in init_state")
     }
 
     fn determine_magnifier_position_and_focal_point(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let (controller, magnifier_info) = (widget.controller, widget.magnifier_info);
+        let magnifier_info = widget.magnifier_info.handle();
+        let controller = widget.controller.handle();
         let (hide_below_threshold, drag_resistance, horizontal_screen_edge_padding) = (
             widget.hide_below_threshold,
             widget.drag_resistance,
@@ -281,7 +280,7 @@ impl SingleTickerProviderStateMixin for CupertinoTextMagnifierState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for CupertinoTextMagnifierState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -291,7 +290,7 @@ impl State for CupertinoTextMagnifierState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let io_animation_controller = AnimationController::create(
+        let io_animation_controller = AnimationController::new(
             app,
             Some(0.0),
             Some(CupertinoMagnifier::K_IN_OUT_ANIMATION_DURATION),
@@ -303,31 +302,26 @@ impl State for CupertinoTextMagnifierState {
         );
         io_animation_controller
             .add_listener(app, Listener::new(move |app| self.set_state(app, |_| {})));
-        app.get_mut(self).io_animation_controller = Some(io_animation_controller);
+        app.get_mut(self).io_animation_controller = Some(io_animation_controller.clone());
 
         let widget = self.widget(app);
         let (controller, magnifier_info, animation_curve) = (
-            widget.controller,
-            widget.magnifier_info,
+            widget.controller.handle(),
+            widget.magnifier_info.clone(),
             widget.animation_curve.clone(),
         );
-        app.get_mut(controller).animation_controller = Some(io_animation_controller);
+        app.get_mut(controller).animation_controller = Some(io_animation_controller.clone());
         magnifier_info.add_listener(
             app,
             Listener::handle_method(self, Self::determine_magnifier_position_and_focal_point),
         );
-        let io_curved_animation = CurvedAnimation::create(
-            app,
-            io_animation_controller.as_animation(),
-            animation_curve,
-            None,
-        );
+        let io_curved_animation =
+            CurvedAnimation::new(app, io_animation_controller.erase(), animation_curve, None);
         let io_tween = Tween::new(app, Some(0.0), Some(1.0));
-        let io_animation = io_tween.animate(app, io_curved_animation.as_animation());
+        let io_animation = io_tween.animate(app, io_curved_animation.erase());
         let state = app.get_mut(self);
         state.io_curved_animation = Some(io_curved_animation);
         state.io_animation = Some(io_animation);
-        state.io_tween = Some(io_tween);
     }
 
     fn activate(self: Handle<Self>, app: &mut App) {
@@ -336,13 +330,15 @@ impl State for CupertinoTextMagnifierState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let (controller, magnifier_info) = (widget.controller, widget.magnifier_info);
+        let (controller, magnifier_info) =
+            (widget.controller.handle(), widget.magnifier_info.clone());
         app.get_mut(controller).animation_controller = None;
         let io_animation_controller = self.io_animation_controller(app);
         io_animation_controller.dispose(app);
         let io_curved_animation = app
             .get(self)
             .io_curved_animation
+            .handle()
             .expect("created in init_state");
         io_curved_animation.dispose(app);
         magnifier_info.remove_listener(
@@ -350,23 +346,10 @@ impl State for CupertinoTextMagnifierState {
             &Listener::handle_method(self, Self::determine_magnifier_position_and_focal_point),
         );
         SingleTickerProviderStateMixin::dispose(self, app);
-        let state = app.get_mut(self);
-        state.io_animation_controller = None;
-        state.io_curved_animation = None;
-        let io_animation = state.io_animation.take();
-        let io_tween = state.io_tween.take();
-        app.destroy(io_animation_controller);
-        app.destroy(io_curved_animation);
-        if let Some(io_animation) = io_animation {
-            app.destroy(io_animation);
-        }
-        if let Some(io_tween) = io_tween {
-            app.destroy(io_tween);
-        }
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &CupertinoTextMagnifier) {
-        let magnifier_info = self.widget(app).magnifier_info;
+        let magnifier_info = self.widget(app).magnifier_info.clone();
         if old_widget.magnifier_info != magnifier_info {
             old_widget.magnifier_info.remove_listener(
                 app,
@@ -389,7 +372,7 @@ impl State for CupertinoTextMagnifierState {
         let (position, vertical_focal_point_adjustment, io_animation) = (
             state.current_adjusted_magnifier_position,
             state.vertical_focal_point_adjustment,
-            state.io_animation.expect("created in init_state"),
+            state.io_animation.clone().expect("created in init_state"),
         );
         AnimatedPositioned::new(
             CupertinoMagnifier::new()
@@ -478,7 +461,7 @@ pub struct CupertinoMagnifier {
     ///
     /// Since [`CupertinoMagnifier`] has no knowledge of shown / hidden state,
     /// this animation should be driven by an external actor.
-    pub in_out_animation: Option<AnyAnimation<f64>>,
+    pub in_out_animation: Option<AnimationRef<f64>>,
     /// Any additional focal point offset, applied over the regular focal
     /// point offset defined in [`K_MAGNIFIER_ABOVE_FOCAL_POINT`](Self::K_MAGNIFIER_ABOVE_FOCAL_POINT).
     pub additional_focal_point_offset: Offset,
@@ -543,7 +526,7 @@ impl CupertinoMagnifier {
     }
 
     /// Dart `CupertinoMagnifier(inOutAnimation:)`.
-    pub fn in_out_animation(mut self, in_out_animation: AnyAnimation<f64>) -> CupertinoMagnifier {
+    pub fn in_out_animation(mut self, in_out_animation: AnimationRef<f64>) -> CupertinoMagnifier {
         self.in_out_animation = Some(in_out_animation);
         self
     }
@@ -612,6 +595,7 @@ impl StatelessWidget for CupertinoMagnifier {
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
         let animation_value = self
             .in_out_animation
+            .as_ref()
             .map_or(1.0, |in_out_animation| in_out_animation.value(app));
         let default_y_offset =
             (self.size.height() / 2.0) - CupertinoMagnifier::K_MAGNIFIER_ABOVE_FOCAL_POINT;
@@ -673,7 +657,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
             Ticker::new(app, on_tick, None)
         }
     }
@@ -762,14 +746,16 @@ mod tests {
     fn show_cupertino_magnifier(
         app: &mut App,
         context: BuildContext,
-        magnifier_controller: Handle<MagnifierController>,
-        magnifier_info: Handle<ValueNotifier<MagnifierInfo>>,
+        magnifier_controller: Ref<MagnifierController>,
+        magnifier_info: Ref<ValueNotifier<MagnifierInfo>>,
     ) -> Duration {
+        let shown_controller = magnifier_controller.clone();
         magnifier_controller.show(
             app,
             context,
             Rc::new(move |_app: &mut App, _context: BuildContext| {
-                CupertinoTextMagnifier::new(magnifier_controller, magnifier_info).into_widget()
+                CupertinoTextMagnifier::new(shown_controller.clone(), magnifier_info.clone())
+                    .into_widget()
             }),
             None,
         );
@@ -824,7 +810,12 @@ mod tests {
         )));
         let magnifier_controller = MagnifierController::new(&mut app);
 
-        show_cupertino_magnifier(&mut app, context, magnifier_controller, magnifier);
+        show_cupertino_magnifier(
+            &mut app,
+            context,
+            magnifier_controller.clone(),
+            magnifier.clone(),
+        );
 
         // Magnifier border color should inherit from CupertinoTheme.of(context).primaryColor.
         let magnifier_border_color =
@@ -847,7 +838,12 @@ mod tests {
         let magnifier_info = app.create(ValueNotifier::new(info(Offset::new(width + 100.0, 0.0))));
         let magnifier_controller = MagnifierController::new(&mut app);
 
-        show_cupertino_magnifier(&mut app, context, magnifier_controller, magnifier_info);
+        show_cupertino_magnifier(
+            &mut app,
+            context,
+            magnifier_controller.clone(),
+            magnifier_info.clone(),
+        );
 
         // Should be less than the right edge, since we have padding.
         assert!(magnifier_position(&mut app).dx() < width);
@@ -868,7 +864,12 @@ mod tests {
         ))));
         let magnifier_controller = MagnifierController::new(&mut app);
 
-        show_cupertino_magnifier(&mut app, context, magnifier_controller, magnifier_info);
+        show_cupertino_magnifier(
+            &mut app,
+            context,
+            magnifier_controller.clone(),
+            magnifier_info.clone(),
+        );
 
         // The magnifier Y should be greater than the text field, since we "dragged" it down.
         let magnified_y = magnifier_position(&mut app).dy() + BASIC_OFFSET.dy();
@@ -882,8 +883,8 @@ mod tests {
         app: &mut App,
         context: BuildContext,
     ) -> (
-        Handle<MagnifierController>,
-        Handle<ValueNotifier<MagnifierInfo>>,
+        Ref<MagnifierController>,
+        Ref<ValueNotifier<MagnifierInfo>>,
         Duration,
     ) {
         let width = MediaQuery::size_of(app, context).width();
@@ -894,7 +895,12 @@ mod tests {
         let magnifier_controller = MagnifierController::new(app);
 
         // Show the magnifier initially, so that we get it in a not hidden state.
-        let at = show_cupertino_magnifier(app, context, magnifier_controller, magnifier_info);
+        let at = show_cupertino_magnifier(
+            app,
+            context,
+            magnifier_controller.clone(),
+            magnifier_info.clone(),
+        );
 
         // Move the gesture to one that should hide it.
         let below = magnifier_info.value(app).global_gesture_position + Offset::new(0.0, 100.0);
@@ -1029,7 +1035,7 @@ mod tests {
         let cell = test_cell();
         install_fonts(&mut cell.borrow_mut());
         let mut app = cell.borrow_mut();
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             &mut app,
             None,
             None,
@@ -1040,17 +1046,21 @@ mod tests {
             TestVSync,
         );
         drop(app);
+        let built_with = controller.clone();
         build(
             &cell,
             CupertinoApp::new()
                 .home(Center::new().child(
                     // CupertinoMagnifier does not listen to the animation itself; its
                     // owner (e.g. CupertinoTextMagnifier) rebuilds it on every tick.
-                    ListenableBuilder::new(Rc::new(controller), move |_app, _context, _child| {
-                        CupertinoMagnifier::new()
-                            .in_out_animation(controller.as_animation())
-                            .into_widget()
-                    }),
+                    ListenableBuilder::new(
+                        Rc::new(controller.clone()),
+                        move |_app, _context, _child| {
+                            CupertinoMagnifier::new()
+                                .in_out_animation(built_with.erase())
+                                .into_widget()
+                        },
+                    ),
                 ))
                 .into_widget(),
         );

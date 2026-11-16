@@ -8,9 +8,9 @@ use std::f64::consts::PI;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use waft_animation::{Animatable, AnyAnimation};
+use waft_animation::{Animatable, AnimationRef, AnyAnimation};
 use waft_embedder::{FilterQuality, Matrix4, Offset, Rect, Size, TextAlign, TextDirection};
-use waft_foundation::{App, Handle, Listenable, Listener, RetainedHandleId};
+use waft_foundation::{App, Handle, Listenable, Listener};
 use waft_painting::{Alignment, AlignmentGeometry, Axis, DecorationRef, TextOverflow, TextStyle};
 use waft_rendering::{
     AnyRenderObject, DecorationPosition, RelativeRect, RenderAnimatedOpacity,
@@ -123,7 +123,6 @@ impl<W: AnimatedWidget> StatefulWidget for Animated<W> {
     fn create_state(&self) -> AnimatedState<W> {
         AnimatedState {
             state: StateData::new(),
-            listened: Vec::new(),
         }
     }
 }
@@ -137,11 +136,6 @@ impl<W: AnimatedWidget> Debug for Animated<W> {
 /// Dart's `_AnimatedState`.
 pub struct AnimatedState<W: AnimatedWidget> {
     state: StateData<Animated<W>>,
-    /// The listenable's arena objects, kept while this state listens to them: the widget's
-    /// owner may destroy the animation it handed down (a tile that drives a new one each
-    /// build) before this state removes its listener from the old one, which Dart's lingering
-    /// object allows.
-    listened: Vec<RetainedHandleId>,
 }
 
 impl<W: AnimatedWidget> State for AnimatedState<W> {
@@ -151,8 +145,6 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let listenable = self.widget(app).0.listenable();
         listenable.add_listener(app, Listener::handle_method(self, Self::handle_change));
-        let listened = listenable.retain(app);
-        app.get_mut(self).listened = listened;
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &Animated<W>) {
@@ -162,15 +154,12 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
             old_listenable
                 .remove_listener(app, &Listener::handle_method(self, Self::handle_change));
             listenable.add_listener(app, Listener::handle_method(self, Self::handle_change));
-            let listened = listenable.retain(app);
-            self.release_listened(app, listened);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let listenable = self.widget(app).0.listenable();
         listenable.remove_listener(app, &Listener::handle_method(self, Self::handle_change));
-        self.release_listened(app, Vec::new());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -183,15 +172,6 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
 }
 
 impl<W: AnimatedWidget> AnimatedState<W> {
-    /// Gives back the objects of the listenable this state stopped listening to, keeping
-    /// `listened` in their place.
-    fn release_listened(self: Handle<Self>, app: &mut App, listened: Vec<RetainedHandleId>) {
-        let released = std::mem::replace(&mut app.get_mut(self).listened, listened);
-        for released in released {
-            app.release_id(released);
-        }
-    }
-
     fn handle_change(self: Handle<Self>, app: &mut App) {
         if !self.mounted(app) {
             return;
@@ -227,8 +207,8 @@ pub struct DelegatedTransitionBuilder {
 type DelegatedTransitionBuilderFn = dyn Fn(
     &mut App,
     BuildContext,
-    AnyAnimation<f64>,
-    AnyAnimation<f64>,
+    AnimationRef<f64>,
+    AnimationRef<f64>,
     bool,
     Option<&WidgetRef>,
 ) -> Option<WidgetRef>;
@@ -247,8 +227,8 @@ impl DelegatedTransitionBuilder {
         builder: impl Fn(
             &mut App,
             BuildContext,
-            AnyAnimation<f64>,
-            AnyAnimation<f64>,
+            AnimationRef<f64>,
+            AnimationRef<f64>,
             bool,
             Option<&WidgetRef>,
         ) -> Option<WidgetRef>
@@ -269,8 +249,8 @@ impl DelegatedTransitionBuilder {
         F: Fn(
                 &mut App,
                 BuildContext,
-                AnyAnimation<f64>,
-                AnyAnimation<f64>,
+                AnimationRef<f64>,
+                AnimationRef<f64>,
                 bool,
                 Option<&WidgetRef>,
             ) -> Option<WidgetRef>
@@ -294,8 +274,8 @@ impl DelegatedTransitionBuilder {
         &self,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         allow_snapshotting: bool,
         child: Option<&WidgetRef>,
     ) -> Option<WidgetRef> {
@@ -358,7 +338,7 @@ pub struct SlideTransition {
     /// If the current value of the position animation is `(dx, dy)`, the child
     /// will be translated horizontally by `width * dx` and vertically by
     /// `height * dy`, after applying the [`text_direction`](Self::text_direction) if available.
-    pub position: AnyAnimation<Offset>,
+    pub position: AnimationRef<Offset>,
 
     /// The direction to use for the x offset described by the [`position`](Self::position).
     ///
@@ -387,7 +367,7 @@ pub struct SlideTransition {
 
 impl SlideTransition {
     /// Creates a fractional translation transition.
-    pub fn new(position: AnyAnimation<Offset>) -> SlideTransition {
+    pub fn new(position: AnimationRef<Offset>) -> SlideTransition {
         SlideTransition {
             key: None,
             position,
@@ -428,7 +408,7 @@ impl AnimatedWidget for SlideTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.position)
+        Rc::new(self.position.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -474,7 +454,7 @@ pub struct MatrixTransition {
     ///
     /// The matrix will be computed from the animation with the
     /// [`on_transform`](Self::on_transform) callback.
-    pub animation: AnyAnimation<f64>,
+    pub animation: AnimationRef<f64>,
 
     /// The alignment of the origin of the coordinate system in which the
     /// transform takes place, relative to the size of the box.
@@ -502,7 +482,7 @@ impl MatrixTransition {
     ///
     /// The [`alignment`](Self::alignment) defaults to [`Alignment::CENTER`].
     pub fn new(
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         on_transform: impl Fn(f64) -> Matrix4 + 'static,
     ) -> MatrixTransition {
         MatrixTransition {
@@ -584,14 +564,14 @@ impl AnimatedWidget for MatrixTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.animation)
+        Rc::new(self.animation.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
         let transform = (self.on_transform)(self.animation.value(app));
         MatrixTransition::build_transform(
             app,
-            self.animation,
+            self.animation.handle(),
             transform,
             self.alignment,
             self.filter_quality,
@@ -617,7 +597,7 @@ pub struct ScaleTransition {
 
     /// See [`MatrixTransition::animation`]; read it as
     /// [`scale`](Self::scale).
-    pub animation: AnyAnimation<f64>,
+    pub animation: AnimationRef<f64>,
 
     /// See [`MatrixTransition::alignment`].
     pub alignment: Alignment,
@@ -633,7 +613,7 @@ impl ScaleTransition {
     /// Creates a scale transition.
     ///
     /// The [`alignment`](Self::alignment) defaults to [`Alignment::CENTER`].
-    pub fn new(scale: AnyAnimation<f64>) -> ScaleTransition {
+    pub fn new(scale: AnimationRef<f64>) -> ScaleTransition {
         ScaleTransition {
             key: None,
             animation: scale,
@@ -645,7 +625,7 @@ impl ScaleTransition {
 
     /// The animation that controls the scale of the child.
     pub fn scale(&self) -> AnyAnimation<f64> {
-        self.animation
+        self.animation.handle()
     }
 
     /// Dart `ScaleTransition(key:)`.
@@ -687,14 +667,14 @@ impl AnimatedWidget for ScaleTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.animation)
+        Rc::new(self.animation.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
         let transform = ScaleTransition::handle_scale_matrix(self.animation.value(app));
         MatrixTransition::build_transform(
             app,
-            self.animation,
+            self.animation.handle(),
             transform,
             self.alignment,
             self.filter_quality,
@@ -717,7 +697,7 @@ pub struct RotationTransition {
     pub key: Option<KeyRef>,
 
     /// See [`MatrixTransition::animation`]; read it as [`turns`](Self::turns).
-    pub animation: AnyAnimation<f64>,
+    pub animation: AnimationRef<f64>,
 
     /// See [`MatrixTransition::alignment`].
     pub alignment: Alignment,
@@ -731,7 +711,7 @@ pub struct RotationTransition {
 
 impl RotationTransition {
     /// Creates a rotation transition.
-    pub fn new(turns: AnyAnimation<f64>) -> RotationTransition {
+    pub fn new(turns: AnimationRef<f64>) -> RotationTransition {
         RotationTransition {
             key: None,
             animation: turns,
@@ -743,7 +723,7 @@ impl RotationTransition {
 
     /// The animation that controls the rotation of the child.
     pub fn turns(&self) -> AnyAnimation<f64> {
-        self.animation
+        self.animation.handle()
     }
 
     /// Dart `RotationTransition(key:)`.
@@ -785,14 +765,14 @@ impl AnimatedWidget for RotationTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.animation)
+        Rc::new(self.animation.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
         let transform = RotationTransition::handle_turns_matrix(self.animation.value(app));
         MatrixTransition::build_transform(
             app,
-            self.animation,
+            self.animation.handle(),
             transform,
             self.alignment,
             self.filter_quality,
@@ -840,7 +820,7 @@ pub struct SizeTransition {
     ///
     /// If the value of [`size_factor`](Self::size_factor) is less than one, the child will be
     /// clipped in the appropriate axis.
-    pub size_factor: AnyAnimation<f64>,
+    pub size_factor: AnimationRef<f64>,
 
     /// Describes how to align the child along the axis that
     /// [`size_factor`](Self::size_factor) is modifying.
@@ -890,7 +870,7 @@ impl SizeTransition {
     /// [`alignment`](Self::alignment) defaults to the center of the modified axis, which
     /// centers the child within the parent during the transition.
     #[allow(deprecated)]
-    pub fn new(size_factor: AnyAnimation<f64>) -> SizeTransition {
+    pub fn new(size_factor: AnimationRef<f64>) -> SizeTransition {
         SizeTransition {
             key: None,
             axis: Axis::Vertical,
@@ -966,7 +946,7 @@ impl AnimatedWidget for SizeTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.size_factor)
+        Rc::new(self.size_factor.clone())
     }
 
     #[allow(deprecated)]
@@ -1037,7 +1017,7 @@ pub struct FadeTransition {
     /// painted with an opacity of v. For example, if v is 0.5, the child will be
     /// blended 50% with its background. Similarly, if v is 0.0, the child will be
     /// completely transparent.
-    pub opacity: AnyAnimation<f64>,
+    pub opacity: AnimationRef<f64>,
 
     /// The widget below this widget in the tree.
     pub child: Option<WidgetRef>,
@@ -1045,7 +1025,7 @@ pub struct FadeTransition {
 
 impl FadeTransition {
     /// Creates an opacity transition.
-    pub fn new(opacity: AnyAnimation<f64>) -> FadeTransition {
+    pub fn new(opacity: AnimationRef<f64>) -> FadeTransition {
         FadeTransition {
             key: None,
             opacity,
@@ -1074,7 +1054,7 @@ impl RenderObjectWidget for FadeTransition {
     }
 
     fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
-        RenderAnimatedOpacity::new(app, self.opacity, None).as_object()
+        RenderAnimatedOpacity::new(app, self.opacity.clone(), None).as_object()
     }
 
     fn update_render_object(
@@ -1083,7 +1063,7 @@ impl RenderObjectWidget for FadeTransition {
         _context: BuildContext,
         render_object: RenderHandle<RenderAnimatedOpacity>,
     ) {
-        render_object.set_opacity(app, self.opacity);
+        render_object.set_opacity(app, self.opacity.clone());
     }
 }
 
@@ -1102,7 +1082,7 @@ impl SingleChildRenderObjectWidget for FadeTransition {
 ///
 /// Unlike the tweens in `waft_animation`, this one is a value rather than an arena
 /// object: the orphan rule leaves no local type in
-/// `impl Animatable<RelativeRect> for Handle<RelativeRectTween>`. A driven animation
+/// `impl Animatable<RelativeRect> for Ref<RelativeRectTween>`. A driven animation
 /// therefore holds a clone, and writing [`begin`](Self::begin) or [`end`](Self::end)
 /// afterwards does not reach it.
 #[derive(Clone, Debug)]
@@ -1168,7 +1148,7 @@ pub struct PositionedTransition {
     pub key: Option<KeyRef>,
 
     /// The animation that controls the child's size and position.
-    pub rect: AnyAnimation<RelativeRect>,
+    pub rect: AnimationRef<RelativeRect>,
 
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
@@ -1177,7 +1157,7 @@ pub struct PositionedTransition {
 impl PositionedTransition {
     /// Creates a transition for `Positioned`.
     pub fn new<K>(
-        rect: AnyAnimation<RelativeRect>,
+        rect: AnimationRef<RelativeRect>,
         child: impl IntoWidget<K>,
     ) -> PositionedTransition {
         PositionedTransition {
@@ -1200,7 +1180,7 @@ impl AnimatedWidget for PositionedTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.rect)
+        Rc::new(self.rect.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -1240,7 +1220,7 @@ pub struct RelativePositionedTransition {
     ///
     ///  * [`size`](Self::size), which gets the size of the box that the `Positioned` widget's
     ///    offsets are relative to.
-    pub rect: AnyAnimation<Option<Rect>>,
+    pub rect: AnimationRef<Option<Rect>>,
 
     /// The `Positioned` widget's offsets are relative to a box of this
     /// size whose origin is 0,0.
@@ -1257,7 +1237,7 @@ impl RelativePositionedTransition {
     /// current value of the [`rect`](Self::rect) argument assuming that the stack has the
     /// given [`size`](Self::size).
     pub fn new<K>(
-        rect: AnyAnimation<Option<Rect>>,
+        rect: AnimationRef<Option<Rect>>,
         size: Size,
         child: impl IntoWidget<K>,
     ) -> RelativePositionedTransition {
@@ -1282,7 +1262,7 @@ impl AnimatedWidget for RelativePositionedTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.rect)
+        Rc::new(self.rect.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -1314,7 +1294,7 @@ pub struct DecoratedBoxTransition {
     ///
     /// Can be created using a `DecorationTween` interpolating typically between
     /// two `BoxDecoration`.
-    pub decoration: AnyAnimation<DecorationRef>,
+    pub decoration: AnimationRef<DecorationRef>,
 
     /// Whether to paint the box decoration behind or in front of the child.
     pub position: DecorationPosition,
@@ -1331,7 +1311,7 @@ impl DecoratedBoxTransition {
     ///
     ///  * [`DecoratedBox::new`]
     pub fn new<K>(
-        decoration: AnyAnimation<DecorationRef>,
+        decoration: AnimationRef<DecorationRef>,
         child: impl IntoWidget<K>,
     ) -> DecoratedBoxTransition {
         DecoratedBoxTransition {
@@ -1361,7 +1341,7 @@ impl AnimatedWidget for DecoratedBoxTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.decoration)
+        Rc::new(self.decoration.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -1392,7 +1372,7 @@ pub struct AlignTransition {
     pub key: Option<KeyRef>,
 
     /// The animation that controls the child's alignment.
-    pub alignment: AnyAnimation<AlignmentGeometry>,
+    pub alignment: AnimationRef<AlignmentGeometry>,
 
     /// If non-`None`, the child's width factor, see `Align::width_factor`.
     pub width_factor: Option<f64>,
@@ -1412,7 +1392,7 @@ impl AlignTransition {
     ///
     ///  * `Align::new`.
     pub fn new<K>(
-        alignment: AnyAnimation<AlignmentGeometry>,
+        alignment: AnimationRef<AlignmentGeometry>,
         child: impl IntoWidget<K>,
     ) -> AlignTransition {
         AlignTransition {
@@ -1449,7 +1429,7 @@ impl AnimatedWidget for AlignTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.alignment)
+        Rc::new(self.alignment.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -1479,7 +1459,7 @@ pub struct DefaultTextStyleTransition {
     pub key: Option<KeyRef>,
 
     /// The animation that controls the descendants' text style.
-    pub style: AnyAnimation<TextStyle>,
+    pub style: AnimationRef<TextStyle>,
 
     /// How the text should be aligned horizontally.
     pub text_align: Option<TextAlign>,
@@ -1505,7 +1485,7 @@ impl DefaultTextStyleTransition {
     /// Creates an animated [`DefaultTextStyle`] whose [`TextStyle`] animation updates
     /// the widget.
     pub fn new<K>(
-        style: AnyAnimation<TextStyle>,
+        style: AnimationRef<TextStyle>,
         child: impl IntoWidget<K>,
     ) -> DefaultTextStyleTransition {
         DefaultTextStyleTransition {
@@ -1556,7 +1536,7 @@ impl AnimatedWidget for DefaultTextStyleTransition {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.style)
+        Rc::new(self.style.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -1687,7 +1667,9 @@ impl AnimatedWidget for ListenableBuilder {
 mod tests {
     use std::cell::Cell;
     use std::time::Duration;
+    use waft_animation::Drive;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
     use waft_animation::{AnimationBehavior, AnimationController, CallbackAnimatable};
     use waft_embedder::Color;
@@ -1709,7 +1691,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
             Ticker::new(app, on_tick, None)
         }
     }
@@ -1739,8 +1721,8 @@ mod tests {
 
     impl LeafRenderObjectWidget for Sized {}
 
-    fn new_controller(app: &mut App) -> Handle<AnimationController> {
-        AnimationController::create(
+    fn new_controller(app: &mut App) -> Ref<AnimationController> {
+        AnimationController::new(
             app,
             None,
             Some(Duration::from_millis(100)),
@@ -1752,7 +1734,7 @@ mod tests {
         )
     }
 
-    fn fade(opacity: AnyAnimation<f64>) -> WidgetRef {
+    fn fade(opacity: AnimationRef<f64>) -> WidgetRef {
         FadeTransition::new(opacity)
             .child(Sized {
                 size: Size::new(10.0, 10.0),
@@ -1822,7 +1804,7 @@ mod tests {
             CallbackAnimatable::from_callback(|t| Offset::new(t, t * 2.0)),
         );
         let slide = |text_direction: Option<TextDirection>| {
-            let mut transition = SlideTransition::new(position)
+            let mut transition = SlideTransition::new(position.clone())
                 .transform_hit_tests(false)
                 .child(ten_by_ten());
             if let Some(text_direction) = text_direction {
@@ -1855,7 +1837,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
-        let widget = MatrixTransition::new(controller.view(), |value| {
+        let widget = MatrixTransition::new(controller.erase(), |value| {
             Matrix4::translation(value as f32 * 100.0, 0.0)
         })
         .alignment(Alignment::TOP_LEFT)
@@ -1886,7 +1868,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
-        let widget = ScaleTransition::new(controller.view())
+        let widget = ScaleTransition::new(controller.erase())
             .child(ten_by_ten())
             .into_widget();
         let harness = Harness::mount(&mut app, widget);
@@ -1921,7 +1903,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
-        let widget = RotationTransition::new(controller.view())
+        let widget = RotationTransition::new(controller.erase())
             .child(ten_by_ten())
             .into_widget();
         let harness = Harness::mount(&mut app, widget);
@@ -1959,13 +1941,13 @@ mod tests {
     /// transitions_test.dart's 'uses ImageFilter when provided with FilterQuality argument',
     /// for the transition `transition` builds over the animation it is handed.
     fn uses_an_image_filter_while_animating(
-        transition: impl FnOnce(AnyAnimation<f64>) -> WidgetRef,
+        transition: impl FnOnce(AnimationRef<f64>) -> WidgetRef,
     ) {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
         let animation = waft_animation::Tween::new(&mut app, Some(0.0), Some(1.0))
-            .animate(&mut app, controller.view());
+            .animate(&mut app, controller.erase());
         let harness = Harness::mount(&mut app, ltr(transition(animation)));
         harness.pump(&mut app);
 
@@ -2023,7 +2005,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
-        let widget = SizeTransition::new(controller.view())
+        let widget = SizeTransition::new(controller.erase())
             .child(ten_by_ten())
             .into_widget();
         let harness = Harness::mount(&mut app, ltr(widget));
@@ -2052,7 +2034,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
-        let widget = SizeTransition::new(controller.view())
+        let widget = SizeTransition::new(controller.erase())
             .axis(Axis::Horizontal)
             .fixed_cross_axis_size_factor(1.0)
             .child(ten_by_ten())
@@ -2078,7 +2060,7 @@ mod tests {
         );
         let rect = controller.drive(&mut app, tween);
         let widget = Stack::new()
-            .children([PositionedTransition::new(rect, ten_by_ten()).into_widget()])
+            .children([PositionedTransition::new(rect.clone(), ten_by_ten()).into_widget()])
             .into_widget();
         let harness = Harness::mount(&mut app, ltr(widget));
         controller.set_value(&mut app, 0.5);
@@ -2109,7 +2091,7 @@ mod tests {
         );
         let widget = Stack::new()
             .children([RelativePositionedTransition::new(
-                rect,
+                rect.clone(),
                 Size::new(100.0, 100.0),
                 ten_by_ten(),
             )
@@ -2154,7 +2136,7 @@ mod tests {
                 )))
             }),
         );
-        let widget = DecoratedBoxTransition::new(decoration, ten_by_ten())
+        let widget = DecoratedBoxTransition::new(decoration.clone(), ten_by_ten())
             .position(DecorationPosition::Foreground)
             .into_widget();
         let harness = Harness::mount(&mut app, widget);
@@ -2187,7 +2169,7 @@ mod tests {
             &mut app,
             CallbackAnimatable::from_callback(|t| AlignmentGeometry::xy(t, -t)),
         );
-        let widget = AlignTransition::new(alignment, ten_by_ten())
+        let widget = AlignTransition::new(alignment.clone(), ten_by_ten())
             .width_factor(2.0)
             .height_factor(3.0)
             .into_widget();
@@ -2230,7 +2212,7 @@ mod tests {
                 }
             }),
         };
-        let widget = DefaultTextStyleTransition::new(style, child)
+        let widget = DefaultTextStyleTransition::new(style.clone(), child)
             .max_lines(3)
             .overflow(TextOverflow::Ellipsis)
             .soft_wrap(false)
@@ -2253,7 +2235,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
-        let harness = Harness::mount(&mut app, fade(controller.view()));
+        let harness = Harness::mount(&mut app, fade(controller.erase()));
         harness.pump(&mut app);
         let render_object = fade_under_root(&harness, &app);
         assert_eq!(render_object.opacity(&app), controller.view());
@@ -2274,7 +2256,7 @@ mod tests {
         );
 
         let other = new_controller(&mut app);
-        harness.set_child(&mut app, fade(other.view()));
+        harness.set_child(&mut app, fade(other.erase()));
         harness.pump(&mut app);
         assert_eq!(
             fade_under_root(&harness, &app),
@@ -2290,18 +2272,18 @@ mod tests {
     /// An animated widget sized by a notifier's value.
     #[derive(Debug)]
     struct Grower {
-        notifier: Handle<ValueNotifier<f64>>,
+        notifier: Ref<ValueNotifier<f64>>,
         builds: Rc<Cell<u32>>,
     }
 
     impl AnimatedWidget for Grower {
         fn listenable(&self) -> Rc<dyn Listenable> {
-            Rc::new(self.notifier)
+            Rc::new(self.notifier.clone())
         }
 
         fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
             self.builds.set(self.builds.get() + 1);
-            let width = *app.get(self.notifier).value();
+            let width = *app.get(&self.notifier).value();
             Sized {
                 size: Size::new(width, 10.0),
             }
@@ -2322,14 +2304,14 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             Grower {
-                notifier,
+                notifier: notifier.clone(),
                 builds: Rc::clone(&builds),
             }
             .into_widget(),
         );
         harness.pump(&mut app);
         assert_eq!(builds.get(), 1);
-        assert!(has_listeners(&app, notifier));
+        assert!(has_listeners(&app, notifier.handle()));
         assert_eq!(root_child_size(&harness, &app), Size::new(10.0, 10.0));
 
         notifier.set_value(&mut app, 20.0);
@@ -2353,16 +2335,16 @@ mod tests {
             }
             .into_widget()
         };
-        let harness = Harness::mount(&mut app, grower(first));
+        let harness = Harness::mount(&mut app, grower(first.clone()));
         harness.pump(&mut app);
 
-        harness.set_child(&mut app, grower(second));
+        harness.set_child(&mut app, grower(second.clone()));
         harness.pump(&mut app);
         assert!(
-            !has_listeners(&app, first),
+            !has_listeners(&app, first.handle()),
             "did_update_widget left the old listenable"
         );
-        assert!(has_listeners(&app, second));
+        assert!(has_listeners(&app, second.handle()));
         assert_eq!(root_child_size(&harness, &app), Size::new(30.0, 10.0));
 
         harness.set_child(
@@ -2373,7 +2355,10 @@ mod tests {
             .into_widget(),
         );
         harness.pump(&mut app);
-        assert!(!has_listeners(&app, second), "dispose removed the listener");
+        assert!(
+            !has_listeners(&app, second.handle()),
+            "dispose removed the listener"
+        );
         let builds_before = builds.get();
         second.set_value(&mut app, 40.0);
         harness.pump(&mut app);
@@ -2392,7 +2377,7 @@ mod tests {
         let builds = Rc::new(Cell::new(0));
         let child: WidgetRef = SizedBox::square(Some(4.0)).into_widget();
         let same_child = Rc::new(Cell::new(true));
-        let widget = AnimatedBuilder::new(Rc::new(notifier), {
+        let widget = AnimatedBuilder::new(Rc::new(notifier.clone()), {
             let builds = Rc::clone(&builds);
             let same_child = Rc::clone(&same_child);
             let child = child.clone();

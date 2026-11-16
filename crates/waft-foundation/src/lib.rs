@@ -10,6 +10,7 @@ mod completer;
 mod constants;
 mod date_time;
 mod entity;
+mod erased;
 mod executor;
 mod handle_map;
 mod key;
@@ -25,6 +26,8 @@ pub use constants::*;
 pub use date_time::DateTime;
 pub use entity::*;
 pub use executor::Task;
+#[cfg(debug_assertions)]
+pub use handle_map::DebugObject;
 pub use key::*;
 pub use observer_list::*;
 pub use timers::Timer;

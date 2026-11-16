@@ -9,7 +9,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use waft_embedder::{Offset, Size, TextBaseline};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_rendering::{
     AnyBoxConstraints, AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult,
     DryLayoutFailure, PaintingContext, RenderBox, RenderBoxData, RenderHandle, RenderObject,
@@ -120,7 +120,7 @@ impl Widget for LayoutBuilder {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        LayoutBuilderElement::create(app, this).as_element()
+        LayoutBuilderElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -164,7 +164,7 @@ pub struct LayoutBuilderElement {
     child: Option<AnyElement>,
     /// Dart's `late final _buildScope`, created right after the element so its
     /// `scheduleRebuild` can name it.
-    build_scope: Option<Handle<BuildScope>>,
+    build_scope: Option<Ref<BuildScope>>,
     // To schedule a rebuild, markNeedsLayout needs to be called on this Element's
     // render object (as the rebuilding is done in its performLayout call). However,
     // the render tree should typically be kept clean during the postFrameCallbacks
@@ -178,17 +178,19 @@ pub struct LayoutBuilderElement {
 }
 
 impl LayoutBuilderElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<LayoutBuilderElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<LayoutBuilderElement> {
         debug_assert!(downcast_widget::<LayoutBuilder>(&*widget).is_some());
-        let this = app.create(LayoutBuilderElement {
-            element: ElementData::new(widget),
-            render_object_element: RenderObjectElementData::default(),
-            child: None,
-            build_scope: None,
-            deferred_callback_scheduled: false,
-            previous_layout_info: None,
-            needs_build: true,
-        });
+        let this = app
+            .create(LayoutBuilderElement {
+                element: ElementData::new(widget),
+                render_object_element: RenderObjectElementData::default(),
+                child: None,
+                build_scope: None,
+                deferred_callback_scheduled: false,
+                previous_layout_info: None,
+                needs_build: true,
+            })
+            .into_tree_node(app);
         let build_scope = BuildScope::new(
             app,
             Some(Listener::handle_method(this, Self::schedule_rebuild)),
@@ -302,7 +304,10 @@ impl Element for LayoutBuilderElement {
     }
 
     fn build_scope(self: Handle<Self>, app: &App) -> Handle<BuildScope> {
-        app.get(self).build_scope.expect("created with the element")
+        app.get(self)
+            .build_scope
+            .handle()
+            .expect("created with the element")
     }
 
     fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
@@ -374,11 +379,7 @@ impl Element for LayoutBuilderElement {
     fn unmount(self: Handle<Self>, app: &mut App) {
         let render_object = self.render_layout_builder(app);
         render_object.set_callback(app, None);
-        let build_scope = app.get_mut(self).build_scope.take();
         RenderObjectElement::unmount(self, app);
-        if let Some(build_scope) = build_scope {
-            app.destroy(build_scope);
-        }
     }
 
     fn update_parent_data(self: Handle<Self>, app: &mut App, parent_data_element: AnyElement) {

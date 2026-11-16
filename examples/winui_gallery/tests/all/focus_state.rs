@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 use waft_embedder::{Offset, PointerChange, TextDirection};
-use waft_foundation::{Handle, Listener};
+use waft_foundation::{Handle, Listener, Ref};
 use waft_rendering::CrossAxisAlignment;
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
@@ -60,7 +60,7 @@ fn fixture() -> Fixture {
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
                 .builder(move |_, _, _| {
-                    FocusScope::new(Overlay::new().initial_entries([entry]))
+                    FocusScope::new(Overlay::new().initial_entries([entry.clone()]))
                         .autofocus(true)
                         .into_widget()
                 })
@@ -207,13 +207,13 @@ fn arrow_key_on_the_only_item_shows_its_ring() {
 }
 
 /// A button whose focus node the test holds, above a SelectorBar of two views.
-fn controls_fixture() -> (Fixture, Handle<FocusNode>) {
-    let slot = Rc::new(std::cell::Cell::new(None));
+fn controls_fixture() -> (Fixture, Ref<FocusNode>) {
+    let slot = Rc::new(std::cell::RefCell::new(None));
     let node = slot.clone();
     let f = Fixture::with_root([600, 300], move |app| {
         winui_gallery::install_fonts(app);
         let focus = FocusNode::new(app);
-        node.set(Some(focus));
+        *node.borrow_mut() = Some(focus.clone());
         let entry = OverlayEntry::new(
             app,
             Rc::new(move |_, _| {
@@ -229,7 +229,7 @@ fn controls_fixture() -> (Fixture, Handle<FocusNode>) {
                             .cross_axis_alignment(CrossAxisAlignment::Start)
                             .children([
                                 Button::text("Target", Listener::new(|_| {}))
-                                    .focus_node(focus.as_node())
+                                    .focus_node(focus.erase())
                                     .into_widget(),
                                 SizedBox::new().height(60.0).into_widget(),
                                 Text::new("Elsewhere").into_widget(),
@@ -248,14 +248,14 @@ fn controls_fixture() -> (Fixture, Handle<FocusNode>) {
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
                 .builder(move |_, _, _| {
-                    FocusScope::new(Overlay::new().initial_entries([entry]))
+                    FocusScope::new(Overlay::new().initial_entries([entry.clone()]))
                         .autofocus(true)
                         .into_widget()
                 })
                 .into_widget(),
         );
     });
-    let node = slot.get().expect("made by the fixture");
+    let node = slot.borrow().clone().expect("made by the fixture");
     (f, node)
 }
 
@@ -271,7 +271,7 @@ fn a_button_focused_by_code_after_a_click_draws_no_ring() {
     let (mut f, node) = controls_fixture();
     f.send_mouse(PointerChange::Add, Offset::new(500.0, 250.0), 0);
     click(&mut f, "Elsewhere");
-    focus_by_code(&mut f, node);
+    focus_by_code(&mut f, node.handle());
     assert!(focus_contains(&f, f.find("Target")));
     assert_eq!(
         visible_rings(&f),
@@ -288,7 +288,7 @@ fn a_button_focused_by_code_after_a_key_draws_its_ring() {
         PhysicalKeyboardKey::SHIFT_LEFT,
         LogicalKeyboardKey::SHIFT_LEFT,
     );
-    focus_by_code(&mut f, node);
+    focus_by_code(&mut f, node.handle());
     assert!(focus_contains(&f, f.find("Target")));
     assert_eq!(
         visible_rings(&f),

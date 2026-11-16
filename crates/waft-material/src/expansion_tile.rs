@@ -8,10 +8,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, AnimationStyle, AnyAnimation, ColorTween, Curve, CurveTween, Curves, Tween,
+    Animatable, AnimationRef, AnimationStyle, ColorTween, Curve, CurveTween, Curves, Drive, Tween,
 };
 use waft_embedder::{Clip, Color, TargetPlatform};
-use waft_foundation::{App, Handle, HandleId, ListenableObject, Listener, ValueChanged};
+use waft_foundation::{App, Handle, ListenableObject, Listener, Ref, ValueChanged};
 use waft_painting::{
     Alignment, AlignmentGeometry, Border, BorderSide, Decoration, EdgeInsetsGeometry,
     ShapeBorderRef, ShapeDecoration,
@@ -383,7 +383,7 @@ pub struct ExpansionTile {
     /// In cases where control over the tile's state is needed from a callback
     /// triggered by a widget within the tile, [`ExpansibleController::of`] may be
     /// more convenient than supplying a controller.
-    pub controller: Option<Handle<ExpansibleController>>,
+    pub controller: Option<Ref<ExpansibleController>>,
 
     /// Whether this list tile is part of a vertically dense list.
     ///
@@ -474,7 +474,7 @@ pub struct ExpansionTile {
     ///
     /// If `None`, the backing [`ListTile`] will create and manage its own
     /// `WidgetStatesController`.
-    pub states_controller: Option<Handle<WidgetStatesController>>,
+    pub states_controller: Option<Ref<WidgetStatesController>>,
 }
 
 impl ExpansionTile {
@@ -679,7 +679,7 @@ impl ExpansionTile {
     }
 
     /// Dart `ExpansionTile(controller:)`.
-    pub fn controller(mut self, controller: Handle<ExpansibleController>) -> ExpansionTile {
+    pub fn controller(mut self, controller: Ref<ExpansibleController>) -> ExpansionTile {
         self.controller = Some(controller);
         self
     }
@@ -741,7 +741,7 @@ impl ExpansionTile {
     /// Dart `ExpansionTile(statesController:)`.
     pub fn states_controller(
         mut self,
-        states_controller: Handle<WidgetStatesController>,
+        states_controller: Ref<WidgetStatesController>,
     ) -> ExpansionTile {
         self.states_controller = Some(states_controller);
         self
@@ -796,38 +796,45 @@ pub struct ExpansionTileState {
     /// Dart's `static final` `_easeInTween`, `_easeOutTween` and `_halfTween`, and the
     /// `ColorTween`s Dart's field initializers make, created in `init_state` because an arena
     /// object needs the [`App`].
-    ease_in_tween: Option<Handle<CurveTween>>,
-    ease_out_tween: Option<Handle<CurveTween>>,
-    half_tween: Option<Handle<Tween<f64>>>,
+    ease_in_tween: Option<Ref<CurveTween>>,
+    ease_out_tween: Option<Ref<CurveTween>>,
+    half_tween: Option<Ref<Tween<f64>>>,
     border_tween: ShapeBorderTween,
-    header_color_tween: Option<Handle<ColorTween>>,
-    icon_color_tween: Option<Handle<ColorTween>>,
-    background_color_tween: Option<Handle<ColorTween>>,
-    icon_turns: Option<AnyAnimation<f64>>,
-    border: Option<AnyAnimation<Option<ShapeBorderRef>>>,
-    header_color: Option<AnyAnimation<Option<Color>>>,
-    icon_color: Option<AnyAnimation<Option<Color>>>,
-    background_color: Option<AnyAnimation<Option<Color>>>,
+    header_color_tween: Option<Ref<ColorTween>>,
+    icon_color_tween: Option<Ref<ColorTween>>,
+    background_color_tween: Option<Ref<ColorTween>>,
+    icon_turns: Option<AnimationRef<f64>>,
+    border: Option<AnimationRef<Option<ShapeBorderRef>>>,
+    header_color: Option<AnimationRef<Option<Color>>>,
+    icon_color: Option<AnimationRef<Option<Color>>>,
+    background_color: Option<AnimationRef<Option<Color>>>,
     expansion_tile_theme: ExpansionTileThemeData,
-    tile_controller: Option<Handle<ExpansibleController>>,
+    tile_controller: Option<Ref<ExpansibleController>>,
     curve: Rc<dyn Curve>,
     reverse_curve: Option<Rc<dyn Curve>>,
     duration: Duration,
 }
 
 impl ExpansionTileState {
-    fn tile_controller(self: Handle<Self>, app: &App) -> Handle<ExpansibleController> {
+    fn tile_controller(self: Handle<Self>, app: &App) -> Ref<ExpansibleController> {
         app.get(self)
             .tile_controller
+            .clone()
             .expect("created in init_state")
     }
 
-    fn ease_in_tween(self: Handle<Self>, app: &App) -> Handle<CurveTween> {
-        app.get(self).ease_in_tween.expect("created in init_state")
+    fn ease_in_tween(self: Handle<Self>, app: &App) -> Ref<CurveTween> {
+        app.get(self)
+            .ease_in_tween
+            .clone()
+            .expect("created in init_state")
     }
 
-    fn ease_out_tween(self: Handle<Self>, app: &App) -> Handle<CurveTween> {
-        app.get(self).ease_out_tween.expect("created in init_state")
+    fn ease_out_tween(self: Handle<Self>, app: &App) -> Ref<CurveTween> {
+        app.get(self)
+            .ease_out_tween
+            .clone()
+            .expect("created in init_state")
     }
 
     fn on_expansion_changed(self: Handle<Self>, app: &mut App) {
@@ -858,19 +865,16 @@ impl ExpansionTileState {
         self: Handle<Self>,
         app: &mut App,
         _context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> Option<WidgetRef> {
-        let half_tween = app.get(self).half_tween.expect("created in init_state");
+        let half_tween = app
+            .get(self)
+            .half_tween
+            .clone()
+            .expect("created in init_state");
         let ease_in_tween = self.ease_in_tween(app);
         let icon_turns = animation.drive(app, half_tween.chain(ease_in_tween));
-        let replaced = [
-            app.get_mut(self)
-                .icon_turns
-                .replace(icon_turns)
-                .map(|old| old.id()),
-            None,
-        ];
-        destroy_replaced_animations(app, replaced);
+        app.get_mut(self).icon_turns = Some(icon_turns.clone());
         Some(
             RotationTransition::new(icon_turns)
                 .child(Icon::new(Some(Icons::expand_more())))
@@ -882,7 +886,7 @@ impl ExpansionTileState {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> Option<WidgetRef> {
         if self.effective_affinity(app) != ListTileControlAffinity::Leading {
             return None;
@@ -894,7 +898,7 @@ impl ExpansionTileState {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> Option<WidgetRef> {
         if self.effective_affinity(app) != ListTileControlAffinity::Trailing {
             return None;
@@ -906,25 +910,24 @@ impl ExpansionTileState {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let ease_in_tween = self.ease_in_tween(app);
         let icon_color_tween = app
             .get(self)
             .icon_color_tween
+            .clone()
             .expect("created in init_state");
         let header_color_tween = app
             .get(self)
             .header_color_tween
+            .clone()
             .expect("created in init_state");
-        let icon_color = animation.drive(app, icon_color_tween.chain(ease_in_tween));
+        let icon_color = animation.drive(app, icon_color_tween.chain(ease_in_tween.clone()));
         let header_color = animation.drive(app, header_color_tween.chain(ease_in_tween));
         let state = app.get_mut(self);
-        let replaced = [
-            state.icon_color.replace(icon_color).map(|old| old.id()),
-            state.header_color.replace(header_color).map(|old| old.id()),
-        ];
-        destroy_replaced_animations(app, replaced);
+        state.icon_color = Some(icon_color.clone());
+        state.header_color = Some(header_color.clone());
         let tile_controller = self.tile_controller(app);
         let is_expanded = tile_controller.is_expanded(app);
         let localizations = <dyn MaterialLocalizations>::of(app, context);
@@ -966,7 +969,7 @@ impl ExpansionTileState {
         let trailing = widget.trailing.clone();
         let leading = match leading {
             Some(leading) => Some(leading),
-            None => self.build_leading_icon(app, context, animation),
+            None => self.build_leading_icon(app, context, animation.clone()),
         };
         let trailing = if show_trailing_icon {
             match trailing {
@@ -980,9 +983,9 @@ impl ExpansionTileState {
         let widget = self.widget(app);
         let expansion_tile_theme = &app.get(self).expansion_tile_theme;
         let on_tap = if is_expanded {
-            Listener::handle_method(tile_controller, ExpansibleController::collapse)
+            Listener::handle_method(tile_controller.handle(), ExpansibleController::collapse)
         } else {
-            Listener::handle_method(tile_controller, ExpansibleController::expand)
+            Listener::handle_method(tile_controller.handle(), ExpansibleController::expand)
         };
         let mut tile = ListTile::new()
             .enabled(widget.enabled)
@@ -998,7 +1001,7 @@ impl ExpansionTileState {
         tile.trailing = trailing;
         tile.min_tile_height = widget.min_tile_height;
         tile.internal_add_semantic_for_on_tap = widget.internal_add_semantic_for_on_tap;
-        tile.states_controller = widget.states_controller;
+        tile.states_controller = widget.states_controller.clone();
 
         let theme_icon_color = expansion_tile_theme.icon_color;
         let mut child = ListTileTheme::merge(tile);
@@ -1033,7 +1036,7 @@ impl ExpansionTileState {
         self: Handle<Self>,
         app: &mut App,
         _context: BuildContext,
-        _animation: AnyAnimation<f64>,
+        _animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let widget = self.widget(app);
         let expansion_tile_theme = &app.get(self).expansion_tile_theme;
@@ -1070,25 +1073,21 @@ impl ExpansionTileState {
         _context: BuildContext,
         header: &WidgetRef,
         body: &WidgetRef,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let ease_out_tween = self.ease_out_tween(app);
         let background_color_tween = app
             .get(self)
             .background_color_tween
+            .clone()
             .expect("created in init_state");
         let border_tween = app.get(self).border_tween.clone();
-        let background_color = animation.drive(app, background_color_tween.chain(ease_out_tween));
+        let background_color =
+            animation.drive(app, background_color_tween.chain(ease_out_tween.clone()));
         let border = animation.drive(app, border_tween.chain(ease_out_tween));
         let state = app.get_mut(self);
-        let replaced = [
-            state
-                .background_color
-                .replace(background_color)
-                .map(|old| old.id()),
-            state.border.replace(border).map(|old| old.id()),
-        ];
-        destroy_replaced_animations(app, replaced);
+        state.background_color = Some(background_color.clone());
+        state.border = Some(border.clone());
         let expansion_tile_theme = &app.get(self).expansion_tile_theme;
         let background_color = background_color
             .value(app)
@@ -1201,7 +1200,10 @@ impl ExpansionTileState {
             .collapsed_text_color
             .or(state.expansion_tile_theme.collapsed_text_color);
         let end = widget.text_color.or(state.expansion_tile_theme.text_color);
-        let header_color_tween = state.header_color_tween.expect("created in init_state");
+        let header_color_tween = state
+            .header_color_tween
+            .clone()
+            .expect("created in init_state");
         let begin = begin.or_else(|| defaults.collapsed_text_color(app));
         let end = end.or_else(|| defaults.text_color(app));
         header_color_tween.set_begin(app, begin);
@@ -1219,7 +1221,10 @@ impl ExpansionTileState {
             .collapsed_icon_color
             .or(state.expansion_tile_theme.collapsed_icon_color);
         let end = widget.icon_color.or(state.expansion_tile_theme.icon_color);
-        let icon_color_tween = state.icon_color_tween.expect("created in init_state");
+        let icon_color_tween = state
+            .icon_color_tween
+            .clone()
+            .expect("created in init_state");
         let begin = begin.or_else(|| defaults.collapsed_icon_color(app));
         let end = end.or_else(|| defaults.icon_color(app));
         icon_color_tween.set_begin(app, begin);
@@ -1235,7 +1240,10 @@ impl ExpansionTileState {
         let end = widget
             .background_color
             .or(state.expansion_tile_theme.background_color);
-        let background_color_tween = state.background_color_tween.expect("created in init_state");
+        let background_color_tween = state
+            .background_color_tween
+            .clone()
+            .expect("created in init_state");
         background_color_tween.set_begin(app, begin);
         background_color_tween.set_end(app, end);
     }
@@ -1273,16 +1281,6 @@ impl ExpansionTileState {
     }
 }
 
-/// Destroys the animations a builder's new `drive` replaced, which only that builder read.
-///
-/// Dart's collector frees them once the field is reassigned; here the state owns each one it
-/// drove until it drives the next.
-fn destroy_replaced_animations(app: &mut App, replaced: [Option<HandleId>; 2]) {
-    for replaced in replaced.into_iter().flatten() {
-        app.destroy(replaced);
-    }
-}
-
 /// The `Border(top: BorderSide(color: Colors.transparent), bottom: BorderSide(color:
 /// Colors.transparent))` Dart writes as a `const` where no shape is given.
 fn transparent_border() -> Border {
@@ -1310,7 +1308,7 @@ impl State for ExpansionTileState {
         let header_color_tween = ColorTween::new(app, None, None);
         let icon_color_tween = ColorTween::new(app, None, None);
         let background_color_tween = ColorTween::new(app, None, None);
-        let tile_controller = match self.widget(app).controller {
+        let tile_controller = match self.widget(app).controller.clone() {
             Some(controller) => controller,
             None => ExpansibleController::new(app),
         };
@@ -1323,7 +1321,7 @@ impl State for ExpansionTileState {
         state.background_color_tween = Some(background_color_tween);
         state.curve = Curves::ease_in();
         state.duration = K_EXPAND;
-        state.tile_controller = Some(tile_controller);
+        state.tile_controller = Some(tile_controller.clone());
         if self.widget(app).initially_expanded {
             tile_controller.expand(app);
         }
@@ -1341,27 +1339,6 @@ impl State for ExpansionTileState {
         );
         if self.widget(app).controller.is_none() {
             tile_controller.dispose(app);
-        }
-        let state = app.get_mut(self);
-        state.tile_controller = None;
-        let owned = [
-            state.icon_turns.take().map(|animation| animation.id()),
-            state.border.take().map(|animation| animation.id()),
-            state.header_color.take().map(|animation| animation.id()),
-            state.icon_color.take().map(|animation| animation.id()),
-            state
-                .background_color
-                .take()
-                .map(|animation| animation.id()),
-            state.ease_in_tween.take().map(|tween| tween.id()),
-            state.ease_out_tween.take().map(|tween| tween.id()),
-            state.half_tween.take().map(|tween| tween.id()),
-            state.header_color_tween.take().map(|tween| tween.id()),
-            state.icon_color_tween.take().map(|tween| tween.id()),
-            state.background_color_tween.take().map(|tween| tween.id()),
-        ];
-        for owned in owned.into_iter().flatten() {
-            app.destroy(owned);
         }
     }
 
@@ -1398,7 +1375,7 @@ impl State for ExpansionTileState {
             self.update_animation_duration(app);
             self.update_height_factor_curve(app);
         }
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.clone();
         if controller != old_widget.controller {
             let tile_controller = self.tile_controller(app);
             tile_controller.remove_listener(
@@ -1413,7 +1390,7 @@ impl State for ExpansionTileState {
                 Some(controller) => controller,
                 None => ExpansibleController::new(app),
             };
-            app.get_mut(self).tile_controller = Some(tile_controller);
+            app.get_mut(self).tile_controller = Some(tile_controller.clone());
             tile_controller.add_listener(
                 app,
                 Listener::handle_method(self, Self::on_expansion_changed),
@@ -1537,6 +1514,7 @@ pub(crate) mod tests {
         AhemText, Drawn, WidgetTester, is_same_color_as, material_app, with_main_thread_stack,
     };
     use crate::text_theme::TextTheme;
+    use waft_foundation::HandleId;
 
     const DIVIDER_COLOR: Color = Color::new(0x1f333333);
     const UNSELECTED_WIDGET_COLOR: Color = Colors::BLACK54;
@@ -3090,7 +3068,7 @@ pub(crate) mod tests {
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
-                        .controller(controller)
+                        .controller(controller.clone())
                         .children([Text::new("Child 0").into_widget()]),
                 ),
             );
@@ -3131,7 +3109,7 @@ pub(crate) mod tests {
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
-                        .controller(controller)
+                        .controller(controller.clone())
                         .initially_expanded(true)
                         .children([Text::new("Child 0").into_widget()]),
                 ),
@@ -3286,7 +3264,7 @@ pub(crate) mod tests {
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
                         .enabled(false)
-                        .controller(controller)
+                        .controller(controller.clone())
                         .children([Text::new("Child 0").into_widget()]),
                 ),
             );
@@ -3414,7 +3392,7 @@ pub(crate) mod tests {
                 )
             };
 
-            pump_app(&mut tester, m3, tile(controller1));
+            pump_app(&mut tester, m3, tile(controller1.clone()));
 
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
             assert!(controller1.is_expanded(&tester.cell.borrow()));
@@ -3423,7 +3401,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(tester.find_onstage_text("Child 0").is_empty());
 
-            pump_app(&mut tester, m3, tile(controller2));
+            pump_app(&mut tester, m3, tile(controller2.clone()));
 
             assert!(tester.find_onstage_text("Child 0").is_empty());
             controller2.expand(&mut tester.cell.borrow_mut());
@@ -3451,7 +3429,7 @@ pub(crate) mod tests {
                 )
             };
 
-            pump_app(&mut tester, m3, tile(controller1));
+            pump_app(&mut tester, m3, tile(controller1.clone()));
 
             assert!(tester.find_onstage_text("Child 0").is_empty());
             assert!(!controller1.is_expanded(&tester.cell.borrow()));
@@ -3460,7 +3438,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
 
-            pump_app(&mut tester, m3, tile(controller2));
+            pump_app(&mut tester, m3, tile(controller2.clone()));
 
             tester.pump_and_settle();
 
@@ -3488,8 +3466,9 @@ pub(crate) mod tests {
             pump_app(
                 &mut tester,
                 m3,
-                Material::new()
-                    .child(ExpansionTile::new(Text::new("Tile")).states_controller(controller)),
+                Material::new().child(
+                    ExpansionTile::new(Text::new("Tile")).states_controller(controller.clone()),
+                ),
             );
 
             the_list_tile(&tester, |list_tile| {
@@ -3587,7 +3566,7 @@ pub(crate) mod tests {
             pump_app(
                 &mut tester,
                 m3,
-                Material::new().child(tile().controller(controller)),
+                Material::new().child(tile().controller(controller.clone())),
             );
             assert!(tester.find_onstage_text("Child 0").is_empty());
 
@@ -3614,17 +3593,17 @@ pub(crate) mod tests {
                 .expect("an ExpansionTile's element holds its state"),
         );
         [
-            state.header_color.expect("built").id(),
-            state.icon_color.expect("built").id(),
-            state.background_color.expect("built").id(),
-            state.border.expect("built").id(),
-            state.icon_turns.expect("built").id(),
+            state.header_color.clone().expect("built").id(),
+            state.icon_color.clone().expect("built").id(),
+            state.background_color.clone().expect("built").id(),
+            state.border.clone().expect("built").id(),
+            state.icon_turns.clone().expect("built").id(),
         ]
     }
 
-    /// Not a Dart case: Dart's collector frees the animations each frame's header, icon and
-    /// decoration drive; here the tile destroys each one when it drives the next, and the last
-    /// ones when it is disposed.
+    /// Not a Dart case: what Dart's collector does with the animations each frame's header,
+    /// icon and decoration drive. Each is freed at the checkpoint after the tile drives the
+    /// next one, and the last ones after the tile goes.
     #[test]
     fn a_tile_keeps_only_the_animations_of_its_latest_frame() {
         with_main_thread_stack(|| {

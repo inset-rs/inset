@@ -861,7 +861,7 @@ fn apply_text_style_overrides(override_text_style: &TextStyle, text_span: &TextS
             Some(style) => style.merge(Some(override_text_style)),
             None => override_text_style.clone(),
         }),
-        recognizer: text_span.recognizer,
+        recognizer: text_span.recognizer.clone(),
         mouse_cursor: text_span.mouse_cursor.clone(),
         on_enter: text_span.on_enter.clone(),
         on_exit: text_span.on_exit.clone(),

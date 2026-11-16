@@ -16,7 +16,7 @@ use waft_embedder::valo::{Cap, FillRule, Join, Point};
 use waft_embedder::{
     Canvas, Color, FontWeight, Offset, Paint, PaintStyle, PathBuilder, Size, Stroke,
 };
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{AlignmentGeometry, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, CustomPainter};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
@@ -446,7 +446,7 @@ impl Intent for UncheckIntent {
 
 struct CheckBoxKeysState {
     state: StateData<CheckBoxKeys>,
-    actions: HashMap<TypeId, AnyAction>,
+    actions: HashMap<TypeId, ActionRef>,
 }
 
 impl StatefulWidget for CheckBoxKeys {
@@ -497,14 +497,8 @@ impl State for CheckBoxKeysState {
             }),
         );
         let actions = &mut app.get_mut(self).actions;
-        actions.insert(TypeId::of::<CheckIntent>(), check.as_action());
-        actions.insert(TypeId::of::<UncheckIntent>(), uncheck.as_action());
-    }
-
-    fn dispose(self: Handle<Self>, app: &mut App) {
-        for action in std::mem::take(&mut app.get_mut(self).actions).into_values() {
-            app.destroy(action.id());
-        }
+        actions.insert(TypeId::of::<CheckIntent>(), check.into_erased());
+        actions.insert(TypeId::of::<UncheckIntent>(), uncheck.into_erased());
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -539,7 +533,7 @@ enum Segment {
 pub(crate) struct CheckGlyphState {
     state: StateData<CheckGlyph>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
     segment: Segment,
 }
 
@@ -571,14 +565,17 @@ impl SingleTickerProviderStateMixin for CheckGlyphState {
 }
 
 impl TickerProviderObject for CheckGlyphState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
 
 impl CheckGlyphState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 
     /// `AnimatedIcon::PlaySegment` for the transition `from` → `to`; a transition into or out of the indeterminate state has a single-position marker and jumps.
@@ -623,7 +620,7 @@ impl State for CheckGlyphState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             Some(1.0),
             Some(ACCEPT_VISUAL_DURATION),

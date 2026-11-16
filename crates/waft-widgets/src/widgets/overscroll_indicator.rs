@@ -13,13 +13,13 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnimationStatus, AnimationStatusListener,
-    AnyAnimation, CurvedAnimation, Curves, Tween,
+    Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, AnyAnimation, CurvedAnimation, Curves, Drive, Tween,
 };
 use waft_embedder::{Canvas, Clip, ClipOp, Color, Offset, Paint, Rect, Size, clamp_double};
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, ListenableObject, Listener, Timer,
-    ValueNotifier,
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, ListenableObject, Listener,
+    OptionRetained, Timer, ValueNotifier,
 };
 use waft_painting::{Axis, AxisDirection, axis_direction_to_axis};
 use waft_physics::{Simulation, SpringDescription, SpringSimulation, Tolerance, near_equal};
@@ -42,6 +42,7 @@ use crate::widgets::scroll_notification::{
 use crate::widgets::stretch_effect::StretchEffect;
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
 use crate::widgets::transitions::AnimatedBuilder;
+use waft_foundation::Ref;
 
 /// A visual indication that a scroll view has overscrolled.
 ///
@@ -227,8 +228,8 @@ impl StatefulWidget for GlowingOverscrollIndicator {
 pub struct GlowingOverscrollIndicatorState {
     state: StateData<GlowingOverscrollIndicator>,
     ticker_provider: TickerProviderStateMixinData,
-    leading_controller: Option<Handle<GlowController>>,
-    trailing_controller: Option<Handle<GlowController>>,
+    leading_controller: Option<Ref<GlowController>>,
+    trailing_controller: Option<Ref<GlowController>>,
     leading_and_trailing_listener: Option<Rc<dyn Listenable>>,
     /// Dart's `Map<bool, bool> _accepted`, indexed by `is_leading as usize`.
     accepted: [bool; 2],
@@ -238,12 +239,14 @@ impl GlowingOverscrollIndicatorState {
     fn leading_controller(self: Handle<Self>, app: &App) -> Handle<GlowController> {
         app.get(self)
             .leading_controller
+            .handle()
             .expect("the controllers are made in init_state")
     }
 
     fn trailing_controller(self: Handle<Self>, app: &App) -> Handle<GlowController> {
         app.get(self)
             .trailing_controller
+            .handle()
             .expect("the controllers are made in init_state")
     }
 
@@ -383,7 +386,7 @@ impl TickerProviderStateMixin for GlowingOverscrollIndicatorState {
 }
 
 impl TickerProviderObject for GlowingOverscrollIndicatorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -400,8 +403,8 @@ impl State for GlowingOverscrollIndicatorState {
         let trailing_controller =
             GlowController::new(app, TickerProviderRef::new(self), color, axis);
         let listener: Rc<dyn Listenable> = Rc::new(waft_foundation::MergingListenable::new(vec![
-            Some(Rc::new(leading_controller)),
-            Some(Rc::new(trailing_controller)),
+            Some(Rc::new(leading_controller.clone())),
+            Some(Rc::new(trailing_controller.clone())),
         ]));
         let state = app.get_mut(self);
         state.leading_controller = Some(leading_controller);
@@ -441,12 +444,12 @@ impl State for GlowingOverscrollIndicatorState {
         let state = app.get(self);
         let painter = GlowingOverscrollIndicatorPainter {
             leading_controller: if widget.show_leading {
-                state.leading_controller
+                state.leading_controller.clone()
             } else {
                 None
             },
             trailing_controller: if widget.show_trailing {
-                state.trailing_controller
+                state.trailing_controller.clone()
             } else {
                 None
             },
@@ -495,20 +498,20 @@ struct GlowController {
 
     // animation of the main axis direction
     state: GlowState,
-    glow_controller: Handle<AnimationController>,
+    glow_controller: Ref<AnimationController>,
     pull_recede_timer: Option<Timer>,
     paint_offset: f64,
     paint_offset_scroll_pixels: f64,
 
     // animation values
-    decelerator: Option<Handle<CurvedAnimation>>,
-    glow_opacity_tween: Handle<Tween<f64>>,
-    glow_opacity: Option<AnyAnimation<f64>>,
-    glow_size_tween: Handle<Tween<f64>>,
-    glow_size: Option<AnyAnimation<f64>>,
+    decelerator: Option<Ref<CurvedAnimation>>,
+    glow_opacity_tween: Ref<Tween<f64>>,
+    glow_opacity: Option<AnimationRef<f64>>,
+    glow_size_tween: Ref<Tween<f64>>,
+    glow_size: Option<AnimationRef<f64>>,
 
     // animation of the cross axis position
-    displacement_ticker: Option<Handle<Ticker>>,
+    displacement_ticker: Option<Ref<Ticker>>,
     displacement_ticker_last_elapsed: Option<Duration>,
     displacement_target: f64,
     displacement: f64,
@@ -547,8 +550,8 @@ impl GlowController {
         vsync: TickerProviderRef,
         color: Color,
         axis: Axis,
-    ) -> Handle<GlowController> {
-        let glow_controller = AnimationController::create(
+    ) -> Ref<GlowController> {
+        let glow_controller = AnimationController::new(
             app,
             None,
             None,
@@ -563,14 +566,14 @@ impl GlowController {
         let this = app.create(GlowController {
             change_notifier: ChangeNotifierData::new(),
             state: GlowState::Idle,
-            glow_controller,
+            glow_controller: glow_controller.clone(),
             pull_recede_timer: None,
             paint_offset: 0.0,
             paint_offset_scroll_pixels: 0.0,
             decelerator: None,
-            glow_opacity_tween,
+            glow_opacity_tween: glow_opacity_tween.clone(),
             glow_opacity: None,
-            glow_size_tween,
+            glow_size_tween: glow_size_tween.clone(),
             glow_size: None,
             displacement_ticker: None,
             displacement_ticker_last_elapsed: None,
@@ -580,23 +583,24 @@ impl GlowController {
             color,
             axis,
         });
+        let handle = this.handle();
         glow_controller.view().add_status_listener(
             app,
-            AnimationStatusListener::handle_method(this, GlowController::change_phase),
+            AnimationStatusListener::handle_method(handle, GlowController::change_phase),
         );
         let decelerator =
-            CurvedAnimation::create(app, glow_controller.view(), Curves::decelerate(), None);
+            CurvedAnimation::new(app, glow_controller.erase(), Curves::decelerate(), None);
         decelerator.add_listener(
             app,
-            Listener::handle_method(this, Handle::<GlowController>::notify_listeners),
+            Listener::handle_method(handle, Handle::<GlowController>::notify_listeners),
         );
-        let glow_opacity = decelerator.as_animation().drive(app, glow_opacity_tween);
-        let glow_size = decelerator.as_animation().drive(app, glow_size_tween);
+        let glow_opacity = decelerator.drive(app, glow_opacity_tween);
+        let glow_size = decelerator.drive(app, glow_size_tween);
         let displacement_ticker = vsync.create_ticker(
             app,
-            FrameCallback::handle_method(this, GlowController::tick_displacement),
+            FrameCallback::handle_method(handle, GlowController::tick_displacement),
         );
-        let controller = app.get_mut(this);
+        let controller = app.get_mut(&this);
         controller.decelerator = Some(decelerator);
         controller.glow_opacity = Some(glow_opacity);
         controller.glow_size = Some(glow_size);
@@ -605,20 +609,30 @@ impl GlowController {
     }
 
     fn decelerator(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
-        app.get(self).decelerator.expect("set by the constructor")
+        app.get(self)
+            .decelerator
+            .handle()
+            .expect("set by the constructor")
     }
 
     fn glow_opacity(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).glow_opacity.expect("set by the constructor")
+        app.get(self)
+            .glow_opacity
+            .handle()
+            .expect("set by the constructor")
     }
 
     fn glow_size(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).glow_size.expect("set by the constructor")
+        app.get(self)
+            .glow_size
+            .handle()
+            .expect("set by the constructor")
     }
 
     fn displacement_ticker(self: Handle<Self>, app: &App) -> Handle<Ticker> {
         app.get(self)
             .displacement_ticker
+            .handle()
             .expect("set by the constructor")
     }
 
@@ -657,7 +671,7 @@ impl GlowController {
         self.decelerator(app).dispose(app);
         self.displacement_ticker(app).dispose(app);
         self.cancel_pull_recede_timer(app);
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Handle a scroll slamming into the edge at a particular velocity.
@@ -673,7 +687,7 @@ impl GlowController {
         } else {
             self.glow_opacity(app).value(app)
         };
-        let glow_opacity_tween = app.get(self).glow_opacity_tween;
+        let glow_opacity_tween = app.get(self).glow_opacity_tween.handle();
         glow_opacity_tween.set_begin(app, Some(glow_opacity_begin));
         glow_opacity_tween.set_end(
             app,
@@ -683,14 +697,14 @@ impl GlowController {
                 Self::MAX_OPACITY,
             )),
         );
-        let glow_size_tween = app.get(self).glow_size_tween;
+        let glow_size_tween = app.get(self).glow_size_tween.handle();
         let glow_size = self.glow_size(app).value(app);
         glow_size_tween.set_begin(app, Some(glow_size));
         glow_size_tween.set_end(
             app,
             Some(f64::min(0.025 + 7.5e-7 * velocity * velocity, 1.0)),
         );
-        let glow_controller = app.get(self).glow_controller;
+        let glow_controller = app.get(self).glow_controller.handle();
         app.get_mut(glow_controller).duration = Some(Duration::from_millis(
             (0.15 + velocity * 0.02).round() as u64,
         ));
@@ -724,7 +738,7 @@ impl GlowController {
         app.get_mut(self).pull_distance += overscroll / 200.0;
         // Dart reads each animation's value again once its tween's `begin` is set, and the
         // second read sees the new `begin`.
-        let glow_opacity_tween = app.get(self).glow_opacity_tween;
+        let glow_opacity_tween = app.get(self).glow_opacity_tween.handle();
         let glow_opacity = self.glow_opacity(app).value(app);
         glow_opacity_tween.set_begin(app, Some(glow_opacity));
         let glow_opacity = self.glow_opacity(app).value(app);
@@ -736,7 +750,7 @@ impl GlowController {
             )),
         );
         let height = f64::min(extent, cross_extent * Self::WIDTH_TO_HEIGHT_FACTOR);
-        let glow_size_tween = app.get(self).glow_size_tween;
+        let glow_size_tween = app.get(self).glow_size_tween.handle();
         let glow_size = self.glow_size(app).value(app);
         glow_size_tween.set_begin(app, Some(glow_size));
         let pull_distance = app.get(self).pull_distance;
@@ -760,7 +774,7 @@ impl GlowController {
             displacement_ticker.stop(app, false);
             app.get_mut(self).displacement_ticker_last_elapsed = None;
         }
-        let glow_controller = app.get(self).glow_controller;
+        let glow_controller = app.get(self).glow_controller.handle();
         app.get_mut(glow_controller).duration = Some(Self::PULL_TIME);
         if app.get(self).state != GlowState::Pull {
             glow_controller.forward(app, Some(0.0));
@@ -806,14 +820,14 @@ impl GlowController {
         self.cancel_pull_recede_timer(app);
         app.get_mut(self).pull_recede_timer = None;
         let glow_opacity = self.glow_opacity(app).value(app);
-        let glow_opacity_tween = app.get(self).glow_opacity_tween;
+        let glow_opacity_tween = app.get(self).glow_opacity_tween.handle();
         glow_opacity_tween.set_begin(app, Some(glow_opacity));
         glow_opacity_tween.set_end(app, Some(0.0));
         let glow_size = self.glow_size(app).value(app);
-        let glow_size_tween = app.get(self).glow_size_tween;
+        let glow_size_tween = app.get(self).glow_size_tween.handle();
         glow_size_tween.set_begin(app, Some(glow_size));
         glow_size_tween.set_end(app, Some(0.0));
-        let glow_controller = app.get(self).glow_controller;
+        let glow_controller = app.get(self).glow_controller.handle();
         app.get_mut(glow_controller).duration = Some(duration);
         glow_controller.forward(app, Some(0.0));
         app.get_mut(self).state = GlowState::Recede;
@@ -899,12 +913,12 @@ struct GlowingOverscrollIndicatorPainter {
     /// The controller for the overscroll glow on the side with negative scroll offsets.
     ///
     /// For a vertical downwards viewport, this is the top side.
-    leading_controller: Option<Handle<GlowController>>,
+    leading_controller: Option<Ref<GlowController>>,
 
     /// The controller for the overscroll glow on the side with positive scroll offsets.
     ///
     /// For a vertical downwards viewport, this is the bottom side.
-    trailing_controller: Option<Handle<GlowController>>,
+    trailing_controller: Option<Ref<GlowController>>,
 
     /// The direction of the viewport.
     axis_direction: AxisDirection,
@@ -965,7 +979,7 @@ impl CustomPainter for GlowingOverscrollIndicatorPainter {
             app,
             canvas,
             size,
-            self.leading_controller,
+            self.leading_controller.handle(),
             self.axis_direction,
             GrowthDirection::Reverse,
         );
@@ -973,7 +987,7 @@ impl CustomPainter for GlowingOverscrollIndicatorPainter {
             app,
             canvas,
             size,
-            self.trailing_controller,
+            self.trailing_controller.handle(),
             self.axis_direction,
             GrowthDirection::Forward,
         );
@@ -1138,7 +1152,7 @@ pub struct StretchingOverscrollIndicatorState {
     ticker_provider: TickerProviderStateMixinData,
     /// Dart's `late final _stretchController`, made on first use, with the `Listenable` the
     /// builder listens to, made once so a rebuild hands the builder the same one.
-    stretch_controller: Option<(Handle<StretchController>, Rc<dyn Listenable>)>,
+    stretch_controller: Option<(Ref<StretchController>, Rc<dyn Listenable>)>,
     /// The metrics of Dart's `_lastOverscrollNotification`, the one member of it `build`
     /// reads.
     last_overscroll_notification_metrics:
@@ -1157,12 +1171,13 @@ impl StretchingOverscrollIndicatorState {
         app: &mut App,
     ) -> (Handle<StretchController>, Rc<dyn Listenable>) {
         if let Some((controller, listenable)) = &app.get(self).stretch_controller {
-            return (*controller, Rc::clone(listenable));
+            return (controller.handle(), Rc::clone(listenable));
         }
         let controller = StretchController::new(app, TickerProviderRef::new(self));
-        let listenable: Rc<dyn Listenable> = Rc::new(controller);
+        let handle = controller.handle();
+        let listenable: Rc<dyn Listenable> = Rc::new(controller.clone());
         app.get_mut(self).stretch_controller = Some((controller, Rc::clone(&listenable)));
-        (controller, listenable)
+        (handle, listenable)
     }
 
     fn handle_scroll_notification(
@@ -1317,7 +1332,7 @@ impl TickerProviderStateMixin for StretchingOverscrollIndicatorState {
 }
 
 impl TickerProviderObject for StretchingOverscrollIndicatorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1359,10 +1374,10 @@ impl State for StretchingOverscrollIndicatorState {
 /// of its [`overscroll`](Self::overscroll).
 struct StretchController {
     vsync: TickerProviderRef,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
 
     /// Manages and notifies changes to the current [`overscroll`](Self::overscroll) value.
-    overscroll_notifier: Handle<ValueNotifier<f64>>,
+    overscroll_notifier: Ref<ValueNotifier<f64>>,
 
     /// Stores the `overscroll` value from an ongoing animation at the precise
     /// moment it is interrupted by a new `pull()` gesture.
@@ -1452,7 +1467,7 @@ impl StretchController {
         )
     }
 
-    fn new(app: &mut App, vsync: TickerProviderRef) -> Handle<StretchController> {
+    fn new(app: &mut App, vsync: TickerProviderRef) -> Ref<StretchController> {
         let overscroll_notifier = app.create(ValueNotifier::new(0.0));
         app.create(StretchController {
             vsync,
@@ -1463,11 +1478,11 @@ impl StretchController {
     }
 
     fn overscroll(self: Handle<Self>, app: &App) -> f64 {
-        *app.get(app.get(self).overscroll_notifier).value()
+        *app.get(&app.get(self).overscroll_notifier).value()
     }
 
     fn set_overscroll(self: Handle<Self>, app: &mut App, new_value: f64) {
-        let notifier = app.get(self).overscroll_notifier;
+        let notifier = app.get(self).overscroll_notifier.handle();
         notifier.set_value(
             app,
             clamp_double(new_value, Self::MIN_OVERSCROLL, Self::MAX_OVERSCROLL),
@@ -1525,7 +1540,7 @@ impl StretchController {
     /// Automatically disposes the controller when the animation completes.
     fn animate(self: Handle<Self>, app: &mut App, simulation: Box<dyn Simulation>) {
         let vsync = app.get(self).vsync.clone();
-        let controller = AnimationController::create_unbounded(
+        let controller = AnimationController::unbounded(
             app,
             0.0,
             None,
@@ -1539,31 +1554,33 @@ impl StretchController {
                 let new_overscroll = app
                     .get(self)
                     .controller
+                    .handle()
                     .map_or(0.0, |controller| controller.value(app));
                 self.set_overscroll(app, new_overscroll);
             }),
         );
+        // The completion is the controller's own: it names the controller without keeping it.
+        let handle = controller.handle();
         controller.animate_with(app, simulation).when_complete(
             app,
             Listener::new(move |app: &mut App| {
+                let controller = handle;
                 // Only clean up if this controller is still the active one. A later
                 // pull(), animate(), or dispose() may have already replaced and disposed
                 // it, in which case that path owns the cleanup and this stale completion
                 // callback must not touch the shared state (or double dispose the
                 // controller).
-                if app.get(self).controller == Some(controller) {
+                if app.get(self).controller.handle() == Some(controller) {
                     self.set_overscroll(app, 0.0);
                     app.get_mut(self).interrupted_overscroll = 0.0;
                     controller.dispose(app);
-                    app.destroy_lingering(controller);
                     app.get_mut(self).controller = None;
                 }
             }),
         );
 
-        if let Some(old_controller) = app.get(self).controller {
+        if let Some(old_controller) = app.get(self).controller.handle() {
             old_controller.dispose(app);
-            app.destroy_lingering(old_controller);
         }
         app.get_mut(self).controller = Some(controller);
     }
@@ -1573,10 +1590,9 @@ impl StretchController {
     /// The `normalized_overscroll` argument should be the scroll distance in
     /// logical pixels, divided by the extent of the viewport in the main axis.
     fn pull(self: Handle<Self>, app: &mut App, normalized_overscroll: f64) {
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             app.get_mut(self).interrupted_overscroll = controller.value(app);
             controller.dispose(app);
-            app.destroy_lingering(controller);
             app.get_mut(self).controller = None;
         }
 
@@ -1603,21 +1619,20 @@ impl StretchController {
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(controller) = app.get_mut(self).controller.take() {
             controller.dispose(app);
-            app.destroy_lingering(controller);
         }
-        let notifier = app.get(self).overscroll_notifier;
-        app.get_mut(notifier).dispose();
+        let notifier = app.get(self).overscroll_notifier.handle();
+        notifier.dispose(app);
     }
 }
 
 impl ListenableObject for StretchController {
     fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
-        let notifier = app.get(self).overscroll_notifier;
+        let notifier = app.get(self).overscroll_notifier.handle();
         notifier.add_listener(app, listener);
     }
 
     fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
-        let notifier = app.get(self).overscroll_notifier;
+        let notifier = app.get(self).overscroll_notifier.handle();
         notifier.remove_listener(app, listener);
     }
 }
@@ -1733,6 +1748,7 @@ impl Debug for OverscrollIndicatorNotification {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use waft_foundation::OptionRetained;
 
     use waft_embedder::valo::Op;
     use waft_embedder::{PointerDeviceKind, TargetPlatform, TextDirection};
@@ -3085,11 +3101,10 @@ mod tests {
         assert_eq!(tester.count::<StretchEffect>(), 0);
     }
 
-    /// Dart's collector frees the `AnimationController` each stretch release animates with once
-    /// the next release or the animation's end replaces it; here the stretch controller frees
-    /// each one it disposes.
+    /// The `AnimationController` each stretch release animates with is freed once the next
+    /// release or the animation's end replaces it, as Dart's collector frees it.
     #[test]
-    fn a_stretch_controller_frees_each_release_animation_it_disposes() {
+    fn a_stretch_controller_frees_each_release_animation_it_replaces() {
         let mut tester = WidgetTester::new();
         tester
             .pump_widget(ltr(StretchingOverscrollIndicator::new(AxisDirection::Down)
@@ -3104,7 +3119,7 @@ mod tests {
                 })
                 .expect("a mounted StretchingOverscrollIndicator");
             let stretch = state.stretch_controller(&mut app);
-            app.get(stretch).controller
+            app.get(stretch).controller.handle()
         };
 
         tester.fling_from(tester.view_center(), Offset::new(0.0, 300.0), 1000.0);
@@ -3182,7 +3197,7 @@ mod tests {
         box1: GlobalKey,
         box2: GlobalKey,
         box3: GlobalKey,
-        controller: Handle<ScrollController>,
+        controller: Ref<ScrollController>,
     }
 
     impl Boxes {
@@ -3285,7 +3300,7 @@ mod tests {
         let mut scroll_view = CustomScrollView::new()
             .reverse(options.reverse)
             .scroll_direction(options.axis)
-            .controller(boxes.controller.as_controller())
+            .controller(boxes.controller.erase())
             .slivers([
                 tile(0xD0FF0000, &boxes.box1),
                 tile(0xFFFFFF00, &boxes.box2),
@@ -3325,7 +3340,7 @@ mod tests {
                 no_overscroll_behavior(),
                 StretchingOverscrollIndicator::new(AxisDirection::Right).child(
                     CustomScrollView::new()
-                        .controller(boxes.controller.as_controller())
+                        .controller(boxes.controller.erase())
                         .slivers([
                             SliverToBoxAdapter::new()
                                 .child(

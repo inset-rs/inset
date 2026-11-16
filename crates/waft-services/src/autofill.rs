@@ -8,6 +8,7 @@ use waft_foundation::{App, Handle, HandleId};
 use crate::text_input::{
     AnyTextInputClient, TextEditingValue, TextInput, TextInputConfiguration, TextInputConnection,
 };
+use waft_foundation::Ref;
 
 /// A collection of commonly used autofill hint strings on different platforms.
 ///
@@ -754,7 +755,7 @@ pub trait AutofillScope: Sized + 'static {
         app: &mut App,
         trigger: AnyTextInputClient,
         configuration: TextInputConfiguration,
-    ) -> Handle<TextInputConnection> {
+    ) -> Ref<TextInputConnection> {
         debug_assert!(
             !self.autofill_clients(app).iter().any(|client| {
                 !client
@@ -874,7 +875,7 @@ mod tests {
             .as_autofill_client()
             .autofill(&mut app, TextEditingValue::new().text("user@example.com"));
         assert_eq!(
-            app.get(field).filled.as_ref().map(|v| v.text.as_str()),
+            app.get(&field).filled.as_ref().map(|v| v.text.as_str()),
             Some("user@example.com")
         );
     }

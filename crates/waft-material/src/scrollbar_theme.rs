@@ -386,7 +386,7 @@ mod tests {
     use std::rc::Rc;
 
     use waft_embedder::{Offset, Rect, TargetPlatform};
-    use waft_widgets::{ScrollController, ScrollControllerLeaf, WidgetState, WidgetStates};
+    use waft_widgets::{ScrollController, WidgetState, WidgetStates};
 
     use super::*;
     use crate::color_scheme::ColorScheme;
@@ -449,11 +449,12 @@ mod tests {
         scrollbar: impl FnOnce(Scrollbar) -> Scrollbar,
         wrap: impl FnOnce(WidgetRef) -> WidgetRef,
     ) {
-        let controller = ScrollController::default(&mut tester.cell.borrow_mut()).as_controller();
+        let controller = ScrollController::default(&mut tester.cell.borrow_mut())
+            .into_erased::<waft_widgets::AnyScrollController>();
         let scrollbar = scrollbar(
-            Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+            Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                 .thumb_visibility(true)
-                .controller(controller),
+                .controller(controller.clone()),
         );
         tester.pump_widget(material_app(
             theme,
@@ -632,13 +633,13 @@ mod tests {
                 .use_material3(false)
                 .scrollbar_theme(ScrollbarThemeData::new().interactive(false))
                 .build(&tester.cell.borrow());
-            let controller =
-                ScrollController::default(&mut tester.cell.borrow_mut()).as_controller();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyScrollController>();
             tester.pump_widget(material_app(
                 theme,
-                Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                     .thumb_visibility(true)
-                    .controller(controller)
+                    .controller(controller.clone())
                     .into_widget(),
             ));
             tester.pump_and_settle();
@@ -675,14 +676,14 @@ mod tests {
                 .use_material3(false)
                 .scrollbar_theme(ScrollbarThemeData::new().interactive(false))
                 .build(&tester.cell.borrow());
-            let controller =
-                ScrollController::default(&mut tester.cell.borrow_mut()).as_controller();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyScrollController>();
             tester.pump_widget(material_app(
                 theme,
-                Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                     .interactive(true)
                     .thumb_visibility(true)
-                    .controller(controller)
+                    .controller(controller.clone())
                     .into_widget(),
             ));
             tester.pump_and_settle();

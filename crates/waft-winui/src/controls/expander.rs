@@ -4,7 +4,7 @@ use crate::*;
 use std::{fmt, rc::Rc, time::Duration};
 use waft_animation::{Cubic, Curve};
 use waft_embedder::{FontWeight, Offset};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{Alignment, EdgeInsetsGeometry};
 use waft_rendering::BoxConstraints;
 use waft_scheduler::{FrameCallback, SchedulerBinding, Ticker};
@@ -192,7 +192,7 @@ pub struct ExpanderState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
 
     /// Clock for the explicit ExpandStates storyboard.
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
 
     /// Elapsed time since the last IsExpanded change.
     elapsed: Duration,
@@ -265,7 +265,7 @@ impl ExpanderState {
         });
 
         if finished {
-            app.get(self).ticker.unwrap().stop(app, false);
+            app.get(self).ticker.handle().unwrap().stop(app, false);
         }
     }
 
@@ -296,7 +296,7 @@ impl State for ExpanderState {
             app,
             FrameCallback::new(move |app, elapsed| self.tick(app, elapsed)),
         );
-        app.get_mut(self).ticker = Some(ticker);
+        app.get_mut(self).ticker = Some(ticker.clone());
         if self.widget(app).is_expanded {
             ticker.start(app);
         }
@@ -309,7 +309,7 @@ impl State for ExpanderState {
             return;
         }
 
-        let ticker = app.get(self).ticker.unwrap();
+        let ticker = app.get(self).ticker.clone().unwrap();
         ticker.stop(app, false);
         let state = app.get_mut(self);
         state.elapsed = Duration::ZERO;
@@ -341,7 +341,7 @@ impl State for ExpanderState {
 
     /// Releases the storyboard clock before disposing its ticker provider.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).ticker.unwrap().dispose(app);
+        app.get(self).ticker.handle().unwrap().dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
     }
 

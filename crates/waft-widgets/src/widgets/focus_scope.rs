@@ -6,7 +6,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use waft_embedder::TargetPlatform;
-use waft_foundation::{App, Handle, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref, ValueChanged};
 
 use crate::framework::{
     AnyElement, BuildContext, ComponentElement, ComponentElementData, Element, ElementData,
@@ -15,7 +15,7 @@ use crate::framework::{
 };
 use crate::widgets::basic::Semantics;
 use crate::widgets::focus_manager::{
-    AnyFocusNode, FocusAttachment, FocusNode, FocusNodeLeaf, FocusOnKeyEventCallback,
+    AnyFocusNode, FocusAttachment, FocusNode, FocusNodeLeaf, FocusNodeRef, FocusOnKeyEventCallback,
     FocusScopeNode,
 };
 
@@ -70,7 +70,7 @@ pub struct Focus {
     /// descendants of the given [`parent_node`](Self::parent_node) for purposes of focus.
     ///
     /// Defaults to `None`.
-    pub parent_node: Option<AnyFocusNode>,
+    pub parent_node: Option<FocusNodeRef>,
 
     /// The child widget of this [`Focus`].
     pub child: WidgetRef,
@@ -85,7 +85,7 @@ pub struct Focus {
     ///
     /// A non-null [`focus_node`](Self::focus_node) must be supplied if using the
     /// [`Focus::with_external_focus_node`] constructor.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
@@ -155,7 +155,7 @@ impl Focus {
     /// attributes on the node, rather than the attributes of this widget.
     pub fn with_external_focus_node<K>(
         child: impl IntoWidget<K>,
-        focus_node: AnyFocusNode,
+        focus_node: FocusNodeRef,
     ) -> Focus {
         Focus {
             focus_node: Some(focus_node),
@@ -171,13 +171,13 @@ impl Focus {
     }
 
     /// Dart `Focus(parentNode:)`.
-    pub fn parent_node(mut self, parent_node: AnyFocusNode) -> Focus {
+    pub fn parent_node(mut self, parent_node: FocusNodeRef) -> Focus {
         self.parent_node = Some(parent_node);
         self
     }
 
     /// Dart `Focus(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> Focus {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> Focus {
         self.focus_node = Some(focus_node);
         self
     }
@@ -246,9 +246,11 @@ impl Focus {
     /// node up the focus hierarchy in turn. If an event reaches the root of the hierarchy, it
     /// is discarded.
     pub fn get_on_key_event(&self, app: &App) -> Option<FocusOnKeyEventCallback> {
-        self.on_key_event
-            .clone()
-            .or_else(|| self.focus_node.and_then(|node| node.on_key_event(app)))
+        self.on_key_event.clone().or_else(|| {
+            self.focus_node
+                .handle()
+                .and_then(|node| node.on_key_event(app))
+        })
     }
 
     /// If true, this widget may request the primary focus.
@@ -258,7 +260,7 @@ impl Focus {
     /// children of this node, and [`AnyFocusNode::has_focus`] can still return true if this
     /// node is the ancestor of the primary focus.
     pub fn get_can_request_focus(&self, app: &mut App) -> bool {
-        let (explicit, node) = (self.can_request_focus, self.focus_node);
+        let (explicit, node) = (self.can_request_focus, self.focus_node.handle());
         Focus::resolve_can_request_focus(explicit, node, app)
     }
 
@@ -278,7 +280,7 @@ impl Focus {
     /// Sets the [`AnyFocusNode::skip_traversal`] flag on the focus node so that it won't be
     /// visited by the `FocusTraversalPolicy`.
     pub fn get_skip_traversal(&self, app: &mut App) -> bool {
-        let (explicit, node) = (self.skip_traversal, self.focus_node);
+        let (explicit, node) = (self.skip_traversal, self.focus_node.handle());
         Focus::resolve_skip_traversal(explicit, node, app)
     }
 
@@ -302,6 +304,7 @@ impl Focus {
         self.descendants_are_focusable
             .or_else(|| {
                 self.focus_node
+                    .handle()
                     .map(|node| node.descendants_are_focusable(app))
             })
             .unwrap_or(true)
@@ -315,6 +318,7 @@ impl Focus {
         self.descendants_are_traversable
             .or_else(|| {
                 self.focus_node
+                    .handle()
                     .map(|node| node.descendants_are_traversable(app))
             })
             .unwrap_or(true)
@@ -322,9 +326,11 @@ impl Focus {
 
     /// A debug label for this widget.
     pub fn get_debug_label(&self, app: &App) -> Option<String> {
-        self.debug_label
-            .clone()
-            .or_else(|| self.focus_node.and_then(|node| node.debug_label(app)))
+        self.debug_label.clone().or_else(|| {
+            self.focus_node
+                .handle()
+                .and_then(|node| node.debug_label(app))
+        })
     }
 
     /// Returns the focus node of the [`Focus`] that most tightly encloses the given
@@ -374,11 +380,11 @@ impl Focus {
         let node = if create_dependency {
             context
                 .depend_on_inherited_widget_of_exact_type::<FocusInheritedScope>(app)
-                .map(|scope| scope.node)
+                .map(|scope| scope.node.handle())
         } else {
             context
                 .get_inherited_widget_of_exact_type::<FocusInheritedScope>(app)
-                .map(|scope| scope.node)
+                .map(|scope| scope.node.handle())
         }?;
         match node.as_scope() {
             Some(_) if !scope_ok => None,
@@ -434,13 +440,13 @@ impl StatefulWidget for Focus {
 /// Dart's private members of `_FocusState`; both [`FocusState`] and [`FocusScopeState`] carry
 /// this bag under the field `focus`.
 pub struct FocusStateData {
-    internal_node: Option<AnyFocusNode>,
+    internal_node: Option<FocusNodeRef>,
     had_primary_focus: bool,
     could_request_focus: bool,
     descendants_were_focusable: bool,
     descendants_were_traversable: bool,
     did_autofocus: bool,
-    focus_attachment: Option<Handle<FocusAttachment>>,
+    focus_attachment: Option<Ref<FocusAttachment>>,
 }
 
 impl FocusStateData {
@@ -480,33 +486,40 @@ pub trait FocusStateLeaf: State + Sized + 'static {
     fn focus_widget(self: Handle<Self>, app: &App) -> &Focus;
 
     /// Dart's `_FocusState._createNode`.
-    fn create_node(self: Handle<Self>, app: &mut App) -> AnyFocusNode;
+    fn create_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef;
 
     /// Dart's `widget.canRequestFocus`.
     fn widget_can_request_focus(self: Handle<Self>, app: &mut App) -> bool {
         let widget = self.focus_widget(app);
-        let (explicit, node) = (widget.can_request_focus, widget.focus_node);
+        let (explicit, node) = (widget.can_request_focus, widget.focus_node.handle());
         Focus::resolve_can_request_focus(explicit, node, app)
     }
 
     /// Dart's `widget.skipTraversal`.
     fn widget_skip_traversal(self: Handle<Self>, app: &mut App) -> bool {
         let widget = self.focus_widget(app);
-        let (explicit, node) = (widget.skip_traversal, widget.focus_node);
+        let (explicit, node) = (widget.skip_traversal, widget.focus_node.handle());
         Focus::resolve_skip_traversal(explicit, node, app)
     }
 
     /// Dart's `_FocusState.focusNode`.
     fn focus_node(self: Handle<Self>, app: &mut App) -> AnyFocusNode {
-        if let Some(node) = self.focus_widget(app).focus_node {
+        if let Some(node) = self.focus_widget(app).focus_node.handle() {
             return node;
         }
-        if let Some(node) = self.focus_state_data(app).internal_node {
+        if let Some(node) = self.focus_state_data(app).internal_node.handle() {
             return node;
         }
         let node = self.create_node(app);
+        let handle = node.handle();
         self.focus_state_data_mut(app).internal_node = Some(node);
-        node
+        handle
+    }
+
+    /// [`focus_node`](Self::focus_node) as the reference a widget built from this state keeps.
+    fn kept_focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
+        let node = self.focus_node(app);
+        node.keep(app)
     }
 
     /// Dart's `_FocusState._initNode`.
@@ -559,19 +572,20 @@ pub trait FocusStateLeaf: State + Sized + 'static {
         );
         self.focus_state_data(app)
             .focus_attachment
+            .handle()
             .expect("attached in init_state")
             .detach(app);
 
         // Don't manage the lifetime of external nodes given to the widget, just the internal
         // node.
-        if let Some(internal_node) = self.focus_state_data(app).internal_node {
+        if let Some(internal_node) = self.focus_state_data(app).internal_node.handle() {
             internal_node.dispose(app);
         }
     }
 
     /// Dart's `_FocusState.didChangeDependencies`.
     fn did_change_dependencies_focus(self: Handle<Self>, app: &mut App) {
-        if let Some(attachment) = self.focus_state_data(app).focus_attachment {
+        if let Some(attachment) = self.focus_state_data(app).focus_attachment.handle() {
             attachment.reparent(app, None);
         }
         self.handle_autofocus(app);
@@ -596,7 +610,7 @@ pub trait FocusStateLeaf: State + Sized + 'static {
     /// it on the root focus node (via reparent) until it either gets moved to a different part
     /// of the tree (via `did_change_dependencies`) or until it is disposed.
     fn deactivate_focus(self: Handle<Self>, app: &mut App) {
-        if let Some(attachment) = self.focus_state_data(app).focus_attachment {
+        if let Some(attachment) = self.focus_state_data(app).focus_attachment.handle() {
             attachment.reparent(app, None);
         }
         self.focus_state_data_mut(app).did_autofocus = false;
@@ -644,9 +658,10 @@ pub trait FocusStateLeaf: State + Sized + 'static {
         } else {
             self.focus_state_data(app)
                 .focus_attachment
+                .handle()
                 .expect("attached in init_state")
                 .detach(app);
-            if let Some(old_node) = old_widget.focus_node {
+            if let Some(old_node) = old_widget.focus_node.handle() {
                 old_node.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_focus_changed),
@@ -723,7 +738,7 @@ impl FocusStateLeaf for FocusState {
         self.widget(app)
     }
 
-    fn create_node(self: Handle<Self>, app: &mut App) -> AnyFocusNode {
+    fn create_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
         let node = FocusNode::new(app);
         let label = self.widget(app).get_debug_label(app);
         node.set_debug_label(app, label);
@@ -735,7 +750,7 @@ impl FocusStateLeaf for FocusState {
         node.set_descendants_are_traversable(app, descendants_are_traversable);
         let skip_traversal = self.widget_skip_traversal(app);
         node.set_skip_traversal(app, skip_traversal);
-        node.as_node()
+        node.into_erased()
     }
 }
 
@@ -764,13 +779,14 @@ impl State for FocusState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let parent_node = self.widget(app).parent_node;
+        let parent_node = self.widget(app).parent_node.handle();
         self.focus_state_data(app)
             .focus_attachment
+            .handle()
             .expect("attached in init_state")
             .reparent(app, parent_node);
         let mut child = self.widget(app).child.clone();
-        let node = self.focus_node(app);
+        let node = self.kept_focus_node(app);
         if self.widget(app).include_semantics {
             let could_request_focus = self.focus_state_data(app).could_request_focus;
             let had_primary_focus = self.focus_state_data(app).had_primary_focus;
@@ -782,6 +798,7 @@ impl State for FocusState {
             // TODO(gspencergoog): Allow this to be set on iOS once the issue is
             // addressed: https://github.com/flutter/flutter/issues/150030
             if app.platform().target_platform() != TargetPlatform::IOS && could_request_focus {
+                let node = node.clone();
                 semantics =
                     semantics.on_focus(Rc::new(move |app: &mut App| node.request_focus(app, None)));
             }
@@ -831,16 +848,16 @@ impl FocusScope {
     /// truth for attributes on the node, rather than the attributes of this widget.
     pub fn with_external_focus_node<K>(
         child: impl IntoWidget<K>,
-        focus_scope_node: Handle<FocusScopeNode>,
+        focus_scope_node: Ref<FocusScopeNode>,
     ) -> FocusScope {
         FocusScope {
-            focus: Focus::with_external_focus_node(child, focus_scope_node.as_node()),
+            focus: Focus::with_external_focus_node(child, focus_scope_node.into_erased()),
         }
     }
 
     /// Dart `FocusScope(node:)`.
-    pub fn node(mut self, node: Handle<FocusScopeNode>) -> FocusScope {
-        self.focus.focus_node = Some(node.as_node());
+    pub fn node(mut self, node: Ref<FocusScopeNode>) -> FocusScope {
+        self.focus.focus_node = Some(node.into_erased());
         self
     }
 
@@ -851,7 +868,7 @@ impl FocusScope {
     }
 
     /// Dart `FocusScope(parentNode:)`.
-    pub fn parent_node(mut self, parent_node: AnyFocusNode) -> FocusScope {
+    pub fn parent_node(mut self, parent_node: FocusNodeRef) -> FocusScope {
         self.focus = self.focus.parent_node(parent_node);
         self
     }
@@ -939,7 +956,7 @@ impl FocusScope {
                     .owner(app)
                     .expect("a mounted element has a build owner");
                 let manager = owner.focus_manager(app);
-                manager.root_scope(app)
+                manager.root_scope(app).handle()
             })
     }
 }
@@ -990,7 +1007,7 @@ impl FocusStateLeaf for FocusScopeState {
         &self.widget(app).focus
     }
 
-    fn create_node(self: Handle<Self>, app: &mut App) -> AnyFocusNode {
+    fn create_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
         let node = FocusScopeNode::new(app);
         let label = self.focus_widget(app).get_debug_label(app);
         node.set_debug_label(app, label);
@@ -998,7 +1015,7 @@ impl FocusStateLeaf for FocusScopeState {
         node.set_can_request_focus(app, can_request_focus);
         let skip_traversal = self.widget_skip_traversal(app);
         node.set_skip_traversal(app, skip_traversal);
-        node.as_node()
+        node.into_erased()
     }
 }
 
@@ -1027,13 +1044,14 @@ impl State for FocusScopeState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let parent_node = self.widget(app).focus.parent_node;
+        let parent_node = self.widget(app).focus.parent_node.handle();
         self.focus_state_data(app)
             .focus_attachment
+            .handle()
             .expect("attached in init_state")
             .reparent(app, parent_node);
         let child = self.widget(app).focus.child.clone();
-        let node = self.focus_node(app);
+        let node = self.kept_focus_node(app);
         let result = FocusInheritedScope { node, child }.into_widget();
         if self.widget(app).focus.include_semantics {
             return Semantics::new()
@@ -1055,7 +1073,7 @@ impl State for FocusScopeState {
 struct FocusInheritedScope {
     /// The [`AnyFocusNode`] to which to listen. Whenever it sends change notifications, the
     /// dependents of this widget are triggered.
-    node: AnyFocusNode,
+    node: FocusNodeRef,
     child: WidgetRef,
 }
 
@@ -1093,7 +1111,7 @@ impl Widget for FocusInheritedScope {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        FocusInheritedScopeElement::create(app, this)
+        FocusInheritedScopeElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1120,19 +1138,21 @@ struct FocusInheritedScopeElement {
 }
 
 impl FocusInheritedScopeElement {
-    fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
-        let node = FocusInheritedScopeElement::widget_of(&widget).node;
-        let this = app.create(FocusInheritedScopeElement {
-            element: ElementData::new(widget),
-            component: ComponentElementData::default(),
-            dependents: HashMap::new(),
-            dirty: false,
-        });
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
+        let node = FocusInheritedScopeElement::widget_of(&widget).node.handle();
+        let this = app
+            .create(FocusInheritedScopeElement {
+                element: ElementData::new(widget),
+                component: ComponentElementData::default(),
+                dependents: HashMap::new(),
+                dirty: false,
+            })
+            .into_tree_node(app);
         node.add_listener(
             app,
             Listener::handle_method(this, FocusInheritedScopeElement::handle_update),
         );
-        this.as_element()
+        this
     }
 
     fn widget_of(widget: &WidgetRef) -> &FocusInheritedScope {
@@ -1185,7 +1205,9 @@ impl ProxyElement for FocusInheritedScopeElement {
 
     fn updated(self: Handle<Self>, app: &mut App, old_widget: WidgetRef) {
         // `InheritedNotifier.updateShouldNotify`: the notifier changed.
-        let old_node = FocusInheritedScopeElement::widget_of(&old_widget).node;
+        let old_node = FocusInheritedScopeElement::widget_of(&old_widget)
+            .node
+            .handle();
         if old_node != self.widget(app).node {
             FocusInheritedScopeElement::notify_clients(self, app, old_widget);
         }
@@ -1212,8 +1234,10 @@ impl Element for FocusInheritedScopeElement {
     }
 
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
-        let old_node = self.widget(app).node;
-        let new_node = FocusInheritedScopeElement::widget_of(&new_widget).node;
+        let old_node = self.widget(app).node.handle();
+        let new_node = FocusInheritedScopeElement::widget_of(&new_widget)
+            .node
+            .handle();
         if old_node != new_node {
             old_node.remove_listener(
                 app,
@@ -1232,7 +1256,7 @@ impl Element for FocusInheritedScopeElement {
     }
 
     fn unmount(self: Handle<Self>, app: &mut App) {
-        let node = self.widget(app).node;
+        let node = self.widget(app).node.handle();
         node.remove_listener(
             app,
             &Listener::handle_method(self, FocusInheritedScopeElement::handle_update),
@@ -1343,9 +1367,13 @@ mod tests {
 
     use super::*;
     use crate::framework::GlobalKey;
+    use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Builder, Center, Padding, SizedBox};
     use crate::widgets::focus_manager::tests::{app_with_view, mount};
-    use crate::widgets::focus_manager::{FocusManager, KeyEventResult};
+    use crate::widgets::focus_manager::{FocusManager, FocusNode, KeyEventResult};
+    use crate::widgets::value_listenable_builder::ValueListenableBuilder;
+    use std::time::Duration;
+    use waft_foundation::ValueNotifier;
 
     type Captured = Rc<Cell<Option<AnyFocusNode>>>;
 
@@ -1357,6 +1385,49 @@ mod tests {
             SizedBox::shrink().into_widget()
         })
         .into_widget()
+    }
+
+    /// A node a caller keeps outlives the `Focus` it hung under: `FocusNode._removeChild` clears
+    /// its parent but leaves its cached ancestors, which the next `Focus` reads through
+    /// `skipTraversal` before it attaches the node again.
+    #[test]
+    fn a_kept_node_remounts_after_the_focus_it_hung_under_is_freed() {
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
+        let node: FocusNodeRef = FocusNode::new(&mut app).into_erased();
+        let layout = app.create(ValueNotifier::new(0));
+        drop(app);
+        let widget = ValueListenableBuilder::new(Rc::new(layout.clone()), {
+            let node = node.clone();
+            move |_app, _context, layout: &i32, _child| match layout {
+                0 => Focus::new(Focus::new(SizedBox::shrink()).focus_node(node.clone()))
+                    .debug_label("outer")
+                    .into_widget(),
+                1 => SizedBox::shrink().into_widget(),
+                _ => Focus::new(SizedBox::shrink())
+                    .focus_node(node.clone())
+                    .into_widget(),
+            }
+        });
+        mount(&cell, widget.into_widget());
+        let mut app = cell.borrow_mut();
+        let outer = node
+            .parent(&app)
+            .expect("the node hangs under the outer Focus");
+        assert!(node.ancestors(&mut app).contains(&outer));
+
+        layout.set_value(&mut app, 1);
+        pump_every_view(&mut app, Duration::ZERO);
+        assert_eq!(node.parent(&app), None);
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
+        assert!(!app.contains(outer));
+
+        layout.set_value(&mut app, 2);
+        pump_every_view(&mut app, Duration::ZERO);
+        assert!(!node.skip_traversal(&mut app));
+        assert!(!node.ancestors(&mut app).contains(&outer));
     }
 
     #[test]
@@ -1427,11 +1498,11 @@ mod tests {
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let view_scope = scope_node.get().expect("FocusScope.of ran");
-        assert_ne!(view_scope, manager.root_scope(&app));
+        assert_ne!(view_scope, manager.root_scope(&app).handle());
         assert_eq!(view_scope.debug_label(&app).as_deref(), Some("View Scope"));
         assert_eq!(
             view_scope.enclosing_scope(&mut app),
-            Some(manager.root_scope(&app))
+            Some(manager.root_scope(&app).handle())
         );
 
         // A FocusScope widget below the view scopes its own subtree instead.
@@ -1452,7 +1523,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let scope = scope_node.get().expect("FocusScope.of ran");
-        assert_ne!(scope, manager.root_scope(&app));
+        assert_ne!(scope, manager.root_scope(&app).handle());
         assert_eq!(scope.debug_label(&app).as_deref(), Some("scope"));
         assert_eq!(
             scope

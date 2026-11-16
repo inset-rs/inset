@@ -9,7 +9,6 @@
 use std::cell::Cell;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use waft_animation::{
@@ -21,7 +20,9 @@ use waft_embedder::{
     Brightness, Canvas, ClipOp, Color, Offset, Paint, PaintStyle, RRect, Radius, Rect, Size,
     Stroke, TargetPlatform, TextDirection, lerp_double, rrect_radii_elliptical,
 };
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, ValueChanged};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, OptionRetained, Ref, ValueChanged,
+};
 use waft_gestures::{DragEndDetails, DragStartBehavior, DragStartDetails, DragUpdateDetails};
 use waft_painting::{
     AnyColor, BlurStyle, BorderSide, BoxPainter, BoxShadow, Decoration, EdgeInsetsGeometry,
@@ -31,7 +32,7 @@ use waft_painting::{
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
-    AnyFocusNode, BuildContext, Directionality, GestureDetector, Icon, IconTheme, IconThemeData,
+    BuildContext, Directionality, FocusNodeRef, GestureDetector, Icon, IconTheme, IconThemeData,
     IntoWidget, KeyRef, Opacity, Semantics, State, StateData, StatefulWidget, StatelessWidget,
     TickerProviderStateMixin, TickerProviderStateMixinData, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, ToggleableStateMixin, ToggleableStateMixinData,
@@ -310,7 +311,7 @@ pub struct Switch {
     /// If one is not supplied, then one will be automatically allocated, owned, and managed
     /// by this widget. The widget will be focusable even if a `focus_node` is not supplied.
     /// If supplied, the given `focus_node` will be _hosted_ by this widget, but not owned.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// Handler called when the focus changes.
     ///
     /// Called with true if this widget's node gains focus, and false if it loses focus.
@@ -529,7 +530,7 @@ impl Switch {
     }
 
     /// Dart `Switch(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> Switch {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> Switch {
         self.focus_node = Some(focus_node);
         self
     }
@@ -684,7 +685,7 @@ impl StatelessWidget for Switch {
             hover_color: self.hover_color,
             overlay_color: self.overlay_color.clone(),
             splash_radius: self.splash_radius,
-            focus_node: self.focus_node,
+            focus_node: self.focus_node.clone(),
             on_focus_change: self.on_focus_change.clone(),
             autofocus: self.autofocus,
             apply_cupertino_theme: self.effective_apply_cupertino_theme(),
@@ -719,7 +720,7 @@ struct MaterialSwitch {
     hover_color: Option<Color>,
     overlay_color: Option<WidgetStatePropertyRef<Option<Color>>>,
     splash_radius: Option<f64>,
-    focus_node: Option<AnyFocusNode>,
+    focus_node: Option<FocusNodeRef>,
     on_focus_change: Option<ValueChanged<bool>>,
     autofocus: bool,
     size: Size,
@@ -758,19 +759,22 @@ struct MaterialSwitchState {
     toggleable: ToggleableStateMixinData,
     /// Dart's `final _SwitchPainter _painter = _SwitchPainter()`, created in `init_state`
     /// because a painter is an arena object and a state is created without the `App`.
-    painter: Option<Handle<SwitchPainter>>,
+    painter: Option<Ref<SwitchPainter>>,
     needs_position_animation: bool,
     is_cupertino: bool,
 }
 
 impl MaterialSwitchState {
     fn painter(self: Handle<Self>, app: &App) -> Handle<SwitchPainter> {
-        app.get(self).painter.expect("created in init_state")
+        app.get(self)
+            .painter
+            .handle()
+            .expect("created in init_state")
     }
 
     fn update_curve(self: Handle<Self>, app: &mut App) {
         let context = self.context(app);
-        let position = self.position(app);
+        let position = self.position(app).handle();
         if Theme::of(app, context).use_material3 {
             let position = app.get_mut(position);
             position.curve = Curves::ease_out_back();
@@ -838,7 +842,8 @@ impl MaterialSwitchState {
 
     fn handle_drag_update(self: Handle<Self>, app: &mut App, details: DragUpdateDetails) {
         if self.is_interactive(app) {
-            let position = app.get_mut(self.position(app));
+            let position = self.position(app).handle();
+            let position = app.get_mut(position);
             position.curve = Curves::linear();
             position.reverse_curve = None;
             let delta = details
@@ -906,7 +911,7 @@ impl TickerProviderStateMixin for MaterialSwitchState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for MaterialSwitchState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -965,7 +970,8 @@ impl State for MaterialSwitchState {
                             | TargetPlatform::Linux
                             | TargetPlatform::Windows => self.update_curve(app),
                             TargetPlatform::IOS | TargetPlatform::MacOS => {
-                                let position = app.get_mut(self.position(app));
+                                let position = self.position(app).handle();
+                                let position = app.get_mut(position);
                                 position.curve = Curves::linear();
                                 position.reverse_curve = Some(Curves::linear());
                             }
@@ -985,8 +991,6 @@ impl State for MaterialSwitchState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let painter = self.painter(app);
         painter.dispose(app);
-        app.get_mut(self).painter = None;
-        app.destroy(painter);
         ToggleableStateMixin::dispose(self, app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -1235,11 +1239,15 @@ impl State for MaterialSwitchState {
         let states = self.states(app);
         let is_cupertino = app.get(self).is_cupertino;
 
-        let painter = self.painter(app);
-        painter.set_position(app, self.position(app).as_animation());
-        painter.set_reaction(app, self.reaction(app).as_animation());
-        painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).as_animation());
-        painter.set_reaction_hover_fade(app, self.reaction_hover_fade(app).as_animation());
+        let painter = app
+            .get(self)
+            .painter
+            .clone()
+            .expect("created in init_state");
+        painter.set_position(app, self.position(app).erase());
+        painter.set_reaction(app, self.reaction(app).erase());
+        painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).erase());
+        painter.set_reaction_hover_fade(app, self.reaction_hover_fade(app).erase());
         painter.set_inactive_reaction_color(app, effective_inactive_pressed_overlay_color);
         painter.set_reaction_color(app, effective_active_pressed_overlay_color);
         painter.set_hover_color(app, effective_hover_overlay_color);
@@ -1276,7 +1284,7 @@ impl State for MaterialSwitchState {
         painter.set_icon_theme(app, Some(icon_theme));
         painter.set_thumb_shadow(app, switch_config.thumb_shadow());
         painter.set_transitional_thumb_size(app, switch_config.transitional_thumb_size());
-        painter.set_position_controller(app, position_controller);
+        painter.set_position_controller(app, position_controller.keep(app));
         painter.set_is_cupertino(app, is_cupertino);
 
         let opacity = if ToggleableStateMixin::on_changed(self, app).is_none() {
@@ -1317,8 +1325,8 @@ impl State for MaterialSwitchState {
 struct SwitchPainter {
     change_notifier: ChangeNotifierData,
     toggleable_painter: ToggleablePainterData,
-    position_controller: Option<Handle<AnimationController>>,
-    color_animation: Option<Handle<CurvedAnimation>>,
+    position_controller: Option<Ref<AnimationController>>,
+    color_animation: Option<Ref<CurvedAnimation>>,
     active_icon: Option<Rc<Icon>>,
     inactive_icon: Option<Rc<Icon>>,
     icon_theme: Option<IconThemeData>,
@@ -1393,7 +1401,7 @@ macro_rules! nullable_painter_field {
 }
 
 impl SwitchPainter {
-    fn new(app: &mut App) -> Handle<SwitchPainter> {
+    fn new(app: &mut App) -> Ref<SwitchPainter> {
         app.create(SwitchPainter {
             change_notifier: ChangeNotifierData::new(),
             toggleable_painter: ToggleablePainterData::new(),
@@ -1440,25 +1448,21 @@ impl SwitchPainter {
     fn position_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .position_controller
+            .handle()
             .expect("set before painting")
     }
 
-    fn set_position_controller(
-        self: Handle<Self>,
-        app: &mut App,
-        value: Handle<AnimationController>,
-    ) {
-        if app.get(self).position_controller == Some(value) {
+    fn set_position_controller(self: Handle<Self>, app: &mut App, value: Ref<AnimationController>) {
+        if app.get(self).position_controller.handle() == Some(value.handle()) {
             return;
         }
-        app.get_mut(self).position_controller = Some(value);
+        app.get_mut(self).position_controller = Some(value.clone());
         if let Some(color_animation) = app.get_mut(self).color_animation.take() {
             color_animation.dispose(app);
-            app.destroy(color_animation);
         }
-        let color_animation = CurvedAnimation::create(
+        let color_animation = CurvedAnimation::new(
             app,
-            value.as_animation(),
+            value.erase(),
             Curves::ease_out(),
             Some(Curves::ease_in()),
         );
@@ -1621,12 +1625,10 @@ impl SwitchPainter {
     ) -> Size {
         let transitional_thumb_size = self.transitional_thumb_size(app);
         let cubic = |a, b, c, d| Rc::new(Cubic::new(a, b, c, d)) as Rc<dyn Curve>;
-        let mut owned = Vec::new();
-        let mut tween = |app: &mut App, begin: Size, end: Size, curve: Rc<dyn Curve>| {
+        let tween = |app: &mut App, begin: Size, end: Size, curve: Rc<dyn Curve>| {
             let tween = Tween::new(app, Some(begin), Some(end));
             let curve = CurveTween::new(app, curve);
-            owned.extend([tween.id(), curve.id()]);
-            Arc::new(tween.chain(curve)) as Arc<dyn Animatable<Size>>
+            Rc::new(tween.chain(curve)) as Rc<dyn Animatable<Size>>
         };
         let thumb_size_sequence = if is_forward {
             let first = tween(
@@ -1642,11 +1644,10 @@ impl SwitchPainter {
                 cubic(0.20, 0.00, 0.00, 1.00),
             );
             let constant = ConstantTween::new(app, active_thumb_size);
-            owned.push(constant.id());
             vec![
                 TweenSequenceItem::new(first, 11.0),
                 TweenSequenceItem::new(second, 72.0),
-                TweenSequenceItem::new(Arc::new(constant), 17.0),
+                TweenSequenceItem::new(Rc::new(constant), 17.0),
             ]
         } else {
             let constant = ConstantTween::new(app, inactive_thumb_size);
@@ -1662,21 +1663,16 @@ impl SwitchPainter {
                 active_thumb_size,
                 Rc::new(cubic(0.31, 0.00, 0.56, 1.00).flipped()),
             );
-            owned.push(constant.id());
             vec![
-                TweenSequenceItem::new(Arc::new(constant), 17.0),
+                TweenSequenceItem::new(Rc::new(constant), 17.0),
                 TweenSequenceItem::new(first, 72.0),
                 TweenSequenceItem::new(second, 11.0),
             ]
         };
 
         let position_controller = self.position_controller(app);
-        let value = TweenSequence::new(thumb_size_sequence)
-            .evaluate(app, position_controller.as_animation());
-        for id in owned {
-            app.destroy(id);
-        }
-        value
+
+        TweenSequence::new(thumb_size_sequence).evaluate(app, position_controller.as_animation())
     }
 
     /// Computes canvas offset for track's upper left corner
@@ -1952,7 +1948,6 @@ impl SwitchPainter {
         let color_animation = painter.color_animation.take();
         if let Some(color_animation) = color_animation {
             color_animation.dispose(app);
-            app.destroy(color_animation);
         }
         ToggleablePainter::dispose(self, app);
     }
@@ -2129,6 +2124,7 @@ impl ToggleablePainter for SwitchPainter {
         let color_value = app
             .get(self)
             .color_animation
+            .handle()
             .expect("set with the position controller")
             .value(app);
         let track_color = Color::lerp(
@@ -2701,9 +2697,9 @@ pub(crate) mod tests {
     use waft_scheduler::SchedulerBinding;
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::{
-        Align, AnyElement, Center, Container, FocusHighlightStrategy, FocusNode, FocusNodeLeaf,
-        IconData, MediaQuery, MediaQueryData, MouseRegion, StateSetter, StatefulBuilder,
-        StatefulElement, UnfocusDisposition,
+        Align, AnyElement, Center, Container, FocusHighlightStrategy, FocusNode, IconData,
+        MediaQuery, MediaQueryData, MouseRegion, StateSetter, StatefulBuilder, StatefulElement,
+        UnfocusDisposition,
     };
 
     use super::*;
@@ -3007,8 +3003,8 @@ pub(crate) mod tests {
         mouse
     }
 
-    fn focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     fn adaptive_on(platform: TargetPlatform) -> impl FnOnce(&App) -> ThemeData {
@@ -3381,7 +3377,7 @@ pub(crate) mod tests {
                 tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
                 let node = focus_node(&tester);
                 let home = Scaffold::new()
-                    .body(Switch::new(true, ignore()).focus_node(node))
+                    .body(Switch::new(true, ignore()).focus_node(node.clone()))
                     .into_widget();
                 pump_app(&mut tester, theme, move |_app| home);
 
@@ -3674,7 +3670,7 @@ pub(crate) mod tests {
         disabled: bool,
         off: bool,
         autofocus: bool,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         focus_color: Option<Color>,
         overall_switch_theme_data: Option<SwitchThemeData>,
         switch_theme_data: Option<SwitchThemeData>,
@@ -3962,7 +3958,7 @@ pub(crate) mod tests {
                 let node = focus_node(&tester);
                 AdaptiveSwitch {
                     autofocus: true,
-                    focus_node: Some(node),
+                    focus_node: Some(node.clone()),
                     focus_color,
                     ..AdaptiveSwitch::default()
                 }
@@ -3994,19 +3990,15 @@ pub(crate) mod tests {
                 if !enabled {
                     value.set(false);
                 }
-                pump_host(
-                    &mut tester,
-                    m3,
-                    TextDirection::Ltr,
-                    &value,
-                    enabled,
+                pump_host(&mut tester, m3, TextDirection::Ltr, &value, enabled, {
+                    let node = node.clone();
                     move |value, on_changed| {
                         Switch::new(value, on_changed)
                             .focus_color(orange)
                             .autofocus(true)
-                            .focus_node(node)
-                    },
-                );
+                            .focus_node(node.clone())
+                    }
+                });
                 tester.pump_and_settle();
                 let painted = drawn(&tester);
                 if !enabled {
@@ -4305,7 +4297,7 @@ pub(crate) mod tests {
             let home = in_material(
                 TextDirection::Rtl,
                 Switch::new(true, ignore())
-                    .focus_node(node)
+                    .focus_node(node.clone())
                     .autofocus(true)
                     .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
                         |states| {
@@ -4362,7 +4354,7 @@ pub(crate) mod tests {
             let pump =
                 |tester: &mut WidgetTester, active: bool, focused: bool, use_overlay: bool| {
                     let mut switch = Switch::new(active, ignore())
-                        .focus_node(node)
+                        .focus_node(node.clone())
                         .autofocus(focused)
                         .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
                             |states| {
@@ -4610,7 +4602,7 @@ pub(crate) mod tests {
             let home = in_material(
                 TextDirection::Rtl,
                 Switch::new(true, ignore())
-                    .focus_node(node)
+                    .focus_node(node.clone())
                     .autofocus(true)
                     .track_outline_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
                         |states| {
@@ -4725,11 +4717,14 @@ pub(crate) mod tests {
             let value = shared(true);
             let pump = |tester: &mut WidgetTester, enabled: bool| {
                 let home = Material::new()
-                    .child(host(&value, enabled, move |value, on_changed| {
-                        Switch::adaptive(value, on_changed)
-                            .focus_color(Color::new(FOCUS_COLOR))
-                            .focus_node(node)
-                            .autofocus(true)
+                    .child(host(&value, enabled, {
+                        let node = node.clone();
+                        move |value, on_changed| {
+                            Switch::adaptive(value, on_changed)
+                                .focus_color(Color::new(FOCUS_COLOR))
+                                .focus_node(node.clone())
+                                .autofocus(true)
+                        }
                     }))
                     .into_widget();
                 let home = Center::new().child(home).into_widget();
@@ -4776,7 +4771,7 @@ pub(crate) mod tests {
             let switch = {
                 let focused = Rc::clone(&focused);
                 Switch::new(true, ignore())
-                    .focus_node(node)
+                    .focus_node(node.clone())
                     .on_focus_change(move |_app, value| focused.set(value))
             };
             pump_switch(&mut tester, m3, switch);
@@ -5115,19 +5110,15 @@ pub(crate) mod tests {
             let value = shared(true);
             let orange = Colors::ORANGE.shade500();
             let pump = |tester: &mut WidgetTester, enabled: bool| {
-                pump_host(
-                    tester,
-                    m2,
-                    TextDirection::Ltr,
-                    &value,
-                    enabled,
+                pump_host(tester, m2, TextDirection::Ltr, &value, enabled, {
+                    let node = node.clone();
                     move |value, on_changed| {
                         Switch::new(value, on_changed)
                             .focus_color(orange)
                             .autofocus(true)
-                            .focus_node(node)
-                    },
-                );
+                            .focus_node(node.clone())
+                    }
+                });
                 tester.pump_and_settle();
             };
 
@@ -5303,7 +5294,7 @@ pub(crate) mod tests {
                 &mut tester,
                 m2,
                 Switch::new(true, ignore())
-                    .focus_node(node)
+                    .focus_node(node.clone())
                     .autofocus(true)
                     .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
                         |states| {
@@ -5424,7 +5415,7 @@ pub(crate) mod tests {
                 let home = in_material(
                     TextDirection::Rtl,
                     Switch::new(true, ignore())
-                        .focus_node(node)
+                        .focus_node(node.clone())
                         .autofocus(true)
                         .track_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
                             |states| {

@@ -6,8 +6,8 @@ use std::time::Duration;
 use waft_animation::{AnimationBehavior, AnimationController, Curve};
 use waft_embedder::PointerDeviceKind;
 use waft_foundation::{
-    App, Completer, CompleterFuture, Handle, HandleId, ListenableObject, Listener,
-    PRECISION_ERROR_TOLERANCE,
+    App, Completer, CompleterFuture, Handle, HandleId, ListenableObject, Listener, OptionRetained,
+    PRECISION_ERROR_TOLERANCE, Retained,
 };
 use waft_gestures::{DragEndDetails, DragObject, DragStartDetails, DragUpdateDetails};
 use waft_painting::{AxisDirection, axis_direction_is_reversed};
@@ -20,6 +20,7 @@ use crate::widgets::scroll_notification::{
     OverscrollNotification, ScrollEndNotification, ScrollStartNotification,
     ScrollUpdateNotification,
 };
+use waft_foundation::Ref;
 
 /// A backend for a [`ScrollActivity`].
 ///
@@ -450,6 +451,11 @@ pub struct AnyScrollActivity {
     vtable: &'static ScrollActivityVTable,
 }
 
+/// A field Dart types as the erased object, kept: AnyScrollActivity with its count.
+pub type ScrollActivityRef = Retained<AnyScrollActivity>;
+
+waft_foundation::erased_handle!(AnyScrollActivity: ScrollActivity => ScrollActivity::as_activity);
+
 impl AnyScrollActivity {
     /// See [`ScrollActivity::delegate`].
     pub fn delegate(self, app: &App) -> AnyScrollActivityDelegate {
@@ -555,14 +561,6 @@ impl AnyScrollActivity {
     }
 }
 
-impl PartialEq for AnyScrollActivity {
-    fn eq(&self, other: &AnyScrollActivity) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyScrollActivity {}
-
 /// A scroll activity that does nothing.
 ///
 /// When a scroll view is not scrolling, it is performing the idle activity.
@@ -575,7 +573,7 @@ pub struct IdleScrollActivity {
 
 impl IdleScrollActivity {
     /// Creates a scroll activity that does nothing.
-    pub fn new(app: &mut App, delegate: AnyScrollActivityDelegate) -> Handle<IdleScrollActivity> {
+    pub fn new(app: &mut App, delegate: AnyScrollActivityDelegate) -> Ref<IdleScrollActivity> {
         app.create(IdleScrollActivity {
             scroll_activity: ScrollActivityData::new(delegate),
         })
@@ -630,6 +628,13 @@ impl<T: ScrollHoldControllerObject> ScrollHoldController for Handle<T> {
     }
 }
 
+/// A kept hold: what `ScrollPosition::hold` hands back, which the caller keeps until it cancels.
+impl<T: ScrollHoldControllerObject> ScrollHoldController for Ref<T> {
+    fn cancel(&self, app: &mut App) {
+        T::cancel(self.handle(), app);
+    }
+}
+
 /// A scroll activity that does nothing but can be released to resume
 /// normal idle behavior.
 ///
@@ -652,7 +657,7 @@ impl HoldScrollActivity {
         app: &mut App,
         delegate: AnyScrollActivityDelegate,
         on_hold_canceled: Option<Listener>,
-    ) -> Handle<HoldScrollActivity> {
+    ) -> Ref<HoldScrollActivity> {
         app.create(HoldScrollActivity {
             scroll_activity: ScrollActivityData::new(delegate),
             on_hold_canceled,
@@ -768,7 +773,7 @@ impl ScrollDragController {
         on_drag_canceled: Option<Listener>,
         carried_velocity: Option<f64>,
         motion_start_distance_threshold: Option<f64>,
-    ) -> Handle<ScrollDragController> {
+    ) -> Ref<ScrollDragController> {
         debug_assert!(
             motion_start_distance_threshold.is_none_or(|threshold| threshold > 0.0),
             "motionStartDistanceThreshold must be a positive number or null"
@@ -983,7 +988,7 @@ impl DragObject for ScrollDragController {
 ///    the scroll view.
 pub struct DragScrollActivity {
     scroll_activity: ScrollActivityData,
-    controller: Option<Handle<ScrollDragController>>,
+    controller: Option<Ref<ScrollDragController>>,
 }
 
 impl DragScrollActivity {
@@ -992,8 +997,8 @@ impl DragScrollActivity {
     pub fn new(
         app: &mut App,
         delegate: AnyScrollActivityDelegate,
-        controller: Handle<ScrollDragController>,
-    ) -> Handle<DragScrollActivity> {
+        controller: Ref<ScrollDragController>,
+    ) -> Ref<DragScrollActivity> {
         app.create(DragScrollActivity {
             scroll_activity: ScrollActivityData::new(delegate),
             controller: Some(controller),
@@ -1003,6 +1008,7 @@ impl DragScrollActivity {
     fn controller(self: Handle<Self>, app: &App) -> Handle<ScrollDragController> {
         app.get(self)
             .controller
+            .handle()
             .expect("the drag activity outlives its controller")
     }
 }
@@ -1076,6 +1082,7 @@ impl ScrollActivity for DragScrollActivity {
     fn should_ignore_pointer(self: Handle<Self>, app: &App) -> bool {
         app.get(self)
             .controller
+            .as_ref()
             .and_then(|controller| controller.kind(app))
             != Some(PointerDeviceKind::Trackpad)
     }
@@ -1096,7 +1103,7 @@ impl ScrollActivity for DragScrollActivity {
     }
 
     fn describe(self: Handle<Self>, app: &App) -> String {
-        let controller = app.get(self).controller;
+        let controller = app.get(self).controller.handle();
         let described =
             controller.map_or_else(|| "null".to_string(), ScrollDragController::describe);
         format!(
@@ -1132,7 +1139,7 @@ impl ScrollActivity for DragScrollActivity {
 ///    when scroll metrics change.
 pub struct BallisticScrollActivity {
     scroll_activity: ScrollActivityData,
-    controller: Handle<AnimationController>,
+    controller: Ref<AnimationController>,
     should_ignore_pointer: bool,
 }
 
@@ -1148,8 +1155,8 @@ impl BallisticScrollActivity {
         simulation: Box<dyn Simulation>,
         vsync: impl TickerProvider,
         should_ignore_pointer: bool,
-    ) -> Handle<BallisticScrollActivity> {
-        let controller = AnimationController::create_unbounded(
+    ) -> Ref<BallisticScrollActivity> {
+        let controller = AnimationController::unbounded(
             app,
             0.0,
             None,
@@ -1159,13 +1166,13 @@ impl BallisticScrollActivity {
         );
         let this = app.create(BallisticScrollActivity {
             scroll_activity: ScrollActivityData::new(delegate),
-            controller,
+            controller: controller.clone(),
             should_ignore_pointer,
         });
-        controller.add_listener(app, Listener::handle_method(this, Self::tick));
+        controller.add_listener(app, Listener::handle_method(this.handle(), Self::tick));
         let done = controller.animate_with(app, simulation);
         // Won't trigger if we dispose the controller before it completes.
-        done.when_complete(app, Listener::handle_method(this, Self::end));
+        done.when_complete(app, Listener::handle_method(this.handle(), Self::end));
         this
     }
 
@@ -1266,7 +1273,7 @@ impl ScrollActivity for BallisticScrollActivity {
 pub struct DrivenScrollActivity {
     scroll_activity: ScrollActivityData,
     completer: Completer<()>,
-    controller: Handle<AnimationController>,
+    controller: Ref<AnimationController>,
 }
 
 impl DrivenScrollActivity {
@@ -1280,10 +1287,10 @@ impl DrivenScrollActivity {
         duration: Duration,
         curve: Rc<dyn Curve>,
         vsync: impl TickerProvider,
-    ) -> Handle<DrivenScrollActivity> {
+    ) -> Ref<DrivenScrollActivity> {
         debug_assert!(duration > Duration::ZERO);
         let completer = Completer::new();
-        let controller = AnimationController::create_unbounded(
+        let controller = AnimationController::unbounded(
             app,
             from,
             None,
@@ -1294,12 +1301,12 @@ impl DrivenScrollActivity {
         let this = app.create(DrivenScrollActivity {
             scroll_activity: ScrollActivityData::new(delegate),
             completer,
-            controller,
+            controller: controller.clone(),
         });
-        controller.add_listener(app, Listener::handle_method(this, Self::tick));
+        controller.add_listener(app, Listener::handle_method(this.handle(), Self::tick));
         let done = controller.animate_to(app, to, Some(duration), curve);
         // Won't trigger if we dispose the controller before it completes.
-        done.when_complete(app, Listener::handle_method(this, Self::end));
+        done.when_complete(app, Listener::handle_method(this.handle(), Self::end));
         this
     }
 
@@ -1310,9 +1317,9 @@ impl DrivenScrollActivity {
         delegate: AnyScrollActivityDelegate,
         simulation: Box<dyn Simulation>,
         vsync: impl TickerProvider,
-    ) -> Handle<DrivenScrollActivity> {
+    ) -> Ref<DrivenScrollActivity> {
         let completer = Completer::new();
-        let controller = AnimationController::create_unbounded(
+        let controller = AnimationController::unbounded(
             app,
             0.0,
             None,
@@ -1323,12 +1330,12 @@ impl DrivenScrollActivity {
         let this = app.create(DrivenScrollActivity {
             scroll_activity: ScrollActivityData::new(delegate),
             completer,
-            controller,
+            controller: controller.clone(),
         });
-        controller.add_listener(app, Listener::handle_method(this, Self::tick));
+        controller.add_listener(app, Listener::handle_method(this.handle(), Self::tick));
         let done = controller.animate_with(app, simulation);
         // Won't trigger if we dispose the controller before it completes.
-        done.when_complete(app, Listener::handle_method(this, Self::end));
+        done.when_complete(app, Listener::handle_method(this.handle(), Self::end));
         this
     }
 

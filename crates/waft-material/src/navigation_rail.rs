@@ -5,12 +5,12 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnyAnimation, CurveTween, CurvedAnimation,
-    Curves, Interval, ReverseAnimation,
+    Animation, AnimationBehavior, AnimationController, AnimationRef, AnyAnimation, CurveTween,
+    CurvedAnimation, Curves, Drive, Interval, ReverseAnimation,
 };
 use waft_embedder::SemanticsRole;
 use waft_embedder::{Color, Offset, Radius, Rect, lerp_double};
-use waft_foundation::{App, Handle, HandleId, K_IS_WEB, Listener, ValueChanged};
+use waft_foundation::{App, Handle, K_IS_WEB, Listener, OptionRetained, Ref, ValueChanged};
 use waft_painting::{
     Alignment, AlignmentGeometry, BorderRadius, BoxShape, EdgeInsetsGeometry, ShapeBorderRef,
     TextDirection, TextStyle,
@@ -549,6 +549,7 @@ impl NavigationRail {
             .depend_on_inherited_widget_of_exact_type::<ExtendedNavigationRailAnimation>(app)
             .expect("a NavigationRail above the context")
             .animation
+            .handle()
     }
 }
 
@@ -591,7 +592,6 @@ impl StatefulWidget for NavigationRail {
             destination_animations: Vec::new(),
             extended_controller: None,
             extended_animation: None,
-            replaced: Vec::new(),
         }
     }
 }
@@ -600,14 +600,10 @@ impl StatefulWidget for NavigationRail {
 pub struct NavigationRailState {
     state: StateData<NavigationRail>,
     ticker_provider: TickerProviderStateMixinData,
-    destination_controllers: Vec<Handle<AnimationController>>,
-    destination_animations: Vec<AnyAnimation<f64>>,
-    extended_controller: Option<Handle<AnimationController>>,
-    extended_animation: Option<Handle<CurvedAnimation>>,
-    /// The controllers and animations a change in the number of destinations disposed,
-    /// destroyed with this state: the destinations and the widgets that read
-    /// [`NavigationRail::extended_animation`] may still unsubscribe from them.
-    replaced: Vec<HandleId>,
+    destination_controllers: Vec<Ref<AnimationController>>,
+    destination_animations: Vec<AnimationRef<f64>>,
+    extended_controller: Option<Ref<AnimationController>>,
+    extended_animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl TickerProviderStateMixin for NavigationRailState {
@@ -624,7 +620,7 @@ impl TickerProviderStateMixin for NavigationRailState {
 }
 
 impl TickerProviderObject for NavigationRailState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -644,15 +640,6 @@ impl State for NavigationRailState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_controllers(app);
         TickerProviderStateMixin::dispose(self, app);
-        let state = app.get_mut(self);
-        let mut owned: Vec<HandleId> = std::mem::take(&mut state.replaced);
-        owned.extend(state.destination_controllers.drain(..).map(HandleId::from));
-        state.destination_animations.clear();
-        owned.extend(state.extended_animation.take().map(HandleId::from));
-        owned.extend(state.extended_controller.take().map(HandleId::from));
-        for id in owned {
-            app.destroy(id);
-        }
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &NavigationRail) {
@@ -788,10 +775,11 @@ impl State for NavigationRailState {
         let is_rtl_direction = Directionality::of(app, context) == TextDirection::Rtl;
 
         let state = app.get(self);
-        let extended_animation = state
+        let extended_animation: AnimationRef<f64> = state
             .extended_animation
+            .as_ref()
             .expect("created in init_state")
-            .as_animation();
+            .erase();
         let destination_animations = state.destination_animations.clone();
         let widget = self.widget(app);
         let destinations_len = widget.destinations.len();
@@ -813,7 +801,7 @@ impl State for NavigationRailState {
                 RailDestination {
                     min_width,
                     min_extended_width,
-                    extended_transition_animation: extended_animation,
+                    extended_transition_animation: extended_animation.clone(),
                     selected,
                     icon: if selected {
                         destination.selected_icon.clone()
@@ -821,7 +809,7 @@ impl State for NavigationRailState {
                         destination.icon.clone()
                     },
                     label: destination.label.clone(),
-                    destination_animation: destination_animations[i],
+                    destination_animation: destination_animations[i].clone(),
                     label_type,
                     icon_theme: if selected {
                         selected_icon_theme.clone()
@@ -914,7 +902,7 @@ impl State for NavigationRailState {
         Semantics::new()
             .container(true)
             .child(ExtendedNavigationRailAnimation {
-                animation: extended_animation,
+                animation: extended_animation.clone(),
                 child: Semantics::new()
                     .explicit_child_nodes(true)
                     .child(
@@ -937,14 +925,21 @@ impl NavigationRailState {
     fn extended_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .extended_controller
+            .handle()
             .expect("created in init_state")
     }
 
     fn dispose_controllers(self: Handle<Self>, app: &mut App) {
         let state = app.get(self);
         let destination_controllers = state.destination_controllers.clone();
-        let extended_controller = state.extended_controller.expect("created in init_state");
-        let extended_animation = state.extended_animation.expect("created in init_state");
+        let extended_controller = state
+            .extended_controller
+            .handle()
+            .expect("created in init_state");
+        let extended_animation = state
+            .extended_animation
+            .handle()
+            .expect("created in init_state");
         for controller in destination_controllers {
             controller.dispose(app);
         }
@@ -954,9 +949,9 @@ impl NavigationRailState {
 
     fn init_controllers(self: Handle<Self>, app: &mut App) {
         let destinations_len = self.widget(app).destinations.len();
-        let destination_controllers: Vec<Handle<AnimationController>> = (0..destinations_len)
+        let destination_controllers: Vec<Ref<AnimationController>> = (0..destinations_len)
             .map(|_| {
-                let controller = AnimationController::create(
+                let controller = AnimationController::new(
                     app,
                     None,
                     Some(K_THEME_ANIMATION_DURATION),
@@ -967,7 +962,7 @@ impl NavigationRailState {
                     self,
                 );
                 Animation::add_listener(
-                    controller,
+                    controller.handle(),
                     app,
                     Listener::handle_method(self, Self::rebuild),
                 );
@@ -976,13 +971,13 @@ impl NavigationRailState {
             .collect();
         let destination_animations = destination_controllers
             .iter()
-            .map(|controller| controller.view())
+            .map(|controller| controller.erase())
             .collect();
         if let Some(selected_index) = self.widget(app).selected_index {
             destination_controllers[selected_index].set_value(app, 1.0);
         }
         let extended = self.widget(app).extended;
-        let extended_controller = AnimationController::create(
+        let extended_controller = AnimationController::new(
             app,
             Some(if extended { 1.0 } else { 0.0 }),
             Some(K_THEME_ANIMATION_DURATION),
@@ -992,10 +987,14 @@ impl NavigationRailState {
             AnimationBehavior::Normal,
             self,
         );
-        let extended_animation =
-            CurvedAnimation::create(app, extended_controller.view(), Curves::ease_in_out(), None);
+        let extended_animation = CurvedAnimation::new(
+            app,
+            extended_controller.erase(),
+            Curves::ease_in_out(),
+            None,
+        );
         Animation::add_listener(
-            extended_controller,
+            extended_controller.handle(),
             app,
             Listener::handle_method(self, Self::rebuild),
         );
@@ -1008,16 +1007,6 @@ impl NavigationRailState {
 
     fn reset_state(self: Handle<Self>, app: &mut App) {
         self.dispose_controllers(app);
-        let state = app.get_mut(self);
-        let mut replaced: Vec<HandleId> = state
-            .destination_controllers
-            .drain(..)
-            .map(HandleId::from)
-            .collect();
-        state.destination_animations.clear();
-        replaced.extend(state.extended_animation.take().map(HandleId::from));
-        replaced.extend(state.extended_controller.take().map(HandleId::from));
-        state.replaced.extend(replaced);
         self.init_controllers(app);
     }
 
@@ -1035,10 +1024,10 @@ struct RailDestination {
     min_extended_width: f64,
     icon: WidgetRef,
     label: WidgetRef,
-    destination_animation: AnyAnimation<f64>,
+    destination_animation: AnimationRef<f64>,
     label_type: NavigationRailLabelType,
     selected: bool,
-    extended_transition_animation: AnyAnimation<f64>,
+    extended_transition_animation: AnimationRef<f64>,
     icon_theme: IconThemeData,
     label_text_style: TextStyle,
     on_tap: Listener,
@@ -1067,7 +1056,6 @@ impl StatefulWidget for RailDestination {
         RailDestinationState {
             state: StateData::new(),
             position_animation: None,
-            label_fade_animations: Vec::new(),
         }
     }
 }
@@ -1075,38 +1063,21 @@ impl StatefulWidget for RailDestination {
 /// Dart's `_RailDestinationState`.
 struct RailDestinationState {
     state: StateData<RailDestination>,
-    position_animation: Option<PositionAnimation>,
-    /// The label fades Dart's `build` makes with `drive(CurveTween(curve: interval))`, one
-    /// per parent animation and interval, destroyed with this state.
-    label_fade_animations: Vec<LabelFadeAnimation>,
-}
-
-/// Dart's `_positionAnimation`: the `CurvedAnimation` and the `ReverseAnimation` it curves.
-struct PositionAnimation {
-    curved: Handle<CurvedAnimation>,
-    reversed: Handle<ReverseAnimation>,
-}
-
-/// A `parent.drive(CurveTween(curve: Interval(begin, end)))` of `_RailDestinationState.build`.
-struct LabelFadeAnimation {
-    parent: AnyAnimation<f64>,
-    begin: f64,
-    end: f64,
-    curve_tween: Handle<CurveTween>,
-    animation: AnyAnimation<f64>,
+    /// Dart's `_positionAnimation`, a `CurvedAnimation` over a `ReverseAnimation`.
+    position_animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl RailDestinationState {
     fn set_position_animation(self: Handle<Self>, app: &mut App) {
-        let destination_animation = self.widget(app).destination_animation;
-        let reversed = app.create(ReverseAnimation::new(destination_animation));
-        let curved = CurvedAnimation::create(
+        let destination_animation = self.widget(app).destination_animation.clone();
+        let reversed = ReverseAnimation::new(app, destination_animation);
+        let curved = CurvedAnimation::new(
             app,
-            reversed.as_animation(),
+            reversed.erase(),
             Curves::ease_in_out(),
             Some(Rc::new(Curves::ease_in_out().flipped())),
         );
-        app.get_mut(self).position_animation = Some(PositionAnimation { curved, reversed });
+        app.get_mut(self).position_animation = Some(curved);
     }
 
     fn dispose_position_animation(self: Handle<Self>, app: &mut App) {
@@ -1115,9 +1086,7 @@ impl RailDestinationState {
             .position_animation
             .take()
             .expect("set in init_state");
-        position_animation.curved.dispose(app);
-        app.destroy(position_animation.curved);
-        app.destroy(position_animation.reversed);
+        position_animation.dispose(app);
     }
 
     fn position_animation_value(self: Handle<Self>, app: &App) -> f64 {
@@ -1125,40 +1094,19 @@ impl RailDestinationState {
             .position_animation
             .as_ref()
             .expect("set in init_state")
-            .curved
-            .as_animation()
             .value(app)
     }
 
     /// Dart's `parent.drive(CurveTween(curve: Interval(begin, end)))`.
     fn label_fade_animation(
-        self: Handle<Self>,
         app: &mut App,
-        parent: AnyAnimation<f64>,
+        parent: AnimationRef<f64>,
         begin: f64,
         end: f64,
-    ) -> AnyAnimation<f64> {
-        if let Some(existing) = app
-            .get(self)
-            .label_fade_animations
-            .iter()
-            .find(|fade| fade.parent == parent && fade.begin == begin && fade.end == end)
-        {
-            return existing.animation;
-        }
+    ) -> AnimationRef<f64> {
         let curve_tween =
             CurveTween::new(app, Rc::new(Interval::new(begin, end, Curves::linear())));
-        let animation = parent.drive(app, curve_tween);
-        app.get_mut(self)
-            .label_fade_animations
-            .push(LabelFadeAnimation {
-                parent,
-                begin,
-                end,
-                curve_tween,
-                animation,
-            });
-        animation
+        parent.drive(app, curve_tween)
     }
 }
 
@@ -1179,11 +1127,6 @@ impl State for RailDestinationState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_position_animation(app);
-        let label_fade_animations = std::mem::take(&mut app.get_mut(self).label_fade_animations);
-        for fade in label_fade_animations {
-            app.destroy(fade.animation.id());
-            app.destroy(fade.curve_tween);
-        }
     }
 
     #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
@@ -1259,7 +1202,7 @@ impl State for RailDestinationState {
             indicator_color: widget.indicator_color,
             indicator_shape: widget.indicator_shape.clone(),
             is_circular,
-            indicator_animation: widget.destination_animation,
+            indicator_animation: widget.destination_animation.clone(),
             child,
         };
 
@@ -1308,12 +1251,17 @@ impl State for RailDestinationState {
                         )
                         .into_widget();
                 } else {
-                    let extended_transition_animation = widget.extended_transition_animation;
+                    let extended_transition_animation =
+                        widget.extended_transition_animation.clone();
                     let min_width = widget.min_width;
                     let min_extended_width = widget.min_extended_width;
                     let padding = widget.padding.unwrap_or(EdgeInsetsGeometry::ZERO);
-                    let label_fade_animation =
-                        self.label_fade_animation(app, extended_transition_animation, 0.0, 0.25);
+                    let label_fade_animation = RailDestinationState::label_fade_animation(
+                        app,
+                        extended_transition_animation,
+                        0.0,
+                        0.25,
+                    );
                     apply_x_offset = true;
                     content = Padding::new(padding)
                         .child(
@@ -1411,8 +1359,8 @@ impl State for RailDestinationState {
                     0.0,
                     HORIZONTAL_DESTINATION_PADDING,
                 ));
-                let destination_animation = widget.destination_animation;
-                let label_fade_animation = self.label_fade_animation(
+                let destination_animation = widget.destination_animation.clone();
+                let label_fade_animation = RailDestinationState::label_fade_animation(
                     app,
                     destination_animation,
                     interval_begin,
@@ -1641,7 +1589,7 @@ struct AddIndicator {
     is_circular: bool,
     indicator_color: Option<Color>,
     indicator_shape: Option<ShapeBorderRef>,
-    indicator_animation: AnyAnimation<f64>,
+    indicator_animation: AnimationRef<f64>,
     child: WidgetRef,
 }
 
@@ -1663,7 +1611,7 @@ impl StatelessWidget for AddIndicator {
             return self.child.clone();
         }
         let indicator = if self.is_circular {
-            let mut indicator = NavigationIndicator::new(self.indicator_animation)
+            let mut indicator = NavigationIndicator::new(self.indicator_animation.clone())
                 .height(K_CIRCULAR_INDICATOR_DIAMETER)
                 .width(K_CIRCULAR_INDICATOR_DIAMETER)
                 .border_radius(BorderRadius::all(Radius::circular(
@@ -1674,7 +1622,7 @@ impl StatelessWidget for AddIndicator {
             }
             indicator
         } else {
-            let mut indicator = NavigationIndicator::new(self.indicator_animation)
+            let mut indicator = NavigationIndicator::new(self.indicator_animation.clone())
                 .width(K_CIRCULAR_INDICATOR_DIAMETER);
             if let Some(shape) = self.indicator_shape.clone() {
                 indicator = indicator.shape(shape);
@@ -1830,7 +1778,7 @@ impl NavigationRailDestination {
 /// Dart's `_ExtendedNavigationRailAnimation`.
 #[derive(Debug)]
 struct ExtendedNavigationRailAnimation {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
     child: WidgetRef,
 }
 
@@ -2140,7 +2088,7 @@ mod tests {
             .iter()
             .find_map(|element| {
                 waft_widgets::downcast_widget::<FadeTransition>(&**element.widget(&app))
-                    .map(|fade| fade.opacity)
+                    .map(|fade| fade.opacity.clone())
             })
             .expect("a FadeTransition above the label");
         fade.value(&app)

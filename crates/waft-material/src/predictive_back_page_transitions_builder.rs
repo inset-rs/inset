@@ -6,17 +6,16 @@
 
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationWithParent, AnyAnimation, CurvedAnimation, Curves, Interval,
+    Animatable, Animation, AnimationRef, AnyAnimation, CurvedAnimation, Curves, Drive, Interval,
     ProxyAnimation, ReverseAnimation, TweenSequence, TweenSequenceItem, ValueConstantTween,
     ValueTween, k_always_dismissed_animation,
 };
 use waft_embedder::Radius;
 use waft_embedder::{Color, Offset, Size};
-use waft_foundation::{App, Handle, HandleId, Listenable};
+use waft_foundation::{App, Handle, Listenable, OptionRetained, Ref};
 use waft_painting::BorderRadius;
 use waft_services::{PredictiveBackEvent, SwipeEdge};
 use waft_widgets::{
@@ -128,8 +127,8 @@ impl PageTransitionsBuilder for PredictiveBackPageTransitionsBuilder {
         _app: &mut App,
         route: AnyPageRoute,
         _context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let this = *self;
@@ -143,9 +142,9 @@ impl PageTransitionsBuilder for PredictiveBackPageTransitionsBuilder {
                     if route.as_modal_route().pop_gesture_in_progress(app) {
                         return PredictiveBackSharedElementPageTransition {
                             is_delegated_transition: true,
-                            animation,
+                            animation: animation.clone(),
                             phase,
-                            secondary_animation,
+                            secondary_animation: secondary_animation.clone(),
                             start_back_event,
                             current_back_event,
                             child: child.clone(),
@@ -160,8 +159,8 @@ impl PageTransitionsBuilder for PredictiveBackPageTransitionsBuilder {
                         app,
                         route,
                         context,
-                        animation,
-                        secondary_animation,
+                        animation.clone(),
+                        secondary_animation.clone(),
                         child.clone(),
                     )
                 },
@@ -232,8 +231,8 @@ impl PageTransitionsBuilder for PredictiveBackFullscreenPageTransitionsBuilder {
         _app: &mut App,
         route: AnyPageRoute,
         _context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let fallback_color = self.fallback_color;
@@ -246,8 +245,8 @@ impl PageTransitionsBuilder for PredictiveBackFullscreenPageTransitionsBuilder {
                     // navigation, fall back to ZoomPageTransitionsBuilder.
                     if route.as_modal_route().pop_gesture_in_progress(app) {
                         return PredictiveBackFullscreenPageTransition {
-                            animation,
-                            secondary_animation,
+                            animation: animation.clone(),
+                            secondary_animation: secondary_animation.clone(),
                             get_is_current: Rc::new(move |app| route.as_route().is_current(app)),
                             phase,
                             child: child.clone(),
@@ -261,8 +260,8 @@ impl PageTransitionsBuilder for PredictiveBackFullscreenPageTransitionsBuilder {
                         app,
                         route,
                         context,
-                        animation,
-                        secondary_animation,
+                        animation.clone(),
+                        secondary_animation.clone(),
                         child.clone(),
                     )
                 },
@@ -499,8 +498,8 @@ impl State for PredictiveBackGestureDetectorState {
 #[derive(Debug)]
 pub(crate) struct PredictiveBackSharedElementPageTransition {
     is_delegated_transition: bool,
-    animation: AnyAnimation<f64>,
-    secondary_animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
+    secondary_animation: AnimationRef<f64>,
     phase: PredictiveBackPhase,
     start_back_event: Option<PredictiveBackEvent>,
     current_back_event: Option<PredictiveBackEvent>,
@@ -511,7 +510,10 @@ impl StatefulWidget for PredictiveBackSharedElementPageTransition {
     type State = PredictiveBackSharedElementPageTransitionState;
 
     fn create_state(&self) -> PredictiveBackSharedElementPageTransitionState {
-        let _ = (self.is_delegated_transition, self.secondary_animation);
+        let _ = (
+            self.is_delegated_transition,
+            self.secondary_animation.clone(),
+        );
         PredictiveBackSharedElementPageTransitionState {
             state: StateData::new(),
             commit_animation: None,
@@ -522,8 +524,6 @@ impl StatefulWidget for PredictiveBackSharedElementPageTransition {
             curved_animation_reversed: None,
             position_animation: None,
             last_drag: Offset::ZERO,
-            made_animations: Vec::new(),
-            replaced_curved_animations: Vec::new(),
         }
     }
 }
@@ -535,37 +535,28 @@ pub(crate) struct PredictiveBackSharedElementPageTransitionState {
 
     // An animation that stays constant at zero before the commit, and after the commit goes
     // from zero to one.
-    commit_animation: Option<Handle<ProxyAnimation>>,
+    commit_animation: Option<Ref<ProxyAnimation>>,
 
     // An animation that goes from zero to a maximum of one during a predictive back gesture,
     // and then at commit, it goes from its current value to zero. Used for animations that
     // follow the gesture and then animate back to their original value after commit.
-    bounce_animation: Option<Handle<ProxyAnimation>>,
+    bounce_animation: Option<Ref<ProxyAnimation>>,
     last_bounce_animation_value: f64,
 
     // An animation that proxies to widget.animation during the gesture and then to
     // _commitAnimation after the commit. So, it goes from zero to a maximum of one before
     // commit, and then after commit goes from zero to one again.
-    animation: Option<Handle<ProxyAnimation>>,
+    animation: Option<Ref<ProxyAnimation>>,
 
     /// The same as widget.animation but with a curve applied.
-    curved_animation: Option<Handle<CurvedAnimation>>,
+    curved_animation: Option<Ref<CurvedAnimation>>,
 
     /// The reverse of `curved_animation`.
-    curved_animation_reversed: Option<Handle<CurvedAnimation>>,
+    curved_animation_reversed: Option<Ref<CurvedAnimation>>,
 
-    position_animation: Option<AnyAnimation<Offset>>,
+    position_animation: Option<AnimationRef<Offset>>,
 
     last_drag: Offset,
-
-    /// The bounce parent and the position animation the last `_updateAnimations` made, which
-    /// Dart's collector frees once the next one replaces them; that one frees them here.
-    made_animations: Vec<HandleId>,
-
-    /// The curved animations, and the reverse animation under one, that
-    /// `_updateCurvedAnimations` replaced; the proxies may still follow them until the next
-    /// `_updateAnimations`, which frees them.
-    replaced_curved_animations: Vec<HandleId>,
 }
 
 impl PredictiveBackSharedElementPageTransitionState {
@@ -618,22 +609,21 @@ impl PredictiveBackSharedElementPageTransitionState {
     fn commit_animation(self: Handle<Self>, app: &App) -> Handle<ProxyAnimation> {
         app.get(self)
             .commit_animation
+            .handle()
             .expect("created in init_state")
     }
 
     fn bounce_animation(self: Handle<Self>, app: &App) -> Handle<ProxyAnimation> {
         app.get(self)
             .bounce_animation
+            .handle()
             .expect("created in init_state")
-    }
-
-    fn proxy_animation(self: Handle<Self>, app: &App) -> Handle<ProxyAnimation> {
-        app.get(self).animation.expect("created in init_state")
     }
 
     fn position_animation(self: Handle<Self>, app: &App) -> AnyAnimation<Offset> {
         app.get(self)
             .position_animation
+            .handle()
             .expect("set in did_change_dependencies")
     }
 
@@ -668,39 +658,42 @@ impl PredictiveBackSharedElementPageTransitionState {
         let widget = self.widget(app);
         let (phase, widget_animation, swipe_edge) = (
             widget.phase,
-            widget.animation,
+            widget.animation.clone(),
             widget.current_back_event.map(|event| event.swipe_edge),
         );
         let state = app.get(self);
         let curved_animation = state
             .curved_animation
+            .clone()
             .expect("set in did_change_dependencies");
         let curved_animation_reversed = state
             .curved_animation_reversed
+            .clone()
             .expect("set in did_change_dependencies");
         let last_bounce_animation_value = state.last_bounce_animation_value;
         let last_drag = state.last_drag;
 
-        let animation = self.proxy_animation(app);
-        let animation_parent = match phase {
-            PredictiveBackPhase::Commit => curved_animation_reversed.as_animation(),
-            _ => widget_animation,
+        let animation = app
+            .get(self)
+            .animation
+            .clone()
+            .expect("created in init_state");
+        let animation_parent: AnimationRef<f64> = match phase {
+            PredictiveBackPhase::Commit => curved_animation_reversed.erase(),
+            _ => widget_animation.clone(),
         };
         animation.set_parent(app, Some(animation_parent));
 
-        let bounce_animation_parent = match phase {
+        let bounce_animation_parent: AnimationRef<f64> = match phase {
             PredictiveBackPhase::Commit => ValueTween::new(0.0, last_bounce_animation_value)
-                .animate(app, curved_animation.as_animation()),
-            _ => app
-                .create(ReverseAnimation::new(widget_animation))
-                .as_animation(),
+                .animate(app, curved_animation.erase()),
+            _ => ReverseAnimation::new(app, widget_animation).into_erased(),
         };
-        let mut made = vec![bounce_animation_parent.id()];
         self.bounce_animation(app)
             .set_parent(app, Some(bounce_animation_parent));
 
-        let commit_animation_parent = match phase {
-            PredictiveBackPhase::Commit => animation.as_animation(),
+        let commit_animation_parent: AnimationRef<f64> = match phase {
+            PredictiveBackPhase::Commit => animation.erase(),
             _ => k_always_dismissed_animation(app),
         };
         self.commit_animation(app)
@@ -731,56 +724,34 @@ impl PredictiveBackSharedElementPageTransitionState {
         };
         let position_animation = animation.drive(app, position_tween);
         app.get_mut(self).position_animation = Some(position_animation);
-        made.push(position_animation.id());
-        self.free_replaced_animations(app, made);
-    }
-
-    /// Keeps `made`, what this `_updateAnimations` made, and frees what the last one made and
-    /// what `_updateCurvedAnimations` replaced since; they linger until the next checkpoint,
-    /// for the transitions built from them to move off them.
-    fn free_replaced_animations(self: Handle<Self>, app: &mut App, made: Vec<HandleId>) {
-        let state = app.get_mut(self);
-        let mut replaced = std::mem::replace(&mut state.made_animations, made);
-        replaced.append(&mut state.replaced_curved_animations);
-        for replaced in replaced {
-            app.destroy_lingering(replaced);
-        }
     }
 
     fn update_curved_animations(self: Handle<Self>, app: &mut App) {
         self.dispose_curved_animations(app);
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         let commit_interval: Rc<dyn waft_animation::Curve> =
             Rc::new(PredictiveBackSharedElementPageTransitionState::k_commit_interval());
         let curved_animation =
-            CurvedAnimation::create(app, animation, Rc::clone(&commit_interval), None);
-        let reversed = app.create(ReverseAnimation::new(animation)).as_animation();
-        let curved_animation_reversed =
-            CurvedAnimation::create(app, reversed, commit_interval, None);
+            CurvedAnimation::new(app, animation.clone(), Rc::clone(&commit_interval), None);
+        let reversed = ReverseAnimation::new(app, animation).into_erased();
+        let curved_animation_reversed = CurvedAnimation::new(app, reversed, commit_interval, None);
         let state = app.get_mut(self);
         state.curved_animation = Some(curved_animation);
         state.curved_animation_reversed = Some(curved_animation_reversed);
     }
 
-    /// Dart's `_curvedAnimation?.dispose()` and `_curvedAnimationReversed?.dispose()`; the
-    /// two, with the `ReverseAnimation` under the second, are freed with what the next
-    /// `_updateAnimations` replaces, as the proxies may still follow them until then.
+    /// Dart's `_curvedAnimation?.dispose()` and `_curvedAnimationReversed?.dispose()`.
     fn dispose_curved_animations(self: Handle<Self>, app: &mut App) {
         let state = app.get(self);
-        let (curved_animation, curved_animation_reversed) =
-            (state.curved_animation, state.curved_animation_reversed);
+        let (curved_animation, curved_animation_reversed) = (
+            state.curved_animation.handle(),
+            state.curved_animation_reversed.handle(),
+        );
         if let Some(curved_animation) = curved_animation {
             curved_animation.dispose(app);
-            app.get_mut(self)
-                .replaced_curved_animations
-                .push(curved_animation.into());
         }
         if let Some(curved_animation_reversed) = curved_animation_reversed {
-            let reversed = AnimationWithParent::parent(curved_animation_reversed, app);
             curved_animation_reversed.dispose(app);
-            app.get_mut(self)
-                .replaced_curved_animations
-                .extend([curved_animation_reversed.into(), reversed.id()]);
         }
     }
 
@@ -848,7 +819,7 @@ impl State for PredictiveBackSharedElementPageTransitionState {
         old_widget: &PredictiveBackSharedElementPageTransition,
     ) {
         let widget = self.widget(app);
-        let (animation, phase) = (widget.animation, widget.phase);
+        let (animation, phase) = (widget.animation.clone(), widget.phase);
         if animation != old_widget.animation {
             self.update_curved_animations(app);
         }
@@ -872,19 +843,11 @@ impl State for PredictiveBackSharedElementPageTransitionState {
             "set in did_change_dependencies"
         );
         self.dispose_curved_animations(app);
-        self.free_replaced_animations(app, Vec::new());
-        for proxy in [
-            self.commit_animation(app),
-            self.bounce_animation(app),
-            self.proxy_animation(app),
-        ] {
-            app.destroy_lingering(proxy);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let widget = self.widget(app);
-        let animation: Rc<dyn Listenable> = Rc::new(widget.animation);
+        let animation: Rc<dyn Listenable> = Rc::new(widget.animation.clone());
         let child = widget.child.clone();
         AnimatedBuilder::new(animation, move |app, context, child| {
             self.build_transition(app, context, child)
@@ -901,8 +864,8 @@ impl State for PredictiveBackSharedElementPageTransitionState {
 ///  * <https://developer.android.com/design/ui/mobile/guides/patterns/predictive-back#full-screen-surfaces>,
 ///    which is the Android spec for this transition.
 pub(crate) struct PredictiveBackFullscreenPageTransition {
-    animation: AnyAnimation<f64>,
-    secondary_animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
+    secondary_animation: AnimationRef<f64>,
     phase: PredictiveBackPhase,
     get_is_current: Rc<dyn Fn(&App) -> bool>,
     child: WidgetRef,
@@ -965,11 +928,11 @@ impl PredictiveBackFullscreenPageTransitionState {
         type S = PredictiveBackFullscreenPageTransitionState;
         TweenSequence::new(vec![
             TweenSequenceItem::new(
-                Arc::new(ValueTween::new(S::K_SCALE_START, S::K_SCALE_START)),
+                Rc::new(ValueTween::new(S::K_SCALE_START, S::K_SCALE_START)),
                 S::K_WEIGHT_PRE_COMMIT,
             ),
             TweenSequenceItem::new(
-                Arc::new(ValueTween::new(S::K_SCALE_COMMIT, S::K_SCALE_START)),
+                Rc::new(ValueTween::new(S::K_SCALE_COMMIT, S::K_SCALE_START)),
                 S::K_WEIGHT_POST_COMMIT,
             ),
         ])
@@ -982,11 +945,11 @@ impl PredictiveBackFullscreenPageTransitionState {
         type S = PredictiveBackFullscreenPageTransitionState;
         TweenSequence::new(vec![
             TweenSequenceItem::new(
-                Arc::new(ValueTween::new(S::K_SCALE_COMMIT, S::K_SCALE_START)),
+                Rc::new(ValueTween::new(S::K_SCALE_COMMIT, S::K_SCALE_START)),
                 S::K_WEIGHT_PRE_COMMIT,
             ),
             TweenSequenceItem::new(
-                Arc::new(ValueTween::new(S::K_SCALE_START, S::K_SCALE_START)),
+                Rc::new(ValueTween::new(S::K_SCALE_START, S::K_SCALE_START)),
                 S::K_WEIGHT_POST_COMMIT,
             ),
         ])
@@ -1000,14 +963,14 @@ impl PredictiveBackFullscreenPageTransitionState {
         type S = PredictiveBackFullscreenPageTransitionState;
         TweenSequence::new(vec![
             TweenSequenceItem::new(
-                Arc::new(ValueTween::new(
+                Rc::new(ValueTween::new(
                     S::K_OPACITY_FULLY_OPENED,
                     S::K_OPACITY_START_TRANSITION,
                 )),
                 S::K_WEIGHT_PRE_COMMIT,
             ),
             TweenSequenceItem::new(
-                Arc::new(ValueTween::new(
+                Rc::new(ValueTween::new(
                     S::K_OPACITY_FULLY_OPENED,
                     S::K_OPACITY_FULLY_OPENED,
                 )),
@@ -1023,7 +986,7 @@ impl PredictiveBackFullscreenPageTransitionState {
     ) -> WidgetRef {
         let widget = self.widget(app);
         let (secondary_animation, get_is_current) = (
-            widget.secondary_animation,
+            widget.secondary_animation.handle(),
             Rc::clone(&widget.get_is_current),
         );
         let is_current = get_is_current(app);
@@ -1064,7 +1027,7 @@ impl PredictiveBackFullscreenPageTransitionState {
         child: Option<&WidgetRef>,
     ) -> WidgetRef {
         let widget = self.widget(app);
-        let (animation, phase) = (widget.animation, widget.phase);
+        let (animation, phase) = (widget.animation.handle(), widget.phase);
         let offset = app
             .get(self)
             .primary_position_tween
@@ -1107,11 +1070,11 @@ impl State for PredictiveBackFullscreenPageTransitionState {
             (screen_width / Self::K_SCREEN_WIDTH_DIVISION_FACTOR) - Self::K_X_SHIFT_ADJUSTMENT;
         let primary_position_tween = TweenSequence::new(vec![
             TweenSequenceItem::new(
-                Arc::new(ValueTween::new(Offset::ZERO, Offset::ZERO)),
+                Rc::new(ValueTween::new(Offset::ZERO, Offset::ZERO)),
                 Self::K_WEIGHT_PRE_COMMIT,
             ),
             TweenSequenceItem::new(
-                Arc::new(ValueTween::new(Offset::new(x_shift, 0.0), Offset::ZERO)),
+                Rc::new(ValueTween::new(Offset::new(x_shift, 0.0), Offset::ZERO)),
                 Self::K_WEIGHT_POST_COMMIT,
             ),
         ]);
@@ -1125,8 +1088,8 @@ impl State for PredictiveBackFullscreenPageTransitionState {
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let widget = self.widget(app);
-        let secondary_animation: Rc<dyn Listenable> = Rc::new(widget.secondary_animation);
-        let animation: Rc<dyn Listenable> = Rc::new(widget.animation);
+        let secondary_animation: Rc<dyn Listenable> = Rc::new(widget.secondary_animation.clone());
+        let animation: Rc<dyn Listenable> = Rc::new(widget.animation.clone());
         let child = widget.child.clone();
         let border_radius =
             MediaQuery::display_corner_radii_of(app, context).unwrap_or_else(|| {
@@ -1167,7 +1130,7 @@ mod tests {
     use waft_foundation::Listener;
     use waft_widgets::{
         AnyElement, ColoredBox, Column, CrossAxisAlignment, Navigator, NavigatorState,
-        PageTransitionsBuilderRef, Route, RouteSettingsRef, SizedBox, SnapshotWidget, StateSetter,
+        PageTransitionsBuilderRef, RouteSettingsRef, SizedBox, SnapshotWidget, StateSetter,
         StatefulBuilder, Text, WidgetBuilder,
     };
 
@@ -1183,9 +1146,12 @@ mod tests {
     use crate::text_button::TextButton;
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
+    use waft_animation::AnimationWithParent;
+    use waft_foundation::HandleId;
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     /// Not a Dart case: Dart's collector frees a disposed shared-element transition's proxies
-    /// and animations; here its `dispose` frees them.
+    /// and animations; here they are freed with the state's references to them.
     #[test]
     fn a_disposed_shared_element_transition_frees_its_animations() {
         with_main_thread_stack(|| {
@@ -1194,12 +1160,12 @@ mod tests {
                 .cell
                 .borrow_mut()
                 .create(waft_animation::AlwaysStoppedAnimation::new(0.5))
-                .as_animation();
+                .into_erased::<AnyAnimation<f64>>();
             tester.pump_widget(
                 PredictiveBackSharedElementPageTransition {
                     is_delegated_transition: false,
-                    animation,
-                    secondary_animation: animation,
+                    animation: animation.clone(),
+                    secondary_animation: animation.clone(),
                     phase: PredictiveBackPhase::Update,
                     start_back_event: None,
                     current_back_event: None,
@@ -1216,17 +1182,21 @@ mod tests {
                 let curved_animation_reversed = app
                     .get(state)
                     .curved_animation_reversed
-                    .expect("set in did_change_dependencies");
-                let mut owned = vec![
+                    .as_ref()
+                    .expect("set in did_change_dependencies")
+                    .handle();
+                vec![
                     state.commit_animation(&app).into(),
                     state.bounce_animation(&app).into(),
-                    state.proxy_animation(&app).into(),
-                    app.get(state).curved_animation.expect("set").into(),
+                    app.get(state)
+                        .curved_animation
+                        .as_ref()
+                        .expect("set")
+                        .handle()
+                        .into(),
                     curved_animation_reversed.into(),
                     AnimationWithParent::parent(curved_animation_reversed, &app).id(),
-                ];
-                owned.extend(app.get(state).made_animations.iter().copied());
-                owned
+                ]
             };
             tester.pump_widget(waft_widgets::SizedBox::new().into_widget());
             tester.cell.checkpoint();
@@ -1238,7 +1208,8 @@ mod tests {
     }
 
     /// Not a Dart case: Dart's collector frees the animations a shared-element transition's
-    /// `_updateCurvedAnimations` and `_updateAnimations` replace; here the state frees them.
+    /// `_updateCurvedAnimations` and `_updateAnimations` replace; here they are freed with their
+    /// last reference.
     #[test]
     fn a_shared_element_transition_given_new_dependencies_leaves_no_new_arena_objects() {
         with_main_thread_stack(|| {
@@ -1247,14 +1218,14 @@ mod tests {
                 .cell
                 .borrow_mut()
                 .create(waft_animation::AlwaysStoppedAnimation::new(0.5))
-                .as_animation();
+                .into_erased::<AnyAnimation<f64>>();
             let transition = move |width: f64| -> WidgetRef {
                 waft_widgets::MediaQuery::new(
                     waft_widgets::MediaQueryData::new().size(Size::new(width, 600.0)),
                     PredictiveBackSharedElementPageTransition {
                         is_delegated_transition: false,
-                        animation,
-                        secondary_animation: animation,
+                        animation: animation.clone(),
+                        secondary_animation: animation.clone(),
                         phase: PredictiveBackPhase::Update,
                         start_back_event: None,
                         current_back_event: None,
@@ -1265,10 +1236,11 @@ mod tests {
             };
             tester.pump_widget(transition(800.0));
             tester.pump_widget(transition(700.0));
-            let before = tester.cell.borrow().debug_object_count();
+            let snapshot = object_snapshot(&tester.cell.borrow());
             tester.pump_widget(transition(800.0));
             tester.pump_widget(transition(700.0));
-            assert_eq!(tester.cell.borrow().debug_object_count(), before);
+            tester.cell.checkpoint();
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         });
     }
 
@@ -1604,12 +1576,13 @@ mod tests {
                                     }),
                                     name => panic!("Invalid route: {name:?}"),
                                 };
-                                Some(Route::as_route(
-                                    MaterialPageRoute::new(app, builder).settings(
+                                Some(
+                                    (MaterialPageRoute::new(app, builder).settings(
                                         app,
                                         RouteSettingsRef::Settings(settings.clone()),
-                                    ),
-                                ))
+                                    ))
+                                    .into_erased(),
+                                )
                             })
                             .into_widget()
                     })
@@ -2126,12 +2099,15 @@ mod tests {
                         } else {
                             "Page 2"
                         };
-                        Some(Route::as_route(MaterialPageRoute::new(
-                            app,
-                            Rc::new(move |_app, _context| {
-                                Material::new().child(Text::new(text)).into_widget()
-                            }),
-                        )))
+                        Some(
+                            (MaterialPageRoute::new(
+                                app,
+                                Rc::new(move |_app, _context| {
+                                    Material::new().child(Text::new(text)).into_widget()
+                                }),
+                            ))
+                            .into_erased(),
+                        )
                     })
                 },
             );

@@ -13,21 +13,21 @@ use waft_embedder::{
     BoxHeightStyle, BoxWidthStyle, Brightness, Clip, Color, Locale, Radius, SmartDashesType,
     SmartQuotesType, TextCapitalization, TextEditingValue, TextInputAction, TextInputType,
 };
-use waft_foundation::{App, Handle, Listenable, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref, ValueChanged};
 use waft_gestures::{DragStartBehavior, GestureTapCallback, PointerDownEvent, PointerUpEvent};
 use waft_painting::{AnyTextStyle, EdgeInsets, TextAlign, TextAlignVertical, TextDirection};
 use waft_services::{
     MaxLengthEnforcement, MouseCursorRef, RestorationBucket, TextInputFormatterRef,
 };
 use waft_widgets::{
-    AnyFormFieldState, AnyTextEditingController, AutovalidateMode, BuildContext,
-    ContentInsertionConfiguration, EditableText, EditableTextContextMenuBuilder, EditableTextState,
-    FocusNode, FormFieldData, FormFieldLeaf, FormFieldState, FormFieldStateData,
-    FormFieldStateLeaf, IntoWidget, KeyRef, RestorableListenable, RestorableProperty,
-    RestorableTextEditingController, RestorationMixin, RestorationMixinData, ScrollController,
-    ScrollPhysicsRef, SpellCheckConfiguration, State, StateData, StatefulWidget, SystemContextMenu,
-    TextEditingControllerLeaf, TextMagnifierConfiguration, TextSelectionControls, ToolbarOptions,
-    UndoHistoryController, UnmanagedRestorationScope, WidgetRef,
+    AnyFormFieldState, AutovalidateMode, BuildContext, ContentInsertionConfiguration, EditableText,
+    EditableTextContextMenuBuilder, EditableTextState, FocusNodeRef, FormFieldData, FormFieldLeaf,
+    FormFieldState, FormFieldStateData, FormFieldStateLeaf, IntoWidget, KeyRef,
+    RestorableListenable, RestorableProperty, RestorableTextEditingController, RestorationMixin,
+    RestorationMixinData, ScrollControllerRef, ScrollPhysicsRef, SpellCheckConfiguration, State,
+    StateData, StatefulWidget, SystemContextMenu, TextEditingControllerRef,
+    TextMagnifierConfiguration, TextSelectionControls, ToolbarOptions, UndoHistoryController,
+    UnmanagedRestorationScope, WidgetRef,
 };
 
 use crate::adaptive_text_selection_toolbar::AdaptiveTextSelectionToolbar;
@@ -63,7 +63,7 @@ pub struct TextFormField {
     ///
     /// If null, this widget will create its own `TextEditingController` and initialize its
     /// `TextEditingController::text` with [`initial_value`](FormFieldData::initial_value).
-    pub controller: Option<AnyTextEditingController>,
+    pub controller: Option<TextEditingControllerRef>,
     /// Called when the user initiates a change to the TextField's value: when they have
     /// inserted or deleted text or reset the form.
     pub on_changed: Option<ValueChanged<String>>,
@@ -109,7 +109,7 @@ impl TextFormField {
     }
 
     /// Dart `TextFormField(controller:)`.
-    pub fn controller(mut self, controller: AnyTextEditingController) -> TextFormField {
+    pub fn controller(mut self, controller: TextEditingControllerRef) -> TextFormField {
         self.controller = Some(controller);
         self.form_field.initial_value = self.form_field_initial_value();
         self
@@ -123,7 +123,7 @@ impl TextFormField {
     }
 
     /// Dart `TextFormField(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: Handle<FocusNode>) -> TextFormField {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> TextFormField {
         self.text_field = self.text_field.focus_node(focus_node);
         self
     }
@@ -479,10 +479,7 @@ impl TextFormField {
     }
 
     /// Dart `TextFormField(scrollController:)`.
-    pub fn scroll_controller(
-        mut self,
-        scroll_controller: Handle<ScrollController>,
-    ) -> TextFormField {
+    pub fn scroll_controller(mut self, scroll_controller: ScrollControllerRef) -> TextFormField {
         self.text_field = self.text_field.scroll_controller(scroll_controller);
         self
     }
@@ -552,10 +549,7 @@ impl TextFormField {
     }
 
     /// Dart `TextFormField(undoController:)`.
-    pub fn undo_controller(
-        mut self,
-        undo_controller: Handle<UndoHistoryController>,
-    ) -> TextFormField {
+    pub fn undo_controller(mut self, undo_controller: Ref<UndoHistoryController>) -> TextFormField {
         self.text_field = self.text_field.undo_controller(undo_controller);
         self
     }
@@ -616,7 +610,7 @@ impl TextFormField {
     /// Dart `TextFormField(statesController:)`.
     pub fn states_controller(
         mut self,
-        states_controller: Handle<MaterialStatesController>,
+        states_controller: Ref<MaterialStatesController>,
     ) -> TextFormField {
         self.text_field = self.text_field.states_controller(states_controller);
         self
@@ -751,7 +745,7 @@ impl TextFormField {
             );
 
         UnmanagedRestorationScope::new(child)
-            .bucket(state.bucket(app))
+            .bucket(state.bucket(app).and_then(|bucket| bucket.upgrade(app)))
             .into_widget()
     }
 
@@ -834,7 +828,7 @@ pub struct TextFormFieldState {
     state: StateData<TextFormField>,
     restoration: RestorationMixinData,
     form_field_state: FormFieldStateData<String>,
-    controller: Option<Handle<RestorableTextEditingController>>,
+    controller: Option<Ref<RestorableTextEditingController>>,
     initial_value: Option<String>,
     /// Dart's `widget.initialValue` for a widget with a controller: the controller's text when
     /// the widget arrived, which Dart's constructor reads.
@@ -842,21 +836,25 @@ pub struct TextFormFieldState {
 }
 
 impl TextFormFieldState {
-    fn effective_controller(self: Handle<Self>, app: &App) -> AnyTextEditingController {
-        if let Some(controller) = self.widget(app).controller {
+    fn effective_controller(self: Handle<Self>, app: &App) -> TextEditingControllerRef {
+        if let Some(controller) = self.widget(app).controller.clone() {
             return controller;
         }
         let restorable = app
             .get(self)
             .controller
+            .handle()
             .expect("a local controller exists when the widget does not supply one");
-        RestorableListenable::value(restorable, app).as_controller()
+        RestorableListenable::value(restorable, app)
+            .keep(app)
+            .into_erased()
     }
 
     fn register_controller(self: Handle<Self>, app: &mut App) {
         let controller = app
             .get(self)
             .controller
+            .handle()
             .expect("register_controller needs a local controller");
         self.register_for_restoration(app, controller.as_property(), "controller");
     }
@@ -867,7 +865,7 @@ impl TextFormFieldState {
             None => RestorableTextEditingController::new(app),
             Some(value) => RestorableTextEditingController::from_value(app, value),
         };
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         if !self.restore_pending(app) {
             self.register_controller(app);
         }
@@ -879,6 +877,7 @@ impl TextFormFieldState {
         let text = self
             .widget(app)
             .controller
+            .as_ref()
             .map(|controller| controller.text_value(app).to_owned());
         app.get_mut(self).widget_initial_value = text;
     }
@@ -958,7 +957,7 @@ impl State for TextFormFieldState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         FormFieldState::init_state(self, app);
-        match self.widget(app).controller {
+        match self.widget(app).controller.clone() {
             None => {
                 let value = self
                     .widget(app)
@@ -993,33 +992,34 @@ impl State for TextFormFieldState {
         FormFieldState::did_update_widget(self, app, old_widget);
         self.read_widget_initial_value(app);
         if self.widget(app).controller != old_widget.controller {
-            if let Some(old_controller) = old_widget.controller {
+            if let Some(old_controller) = old_widget.controller.clone() {
                 old_controller.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_controller_changed),
                 );
             }
-            if let Some(controller) = self.widget(app).controller {
+            if let Some(controller) = self.widget(app).controller.clone() {
                 controller.add_listener(
                     app,
                     Listener::handle_method(self, Self::handle_controller_changed),
                 );
             }
 
-            if let Some(old_controller) = old_widget.controller
+            if let Some(old_controller) = old_widget.controller.clone()
                 && self.widget(app).controller.is_none()
             {
                 let value = old_controller.value(app).clone();
                 self.create_local_controller(app, Some(value));
             }
 
-            if let Some(controller) = self.widget(app).controller {
+            if let Some(controller) = self.widget(app).controller.clone() {
                 let text = controller.text_value(app).to_owned();
                 self.set_value(app, Some(text));
                 if old_widget.controller.is_none() {
                     let local = app
                         .get(self)
                         .controller
+                        .handle()
                         .expect("a local controller while the old widget had none");
                     self.unregister_from_restoration(app, local.as_property());
                     RestorableProperty::dispose(local, app);
@@ -1038,13 +1038,13 @@ impl State for TextFormFieldState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = self.widget(app).controller {
+        if let Some(controller) = self.widget(app).controller.clone() {
             controller.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::handle_controller_changed),
             );
         }
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             RestorableProperty::dispose(controller, app);
         }
         FormFieldState::dispose(self, app);
@@ -1072,6 +1072,7 @@ mod tests {
     use crate::scaffold::Scaffold;
     use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
     use crate::theme_data::ThemeData;
+    use waft_widgets::TextEditingControllerLeaf;
 
     fn tester() -> WidgetTester {
         let tester = WidgetTester::on(TargetPlatform::Android);
@@ -1346,10 +1347,7 @@ mod tests {
                 controller.set_text(&mut app, "initialValue");
                 controller
             };
-            let root = centered(
-                &tester,
-                TextFormField::new().controller(controller.as_controller()),
-            );
+            let root = centered(&tester, TextFormField::new().controller(controller.erase()));
             tester.pump_widget(root);
 
             enter_text(&mut tester, "changedValue");
@@ -1553,7 +1551,7 @@ mod tests {
                 let mut app = tester.cell.borrow_mut();
                 let controller = TextEditingController::new(&mut app);
                 controller.set_text(&mut app, "Initial Value");
-                controller
+                controller.clone()
             };
             let set_state: Rc<RefCell<Option<StateSetter>>> = Rc::new(RefCell::new(None));
             let setter_slot = Rc::clone(&set_state);
@@ -1561,11 +1559,14 @@ mod tests {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 Scaffold::new()
-                    .body(StatefulBuilder::new(move |_app, _context, setter| {
-                        *setter_slot.borrow_mut() = Some(setter);
-                        Form::new(TextFormField::new().controller(controller.as_controller()))
-                            .key(key_for_form.clone().into())
-                            .into_widget()
+                    .body(StatefulBuilder::new({
+                        let controller = controller.clone();
+                        move |_app, _context, setter| {
+                            *setter_slot.borrow_mut() = Some(setter);
+                            Form::new(TextFormField::new().controller(controller.erase()))
+                                .key(key_for_form.clone().into())
+                                .into_widget()
+                        }
                     }))
                     .into_widget(),
             );

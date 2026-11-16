@@ -12,7 +12,7 @@ use waft_embedder::{
     Color, CompositionLayer, HardwareBufferUsage, Image, PlatformRef, TextDirection,
 };
 use waft_embedder_android::AndroidPlatform;
-use waft_foundation::{App, Handle, Listener, Timer, ValueListenable, ValueNotifier};
+use waft_foundation::{App, Handle, Listener, Ref, Timer, ValueListenable, ValueNotifier};
 use waft_painting::{BoxDecoration, EdgeInsetsGeometry, ImageInfo, TextStyle};
 use waft_scheduler::{PersistentFrameCallback, SchedulerBinding};
 use waft_widgets::{
@@ -48,7 +48,7 @@ pub(crate) fn run(app: &mut App) {
     let layer = compositor.make_layer(true);
     let image = image_drawn_once(&platform, &mut painter);
     let place = app.create(ValueNotifier::new(0usize));
-    move_every_second(app, place);
+    move_every_second(app, place.handle());
     let counts = Arc::new(Counts::default());
     start_producer_once_sized(app, Arc::clone(&layer), painter, Arc::clone(&counts));
     run_app(app, home(layer, place, image, counts));
@@ -145,7 +145,7 @@ fn start_producer_once_sized(
 
 fn home(
     layer: Arc<dyn CompositionLayer>,
-    place: Handle<ValueNotifier<usize>>,
+    place: Ref<ValueNotifier<usize>>,
     image: Option<Image>,
     counts: Arc<Counts>,
 ) -> WidgetRef {

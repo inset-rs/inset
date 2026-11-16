@@ -15,8 +15,8 @@ use waft_material::{
     Colors, MaterialApp, MaterialPageRoute, ThemeData, ThemeMode, install_material_icon_font,
 };
 use waft_widgets::{
-    AnyRoute, BuildContext, GlobalKey, IntoWidget, Navigator, NavigatorState, Route, State,
-    StateData, StatefulWidget, WidgetBuilder, WidgetRef, run_app_with,
+    BuildContext, GlobalKey, IntoWidget, Navigator, NavigatorState, RouteRef, State, StateData,
+    StatefulWidget, WidgetBuilder, WidgetRef, run_app_with,
 };
 
 use crate::catalog::Entry;
@@ -144,17 +144,17 @@ pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
 }
 
 /// The route one catalog entry's page is pushed as.
-pub fn entry_route(app: &mut App, entry: Entry) -> AnyRoute {
+pub fn entry_route(app: &mut App, entry: Entry) -> RouteRef {
     let builder: WidgetBuilder =
         Rc::new(move |app: &mut App, context: BuildContext| entry.body(app, context));
-    MaterialPageRoute::new(app, builder).as_route()
+    MaterialPageRoute::new(app, builder).into_erased()
 }
 
 /// The route one of an entry's own sub-pages is pushed as.
-pub fn sub_route(app: &mut App, entry: Entry, index: usize) -> AnyRoute {
+pub fn sub_route(app: &mut App, entry: Entry, index: usize) -> RouteRef {
     let builder: WidgetBuilder =
         Rc::new(move |app: &mut App, context: BuildContext| entry.sub_body(index, app, context));
-    MaterialPageRoute::new(app, builder).as_route()
+    MaterialPageRoute::new(app, builder).into_erased()
 }
 
 /// Opens an entry's page, from a tile on the index or in its drawer.

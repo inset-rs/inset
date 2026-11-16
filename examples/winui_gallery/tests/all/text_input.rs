@@ -3,7 +3,6 @@ use crate::common::GalleryFixtureExt;
 
 use crate::common::Fixture;
 use waft_embedder::{Offset, PointerChange, TextAffinity, TextRange, TextSelection};
-use waft_foundation::Handle;
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
     PhysicalKeyboardKey as Physical, TextEditingValue, TextInput,
@@ -20,20 +19,20 @@ fn controller(f: &Fixture, placeholder: &str) -> AnyTextEditingController {
         if let Some(text) = downcast_widget::<TextBox>(widget.as_ref())
             && text.placeholder_text == placeholder
         {
-            return text.controller;
+            return text.controller.handle();
         }
 
         if let Some(password) = downcast_widget::<PasswordBox>(widget.as_ref())
             && password.placeholder_text == placeholder
         {
-            return password.controller;
+            return password.controller.handle();
         }
     }
     panic!("missing control {placeholder}")
 }
 
 /// Finds the mounted editor and a point inside its native render object.
-fn editor(f: &Fixture, controller: AnyTextEditingController) -> (Handle<FocusNode>, Offset, bool) {
+fn editor(f: &Fixture, controller: AnyTextEditingController) -> (AnyFocusNode, Offset, bool) {
     let elements = f.elements();
     let app = f.cell.borrow();
     for element in elements {
@@ -42,7 +41,7 @@ fn editor(f: &Fixture, controller: AnyTextEditingController) -> (Handle<FocusNod
         {
             let render = element.find_render_object(&app).unwrap().as_box().unwrap();
             return (
-                editable.focus_node,
+                editable.focus_node.handle(),
                 render.local_to_global(&app, Offset::new(8.0, 8.0), None),
                 editable.obscure_text,
             );
@@ -341,7 +340,7 @@ fn a_box_showing_its_delete_button_given_spare_height_keeps_its_own() {
     let r = ThemeResources::new(Theme::Light, AccentPalette::default());
     let size = crate::common::size_under_center([300, 300], |app| {
         let controller = TextEditingController::new(app).text(app, "Text");
-        TextBox::new(controller.as_controller())
+        TextBox::new(controller.erase())
             .autofocus(true)
             .into_widget()
     });

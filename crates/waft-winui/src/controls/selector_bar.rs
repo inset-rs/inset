@@ -9,7 +9,7 @@ use crate::*;
 use std::{fmt, rc::Rc, time::Duration};
 use waft_animation::{Cubic, Curve};
 use waft_embedder::{Color, FontWeight, Radius};
-use waft_foundation::{App, Handle, ListenableObject, Listener, ValueKey};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, Ref, ValueKey};
 use waft_painting::{
     Alignment, AlignmentGeometry, Axis, BorderRadius, BoxDecoration, EdgeInsetsGeometry,
 };
@@ -143,7 +143,7 @@ pub struct SelectorBarState {
     state: StateData<SelectorBar>,
 
     /// `PART_ItemsView`'s selection, which follows `SelectedItem` both ways.
-    selection: Option<Handle<ItemsViewSelection>>,
+    selection: Option<Ref<ItemsViewSelection>>,
     listener: Option<Listener>,
 
     /// The selection asked for since the application last built the bar, so that a click and the
@@ -153,7 +153,10 @@ pub struct SelectorBarState {
 
 impl SelectorBarState {
     fn items_view_selection(self: Handle<Self>, app: &App) -> Handle<ItemsViewSelection> {
-        app.get(self).selection.expect("made in `init_state`")
+        app.get(self)
+            .selection
+            .handle()
+            .expect("made in `init_state`")
     }
 
     /// The selection as the bar last saw or asked for it.
@@ -223,7 +226,7 @@ impl State for SelectorBarState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let selection = ItemsViewSelection::new(app);
         let listener = Listener::new(move |app| self.update_selected_item_from_items_view(app));
-        app.get_mut(self).selection = Some(selection);
+        app.get_mut(self).selection = Some(selection.clone());
         self.update_items_view_selection_from_selected_item(app);
         selection.add_listener(app, listener.clone());
         app.get_mut(self).listener = Some(listener);
@@ -240,7 +243,6 @@ impl State for SelectorBarState {
             selection.remove_listener(app, &listener);
         }
         selection.dispose(app);
-        app.destroy(selection);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -257,7 +259,12 @@ impl State for SelectorBarState {
             spacing: 0.0,
         })
         .selection_mode(ItemsViewSelectionMode::Single)
-        .selection(self.items_view_selection(app))
+        .selection(
+            app.get(self)
+                .selection
+                .clone()
+                .expect("made in `init_state`"),
+        )
         .padding(widget.padding.unwrap_or(resources.selector_bar_padding));
         let bar = Focus::new(items_view)
             .can_request_focus(false)
@@ -311,7 +318,7 @@ impl StatefulWidget for SelectorBarItemVisual {
 struct SelectorBarItemVisualState {
     state: StateData<SelectorBarItemVisual>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
 
     /// How long the item has been selected, up to the storyboard's end.
     selected_for: Duration,
@@ -337,7 +344,7 @@ impl SelectorBarItemVisualState {
     /// Starts the selected states' storyboard when the item is selected, and on leaving them
     /// returns the pill to its base values at once, as stopping a storyboard does.
     fn sync_storyboard(self: Handle<Self>, app: &mut App) {
-        let ticker = app.get(self).ticker.expect("made in `init_state`");
+        let ticker = app.get(self).ticker.clone().expect("made in `init_state`");
         if self.widget(app).states.is_selected {
             if !ticker.is_active(app) && app.get(self).selected_for.is_zero() {
                 ticker.start(app);
@@ -354,7 +361,7 @@ impl SelectorBarItemVisualState {
         let duration =
             ThemeResources::of(app, self.context(app)).combo_box_item_scale_animation_duration;
         if elapsed >= duration {
-            app.get(self).ticker.unwrap().stop(app, false);
+            app.get(self).ticker.handle().unwrap().stop(app, false);
         }
     }
 
@@ -381,7 +388,7 @@ impl State for SelectorBarItemVisualState {
             app,
             FrameCallback::new(move |app, elapsed| self.tick(app, elapsed)),
         );
-        app.get_mut(self).ticker = Some(ticker);
+        app.get_mut(self).ticker = Some(ticker.clone());
         self.sync_storyboard(app);
     }
 
@@ -394,7 +401,7 @@ impl State for SelectorBarItemVisualState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).ticker.unwrap().dispose(app);
+        app.get(self).ticker.handle().unwrap().dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
     }
 

@@ -1090,8 +1090,9 @@ pub trait RenderObject: 'static + Sized {
     /// Implementations of this method must end with a call to the inherited method,
     /// `RenderObjectBase::dispose(self, app)`, as in Dart's `super.dispose()`.
     ///
-    /// The object is no longer usable after calling dispose. The arena has no collector, so
-    /// [`AnyRenderObject::dispose`] destroys the slot after this hook returns.
+    /// The object is no longer usable after calling dispose. [`AnyRenderObject::dispose`] gives
+    /// up the tree's hold on it after this hook returns, and the arena frees it at the next
+    /// checkpoint unless a `Ref` still keeps it.
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
         RenderObjectBase::dispose(self, app);
     }
@@ -1210,8 +1211,10 @@ pub(crate) fn resolve<T: 'static>(id: HandleId) -> RenderHandle<T> {
     RenderHandle(Handle::from_id(id))
 }
 
+/// A render object is a tree node: the tree code keeps it until [`AnyRenderObject::dispose`].
+#[track_caller]
 pub(crate) fn create<T: 'static>(app: &mut App, object: T) -> RenderHandle<T> {
-    RenderHandle(app.create(object))
+    RenderHandle(app.create(object).into_tree_node(app))
 }
 
 /// The dispatch signature of [`RenderObject::show_on_screen`].
@@ -1840,16 +1843,16 @@ impl AnyRenderObject {
         app.handle::<T>(self.id).map(RenderHandle::from_handle)
     }
 
-    /// Release any resources held by this render object and free its arena slot. Dart's
-    /// `dispose` nulls the layer handle and leaves the object to the collector; the arena has no
-    /// collector, so the slot is destroyed here after the virtual [`RenderObject::dispose`].
+    /// Release any resources held by this render object, and the tree's part of its arena entry,
+    /// after the virtual [`RenderObject::dispose`]. The entry is freed at the next checkpoint,
+    /// unless something else keeps it (a cached hit-test path, the mouse tracker).
     ///
     /// The object must be detached. Its parent may still hold a handle to it: the widget layer
     /// unmounts bottom-up and disposes the parent next, as Dart does.
     pub fn dispose(self, app: &mut App) {
         debug_assert!(!self.attached(app));
         (self.vtable.dispose)(app, self.id);
-        app.destroy(self.id);
+        app.release_tree_node(self.id);
     }
 
     /// Whether this render object repaints separately from its parent.
@@ -1966,7 +1969,7 @@ impl AnyRenderObject {
     }
 
     /// See [`RenderObject::mouse_tracker_annotation`]. Also `None` once the object has left
-    /// the arena: Dart's tracker keeps a stale annotation object alive, the arena does not.
+    /// the arena, which the tracker's `Ref`s on what it remembers keep from happening.
     pub fn mouse_tracker_annotation(self, app: &App) -> Option<MouseTrackerAnnotation> {
         if !app.contains(self.id) {
             return None;
@@ -2640,7 +2643,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None, None);
         let node = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
-        node.as_object().attach(&mut app, owner);
+        node.as_object().attach(&mut app, owner.handle());
         assert!(owner.nodes_needing_layout(&app).is_empty());
 
         node.layout(&mut app, tight(), false);
@@ -2677,7 +2680,7 @@ mod tests {
             parent(Some(child.as_box()), Rc::new(Cell::new(0)), true, true),
         );
         parent.adopt_child(&mut app, child.as_object());
-        parent.as_object().attach(&mut app, owner);
+        parent.as_object().attach(&mut app, owner.handle());
         parent.layout(&mut app, loose(), false);
         assert!(!parent.debug_needs_layout(&app));
         assert!(!child.debug_needs_layout(&app));
@@ -2709,10 +2712,10 @@ mod tests {
         );
         assert!(!child.attached(&app));
 
-        parent.as_object().attach(&mut app, owner);
+        parent.as_object().attach(&mut app, owner.handle());
         assert!(parent.attached(&app));
         assert!(child.attached(&app));
-        assert_eq!(child.owner(&app), Some(owner));
+        assert_eq!(child.owner(&app), Some(owner.handle()));
 
         parent.drop_child(&mut app, child.as_object());
         assert!(child.parent(&app).is_none());
@@ -2815,7 +2818,7 @@ mod tests {
             },
         );
         parent.adopt_child(&mut app, child.as_object());
-        parent.as_object().attach(&mut app, owner);
+        parent.as_object().attach(&mut app, owner.handle());
         parent.layout(&mut app, tight(), false);
         child.layout(&mut app, tight(), false);
         parent.as_object().mark_needs_layout(&mut app);

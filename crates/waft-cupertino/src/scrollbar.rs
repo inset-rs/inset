@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use waft_animation::{Animation, AnimationBehavior, AnimationController};
 use waft_embedder::{Color, Offset, Radius, TargetPlatform};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_gestures::{TapDownDetails, Velocity};
 use waft_painting::EdgeInsetsGeometry;
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
-    AnyScrollController, BuildContext, Directionality, IntoWidget, KeyRef, MediaQuery,
-    RawScrollbarData, RawScrollbarLeaf, RawScrollbarState, RawScrollbarStateData,
-    RawScrollbarStateLeaf, ScrollConfiguration, ScrollNotificationPredicate, ScrollbarOrientation,
+    BuildContext, Directionality, IntoWidget, KeyRef, MediaQuery, RawScrollbarData,
+    RawScrollbarLeaf, RawScrollbarState, RawScrollbarStateData, RawScrollbarStateLeaf,
+    ScrollConfiguration, ScrollControllerRef, ScrollNotificationPredicate, ScrollbarOrientation,
     State, StateData, StatefulWidget, TickerProviderStateMixin, TickerProviderStateMixinData,
     WidgetRef, default_scroll_notification_predicate,
 };
@@ -115,7 +115,7 @@ impl CupertinoScrollbar {
     }
 
     /// Dart `CupertinoScrollbar(controller:)`.
-    pub fn controller(mut self, controller: AnyScrollController) -> CupertinoScrollbar {
+    pub fn controller(mut self, controller: ScrollControllerRef) -> CupertinoScrollbar {
         self.raw_scrollbar.controller = Some(controller);
         self
     }
@@ -218,7 +218,7 @@ pub struct CupertinoScrollbarState {
     state: StateData<CupertinoScrollbar>,
     ticker_provider: TickerProviderStateMixinData,
     raw_scrollbar_state: RawScrollbarStateData,
-    thickness_animation_controller: Option<Handle<AnimationController>>,
+    thickness_animation_controller: Option<Ref<AnimationController>>,
 }
 
 impl CupertinoScrollbarState {
@@ -228,6 +228,7 @@ impl CupertinoScrollbarState {
     ) -> Handle<AnimationController> {
         app.get(self)
             .thickness_animation_controller
+            .handle()
             .expect("initState creates the controller")
     }
 
@@ -259,7 +260,7 @@ impl State for CupertinoScrollbarState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         RawScrollbarState::init_state(self, app);
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(K_SCROLLBAR_RESIZE_DURATION),
@@ -269,7 +270,7 @@ impl State for CupertinoScrollbarState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).thickness_animation_controller = Some(controller);
+        app.get_mut(self).thickness_animation_controller = Some(controller.clone());
         controller.add_listener(
             app,
             Listener::new(move |app: &mut App| {
@@ -289,7 +290,6 @@ impl State for CupertinoScrollbarState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let thickness_animation_controller = self.thickness_animation_controller(app);
         thickness_animation_controller.dispose(app);
-        app.destroy_lingering(thickness_animation_controller);
         RawScrollbarState::dispose(self, app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -368,7 +368,7 @@ impl RawScrollbarStateLeaf for CupertinoScrollbarState {
 }
 
 impl TickerProviderObject for CupertinoScrollbarState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -397,8 +397,7 @@ mod tests {
 
     use waft_embedder::{Size, TextDirection};
     use waft_widgets::{
-        Directionality, GlobalKey, ListView, MediaQueryData, ScrollController,
-        ScrollControllerLeaf, SizedBox,
+        Directionality, GlobalKey, ListView, MediaQueryData, ScrollController, SizedBox,
     };
 
     use super::*;
@@ -413,11 +412,11 @@ mod tests {
         let key = GlobalKey::new();
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
-            .controller(controller.as_controller())
+            .controller(controller.clone().into_erased())
             .children((0..40).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
         let scrollbar = CupertinoScrollbar::new(list)
             .key(key.clone().into())
-            .controller(controller.as_controller());
+            .controller(controller.clone().into_erased());
         let tree: WidgetRef = MediaQuery::new(
             MediaQueryData::new().size(Size::new(400.0, 300.0)),
             scrollbar,
@@ -467,11 +466,11 @@ mod tests {
         let key = GlobalKey::new();
         let controller = ScrollController::default(&mut cell.borrow_mut());
         let list = ListView::new()
-            .controller(controller.as_controller())
+            .controller(controller.clone().into_erased())
             .children((0..40).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
         let scrollbar = CupertinoScrollbar::new(list)
             .key(key.clone().into())
-            .controller(controller.as_controller());
+            .controller(controller.clone().into_erased());
         build(
             &cell,
             Directionality::new(TextDirection::Ltr, scrollbar).into_widget(),

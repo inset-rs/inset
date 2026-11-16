@@ -9,7 +9,7 @@
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 
@@ -30,6 +30,8 @@ pub struct DropListener {
     pub on_change: Option<DragChangeCallback>,
     /// Called with the dropped items.
     pub on_dropped: Option<DroppedCallback>,
+    /// What the binding observes, kept to remove it. It keeps this object, as Dart's binding
+    /// keeps its observer, until `dispose` removes it.
     observer: Option<WidgetsBindingObserverRef>,
 }
 
@@ -43,7 +45,7 @@ impl Debug for DropListener {
 
 impl DropListener {
     /// A listener registered with the current [`WidgetsBinding`].
-    pub fn new(app: &mut App) -> Handle<DropListener> {
+    pub fn new(app: &mut App) -> Ref<DropListener> {
         let binding = WidgetsBinding::instance(app);
         let this = app.create(DropListener {
             binding,
@@ -51,27 +53,19 @@ impl DropListener {
             on_dropped: None,
             observer: None,
         });
-        let observer: WidgetsBindingObserverRef = Rc::new(this);
-        app.get_mut(this).observer = Some(Rc::clone(&observer));
+        let observer: WidgetsBindingObserverRef = Rc::new(this.clone());
+        app.get_mut(&this).observer = Some(Rc::clone(&observer));
         binding.add_observer(app, observer);
         this
     }
 
-    pub fn on_change(
-        self: Handle<Self>,
-        app: &mut App,
-        on_change: DragChangeCallback,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_change = Some(on_change);
+    pub fn on_change(self: Ref<Self>, app: &mut App, on_change: DragChangeCallback) -> Ref<Self> {
+        app.get_mut(&self).on_change = Some(on_change);
         self
     }
 
-    pub fn on_dropped(
-        self: Handle<Self>,
-        app: &mut App,
-        on_dropped: DroppedCallback,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_dropped = Some(on_dropped);
+    pub fn on_dropped(self: Ref<Self>, app: &mut App, on_dropped: DroppedCallback) -> Ref<Self> {
+        app.get_mut(&self).on_dropped = Some(on_dropped);
         self
     }
 

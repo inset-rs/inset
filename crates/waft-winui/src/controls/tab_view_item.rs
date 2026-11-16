@@ -204,10 +204,10 @@ pub(crate) struct TabViewItemHeader {
     pub separator_visible: bool,
 
     /// Header focus node retained by the owner strip.
-    pub focus_node: AnyFocusNode,
+    pub focus_node: FocusNodeRef,
 
     /// Close-button focus node retained by the owner strip.
-    pub close_focus_node: AnyFocusNode,
+    pub close_focus_node: FocusNodeRef,
 
     /// Requests selecting this item.
     pub select: Listener,
@@ -235,7 +235,7 @@ impl StatelessWidget for TabViewItemHeader {
         })
         .is_enabled(self.item.is_enabled)
         .is_tab_stop(self.selected)
-        .focus_node(self.focus_node);
+        .focus_node(self.focus_node.clone());
         let enter = self.hover_changed.clone();
         let leave = self.hover_changed.clone();
         let close = self.close.clone();
@@ -433,7 +433,7 @@ impl TabViewItemHeader {
                 )
                 .is_enabled(self.item.is_enabled)
                 .is_tab_stop(false)
-                .focus_node(self.close_focus_node)
+                .focus_node(self.close_focus_node.clone())
                 .template(move |_, _, states, content| {
                     close_button_template(
                         &r2,

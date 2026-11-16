@@ -11,25 +11,25 @@ use std::time::Duration;
 
 use waft_animation::{
     Animatable, AnimationBehavior, AnimationController, AnimationLocalListenersMixin,
-    AnimationLocalStatusListenersMixin, AnimationStatus, AnimationStatusListener, AnyAnimation,
+    AnimationLocalStatusListenersMixin, AnimationRef, AnimationStatus, AnimationStatusListener,
     ConstantTween, CurveTween, Curves, Tween, TweenSequence, TweenSequenceItem,
 };
 use waft_embedder::{
     Canvas, ClipOp, Color, FragmentProgram, FragmentShader, Matrix4, Offset, Paint, Shader,
     TextDirection, UniformFloatSlot, UniformVec2Slot, UniformVec4Slot,
 };
-use waft_foundation::{App, Handle, HandleId, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{BorderRadius, ShapeBorder, ShapeBorderRef, get_as_translation};
 use waft_rendering::AnyRenderBox;
 
 use crate::ink_well::{
-    AnyInteractiveInkFeature, InteractiveInkFeatureData, InteractiveInkFeatureFactory,
-    InteractiveInkFeatureFactoryRef, InteractiveInkFeatureLeaf, InteractiveInkFeatureLeafData,
-    InteractiveInkFeatureObject, clip_rrect, rrect_from_rect_and_corners,
+    InteractiveInkFeatureData, InteractiveInkFeatureFactory, InteractiveInkFeatureFactoryRef,
+    InteractiveInkFeatureLeaf, InteractiveInkFeatureLeafData, InteractiveInkFeatureRef, clip_rrect,
+    rrect_from_rect_and_corners,
 };
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, RectCallback,
+    RectCallback,
 };
 
 /// Begin a Material 3 ink sparkle ripple, centered at the tap or click position
@@ -62,16 +62,16 @@ pub struct InkSparkle {
     ink_feature: InkFeatureData,
     interactive_ink_feature: InteractiveInkFeatureData,
 
-    animation_controller: Option<Handle<AnimationController>>,
+    animation_controller: Option<Ref<AnimationController>>,
 
     // The Android 12 version has these values calculated in the GLSL. They are
     // constant for every pixel in the animation, so the Flutter implementation
     // computes these animation values in software in order to simplify the shader
     // implementation and provide better performance on most devices.
-    center: Option<AnyAnimation<Offset>>,
-    radius_scale: Option<AnyAnimation<f64>>,
-    alpha: Option<AnyAnimation<f64>>,
-    sparkle_alpha: Option<AnyAnimation<f64>>,
+    center: Option<AnimationRef<Offset>>,
+    radius_scale: Option<AnimationRef<f64>>,
+    alpha: Option<AnimationRef<f64>>,
+    sparkle_alpha: Option<AnimationRef<f64>>,
 
     turbulence_seed: f64,
 
@@ -83,9 +83,6 @@ pub struct InkSparkle {
 
     fragment_shader: Option<FragmentShader>,
     uniforms: Option<InkSparkleUniforms>,
-
-    /// The tweens and driven animations this sparkle made, which its dispose frees.
-    owned: Vec<HandleId>,
 }
 
 impl InkSparkle {
@@ -155,7 +152,7 @@ impl InkSparkle {
         radius: Option<f64>,
         on_removed: Option<Listener>,
         turbulence_seed: Option<f64>,
-    ) -> Handle<InkSparkle> {
+    ) -> Ref<InkSparkle> {
         debug_assert!(contained_ink_well || rect_callback.is_none());
         let target_radius = radius.unwrap_or_else(|| {
             get_target_radius(
@@ -183,15 +180,15 @@ impl InkSparkle {
             text_direction,
             fragment_shader: None,
             uniforms: None,
-            owned: Vec::new(),
         });
         // InkSparkle will not be painted until the compilation completes.
         InkSparkleFactory::initialize_shader();
-        controller.add_ink_feature(app, this.as_ink_feature());
+        controller.add_ink_feature(app, this.erase());
+        let handle = this.handle();
 
         // Immediately begin animating the ink.
         let vsync = controller.vsync(app);
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             app,
             None,
             Some(Self::ANIMATION_DURATION),
@@ -205,20 +202,19 @@ impl InkSparkle {
         animation_controller.add_status_listener(
             app,
             AnimationStatusListener::new(move |status, app| {
-                this.handle_status_changed(app, status)
+                handle.handle_status_changed(app, status)
             }),
         );
         animation_controller.forward(app, None);
-        let mut owned = Vec::new();
+        let animation: AnimationRef<f64> = animation_controller.erase();
 
         let fast_out_slow_in = CurveTween::new(app, Curves::fast_out_slow_in());
         let one = ConstantTween::new(app, 1.0);
-        owned.extend([fast_out_slow_in.id(), one.id()]);
         let radius_scale = TweenSequence::new(vec![
-            TweenSequenceItem::new(Arc::new(fast_out_slow_in), 75.0),
-            TweenSequenceItem::new(Arc::new(one), 25.0),
+            TweenSequenceItem::new(Rc::new(fast_out_slow_in.clone()), 75.0),
+            TweenSequenceItem::new(Rc::new(one.clone()), 25.0),
         ])
-        .animate(app, animation_controller.view());
+        .animate(app, animation.clone());
 
         // Functionally equivalent to Android 12's SkSL:
         //`return mix(u_touch, u_resolution, saturate(in_radius_scale * 2.0))`
@@ -229,30 +225,28 @@ impl InkSparkle {
             Some(Offset::new(size.width() / 2.0, size.height() / 2.0)),
         );
         let progress = Tween::new(app, Some(0.0), Some(1.0));
-        owned.extend([center_tween.id(), progress.id()]);
         let center_progress = TweenSequence::new(vec![
-            TweenSequenceItem::new(Arc::new(progress), 50.0),
-            TweenSequenceItem::new(Arc::new(one), 50.0),
+            TweenSequenceItem::new(Rc::new(progress.clone()), 50.0),
+            TweenSequenceItem::new(Rc::new(one.clone()), 50.0),
         ])
-        .animate(app, radius_scale);
+        .animate(app, radius_scale.clone());
         let center = center_tween.animate(app, center_progress);
 
         let fade_in = Tween::new(app, Some(0.0), Some(1.0));
         let fade_out = Tween::new(app, Some(1.0), Some(0.0));
-        owned.extend([fade_in.id(), fade_out.id()]);
         let alpha = TweenSequence::new(vec![
-            TweenSequenceItem::new(Arc::new(fade_in), 13.0),
-            TweenSequenceItem::new(Arc::new(one), 27.0),
-            TweenSequenceItem::new(Arc::new(fade_out), 60.0),
+            TweenSequenceItem::new(Rc::new(fade_in.clone()), 13.0),
+            TweenSequenceItem::new(Rc::new(one.clone()), 27.0),
+            TweenSequenceItem::new(Rc::new(fade_out.clone()), 60.0),
         ])
-        .animate(app, animation_controller.view());
+        .animate(app, animation.clone());
 
         let sparkle_alpha = TweenSequence::new(vec![
-            TweenSequenceItem::new(Arc::new(fade_in), 13.0),
-            TweenSequenceItem::new(Arc::new(one), 27.0),
-            TweenSequenceItem::new(Arc::new(fade_out), 50.0),
+            TweenSequenceItem::new(Rc::new(fade_in.clone()), 13.0),
+            TweenSequenceItem::new(Rc::new(one.clone()), 27.0),
+            TweenSequenceItem::new(Rc::new(fade_out.clone()), 50.0),
         ])
-        .animate(app, animation_controller.view());
+        .animate(app, animation.clone());
 
         // Creates an element of randomness so that ink emanating from the same
         // pixel have slightly different rings and sparkles.
@@ -265,21 +259,13 @@ impl InkSparkle {
         }
         let turbulence_seed = turbulence_seed.unwrap_or_else(|| random_double() * 1000.0);
 
-        owned.extend([
-            radius_scale.id(),
-            center_progress.id(),
-            center.id(),
-            alpha.id(),
-            sparkle_alpha.id(),
-        ]);
-        let sparkle = app.get_mut(this);
+        let sparkle = app.get_mut(handle);
         sparkle.animation_controller = Some(animation_controller);
         sparkle.radius_scale = Some(radius_scale);
         sparkle.center = Some(center);
         sparkle.alpha = Some(alpha);
         sparkle.sparkle_alpha = Some(sparkle_alpha);
         sparkle.turbulence_seed = turbulence_seed;
-        sparkle.owned = owned;
         this
     }
 
@@ -290,7 +276,10 @@ impl InkSparkle {
     }
 
     fn animation_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).animation_controller.expect("created in new")
+        app.get(self)
+            .animation_controller
+            .handle()
+            .expect("created in new")
     }
 
     /// Used to specify this type of ink splash for an [`InkWell`](crate::InkWell),
@@ -339,10 +328,18 @@ impl InkSparkle {
     fn update_fragment_shader(self: Handle<Self>, app: &mut App) {
         const TURBULENCE_SCALE: f64 = 1.5;
         let sparkle = app.get(self);
-        let radius_scale = sparkle.radius_scale.expect("created in new").value(app);
-        let alpha = sparkle.alpha.expect("created in new").value(app);
-        let sparkle_alpha = sparkle.sparkle_alpha.expect("created in new").value(app);
-        let center = sparkle.center.expect("created in new").value(app);
+        let radius_scale = sparkle
+            .radius_scale
+            .as_ref()
+            .expect("created in new")
+            .value(app);
+        let alpha = sparkle.alpha.as_ref().expect("created in new").value(app);
+        let sparkle_alpha = sparkle
+            .sparkle_alpha
+            .as_ref()
+            .expect("created in new")
+            .value(app);
+        let center = sparkle.center.as_ref().expect("created in new").value(app);
         let color = sparkle.color;
         let target_radius = sparkle.target_radius;
         let turbulence_phase = sparkle.turbulence_seed + radius_scale;
@@ -494,10 +491,6 @@ impl InkFeatureLeaf for InkSparkle {
         let animation_controller = self.animation_controller(app);
         animation_controller.stop(app, true);
         animation_controller.dispose(app);
-        app.destroy_lingering(animation_controller);
-        for owned in std::mem::take(&mut app.get_mut(self).owned) {
-            app.destroy_lingering(owned);
-        }
         app.get_mut(self).fragment_shader = None;
         InkFeature::dispose(self, app);
     }
@@ -660,7 +653,7 @@ impl InteractiveInkFeatureFactory for InkSparkleFactory {
         custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
-    ) -> AnyInteractiveInkFeature {
+    ) -> InteractiveInkFeatureRef {
         InkSparkle::new(
             app,
             controller,
@@ -676,7 +669,7 @@ impl InteractiveInkFeatureFactory for InkSparkleFactory {
             on_removed,
             self.turbulence_seed,
         )
-        .as_interactive_ink_feature()
+        .into_erased()
     }
 }
 

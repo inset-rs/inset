@@ -128,16 +128,19 @@ impl RenderView {
         configuration: Option<ViewConfiguration>,
         view: ViewRef,
     ) -> RenderHandle<RenderView> {
-        let this = RenderHandle::from_handle(app.create(RenderView {
-            render_object: RenderObjectData::new(),
-            child: None,
-            size: Size::ZERO,
-            configuration: None,
-            view,
-            root_transform: None,
-            needs_composite_frame: false,
-            automatic_system_ui_adjustment: true,
-        }));
+        let this = crate::object::create(
+            app,
+            RenderView {
+                render_object: RenderObjectData::new(),
+                child: None,
+                size: Size::ZERO,
+                configuration: None,
+                view,
+                root_transform: None,
+                needs_composite_frame: false,
+                automatic_system_ui_adjustment: true,
+            },
+        );
         let data = this.render_object_data_mut(app);
         data.object_vtable = Some(&VTABLE);
         data.was_repaint_boundary = true;

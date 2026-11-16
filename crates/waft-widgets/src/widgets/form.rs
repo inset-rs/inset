@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use indexmap::IndexSet;
 use waft_embedder::{SemanticsRole, SemanticsValidationResult};
-use waft_foundation::{App, Handle, HandleId, VoidCallback};
+use waft_foundation::{App, Handle, HandleId, OptionRetained, VoidCallback};
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 use waft_services::RestorationBucket;
 
@@ -35,6 +35,7 @@ use crate::widgets::pop_scope::PopScope;
 use crate::widgets::restoration::{RestorableProperty, RestorationMixin, RestorationMixinData};
 use crate::widgets::restoration_properties::{RestorableBool, RestorableStringN, RestorableValue};
 use crate::widgets::routes::PopInvokedWithResultCallback;
+use waft_foundation::Ref;
 
 // ---------------------------------------------------------------------------------------------
 // Form
@@ -759,9 +760,9 @@ pub type FormFieldValue<S> = <<S as State>::Widget as FormFieldLeaf>::Value;
 /// [`FormFieldState::init_state`] creates them.
 pub struct FormFieldStateData<T> {
     value: Option<T>,
-    error_text: Option<Handle<RestorableStringN>>,
-    has_interacted_by_user: Option<Handle<RestorableBool>>,
-    focus_node: Option<Handle<FocusNode>>,
+    error_text: Option<Ref<RestorableStringN>>,
+    has_interacted_by_user: Option<Ref<RestorableBool>>,
+    focus_node: Option<Ref<FocusNode>>,
 }
 
 impl<T: Clone + 'static> FormFieldStateData<T> {
@@ -777,15 +778,17 @@ impl<T: Clone + 'static> FormFieldStateData<T> {
     }
 
     fn error_text_property(&self) -> Handle<RestorableStringN> {
-        self.error_text.expect("created in init_state")
+        self.error_text.handle().expect("created in init_state")
     }
 
     fn has_interacted_by_user_property(&self) -> Handle<RestorableBool> {
-        self.has_interacted_by_user.expect("created in init_state")
+        self.has_interacted_by_user
+            .handle()
+            .expect("created in init_state")
     }
 
     fn focus_node(&self) -> Handle<FocusNode> {
-        self.focus_node.expect("created in init_state")
+        self.focus_node.handle().expect("created in init_state")
     }
 }
 
@@ -1216,7 +1219,12 @@ impl<T: Clone + 'static> FormFieldState<T> {
             && autovalidate_mode != AutovalidateMode::Always
             || autovalidate_mode == AutovalidateMode::OnUnfocus
         {
-            let focus_node = this.form_field_state_data(app).focus_node();
+            let focus_node = this
+                .form_field_state_data(app)
+                .focus_node
+                .as_ref()
+                .expect("created in init_state")
+                .erase();
             return Focus::new(child)
                 .can_request_focus(false)
                 .skip_traversal(true)
@@ -1226,7 +1234,7 @@ impl<T: Clone + 'static> FormFieldState<T> {
                         this.set_state(app, |_state| {});
                     }
                 })
-                .focus_node(focus_node.as_node())
+                .focus_node(focus_node)
                 .into_widget();
         }
 
@@ -1635,6 +1643,8 @@ pub enum AutovalidateMode {
 mod tests {
     use std::cell::{Cell, RefCell, RefMut};
     use std::time::Duration;
+    use waft_foundation::OptionRetained;
+    use waft_foundation::Ref;
 
     use waft_embedder::{Restoration, Size, TargetPlatform, TextDirection};
     use waft_foundation::{AppCell, UniqueKey, ValueKey};
@@ -1647,7 +1657,7 @@ mod tests {
     use crate::framework::{AnyElement, GlobalKey, downcast_widget};
     use crate::test_harness::{platform_view, pump_every_view};
     use crate::widgets::basic::{Center, Column, Directionality, SizedBox, StatefulBuilder};
-    use crate::widgets::focus_manager::AnyFocusNode;
+    use crate::widgets::focus_manager::{AnyFocusNode, FocusNodeRef};
     use crate::widgets::restoration::RootRestorationScope;
     use crate::widgets::scroll_view::ListView;
 
@@ -1816,10 +1826,10 @@ mod tests {
     }
 
     /// A field whose subtree takes the focus through `node`, as a text field's does on a tap.
-    fn focusable_text_field(key: &GlobalKey, node: AnyFocusNode) -> FormField<String> {
+    fn focusable_text_field(key: &GlobalKey, node: FocusNodeRef) -> FormField<String> {
         FormField::new(move |app, field| {
             Focus::new(show_field(app, field))
-                .focus_node(node)
+                .focus_node(node.clone())
                 .into_widget()
         })
         .key(key.clone().into())
@@ -2582,11 +2592,11 @@ mod tests {
     fn a_form_on_unfocus_validates_a_field_as_it_loses_the_focus() {
         let mut tester = WidgetTester::new();
         let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        let (node1, node2) = {
+        let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
             let mut app = tester.app();
             (
-                FocusNode::new(&mut app).as_node(),
-                FocusNode::new(&mut app).as_node(),
+                FocusNode::new(&mut app).into_erased(),
+                FocusNode::new(&mut app).into_erased(),
             )
         };
         let field = |key: &GlobalKey, node| {
@@ -2596,16 +2606,18 @@ mod tests {
                 .into_widget()
         };
         tester.pump_widget(
-            Form::new(Column::new().children([field(&key1, node1), field(&key2, node2)]))
-                .autovalidate_mode(AutovalidateMode::OnUnfocus)
-                .into_widget(),
+            Form::new(
+                Column::new().children([field(&key1, node1.clone()), field(&key2, node2.clone())]),
+            )
+            .autovalidate_mode(AutovalidateMode::OnUnfocus)
+            .into_widget(),
         );
 
         // No error text is visible yet.
         assert_eq!(tester.count_text("foo/error"), 0);
 
         // Enter text in the first TextFormField.
-        focus(&mut tester, node1);
+        focus(&mut tester, node1.handle());
         tester.enter_text(&key1, "foo");
         tester.pump();
 
@@ -2614,14 +2626,14 @@ mod tests {
 
         // Tap on the second TextFormField to trigger validation.
         // This should trigger validation for the first TextFormField as well.
-        focus(&mut tester, node2);
+        focus(&mut tester, node2.handle());
 
         // Verify that the error text is displayed for the first TextFormField.
         assert_eq!(tester.count_text("foo/error"), 1);
         assert_eq!(tester.count_text("bar/error"), 0);
 
         // Tap on the first TextFormField to trigger validation.
-        focus(&mut tester, node1);
+        focus(&mut tester, node1.handle());
 
         // Verify that the both error texts are displayed.
         assert_eq!(tester.count_text("foo/error"), 1);
@@ -2632,22 +2644,22 @@ mod tests {
     fn a_field_mode_of_its_own_wins_over_the_form_on_unfocus() {
         let mut tester = WidgetTester::new();
         let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        let (node1, node2) = {
+        let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
             let mut app = tester.app();
             (
-                FocusNode::new(&mut app).as_node(),
-                FocusNode::new(&mut app).as_node(),
+                FocusNode::new(&mut app).into_erased(),
+                FocusNode::new(&mut app).into_erased(),
             )
         };
         tester.pump_widget(
             Form::new(
                 Column::new().children([
-                    focusable_text_field(&key1, node1)
+                    focusable_text_field(&key1, node1.clone())
                         .autovalidate_mode(AutovalidateMode::Always)
                         .initial_value("foo".to_string())
                         .validator(|_app, value| error_text(value))
                         .into_widget(),
-                    focusable_text_field(&key2, node2)
+                    focusable_text_field(&key2, node2.clone())
                         .autovalidate_mode(AutovalidateMode::Disabled)
                         .initial_value("bar".to_string())
                         .validator(|_app, value| error_text(value))
@@ -2662,19 +2674,19 @@ mod tests {
         assert_eq!(tester.count_text("foo/error"), 1);
 
         // Enter text in the TextFormField.
-        focus(&mut tester, node1);
+        focus(&mut tester, node1.handle());
         tester.enter_text(&key1, "foo");
         tester.pump();
 
         // Click in the second TextFormField to trigger validation.
-        focus(&mut tester, node2);
+        focus(&mut tester, node2.handle());
 
         // No error text is visible yet for the second TextFormField.
         assert_eq!(tester.count_text("bar/error"), 0);
 
         // Now click in the first TextFormField to trigger validation for the second
         // TextFormField.
-        focus(&mut tester, node1);
+        focus(&mut tester, node1.handle());
 
         // Verify that the error text is displayed for the second TextFormField.
         assert_eq!(tester.count_text("bar/error"), 1);
@@ -2685,21 +2697,21 @@ mod tests {
         let mut tester = WidgetTester::new();
         let form_key = GlobalKey::new();
         let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        let (node1, node2) = {
+        let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
             let mut app = tester.app();
             (
-                FocusNode::new(&mut app).as_node(),
-                FocusNode::new(&mut app).as_node(),
+                FocusNode::new(&mut app).into_erased(),
+                FocusNode::new(&mut app).into_erased(),
             )
         };
         tester.pump_widget(
             Form::new(
                 Column::new().children([
-                    focusable_text_field(&key1, node1)
+                    focusable_text_field(&key1, node1.clone())
                         .initial_value("foo".to_string())
                         .validator(|_app, value| error_text(value))
                         .into_widget(),
-                    focusable_text_field(&key2, node2)
+                    focusable_text_field(&key2, node2.clone())
                         .initial_value("bar".to_string())
                         .validator(|_app, value| error_text(value))
                         .into_widget(),
@@ -2711,7 +2723,7 @@ mod tests {
         );
 
         // Focus on the first field.
-        focus(&mut tester, node1);
+        focus(&mut tester, node1.handle());
 
         // Check no error messages are displayed initially.
         assert_eq!(tester.count_text("foo/error"), 0);
@@ -3098,12 +3110,12 @@ mod tests {
         state: StateData<RestorableTextField>,
         restoration: RestorationMixinData,
         form_field_state: FormFieldStateData<String>,
-        text: Option<Handle<RestorableStringN>>,
+        text: Option<Ref<RestorableStringN>>,
     }
 
     impl RestorableTextFieldState {
         fn text(self: Handle<Self>, app: &App) -> Handle<RestorableStringN> {
-            app.get(self).text.expect("created in init_state")
+            app.get(self).text.handle().expect("created in init_state")
         }
     }
 

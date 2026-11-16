@@ -9,15 +9,16 @@
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use waft_animation::Animation;
 use waft_cupertino::CupertinoRadio;
 use waft_embedder::{Canvas, Color, Offset, Paint, PaintStyle, Size, TargetPlatform};
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, ValueChanged};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, OptionRetained, Ref, ValueChanged,
+};
 use waft_painting::{AnyBorderSide, BorderSide, CircleBorder, ShapeBorder};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnyFocusNode, AnyRadioClient, AnyRadioGroupRegistry, AnyToggleableState, BuildContext,
-    CustomPaint, FocusNode, FocusNodeLeaf, IntoWidget, KeyRef, RadioBuilder, RadioGroup,
+    AnyRadioClient, AnyRadioGroupRegistry, AnyToggleableState, BuildContext, CustomPaint,
+    FocusNode, FocusNodeLeaf, FocusNodeRef, IntoWidget, KeyRef, RadioBuilder, RadioGroup,
     RadioGroupRegistry, RawRadio, State, StateData, StatefulWidget, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, WidgetRef, WidgetState, WidgetStateBorderSide,
     WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
@@ -223,7 +224,7 @@ pub struct Radio<T: Clone + PartialEq + 'static> {
     /// If one is not supplied, then one will be automatically allocated, owned, and managed by
     /// this widget. The widget will be focusable even if a `focus_node` is not supplied. If
     /// supplied, the given `focus_node` will be _hosted_ by this widget, but not owned.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
     pub autofocus: bool,
@@ -447,7 +448,7 @@ impl<T: Clone + PartialEq + 'static> Radio<T> {
     }
 
     /// Dart `Radio(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> Radio<T> {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> Radio<T> {
         self.focus_node = Some(focus_node);
         self
     }
@@ -532,21 +533,21 @@ impl<T: Clone + PartialEq + 'static> StatefulWidget for Radio<T> {
 /// Dart's `_RadioState`; public because [`Radio`]'s `StatefulWidget::State` names it.
 pub struct RadioState<T: Clone + PartialEq + 'static> {
     state: StateData<Radio<T>>,
-    internal_focus_node: Option<AnyFocusNode>,
-    internal_radio_registry: Option<Handle<RadioRegistry<T>>>,
+    internal_focus_node: Option<Ref<FocusNode>>,
+    internal_radio_registry: Option<Ref<RadioRegistry<T>>>,
 }
 
 impl<T: Clone + PartialEq + 'static> RadioState<T> {
-    fn focus_node(self: Handle<Self>, app: &mut App) -> AnyFocusNode {
-        if let Some(focus_node) = self.widget(app).focus_node {
+    fn focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
+        if let Some(focus_node) = self.widget(app).focus_node.clone() {
             return focus_node;
         }
-        if let Some(focus_node) = app.get(self).internal_focus_node {
-            return focus_node;
+        if let Some(focus_node) = app.get(self).internal_focus_node.as_ref() {
+            return focus_node.erase();
         }
-        let focus_node = FocusNode::new(app).as_node();
-        app.get_mut(self).internal_focus_node = Some(focus_node);
-        focus_node
+        let focus_node = FocusNode::new(app);
+        app.get_mut(self).internal_focus_node = Some(focus_node.clone());
+        focus_node.into_erased()
     }
 
     fn enabled(self: Handle<Self>, app: &mut App) -> bool {
@@ -572,12 +573,12 @@ impl<T: Clone + PartialEq + 'static> RadioState<T> {
         }
 
         // Handles deprecated API.
-        let registry = match app.get(self).internal_radio_registry {
+        let registry = match app.get(self).internal_radio_registry.handle() {
             Some(registry) => registry,
             None => {
                 let registry = app.create(RadioRegistry { state: self });
-                app.get_mut(self).internal_radio_registry = Some(registry);
-                registry
+                app.get_mut(self).internal_radio_registry = Some(registry.clone());
+                registry.handle()
             }
         };
         registry.as_radio_group_registry()
@@ -669,13 +670,10 @@ impl<T: Clone + PartialEq + 'static> State for RadioState<T> {
     waft_widgets::state_accessors!();
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(focus_node) = app.get(self).internal_focus_node {
+        if let Some(focus_node) = app.get(self).internal_focus_node.handle() {
             focus_node.dispose(app);
         }
         // The raw radio below has unregistered already: children dispose first.
-        if let Some(registry) = app.get_mut(self).internal_radio_registry.take() {
-            app.destroy(registry);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -797,12 +795,15 @@ struct RadioPaintState {
     state: StateData<RadioPaint>,
     /// Dart's `final _RadioPainter _painter = _RadioPainter()`, created in `init_state` because
     /// a painter is an arena object and a state is created without the `App`.
-    painter: Option<Handle<RadioPainter>>,
+    painter: Option<Ref<RadioPainter>>,
 }
 
 impl RadioPaintState {
     fn painter(self: Handle<Self>, app: &App) -> Handle<RadioPainter> {
-        app.get(self).painter.expect("created in init_state")
+        app.get(self)
+            .painter
+            .handle()
+            .expect("created in init_state")
     }
 
     fn widget_fill_color(self: Handle<Self>, app: &App) -> WidgetStatePropertyRef<Option<Color>> {
@@ -857,8 +858,6 @@ impl State for RadioPaintState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let painter = self.painter(app);
         ToggleablePainter::dispose(painter, app);
-        app.get_mut(self).painter = None;
-        app.destroy(painter);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1038,17 +1037,15 @@ impl State for RadioPaintState {
             .or(radio_theme.splash_radius)
             .unwrap_or(K_RADIAL_REACTION_RADIUS);
         let current_states = toggleable_state.states(app);
-        let painter = self.painter(app);
-        painter.set_position(app, toggleable_state.position(app).as_animation());
-        painter.set_reaction(app, toggleable_state.reaction(app).as_animation());
-        painter.set_reaction_focus_fade(
-            app,
-            toggleable_state.reaction_focus_fade(app).as_animation(),
-        );
-        painter.set_reaction_hover_fade(
-            app,
-            toggleable_state.reaction_hover_fade(app).as_animation(),
-        );
+        let painter = app
+            .get(self)
+            .painter
+            .clone()
+            .expect("created in init_state");
+        painter.set_position(app, toggleable_state.position(app).erase());
+        painter.set_reaction(app, toggleable_state.reaction(app).erase());
+        painter.set_reaction_focus_fade(app, toggleable_state.reaction_focus_fade(app).erase());
+        painter.set_reaction_hover_fade(app, toggleable_state.reaction_hover_fade(app).erase());
         painter.set_inactive_reaction_color(app, effective_inactive_pressed_overlay_color);
         painter.set_reaction_color(app, effective_active_pressed_overlay_color);
         painter.set_hover_color(app, effective_hover_overlay_color);
@@ -1084,7 +1081,7 @@ struct RadioPainter {
 }
 
 impl RadioPainter {
-    fn new(app: &mut App) -> Handle<RadioPainter> {
+    fn new(app: &mut App) -> Ref<RadioPainter> {
         app.create(RadioPainter {
             change_notifier: ChangeNotifierData::new(),
             toggleable_painter: ToggleablePainterData::new(),
@@ -1882,16 +1879,25 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             let theme = m2(&tester);
-            let configure = move |radio: Radio<i32>| {
-                radio
-                    .focus_color(Colors::ORANGE.shade500())
-                    .autofocus(true)
-                    .focus_node(focus_node)
+            let configure = {
+                let focus_node = focus_node.clone();
+                move |radio: Radio<i32>| {
+                    radio
+                        .focus_color(Colors::ORANGE.shade500())
+                        .autofocus(true)
+                        .focus_node(focus_node.clone())
+                }
             };
 
-            tester.pump_widget(focus_and_hover_app(theme.clone(), 0, true, configure));
+            tester.pump_widget(focus_and_hover_app(
+                theme.clone(),
+                0,
+                true,
+                configure.clone(),
+            ));
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
@@ -1906,7 +1912,12 @@ pub(crate) mod tests {
             );
 
             // Check when the radio isn't selected.
-            tester.pump_widget(focus_and_hover_app(theme.clone(), 1, true, configure));
+            tester.pump_widget(focus_and_hover_app(
+                theme.clone(),
+                1,
+                true,
+                configure.clone(),
+            ));
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
@@ -1940,17 +1951,26 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             let theme = m3(&tester);
             let colors = theme.color_scheme.clone();
-            let configure = move |radio: Radio<i32>| {
-                radio
-                    .focus_color(Colors::ORANGE.shade500())
-                    .autofocus(true)
-                    .focus_node(focus_node)
+            let configure = {
+                let focus_node = focus_node.clone();
+                move |radio: Radio<i32>| {
+                    radio
+                        .focus_color(Colors::ORANGE.shade500())
+                        .autofocus(true)
+                        .focus_node(focus_node.clone())
+                }
             };
 
-            tester.pump_widget(focus_and_hover_app(theme.clone(), 0, true, configure));
+            tester.pump_widget(focus_and_hover_app(
+                theme.clone(),
+                0,
+                true,
+                configure.clone(),
+            ));
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
@@ -1965,7 +1985,12 @@ pub(crate) mod tests {
             );
 
             // Check when the radio isn't selected.
-            tester.pump_widget(focus_and_hover_app(theme.clone(), 1, true, configure));
+            tester.pump_widget(focus_and_hover_app(
+                theme.clone(),
+                1,
+                true,
+                configure.clone(),
+            ));
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_paints(
@@ -2113,37 +2138,43 @@ pub(crate) mod tests {
             let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let group_value = Rc::new(Cell::new(Some(1)));
-            let focus_node2 = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node2 = FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             focus_node2.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio2".into()));
             let theme = m3(&tester);
 
             let builder_value = Rc::clone(&group_value);
             tester.pump_widget(centered_app(
                 theme,
-                StatefulBuilder::new(move |_app, _context, set_state| {
-                    let radio = |value: i32| {
-                        let group_value = Rc::clone(&builder_value);
-                        let set_state = Rc::clone(&set_state);
-                        let mut radio = Radio::new(value)
-                            .on_changed(Rc::new(move |app: &mut App, new_value: Option<i32>| {
-                                set_state(app, &mut |_app| group_value.set(new_value));
-                            }))
-                            .hover_color(Colors::ORANGE.shade500());
-                        if let Some(group_value) = builder_value.get() {
-                            radio = radio.group_value(group_value);
-                        }
-                        radio
-                    };
-                    Container::new()
-                        .width(200.0)
-                        .height(100.0)
-                        .color(Colors::WHITE)
-                        .child(Row::new().children([
-                            radio(0).autofocus(true).into_widget(),
-                            radio(1).into_widget(),
-                            radio(2).focus_node(focus_node2).into_widget(),
-                        ]))
-                        .into_widget()
+                StatefulBuilder::new({
+                    let focus_node2 = focus_node2.clone();
+                    move |_app, _context, set_state| {
+                        let radio = |value: i32| {
+                            let group_value = Rc::clone(&builder_value);
+                            let set_state = Rc::clone(&set_state);
+                            let mut radio = Radio::new(value)
+                                .on_changed(Rc::new(
+                                    move |app: &mut App, new_value: Option<i32>| {
+                                        set_state(app, &mut |_app| group_value.set(new_value));
+                                    },
+                                ))
+                                .hover_color(Colors::ORANGE.shade500());
+                            if let Some(group_value) = builder_value.get() {
+                                radio = radio.group_value(group_value);
+                            }
+                            radio
+                        };
+                        Container::new()
+                            .width(200.0)
+                            .height(100.0)
+                            .color(Colors::WHITE)
+                            .child(Row::new().children([
+                                radio(0).autofocus(true).into_widget(),
+                                radio(1).into_widget(),
+                                radio(2).focus_node(focus_node2.clone()).into_widget(),
+                            ]))
+                            .into_widget()
+                    }
                 }),
             ));
             tester.pump_and_settle();
@@ -2174,7 +2205,8 @@ pub(crate) mod tests {
     fn arrow_keys_move_the_selection_through_a_radio_group() {
         with_main_thread_stack(|| {
             let mut tester = tester();
-            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             let group_value: Rc<Cell<Option<i32>>> = Rc::default();
             let theme = m3(&tester);
             let key0 = GlobalKey::new();
@@ -2183,25 +2215,28 @@ pub(crate) mod tests {
             let builder_key = key0.clone();
             tester.pump_widget(centered_app(
                 theme,
-                StatefulBuilder::new(move |_app, _context, set_state| {
-                    let group_value = Rc::clone(&builder_value);
-                    let mut group = RadioGroup::<i32>::new(
-                        Rc::new(move |app: &mut App, value: Option<i32>| {
-                            set_state(app, &mut |_app| group_value.set(value));
-                        }),
-                        waft_widgets::Column::new().children([
-                            Radio::new(0)
-                                .key(builder_key.clone().into())
-                                .focus_node(focus_node)
-                                .into_widget(),
-                            Radio::new(1).into_widget(),
-                            Radio::new(2).into_widget(),
-                        ]),
-                    );
-                    if let Some(value) = builder_value.get() {
-                        group = group.group_value(value);
+                StatefulBuilder::new({
+                    let focus_node = focus_node.clone();
+                    move |_app, _context, set_state| {
+                        let group_value = Rc::clone(&builder_value);
+                        let mut group = RadioGroup::<i32>::new(
+                            Rc::new(move |app: &mut App, value: Option<i32>| {
+                                set_state(app, &mut |_app| group_value.set(value));
+                            }),
+                            waft_widgets::Column::new().children([
+                                Radio::new(0)
+                                    .key(builder_key.clone().into())
+                                    .focus_node(focus_node.clone())
+                                    .into_widget(),
+                                Radio::new(1).into_widget(),
+                                Radio::new(2).into_widget(),
+                            ]),
+                        );
+                        if let Some(value) = builder_value.get() {
+                            group = group.group_value(value);
+                        }
+                        group.into_widget()
                     }
-                    group.into_widget()
                 }),
             ));
 
@@ -2440,16 +2475,20 @@ pub(crate) mod tests {
     fn fill_color_in_hovered_and_focused_states(m3_theme: bool, focus: Color, hover: Color) {
         let mut tester = tester();
         tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-        let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+        let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+            .into_erased::<waft_widgets::AnyFocusNode>();
         focus_node.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio".into()));
         let theme = if m3_theme { m3(&tester) } else { m2(&tester) };
         let fill_color = hovered_or_focused_fill_color();
 
-        tester.pump_widget(focus_and_hover_app(theme, 0, true, move |radio| {
-            radio
-                .autofocus(true)
-                .focus_node(focus_node)
-                .fill_color(fill_color)
+        tester.pump_widget(focus_and_hover_app(theme, 0, true, {
+            let focus_node = focus_node.clone();
+            move |radio| {
+                radio
+                    .autofocus(true)
+                    .focus_node(focus_node.clone())
+                    .fill_color(fill_color)
+            }
         }));
         tester.pump_and_settle();
         assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
@@ -2530,11 +2569,12 @@ pub(crate) mod tests {
             };
             let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             let theme = m3(&tester);
             let build_radio = |active: bool, focused: bool, use_overlay: bool| {
                 let mut radio = Radio::new(active)
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .autofocus(focused)
                     .group_value(true)
                     .on_changed(no_op())
@@ -2784,14 +2824,15 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             let theme = m2(&tester);
             let colors = theme.color_scheme.clone();
             let build_radio = |focused: bool, selected: bool| {
                 scaffold_app(
                     theme.clone(),
                     Radio::new(true)
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .autofocus(focused)
                         .group_value(selected)
                         .on_changed(no_op()),
@@ -2879,14 +2920,15 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             let theme = m3(&tester);
             let colors = theme.color_scheme.clone();
             let build_radio = |focused: bool, selected: bool| {
                 scaffold_app(
                     theme.clone(),
                     Radio::new(true)
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .autofocus(focused)
                         .group_value(selected)
                         .on_changed(no_op()),
@@ -3023,13 +3065,14 @@ pub(crate) mod tests {
     ) {
         let mut tester = tester();
         tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-        let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+        let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+            .into_erased::<waft_widgets::AnyFocusNode>();
         let theme = if m3_theme { m3(&tester) } else { m2(&tester) };
 
         tester.pump_widget(scaffold_app(
             theme.clone(),
             Radio::new(true)
-                .focus_node(focus_node)
+                .focus_node(focus_node.clone())
                 .group_value(true)
                 .on_changed(no_op()),
         ));
@@ -3170,13 +3213,15 @@ pub(crate) mod tests {
     ) {
         let mut tester = tester();
         tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-        let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+        let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+            .into_erased::<waft_widgets::AnyFocusNode>();
         focus_node.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio".into()));
         let theme = m3(&tester);
         let primary = theme.color_scheme.primary;
 
-        tester.pump_widget(group_app(theme, 0, move |radio| {
-            configure(radio.autofocus(true).focus_node(focus_node))
+        tester.pump_widget(group_app(theme, 0, {
+            let focus_node = focus_node.clone();
+            move |radio| configure(radio.autofocus(true).focus_node(focus_node.clone()))
         }));
         tester.pump_and_settle();
         assert!(focus_node.has_primary_focus(&tester.cell.borrow()));

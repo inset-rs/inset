@@ -30,7 +30,7 @@ use crate::{
 use std::{any::TypeId, f64::consts::PI, fmt, rc::Rc};
 use waft_embedder::valo::{Matrix, Paint, PaintStyle, Shader, Stroke};
 use waft_embedder::{Canvas, Color, Image, Offset, PointerDeviceKind, Rect, Size};
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref};
 use waft_gestures::{EagerGestureRecognizer, PointerDownEvent};
 use waft_painting::draw_oval;
 use waft_rendering::{CustomPainter, HitTestBehavior};
@@ -399,7 +399,7 @@ pub struct ColorSpectrumState {
     state: StateData<ColorSpectrum>,
 
     /// The control's focus.
-    focus: Option<Handle<FocusNode>>,
+    focus: Option<Ref<FocusNode>>,
 
     /// `HsvColor` as the spectrum reads it: the colour it last asked for until the application
     /// next builds it, else the application's.
@@ -432,7 +432,10 @@ pub struct ColorSpectrumState {
 
 impl ColorSpectrumState {
     fn focus(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-        app.get(self).focus.expect("an initialized ColorSpectrum")
+        app.get(self)
+            .focus
+            .handle()
+            .expect("an initialized ColorSpectrum")
     }
 
     /// `Color`.
@@ -1183,7 +1186,6 @@ impl State for ColorSpectrumState {
             .expect("an initialized ColorSpectrum");
         focus.remove_listener(app, &Listener::handle_method(self, Self::focus_changed));
         focus.dispose(app);
-        app.destroy(focus);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1320,7 +1322,13 @@ impl State for ColorSpectrumState {
             Rc::new(move |app, _, size| self.layout_root_size_changed(app, size)),
         );
         Focus::new(layout_root)
-            .focus_node(self.focus(app).as_node())
+            .focus_node(
+                app.get(self)
+                    .focus
+                    .as_ref()
+                    .expect("an initialized ColorSpectrum")
+                    .erase(),
+            )
             .can_request_focus(widget.is_enabled)
             .skip_traversal(!widget.is_enabled)
             .into_widget()

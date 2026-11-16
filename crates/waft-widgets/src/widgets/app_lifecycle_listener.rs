@@ -3,7 +3,7 @@
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use waft_foundation::{App, Handle, Task};
+use waft_foundation::{App, Handle, Ref, Task};
 use waft_scheduler::SchedulerBinding;
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
@@ -130,7 +130,7 @@ impl Debug for AppLifecycleListener {
 
 impl AppLifecycleListener {
     /// Creates an [`AppLifecycleListener`].
-    pub fn new(app: &mut App) -> Handle<AppLifecycleListener> {
+    pub fn new(app: &mut App) -> Ref<AppLifecycleListener> {
         let binding = WidgetsBinding::instance(app);
         let lifecycle_state = SchedulerBinding::lifecycle_state(app);
         let this = app.create(AppLifecycleListener {
@@ -148,8 +148,11 @@ impl AppLifecycleListener {
             observer: None,
             debug_disposed: false,
         });
-        let observer: WidgetsBindingObserverRef = Rc::new(this);
-        app.get_mut(this).observer = Some(Rc::clone(&observer));
+        // The binding names the listener without keeping it: the listener's own `observer` field
+        // holds this `Rc`, so a `Ref` in it would be a ring. One dropped without `dispose` is
+        // skipped once it is freed.
+        let observer: WidgetsBindingObserverRef = Rc::new(this.handle());
+        app.get_mut(&this).observer = Some(Rc::clone(&observer));
         binding.add_observer(app, observer);
         this
     }
@@ -157,91 +160,71 @@ impl AppLifecycleListener {
     /// Dart `AppLifecycleListener(onStateChange:)`.
     #[allow(clippy::type_complexity)]
     pub fn on_state_change(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         on_state_change: Rc<dyn Fn(&mut App, AppLifecycleState)>,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_state_change = Some(on_state_change);
+    ) -> Ref<Self> {
+        app.get_mut(&self).on_state_change = Some(on_state_change);
         self
     }
 
     /// Dart `AppLifecycleListener(onInactive:)`.
     pub fn on_inactive(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         on_inactive: Rc<dyn Fn(&mut App)>,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_inactive = Some(on_inactive);
+    ) -> Ref<Self> {
+        app.get_mut(&self).on_inactive = Some(on_inactive);
         self
     }
 
     /// Dart `AppLifecycleListener(onResume:)`.
-    pub fn on_resume(
-        self: Handle<Self>,
-        app: &mut App,
-        on_resume: Rc<dyn Fn(&mut App)>,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_resume = Some(on_resume);
+    pub fn on_resume(self: Ref<Self>, app: &mut App, on_resume: Rc<dyn Fn(&mut App)>) -> Ref<Self> {
+        app.get_mut(&self).on_resume = Some(on_resume);
         self
     }
 
     /// Dart `AppLifecycleListener(onHide:)`.
-    pub fn on_hide(
-        self: Handle<Self>,
-        app: &mut App,
-        on_hide: Rc<dyn Fn(&mut App)>,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_hide = Some(on_hide);
+    pub fn on_hide(self: Ref<Self>, app: &mut App, on_hide: Rc<dyn Fn(&mut App)>) -> Ref<Self> {
+        app.get_mut(&self).on_hide = Some(on_hide);
         self
     }
 
     /// Dart `AppLifecycleListener(onShow:)`.
-    pub fn on_show(
-        self: Handle<Self>,
-        app: &mut App,
-        on_show: Rc<dyn Fn(&mut App)>,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_show = Some(on_show);
+    pub fn on_show(self: Ref<Self>, app: &mut App, on_show: Rc<dyn Fn(&mut App)>) -> Ref<Self> {
+        app.get_mut(&self).on_show = Some(on_show);
         self
     }
 
     /// Dart `AppLifecycleListener(onPause:)`.
-    pub fn on_pause(
-        self: Handle<Self>,
-        app: &mut App,
-        on_pause: Rc<dyn Fn(&mut App)>,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_pause = Some(on_pause);
+    pub fn on_pause(self: Ref<Self>, app: &mut App, on_pause: Rc<dyn Fn(&mut App)>) -> Ref<Self> {
+        app.get_mut(&self).on_pause = Some(on_pause);
         self
     }
 
     /// Dart `AppLifecycleListener(onRestart:)`.
     pub fn on_restart(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         on_restart: Rc<dyn Fn(&mut App)>,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_restart = Some(on_restart);
+    ) -> Ref<Self> {
+        app.get_mut(&self).on_restart = Some(on_restart);
         self
     }
 
     /// Dart `AppLifecycleListener(onExitRequested:)`.
     pub fn on_exit_requested(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         on_exit_requested: AppExitRequestCallback,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_exit_requested = Some(on_exit_requested);
+    ) -> Ref<Self> {
+        app.get_mut(&self).on_exit_requested = Some(on_exit_requested);
         self
     }
 
     /// Dart `AppLifecycleListener(onDetach:)`.
-    pub fn on_detach(
-        self: Handle<Self>,
-        app: &mut App,
-        on_detach: Rc<dyn Fn(&mut App)>,
-    ) -> Handle<Self> {
-        app.get_mut(self).on_detach = Some(on_detach);
+    pub fn on_detach(self: Ref<Self>, app: &mut App, on_detach: Rc<dyn Fn(&mut App)>) -> Ref<Self> {
+        app.get_mut(&self).on_detach = Some(on_detach);
         self
     }
 
@@ -394,6 +377,26 @@ mod tests {
         assert!(fired.get());
         listener.dispose(&mut app);
         assert_eq!(binding.observer_count(&app), 0);
+    }
+
+    #[test]
+    fn a_listener_dropped_without_dispose_is_skipped_once_freed() {
+        let cell = detached_app();
+        let mut app = cell.borrow_mut();
+        let fired = Rc::new(Cell::new(false));
+        let seen = Rc::clone(&fired);
+        drop(
+            AppLifecycleListener::new(&mut app)
+                .on_resume(&mut app, Rc::new(move |_app| seen.set(true))),
+        );
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
+        set_app_lifecycle_state(&mut app, AppLifecycleState::Resumed);
+        assert!(!fired.get());
+        let skipped = app.debug_take_skipped_tear_offs();
+        assert_eq!(skipped.len(), 1, "{skipped:?}");
+        assert!(skipped[0].contains("AppLifecycleListener"), "{skipped:?}");
     }
 
     /// The host reports `state`, as Dart's test sends it on `flutter/lifecycle`.

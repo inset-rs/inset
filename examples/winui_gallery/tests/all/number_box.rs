@@ -9,7 +9,7 @@ use waft_embedder::{
     Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
     Size, TextAffinity, TextInputAction, TextRange, TextSelection,
 };
-use waft_foundation::{App, Handle, ValueNotifier};
+use waft_foundation::{App, Ref, ValueNotifier};
 use waft_gestures::GestureBinding;
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyRepeatEvent, KeyUpEvent,
@@ -25,7 +25,7 @@ const PAGE: [u32; 2] = [1080, 1700];
 /// The text box of the NumberBox with `placeholder`: its text, its focus and a point inside it.
 struct InputBox {
     controller: AnyTextEditingController,
-    focus: Handle<FocusNode>,
+    focus: AnyFocusNode,
     point: Offset,
 }
 
@@ -62,8 +62,8 @@ fn input_box(f: &Fixture, placeholder: &str) -> InputBox {
         if let Some(editable) = downcast_widget::<EditableText>(element.widget(&app).as_ref()) {
             let render = element.find_render_object(&app).unwrap().as_box().unwrap();
             return InputBox {
-                controller: editable.controller,
-                focus: editable.focus_node,
+                controller: editable.controller.handle(),
+                focus: editable.focus_node.handle(),
                 point: render.local_to_global(&app, Offset::new(8.0, 8.0), None),
             };
         }
@@ -416,7 +416,7 @@ fn compact_spin_buttons_open_in_a_popup_while_the_box_has_the_focus() {
 /// A window with one NumberBox whose value lives in `value`, built by `make`; whether the
 /// application takes what the box asks for is `accept`.
 struct Host {
-    value: Handle<ValueNotifier<f64>>,
+    value: Ref<ValueNotifier<f64>>,
     events: Rc<RefCell<Vec<(f64, f64)>>>,
 }
 
@@ -432,7 +432,7 @@ fn host(
         let value = app.create(ValueNotifier::new(initial));
         let events = Rc::new(RefCell::new(Vec::new()));
         *slot.borrow_mut() = Some(Host {
-            value,
+            value: value.clone(),
             events: events.clone(),
         });
         let make = Rc::new(make);
@@ -446,12 +446,13 @@ fn host(
                         Rc::new(move |app, context, _, _| builder(app, context)),
                     )
                     .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                    PageRoute::as_page_route(route)
+                    route.into_erased()
                 })
                 .home(ThemeScope::new(
                     Theme::Light,
-                    ValueListenableBuilder::new(Rc::new(value), move |_, _, current, _| {
+                    ValueListenableBuilder::new(Rc::new(value.clone()), move |_, _, current, _| {
                         let events = events.clone();
+                        let value = value.clone();
                         let number_box = NumberBox::new(*current, move |app, args| {
                             events.borrow_mut().push((args.old_value, args.new_value));
                             if accept {
@@ -483,8 +484,8 @@ fn a_value_out_of_range_is_coerced_and_reported_after_the_frame() {
     let reported = events(&host);
     assert_eq!(reported.len(), 1);
     assert!(reported[0].0.is_nan() && reported[0].1 == 100.0);
-    let value = host.borrow().as_ref().unwrap().value;
-    assert_eq!(*f.cell.borrow().get(value).value(), 100.0);
+    let value = host.borrow().as_ref().unwrap().value.clone();
+    assert_eq!(*f.cell.borrow().get(&value).value(), 100.0);
     // A value the application sets within range raises no ValueChanged.
     value.set_value(&mut f.cell.borrow_mut(), 40.0);
     f.cell.checkpoint();
@@ -535,7 +536,7 @@ fn an_equal_formatter_built_again_leaves_typed_text_alone() {
     click(&mut f, input.point);
     type_text(&mut f, "12");
     // The parent builds the box again, with a new but equal formatter, while "12" is typed.
-    let value = host.borrow().as_ref().unwrap().value;
+    let value = host.borrow().as_ref().unwrap().value.clone();
     value.notify_listeners(&mut f.cell.borrow_mut());
     f.cell.checkpoint();
     f.pump();

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use waft_animation::Curve;
 use waft_embedder::{Clip, Matrix4, Offset, Rect, Size, clamp_double};
-use waft_foundation::{App, Handle, HandleId, Listenable, Listener};
+use waft_foundation::{App, Handle, HandleId, Listener};
 use waft_painting::{Axis, AxisDirection, axis_direction_to_axis, transform_rect};
 
 use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
@@ -26,7 +26,7 @@ use crate::sliver::{
     SliverLogicalContainerParentData, SliverPhysicalContainerParentData,
     apply_growth_direction_to_axis_direction, apply_growth_direction_to_scroll_direction,
 };
-use crate::viewport_offset::AnyViewportOffset;
+use crate::viewport_offset::{AnyViewportOffset, ViewportOffsetRef};
 
 /// The unit of measurement for a viewport's cache extent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -357,7 +357,7 @@ pub type SliverAdvance<T> =
 pub struct RenderViewportBaseData {
     axis_direction: AxisDirection,
     cross_axis_direction: AxisDirection,
-    offset: AnyViewportOffset,
+    offset: ViewportOffsetRef,
     scroll_cache_extent: ScrollCacheExtent,
     /// This value is set during layout based on the
     /// [`scroll_cache_extent`](RenderViewportBase::scroll_cache_extent).
@@ -376,7 +376,7 @@ impl RenderViewportBaseData {
     /// [`SliverPaintOrder::FirstIsTop`], and [`Clip::HardEdge`].
     pub fn new(
         cross_axis_direction: AxisDirection,
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
     ) -> RenderViewportBaseData {
         RenderViewportBaseData {
             axis_direction: AxisDirection::Down,
@@ -484,11 +484,11 @@ pub trait RenderViewportBase:
     /// viewport uses to select which part of its content to display. As the user scrolls the
     /// viewport, this value changes, which changes the content that is displayed.
     fn offset(self: RenderHandle<Self>, app: &App) -> AnyViewportOffset {
-        self.viewport_data(app).offset
+        self.viewport_data(app).offset.handle()
     }
 
     /// Sets [`offset`](Self::offset).
-    fn set_offset(self: RenderHandle<Self>, app: &mut App, value: AnyViewportOffset) {
+    fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
         let old = self.offset(app);
         if value == old {
             return;
@@ -496,9 +496,11 @@ pub trait RenderViewportBase:
         if self.attached(app) {
             old.remove_listener(app, &self.mark_needs_layout_listener());
         }
-        self.viewport_data_mut(app).offset = value;
+        let new = value.handle();
+        // The old offset goes when this local does, after the listener moved off it.
+        let _old = std::mem::replace(&mut self.viewport_data_mut(app).offset, value);
         if self.attached(app) {
-            value.add_listener(app, self.mark_needs_layout_listener());
+            new.add_listener(app, self.mark_needs_layout_listener());
         }
         // We need to go through layout even if the new offset has the same pixels value as the
         // old offset so that we will apply our viewport and content dimensions.
@@ -1412,7 +1414,7 @@ impl RenderViewport {
     pub fn new(
         app: &mut App,
         cross_axis_direction: AxisDirection,
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
         children: Option<Vec<AnyRenderSliver>>,
         center: Option<AnyRenderSliver>,
     ) -> RenderHandle<RenderViewport> {
@@ -1988,7 +1990,7 @@ impl RenderShrinkWrappingViewport {
     pub fn new(
         app: &mut App,
         cross_axis_direction: AxisDirection,
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
         children: Option<Vec<AnyRenderSliver>>,
     ) -> RenderHandle<RenderShrinkWrappingViewport> {
         let this = RenderHandle::new_box(
@@ -2427,6 +2429,7 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
     use waft_foundation::Handle;
     use waft_gestures::HitTestResult;
@@ -2436,7 +2439,7 @@ mod tests {
     use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer};
     use crate::proxy_box::RenderConstrainedBox;
     use crate::sliver::{RenderSliver, RenderSliverToBoxAdapter};
-    use crate::viewport_offset::{FixedViewportOffset, ViewportOffset};
+    use crate::viewport_offset::FixedViewportOffset;
 
     /// A sliver of a fixed scroll extent that records the offsets it was painted at.
     struct TestSliver {
@@ -2522,18 +2525,18 @@ mod tests {
             .schedule_initial_paint(app, paint_root.as_container_layer());
         owner.flush_compositing_bits(app);
         owner.flush_paint(app);
-        owner
+        owner.handle()
     }
 
     fn vertical_viewport(
         app: &mut App,
-        offset: Handle<FixedViewportOffset>,
+        offset: &Ref<FixedViewportOffset>,
         children: Vec<AnyRenderSliver>,
     ) -> RenderHandle<RenderViewport> {
         RenderViewport::new(
             app,
             AxisDirection::Right,
-            offset.as_viewport_offset(),
+            offset.erase(),
             Some(children),
             None,
         )
@@ -2547,7 +2550,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![]);
         viewport.as_box().get_min_intrinsic_width(&mut app, 0.0);
     }
 
@@ -2557,7 +2560,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![]);
         crate::object::set_debug_checking_intrinsics(true);
         let width = viewport.as_box().get_min_intrinsic_width(&mut app, 0.0);
         let height = viewport.as_box().get_max_intrinsic_height(&mut app, 0.0);
@@ -2573,7 +2576,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let (sliver, _paints) = test_sliver(&mut app, 100.0);
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![sliver]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![sliver]);
         let constraints = BoxConstraints::new().max_width(200.0).max_height(400.0);
         let dry = viewport.as_box().get_dry_layout(&mut app, constraints);
         first_frame(&mut app, viewport.as_box(), constraints);
@@ -2590,7 +2593,7 @@ mod tests {
         let (first, first_paints) = test_sliver(&mut app, 100.0);
         let (second, second_paints) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![first, second]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
 
         first_frame(
             &mut app,
@@ -2620,7 +2623,7 @@ mod tests {
         let (first, _) = test_sliver(&mut app, 100.0);
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::new(&mut app, 60.0);
-        let viewport = vertical_viewport(&mut app, offset, vec![first, second]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
 
         first_frame(
             &mut app,
@@ -2646,7 +2649,7 @@ mod tests {
         let (first, _) = test_sliver(&mut app, 100.0);
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![first, second]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
         first_frame(
             &mut app,
             viewport.as_box(),
@@ -2678,7 +2681,7 @@ mod tests {
         let (first, _) = test_sliver(&mut app, 100.0);
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![first, second]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
         first_frame(
             &mut app,
             viewport.as_box(),
@@ -2706,7 +2709,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let (sliver, _) = test_sliver(&mut app, 1000.0);
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![sliver]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![sliver]);
         viewport.set_scroll_cache_extent(&mut app, Some(ScrollCacheExtent::Pixels(100.0)));
 
         first_frame(
@@ -2740,7 +2743,7 @@ mod tests {
         let viewport = RenderShrinkWrappingViewport::new(
             &mut app,
             AxisDirection::Right,
-            offset.as_viewport_offset(),
+            offset.erase(),
             Some(vec![first, second]),
         );
 
@@ -2772,7 +2775,7 @@ mod tests {
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight_for(None, Some(80.0)), None);
         let adapter = RenderSliverToBoxAdapter::new(&mut app, Some(child.as_box()));
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![adapter.as_sliver()]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![adapter.as_sliver()]);
 
         first_frame(
             &mut app,
@@ -2797,7 +2800,7 @@ mod tests {
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight_for(None, Some(80.0)), None);
         let adapter = RenderSliverToBoxAdapter::new(&mut app, Some(child.as_box()));
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![adapter.as_sliver()]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![adapter.as_sliver()]);
         first_frame(
             &mut app,
             viewport.as_box(),
@@ -2823,7 +2826,7 @@ mod tests {
         let offset = FixedViewportOffset::zero(&mut app);
         let viewport = vertical_viewport(
             &mut app,
-            offset,
+            &offset,
             vec![first.as_sliver(), second.as_sliver()],
         );
         first_frame(
@@ -2870,7 +2873,7 @@ mod tests {
         let (first, _) = test_sliver(&mut app, 100.0);
         let (second, _) = test_sliver(&mut app, 300.0);
         let offset = FixedViewportOffset::zero(&mut app);
-        let viewport = vertical_viewport(&mut app, offset, vec![first, second]);
+        let viewport = vertical_viewport(&mut app, &offset, vec![first, second]);
         first_frame(
             &mut app,
             viewport.as_box(),

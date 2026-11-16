@@ -11,6 +11,7 @@ use waft_foundation::{App, Handle, Key, LocalKey};
 use crate::framework::{
     AnyElement, BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef, downcast_widget,
 };
+use waft_foundation::Ref;
 
 /// A `Key` that can be used to persist the widget state in storage after the destruction
 /// and will be restored when recreated.
@@ -162,7 +163,7 @@ pub struct PageStorageBucket {
 
 impl PageStorageBucket {
     /// Creates an empty bucket.
-    pub fn new(app: &mut App) -> Handle<PageStorageBucket> {
+    pub fn new(app: &mut App) -> Ref<PageStorageBucket> {
         app.create(PageStorageBucket::default())
     }
 
@@ -267,14 +268,14 @@ impl PageStorageBucket {
 pub struct PageStorage {
     pub key: Option<KeyRef>,
     /// The page storage bucket to use for this subtree.
-    pub bucket: Handle<PageStorageBucket>,
+    pub bucket: Ref<PageStorageBucket>,
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
 }
 
 impl PageStorage {
     /// Creates a widget that provides a storage bucket for its descendants.
-    pub fn new<K>(bucket: Handle<PageStorageBucket>, child: impl IntoWidget<K>) -> PageStorage {
+    pub fn new<K>(bucket: Ref<PageStorageBucket>, child: impl IntoWidget<K>) -> PageStorage {
         PageStorage {
             key: None,
             bucket,
@@ -303,7 +304,7 @@ impl PageStorage {
     pub fn maybe_of(app: &App, context: BuildContext) -> Option<Handle<PageStorageBucket>> {
         context
             .find_ancestor_widget_of_exact_type::<PageStorage>(app)
-            .map(|widget| widget.bucket)
+            .map(|widget| widget.bucket.handle())
     }
 
     /// The [`PageStorageBucket`] from the closest instance of a [`PageStorage`] widget that
@@ -370,7 +371,7 @@ mod tests {
         let seen = Rc::new(RefCell::new(Vec::new()));
         let page = |seen: &Rc<RefCell<Vec<Option<i32>>>>, value: i32| {
             PageStorage::new(
-                bucket,
+                bucket.clone(),
                 Padding::new(EdgeInsetsGeometry::ZERO)
                     .key(PageStorageKey::new("page").into_key())
                     .child(probe(seen, value)),
@@ -397,12 +398,12 @@ mod tests {
         let seen = Rc::new(RefCell::new(Vec::new()));
         let harness = Harness::mount(
             &mut app,
-            PageStorage::new(bucket, probe(&seen, 1)).into_widget(),
+            PageStorage::new(bucket.clone(), probe(&seen, 1)).into_widget(),
         );
         harness.pump(&mut app);
         harness.set_child(
             &mut app,
-            PageStorage::new(bucket, probe(&seen, 2)).into_widget(),
+            PageStorage::new(bucket.clone(), probe(&seen, 2)).into_widget(),
         );
         harness.pump(&mut app);
         assert_eq!(*seen.borrow(), vec![None, None]);
@@ -415,10 +416,13 @@ mod tests {
                 SizedBox::shrink().into_widget()
             }
         });
-        harness.set_child(&mut app, PageStorage::new(bucket, capture).into_widget());
+        harness.set_child(
+            &mut app,
+            PageStorage::new(bucket.clone(), capture).into_widget(),
+        );
         harness.pump(&mut app);
         let context = context.get().expect("the probe built");
-        assert_eq!(PageStorage::maybe_of(&app, context), Some(bucket));
+        assert_eq!(PageStorage::maybe_of(&app, context), Some(bucket.handle()));
 
         let identifier: KeyRef = waft_foundation::ValueKey::new("scroll").into();
         bucket.write_state(&mut app, context, Rc::new(4.5f64), Some(identifier.clone()));

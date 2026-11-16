@@ -11,12 +11,11 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{Matrix4, Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, HandleId, Listener, Timer};
+use waft_foundation::{App, Handle, HandleId, Listener, OptionRetained, Timer};
 
 use crate::arena::{GestureArenaEntry, GestureArenaMember, GestureDisposition};
 use crate::binding::GestureBinding;
@@ -26,6 +25,8 @@ use crate::events::{PointerDownEvent, PointerEvent, PointerPanZoomStartEvent};
 use crate::gesture_settings::DeviceGestureSettings;
 use crate::pointer_router::PointerRoute;
 use crate::team::GestureArenaTeam;
+use waft_foundation::Ref;
+use waft_foundation::Retained;
 
 /// Signature for a recognizer's `allowed_buttons_filter`.
 ///
@@ -190,7 +191,7 @@ impl Default for GestureRecognizerData {
 pub struct OneSequenceData {
     pub(crate) entries: HashMap<i64, GestureArenaEntry>,
     pub(crate) tracked_pointers: HashSet<i64>,
-    pub(crate) team: Option<Handle<GestureArenaTeam>>,
+    pub(crate) team: Option<Ref<GestureArenaTeam>>,
 }
 
 impl OneSequenceData {
@@ -569,6 +570,11 @@ pub trait GestureRecognizerLeaf: Sized + 'static {
     fn as_recognizer(self: Handle<Self>) -> AnyGestureRecognizer;
 }
 
+/// A field Dart types as `GestureRecognizer`, kept: the erased recognizer with its count.
+pub type RecognizerRef = Retained<AnyGestureRecognizer>;
+
+waft_foundation::erased_handle!(AnyGestureRecognizer: GestureRecognizerLeaf => GestureRecognizerLeaf::as_recognizer);
+
 impl<R: RecognizerLeaf> GestureRecognizerLeaf for R {
     fn as_recognizer(self: Handle<Self>) -> AnyGestureRecognizer {
         AnyGestureRecognizer {
@@ -635,20 +641,6 @@ impl GestureRecognizerVTable {
 pub struct AnyGestureRecognizer {
     id: HandleId,
     vtable: &'static GestureRecognizerVTable,
-}
-
-impl PartialEq for AnyGestureRecognizer {
-    fn eq(&self, other: &AnyGestureRecognizer) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyGestureRecognizer {}
-
-impl Hash for AnyGestureRecognizer {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
 }
 
 impl fmt::Debug for AnyGestureRecognizer {
@@ -832,10 +824,9 @@ impl GestureRecognizer {
 
     /// Releases any resources used by the object.
     ///
-    /// Dart's body is a diagnostics assert and leaves the object to the collector; the arena
-    /// has no collector, so the slot goes too.
+    /// Dart's body is a diagnostics assert; the object stays readable while something keeps it.
     pub fn dispose<R: RecognizerLeaf>(this: Handle<R>, app: &mut App) {
-        app.destroy(this);
+        app.mark_disposed(this);
     }
 
     /// Invoke a callback provided by the application.
@@ -956,7 +947,7 @@ impl OneSequenceGestureRecognizer {
         app: &mut App,
         pointer: i64,
     ) -> GestureArenaEntry {
-        let team = app.get(this).one_sequence().team;
+        let team = app.get(this).one_sequence().team.handle();
         if let Some(team) = team {
             team.add(app, pointer, this)
         } else {
@@ -1261,7 +1252,10 @@ mod tests {
         assert_ne!(erased, long_press.as_recognizer());
         assert_eq!(erased.id(), tap.id());
         assert_eq!(erased.type_id(), TypeId::of::<TapGestureRecognizer>());
-        assert_eq!(erased.downcast::<TapGestureRecognizer>(&app), Some(tap));
+        assert_eq!(
+            erased.downcast::<TapGestureRecognizer>(&app),
+            Some(tap.handle())
+        );
         assert_eq!(erased.downcast::<LongPressGestureRecognizer>(&app), None);
         assert_eq!(erased.debug_description(), "tap");
         assert_eq!(long_press.as_recognizer().debug_description(), "long press");
@@ -1269,7 +1263,7 @@ mod tests {
     }
 
     #[test]
-    fn an_erased_recognizer_adds_pointers_and_dispose_frees_the_slot() {
+    fn an_erased_recognizer_adds_pointers_and_the_last_ref_frees_the_slot() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let tap = TapGestureRecognizer::new(&mut app);
@@ -1297,7 +1291,11 @@ mod tests {
         assert!(recognized.get());
 
         erased.dispose(&mut app);
-        assert!(!app.contains(erased.id()));
+        assert!(app.is_disposed(erased.id()), "dispose frees nothing");
+        drop(tap);
+        drop(app);
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(erased.id()), "the last ref did");
     }
 
     #[test]

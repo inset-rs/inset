@@ -361,6 +361,10 @@ fn a_different_widget_type_disposes_the_old_subtree_at_finalize() {
     assert!(!app.get(state).disposed, "dispose waits for finalize_tree");
     harness.pump(&mut app);
     assert_eq!(old_element.lifecycle(&app), ElementLifecycle::Defunct);
+    // The tree released the old subtree; the checkpoint frees it.
+    drop(app);
+    cell.checkpoint();
+    let app = cell.borrow();
     assert!(
         !app.contains(state),
         "the state slot is freed after dispose"
@@ -873,4 +877,54 @@ fn a_widget_names_its_type_without_its_module_path() {
         short_type_name::<Option<Labelled>>(),
         "Option<waft_widgets::framework::tests::Labelled>"
     );
+}
+
+/// Dart drops a defunct element; a `BuildContext` a callback kept reads `mounted` as false
+/// once the element is unmounted, here also after the arena has freed it at the checkpoint.
+#[test]
+fn a_kept_build_context_reads_unmounted_once_its_element_is_freed() {
+    let cell = AppCell::new();
+    let saved: Rc<Cell<Option<BuildContext>>> = Rc::new(Cell::new(None));
+    let harness = {
+        let mut app = cell.borrow_mut();
+        let saved = Rc::clone(&saved);
+        let harness = Harness::mount(
+            &mut app,
+            crate::Builder::new(move |_app, context| {
+                saved.set(Some(context));
+                Padding {
+                    key: None,
+                    padding: 1.0,
+                    child: None,
+                }
+                .into_widget()
+            })
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        harness
+    };
+    let context = saved.get().expect("the builder ran");
+    assert!(context.mounted(&cell.borrow()));
+
+    {
+        let mut app = cell.borrow_mut();
+        harness.set_child(
+            &mut app,
+            Padding {
+                key: None,
+                padding: 2.0,
+                child: None,
+            }
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert!(!context.mounted(&app), "unmounted");
+    }
+    cell.checkpoint();
+
+    let app = cell.borrow();
+    assert!(!app.contains(context.id()), "freed at the checkpoint");
+    assert!(!context.mounted(&app));
+    assert_eq!(context.lifecycle(&app), ElementLifecycle::Defunct);
 }

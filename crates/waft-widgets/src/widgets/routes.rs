@@ -1,5 +1,8 @@
 //! Flutter counterpart: `widgets/routes.dart`.
 
+use crate::widgets::actions::ActionRef;
+use crate::widgets::navigator::RouteRef;
+use crate::widgets::scroll_controller::ScrollControllerRef;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -7,12 +10,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatus,
-    AnimationStatusListener, AnyAnimation, ColorTween, Curve, CurveTween, Curves, ProxyAnimation,
-    TrainHoppingAnimation, k_always_complete_animation, k_always_dismissed_animation,
+    Animatable, Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, AnyAnimation, ColorTween, Curve, CurveTween, Curves, Drive,
+    ProxyAnimation, TrainHoppingAnimation, k_always_complete_animation,
+    k_always_dismissed_animation,
 };
 use waft_foundation::{
-    App, Completer, CompleterFuture, Handle, HandleId, Listener, MergingListenable, ValueListenable,
+    App, Completer, CompleterFuture, Handle, HandleId, Listener, MergingListenable, Retained,
+    ValueListenable,
 };
 use waft_painting::Color;
 use waft_physics::Simulation;
@@ -40,6 +45,8 @@ use crate::widgets::restoration::RestorationScope;
 use crate::widgets::scroll_controller::ScrollController;
 use crate::widgets::scroll_controller::ScrollControllerLeaf;
 use crate::widgets::transitions::{AnimatedBuilder, DelegatedTransitionBuilder, ListenableBuilder};
+use waft_foundation::OptionRetained;
+use waft_foundation::Ref;
 
 // ---------------------------------------------------------------------------------------------
 // OverlayRoute
@@ -47,7 +54,7 @@ use crate::widgets::transitions::{AnimatedBuilder, DelegatedTransitionBuilder, L
 /// The fields Dart's `OverlayRoute` declares; every overlay route carries this bag under the
 /// field `overlay_route`.
 pub struct OverlayRouteData {
-    overlay_entries: Vec<Handle<OverlayEntry>>,
+    overlay_entries: Vec<Ref<OverlayEntry>>,
 }
 
 impl OverlayRouteData {
@@ -100,11 +107,15 @@ pub trait OverlayRoute: Route {
     fn overlay_route_data_mut(self: Handle<Self>, app: &mut App) -> &mut OverlayRouteData;
 
     /// Subclasses should override this method to return the builders for the overlay.
-    fn create_overlay_entries(self: Handle<Self>, app: &mut App) -> Vec<Handle<OverlayEntry>>;
+    fn create_overlay_entries(self: Handle<Self>, app: &mut App) -> Vec<Ref<OverlayEntry>>;
 
     /// Dart's `OverlayRoute.overlayEntries`.
     fn overlay_entries(self: Handle<Self>, app: &App) -> Vec<Handle<OverlayEntry>> {
-        self.overlay_route_data(app).overlay_entries.clone()
+        self.overlay_route_data(app)
+            .overlay_entries
+            .iter()
+            .map(Retained::handle)
+            .collect()
     }
 
     /// Dart's `OverlayRoute.install`.
@@ -147,7 +158,7 @@ pub trait OverlayRoute: Route {
 
     /// Dart's `OverlayRoute.dispose`.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        for entry in self.overlay_route_data(app).overlay_entries.clone() {
+        for entry in OverlayRoute::overlay_entries(self, app) {
             entry.dispose(app);
         }
         self.overlay_route_data_mut(app).overlay_entries.clear();
@@ -163,9 +174,9 @@ pub trait OverlayRoute: Route {
 pub struct TransitionRouteData {
     transition_completer: Completer<RouteResult>,
     pop_finalized: bool,
-    animation: Option<AnyAnimation<f64>>,
-    controller: Option<Handle<AnimationController>>,
-    secondary_animation: Handle<ProxyAnimation>,
+    animation: Option<AnimationRef<f64>>,
+    controller: Option<Ref<AnimationController>>,
+    secondary_animation: Ref<ProxyAnimation>,
     /// Whether to takeover the [`controller`](TransitionRoute::controller) created by
     /// [`create_animation_controller`](TransitionRoute::create_animation_controller).
     ///
@@ -312,6 +323,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         let controller = self
             .transition_route_data(app)
             .controller
+            .handle()
             .expect("an installed route");
         controller.status(app).is_dismissed() && !self.transition_route_data(app).pop_finalized
     }
@@ -319,14 +331,14 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
     /// The animation that drives the route's transition and the previous route's forward
     /// transition.
     fn animation(self: Handle<Self>, app: &App) -> Option<AnyAnimation<f64>> {
-        self.transition_route_data(app).animation
+        self.transition_route_data(app).animation.handle()
     }
 
     /// The animation controller that the route uses to drive the transitions.
     ///
     /// The animation itself is exposed by [`animation`](Self::animation).
     fn controller(self: Handle<Self>, app: &App) -> Option<Handle<AnimationController>> {
-        self.transition_route_data(app).controller
+        self.transition_route_data(app).controller.handle()
     }
 
     /// The animation for the route being pushed on top of this route.
@@ -365,10 +377,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
     /// The returned controller will be disposed by `AnimationController::dispose` if
     /// [`will_dispose_animation_controller`](TransitionRouteData::will_dispose_animation_controller)
     /// is true.
-    fn create_animation_controller(
-        self: Handle<Self>,
-        app: &mut App,
-    ) -> Handle<AnimationController> {
+    fn create_animation_controller(self: Handle<Self>, app: &mut App) -> Ref<AnimationController> {
         debug_assert!(
             !TransitionRoute::debug_transition_completed(self, app),
             "cannot reuse a route after disposing it"
@@ -379,7 +388,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
             .as_route()
             .navigator(app)
             .expect("an installed route has a navigator");
-        AnimationController::create(
+        AnimationController::new(
             app,
             None,
             Some(duration),
@@ -394,16 +403,17 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
     /// Called to create the animation that exposes the current progress of the transition
     /// controlled by the animation controller created by
     /// [`create_animation_controller`](Self::create_animation_controller).
-    fn create_animation(self: Handle<Self>, app: &mut App) -> AnyAnimation<f64> {
+    fn create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
         debug_assert!(
             !TransitionRoute::debug_transition_completed(self, app),
             "cannot reuse a route after disposing it"
         );
-        let controller = self
-            .transition_route_data(app)
+        // Dart's `controller!.view`: the controller itself, as an animation.
+        self.transition_route_data(app)
             .controller
-            .expect("createAnimationController ran first");
-        controller.view()
+            .as_ref()
+            .expect("createAnimationController ran first")
+            .erase()
     }
 
     /// Creates the simulation that drives the transition animation for this route.
@@ -497,10 +507,11 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
             app,
             AnimationStatusListener::handle_method(self, Self::handle_status_changed),
         );
+        let animation_handle = animation.handle();
         self.transition_route_data_mut(app).animation = Some(animation);
         OverlayRoute::install(self, app);
         let entries = Route::overlay_entries(self, app);
-        if animation.is_completed(app)
+        if animation_handle.is_completed(app)
             && let Some(first) = entries.first().copied()
         {
             let opaque = TransitionRoute::opaque(self, app);
@@ -523,6 +534,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         let controller = self
             .transition_route_data(app)
             .controller
+            .handle()
             .expect("installed");
         match simulation {
             None => controller.forward(app, None),
@@ -544,6 +556,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         let controller = self
             .transition_route_data(app)
             .controller
+            .handle()
             .expect("installed");
         let upper_bound = app.get(controller).upper_bound;
         controller.set_value(app, upper_bound);
@@ -564,6 +577,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
             let controller = self
                 .transition_route_data(app)
                 .controller
+                .handle()
                 .expect("installed");
             controller.set_value(app, value);
         }
@@ -588,6 +602,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         let controller = self
             .transition_route_data(app)
             .controller
+            .handle()
             .expect("installed");
         match simulation {
             None => {
@@ -647,7 +662,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         };
 
         if let (Some(next), true) = (next, coordinates) {
-            let secondary = self.transition_route_data(app).secondary_animation;
+            let secondary = self.transition_route_data(app).secondary_animation.handle();
             match secondary.parent(app) {
                 Some(current) => {
                     let current_train = match current.downcast::<TrainHoppingAnimation>(app) {
@@ -658,6 +673,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                     if current_train.value(app) == next_train.value(app)
                         || !next_train.is_animating(app)
                     {
+                        let next_train = next_train.keep(app);
                         TransitionRoute::set_secondary_animation(
                             self,
                             app,
@@ -675,35 +691,43 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                         //  3. A new `update_secondary_animation` is called before train hopping
                         //     finishes. We leave a listener remover for the next call to
                         //     properly clean up the existing train hopping.
-                        let slot: Rc<std::cell::Cell<Option<Handle<TrainHoppingAnimation>>>> =
-                            Rc::new(std::cell::Cell::new(None));
+                        let slot: Rc<std::cell::RefCell<Option<Ref<TrainHoppingAnimation>>>> =
+                            Rc::new(std::cell::RefCell::new(None));
+                        // Registered on the next train, so it names that train and this route
+                        // bare, and does nothing once either is no longer kept.
                         let jump_on_animation_end =
                             AnimationStatusListener::new(move |status: AnimationStatus, app| {
-                                if !status.is_animating() {
-                                    // The next train has stopped animating without train
-                                    // hopping. Directly sets the secondary animation and
-                                    // disposes the `TrainHoppingAnimation`.
-                                    TransitionRoute::set_secondary_animation(
-                                        self,
-                                        app,
-                                        Some(next_train),
-                                        Some(next.completed(app)),
-                                    );
-                                    if let Some(remover) = self
-                                        .transition_route_data_mut(app)
-                                        .train_hopping_listener_remover
-                                        .take()
-                                    {
-                                        remover(app);
-                                    }
+                                if status.is_animating() || self.upgrade(app).is_none() {
+                                    return;
+                                }
+                                // The next train has stopped animating without train hopping.
+                                // Directly sets the secondary animation and disposes the
+                                // `TrainHoppingAnimation`.
+                                let kept_train = next_train.upgrade(app);
+                                TransitionRoute::set_secondary_animation(
+                                    self,
+                                    app,
+                                    kept_train,
+                                    Some(next.completed(app)),
+                                );
+                                if let Some(remover) = self
+                                    .transition_route_data_mut(app)
+                                    .train_hopping_listener_remover
+                                    .take()
+                                {
+                                    remover(app);
                                 }
                             });
+                        // The remover holds the hopping animation, and lets go of it when it
+                        // runs; the animation's own callback names it only weakly, or the two
+                        // would keep each other.
                         let remover = {
                             let listener = jump_on_animation_end.clone();
                             let slot = Rc::clone(&slot);
                             Rc::new(move |app: &mut App| {
                                 next_train.remove_status_listener(app, &listener);
-                                if let Some(animation) = slot.get() {
+                                let hopping = slot.borrow_mut().take();
+                                if let Some(animation) = hopping {
                                     animation.dispose(app);
                                 }
                             })
@@ -712,9 +736,12 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                             .train_hopping_listener_remover = Some(remover);
                         next_train.add_status_listener(app, jump_on_animation_end);
                         let on_switched_train = {
-                            let slot = Rc::clone(&slot);
+                            let slot = Rc::downgrade(&slot);
                             Listener::new(move |app| {
-                                let new_animation = slot.get().expect("the hopping animation");
+                                let new_animation = slot
+                                    .upgrade()
+                                    .and_then(|slot| slot.borrow().as_ref().map(Retained::handle))
+                                    .expect("the hopping animation, kept until the remover runs");
                                 debug_assert!(
                                     self.transition_route_data(app)
                                         .secondary_animation
@@ -725,6 +752,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                                 debug_assert!(current == next.underlying_animation(app));
                                 // We can hop on the next train, so we don't need to listen to
                                 // whether the next train has stopped.
+                                let current = current.and_then(|current| current.upgrade(app));
                                 TransitionRoute::set_secondary_animation(
                                     self,
                                     app,
@@ -740,22 +768,23 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                                 }
                             })
                         };
-                        let new_animation = TrainHoppingAnimation::create(
+                        let current_train = current_train.keep(app);
+                        let kept_next_train = next_train.keep(app);
+                        let new_animation = TrainHoppingAnimation::new(
                             app,
                             current_train,
-                            Some(next_train),
+                            Some(kept_next_train),
                             Some(on_switched_train),
                         );
-                        slot.set(Some(new_animation));
-                        self.set_secondary_animation(
-                            app,
-                            Some(new_animation.as_animation()),
-                            Some(next.completed(app)),
-                        );
+                        let erased: AnimationRef<f64> = new_animation.erase();
+                        *slot.borrow_mut() = Some(new_animation);
+                        self.set_secondary_animation(app, Some(erased), Some(next.completed(app)));
                     }
                 }
                 None => {
-                    let animation = next.underlying_animation(app);
+                    let animation = next
+                        .underlying_animation(app)
+                        .and_then(|animation| animation.upgrade(app));
                     TransitionRoute::set_secondary_animation(
                         self,
                         app,
@@ -779,18 +808,19 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
     fn set_secondary_animation(
         self: Handle<Self>,
         app: &mut App,
-        animation: Option<AnyAnimation<f64>>,
+        animation: Option<AnimationRef<f64>>,
         disposed: Option<CompleterFuture<RouteResult>>,
     ) {
-        let secondary = self.transition_route_data(app).secondary_animation;
+        let secondary = self.transition_route_data(app).secondary_animation.clone();
+        let animation_handle = animation.handle();
         secondary.set_parent(app, animation);
         // Releases the reference to the next route's animation when that route is disposed.
         if let Some(disposed) = disposed {
             disposed.then(app, move |app, _| {
-                if secondary.parent(app) == animation {
+                if secondary.parent(app) == animation_handle {
                     let dismissed = k_always_dismissed_animation(app);
                     secondary.set_parent(app, Some(dismissed));
-                    if let Some(animation) = animation
+                    if let Some(animation) = animation_handle
                         && let Some(hopping) = animation.downcast::<TrainHoppingAnimation>(app)
                     {
                         hopping.dispose(app);
@@ -833,7 +863,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
     /// Dart's `TransitionRoute.handleStartBackGesture`.
     fn handle_start_back_gesture(self: Handle<Self>, app: &mut App, progress: f64) {
         debug_assert!(self.as_route().is_current(app));
-        if let Some(controller) = self.transition_route_data(app).controller {
+        if let Some(controller) = self.transition_route_data(app).controller.handle() {
             controller.set_value(app, progress);
         }
         if let Some(navigator) = self.as_route().navigator(app) {
@@ -848,7 +878,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         if !self.as_route().is_current(app) {
             return;
         }
-        if let Some(controller) = self.transition_route_data(app).controller {
+        if let Some(controller) = self.transition_route_data(app).controller.handle() {
             controller.set_value(app, progress);
         }
     }
@@ -869,6 +899,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
             let controller = self
                 .transition_route_data(app)
                 .controller
+                .handle()
                 .expect("installed");
             if animate_forward {
                 // Typically, `handle_update_back_gesture_progress` will have already completed
@@ -882,7 +913,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                     navigator.pop(app, None);
                 }
                 // The popping may have finished inline if already at the target destination.
-                if let Some(controller) = self.transition_route_data(app).controller
+                if let Some(controller) = self.transition_route_data(app).controller.handle()
                     && controller.is_animating(app)
                 {
                     let upper_bound = app.get(controller).upper_bound;
@@ -891,7 +922,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
             }
         }
 
-        let controller = self.transition_route_data(app).controller;
+        let controller = self.transition_route_data(app).controller.handle();
         let animating = match controller {
             Some(controller) => controller.is_animating(app),
             None => false,
@@ -900,21 +931,25 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
             // Keep `user_gesture_in_progress` true, since the Android back-gesture page
             // transition depends on it.
             let controller = controller.expect("an animating controller");
-            let slot: Rc<std::cell::RefCell<Option<AnimationStatusListener>>> =
-                Rc::new(std::cell::RefCell::new(None));
+            // The listener removes itself, naming itself weakly: it lives in the controller's
+            // list and goes with it.
+            let me: Rc<std::cell::OnceCell<waft_animation::WeakAnimationStatusListener>> =
+                Rc::default();
             let listener = {
-                let slot = Rc::clone(&slot);
+                let me = Rc::clone(&me);
                 AnimationStatusListener::new(move |_status, app| {
                     if let Some(navigator) = self.as_route().navigator(app) {
                         navigator.did_stop_user_gesture(app);
                     }
-                    let registered = slot.borrow().clone();
-                    if let Some(registered) = registered {
+                    if let Some(registered) = me
+                        .get()
+                        .and_then(waft_animation::WeakAnimationStatusListener::upgrade)
+                    {
                         controller.remove_status_listener(app, &registered);
                     }
                 })
             };
-            *slot.borrow_mut() = Some(listener.clone());
+            let _ = me.set(listener.downgrade());
             controller.add_status_listener(app, listener);
         } else if let Some(navigator) = self.as_route().navigator(app) {
             navigator.did_stop_user_gesture(app);
@@ -930,7 +965,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                 .is_completed(),
             "cannot dispose a route twice"
         );
-        if let Some(animation) = self.transition_route_data(app).animation {
+        if let Some(animation) = self.transition_route_data(app).animation.handle() {
             animation.remove_status_listener(
                 app,
                 &AnimationStatusListener::handle_method(self, Self::handle_status_changed),
@@ -939,18 +974,13 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         if self
             .transition_route_data(app)
             .will_dispose_animation_controller
-            && let Some(controller) = self.transition_route_data(app).controller
+            && let Some(controller) = self.transition_route_data(app).controller.handle()
         {
             controller.dispose(app);
         }
         let result = self.transition_route_data(app).result.clone();
         let transition_completer = self.transition_route_data(app).transition_completer.clone();
         transition_completer.complete(app, result);
-        // The navigator disposes a route once its overlay entries have unmounted, so nothing
-        // reads what its last builds made any more.
-        if let Some(modal_route) = self.as_route().as_modal_route(app) {
-            modal_route.free_last_build_objects(app);
-        }
         OverlayRoute::dispose(self, app);
     }
 
@@ -991,12 +1021,15 @@ impl TransitionRouteVTable {
             route: |id| Route::as_route(resolve::<R>(id)),
             animation: |app, id| R::animation(resolve(id), app),
             underlying_animation: |app, id| {
-                R::transition_route_data(resolve::<R>(id), app).animation
+                R::transition_route_data(resolve::<R>(id), app)
+                    .animation
+                    .handle()
             },
             controller: |app, id| R::controller(resolve(id), app),
             controller_value: |app, id| {
                 let controller = R::transition_route_data(resolve::<R>(id), app)
                     .controller
+                    .handle()
                     .expect("an installed route");
                 controller.value(app)
             },
@@ -1037,13 +1070,17 @@ pub struct AnyTransitionRoute {
     vtable: &'static TransitionRouteVTable,
 }
 
-impl PartialEq for AnyTransitionRoute {
-    fn eq(&self, other: &AnyTransitionRoute) -> bool {
-        self.id == other.id
+/// A kept route as a [`RouteRef`], through [`Retained::erase`]: Dart's upcast.
+impl From<AnyTransitionRoute> for AnyRoute {
+    fn from(route: AnyTransitionRoute) -> AnyRoute {
+        route.as_route()
     }
 }
 
-impl Eq for AnyTransitionRoute {}
+/// A field Dart types as the erased object, kept: AnyTransitionRoute with its count.
+pub type TransitionRouteRef = Retained<AnyTransitionRoute>;
+
+waft_foundation::erased_handle!(AnyTransitionRoute: TransitionRoute => TransitionRoute::as_transition_route);
 
 impl Debug for AnyTransitionRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1186,7 +1223,7 @@ impl LocalHistoryEntry {
     /// are the setters.
     ///
     /// [`implies_app_bar_dismissal`](Self::implies_app_bar_dismissal) defaults to true.
-    pub fn new(app: &mut App) -> Handle<LocalHistoryEntry> {
+    pub fn new(app: &mut App) -> Ref<LocalHistoryEntry> {
         app.create(LocalHistoryEntry {
             on_remove: None,
             owner: None,
@@ -1195,18 +1232,18 @@ impl LocalHistoryEntry {
     }
 
     /// Dart `LocalHistoryEntry(onRemove:)`.
-    pub fn on_remove(self: Handle<Self>, app: &mut App, on_remove: Listener) -> Handle<Self> {
-        app.get_mut(self).on_remove = Some(on_remove);
+    pub fn on_remove(self: Ref<Self>, app: &mut App, on_remove: Listener) -> Ref<Self> {
+        app.get_mut(&self).on_remove = Some(on_remove);
         self
     }
 
     /// Dart `LocalHistoryEntry(impliesAppBarDismissal:)`.
     pub fn implies_app_bar_dismissal(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         implies_app_bar_dismissal: bool,
-    ) -> Handle<Self> {
-        app.get_mut(self).implies_app_bar_dismissal = implies_app_bar_dismissal;
+    ) -> Ref<Self> {
+        app.get_mut(&self).implies_app_bar_dismissal = implies_app_bar_dismissal;
         self
     }
 
@@ -1237,7 +1274,7 @@ impl Debug for LocalHistoryEntry {
 /// The fields Dart's `LocalHistoryRoute` mixin declares; every route that mixes it in carries
 /// this bag under the field `local_history`.
 pub struct LocalHistoryRouteData {
-    local_history: Option<Vec<Handle<LocalHistoryEntry>>>,
+    local_history: Option<Vec<Ref<LocalHistoryEntry>>>,
     entries_implies_app_bar_dismissal: i64,
 }
 
@@ -1302,19 +1339,16 @@ pub trait LocalHistoryRoute: TransitionRoute {
     /// the pop internally by removing the most recently added local history entry.
     ///
     /// The given local history entry must not already be part of another local history route.
-    fn add_local_history_entry(
-        self: Handle<Self>,
-        app: &mut App,
-        entry: Handle<LocalHistoryEntry>,
-    ) {
-        debug_assert!(app.get(entry).owner.is_none());
-        app.get_mut(entry).owner = Some(self.as_route());
+    fn add_local_history_entry(self: Handle<Self>, app: &mut App, entry: Ref<LocalHistoryEntry>) {
+        debug_assert!(app.get(&entry).owner.is_none());
+        app.get_mut(&entry).owner = Some(self.as_route());
+        let implies_app_bar_dismissal = app.get(&entry).implies_app_bar_dismissal;
         let data = self.local_history_route_data_mut(app);
         let history = data.local_history.get_or_insert_with(Vec::new);
         let was_empty = history.is_empty();
         history.push(entry);
         let mut internal_state_changed = false;
-        if app.get(entry).implies_app_bar_dismissal {
+        if implies_app_bar_dismissal {
             let data = self.local_history_route_data_mut(app);
             internal_state_changed = data.entries_implies_app_bar_dismissal == 0;
             data.entries_implies_app_bar_dismissal += 1;
@@ -1335,8 +1369,8 @@ pub trait LocalHistoryRoute: TransitionRoute {
         debug_assert!(app.get(entry).owner == Some(self.as_route()));
         let data = self.local_history_route_data_mut(app);
         let history = data.local_history.as_mut().expect("a local history");
-        debug_assert!(history.contains(&entry));
-        let position = history.iter().position(|held| *held == entry);
+        debug_assert!(history.iter().any(|held| held == entry));
+        let position = history.iter().position(|held| held == entry);
         let mut internal_state_changed = false;
         if let Some(position) = position {
             history.remove(position);
@@ -1362,7 +1396,7 @@ pub trait LocalHistoryRoute: TransitionRoute {
                 SchedulerBinding::add_post_frame_callback(
                     app,
                     FrameCallback::new(move |app, _duration| {
-                        if self.as_route().is_active(app) {
+                        if self.upgrade(app).is_some() && self.as_route().is_active(app) {
                             Route::changed_internal_state(self, app);
                         }
                     }),
@@ -1400,11 +1434,11 @@ pub trait LocalHistoryRoute: TransitionRoute {
             .as_mut()
             .and_then(Vec::pop);
         if let Some(entry) = last {
-            debug_assert!(app.get(entry).owner == Some(self.as_route()));
-            app.get_mut(entry).owner = None;
+            debug_assert!(app.get(&entry).owner == Some(self.as_route()));
+            app.get_mut(&entry).owner = None;
             entry.notify_removed(app);
             let mut internal_state_changed = false;
-            if app.get(entry).implies_app_bar_dismissal {
+            if app.get(&entry).implies_app_bar_dismissal {
                 let data = self.local_history_route_data_mut(app);
                 data.entries_implies_app_bar_dismissal -= 1;
                 internal_state_changed = data.entries_implies_app_bar_dismissal == 0;
@@ -1441,7 +1475,7 @@ struct DismissModalAction {
 }
 
 impl DismissModalAction {
-    fn new(app: &mut App, context: BuildContext) -> Handle<DismissModalAction> {
+    fn new(app: &mut App, context: BuildContext) -> Ref<DismissModalAction> {
         app.create(DismissModalAction {
             action: ActionData::new(),
             context,
@@ -1495,7 +1529,7 @@ struct ModalScopeStatus {
     can_pop: bool,
     implies_app_bar_dismissal: bool,
     opaque: bool,
-    route: AnyModalRoute,
+    route: ModalRouteRef,
     child: WidgetRef,
 }
 
@@ -1565,7 +1599,6 @@ impl StatefulWidget for ModalScope {
             focus_scope_node: None,
             primary_scroll_controller: None,
             no_gesture_in_progress: None,
-            dismiss_action: None,
         }
     }
 }
@@ -1580,32 +1613,20 @@ struct ModalScopeState {
     page: Option<WidgetRef>,
     // This is the combination of the two animations for the route.
     listenable: Option<Rc<MergingListenable>>,
-    focus_scope_node: Option<Handle<FocusScopeNode>>,
-    primary_scroll_controller: Option<Handle<ScrollController>>,
-    no_gesture_in_progress: Option<Handle<waft_foundation::ValueNotifier<bool>>>,
-    /// The `_DismissModalAction` the last build made, which Dart's collector frees once the
-    /// next build replaces it; that build, or `dispose`, frees it here.
-    dismiss_action: Option<Handle<DismissModalAction>>,
+    focus_scope_node: Option<Ref<FocusScopeNode>>,
+    primary_scroll_controller: Option<Ref<ScrollController>>,
+    /// The notifier a scope whose route has no navigator listens to, where Dart makes a fresh
+    /// `ValueNotifier<bool>(false)` in each build.
+    no_gesture_in_progress: Option<Ref<waft_foundation::ValueNotifier<bool>>>,
 }
 
 impl ModalScopeState {
-    /// Keeps `made`, this build's dismiss action, and frees the last build's.
-    ///
-    /// It lingers until the next checkpoint: the `Actions` built with it removes its listener
-    /// from it only when this build's replaces it.
-    fn replace_dismiss_action(
-        self: Handle<Self>,
-        app: &mut App,
-        made: Option<Handle<DismissModalAction>>,
-    ) {
-        if let Some(replaced) = std::mem::replace(&mut app.get_mut(self).dismiss_action, made) {
-            app.destroy_lingering(replaced);
-        }
-    }
-
     /// The node this scope uses for its root `FocusScope` widget.
     fn focus_scope_node(self: Handle<Self>, app: &App) -> Handle<FocusScopeNode> {
-        app.get(self).focus_scope_node.expect("init_state has run")
+        app.get(self)
+            .focus_scope_node
+            .handle()
+            .expect("init_state has run")
     }
 
     fn route(self: Handle<Self>, app: &App) -> AnyModalRoute {
@@ -1698,13 +1719,12 @@ impl State for ModalScopeState {
         app.get_mut(self).no_gesture_in_progress =
             Some(app.create(waft_foundation::ValueNotifier::new(false)));
         let route = self.route(app);
+        let as_listenable = |animation: AnyAnimation<f64>| {
+            Rc::new(animation.keep(app)) as Rc<dyn waft_foundation::Listenable>
+        };
         let animations: Vec<Option<Rc<dyn waft_foundation::Listenable>>> = vec![
-            route
-                .animation(app)
-                .map(|animation| Rc::new(animation) as Rc<dyn waft_foundation::Listenable>),
-            route
-                .secondary_animation(app)
-                .map(|animation| Rc::new(animation) as Rc<dyn waft_foundation::Listenable>),
+            route.animation(app).map(as_listenable),
+            route.secondary_animation(app).map(as_listenable),
         ];
         app.get_mut(self).listenable = Some(Rc::new(MergingListenable::new(animations)));
     }
@@ -1722,14 +1742,23 @@ impl State for ModalScopeState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let node = self.focus_scope_node(app);
         node.dispose(app);
-        let controller = app.get(self).primary_scroll_controller.expect("init_state");
+        let controller = app
+            .get(self)
+            .primary_scroll_controller
+            .handle()
+            .expect("init_state");
         ScrollController::dispose(controller.as_controller(), app);
-        self.replace_dismiss_action(app, None);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        // The widgets built here keep the route, as Dart's closures over `widget.route` do.
         let route = self.route(app);
-        let node = self.focus_scope_node(app);
+        let route_kept = route.keep(app);
+        let node = app
+            .get(self)
+            .focus_scope_node
+            .clone()
+            .expect("init_state has run");
         // Only the top-most route can participate in focus traversal.
         let is_current = route.as_route().is_current(app);
         node.set_skip_traversal(app, !is_current);
@@ -1737,12 +1766,12 @@ impl State for ModalScopeState {
         let page = match app.get(self).page.clone() {
             Some(page) => page,
             None => {
+                let page_route = route_kept.clone();
                 let page = RepaintBoundary::new()
                     .key(route.subtree_key(app).into())
                     .child(Builder::new(move |app, context| {
-                        let animation = route.animation(app).expect("an installed route");
-                        let secondary = route.secondary_animation(app).expect("an installed route");
-                        route.build_page(app, context, animation, secondary)
+                        let (animation, secondary) = page_route.animations(app);
+                        page_route.build_page(app, context, animation, secondary)
                     }))
                     .into_widget();
                 app.get_mut(self).page = Some(page.clone());
@@ -1750,17 +1779,27 @@ impl State for ModalScopeState {
             }
         };
 
-        let gesture_notifier: Rc<dyn waft_foundation::Listenable> =
-            match route.as_route().navigator(app) {
-                Some(navigator) => Rc::new(navigator.user_gesture_in_progress_notifier(app)),
-                None => Rc::new(app.get(self).no_gesture_in_progress.expect("init_state")),
-            };
+        let gesture_notifier: Rc<dyn waft_foundation::Listenable> = match route
+            .as_route()
+            .navigator(app)
+        {
+            Some(navigator) => Rc::new(navigator.user_gesture_in_progress_notifier(app).keep(app)),
+            None => Rc::new(
+                app.get(self)
+                    .no_gesture_in_progress
+                    .clone()
+                    .expect("init_state"),
+            ),
+        };
         let listenable = app.get(self).listenable.clone().expect("init_state");
 
+        let transitions_route = route_kept.clone();
+        let transitions_node = node.clone();
         let transitions = ListenableBuilder::new(listenable, move |app, context, child| {
+            let route = &transitions_route;
+            let node = transitions_node.clone();
             let child = child.cloned().expect("the cached page");
-            let animation = route.animation(app).expect("an installed route");
-            let secondary = route.secondary_animation(app).expect("an installed route");
+            let (animation, secondary) = route.animations(app);
             // This additional builder is included because if the value of the user-gesture
             // notifier changes, it is only necessary to rebuild the `IgnorePointer` widget and
             // set the focus node's ability to focus.
@@ -1783,29 +1822,34 @@ impl State for ModalScopeState {
         .into_widget();
 
         let scope_child = Builder::new(move |app, context| {
-            let dismiss_action = DismissModalAction::new(app, context);
-            self.replace_dismiss_action(app, Some(dismiss_action));
+            let dismiss_action: ActionRef = DismissModalAction::new(app, context).into_erased();
             let mut actions = HashMap::new();
             actions.insert(
                 <DismissModalAction as Action>::intent_type(),
-                Action::as_action(dismiss_action),
+                dismiss_action,
             );
-            let controller = app.get(self).primary_scroll_controller.expect("init_state");
+            let controller: ScrollControllerRef = app
+                .get(self)
+                .primary_scroll_controller
+                .as_ref()
+                .expect("init_state")
+                .erase();
             Actions::new(
                 actions,
                 PrimaryScrollController::new(
-                    controller.as_controller(),
+                    controller,
                     FocusScope::with_external_focus_node(
                         RepaintBoundary::new().child(transitions.clone()),
-                        node,
+                        node.clone(),
                     ),
                 ),
             )
             .into_widget()
         });
 
+        let storage_bucket = route.storage_bucket(app).keep(app);
         let status = ModalScopeStatus {
-            route,
+            route: route_kept,
             // `route_set_state` is called if any of these update.
             is_current,
             can_pop: route.can_pop(app),
@@ -1813,16 +1857,16 @@ impl State for ModalScopeState {
             implies_app_bar_dismissal: route.implies_app_bar_dismissal(app),
             child: Offstage::new()
                 .offstage(route.offstage(app))
-                .child(PageStorage::new(route.storage_bucket(app), scope_child))
+                .child(PageStorage::new(storage_bucket, scope_child))
                 .into_widget(),
         };
 
-        let restoration_scope_id = route.as_route().restoration_scope_id(app);
+        let restoration_scope_id = route.as_route().restoration_scope_id(app).keep(app);
         AnimatedBuilder::new(
-            Rc::new(restoration_scope_id),
+            Rc::new(restoration_scope_id.clone()),
             move |app, _context, child| {
                 let child = child.cloned().expect("the modal scope status");
-                let id = app.get(restoration_scope_id).value().clone();
+                let id = app.get(&restoration_scope_id).value().clone();
                 RestorationScope::new(id, child).into_widget()
             },
         )
@@ -1860,22 +1904,15 @@ pub struct ModalRouteData {
     /// stack. If not `None`, it wraps the route content.
     pub received_transition: Option<DelegatedTransitionBuilder>,
     offstage: bool,
-    animation_proxy: Option<Handle<ProxyAnimation>>,
-    secondary_animation_proxy: Option<Handle<ProxyAnimation>>,
+    animation_proxy: Option<Ref<ProxyAnimation>>,
+    secondary_animation_proxy: Option<Ref<ProxyAnimation>>,
     pop_entries: Vec<Rc<dyn PopEntry>>,
     scope_key: GlobalKey,
     subtree_key: GlobalKey,
-    storage_bucket: Handle<PageStorageBucket>,
-    modal_barrier: Option<Handle<OverlayEntry>>,
-    modal_scope: Option<Handle<OverlayEntry>>,
+    storage_bucket: Ref<PageStorageBucket>,
+    modal_barrier: Option<Ref<OverlayEntry>>,
+    modal_scope: Option<Ref<OverlayEntry>>,
     modal_scope_cache: Option<WidgetRef>,
-    /// The tweens and the colour animation the last `build_modal_barrier` drove, which Dart's
-    /// collector frees once the next build replaces them; that build frees them here.
-    barrier_animations: Vec<HandleId>,
-    /// The static proxy the last `_buildFlexibleTransitions` handed this route's transitions
-    /// in place of the secondary animation, which they read across frames until the next one
-    /// replaces it; Dart's collector frees it then, and that build frees it here.
-    flexible_transitions_proxy: Option<Handle<ProxyAnimation>>,
 }
 
 impl ModalRouteData {
@@ -1896,8 +1933,6 @@ impl ModalRouteData {
             modal_barrier: None,
             modal_scope: None,
             modal_scope_cache: None,
-            barrier_animations: Vec::new(),
-            flexible_transitions_proxy: None,
         }
     }
 }
@@ -1983,8 +2018,8 @@ pub trait ModalRoute: LocalHistoryRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef;
 
     /// Override this method to wrap the `child` with one or more transition widgets that define
@@ -1999,8 +2034,8 @@ pub trait ModalRoute: LocalHistoryRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let _ = (app, context, animation, secondary_animation);
@@ -2030,13 +2065,12 @@ pub trait ModalRoute: LocalHistoryRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let received = self.modal_route_data(app).received_transition.clone();
         let Some(received) = received else {
-            self.replace_flexible_transitions_proxy(app, None);
             return ModalRoute::build_transitions(
                 self,
                 app,
@@ -2047,7 +2081,6 @@ pub trait ModalRoute: LocalHistoryRoute {
             );
         };
         if secondary_animation.is_dismissed(app) {
-            self.replace_flexible_transitions_proxy(app, None);
             return ModalRoute::build_transitions(
                 self,
                 app,
@@ -2059,14 +2092,13 @@ pub trait ModalRoute: LocalHistoryRoute {
         }
 
         // Create a static proxy animation to suppress the original secondary transition.
-        let proxy_animation = ProxyAnimation::new(app, None);
-        self.replace_flexible_transitions_proxy(app, Some(proxy_animation));
+        let proxy_animation: AnimationRef<f64> = ProxyAnimation::new(app, None).into_erased();
         let proxied_original_transitions = ModalRoute::build_transitions(
             self,
             app,
             context,
-            animation,
-            proxy_animation.as_animation(),
+            animation.clone(),
+            proxy_animation,
             child,
         );
 
@@ -2089,11 +2121,9 @@ pub trait ModalRoute: LocalHistoryRoute {
     /// Dart's `ModalRoute.install`.
     fn install(self: Handle<Self>, app: &mut App) {
         TransitionRoute::install(self, app);
-        let animation = self.transition_route_data(app).animation;
-        let secondary = self
-            .transition_route_data(app)
-            .secondary_animation
-            .as_animation();
+        let animation = self.transition_route_data(app).animation.clone();
+        let secondary: AnimationRef<f64> =
+            self.transition_route_data(app).secondary_animation.erase();
         self.modal_route_data_mut(app).animation_proxy = Some(ProxyAnimation::new(app, animation));
         self.modal_route_data_mut(app).secondary_animation_proxy =
             Some(ProxyAnimation::new(app, Some(secondary)));
@@ -2244,23 +2274,23 @@ pub trait ModalRoute: LocalHistoryRoute {
         let animation_proxy = self
             .modal_route_data(app)
             .animation_proxy
+            .handle()
             .expect("installed");
         let parent = if offstage {
             Some(k_always_complete_animation(app))
         } else {
-            self.transition_route_data(app).animation
+            self.transition_route_data(app).animation.clone()
         };
         animation_proxy.set_parent(app, parent);
         let secondary_proxy = self
             .modal_route_data(app)
             .secondary_animation_proxy
+            .handle()
             .expect("installed");
         let parent = if offstage {
             k_always_dismissed_animation(app)
         } else {
-            self.transition_route_data(app)
-                .secondary_animation
-                .as_animation()
+            self.transition_route_data(app).secondary_animation.erase()
         };
         secondary_proxy.set_parent(app, Some(parent));
         Route::changed_internal_state(self, app);
@@ -2276,6 +2306,7 @@ pub trait ModalRoute: LocalHistoryRoute {
     fn animation(self: Handle<Self>, app: &App) -> Option<AnyAnimation<f64>> {
         self.modal_route_data(app)
             .animation_proxy
+            .handle()
             .map(Animation::as_animation)
     }
 
@@ -2283,6 +2314,7 @@ pub trait ModalRoute: LocalHistoryRoute {
     fn secondary_animation(self: Handle<Self>, app: &App) -> Option<AnyAnimation<f64>> {
         self.modal_route_data(app)
             .secondary_animation_proxy
+            .handle()
             .map(Animation::as_animation)
     }
 
@@ -2377,6 +2409,9 @@ pub trait ModalRoute: LocalHistoryRoute {
                 SchedulerBinding::add_post_frame_callback(
                     app,
                     FrameCallback::new(move |app, _time_stamp| {
+                        if self.upgrade(app).is_none() {
+                            return;
+                        }
                         let context = ModalRoute::subtree_context(self, app);
                         if !context.is_some_and(|context| context.mounted(app)) {
                             return;
@@ -2442,18 +2477,30 @@ pub trait ModalRoute: LocalHistoryRoute {
             ModalRoute::set_state(self, app, |_app| {
                 // The internal state already changed.
             });
-            let barrier = self.modal_route_data(app).modal_barrier.expect("installed");
+            let barrier = self
+                .modal_route_data(app)
+                .modal_barrier
+                .handle()
+                .expect("installed");
             barrier.mark_needs_build(app);
         }
         let maintain_state = ModalRoute::maintain_state(self, app);
-        let scope = self.modal_route_data(app).modal_scope.expect("installed");
+        let scope = self
+            .modal_route_data(app)
+            .modal_scope
+            .handle()
+            .expect("installed");
         scope.set_maintain_state(app, maintain_state);
     }
 
     /// Dart's `ModalRoute.changedExternalState`.
     fn changed_external_state(self: Handle<Self>, app: &mut App) {
         RouteBase::changed_external_state(self, app);
-        let barrier = self.modal_route_data(app).modal_barrier.expect("installed");
+        let barrier = self
+            .modal_route_data(app)
+            .modal_barrier
+            .handle()
+            .expect("installed");
         barrier.mark_needs_build(app);
         let key = self.modal_route_data(app).scope_key.clone();
         if let Some(state) = key.current_state::<ModalScopeState>(app) {
@@ -2549,7 +2596,7 @@ pub trait ModalRoute: LocalHistoryRoute {
     }
 
     /// Dart's `ModalRoute.createOverlayEntries`.
-    fn create_overlay_entries(self: Handle<Self>, app: &mut App) -> Vec<Handle<OverlayEntry>> {
+    fn create_overlay_entries(self: Handle<Self>, app: &mut App) -> Vec<Ref<OverlayEntry>> {
         let barrier = OverlayEntry::new(
             app,
             Rc::new(move |app, context| ModalRoute::build_modal_barrier_entry(self, app, context)),
@@ -2557,7 +2604,7 @@ pub trait ModalRoute: LocalHistoryRoute {
             false,
             false,
         );
-        self.modal_route_data_mut(app).modal_barrier = Some(barrier);
+        self.modal_route_data_mut(app).modal_barrier = Some(barrier.clone());
         let maintain_state = ModalRoute::maintain_state(self, app);
         let opaque = TransitionRoute::opaque(self, app);
         let scope = OverlayEntry::new(
@@ -2567,7 +2614,7 @@ pub trait ModalRoute: LocalHistoryRoute {
             maintain_state,
             opaque,
         );
-        self.modal_route_data_mut(app).modal_scope = Some(scope);
+        self.modal_route_data_mut(app).modal_scope = Some(scope.clone());
         vec![barrier, scope]
     }
 }
@@ -2589,64 +2636,24 @@ pub trait ModalRouteBase: ModalRoute {
                 // `changed_internal_state` is called if the barrier color or offstage updates.
                 let transparent = barrier_color.with_values(Some(0.0), None, None, None, None);
                 debug_assert!(barrier_color != transparent);
-                let animation = TransitionRoute::animation(self, app).expect("an installed route");
+                let animation = TransitionRoute::animation(self, app)
+                    .expect("an installed route keeps its animation")
+                    .keep(app);
                 let curve = ModalRoute::barrier_curve(self, app);
                 let color_tween = ColorTween::new(app, Some(transparent), Some(barrier_color));
                 let curve_tween = CurveTween::new(app, curve);
                 let color = animation.drive(app, color_tween.chain(curve_tween));
-                self.replace_barrier_animations(
-                    app,
-                    vec![color_tween.into(), curve_tween.into(), color.id()],
-                );
                 AnimatedModalBarrier::new(color)
                     .dismissible(dismissible)
                     .barrier_semantics_dismissible(semantics_dismissible)
                     .maybe_semantics_label(semantics_label)
                     .into_widget()
             }
-            _ => {
-                self.replace_barrier_animations(app, Vec::new());
-                ModalBarrier::new()
-                    .dismissible(dismissible)
-                    .barrier_semantics_dismissible(semantics_dismissible)
-                    .maybe_semantics_label(semantics_label)
-                    .into_widget()
-            }
-        }
-    }
-
-    /// Keeps `made`, the proxy this `_buildFlexibleTransitions` hands the transitions, and
-    /// frees the last one; it lingers until the next checkpoint, for the transitions built
-    /// with it to move to this build's.
-    fn replace_flexible_transitions_proxy(
-        self: Handle<Self>,
-        app: &mut App,
-        made: Option<Handle<ProxyAnimation>>,
-    ) {
-        if let Some(replaced) = std::mem::replace(
-            &mut self.modal_route_data_mut(app).flexible_transitions_proxy,
-            made,
-        ) {
-            app.destroy_lingering(replaced);
-        }
-    }
-
-    /// Frees what the route's last builds made and still keeps — the barrier's tweens and
-    /// animation and the transitions' proxy — which Dart's collector frees with the route.
-    fn free_last_build_objects(self: Handle<Self>, app: &mut App) {
-        self.replace_barrier_animations(app, Vec::new());
-        self.replace_flexible_transitions_proxy(app, None);
-    }
-
-    /// Keeps `made`, what this build of the barrier drove, and frees what the last build drove.
-    ///
-    /// They linger until the next checkpoint: the barrier built from them moves off them only
-    /// when this build's barrier replaces it.
-    fn replace_barrier_animations(self: Handle<Self>, app: &mut App, made: Vec<HandleId>) {
-        let replaced =
-            std::mem::replace(&mut self.modal_route_data_mut(app).barrier_animations, made);
-        for replaced in replaced {
-            app.destroy_lingering(replaced);
+            _ => ModalBarrier::new()
+                .dismissible(dismissible)
+                .barrier_semantics_dismissible(semantics_dismissible)
+                .maybe_semantics_label(semantics_label)
+                .into_widget(),
         }
     }
 }
@@ -2658,8 +2665,8 @@ type BuildFlexibleTransitionsSlot = fn(
     &mut App,
     HandleId,
     BuildContext,
-    AnyAnimation<f64>,
-    AnyAnimation<f64>,
+    AnimationRef<f64>,
+    AnimationRef<f64>,
     WidgetRef,
 ) -> WidgetRef;
 
@@ -2689,13 +2696,12 @@ struct ModalRouteVTable {
     subtree_key: fn(&App, HandleId) -> GlobalKey,
     subtree_context: fn(&mut App, HandleId) -> Option<BuildContext>,
     build_page:
-        fn(&mut App, HandleId, BuildContext, AnyAnimation<f64>, AnyAnimation<f64>) -> WidgetRef,
+        fn(&mut App, HandleId, BuildContext, AnimationRef<f64>, AnimationRef<f64>) -> WidgetRef,
     build_flexible_transitions: BuildFlexibleTransitionsSlot,
-    add_local_history_entry: fn(&mut App, HandleId, Handle<LocalHistoryEntry>),
+    add_local_history_entry: fn(&mut App, HandleId, Ref<LocalHistoryEntry>),
     remove_local_history_entry: fn(&mut App, HandleId, Handle<LocalHistoryEntry>),
     register_pop_entry: fn(&mut App, HandleId, Rc<dyn PopEntry>),
     unregister_pop_entry: fn(&mut App, HandleId, Rc<dyn PopEntry>),
-    free_last_build_objects: fn(&mut App, HandleId),
 }
 
 impl ModalRouteVTable {
@@ -2725,7 +2731,11 @@ impl ModalRouteVTable {
             directional_traversal_edge_behavior: |app, id| {
                 R::modal_route_data(resolve::<R>(id), app).directional_traversal_edge_behavior
             },
-            storage_bucket: |app, id| R::modal_route_data(resolve::<R>(id), app).storage_bucket,
+            storage_bucket: |app, id| {
+                R::modal_route_data(resolve::<R>(id), app)
+                    .storage_bucket
+                    .handle()
+            },
             subtree_key: |app, id| {
                 R::modal_route_data(resolve::<R>(id), app)
                     .subtree_key
@@ -2753,9 +2763,6 @@ impl ModalRouteVTable {
             },
             register_pop_entry: |app, id, entry| R::register_pop_entry(resolve(id), app, entry),
             unregister_pop_entry: |app, id, entry| R::unregister_pop_entry(resolve(id), app, entry),
-            free_last_build_objects: |app, id| {
-                ModalRouteBase::free_last_build_objects(resolve::<R>(id), app)
-            },
         }
     }
 }
@@ -2768,19 +2775,23 @@ pub struct AnyModalRoute {
     vtable: &'static ModalRouteVTable,
 }
 
-impl PartialEq for AnyModalRoute {
-    fn eq(&self, other: &AnyModalRoute) -> bool {
-        self.id == other.id
+/// A kept route as a [`RouteRef`], through [`Retained::erase`]: Dart's upcast.
+impl From<AnyModalRoute> for AnyRoute {
+    fn from(route: AnyModalRoute) -> AnyRoute {
+        route.as_route()
     }
 }
 
-impl Eq for AnyModalRoute {}
-
-impl std::hash::Hash for AnyModalRoute {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
+impl From<AnyModalRoute> for AnyTransitionRoute {
+    fn from(route: AnyModalRoute) -> AnyTransitionRoute {
+        route.as_transition_route()
     }
 }
+
+/// A field Dart types as the erased object, kept: AnyModalRoute with its count.
+pub type ModalRouteRef = Retained<AnyModalRoute>;
+
+waft_foundation::erased_handle!(AnyModalRoute: ModalRoute => ModalRoute::as_modal_route);
 
 impl Debug for AnyModalRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -2789,6 +2800,24 @@ impl Debug for AnyModalRoute {
 }
 
 impl AnyModalRoute {
+    /// The route's [`animation`](Self::animation) and
+    /// [`secondary_animation`](Self::secondary_animation), kept, for the builders that take them.
+    ///
+    /// # Panics
+    ///
+    /// Before the route is installed.
+    pub fn animations(self, app: &App) -> (AnimationRef<f64>, AnimationRef<f64>) {
+        let kept = |animation: Option<AnyAnimation<f64>>| {
+            animation
+                .expect("an installed route keeps its animations")
+                .keep(app)
+        };
+        (
+            kept(self.animation(app)),
+            kept(self.secondary_animation(app)),
+        )
+    }
+
     /// Returns the modal route most closely associated with the given context.
     ///
     /// Returns `None` if the given context is not associated with a modal route.
@@ -2808,7 +2837,7 @@ impl AnyModalRoute {
         context: BuildContext,
         aspect: Option<ModalRouteAspect>,
     ) -> Option<AnyModalRoute> {
-        ModalScopeStatus::inherit_from(app, context, aspect).map(|status| status.route)
+        ModalScopeStatus::inherit_from(app, context, aspect).map(|status| status.route.handle())
     }
 
     /// Returns [`AnyRoute::is_current`] for the modal route most closely associated with the
@@ -2984,8 +3013,8 @@ impl AnyModalRoute {
         self,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         (self.vtable.build_page)(app, self.id, context, animation, secondary_animation)
     }
@@ -2995,8 +3024,8 @@ impl AnyModalRoute {
         self,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         (self.vtable.build_flexible_transitions)(
@@ -3010,7 +3039,7 @@ impl AnyModalRoute {
     }
 
     /// See [`LocalHistoryRoute::add_local_history_entry`].
-    pub fn add_local_history_entry(self, app: &mut App, entry: Handle<LocalHistoryEntry>) {
+    pub fn add_local_history_entry(self, app: &mut App, entry: Ref<LocalHistoryEntry>) {
         (self.vtable.add_local_history_entry)(app, self.id, entry)
     }
 
@@ -3027,11 +3056,6 @@ impl AnyModalRoute {
     /// See [`ModalRoute::unregister_pop_entry`].
     pub fn unregister_pop_entry(self, app: &mut App, pop_entry: Rc<dyn PopEntry>) {
         (self.vtable.unregister_pop_entry)(app, self.id, pop_entry)
-    }
-
-    /// See [`ModalRouteBase::free_last_build_objects`]; `TransitionRoute::dispose` calls it.
-    fn free_last_build_objects(self, app: &mut App) {
-        (self.vtable.free_last_build_objects)(app, self.id)
     }
 }
 
@@ -3209,7 +3233,7 @@ macro_rules! modal_overlay_route_overrides {
         fn create_overlay_entries(
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
-        ) -> ::std::vec::Vec<::waft_foundation::Handle<$crate::OverlayEntry>> {
+        ) -> ::std::vec::Vec<::waft_foundation::Ref<$crate::OverlayEntry>> {
             $crate::ModalRoute::create_overlay_entries(self, app)
         }
 
@@ -3310,12 +3334,12 @@ macro_rules! modal_transition_route_overrides {
 pub struct RouteObserver {
     navigator_observer: NavigatorObserverData,
     matches: RoutePredicate,
-    listeners: Vec<(AnyRoute, Vec<Rc<dyn RouteAware>>)>,
+    listeners: Vec<(RouteRef, Vec<Rc<dyn RouteAware>>)>,
 }
 
 impl RouteObserver {
     /// Creates an observer of the routes `matches` accepts; Dart's type argument `R`.
-    pub fn new(app: &mut App, matches: RoutePredicate) -> Handle<RouteObserver> {
+    pub fn new(app: &mut App, matches: RoutePredicate) -> Ref<RouteObserver> {
         app.create(RouteObserver {
             navigator_observer: NavigatorObserverData::new(),
             matches,
@@ -3333,7 +3357,7 @@ impl RouteObserver {
                 .get(self)
                 .listeners
                 .iter()
-                .any(|(held, _)| *held == route);
+                .any(|(held, _)| held == route);
         }
         contained
     }
@@ -3349,11 +3373,12 @@ impl RouteObserver {
         route_aware: Rc<dyn RouteAware>,
         route: AnyRoute,
     ) {
+        let kept = route.keep(app);
         let listeners = &mut app.get_mut(self).listeners;
-        let subscribers = match listeners.iter_mut().find(|(held, _)| *held == route) {
+        let subscribers = match listeners.iter_mut().find(|(held, _)| held == route) {
             Some((_, subscribers)) => subscribers,
             None => {
-                listeners.push((route, Vec::new()));
+                listeners.push((kept, Vec::new()));
                 &mut listeners.last_mut().expect("just pushed").1
             }
         };
@@ -3387,7 +3412,7 @@ impl RouteObserver {
         app.get(self)
             .listeners
             .iter()
-            .find(|(held, _)| *held == route)
+            .find(|(held, _)| held == route)
             .map(|(_, subscribers)| subscribers.clone())
     }
 
@@ -3520,7 +3545,7 @@ impl<T: RouteAwareObject> RouteAware for Handle<T> {
 ///
 /// See [`ModalRoute::build_page`] for the complete definition of the parameters.
 pub type RoutePageBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, AnyAnimation<f64>, AnyAnimation<f64>) -> WidgetRef>;
+    Rc<dyn Fn(&mut App, BuildContext, AnimationRef<f64>, AnimationRef<f64>) -> WidgetRef>;
 
 /// Signature for the function that builds a route's transitions.
 ///
@@ -3539,7 +3564,7 @@ pub type RoutePageBuilder =
 ///
 /// See [`ModalRoute::build_transitions`] for the complete definition of the parameters.
 pub type RouteTransitionsBuilder = Rc<
-    dyn Fn(&mut App, BuildContext, AnyAnimation<f64>, AnyAnimation<f64>, WidgetRef) -> WidgetRef,
+    dyn Fn(&mut App, BuildContext, AnimationRef<f64>, AnimationRef<f64>, WidgetRef) -> WidgetRef,
 >;
 
 /// Configuration details for a custom modal barrier.
@@ -3552,7 +3577,7 @@ pub struct RouteBarrierDetails {
     ///
     /// Typically used to animate the barrier's opacity from 0.0 to 1.0 when the route is
     /// pushed.
-    pub animation: AnyAnimation<f64>,
+    pub animation: AnimationRef<f64>,
     /// The color to paint behind the route.
     ///
     /// If `None`, the barrier will be transparent.
@@ -3566,7 +3591,7 @@ pub struct RouteBarrierDetails {
 impl RouteBarrierDetails {
     /// Creates an object that contains the configuration for a modal barrier; Dart's optional
     /// arguments are the setters.
-    pub fn new(animation: AnyAnimation<f64>, barrier_dismissible: bool) -> RouteBarrierDetails {
+    pub fn new(animation: AnimationRef<f64>, barrier_dismissible: bool) -> RouteBarrierDetails {
         RouteBarrierDetails {
             animation,
             barrier_color: None,
@@ -3769,8 +3794,8 @@ pub trait RawDialogRouteLeaf: PopupRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         RawDialogRoute::build_page(self, app, context, animation, secondary_animation)
     }
@@ -3780,8 +3805,8 @@ pub trait RawDialogRouteLeaf: PopupRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         RawDialogRoute::build_transitions(self, app, context, animation, secondary_animation, child)
@@ -3840,8 +3865,8 @@ macro_rules! raw_dialog_route_modal_route_overrides {
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
             context: $crate::BuildContext,
-            animation: ::waft_animation::AnyAnimation<f64>,
-            secondary_animation: ::waft_animation::AnyAnimation<f64>,
+            animation: ::waft_animation::AnimationRef<f64>,
+            secondary_animation: ::waft_animation::AnimationRef<f64>,
         ) -> $crate::WidgetRef {
             $crate::RawDialogRouteLeaf::build_page(
                 self,
@@ -3856,8 +3881,8 @@ macro_rules! raw_dialog_route_modal_route_overrides {
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
             context: $crate::BuildContext,
-            animation: ::waft_animation::AnyAnimation<f64>,
-            secondary_animation: ::waft_animation::AnyAnimation<f64>,
+            animation: ::waft_animation::AnimationRef<f64>,
+            secondary_animation: ::waft_animation::AnimationRef<f64>,
             child: $crate::WidgetRef,
         ) -> $crate::WidgetRef {
             $crate::RawDialogRouteLeaf::build_transitions(
@@ -3934,7 +3959,7 @@ impl RawDialogRoute {
     ///
     /// Dart's defaults: `barrier_dismissible` true, `barrier_color` `0x80000000`,
     /// `transition_duration` 200 ms, `fullscreen_dialog` false.
-    pub fn new(app: &mut App, page_builder: RoutePageBuilder) -> Handle<RawDialogRoute> {
+    pub fn new(app: &mut App, page_builder: RoutePageBuilder) -> Ref<RawDialogRoute> {
         let route = crate::widgets::navigator::RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -3949,13 +3974,13 @@ impl RawDialogRoute {
     }
 
     /// Dart `RawDialogRoute(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `RawDialogRoute(requestFocus:)`.
-    pub fn request_focus(self: Handle<Self>, app: &mut App, request_focus: bool) -> Handle<Self> {
+    pub fn request_focus(self: Ref<Self>, app: &mut App, request_focus: bool) -> Ref<Self> {
         self.route_data_mut(app)
             .set_request_focus(Some(request_focus));
         self
@@ -3963,87 +3988,83 @@ impl RawDialogRoute {
 
     /// Dart `RawDialogRoute(barrierDismissible:)`.
     pub fn barrier_dismissible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_dismissible: bool,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_dismissible = barrier_dismissible;
         self
     }
 
     /// Dart `RawDialogRoute(barrierColor:)`.
     pub fn barrier_color(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_color: Option<Color>,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_color = barrier_color;
         self
     }
 
     /// Dart `RawDialogRoute(barrierLabel:)`.
-    pub fn barrier_label(self: Handle<Self>, app: &mut App, barrier_label: String) -> Handle<Self> {
+    pub fn barrier_label(self: Ref<Self>, app: &mut App, barrier_label: String) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_label = Some(barrier_label);
         self
     }
 
     /// Dart `RawDialogRoute(transitionDuration:)`.
     pub fn transition_duration(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         transition_duration: Duration,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).transition_duration = transition_duration;
         self
     }
 
     /// Dart `RawDialogRoute(transitionBuilder:)`.
     pub fn transition_builder(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         transition_builder: RouteTransitionsBuilder,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).transition_builder = Some(transition_builder);
         self
     }
 
     /// Dart `RawDialogRoute(barrierBuilder:)`.
     pub fn barrier_builder(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_builder: RouteBarrierBuilder,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_builder = Some(barrier_builder);
         self
     }
 
     /// Dart `RawDialogRoute(traversalEdgeBehavior:)`.
     pub fn traversal_edge_behavior(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         behavior: TraversalEdgeBehavior,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.modal_route_data_mut(app).traversal_edge_behavior = Some(behavior);
         self
     }
 
     /// Dart `RawDialogRoute(directionalTraversalEdgeBehavior:)`.
     pub fn directional_traversal_edge_behavior(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         behavior: TraversalEdgeBehavior,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.modal_route_data_mut(app)
             .directional_traversal_edge_behavior = Some(behavior);
         self
     }
 
     /// Dart `RawDialogRoute(fullscreenDialog:)`.
-    pub fn fullscreen_dialog(
-        self: Handle<Self>,
-        app: &mut App,
-        fullscreen_dialog: bool,
-    ) -> Handle<Self> {
+    pub fn fullscreen_dialog(self: Ref<Self>, app: &mut App, fullscreen_dialog: bool) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).fullscreen_dialog = fullscreen_dialog;
         self
     }
@@ -4054,8 +4075,8 @@ impl RawDialogRoute {
         this: Handle<R>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let page_builder = Rc::clone(&this.raw_dialog_route_data(app).page_builder);
         Semantics::new()
@@ -4071,8 +4092,8 @@ impl RawDialogRoute {
         this: Handle<R>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         match this.raw_dialog_route_data(app).transition_builder.clone() {
@@ -4098,7 +4119,9 @@ impl RawDialogRoute {
             return barrier;
         };
         Builder::new(move |app, context| {
-            let animation = TransitionRoute::animation(this, app).expect("an installed route");
+            let animation = TransitionRoute::animation(this, app)
+                .expect("an installed route keeps its animation")
+                .keep(app);
             let mut details =
                 RouteBarrierDetails::new(animation, ModalRoute::barrier_dismissible(this, app));
             if let Some(color) = ModalRoute::barrier_color(this, app) {
@@ -4180,28 +4203,28 @@ pub fn show_general_dialog(
     request_focus: Option<bool>,
 ) -> CompleterFuture<RouteResult> {
     debug_assert!(!barrier_dismissible || barrier_label.is_some());
-    let route = RawDialogRoute::new(app, page_builder)
+    let mut route = RawDialogRoute::new(app, page_builder)
         .barrier_dismissible(app, barrier_dismissible)
         .barrier_color(app, Some(barrier_color))
         .transition_duration(app, transition_duration)
         .fullscreen_dialog(app, fullscreen_dialog);
     if let Some(barrier_label) = barrier_label {
-        route.barrier_label(app, barrier_label);
+        route = route.barrier_label(app, barrier_label);
     }
     if let Some(transition_builder) = transition_builder {
-        route.transition_builder(app, transition_builder);
+        route = route.transition_builder(app, transition_builder);
     }
     if let Some(barrier_builder) = barrier_builder {
-        route.barrier_builder(app, barrier_builder);
+        route = route.barrier_builder(app, barrier_builder);
     }
     if let Some(route_settings) = route_settings {
-        route.settings(app, route_settings);
+        route = route.settings(app, route_settings);
     }
     if let Some(request_focus) = request_focus {
-        route.request_focus(app, request_focus);
+        route = route.request_focus(app, request_focus);
     }
     let navigator = Navigator::of(app, context, use_root_navigator);
-    navigator.push(app, route.as_route())
+    navigator.push(app, route.into_erased())
 }
 
 #[cfg(test)]
@@ -4222,6 +4245,7 @@ mod tests {
     use crate::widgets::navigator::{NavigatorState, RouteSettings};
     use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::pop_scope::PopScope;
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     const VIEW_WIDTH: f64 = 300.0;
     const VIEW_HEIGHT: f64 = 200.0;
@@ -4288,7 +4312,7 @@ mod tests {
         })
     }
 
-    fn page_route(app: &mut App, child: Option<WidgetRef>, name: &str) -> Handle<PageRouteBuilder> {
+    fn page_route(app: &mut App, child: Option<WidgetRef>, name: &str) -> Ref<PageRouteBuilder> {
         PageRouteBuilder::new(app, corner_page(child))
             .settings(app, RouteSettings::new().name(name.to_string()).into())
     }
@@ -4297,7 +4321,7 @@ mod tests {
     /// theater needs.
     fn navigator(
         key: &GlobalKey,
-        on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
+        on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<RouteRef> + 'static,
     ) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
@@ -4349,15 +4373,15 @@ mod tests {
         mount(
             &cell,
             navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").as_route())
+                Some(page_route(app, None, "/").into_erased())
             }),
         );
         let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let pushed = page_route(&mut app, None, "second").as_route();
-        navigator_state.push(&mut app, pushed);
+        let pushed: RouteRef = page_route(&mut app, None, "second").into_erased();
+        navigator_state.push(&mut app, pushed.clone());
         pump_every_view(&mut app, at);
         let animation = pushed
             .as_transition_route(&app)
@@ -4403,7 +4427,7 @@ mod tests {
         mount(
             &cell,
             navigator(&key, move |app, _settings| {
-                Some(page_route(app, Some(watcher.clone()), "/").as_route())
+                Some(page_route(app, Some(watcher.clone()), "/").into_erased())
             }),
         );
         let mut app = cell.borrow_mut();
@@ -4411,7 +4435,7 @@ mod tests {
         let at = settle(&mut app, Duration::ZERO);
         assert_eq!(seen.borrow().last().copied(), Some((true, true)));
 
-        let second = page_route(&mut app, None, "second").as_route();
+        let second: RouteRef = page_route(&mut app, None, "second").into_erased();
         navigator_state.push(&mut app, second);
         settle(&mut app, at);
         assert_eq!(
@@ -4436,15 +4460,15 @@ mod tests {
         mount(
             &cell,
             navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").as_route())
+                Some(page_route(app, None, "/").into_erased())
             }),
         );
         let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let second = page_route(&mut app, Some(scope), "second").as_route();
-        navigator_state.push(&mut app, second);
+        let second: RouteRef = page_route(&mut app, Some(scope), "second").into_erased();
+        navigator_state.push(&mut app, second.clone());
         let at = settle(&mut app, at);
         assert!(second.is_current(&app));
 
@@ -4464,18 +4488,18 @@ mod tests {
         mount(
             &cell,
             navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").as_route())
+                Some(page_route(app, None, "/").into_erased())
             }),
         );
         let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let dialog = RawDialogRoute::new(&mut app, corner_page(None))
+        let dialog: RouteRef = RawDialogRoute::new(&mut app, corner_page(None))
             .barrier_dismissible(&mut app, true)
             .barrier_label(&mut app, "dismiss".to_string())
-            .as_route();
-        navigator_state.push(&mut app, dialog);
+            .into_erased();
+        navigator_state.push(&mut app, dialog.clone());
         let at = settle(&mut app, at);
         assert!(dialog.is_current(&app));
 
@@ -4497,7 +4521,7 @@ mod tests {
         mount(
             &cell,
             navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").as_route())
+                Some(page_route(app, None, "/").into_erased())
             }),
         );
         let mut app = cell.borrow_mut();
@@ -4505,10 +4529,10 @@ mod tests {
         let at = settle(&mut app, Duration::ZERO);
         let dialog = RawDialogRoute::new(&mut app, corner_page(None))
             .barrier_color(&mut app, Some(Color::new(0x80000000)));
-        navigator_state.push(&mut app, dialog.as_route());
+        navigator_state.push(&mut app, dialog.clone().into_erased());
         let mut at = settle(&mut app, at);
         let rebuild_barrier = |app: &mut App, at: &mut Duration| {
-            ModalRoute::changed_internal_state(dialog, app);
+            ModalRoute::changed_internal_state(dialog.handle(), app);
             *at += Duration::from_millis(20);
             pump_every_view(app, *at);
         };
@@ -4516,62 +4540,116 @@ mod tests {
         drop(app);
         cell.checkpoint();
 
-        let before = cell.borrow().debug_object_count();
+        let snapshot = object_snapshot(&cell.borrow());
         rebuild_barrier(&mut cell.borrow_mut(), &mut at);
         cell.checkpoint();
-        assert_eq!(cell.borrow().debug_object_count(), before);
+        assert_no_new_objects(&cell.borrow(), &snapshot);
     }
 
-    /// Not a Dart case: Dart's collector frees a disposed route's last barrier tweens and
-    /// colour animation; here the route's disposal frees them.
+    /// Not a Dart case: Dart's collector frees a popped route, and what its barrier drove, once
+    /// nothing reaches it; here the checkpoint after its entry goes frees it.
     #[test]
-    fn a_disposed_route_frees_its_last_barrier_animations() {
+    fn a_popped_route_is_freed_once_its_entry_goes() {
         let cell = app_with_view();
         let key = GlobalKey::new();
         mount(
             &cell,
             navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").as_route())
+                Some(page_route(app, None, "/").into_erased())
             }),
         );
-        let (dialog, barrier_animations) = {
+        let dialog = {
             let mut app = cell.borrow_mut();
             let navigator_state = state(&key, &mut app);
             let at = settle(&mut app, Duration::ZERO);
             let dialog = RawDialogRoute::new(&mut app, corner_page(None))
                 .barrier_color(&mut app, Some(Color::new(0x80000000)));
-            navigator_state.push(&mut app, dialog.as_route());
-            let mut at = settle(&mut app, at);
+            let named = dialog.handle();
+            navigator_state.push(&mut app, dialog.into_erased());
+            let at = settle(&mut app, at);
             navigator_state.pop(&mut app, None);
-            // What the barrier's last build drove, read frame by frame until the route goes.
-            let mut barrier_animations = Vec::new();
-            for _ in 0..40 {
-                let driven = &dialog.modal_route_data(&app).barrier_animations;
-                if !driven.is_empty() {
-                    barrier_animations.clone_from(driven);
-                }
-                at += Duration::from_millis(20);
-                pump_every_view(&mut app, at);
-            }
-            (dialog, barrier_animations)
+            settle(&mut app, at);
+            assert!(
+                named
+                    .transition_route_data(&app)
+                    .transition_completer
+                    .is_completed(),
+                "the route is disposed"
+            );
+            named
         };
         cell.checkpoint();
-        let app = cell.borrow();
+        assert!(!cell.borrow().contains(dialog), "the popped route is freed");
+    }
+
+    /// Dart's 'secondary animation is kDismissed after train hopping finishes and pop', with
+    /// linear routes: Dart's third route curves its animation (`easeOutExpo`), which a
+    /// `PageRouteBuilder` here cannot be given, so the trains never meet and the hop ends when
+    /// the replacing route's push does, through the remover. The hopping animation is freed
+    /// once it is done with, as Dart's collector would.
+    #[test]
+    fn a_finished_train_hop_leaves_the_secondary_animation_on_the_new_route_and_frees_it() {
+        let cell = app_with_view();
+        let key = GlobalKey::new();
+        mount(
+            &cell,
+            navigator(&key, |app, _settings| {
+                Some(page_route(app, None, "/").into_erased())
+            }),
+        );
+        let mut app = cell.borrow_mut();
+        let navigator_state = state(&key, &mut app);
+        let at = settle(&mut app, Duration::ZERO);
+
+        let one = page_route(&mut app, None, "one");
+        let one_route = one.handle();
+        navigator_state.push(&mut app, one.into_erased());
+        let at = settle(&mut app, at);
+        let secondary_parent = |app: &App| {
+            one_route
+                .transition_route_data(app)
+                .secondary_animation
+                .parent(app)
+        };
+        let dismissed = k_always_dismissed_animation(&mut app).handle();
+        assert_eq!(secondary_parent(&app), Some(dismissed));
+
+        let two: RouteRef = page_route(&mut app, None, "two").into_erased();
+        navigator_state.push(&mut app, two.clone());
+        pump_every_view(&mut app, at);
+        let at = at + Duration::from_millis(100);
+        pump_every_view(&mut app, at);
+        let two_animation = two
+            .as_transition_route(&app)
+            .and_then(|route| route.underlying_animation(&app));
+        assert_eq!(secondary_parent(&app), two_animation);
+
+        let three: RouteRef = page_route(&mut app, None, "three").into_erased();
+        navigator_state.push_replacement(&mut app, three.clone(), None);
+        pump_every_view(&mut app, at);
+        let at = at + Duration::from_millis(1);
+        pump_every_view(&mut app, at);
+        let hopper = secondary_parent(&app)
+            .and_then(|parent| parent.downcast::<TrainHoppingAnimation>(&app))
+            .expect("the secondary animation hops trains");
+        assert_eq!(app.get(hopper).current_train(), two_animation);
+
+        let at = settle(&mut app, at);
+        let three_animation = three
+            .as_transition_route(&app)
+            .and_then(|route| route.underlying_animation(&app));
+        assert_eq!(secondary_parent(&app), three_animation);
+        drop(app);
+        cell.checkpoint();
         assert!(
-            dialog
-                .transition_route_data(&app)
-                .transition_completer
-                .is_completed(),
-            "the route is disposed"
+            !cell.borrow().contains(hopper),
+            "the finished hop's animation is freed"
         );
-        assert_eq!(
-            barrier_animations.len(),
-            3,
-            "two tweens and the colour animation"
-        );
-        for id in barrier_animations {
-            assert!(!app.contains(id), "{id:?} is freed");
-        }
+
+        let mut app = cell.borrow_mut();
+        navigator_state.pop(&mut app, None);
+        settle(&mut app, at);
+        assert_eq!(secondary_parent(&app), Some(dismissed));
     }
 
     #[test]
@@ -4581,17 +4659,17 @@ mod tests {
         mount(
             &cell,
             navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").as_route())
+                Some(page_route(app, None, "/").into_erased())
             }),
         );
         let mut app = cell.borrow_mut();
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let dialog = RawDialogRoute::new(&mut app, corner_page(None))
+        let dialog: RouteRef = RawDialogRoute::new(&mut app, corner_page(None))
             .barrier_dismissible(&mut app, false)
-            .as_route();
-        navigator_state.push(&mut app, dialog);
+            .into_erased();
+        navigator_state.push(&mut app, dialog.clone());
         let at = settle(&mut app, at);
 
         tap_at(&mut app, Offset::new(150.0, 100.0));
@@ -4607,7 +4685,7 @@ mod tests {
         mount(
             &cell,
             navigator(&key, |app, _settings| {
-                Some(page_route(app, None, "/").as_route())
+                Some(page_route(app, None, "/").into_erased())
             }),
         );
         let mut app = cell.borrow_mut();
@@ -4615,7 +4693,7 @@ mod tests {
         let at = settle(&mut app, Duration::ZERO);
 
         let second = page_route(&mut app, None, "second");
-        navigator_state.push(&mut app, second.as_route());
+        navigator_state.push(&mut app, second.clone().into_erased());
         let at = settle(&mut app, at);
 
         let removed = Rc::new(Cell::new(false));
@@ -4623,8 +4701,8 @@ mod tests {
             let removed = Rc::clone(&removed);
             Listener::new(move |_app| removed.set(true))
         });
-        LocalHistoryRoute::add_local_history_entry(second, &mut app, entry);
-        assert!(Route::will_handle_pop_internally(second, &app));
+        LocalHistoryRoute::add_local_history_entry(second.handle(), &mut app, entry);
+        assert!(Route::will_handle_pop_internally(second.handle(), &app));
 
         navigator_state.pop(&mut app, None);
         pump_every_view(&mut app, at);
@@ -4688,12 +4766,12 @@ mod tests {
                     .on_generate_route({
                         let initial = Rc::clone(&initial);
                         move |app, _settings| {
-                            let route = page_route(app, None, "/").as_route();
-                            initial.set(Some(route));
+                            let route: RouteRef = page_route(app, None, "/").into_erased();
+                            initial.set(Some(route.handle()));
                             Some(route)
                         }
                     })
-                    .observers(vec![observer.as_observer()]),
+                    .observers(vec![observer.erase()]),
             )
             .into_widget(),
         );
@@ -4708,17 +4786,17 @@ mod tests {
             popped: Cell::new(0),
             popped_next: Cell::new(0),
         });
-        observer.subscribe(&mut app, Rc::new(watcher), first);
-        assert_eq!(app.get(watcher).pushed.get(), 1);
+        observer.subscribe(&mut app, Rc::new(watcher.handle()), first);
+        assert_eq!(app.get(&watcher).pushed.get(), 1);
 
-        let second = page_route(&mut app, None, "second").as_route();
+        let second: RouteRef = page_route(&mut app, None, "second").into_erased();
         navigator_state.push(&mut app, second);
         let at = settle(&mut app, at);
-        assert_eq!(app.get(watcher).pushed_next.get(), 1);
+        assert_eq!(app.get(&watcher).pushed_next.get(), 1);
 
         navigator_state.pop(&mut app, None);
         settle(&mut app, at);
-        assert_eq!(app.get(watcher).popped_next.get(), 1);
-        assert_eq!(app.get(watcher).popped.get(), 0);
+        assert_eq!(app.get(&watcher).popped_next.get(), 1);
+        assert_eq!(app.get(&watcher).popped.get(), 0);
     }
 }

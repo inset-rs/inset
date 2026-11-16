@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use waft_animation::Curve;
 use waft_embedder::{Clip, Matrix4, Offset, Rect, Size};
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listener};
 use waft_gestures::DragStartBehavior;
 use waft_painting::{
     Axis, AxisDirection, EdgeInsetsGeometry, axis_direction_to_axis, transform_rect,
@@ -19,7 +19,7 @@ use waft_rendering::{
     BoxHitTestResult, ClipRectLayer, EmptyParentData, HitTestBehavior, LayerHandle,
     PaintingContext, PipelineOwner, RenderAbstractViewport, RenderBox, RenderBoxData, RenderHandle,
     RenderObject, RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
-    RevealedOffset, show_in_viewport,
+    RevealedOffset, ViewportOffsetRef, show_in_viewport,
 };
 
 use crate::framework::{
@@ -34,7 +34,7 @@ use crate::widgets::focus_scope::FocusScope;
 use crate::widgets::notification_listener::NotificationListener;
 use crate::widgets::primary_scroll_controller::PrimaryScrollController;
 use crate::widgets::scroll_configuration::ScrollConfiguration;
-use crate::widgets::scroll_controller::AnyScrollController;
+use crate::widgets::scroll_controller::ScrollControllerRef;
 use crate::widgets::scroll_notification::{ScrollUpdateNotification, ViewportElementMixin};
 use crate::widgets::scroll_physics::ScrollPhysicsRef;
 use crate::widgets::scroll_view::ScrollViewKeyboardDismissBehavior;
@@ -88,7 +88,7 @@ pub struct SingleChildScrollView {
     /// view is scrolled.
     ///
     /// Must be `None` if [`primary`](Self::primary) is true.
-    pub controller: Option<AnyScrollController>,
+    pub controller: Option<ScrollControllerRef>,
 
     /// Whether this is the primary scroll view associated with the parent
     /// [`PrimaryScrollController`].
@@ -180,7 +180,7 @@ impl SingleChildScrollView {
     }
 
     /// Dart `SingleChildScrollView(controller:)`.
-    pub fn controller(mut self, controller: AnyScrollController) -> SingleChildScrollView {
+    pub fn controller(mut self, controller: ScrollControllerRef) -> SingleChildScrollView {
         debug_assert!(
             !self.primary.unwrap_or(false),
             "Primary ScrollViews obtain their ScrollController via inheritance from a \
@@ -293,7 +293,7 @@ impl StatelessWidget for SingleChildScrollView {
         let scroll_controller = if effective_primary {
             PrimaryScrollController::maybe_of(app, context)
         } else {
-            self.controller
+            self.controller.clone()
         };
 
         let clip_behavior = self.clip_behavior;
@@ -311,6 +311,7 @@ impl StatelessWidget for SingleChildScrollView {
             .axis_direction(axis_direction)
             .clip_behavior(self.clip_behavior)
             .hit_test_behavior(self.hit_test_behavior);
+        let has_scroll_controller = scroll_controller.is_some();
         if let Some(controller) = scroll_controller {
             scrollable = scrollable.controller(controller);
         }
@@ -343,7 +344,7 @@ impl StatelessWidget for SingleChildScrollView {
                 .into_widget();
         }
 
-        if effective_primary && scroll_controller.is_some() {
+        if effective_primary && has_scroll_controller {
             // Further descendant scroll views will not inherit the same
             // `PrimaryScrollController`.
             PrimaryScrollController::none(scrollable).into_widget()
@@ -359,7 +360,7 @@ pub struct SingleChildViewport {
     /// The direction in which the [`offset`](Self::offset)'s pixels increase.
     pub axis_direction: AxisDirection,
     /// Which part of the content inside the viewport should be visible.
-    pub offset: AnyViewportOffset,
+    pub offset: ViewportOffsetRef,
     /// The content will be clipped (or not) according to this option.
     pub clip_behavior: Clip,
     /// The widget that scrolls.
@@ -368,7 +369,7 @@ pub struct SingleChildViewport {
 
 impl SingleChildViewport {
     /// Creates a viewport for a single box child.
-    pub fn new(offset: AnyViewportOffset, clip_behavior: Clip) -> SingleChildViewport {
+    pub fn new(offset: ViewportOffsetRef, clip_behavior: Clip) -> SingleChildViewport {
         SingleChildViewport {
             axis_direction: AxisDirection::Down,
             offset,
@@ -397,7 +398,7 @@ impl RenderObjectWidget for SingleChildViewport {
         RenderSingleChildViewport::new(
             app,
             self.axis_direction,
-            self.offset,
+            self.offset.clone(),
             None,
             self.clip_behavior,
         )
@@ -412,7 +413,7 @@ impl RenderObjectWidget for SingleChildViewport {
     ) {
         // Order dependency: the offset setter reads the axis direction.
         render_object.set_axis_direction(app, self.axis_direction);
-        render_object.set_offset(app, self.offset);
+        render_object.set_offset(app, self.offset.clone());
         render_object.set_clip_behavior(app, self.clip_behavior);
     }
 }
@@ -423,7 +424,7 @@ impl SingleChildRenderObjectWidget for SingleChildViewport {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        SingleChildViewportElement::create(app, this).as_element()
+        SingleChildViewportElement::new(app, this).as_element()
     }
 }
 
@@ -437,13 +438,14 @@ pub struct SingleChildViewportElement {
 
 impl SingleChildViewportElement {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> Handle<SingleChildViewportElement> {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<SingleChildViewportElement> {
         debug_assert!(downcast_widget::<SingleChildViewport>(&*widget).is_some());
         app.create(SingleChildViewportElement {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
             single_child: SingleChildRenderObjectElementData::default(),
         })
+        .into_tree_node(app)
     }
 }
 
@@ -600,7 +602,7 @@ pub struct RenderSingleChildViewport {
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
     axis_direction: AxisDirection,
-    offset: AnyViewportOffset,
+    offset: ViewportOffsetRef,
     clip_behavior: Clip,
     clip_rect_layer: LayerHandle<Handle<ClipRectLayer>>,
 }
@@ -610,7 +612,7 @@ impl RenderSingleChildViewport {
     pub fn new(
         app: &mut App,
         axis_direction: AxisDirection,
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
         child: Option<AnyRenderBox>,
         clip_behavior: Clip,
     ) -> RenderHandle<RenderSingleChildViewport> {
@@ -651,21 +653,23 @@ impl RenderSingleChildViewport {
 
     /// Which part of the content inside the viewport should be visible.
     pub fn offset(self: RenderHandle<Self>, app: &App) -> AnyViewportOffset {
-        self.get(app).offset
+        self.get(app).offset.handle()
     }
 
     /// Sets [`offset`](Self::offset).
-    pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: AnyViewportOffset) {
-        let old = self.get(app).offset;
+    pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
+        let old = self.offset(app);
         if value == old {
             return;
         }
         if self.attached(app) {
             old.remove_listener(app, &self.has_scrolled_listener());
         }
-        self.get_mut(app).offset = value;
+        let new = value.handle();
+        // The old offset goes when this local does, after the listener moved off it.
+        let _old = std::mem::replace(&mut self.get_mut(app).offset, value);
         if self.attached(app) {
-            value.add_listener(app, self.has_scrolled_listener());
+            new.add_listener(app, self.has_scrolled_listener());
         }
         self.mark_needs_layout(app);
     }
@@ -1196,7 +1200,7 @@ mod tests {
         let viewport = mount(
             &cell,
             SingleChildScrollView::new()
-                .controller(controller.as_controller())
+                .controller(controller.erase())
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
         let app = cell.borrow();
@@ -1220,7 +1224,7 @@ mod tests {
             &cell,
             SingleChildScrollView::new()
                 .scroll_direction(Axis::Horizontal)
-                .controller(controller.as_controller())
+                .controller(controller.erase())
                 .child(SizedBox::new().width(CONTENT_HEIGHT).height(CONTENT_WIDTH)),
         );
         let app = cell.borrow();
@@ -1243,7 +1247,7 @@ mod tests {
         let viewport = mount(
             &cell,
             SingleChildScrollView::new()
-                .controller(controller.as_controller())
+                .controller(controller.erase())
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
         let mut app = cell.borrow_mut();
@@ -1264,7 +1268,7 @@ mod tests {
             &cell,
             SingleChildScrollView::new()
                 .reverse(true)
-                .controller(controller.as_controller())
+                .controller(controller.erase())
                 .child(SizedBox::new().width(CONTENT_WIDTH).height(CONTENT_HEIGHT)),
         );
         let mut app = cell.borrow_mut();
@@ -1324,7 +1328,7 @@ mod tests {
         let viewport = mount(
             &cell,
             SingleChildScrollView::new()
-                .controller(controller.as_controller())
+                .controller(controller.erase())
                 .child(tall_content()),
         );
         let mut app = cell.borrow_mut();

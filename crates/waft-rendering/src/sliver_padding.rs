@@ -548,7 +548,7 @@ impl RenderSliver for RenderSliverPadding {
 mod tests {
     use waft_embedder::Size;
     use waft_foundation::AppCell;
-    use waft_foundation::Handle;
+    use waft_foundation::Ref;
     use waft_gestures::HitTestResult;
 
     use super::*;
@@ -557,7 +557,7 @@ mod tests {
     use crate::sliver::{RenderSliverToBoxAdapter, SliverPhysicalParentData};
     use crate::sliver_multi_box_adaptor::test_support::hit_testable_box;
     use crate::viewport::RenderViewport;
-    use crate::viewport_offset::{FixedViewportOffset, ViewportOffset};
+    use crate::viewport_offset::FixedViewportOffset;
 
     /// Lays a sliver out in a viewport of the given size, without a `RenderView`.
     fn lay_out(
@@ -565,12 +565,12 @@ mod tests {
         sliver: AnyRenderSliver,
         size: Size,
         scroll_offset: f64,
-    ) -> (Handle<PipelineOwner>, RenderHandle<RenderViewport>) {
+    ) -> (Ref<PipelineOwner>, RenderHandle<RenderViewport>) {
         let offset = FixedViewportOffset::new(app, scroll_offset);
         let viewport = RenderViewport::new(
             app,
             AxisDirection::Right,
-            offset.as_viewport_offset(),
+            offset.erase(),
             Some(vec![sliver]),
             None,
         );

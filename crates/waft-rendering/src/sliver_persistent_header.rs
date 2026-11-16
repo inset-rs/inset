@@ -6,8 +6,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, AnimationController, AnimationStatus, AnyAnimation, Curve, CurveTween, Curves,
-    Tween,
+    Animatable, AnimationController, AnimationStatus, Curve, CurveTween, Curves, Tween,
 };
 use waft_embedder::{Matrix4, Offset, Rect, clamp_double};
 use waft_foundation::{App, AsyncCallback, Handle, HandleId, ListenableObject, Listener};
@@ -24,6 +23,10 @@ use crate::sliver::{
     apply_growth_direction_to_axis_direction, calculate_cache_offset,
 };
 use crate::viewport_offset::ScrollDirection;
+use waft_animation::AnimationRef;
+use waft_animation::Drive;
+use waft_foundation::OptionRetained;
+use waft_foundation::Ref;
 
 /// Trims the specified edges of the given `Rect`, so that they do not exceed the given values.
 ///
@@ -55,7 +58,7 @@ impl TickerProviderRef {
 }
 
 impl TickerProvider for TickerProviderRef {
-    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         self.provider.create_ticker(app, on_tick)
     }
 }
@@ -748,8 +751,8 @@ pub trait RenderSliverPinnedPersistentHeader: RenderSliverPersistentHeader {
 
 /// Flutter's `RenderSliverFloatingPersistentHeader` fields.
 pub struct RenderSliverFloatingPersistentHeaderData {
-    controller: Option<Handle<AnimationController>>,
-    animation: Option<AnyAnimation<f64>>,
+    controller: Option<Ref<AnimationController>>,
+    animation: Option<AnimationRef<f64>>,
     last_actual_scroll_offset: Option<f64>,
     effective_scroll_offset: Option<f64>,
     // Important for pointer scrolling, which does not have the same concept of a hold and release
@@ -816,7 +819,7 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
     /// The body of Flutter's `detach` override: disposes the snap animation controller, which is
     /// lazily recreated if we are reattached.
     fn did_detach(self: RenderHandle<Self>, app: &mut App) {
-        if let Some(controller) = self.floating_data(app).controller {
+        if let Some(controller) = self.floating_data(app).controller.handle() {
             controller.dispose(app);
         }
         self.floating_data_mut(app).controller = None;
@@ -835,13 +838,13 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
         self.floating_data_mut(app).vsync = value.clone();
         match value {
             None => {
-                if let Some(controller) = self.floating_data(app).controller {
+                if let Some(controller) = self.floating_data(app).controller.handle() {
                     controller.dispose(app);
                 }
                 self.floating_data_mut(app).controller = None;
             }
             Some(vsync) => {
-                if let Some(controller) = self.floating_data(app).controller {
+                if let Some(controller) = self.floating_data(app).controller.handle() {
                     controller.resync(app, vsync);
                 }
             }
@@ -939,10 +942,10 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
         let vsync = self
             .vsync(app)
             .expect("vsync must be set if the floating header changes size animatedly");
-        let controller = match self.floating_data(app).controller {
+        let controller = match self.floating_data(app).controller.clone() {
             Some(controller) => controller,
             None => {
-                let controller = AnimationController::create(
+                let controller = AnimationController::new(
                     app,
                     None,
                     Some(duration),
@@ -952,7 +955,7 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
                     waft_animation::AnimationBehavior::Normal,
                     vsync,
                 );
-                self.floating_data_mut(app).controller = Some(controller);
+                self.floating_data_mut(app).controller = Some(controller.clone());
                 controller.add_listener(
                     app,
                     Listener::handle_method(self.handle(), snap_tick::<Self>),
@@ -1002,7 +1005,7 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
             max_extent
         };
         self.update_animation(app, snap.duration, end_value, Rc::clone(&snap.curve));
-        if let Some(controller) = self.floating_data(app).controller {
+        if let Some(controller) = self.floating_data(app).controller.handle() {
             controller.forward(app, Some(0.0));
         }
     }
@@ -1013,7 +1016,7 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
         app: &mut App,
         _direction: ScrollDirection,
     ) {
-        if let Some(controller) = self.floating_data(app).controller {
+        if let Some(controller) = self.floating_data(app).controller.handle() {
             controller.stop(app, false);
         }
     }
@@ -1169,6 +1172,7 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
         let controller_status = self
             .floating_data(app)
             .controller
+            .handle()
             .map(|controller| controller.status(app));
         if target_extent > child_extent && controller_status != Some(AnimationStatus::Forward) {
             let target_scroll_offset = max_extent - target_extent;
@@ -1177,7 +1181,7 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
                 "vsync must be set if the floating header changes size animatedly"
             );
             self.update_animation(app, duration, target_scroll_offset, Rc::clone(&curve));
-            if let Some(controller) = self.floating_data(app).controller {
+            if let Some(controller) = self.floating_data(app).controller.handle() {
                 controller.forward(app, Some(0.0));
             }
         }
@@ -1271,7 +1275,7 @@ impl Eq for AnyRenderSliverFloatingPersistentHeader {}
 /// The snap animation's listener: Dart's closure inside `_updateAnimation`.
 fn snap_tick<T: RenderSliverFloatingPersistentHeader>(this: Handle<T>, app: &mut App) {
     let this = RenderHandle::from_handle(this);
-    let Some(animation) = this.floating_data(app).animation else {
+    let Some(animation) = this.floating_data(app).animation.handle() else {
         return;
     };
     let value = animation.value(app);
@@ -1336,6 +1340,7 @@ pub trait RenderSliverFloatingPinnedPersistentHeader: RenderSliverFloatingPersis
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
+    use waft_foundation::Ref;
 
     use waft_embedder::Size;
     use waft_foundation::{AppCell, Task};
@@ -1679,7 +1684,7 @@ mod tests {
             self: Handle<Self>,
             app: &mut App,
             on_tick: TickerCallback,
-        ) -> Handle<Ticker> {
+        ) -> Ref<Ticker> {
             Ticker::new(app, on_tick, None)
         }
     }
@@ -1691,7 +1696,9 @@ mod tests {
         let vsync = app.create(Vsync);
         let other_vsync = app.create(Vsync);
 
-        assert!(TickerProviderRef::new(vsync) == TickerProviderRef::new(vsync));
-        assert!(TickerProviderRef::new(vsync) != TickerProviderRef::new(other_vsync));
+        assert!(TickerProviderRef::new(vsync.handle()) == TickerProviderRef::new(vsync.handle()));
+        assert!(
+            TickerProviderRef::new(vsync.handle()) != TickerProviderRef::new(other_vsync.handle())
+        );
     }
 }

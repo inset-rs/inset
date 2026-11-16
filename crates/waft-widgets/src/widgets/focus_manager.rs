@@ -9,7 +9,8 @@ use std::rc::Rc;
 
 use waft_embedder::{AppLifecycleState, Offset, PointerDeviceKind, Rect, Size, TargetPlatform};
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listener, ValueChanged,
+    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, ListenableHandle,
+    Listener, OptionRetained, Ref, Retained, ValueChanged,
 };
 use waft_gestures::{GestureBinding, PointerEvent, PointerRoute};
 use waft_rendering::RendererBinding;
@@ -87,10 +88,9 @@ pub type OnKeyEventCallback = Rc<dyn Fn(&mut App, &KeyEvent) -> KeyEventResult>;
 pub type HighlightModeListener = Rc<dyn Fn(&mut App, FocusHighlightMode)>;
 
 /// Represents a pending autofocus request.
-#[derive(Clone, Copy)]
 struct Autofocus {
-    scope: Handle<FocusScopeNode>,
-    autofocus_node: AnyFocusNode,
+    scope: Ref<FocusScopeNode>,
+    autofocus_node: FocusNodeRef,
 }
 
 impl Autofocus {
@@ -103,8 +103,7 @@ impl Autofocus {
     /// which are no longer attached to the original manager.
     fn apply_if_valid(self, app: &mut App, manager: Handle<FocusManager>) {
         let scope = self.scope.as_node();
-        let should_apply = (scope.parent(app).is_some()
-            || self.scope == app.get(manager).root_scope)
+        let should_apply = (scope.parent(app).is_some() || self.scope == *manager.root_scope(app))
             && scope.manager(app) == Some(manager)
             && self.scope.focused_child(app).is_none()
             && self.autofocus_node.ancestors(app).contains(&scope);
@@ -144,7 +143,7 @@ pub struct FocusAttachment {
 impl FocusAttachment {
     /// A private constructor, because [`FocusAttachment`]s are only to be created by
     /// [`AnyFocusNode::attach`].
-    fn new(app: &mut App, node: AnyFocusNode) -> Handle<FocusAttachment> {
+    fn new(app: &mut App, node: AnyFocusNode) -> Ref<FocusAttachment> {
         app.create(FocusAttachment { node })
     }
 
@@ -154,7 +153,7 @@ impl FocusAttachment {
     /// (i.e. to not have a parent yet in the focus tree).
     pub fn is_attached(self: Handle<Self>, app: &App) -> bool {
         let node = app.get(self).node;
-        node.data(app).attachment == Some(self)
+        node.data(app).attachment.handle() == Some(self)
     }
 
     /// Detaches the [`FocusNode`] this attachment point is associated with from the focus
@@ -166,7 +165,7 @@ impl FocusAttachment {
         if self.is_attached(app) {
             let marked_for_focus = node
                 .manager(app)
-                .map(|manager| app.get(manager).marked_for_focus);
+                .map(|manager| app.get(manager).marked_for_focus.handle());
             if node.has_primary_focus(app) || marked_for_focus == Some(Some(node)) {
                 node.unfocus(app, UnfocusDisposition::PreviouslyFocusedChild);
             }
@@ -184,7 +183,7 @@ impl FocusAttachment {
             );
             debug_assert!(
                 node.manager(app)
-                    .is_none_or(|manager| app.get(manager).marked_for_focus != Some(node)),
+                    .is_none_or(|manager| app.get(manager).marked_for_focus.handle() != Some(node)),
                 "Node {node:?} still marked for focus while being detached."
             );
         }
@@ -225,7 +224,7 @@ impl FocusAttachment {
                     context
                         .owner(app)
                         .map(|owner| owner.focus_manager(app))
-                        .map(|manager| app.get(manager).root_scope.as_node())
+                        .map(|manager| manager.root_scope(app).as_node())
                 })
                 .expect("the element's build owner has a focus manager");
             parent.reparent_child(app, node);
@@ -280,12 +279,12 @@ pub struct FocusNodeData {
     on_key_event: Option<FocusOnKeyEventCallback>,
     manager: Option<Handle<FocusManager>>,
     ancestors: Option<Vec<AnyFocusNode>>,
-    descendants: Option<Vec<AnyFocusNode>>,
+    descendants: Option<Vec<FocusNodeRef>>,
     has_keyboard_token: bool,
     parent: Option<AnyFocusNode>,
-    children: Vec<AnyFocusNode>,
+    children: Vec<FocusNodeRef>,
     debug_label: Option<String>,
-    attachment: Option<Handle<FocusAttachment>>,
+    attachment: Option<Ref<FocusAttachment>>,
     enclosing_scope: Option<Handle<FocusScopeNode>>,
     request_focus_when_reparented: bool,
 }
@@ -545,7 +544,7 @@ pub trait FocusNodeLeaf: ChangeNotifier + Sized + 'static {
         app: &mut App,
         context: Option<BuildContext>,
         on_key_event: Option<FocusOnKeyEventCallback>,
-    ) -> Handle<FocusAttachment> {
+    ) -> Ref<FocusAttachment> {
         self.as_node().attach(app, context, on_key_event)
     }
 
@@ -611,11 +610,7 @@ impl FocusNodeVTable {
                     .remove_listener(listener)
             },
             notify_listeners: |app, id| resolve::<L>(id).notify_listeners(app),
-            dispose_notifier: |app, id| {
-                app.get_mut(resolve::<L>(id))
-                    .change_notifier_data_mut()
-                    .dispose()
-            },
+            dispose_notifier: |app, id| ChangeNotifierData::dispose(app, resolve::<L>(id)),
         }
     }
 }
@@ -636,19 +631,10 @@ pub struct AnyFocusNode {
     vtable: &'static FocusNodeVTable,
 }
 
-impl PartialEq for AnyFocusNode {
-    fn eq(&self, other: &AnyFocusNode) -> bool {
-        self.id == other.id
-    }
-}
+/// A field Dart types as the erased object, kept: AnyFocusNode with its count.
+pub type FocusNodeRef = Retained<AnyFocusNode>;
 
-impl Eq for AnyFocusNode {}
-
-impl std::hash::Hash for AnyFocusNode {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
+waft_foundation::erased_handle!(AnyFocusNode: FocusNodeLeaf => FocusNodeLeaf::as_node);
 
 impl fmt::Debug for AnyFocusNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -861,7 +847,11 @@ impl AnyFocusNode {
 
     /// An iterator over the children of this node.
     pub fn children(self, app: &App) -> Vec<AnyFocusNode> {
-        self.data(app).children.clone()
+        self.data(app)
+            .children
+            .iter()
+            .map(Retained::handle)
+            .collect()
     }
 
     /// An iterator over the children that are allowed to be traversed by the
@@ -889,18 +879,27 @@ impl AnyFocusNode {
 
     /// The hierarchy of children below this one, in depth-first order.
     pub fn descendants(self, app: &mut App) -> Vec<AnyFocusNode> {
-        if self.data(app).descendants.is_none() {
-            let mut result = Vec::new();
-            for child in self.data(app).children.clone() {
-                result.extend(child.descendants(app));
-                result.push(child);
-            }
-            self.data_mut(app).descendants = Some(result);
-        }
+        self.fill_descendants(app);
         self.data(app)
             .descendants
-            .clone()
-            .expect("just filled the cache")
+            .iter()
+            .flatten()
+            .map(Retained::handle)
+            .collect()
+    }
+
+    /// Fills the cache [`descendants`](Self::descendants) reads, depth first.
+    fn fill_descendants(self, app: &mut App) {
+        if self.data(app).descendants.is_some() {
+            return;
+        }
+        let mut result = Vec::new();
+        for child in self.data(app).children.clone() {
+            child.fill_descendants(app);
+            result.extend(child.data(app).descendants.iter().flatten().cloned());
+            result.push(child);
+        }
+        self.data_mut(app).descendants = Some(result);
     }
 
     /// Returns all descendants which do not have the
@@ -947,7 +946,7 @@ impl AnyFocusNode {
         }
         let primary_focus = self
             .manager(app)
-            .and_then(|manager| app.get(manager).primary_focus);
+            .and_then(|manager| app.get(manager).primary_focus.handle());
         primary_focus.is_some_and(|primary| primary.ancestors(app).contains(&self))
     }
 
@@ -958,7 +957,7 @@ impl AnyFocusNode {
     /// nodes, but none of its descendants.
     pub fn has_primary_focus(self, app: &App) -> bool {
         self.manager(app)
-            .is_some_and(|manager| app.get(manager).primary_focus == Some(self))
+            .is_some_and(|manager| app.get(manager).primary_focus.handle() == Some(self))
     }
 
     /// Returns the [`FocusHighlightMode`] that is currently in effect for this node.
@@ -1076,7 +1075,7 @@ impl AnyFocusNode {
     pub fn unfocus(self, app: &mut App, disposition: UnfocusDisposition) {
         let marked_for_focus = self
             .manager(app)
-            .map(|manager| app.get(manager).marked_for_focus);
+            .map(|manager| app.get(manager).marked_for_focus.handle());
         if !self.has_focus(app) && marked_for_focus != Some(Some(self)) {
             return;
         }
@@ -1098,7 +1097,10 @@ impl AnyFocusNode {
                 while !scope.can_request_focus(app) {
                     scope = scope
                         .enclosing_scope(app)
-                        .or_else(|| self.manager(app).map(|manager| app.get(manager).root_scope))
+                        .or_else(|| {
+                            self.manager(app)
+                                .map(|manager| manager.root_scope(app).handle())
+                        })
                         .expect("a node with a scope has a manager");
                 }
                 scope.do_request_focus(app, false);
@@ -1115,7 +1117,10 @@ impl AnyFocusNode {
                     }
                     scope = scope
                         .enclosing_scope(app)
-                        .or_else(|| self.manager(app).map(|manager| app.get(manager).root_scope))
+                        .or_else(|| {
+                            self.manager(app)
+                                .map(|manager| manager.root_scope(app).handle())
+                        })
                         .expect("a node with a scope has a manager");
                 }
                 scope.do_request_focus(app, true);
@@ -1164,7 +1169,7 @@ impl AnyFocusNode {
     /// Removes the given [`AnyFocusNode`] and its children as a child of this node.
     fn remove_child(self, app: &mut App, node: AnyFocusNode, remove_scope_focus: bool) {
         debug_assert!(
-            self.data(app).children.contains(&node),
+            self.data(app).children.iter().any(|kept| kept == node),
             "Tried to remove a node that wasn't a child."
         );
         debug_assert!(node.data(app).parent == Some(self));
@@ -1181,7 +1186,8 @@ impl AnyFocusNode {
 
         node.data_mut(app).parent = None;
         node.clear_enclosing_scope_cache(app);
-        self.data_mut(app).children.retain(|child| *child != node);
+        node.clear_ancestors_caches(app);
+        self.data_mut(app).children.retain(|child| child != node);
         for ancestor in self.ancestors(app) {
             ancestor.data_mut(app).descendants = None;
         }
@@ -1189,10 +1195,19 @@ impl AnyFocusNode {
         debug_assert!(match self.manager(app) {
             None => true,
             Some(manager) => {
-                let root = app.get(manager).root_scope.as_node();
+                let root = manager.root_scope(app).as_node();
                 !root.descendants(app).contains(&node)
             }
         });
+    }
+
+    /// Forgets the ancestors this node and its descendants cached, for a node that has left its
+    /// parent: Dart keeps reading them, but the arena frees them.
+    fn clear_ancestors_caches(self, app: &mut App) {
+        self.data_mut(app).ancestors = None;
+        for descendant in self.descendants(app) {
+            descendant.data_mut(app).ancestors = None;
+        }
     }
 
     fn update_manager(self, app: &mut App, manager: Option<Handle<FocusManager>>) {
@@ -1212,7 +1227,7 @@ impl AnyFocusNode {
         );
         if child.data(app).parent == Some(self) {
             debug_assert!(
-                self.data(app).children.contains(&child),
+                self.data(app).children.iter().any(|kept| kept == child),
                 "Found a node that says it's a child, but doesn't appear in the child list."
             );
             // The child is already a child of this parent.
@@ -1220,7 +1235,7 @@ impl AnyFocusNode {
         }
         debug_assert!(match self.manager(app) {
             None => true,
-            Some(manager) => child != app.get(manager).root_scope.as_node(),
+            Some(manager) => child != manager.root_scope(app).as_node(),
         });
         debug_assert!(
             !self.ancestors(app).contains(&child),
@@ -1232,7 +1247,8 @@ impl AnyFocusNode {
             let nearest_scope = self.nearest_scope(app);
             parent.remove_child(app, child, old_scope != nearest_scope);
         }
-        self.data_mut(app).children.push(child);
+        let kept_child = child.keep(app);
+        self.data_mut(app).children.push(kept_child);
         let child_data = child.data_mut(app);
         child_data.parent = Some(self);
         child_data.ancestors = None;
@@ -1245,7 +1261,7 @@ impl AnyFocusNode {
             // Update the focus chain for the current focus without changing it.
             let primary_focus = self
                 .manager(app)
-                .and_then(|manager| app.get(manager).primary_focus);
+                .and_then(|manager| app.get(manager).primary_focus.handle());
             if let Some(primary_focus) = primary_focus {
                 primary_focus.set_as_focused_child_for_scope(app);
             }
@@ -1278,13 +1294,13 @@ impl AnyFocusNode {
         app: &mut App,
         context: Option<BuildContext>,
         on_key_event: Option<FocusOnKeyEventCallback>,
-    ) -> Handle<FocusAttachment> {
+    ) -> Ref<FocusAttachment> {
         self.data_mut(app).context = context;
         if on_key_event.is_some() {
             self.data_mut(app).on_key_event = on_key_event;
         }
         let attachment = FocusAttachment::new(app, self);
-        self.data_mut(app).attachment = Some(attachment);
+        self.data_mut(app).attachment = Some(attachment.clone());
         attachment
     }
 
@@ -1292,7 +1308,7 @@ impl AnyFocusNode {
     ///
     /// Detaching also unfocuses and cleans up the manager's data structures.
     pub fn dispose(self, app: &mut App) {
-        if let Some(attachment) = self.data(app).attachment {
+        if let Some(attachment) = self.data(app).attachment.handle() {
             attachment.detach(app);
         }
         (self.vtable.dispose_notifier)(app, self.id);
@@ -1368,10 +1384,8 @@ impl AnyFocusNode {
             remove_focused_child(app, ancestor, scope_focus);
             // Add it to the end of the list, which is also the top of the queue: the end of the
             // list represents the currently focused child.
-            app.get_mut(ancestor)
-                .scope
-                .focused_children
-                .push(scope_focus);
+            let kept = scope_focus.keep(app);
+            app.get_mut(ancestor).scope.focused_children.push(kept);
             scope_focus = ancestor.as_node();
         }
     }
@@ -1429,12 +1443,22 @@ impl AnyFocusNode {
     }
 }
 
+impl ListenableHandle for AnyFocusNode {
+    fn add_listener_to(self, app: &mut App, listener: Listener) {
+        AnyFocusNode::add_listener(self, app, listener);
+    }
+
+    fn remove_listener_from(self, app: &mut App, listener: &Listener) {
+        AnyFocusNode::remove_listener(self, app, listener);
+    }
+}
+
 /// Dart's `scope._focusedChildren.remove(node)`.
 fn remove_focused_child(app: &mut App, scope: Handle<FocusScopeNode>, node: AnyFocusNode) {
     app.get_mut(scope)
         .scope
         .focused_children
-        .retain(|child| *child != node);
+        .retain(|child| child != node);
 }
 
 /// An object that can be used by a stateful widget to obtain the keyboard focus and to handle
@@ -1483,7 +1507,7 @@ pub struct FocusNode {
 
 impl FocusNode {
     /// Creates a focus node.
-    pub fn new(app: &mut App) -> Handle<FocusNode> {
+    pub fn new(app: &mut App) -> Ref<FocusNode> {
         app.create(FocusNode {
             change_notifier: ChangeNotifierData::new(),
             focus_node: FocusNodeData::new(),
@@ -1538,7 +1562,7 @@ impl FocusNode {
         this.set_as_focused_child_for_scope(app);
         let marked_for_focus = this
             .manager(app)
-            .and_then(|manager| app.get(manager).marked_for_focus);
+            .and_then(|manager| app.get(manager).marked_for_focus.handle());
         if this.has_primary_focus(app)
             && (marked_for_focus.is_none() || marked_for_focus == Some(this))
         {
@@ -1585,7 +1609,7 @@ pub struct FocusScopeNodeData {
 
     /// A stack of the children that have been set as the `focused_child`, most recent last
     /// (which is the top of the stack).
-    focused_children: Vec<AnyFocusNode>,
+    focused_children: Vec<FocusNodeRef>,
 }
 
 /// A subclass of [`FocusNode`] that acts as a scope for its descendants, maintaining
@@ -1614,7 +1638,7 @@ impl FocusScopeNode {
     ///
     /// Dart's optional constructor arguments are the setters; `descendantsAreFocusable` is
     /// always true on a scope, which is [`FocusNodeData`]'s default.
-    pub fn new(app: &mut App) -> Handle<FocusScopeNode> {
+    pub fn new(app: &mut App) -> Ref<FocusScopeNode> {
         app.create(FocusScopeNode {
             change_notifier: ChangeNotifierData::new(),
             focus_node: FocusNodeData::new(),
@@ -1673,7 +1697,12 @@ impl FocusScopeNode {
     ///
     /// Returns `None` if there is no currently focused child.
     pub fn focused_child(self: Handle<Self>, app: &mut App) -> Option<AnyFocusNode> {
-        let last = app.get(self).scope.focused_children.last().copied();
+        let last = app
+            .get(self)
+            .scope
+            .focused_children
+            .last()
+            .map(Retained::handle);
         debug_assert!(match last {
             None => true,
             Some(last) => last.enclosing_scope(app) == Some(self),
@@ -1719,10 +1748,11 @@ impl FocusScopeNode {
         }
         debug_assert!(self.as_node().manager(app).is_some());
         if let Some(manager) = self.as_node().manager(app) {
-            app.get_mut(manager).pending_autofocuses.push(Autofocus {
-                scope: self,
-                autofocus_node: node,
-            });
+            let autofocus = Autofocus {
+                scope: self.keep(app),
+                autofocus_node: node.keep(app),
+            };
+            app.get_mut(manager).pending_autofocuses.push(autofocus);
             manager.mark_needs_update(app);
         }
     }
@@ -1784,7 +1814,12 @@ impl FocusNodeLeaf for FocusScopeNode {
         // It is possible that a previously focused child is no longer focusable, so clean out
         // the list if so.
         loop {
-            let last = app.get(self).scope.focused_children.last().copied();
+            let last = app
+                .get(self)
+                .scope
+                .focused_children
+                .last()
+                .map(Retained::handle);
             let Some(last) = last else { break };
             if last.can_request_focus(app) && last.enclosing_scope(app).is_some() {
                 break;
@@ -1887,14 +1922,14 @@ impl WidgetsBindingObserver for AppLifecycleListener {
 /// [`remove_highlight_mode_listener`](Self::remove_highlight_mode_listener).
 pub struct FocusManager {
     change_notifier: ChangeNotifierData,
-    highlight_manager: Handle<HighlightModeManager>,
+    highlight_manager: Ref<HighlightModeManager>,
     /// The root [`FocusScopeNode`] in the focus tree.
-    root_scope: Handle<FocusScopeNode>,
-    primary_focus: Option<AnyFocusNode>,
+    root_scope: Ref<FocusScopeNode>,
+    primary_focus: Option<FocusNodeRef>,
     /// The set of nodes that need to notify their listeners of changes at the next update.
-    dirty_nodes: Vec<AnyFocusNode>,
+    dirty_nodes: Vec<FocusNodeRef>,
     /// The node that has requested to have the primary focus, but hasn't been given it yet.
-    marked_for_focus: Option<AnyFocusNode>,
+    marked_for_focus: Option<FocusNodeRef>,
     /// The list of autofocus requests made since the last `apply_focus_change` call.
     pending_autofocuses: Vec<Autofocus>,
     /// True indicates that there is an update pending.
@@ -1904,7 +1939,7 @@ pub struct FocusManager {
     app_lifecycle_listener: Option<WidgetsBindingObserverRef>,
     /// The node that was focused before the app lifecycle changed. Will be restored as the
     /// primary focus once the app is resumed.
-    suspended_node: Option<AnyFocusNode>,
+    suspended_node: Option<FocusNodeRef>,
 }
 
 impl FocusManager {
@@ -1917,14 +1952,14 @@ impl FocusManager {
     /// This newly constructed focus manager does not have the necessary event handlers
     /// registered to allow it to manage focus. To register those event handlers, callers must
     /// call [`register_global_handlers`](Self::register_global_handlers).
-    pub fn new(app: &mut App) -> Handle<FocusManager> {
+    pub fn new(app: &mut App) -> Ref<FocusManager> {
         let root_scope = FocusScopeNode::new(app);
         root_scope.set_debug_label(app, Some("Root Focus Scope".to_string()));
         let highlight_manager = HighlightModeManager::new(app);
         let this = app.create(FocusManager {
             change_notifier: ChangeNotifierData::new(),
             highlight_manager,
-            root_scope,
+            root_scope: root_scope.clone(),
             primary_focus: None,
             dirty_nodes: Vec::new(),
             marked_for_focus: None,
@@ -1934,7 +1969,7 @@ impl FocusManager {
             suspended_node: None,
         });
         this.listen_to_application_lifecycle_changes_if_supported(app);
-        root_scope.focus_node_data_mut(app).manager = Some(this);
+        root_scope.focus_node_data_mut(app).manager = Some(this.handle());
         this
     }
 
@@ -2001,8 +2036,8 @@ impl FocusManager {
             WidgetsBinding::instance(app).remove_observer(app, &listener);
         }
         app.get(self).highlight_manager.dispose(app);
-        app.get(self).root_scope.dispose(app);
-        app.get_mut(self).change_notifier.dispose();
+        self.root_scope(app).handle().dispose(app);
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Provides convenient access to the current [`FocusManager`] singleton from the
@@ -2018,7 +2053,7 @@ impl FocusManager {
     ///
     /// Defaults to [`FocusHighlightStrategy::Automatic`].
     pub fn highlight_strategy(self: Handle<Self>, app: &App) -> FocusHighlightStrategy {
-        app.get(app.get(self).highlight_manager).strategy
+        app.get(&app.get(self).highlight_manager).strategy
     }
 
     /// See [`highlight_strategy`](Self::highlight_strategy).
@@ -2027,7 +2062,7 @@ impl FocusManager {
         app: &mut App,
         value: FocusHighlightStrategy,
     ) {
-        let highlight_manager = app.get(self).highlight_manager;
+        let highlight_manager = app.get(self).highlight_manager.handle();
         if app.get(highlight_manager).strategy == value {
             return;
         }
@@ -2133,22 +2168,23 @@ impl FocusManager {
     ///
     /// This field is rarely used directly. To find the nearest [`FocusScopeNode`] for a given
     /// [`FocusNode`], call [`AnyFocusNode::nearest_scope`].
-    pub fn root_scope(self: Handle<Self>, app: &App) -> Handle<FocusScopeNode> {
-        app.get(self).root_scope
+    pub fn root_scope(self: Handle<Self>, app: &App) -> &Ref<FocusScopeNode> {
+        &app.get(self).root_scope
     }
 
     /// The node that currently has the primary focus.
     pub fn primary_focus(self: Handle<Self>, app: &App) -> Option<AnyFocusNode> {
-        app.get(self).primary_focus
+        app.get(self).primary_focus.handle()
     }
 
     fn app_lifecycle_change(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
-        let root_scope = Some(app.get(self).root_scope.as_node());
+        let root_scope: FocusNodeRef = self.root_scope(app).erase();
+        let root_has_primary_focus = self.primary_focus(app) == Some(root_scope.handle());
         if state == AppLifecycleState::Resumed {
-            if app.get(self).primary_focus != root_scope {
+            if !root_has_primary_focus {
                 // The focus changed while the app was paused: the suspended node is ignored.
                 app.get_mut(self).suspended_node = None;
-            } else if let Some(suspended_node) = app.get(self).suspended_node {
+            } else if let Some(suspended_node) = app.get(self).suspended_node.handle() {
                 // Only restore the focus that was suspended when the app went inactive if
                 // nothing else has requested focus in the meantime. For example, activating a
                 // different window will cause its view to request focus.
@@ -2160,10 +2196,10 @@ impl FocusManager {
                     app.get_mut(self).suspended_node = None;
                 }
             }
-        } else if app.get(self).primary_focus != root_scope {
+        } else if !root_has_primary_focus {
             let manager = app.get_mut(self);
-            manager.marked_for_focus = root_scope;
-            manager.suspended_node = manager.primary_focus;
+            manager.marked_for_focus = Some(root_scope);
+            manager.suspended_node = manager.primary_focus.clone();
             self.apply_focus_changes_if_needed(app);
         }
     }
@@ -2172,13 +2208,13 @@ impl FocusManager {
         // The node has been removed from the tree, so it no longer needs to be notified of
         // changes.
         let manager = app.get_mut(self);
-        if manager.primary_focus == Some(node) {
+        if manager.primary_focus.handle() == Some(node) {
             manager.primary_focus = None;
         }
-        if manager.suspended_node == Some(node) {
+        if manager.suspended_node.handle() == Some(node) {
             manager.suspended_node = None;
         }
-        manager.dirty_nodes.retain(|dirty| *dirty != node);
+        manager.dirty_nodes.retain(|dirty| dirty != node);
     }
 
     fn mark_properties_changed(self: Handle<Self>, app: &mut App, node: AnyFocusNode) {
@@ -2187,11 +2223,12 @@ impl FocusManager {
     }
 
     fn mark_next_focus(self: Handle<Self>, app: &mut App, node: AnyFocusNode) {
-        if app.get(self).primary_focus == Some(node) {
+        if self.primary_focus(app) == Some(node) {
             // The caller asked for the current focus to be the next focus, so just pretend that
             // didn't happen.
             app.get_mut(self).marked_for_focus = None;
         } else {
+            let node = node.keep(app);
             app.get_mut(self).marked_for_focus = Some(node);
             self.mark_needs_update(app);
         }
@@ -2230,7 +2267,7 @@ impl FocusManager {
         );
 
         app.get_mut(self).have_scheduled_update = false;
-        let previous_focus = app.get(self).primary_focus;
+        let previous_focus = self.primary_focus(app);
 
         for autofocus in std::mem::take(&mut app.get_mut(self).pending_autofocuses) {
             autofocus.apply_if_valid(app, self);
@@ -2239,13 +2276,13 @@ impl FocusManager {
         if app.get(self).primary_focus.is_none() && app.get(self).marked_for_focus.is_none() {
             // If we don't have any current focus, and nobody has asked to focus yet, then
             // revert to the root scope.
-            let root_scope = app.get(self).root_scope;
-            app.get_mut(self).marked_for_focus = Some(root_scope.as_node());
+            let root_scope: FocusNodeRef = self.root_scope(app).erase();
+            app.get_mut(self).marked_for_focus = Some(root_scope);
         }
         // A node has requested to be the next focus, and isn't already the primary focus.
-        let marked_for_focus = app.get(self).marked_for_focus;
+        let marked_for_focus = app.get(self).marked_for_focus.clone();
         if let Some(marked_for_focus) = marked_for_focus
-            && Some(marked_for_focus) != app.get(self).primary_focus
+            && Some(marked_for_focus.handle()) != self.primary_focus(app)
         {
             let previous_path = match previous_focus {
                 Some(previous) => previous.ancestors(app),
@@ -2272,7 +2309,7 @@ impl FocusManager {
             manager.marked_for_focus = None;
         }
         debug_assert!(app.get(self).marked_for_focus.is_none());
-        let primary_focus = app.get(self).primary_focus;
+        let primary_focus = self.primary_focus(app);
         if previous_focus != primary_focus {
             if let Some(previous_focus) = previous_focus {
                 add_dirty_node(app, self, previous_focus);
@@ -2292,9 +2329,14 @@ impl FocusManager {
 
 /// Dart's `_dirtyNodes.add(node)`: a set that keeps insertion order.
 fn add_dirty_node(app: &mut App, manager: Handle<FocusManager>, node: AnyFocusNode) {
-    let dirty_nodes = &mut app.get_mut(manager).dirty_nodes;
-    if !dirty_nodes.contains(&node) {
-        dirty_nodes.push(node);
+    if app
+        .get(manager)
+        .dirty_nodes
+        .iter()
+        .all(|dirty| dirty != node)
+    {
+        let node = node.keep(app);
+        app.get_mut(manager).dirty_nodes.push(node);
     }
 }
 
@@ -2334,7 +2376,7 @@ struct HighlightModeManager {
 }
 
 impl HighlightModeManager {
-    fn new(app: &mut App) -> Handle<HighlightModeManager> {
+    fn new(app: &mut App) -> Ref<HighlightModeManager> {
         app.create(HighlightModeManager {
             last_interaction_requires_traditional_highlights: None,
             highlight_mode: None,
@@ -2812,7 +2854,7 @@ pub(crate) mod tests {
         node: AnyFocusNode,
         context: BuildContext,
         parent: AnyFocusNode,
-    ) -> Handle<FocusAttachment> {
+    ) -> Ref<FocusAttachment> {
         let attachment = node.attach(app, Some(context), None);
         attachment.reparent(app, Some(parent));
         attachment
@@ -2823,7 +2865,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);
@@ -2847,7 +2889,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let child1 = FocusNode::new(&mut app);
@@ -2878,12 +2920,12 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope1 = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope1.as_node(), context, root.as_node());
         let scope2 = FocusScopeNode::new(&mut app);
 
-        scope1.set_first_focus(&mut app, scope2);
+        scope1.set_first_focus(&mut app, scope2.handle());
         assert_eq!(scope2.parent(&app), Some(scope1.as_node()));
         assert_eq!(scope1.focused_child(&mut app), Some(scope2.as_node()));
         assert!(!scope2.has_focus(&mut app));
@@ -2898,7 +2940,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);
@@ -2917,7 +2959,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);
@@ -2945,7 +2987,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);
@@ -3006,11 +3048,11 @@ pub(crate) mod tests {
     /// of `target`, with the primary focus.
     fn focused_node_on(
         target: TargetPlatform,
-    ) -> (Rc<AppCell>, Handle<FocusNode>, Handle<FocusAttachment>) {
+    ) -> (Rc<AppCell>, Ref<FocusNode>, Ref<FocusAttachment>) {
         let (cell, context) = mounted_context_on(target);
         let (node, attachment) = {
             let mut app = cell.borrow_mut();
-            let root = FocusManager::instance(&mut app).root_scope(&app);
+            let root = FocusManager::instance(&mut app).root_scope(&app).handle();
             let scope = FocusScopeNode::new(&mut app);
             attach_under(&mut app, scope.as_node(), context, root.as_node());
             let node = FocusNode::new(&mut app);
@@ -3083,7 +3125,7 @@ pub(crate) mod tests {
         ] {
             let (cell, context) = mounted_context_on(target);
             let mut app = cell.borrow_mut();
-            let root = FocusManager::instance(&mut app).root_scope(&app);
+            let root = FocusManager::instance(&mut app).root_scope(&app).handle();
             let scope = FocusScopeNode::new(&mut app);
             attach_under(&mut app, scope.as_node(), context, root.as_node());
             let node_a = FocusNode::new(&mut app);
@@ -3117,7 +3159,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);

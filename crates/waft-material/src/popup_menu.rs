@@ -12,14 +12,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationStyle, AnyAnimation, CurveTween, CurvedAnimation, Curves,
+    Animatable, Animation, AnimationRef, AnimationStyle, CurveTween, CurvedAnimation, Curves,
     Interval,
 };
 use waft_embedder::{
     Brightness, Clip, Color, Offset, Rect, SemanticsRole, Size, TargetPlatform, TextBaseline,
     TextDirection,
 };
-use waft_foundation::{App, CompleterFuture, Handle, Listener, ValueChanged};
+use waft_foundation::{App, CompleterFuture, Handle, Listener, OptionRetained, Ref, ValueChanged};
 use waft_painting::{
     AlignmentGeometry, BorderRadius, BorderRadiusGeometry, EdgeInsets, EdgeInsetsGeometry,
     ShapeBorderRef, TextStyle,
@@ -1163,18 +1163,25 @@ pub struct CheckedPopupMenuItemState<T: Clone + PartialEq + 'static> {
     state: StateData<CheckedPopupMenuItem<T>>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     /// Created in `init_state`, because a state is created without the [`App`].
-    controller: Option<Handle<waft_animation::AnimationController>>,
+    controller: Option<Ref<waft_animation::AnimationController>>,
 }
 
 impl<T: Clone + PartialEq + 'static> CheckedPopupMenuItemState<T> {
     const FADE_DURATION: Duration = Duration::from_millis(150);
 
     fn controller(self: Handle<Self>, app: &App) -> Handle<waft_animation::AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 
-    fn opacity(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        self.controller(app).view()
+    fn opacity(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
+        app.get(self)
+            .controller
+            .as_ref()
+            .expect("created in init_state")
+            .erase()
     }
 
     fn animation_changed(self: Handle<Self>, app: &mut App) {
@@ -1218,7 +1225,7 @@ impl<T: Clone + PartialEq + 'static> waft_scheduler::TickerProviderObject
         self: Handle<Self>,
         app: &mut App,
         on_tick: waft_scheduler::TickerCallback,
-    ) -> Handle<waft_scheduler::Ticker> {
+    ) -> Ref<waft_scheduler::Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1300,7 +1307,7 @@ impl<T: Clone + PartialEq + 'static> State for CheckedPopupMenuItemState<T> {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = waft_animation::AnimationController::create(
+        let controller = waft_animation::AnimationController::new(
             app,
             None,
             Some(Self::FADE_DURATION),
@@ -1310,7 +1317,7 @@ impl<T: Clone + PartialEq + 'static> State for CheckedPopupMenuItemState<T> {
             waft_animation::AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         let value = if self.widget(app).checked { 1.0 } else { 0.0 };
         controller.set_value(app, value);
         controller.add_listener(app, Listener::handle_method(self, Self::animation_changed));
@@ -1324,8 +1331,6 @@ impl<T: Clone + PartialEq + 'static> State for CheckedPopupMenuItemState<T> {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        app.get_mut(self).controller = None;
-        app.destroy(controller);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1425,7 +1430,7 @@ impl<T: Clone + PartialEq + 'static> StatefulWidget for PopupMenu<T> {
 /// Dart's `_PopupMenuState<T>`.
 struct PopupMenuState<T: Clone + PartialEq + 'static> {
     state: StateData<PopupMenu<T>>,
-    opacities: Vec<Handle<CurvedAnimation>>,
+    opacities: Vec<Ref<CurvedAnimation>>,
 }
 
 impl<T: Clone + PartialEq + 'static> Debug for PopupMenuState<T> {
@@ -1437,14 +1442,15 @@ impl<T: Clone + PartialEq + 'static> Debug for PopupMenuState<T> {
 }
 
 impl<T: Clone + PartialEq + 'static> PopupMenuState<T> {
-    fn route_animation(app: &App, route: Handle<PopupMenuRoute<T>>) -> AnyAnimation<f64> {
-        ModalRoute::animation(route, app).expect("an installed route has an animation")
+    fn route_animation(app: &App, route: Handle<PopupMenuRoute<T>>) -> AnimationRef<f64> {
+        ModalRoute::animation(route, app)
+            .expect("an installed route has an animation")
+            .keep(app)
     }
 
     fn set_opacities(self: Handle<Self>, app: &mut App) {
         for opacity in std::mem::take(&mut app.get_mut(self).opacities) {
             opacity.dispose(app);
-            app.destroy_lingering(opacity);
         }
         let route = self.widget(app).route;
         let count = app.get(route).items.len();
@@ -1455,9 +1461,9 @@ impl<T: Clone + PartialEq + 'static> PopupMenuState<T> {
         for i in 0..count {
             let start = (i as f64 + 1.0) * unit;
             let end = (start + 1.5 * unit).clamp(0.0, 1.0);
-            let opacity = CurvedAnimation::create(
+            let opacity = CurvedAnimation::new(
                 app,
-                animation,
+                animation.clone(),
                 Rc::new(Interval::new(start, end, Curves::linear())),
                 None,
             );
@@ -1487,7 +1493,6 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
     fn dispose(self: Handle<Self>, app: &mut App) {
         for opacity in std::mem::take(&mut app.get_mut(self).opacities) {
             opacity.dispose(app);
-            app.destroy_lingering(opacity);
         }
     }
 
@@ -1506,7 +1511,7 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
         };
 
         for i in 0..count {
-            let opacity = app.get(self).opacities[i].as_animation();
+            let opacity = app.get(self).opacities[i].erase();
             let menu_route = app.get(route);
             let mut item = menu_route.items[i].widget().clone();
             if let Some(initial_value) = &menu_route.initial_value
@@ -1606,9 +1611,11 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
         let surface_tint_color = route_surface_tint_color
             .or(popup_menu_theme.surface_tint_color)
             .or_else(|| defaults.surface_tint_color(app));
-        let opacity = opacity.animate(app, animation);
+        let opacity = opacity.animate(app, animation.clone());
+        let animated = animation.clone();
+        let animation = animation.handle();
 
-        AnimatedBuilder::new(Rc::new(animation), move |app, _context, child| {
+        AnimatedBuilder::new(Rc::new(animated), move |app, _context, child| {
             let mut material = Material::new()
                 .clip_behavior(clip_behavior)
                 .r#type(MaterialType::Card)
@@ -1632,7 +1639,7 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
             if let Some(child) = child {
                 align = align.child(child.clone());
             }
-            FadeTransition::new(opacity)
+            FadeTransition::new(opacity.clone())
                 .child(material.child(align))
                 .into_widget()
         })
@@ -1798,7 +1805,7 @@ struct PopupMenuRoute<T: Clone + PartialEq + 'static> {
     clip_behavior: Clip,
     pop_up_animation_style: Option<AnimationStyle>,
     barrier_label: String,
-    animation: Option<Handle<CurvedAnimation>>,
+    animation: Option<Ref<CurvedAnimation>>,
 }
 
 /// The arguments of Dart's `_PopupMenuRoute` constructor.
@@ -1825,7 +1832,7 @@ struct PopupMenuRouteArguments<T: 'static> {
 }
 
 impl<T: Clone + PartialEq + 'static> PopupMenuRoute<T> {
-    fn new(app: &mut App, arguments: PopupMenuRouteArguments<T>) -> Handle<PopupMenuRoute<T>> {
+    fn new(app: &mut App, arguments: PopupMenuRouteArguments<T>) -> Ref<PopupMenuRoute<T>> {
         debug_assert!(
             arguments.position.is_some() != arguments.position_builder.is_some(),
             "Either position or positionBuilder must be provided."
@@ -1887,14 +1894,14 @@ impl<T: Clone + PartialEq + 'static> PopupMenuRoute<T> {
 
     /// Dart's `TransitionRoute.createAnimation`, which the override runs as `super`: the
     /// trait's default body.
-    fn transition_route_create_animation(self: Handle<Self>, app: &mut App) -> AnyAnimation<f64> {
+    fn transition_route_create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
         debug_assert!(
             !TransitionRoute::debug_transition_completed(self, app),
             "cannot reuse a route after disposing it"
         );
         let controller =
             TransitionRoute::controller(self, app).expect("createAnimationController ran first");
-        controller.view()
+        controller.keep(app).into_erased()
     }
 }
 
@@ -1985,7 +1992,7 @@ impl<T: Clone + PartialEq + 'static> Route for PopupMenuRoute<T> {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(animation) = app.get(self).animation {
+        if let Some(animation) = app.get(self).animation.handle() {
             animation.dispose(app);
         }
         TransitionRoute::dispose(self, app)
@@ -2019,11 +2026,11 @@ impl<T: Clone + PartialEq + 'static> TransitionRoute for PopupMenuRoute<T> {
         PopupRoute::allow_snapshotting(self, app)
     }
 
-    fn create_animation(self: Handle<Self>, app: &mut App) -> AnyAnimation<f64> {
+    fn create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
         let style = app.get(self).pop_up_animation_style.clone();
         if style.as_ref() != Some(&AnimationStyle::NO_ANIMATION) {
-            if let Some(animation) = app.get(self).animation {
-                return animation.as_animation();
+            if let Some(animation) = app.get(self).animation.as_ref() {
+                return animation.erase();
             }
             let parent = self.transition_route_create_animation(app);
             let curve = style
@@ -2040,9 +2047,9 @@ impl<T: Clone + PartialEq + 'static> TransitionRoute for PopupMenuRoute<T> {
                         Curves::linear(),
                     ))
                 });
-            let animation = CurvedAnimation::create(app, parent, curve, Some(reverse_curve));
-            app.get_mut(self).animation = Some(animation);
-            return animation.as_animation();
+            let animation = CurvedAnimation::new(app, parent, curve, Some(reverse_curve));
+            app.get_mut(self).animation = Some(animation.clone());
+            return animation.into_erased();
         }
         self.transition_route_create_animation(app)
     }
@@ -2075,8 +2082,8 @@ impl<T: Clone + PartialEq + 'static> ModalRoute for PopupMenuRoute<T> {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let _ = (animation, secondary_animation);
         let mut selected_item_index = None;
@@ -2283,7 +2290,7 @@ pub fn show_menu<T: Clone + PartialEq + 'static>(
             request_focus,
         },
     );
-    navigator.push(app, Route::as_route(route))
+    navigator.push(app, route.into_erased())
 }
 
 /// Signature for the callback invoked when a menu item is selected. The argument is the value
@@ -3182,8 +3189,10 @@ mod tests {
                                 Material::new().child(child()).into_widget()
                             }),
                         );
-                        route.settings(app, RouteSettingsRef::Settings(settings.clone()));
-                        Some(Route::as_route(route))
+                        route
+                            .clone()
+                            .settings(app, RouteSettingsRef::Settings(settings.clone()));
+                        Some(route.erase())
                     }),
                 ),
             )
@@ -4635,7 +4644,7 @@ mod tests {
                             .into_widget()
                         }),
                     );
-                    Some(Route::as_route(route))
+                    Some(route.erase())
                 })
                 .into_widget()
         });
@@ -5289,7 +5298,7 @@ mod tests {
                                                 .into_widget()
                                         }),
                                     );
-                                    Some(Route::as_route(route))
+                                    Some(route.erase())
                                 },
                             ))
                             .into_widget(),
@@ -6298,7 +6307,7 @@ mod tests {
                                 .into_widget()
                         }),
                     );
-                    Some(Route::as_route(route))
+                    Some(route.erase())
                 })
                 .into_widget()
         });
@@ -6640,11 +6649,13 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             let field_focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut());
-            pump_app(&mut tester, m3, move |_app| {
-                crate::scaffold::Scaffold::new()
-                    .body(Column::new().children(vec![
+            pump_app(&mut tester, m3, {
+                let field_focus_node = field_focus_node.clone();
+                move |_app| {
+                    crate::scaffold::Scaffold::new()
+                        .body(Column::new().children(vec![
                         crate::text_field::TextField::new()
-                            .focus_node(field_focus_node)
+                            .focus_node(field_focus_node.erase())
                             .autofocus(true)
                             .into_widget(),
                         PopupMenuButton::new(|_app, _context| vec![item(1, "One")])
@@ -6657,17 +6668,18 @@ mod tests {
                             .child(Text::new("click here"))
                             .into_widget(),
                     ]))
-                    .into_widget()
+                        .into_widget()
+                }
             });
             tester.pump(Duration::ZERO);
             assert!(waft_widgets::FocusNodeLeaf::has_focus(
-                field_focus_node,
+                field_focus_node.handle(),
                 &mut tester.cell.borrow_mut()
             ));
             tap_text(&mut tester, "click here");
             tester.pump(Duration::ZERO);
             assert!(waft_widgets::FocusNodeLeaf::has_focus(
-                field_focus_node,
+                field_focus_node.handle(),
                 &mut tester.cell.borrow_mut()
             ));
         });
@@ -6824,7 +6836,7 @@ mod tests {
                                     .into_widget()
                             }),
                         );
-                        Some(Route::as_route(route))
+                        Some(route.erase())
                     }),
                 ))
                 .into_widget()
@@ -7308,7 +7320,7 @@ mod tests {
     }
 
     /// Dart's collector frees the item fades `_PopupMenuState` makes once the menu closes;
-    /// here the state frees them in its `dispose`.
+    /// here they are freed with the state's references to them.
     #[test]
     fn a_closed_menu_frees_the_item_fades_its_state_made() {
         with_main_thread_stack(|| {
@@ -7331,7 +7343,11 @@ mod tests {
                 let state = menu
                     .state_handle::<PopupMenuState<i32>>(&app)
                     .expect("the menu is stateful");
-                app.get(state).opacities.clone()
+                app.get(state)
+                    .opacities
+                    .iter()
+                    .map(|opacity| opacity.handle())
+                    .collect::<Vec<_>>()
             };
             assert_eq!(opacities.len(), 2);
 

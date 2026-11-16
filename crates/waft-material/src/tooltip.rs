@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{Brightness, Radius, TargetPlatform, TextAlign};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 use waft_painting::{
     BorderRadius, BoxDecoration, DecorationRef, EdgeInsets, EdgeInsetsGeometry, InlineSpanRef,
     TextSpan, TextStyle, position_dependent_box,
@@ -689,7 +689,7 @@ impl SingleTickerProviderStateMixin for TooltipState {
 
 /// Dart's `TooltipState with SingleTickerProviderStateMixin`.
 impl TickerProviderObject for TooltipState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1800,7 +1800,7 @@ pub(crate) mod tests {
             };
             let rich_message = TextSpan::new()
                 .text(TOOLTIP_TEXT)
-                .recognizer(recognizer.as_recognizer())
+                .recognizer(recognizer.erase())
                 .into_span();
             pump_app(&mut tester, m3, |_app| {
                 Tooltip::new()

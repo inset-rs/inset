@@ -3,7 +3,7 @@
 use std::{cell::Cell, rc::Rc, time::Duration};
 use waft_animation::{AnimationController, Cubic, Curve, Curves};
 use waft_embedder::{Offset, Rect};
-use waft_foundation::Handle;
+use waft_foundation::Ref;
 use waft_painting::Alignment;
 use waft_widgets::*;
 
@@ -201,12 +201,12 @@ pub(crate) struct NavigationIndicatorTransition {
 impl NavigationIndicatorTransition {
     /// Wraps the real indicator, preserving its visual parent's clips, scrolling and visibility.
     pub(crate) fn build(
-        controller: Handle<AnimationController>,
+        controller: Ref<AnimationController>,
         animation: Option<Self>,
         settled_opacity: f64,
         child: WidgetRef,
     ) -> WidgetRef {
-        AnimatedBuilder::new(Rc::new(controller), move |app, _, child| {
+        AnimatedBuilder::new(Rc::new(controller.clone()), move |app, _, child| {
             let (opacity, offset, scale_x, scale_y) = if let Some(animation) = &animation {
                 let frame = indicator_frames_with_pivots(
                     animation.from,

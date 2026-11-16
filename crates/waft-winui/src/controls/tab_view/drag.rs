@@ -2,8 +2,8 @@
 use super::*;
 use std::cell::Cell;
 use waft_embedder::{Offset, Rect};
-use waft_foundation::Timer;
-use waft_gestures::{AnyGestureRecognizer, GestureMultiDragStartCallback};
+use waft_foundation::{OptionRetained, Ref, Timer};
+use waft_gestures::{GestureMultiDragStartCallback, RecognizerRef};
 
 /// Requests moving a tab within the owner's collection. `new_index` is its index after removal.
 #[derive(Clone, Debug)]
@@ -183,7 +183,7 @@ pub(super) struct TabDragState {
     timer: Option<Timer>,
 
     /// Native edge scroller associated with this strip’s viewport.
-    auto_scroll: Option<Handle<EdgeDraggingAutoScroller>>,
+    auto_scroll: Option<Ref<EdgeDraggingAutoScroller>>,
 }
 
 /// Allows TabDragStarting to cancel before the native recognizer creates its drag avatar.
@@ -203,7 +203,7 @@ impl DraggableWidget for TabDraggable {
         &self,
         app: &mut App,
         on_start: GestureMultiDragStartCallback,
-    ) -> AnyGestureRecognizer {
+    ) -> RecognizerRef {
         let data = self.draggable.data.as_ref().unwrap().clone();
         self.draggable.create_recognizer(
             app,
@@ -338,7 +338,7 @@ impl TabViewState {
                         app.get(self)
                             .containers
                             .get(&id)
-                            .map(|entry| entry.tab_focus)
+                            .map(|entry| entry.tab_focus.handle())
                     } else {
                         None
                     };
@@ -616,7 +616,7 @@ impl TabViewState {
                 app.get_mut(self).drag.auto_scroll = Some(scroller);
             }
         }
-        if let Some(scroller) = app.get(self).drag.auto_scroll {
+        if let Some(scroller) = app.get(self).drag.auto_scroll.handle() {
             scroller.start_auto_scroll_if_necessary(
                 app,
                 Rect::from_ltwh(position.dx() - 10.0, position.dy(), 20.0, 1.0),
@@ -668,7 +668,7 @@ impl TabViewState {
         if let Some(timer) = app.get_mut(self).drag.timer.take() {
             timer.cancel(app);
         }
-        if let Some(scroller) = app.get(self).drag.auto_scroll {
+        if let Some(scroller) = app.get(self).drag.auto_scroll.handle() {
             scroller.stop_auto_scroll(app);
         }
         let drag = &mut app.get_mut(self).drag;
@@ -681,8 +681,6 @@ impl TabViewState {
     /// Cancels timers and releases the owned native scroller.
     pub(super) fn dispose_drag(self: Handle<Self>, app: &mut App) {
         self.clear_drag(app);
-        if let Some(scroller) = app.get_mut(self).drag.auto_scroll.take() {
-            app.destroy(scroller);
-        }
+        app.get_mut(self).drag.auto_scroll = None;
     }
 }

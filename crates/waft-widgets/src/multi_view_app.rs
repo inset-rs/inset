@@ -416,7 +416,11 @@ mod tests {
             &mut platform.cell.borrow_mut(),
             MultiViewApp::new(|_app, _view| Some(SizedBox::new().into_widget())).into_widget(),
         );
-        assert_eq!(window.test_view().presented(), 0, "closed before its first frame");
+        assert_eq!(
+            window.test_view().presented(),
+            0,
+            "closed before its first frame"
+        );
         request_view_close(&platform.cell, ViewId(1));
         assert_eq!(window.closes(), 1);
         assert_eq!(platform.quits.count(), 0, "not the last view");

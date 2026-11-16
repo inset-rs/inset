@@ -11,12 +11,12 @@ use std::time::Duration;
 use waft_animation::{
     AlwaysStoppedAnimation, Animation, AnimationLazyListenerData, AnimationLazyListenerMixin,
     AnimationLocalListenersData, AnimationLocalListenersMixin, AnimationLocalStatusListenersData,
-    AnimationLocalStatusListenersMixin, AnimationStatus, AnimationStatusListener, AnyAnimation,
-    CompoundAnimation, Curve, CurveTween, Curves, Interval, ReverseAnimation, Threshold, Tween,
-    compound_did_start_listening, compound_did_stop_listening,
+    AnimationLocalStatusListenersMixin, AnimationRef, AnimationStatus, AnimationStatusListener,
+    AnyAnimation, CompoundAnimation, Curve, CurveTween, Curves, Drive, Interval, ReverseAnimation,
+    Threshold, Tween, compound_did_start_listening, compound_did_stop_listening,
 };
 use waft_embedder::{Offset, TextDirection};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 
 use crate::scaffold::ScaffoldPrelayoutGeometry;
 
@@ -809,7 +809,7 @@ pub trait FloatingActionButtonAnimator: Debug + 'static {
     ///
     /// For example, to create an animation that linearly scales out and then back in,
     /// you could join animations that pass each other with a `TrainHoppingAnimation`.
-    fn get_scale_animation(&self, app: &mut App, parent: AnyAnimation<f64>) -> AnyAnimation<f64>;
+    fn get_scale_animation(&self, app: &mut App, parent: AnimationRef<f64>) -> AnimationRef<f64>;
 
     /// Animates the rotation of `Scaffold.floatingActionButton`.
     ///
@@ -821,8 +821,8 @@ pub trait FloatingActionButtonAnimator: Debug + 'static {
     /// For example, to create a rotation animation that rotates the
     /// `FloatingActionButton` through a full circle, drive a `Tween` from 0.0 to 1.0 with
     /// `parent`.
-    fn get_rotation_animation(&self, app: &mut App, parent: AnyAnimation<f64>)
-    -> AnyAnimation<f64>;
+    fn get_rotation_animation(&self, app: &mut App, parent: AnimationRef<f64>)
+    -> AnimationRef<f64>;
 
     /// Gets the progress value to restart a motion animation from when the animation is
     /// interrupted.
@@ -881,20 +881,20 @@ impl dyn FloatingActionButtonAnimator {
 struct ScalingFabMotionAnimator;
 
 /// Dart's `static final` tweens of `_ScalingFabMotionAnimator`, kept per [`App`] and made on
-/// first use. They are shared by every animation the animator returns, so they are never
-/// destroyed.
+/// first use. They are shared by every animation the animator returns, so the `App` keeps them for
+/// its life.
 #[derive(Default)]
 struct ScalingFabMotionAnimatorStatics {
-    rotation_tween: Option<Handle<Tween<f64>>>,
-    threshold_center_tween: Option<Handle<CurveTween>>,
+    rotation_tween: Option<Ref<Tween<f64>>>,
+    threshold_center_tween: Option<Ref<CurveTween>>,
 }
 
 impl ScalingFabMotionAnimator {
     // Because we only see the last half of the rotation tween,
     // it needs to go twice as far.
-    fn rotation_tween(app: &mut App) -> Handle<Tween<f64>> {
+    fn rotation_tween(app: &mut App) -> Ref<Tween<f64>> {
         let statics = app.singleton::<ScalingFabMotionAnimatorStatics>();
-        if let Some(rotation_tween) = app.get(statics).rotation_tween {
+        if let Some(rotation_tween) = app.get(statics).rotation_tween.clone() {
             return rotation_tween;
         }
         let rotation_tween = Tween::new(
@@ -902,17 +902,17 @@ impl ScalingFabMotionAnimator {
             Some(1.0 - K_FLOATING_ACTION_BUTTON_TURN_INTERVAL * 2.0),
             Some(1.0),
         );
-        app.get_mut(statics).rotation_tween = Some(rotation_tween);
+        app.get_mut(statics).rotation_tween = Some(rotation_tween.clone());
         rotation_tween
     }
 
-    fn threshold_center_tween(app: &mut App) -> Handle<CurveTween> {
+    fn threshold_center_tween(app: &mut App) -> Ref<CurveTween> {
         let statics = app.singleton::<ScalingFabMotionAnimatorStatics>();
-        if let Some(threshold_center_tween) = app.get(statics).threshold_center_tween {
+        if let Some(threshold_center_tween) = app.get(statics).threshold_center_tween.clone() {
             return threshold_center_tween;
         }
         let threshold_center_tween = CurveTween::new(app, Rc::new(Threshold::new(0.5)));
-        app.get_mut(statics).threshold_center_tween = Some(threshold_center_tween);
+        app.get_mut(statics).threshold_center_tween = Some(threshold_center_tween.clone());
         threshold_center_tween
     }
 }
@@ -922,32 +922,32 @@ impl FloatingActionButtonAnimator for ScalingFabMotionAnimator {
         if progress < 0.5 { begin } else { end }
     }
 
-    fn get_scale_animation(&self, app: &mut App, parent: AnyAnimation<f64>) -> AnyAnimation<f64> {
+    fn get_scale_animation(&self, app: &mut App, parent: AnimationRef<f64>) -> AnimationRef<f64> {
         // Animate the scale down from 1 to 0 in the first half of the animation
         // then from 0 back to 1 in the second half.
         let curve: Rc<dyn Curve> = Rc::new(Interval::new(0.5, 1.0, Curves::ease()));
         let flipped_tween = CurveTween::new(app, Rc::new(Rc::clone(&curve).flipped()));
         let flipped = parent.drive(app, flipped_tween);
-        let first = app.create(ReverseAnimation::new(flipped)).as_animation();
+        let first = ReverseAnimation::new(app, flipped).into_erased();
         let curve_tween = CurveTween::new(app, curve);
         let next = parent.drive(app, curve_tween);
         app.create(AnimationSwap::new(first, next, parent, 0.5))
-            .as_animation()
+            .into_erased()
     }
 
     fn get_rotation_animation(
         &self,
         app: &mut App,
-        parent: AnyAnimation<f64>,
-    ) -> AnyAnimation<f64> {
+        parent: AnimationRef<f64>,
+    ) -> AnimationRef<f64> {
         // This rotation will turn on the way in, but not on the way out.
         let rotation_tween = ScalingFabMotionAnimator::rotation_tween(app);
         let first = parent.drive(app, rotation_tween);
         let threshold_center_tween = ScalingFabMotionAnimator::threshold_center_tween(app);
         let threshold = parent.drive(app, threshold_center_tween);
-        let next = app.create(ReverseAnimation::new(threshold)).as_animation();
+        let next = ReverseAnimation::new(app, threshold).into_erased();
         app.create(AnimationSwap::new(first, next, parent, 0.5))
-            .as_animation()
+            .into_erased()
     }
 
     // If the animation was just starting, we'll continue from where we left off.
@@ -963,21 +963,21 @@ impl FloatingActionButtonAnimator for ScalingFabMotionAnimator {
 struct NoAnimationFabMotionAnimator;
 
 /// Dart's `const AlwaysStoppedAnimation<double>(1.0)`, which Dart canonicalizes into one
-/// object, kept per [`App`] and made on first use; never destroyed.
+/// object, kept per [`App`] and made on first use; the `App` keeps it for its life.
 #[derive(Default)]
 struct AlwaysStoppedAtOne {
-    animation: Option<Handle<AlwaysStoppedAnimation<f64>>>,
+    animation: Option<Ref<AlwaysStoppedAnimation<f64>>>,
 }
 
 impl AlwaysStoppedAtOne {
-    fn instance(app: &mut App) -> AnyAnimation<f64> {
+    fn instance(app: &mut App) -> AnimationRef<f64> {
         let statics = app.singleton::<AlwaysStoppedAtOne>();
-        if let Some(animation) = app.get(statics).animation {
-            return animation.as_animation();
+        if let Some(animation) = app.get(statics).animation.clone() {
+            return animation.into_erased();
         }
         let animation = app.create(AlwaysStoppedAnimation::new(1.0));
-        app.get_mut(statics).animation = Some(animation);
-        animation.as_animation()
+        app.get_mut(statics).animation = Some(animation.clone());
+        animation.into_erased()
     }
 }
 
@@ -990,13 +990,13 @@ impl FloatingActionButtonAnimator for NoAnimationFabMotionAnimator {
     fn get_rotation_animation(
         &self,
         app: &mut App,
-        parent: AnyAnimation<f64>,
-    ) -> AnyAnimation<f64> {
+        parent: AnimationRef<f64>,
+    ) -> AnimationRef<f64> {
         let _ = parent;
         AlwaysStoppedAtOne::instance(app)
     }
 
-    fn get_scale_animation(&self, app: &mut App, parent: AnyAnimation<f64>) -> AnyAnimation<f64> {
+    fn get_scale_animation(&self, app: &mut App, parent: AnimationRef<f64>) -> AnimationRef<f64> {
         let _ = parent;
         AlwaysStoppedAtOne::instance(app)
     }
@@ -1008,9 +1008,9 @@ impl FloatingActionButtonAnimator for NoAnimationFabMotionAnimator {
 /// The value of this animation is the value of `first` when `parent.value` <
 /// [`swap_threshold`](Self::swap_threshold) and the value of `next` otherwise.
 struct AnimationSwap<T: Clone + PartialEq + 'static> {
-    first: AnyAnimation<T>,
-    next: AnyAnimation<T>,
-    parent: AnyAnimation<f64>,
+    first: AnimationRef<T>,
+    next: AnimationRef<T>,
+    parent: AnimationRef<f64>,
     swap_threshold: f64,
     last_status: Option<AnimationStatus>,
     last_value: Option<T>,
@@ -1025,9 +1025,9 @@ impl<T: Clone + PartialEq + 'static> AnimationSwap<T> {
     /// Either argument can be an [`AnimationSwap`] itself to combine multiple
     /// animations.
     fn new(
-        first: AnyAnimation<T>,
-        next: AnyAnimation<T>,
-        parent: AnyAnimation<f64>,
+        first: AnimationRef<T>,
+        next: AnimationRef<T>,
+        parent: AnimationRef<f64>,
         swap_threshold: f64,
     ) -> AnimationSwap<T> {
         AnimationSwap {
@@ -1109,11 +1109,11 @@ impl<T: Clone + PartialEq + 'static> AnimationLocalStatusListenersMixin for Anim
 
 impl<T: Clone + PartialEq + 'static> CompoundAnimation<T> for AnimationSwap<T> {
     fn first(self: Handle<Self>, app: &App) -> AnyAnimation<T> {
-        app.get(self).first
+        app.get(self).first.handle()
     }
 
     fn next(self: Handle<Self>, app: &App) -> AnyAnimation<T> {
-        app.get(self).next
+        app.get(self).next.handle()
     }
 
     fn last_status(self: Handle<Self>, app: &App) -> Option<AnimationStatus> {
@@ -1370,17 +1370,19 @@ mod tests {
         fn get_scale_animation(
             &self,
             app: &mut App,
-            _parent: AnyAnimation<f64>,
-        ) -> AnyAnimation<f64> {
-            app.create(AlwaysStoppedAnimation::new(1.0)).as_animation()
+            _parent: AnimationRef<f64>,
+        ) -> AnimationRef<f64> {
+            app.create(AlwaysStoppedAnimation::new(1.0))
+                .into_erased::<AnyAnimation<f64>>()
         }
 
         fn get_rotation_animation(
             &self,
             app: &mut App,
-            _parent: AnyAnimation<f64>,
-        ) -> AnyAnimation<f64> {
-            app.create(AlwaysStoppedAnimation::new(1.0)).as_animation()
+            _parent: AnimationRef<f64>,
+        ) -> AnimationRef<f64> {
+            app.create(AlwaysStoppedAnimation::new(1.0))
+                .into_erased::<AnyAnimation<f64>>()
         }
     }
 
@@ -1506,7 +1508,7 @@ mod tests {
     /// Dart's `_GeometryCachePainter`: caches the scaffold's geometry when it paints, the
     /// only time it can be read.
     struct GeometryCachePainter {
-        geometry_listenable: Handle<ScaffoldGeometryNotifier>,
+        geometry_listenable: Ref<ScaffoldGeometryNotifier>,
         repaint: Rc<dyn Listenable>,
         value: Rc<RefCell<Option<ScaffoldGeometry>>>,
     }
@@ -1554,7 +1556,7 @@ mod tests {
     /// Dart's `_GeometryListenerState`.
     struct GeometryListenerState {
         state: StateData<GeometryListener>,
-        geometry_listenable: Option<Handle<ScaffoldGeometryNotifier>>,
+        geometry_listenable: Option<Ref<ScaffoldGeometryNotifier>>,
         cache: Rc<RefCell<Option<ScaffoldGeometry>>>,
     }
 
@@ -1565,7 +1567,7 @@ mod tests {
         fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
             let context = self.context(app);
             let new_listenable = Scaffold::geometry_of(app, context);
-            if app.get(self).geometry_listenable == Some(new_listenable) {
+            if app.get(self).geometry_listenable.as_ref() == Some(&new_listenable) {
                 return;
             }
             app.get_mut(self).geometry_listenable = Some(new_listenable);
@@ -1573,10 +1575,14 @@ mod tests {
         }
 
         fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-            let geometry_listenable = app.get(self).geometry_listenable.expect("dependencies");
+            let geometry_listenable = app
+                .get(self)
+                .geometry_listenable
+                .clone()
+                .expect("dependencies");
             CustomPaint::new()
                 .painter(GeometryCachePainter {
-                    geometry_listenable,
+                    geometry_listenable: geometry_listenable.clone(),
                     repaint: Rc::new(geometry_listenable),
                     value: Rc::clone(&app.get(self).cache),
                 })
@@ -1605,7 +1611,11 @@ mod tests {
         let state = key
             .current_state::<GeometryListenerState>(&app)
             .expect("the listener's state");
-        let listenable = app.get(state).geometry_listenable.expect("dependencies");
+        let listenable = app
+            .get(state)
+            .geometry_listenable
+            .clone()
+            .expect("dependencies");
         listenable.add_listener(
             &mut app,
             waft_foundation::Listener::new({

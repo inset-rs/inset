@@ -12,7 +12,7 @@ use crate::{
 use std::{any::TypeId, fmt, rc::Rc, time::Duration};
 use waft_animation::{Cubic, Curve};
 use waft_embedder::{Clip, Color, FontWeight};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 use waft_gestures::{
     DragDownDetails, DragEndDetails, DragGestureRecognizer, DragStartBehavior, DragUpdateDetails,
     HorizontalDragGestureRecognizer,
@@ -136,7 +136,7 @@ pub struct ToggleSwitchState {
     was_dragged: bool,
     /// `m_knobTranslation`: the horizontal change since the drag started, accumulated unclamped; `SetTranslations` clamps what the knob shows.
     knob_translation: f64,
-    focus_node: Option<Handle<FocusNode>>,
+    focus_node: Option<Ref<FocusNode>>,
     hovered: bool,
     focused: bool,
     handled_key_down: bool,
@@ -175,7 +175,6 @@ impl State for ToggleSwitchState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(node) = app.get_mut(self).focus_node.take() {
             node.dispose(app);
-            app.destroy(node);
         }
     }
 
@@ -202,7 +201,7 @@ impl State for ToggleSwitchState {
             },
             focused: is_enabled && state.focused,
         };
-        let node = state.focus_node.unwrap();
+        let node = state.focus_node.clone().unwrap();
         let body = self.template(app, context, states);
         let mut tapped = GestureDetector::new()
             .behavior(HitTestBehavior::Opaque)
@@ -215,7 +214,7 @@ impl State for ToggleSwitchState {
             }));
         }
         let detector = FocusableActionDetector::new(tapped)
-            .focus_node(node.as_node())
+            .focus_node(node.erase())
             .enabled(is_enabled)
             .on_focus_change(move |app, focused| {
                 let focused = focused && crate::FocusState::current(app).shows_focus_visual();

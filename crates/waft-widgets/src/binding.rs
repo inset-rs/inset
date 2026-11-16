@@ -24,7 +24,7 @@ use waft_embedder::{
     Locale, MediaChangeFuture, RequestId, TrayIconEvent, TrayIconId, ViewError, ViewFocusEvent,
     ViewId, ViewRef, WindowConfig,
 };
-use waft_foundation::{App, Handle, Listener, Task, Timer};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref, Task, Timer};
 use waft_rendering::{RendererBinding, RendererBindingOverridesObject};
 use waft_scheduler::{FrameTarget, SchedulerBinding, SchedulerBindingOverridesObject};
 use waft_services::{
@@ -58,7 +58,7 @@ pub struct WidgetsBinding {
     /// Whether the binding is set up: Dart's `_instance` being assigned, which comes before
     /// the parts `init_instances` builds, since they ask for the binding.
     initialized: bool,
-    build_owner: Option<Handle<BuildOwner>>,
+    build_owner: Option<Ref<BuildOwner>>,
     root_element: Option<AnyElement>,
     ready_to_produce_frames: bool,
     observers: Vec<WidgetsBindingObserverRef>,
@@ -391,81 +391,195 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
     }
 }
 
+/// An object the binding names without keeping, as an observer: once the object is freed, the
+/// binding skips it as it skips a tear-off ([`App::tear_off_receiver_is_live`]).
 impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
     fn did_change_metrics(&self, app: &mut App) {
-        T::did_change_metrics(*self, app);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_metrics(*self, app);
+        }
     }
 
     fn did_change_locales(&self, app: &mut App, locales: Option<&[Locale]>) {
-        T::did_change_locales(*self, app, locales);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_locales(*self, app, locales);
+        }
     }
 
     fn did_change_view_focus(&self, app: &mut App, event: ViewFocusEvent) {
-        T::did_change_view_focus(*self, app, event);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_view_focus(*self, app, event);
+        }
     }
 
     fn did_change_drag(&self, app: &mut App, report: &DragReport) {
-        T::did_change_drag(*self, app, report);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_drag(*self, app, report);
+        }
     }
 
     fn did_change_text_scale_factor(&self, app: &mut App) {
-        T::did_change_text_scale_factor(*self, app);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_text_scale_factor(*self, app);
+        }
     }
 
     fn did_change_platform_brightness(&self, app: &mut App) {
-        T::did_change_platform_brightness(*self, app);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_platform_brightness(*self, app);
+        }
     }
 
     fn did_change_caption_style(&self, app: &mut App) {
-        T::did_change_caption_style(*self, app);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_caption_style(*self, app);
+        }
     }
 
     fn did_change_app_lifecycle_state(&self, app: &mut App, state: AppLifecycleState) {
-        T::did_change_app_lifecycle_state(*self, app, state);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_app_lifecycle_state(*self, app, state);
+        }
     }
 
     fn did_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse> {
+        if !app.tear_off_receiver_is_live(*self) {
+            return Task::ready(AppExitResponse::Exit);
+        }
         T::did_request_app_exit(*self, app)
     }
 
     fn did_change_accessibility_features(&self, app: &mut App) {
-        T::did_change_accessibility_features(*self, app);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_change_accessibility_features(*self, app);
+        }
     }
 
     fn did_pop_route(&self, app: &mut App, view: ViewId) -> bool {
-        T::did_pop_route(*self, app, view)
+        app.tear_off_receiver_is_live(*self) && T::did_pop_route(*self, app, view)
     }
 
     fn handle_start_back_gesture(&self, app: &mut App, back_event: PredictiveBackEvent) -> bool {
-        T::handle_start_back_gesture(*self, app, back_event)
+        app.tear_off_receiver_is_live(*self) && T::handle_start_back_gesture(*self, app, back_event)
     }
 
     fn handle_update_back_gesture_progress(&self, app: &mut App, back_event: PredictiveBackEvent) {
-        T::handle_update_back_gesture_progress(*self, app, back_event);
+        if app.tear_off_receiver_is_live(*self) {
+            T::handle_update_back_gesture_progress(*self, app, back_event);
+        }
     }
 
     fn handle_commit_back_gesture(&self, app: &mut App) {
-        T::handle_commit_back_gesture(*self, app);
+        if app.tear_off_receiver_is_live(*self) {
+            T::handle_commit_back_gesture(*self, app);
+        }
     }
 
     fn handle_cancel_back_gesture(&self, app: &mut App) {
-        T::handle_cancel_back_gesture(*self, app);
+        if app.tear_off_receiver_is_live(*self) {
+            T::handle_cancel_back_gesture(*self, app);
+        }
     }
 
     fn did_add_view(&self, app: &mut App, view: &ViewRef) {
-        T::did_add_view(*self, app, view);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_add_view(*self, app, view);
+        }
     }
 
     fn did_remove_view(&self, app: &mut App, view: ViewId) {
-        T::did_remove_view(*self, app, view);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_remove_view(*self, app, view);
+        }
     }
 
     fn did_fail_view_request(&self, app: &mut App, request: RequestId, error: &ViewError) {
-        T::did_fail_view_request(*self, app, request, error);
+        if app.tear_off_receiver_is_live(*self) {
+            T::did_fail_view_request(*self, app, request, error);
+        }
     }
 
     fn did_request_view_close(&self, app: &mut App, view: ViewId) -> bool {
-        T::did_request_view_close(*self, app, view)
+        app.tear_off_receiver_is_live(*self) && T::did_request_view_close(*self, app, view)
+    }
+}
+
+/// A kept object as an observer: the binding's list keeps it, as Dart's `_observers` does.
+impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Ref<T> {
+    fn did_change_metrics(&self, app: &mut App) {
+        T::did_change_metrics(self.handle(), app);
+    }
+
+    fn did_change_locales(&self, app: &mut App, locales: Option<&[Locale]>) {
+        T::did_change_locales(self.handle(), app, locales);
+    }
+
+    fn did_change_view_focus(&self, app: &mut App, event: ViewFocusEvent) {
+        T::did_change_view_focus(self.handle(), app, event);
+    }
+
+    fn did_change_drag(&self, app: &mut App, report: &DragReport) {
+        T::did_change_drag(self.handle(), app, report);
+    }
+
+    fn did_change_text_scale_factor(&self, app: &mut App) {
+        T::did_change_text_scale_factor(self.handle(), app);
+    }
+
+    fn did_change_platform_brightness(&self, app: &mut App) {
+        T::did_change_platform_brightness(self.handle(), app);
+    }
+
+    fn did_change_caption_style(&self, app: &mut App) {
+        T::did_change_caption_style(self.handle(), app);
+    }
+
+    fn did_change_app_lifecycle_state(&self, app: &mut App, state: AppLifecycleState) {
+        T::did_change_app_lifecycle_state(self.handle(), app, state);
+    }
+
+    fn did_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse> {
+        T::did_request_app_exit(self.handle(), app)
+    }
+
+    fn did_change_accessibility_features(&self, app: &mut App) {
+        T::did_change_accessibility_features(self.handle(), app);
+    }
+
+    fn did_pop_route(&self, app: &mut App, view: ViewId) -> bool {
+        T::did_pop_route(self.handle(), app, view)
+    }
+
+    fn handle_start_back_gesture(&self, app: &mut App, back_event: PredictiveBackEvent) -> bool {
+        T::handle_start_back_gesture(self.handle(), app, back_event)
+    }
+
+    fn handle_update_back_gesture_progress(&self, app: &mut App, back_event: PredictiveBackEvent) {
+        T::handle_update_back_gesture_progress(self.handle(), app, back_event);
+    }
+
+    fn handle_commit_back_gesture(&self, app: &mut App) {
+        T::handle_commit_back_gesture(self.handle(), app);
+    }
+
+    fn handle_cancel_back_gesture(&self, app: &mut App) {
+        T::handle_cancel_back_gesture(self.handle(), app);
+    }
+
+    fn did_add_view(&self, app: &mut App, view: &ViewRef) {
+        T::did_add_view(self.handle(), app, view);
+    }
+
+    fn did_remove_view(&self, app: &mut App, view: ViewId) {
+        T::did_remove_view(self.handle(), app, view);
+    }
+
+    fn did_fail_view_request(&self, app: &mut App, request: RequestId, error: &ViewError) {
+        T::did_fail_view_request(self.handle(), app, request, error);
+    }
+
+    fn did_request_view_close(&self, app: &mut App, view: ViewId) -> bool {
+        T::did_request_view_close(self.handle(), app, view)
     }
 }
 
@@ -650,6 +764,7 @@ impl WidgetsBinding {
     pub fn build_owner(self: Handle<Self>, app: &App) -> Handle<BuildOwner> {
         app.get(self)
             .build_owner
+            .handle()
             .expect("WidgetsBinding::instance must run first")
     }
 
@@ -1313,7 +1428,7 @@ impl RootWidget {
             None => {
                 let mut created = None;
                 owner.lock_state(app, |app| {
-                    let element = RootElement::create(app, widget.clone());
+                    let element = RootElement::new(app, widget.clone());
                     element.as_element().assign_owner(app, owner);
                     created = Some(element);
                 });
@@ -1342,7 +1457,7 @@ impl Widget for RootWidget {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        RootElement::create(app, this).as_element()
+        RootElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1374,13 +1489,14 @@ pub struct RootElement {
 }
 
 impl RootElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<RootElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<RootElement> {
         debug_assert!(downcast_widget::<RootWidget>(&*widget).is_some());
         app.create(RootElement {
             element: ElementData::new(widget),
             child: None,
             new_widget: None,
         })
+        .into_tree_node(app)
     }
 
     /// The child element, if any.
@@ -1459,7 +1575,7 @@ impl Element for RootElement {
 /// `WidgetsBinding.instance.buildOwner` reads it; `None` before the binding exists.
 pub(crate) fn current_build_owner(app: &App) -> Option<Handle<BuildOwner>> {
     let binding = app.existing_singleton::<WidgetsBinding>()?;
-    app.get(binding).build_owner
+    app.get(binding).build_owner.handle()
 }
 
 #[cfg(test)]

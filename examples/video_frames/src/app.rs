@@ -14,7 +14,7 @@ use waft_embedder::{
     TextDirection, VideoOutput, WaitReason, WindowConfig,
 };
 use waft_embedder_winit::{LinuxSettings, WinitEmbedder};
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, ListenableObject, Listener, OptionRetained, Ref};
 use waft_painting::{
     AlignmentGeometry, BorderRadiusGeometry, BoxDecoration, EdgeInsetsGeometry, TextStyle,
 };
@@ -70,22 +70,22 @@ pub(crate) fn run(presentation: Presentation) {
 /// Plays the video as `presentation` says: the window's content.
 fn playing(app: &mut App, presentation: &Presentation) -> WidgetRef {
     let player = Player::new(app, &presentation.url).expect("macOS has players");
-    Player::set_looping(player, app, true);
+    player.set_looping(app, true);
     let reader = app
         .platform()
         .video_frame_readers()
         .expect("macOS hands out frames")
         .make_reader();
-    Player::set_video_output(player, app, Some(VideoOutput::Frames(Arc::clone(&reader))));
+    player.set_video_output(app, Some(VideoOutput::Frames(Arc::clone(&reader))));
     let video = VideoFrameView::new(reader).into_widget();
-    follow_tracks(app, player, presentation.subtitles.clone());
-    Player::play(player, app);
+    follow_tracks(app, player.handle(), presentation.subtitles.clone());
+    player.play(app);
     let presentation = presentation.clone();
-    let listenable: Rc<dyn Listenable> = Rc::new(player);
+    let listenable: Rc<dyn Listenable> = Rc::new(player.clone());
     ListenableBuilder::new(listenable, move |app, _, _| {
-        let subtitled = with_subtitles(video.clone(), Player::cues(player, app).to_vec());
-        let state = Player::state(player, app);
-        page(player, subtitled, state, &presentation)
+        let subtitled = with_subtitles(video.clone(), player.cues(app).to_vec());
+        let state = player.state(app);
+        page(player.clone(), subtitled, state, &presentation)
     })
     .into_widget()
 }
@@ -95,11 +95,10 @@ fn playing(app: &mut App, presentation: &Presentation) -> WidgetRef {
 fn follow_tracks(app: &mut App, player: Handle<Player>, language: Option<String>) {
     let printed = RefCell::new(Vec::new());
     let chosen = Cell::new(false);
-    let listenable: Rc<dyn Listenable> = Rc::new(player);
-    listenable.add_listener(
+    player.add_listener(
         app,
         Listener::new(move |app| {
-            let tracks = Player::state(player, app).tracks.clone();
+            let tracks = player.state(app).tracks.clone();
             if *printed.borrow() != tracks {
                 print_tracks(&tracks);
                 *printed.borrow_mut() = tracks.clone();
@@ -111,7 +110,7 @@ fn follow_tracks(app: &mut App, player: Handle<Player>, language: Option<String>
                 return;
             }
             if let Some(track) = text_track_in(&tracks, language) {
-                Player::select_text_track(player, app, Some(&track.id));
+                player.select_text_track(app, Some(&track.id));
                 chosen.set(true);
             }
         }),
@@ -151,7 +150,7 @@ fn with_subtitles(video: WidgetRef, cues: Vec<waft_embedder::Cue>) -> WidgetRef 
 
 /// The video at its aspect, with the status under it.
 fn page(
-    player: Handle<Player>,
+    player: Ref<Player>,
     video: WidgetRef,
     state: &PlayerState,
     presentation: &Presentation,
@@ -168,12 +167,13 @@ fn page(
         .child(framed);
     let turned = Transform::rotate(presentation.turn_degrees.to_radians()).child(rounded);
     let paused = matches!(state.activity, PlayerActivity::Paused(_));
+    let tapped = player.clone();
     let clickable = GestureDetector::new()
         .on_tap(Listener::new(move |app| {
             if paused {
-                Player::play(player, app);
+                tapped.play(app);
             } else {
-                Player::pause(player, app);
+                tapped.pause(app);
             }
         }))
         .child(turned);
@@ -195,7 +195,7 @@ fn page(
 /// each frame while it plays.
 #[derive(Debug)]
 struct StatusLine {
-    player: Handle<Player>,
+    player: Ref<Player>,
 }
 
 impl StatefulWidget for StatusLine {
@@ -215,14 +215,14 @@ struct StatusLineState {
     state: StateData<StatusLine>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     /// Ticks at each frame while the player plays; made in `init_state`.
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
     /// The line as it was built last.
     shown: String,
 }
 
 impl StatusLineState {
     fn ticker(self: Handle<Self>, app: &App) -> Handle<Ticker> {
-        app.get(self).ticker.expect("made in init_state")
+        app.get(self).ticker.handle().expect("made in init_state")
     }
 
     /// The player's state changed, or its position jumped: the line is built again.
@@ -233,8 +233,7 @@ impl StatusLineState {
 
     /// Runs the ticker while the player plays, and stops it otherwise.
     fn tick_while_playing(self: Handle<Self>, app: &mut App) {
-        let playing =
-            Player::state(self.widget(app).player, app).activity == PlayerActivity::Playing;
+        let playing = self.widget(app).player.state(app).activity == PlayerActivity::Playing;
         let ticker = self.ticker(app);
         if playing && !ticker.is_active(app) {
             let _ticking = ticker.start(app);
@@ -245,7 +244,7 @@ impl StatusLineState {
 
     /// A frame while the player plays: the line is built again once what it shows changed.
     fn tick(self: Handle<Self>, app: &mut App) {
-        if status_line(app, self.widget(app).player) != app.get(self).shown {
+        if status_line(app, self.widget(app).player.handle()) != app.get(self).shown {
             self.set_state(app, |_| {});
         }
     }
@@ -278,7 +277,7 @@ impl State for StatusLineState {
             FrameCallback::new(move |app, _elapsed| self.tick(app)),
         );
         app.get_mut(self).ticker = Some(ticker);
-        let player = self.widget(app).player;
+        let player = self.widget(app).player.handle();
         player.add_listener(app, Listener::handle_method(self, Self::player_changed));
         self.tick_while_playing(app);
     }
@@ -288,7 +287,7 @@ impl State for StatusLineState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let player = self.widget(app).player;
+        let player = self.widget(app).player.handle();
         player.remove_listener(app, &Listener::handle_method(self, Self::player_changed));
         if let Some(ticker) = app.get_mut(self).ticker.take() {
             ticker.dispose(app);
@@ -297,7 +296,7 @@ impl State for StatusLineState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let line = status_line(app, self.widget(app).player);
+        let line = status_line(app, self.widget(app).player.handle());
         app.get_mut(self).shown = line.clone();
         Text::new(line)
             .style(TextStyle::new().font_size(14.0).color(STATUS))
@@ -307,7 +306,7 @@ impl State for StatusLineState {
 
 /// `player`'s status, its position read now.
 fn status_line(app: &App, player: Handle<Player>) -> String {
-    status(Player::state(player, app), Player::position(player, app))
+    status(player.state(app), player.position(app))
 }
 
 /// What the player is doing, how far it is, at `position`, and what size its frames are.

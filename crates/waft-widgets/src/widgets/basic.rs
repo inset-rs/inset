@@ -16,7 +16,7 @@ use waft_embedder::{
     RSuperellipse, Rect, SemanticsHitTestBehavior, SemanticsInputType, SemanticsRole,
     SemanticsValidationResult, Size, TextBaseline, TextDirection,
 };
-use waft_foundation::{App, Handle, ValueKey, VoidCallback};
+use waft_foundation::{App, Handle, Ref, ValueKey, VoidCallback};
 use waft_gestures::{
     PointerCancelEventListener, PointerDownEventListener, PointerEnterEventListener,
     PointerExitEventListener, PointerHoverEventListener, PointerMoveEventListener,
@@ -193,13 +193,13 @@ pub struct CompositedTransformTarget {
     pub key: Option<KeyRef>,
     /// The link object that connects this [`CompositedTransformTarget`] with one or more
     /// [`CompositedTransformFollower`]s.
-    pub link: Handle<LayerLink>,
+    pub link: Ref<LayerLink>,
     pub child: Option<WidgetRef>,
 }
 
 impl CompositedTransformTarget {
     /// Dart's `CompositedTransformTarget({required link, child})`.
-    pub fn new(link: Handle<LayerLink>) -> CompositedTransformTarget {
+    pub fn new(link: Ref<LayerLink>) -> CompositedTransformTarget {
         CompositedTransformTarget {
             key: None,
             link,
@@ -228,7 +228,7 @@ impl RenderObjectWidget for CompositedTransformTarget {
     }
 
     fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
-        RenderLeaderLayer::new(app, self.link, None).as_object()
+        RenderLeaderLayer::new(app, self.link.clone(), None).as_object()
     }
 
     fn update_render_object(
@@ -237,7 +237,7 @@ impl RenderObjectWidget for CompositedTransformTarget {
         _context: BuildContext,
         render_object: RenderHandle<RenderLeaderLayer>,
     ) {
-        render_object.set_link(app, self.link);
+        render_object.set_link(app, self.link.clone());
     }
 }
 
@@ -272,7 +272,7 @@ pub struct CompositedTransformFollower {
     pub key: Option<KeyRef>,
     /// The link object that connects this [`CompositedTransformFollower`] with a
     /// [`CompositedTransformTarget`].
-    pub link: Handle<LayerLink>,
+    pub link: Ref<LayerLink>,
     /// Whether to show the widget's contents when there is no corresponding
     /// [`CompositedTransformTarget`] with the same [`link`](Self::link).
     ///
@@ -302,7 +302,7 @@ pub struct CompositedTransformFollower {
 
 impl CompositedTransformFollower {
     /// Dart's `CompositedTransformFollower({required link, ..})`.
-    pub fn new(link: Handle<LayerLink>) -> CompositedTransformFollower {
+    pub fn new(link: Ref<LayerLink>) -> CompositedTransformFollower {
         CompositedTransformFollower {
             key: None,
             link,
@@ -361,7 +361,7 @@ impl RenderObjectWidget for CompositedTransformFollower {
     fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
         RenderFollowerLayer::new(
             app,
-            self.link,
+            self.link.clone(),
             self.show_when_unlinked,
             self.offset,
             self.target_anchor,
@@ -377,7 +377,7 @@ impl RenderObjectWidget for CompositedTransformFollower {
         _context: BuildContext,
         render_object: RenderHandle<RenderFollowerLayer>,
     ) {
-        render_object.set_link(app, self.link);
+        render_object.set_link(app, self.link.clone());
         render_object.set_show_when_unlinked(app, self.show_when_unlinked);
         render_object.set_offset(app, self.offset);
         render_object.set_leader_anchor(app, self.target_anchor);
@@ -11178,7 +11178,7 @@ mod tests {
         use waft_embedder::TextDirection;
         use waft_rendering::{
             ContainerRenderObjectMixin, FixedViewportOffset, RenderSliver, RenderSliverPadding,
-            RenderSliverToBoxAdapter, RenderViewport, ScrollCacheExtent, ViewportOffset,
+            RenderSliverToBoxAdapter, RenderViewport, ScrollCacheExtent,
         };
 
         use crate::widgets::viewport::Viewport;
@@ -11188,7 +11188,7 @@ mod tests {
         let offset = FixedViewportOffset::zero(&mut app);
         let tree = Directionality::new(
             TextDirection::Ltr,
-            Viewport::new(offset.as_viewport_offset())
+            Viewport::new(offset.erase())
                 .scroll_cache_extent(ScrollCacheExtent::Pixels(0.0))
                 .slivers(vec![
                     SliverPadding::new(EdgeInsetsGeometry::only(10.0, 20.0, 30.0, 40.0))

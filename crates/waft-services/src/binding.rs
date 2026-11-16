@@ -14,6 +14,8 @@ use waft_foundation::{App, ChangeNotifierData, Handle, Task};
 use waft_scheduler::SchedulerBinding;
 
 use crate::SystemChrome;
+use waft_foundation::OptionRetained;
+use waft_foundation::Ref;
 
 /// The object side of Flutter's `WidgetsBinding` override of
 /// `ServicesBinding.handleRequestAppExit`, which asks the widget layer's observers. Implement it
@@ -36,13 +38,20 @@ impl<T: ServicesBindingOverridesObject> ServicesBindingOverrides for Handle<T> {
     }
 }
 
+/// An override object the services binding keeps, for one nothing else keeps.
+impl<T: ServicesBindingOverridesObject> ServicesBindingOverrides for Ref<T> {
+    fn handle_request_app_exit(&self, app: &mut App) -> Task<AppExitResponse> {
+        T::handle_request_app_exit(self.handle(), app)
+    }
+}
+
 /// Hands the host's lifecycle messages to the scheduler and the layers above, answers the host's
 /// requests to exit the application, and asks the host to exit it.
 #[derive(Default)]
 pub struct ServicesBinding {
     overrides: Option<Rc<dyn ServicesBindingOverrides>>,
     /// Created with the binding so that what shows the clipboard can listen.
-    clipboard: Option<Handle<ChangeNotifierData>>,
+    clipboard: Option<Ref<ChangeNotifierData>>,
     /// Whether `initInstances`'s work is done, which the first `instance` does.
     initialized: bool,
 }
@@ -73,6 +82,7 @@ impl ServicesBinding {
     pub fn clipboard(self: Handle<Self>, app: &App) -> Handle<ChangeNotifierData> {
         app.get(self)
             .clipboard
+            .handle()
             .expect("ServicesBinding::instance creates the clipboard listenable")
     }
 

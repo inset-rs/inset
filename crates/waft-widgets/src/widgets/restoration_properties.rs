@@ -13,6 +13,7 @@ use waft_services::{RestorationData, TextEditingValue};
 
 use crate::widgets::editable_text::{TextEditingController, TextEditingControllerLeaf};
 use crate::widgets::restoration::{RestorableProperty, RestorablePropertyData};
+use waft_foundation::Ref;
 
 // ---------------------------------------------------------------------------------------------
 // RestorableValue
@@ -372,7 +373,7 @@ impl<T: RestorableNumValue> RestorableNum<T> {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: T) -> Handle<RestorableNum<T>> {
+    pub fn new(app: &mut App, default_value: T) -> Ref<RestorableNum<T>> {
         app.create(RestorableNum {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -467,7 +468,7 @@ impl RestorableString {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: impl Into<String>) -> Handle<RestorableString> {
+    pub fn new(app: &mut App, default_value: impl Into<String>) -> Ref<RestorableString> {
         app.create(RestorableString {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -546,7 +547,7 @@ impl RestorableBool {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: bool) -> Handle<RestorableBool> {
+    pub fn new(app: &mut App, default_value: bool) -> Ref<RestorableBool> {
         app.create(RestorableBool {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -625,7 +626,7 @@ impl RestorableBoolN {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: Option<bool>) -> Handle<RestorableBoolN> {
+    pub fn new(app: &mut App, default_value: Option<bool>) -> Ref<RestorableBoolN> {
         app.create(RestorableBoolN {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -706,7 +707,7 @@ impl<T: RestorableNumValue> RestorableNumN<T> {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: Option<T>) -> Handle<RestorableNumN<T>> {
+    pub fn new(app: &mut App, default_value: Option<T>) -> Ref<RestorableNumN<T>> {
         app.create(RestorableNumN {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -799,7 +800,7 @@ impl RestorableStringN {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: Option<String>) -> Handle<RestorableStringN> {
+    pub fn new(app: &mut App, default_value: Option<String>) -> Ref<RestorableStringN> {
         app.create(RestorableStringN {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -879,7 +880,7 @@ impl RestorableDateTime {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: DateTime) -> Handle<RestorableDateTime> {
+    pub fn new(app: &mut App, default_value: DateTime) -> Ref<RestorableDateTime> {
         app.create(RestorableDateTime {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -953,7 +954,7 @@ impl RestorableDateTimeN {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: Option<DateTime>) -> Handle<RestorableDateTimeN> {
+    pub fn new(app: &mut App, default_value: Option<DateTime>) -> Ref<RestorableDateTimeN> {
         app.create(RestorableDateTimeN {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -1052,7 +1053,7 @@ impl<T: Copy + Debug + PartialEq + 'static> RestorableEnum<T> {
         app: &mut App,
         default_value: T,
         values: impl IntoIterator<Item = T>,
-    ) -> Handle<RestorableEnum<T>> {
+    ) -> Ref<RestorableEnum<T>> {
         let values: Vec<T> = values.into_iter().collect();
         assert!(
             values.contains(&default_value),
@@ -1185,7 +1186,7 @@ impl<T: Copy + Debug + PartialEq + 'static> RestorableEnumN<T> {
         app: &mut App,
         default_value: Option<T>,
         values: impl IntoIterator<Item = T>,
-    ) -> Handle<RestorableEnumN<T>> {
+    ) -> Ref<RestorableEnumN<T>> {
         let values: Vec<T> = values.into_iter().collect();
         assert!(
             default_value.is_none_or(|default| values.contains(&default)),
@@ -1458,7 +1459,7 @@ pub trait RestorableChangeNotifier: RestorableListenable {
 pub struct RestorableTextEditingController {
     change_notifier: ChangeNotifierData,
     property: RestorablePropertyData,
-    listenable: RestorableListenableData<Handle<TextEditingController>>,
+    listenable: RestorableListenableData<Ref<TextEditingController>>,
     initial_value: TextEditingValue,
 }
 
@@ -1466,12 +1467,12 @@ impl RestorableTextEditingController {
     /// Creates a [`RestorableTextEditingController`].
     ///
     /// This constructor treats a missing `text` argument as if it were the empty string.
-    pub fn new(app: &mut App) -> Handle<RestorableTextEditingController> {
+    pub fn new(app: &mut App) -> Ref<RestorableTextEditingController> {
         Self::from_value(app, TextEditingValue::EMPTY)
     }
 
     /// Dart `RestorableTextEditingController(text:)`.
-    pub fn text(app: &mut App, text: impl Into<String>) -> Handle<RestorableTextEditingController> {
+    pub fn text(app: &mut App, text: impl Into<String>) -> Ref<RestorableTextEditingController> {
         Self::from_value(app, TextEditingValue::new().text(text))
     }
 
@@ -1479,7 +1480,7 @@ impl RestorableTextEditingController {
     pub fn from_value(
         app: &mut App,
         value: TextEditingValue,
-    ) -> Handle<RestorableTextEditingController> {
+    ) -> Ref<RestorableTextEditingController> {
         app.create(RestorableTextEditingController {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -1500,10 +1501,10 @@ impl ChangeNotifier for RestorableTextEditingController {
 }
 
 impl RestorableProperty for RestorableTextEditingController {
-    type Value = Handle<TextEditingController>;
+    type Value = Ref<TextEditingController>;
     crate::restorable_property_accessors!();
 
-    fn create_default_value(self: Handle<Self>, app: &mut App) -> Handle<TextEditingController> {
+    fn create_default_value(self: Handle<Self>, app: &mut App) -> Ref<TextEditingController> {
         let initial_value = app.get(self).initial_value.clone();
         TextEditingController::from_value(app, Some(initial_value))
     }
@@ -1512,7 +1513,7 @@ impl RestorableProperty for RestorableTextEditingController {
         self: Handle<Self>,
         app: &mut App,
         data: &RestorationData,
-    ) -> Handle<TextEditingController> {
+    ) -> Ref<TextEditingController> {
         TextEditingController::new(app).text(
             app,
             data.as_str()
@@ -1520,7 +1521,7 @@ impl RestorableProperty for RestorableTextEditingController {
         )
     }
 
-    fn init_with_value(self: Handle<Self>, app: &mut App, value: Handle<TextEditingController>) {
+    fn init_with_value(self: Handle<Self>, app: &mut App, value: Ref<TextEditingController>) {
         RestorableChangeNotifier::init_with_value(self, app, value);
     }
 
@@ -1542,8 +1543,8 @@ impl RestorableListenable for RestorableTextEditingController {
 }
 
 impl RestorableChangeNotifier for RestorableTextEditingController {
-    fn dispose_value(self: Handle<Self>, app: &mut App, value: Handle<TextEditingController>) {
-        app.get_mut(value).dispose();
+    fn dispose_value(self: Handle<Self>, app: &mut App, value: Ref<TextEditingController>) {
+        value.dispose(app);
     }
 }
 
@@ -1552,7 +1553,7 @@ mod tests {
     use std::rc::Rc;
     use waft_foundation::AppCell;
 
-    use waft_foundation::Handle;
+    use waft_foundation::{Handle, OptionRetained};
     use waft_services::{RestorationBucket, RestorationManager, RestorationMap};
 
     use super::*;
@@ -1590,24 +1591,24 @@ mod tests {
     }
 
     /// One property of every kind, so a single registration exercises them all.
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     struct Properties {
-        int: Handle<RestorableInt>,
-        double: Handle<RestorableDouble>,
-        string: Handle<RestorableString>,
-        boolean: Handle<RestorableBool>,
-        int_n: Handle<RestorableIntN>,
-        double_n: Handle<RestorableDoubleN>,
-        string_n: Handle<RestorableStringN>,
-        bool_n: Handle<RestorableBoolN>,
-        date_time: Handle<RestorableDateTime>,
-        date_time_n: Handle<RestorableDateTimeN>,
-        direction: Handle<RestorableEnum<Direction>>,
-        direction_n: Handle<RestorableEnumN<Direction>>,
+        int: Ref<RestorableInt>,
+        double: Ref<RestorableDouble>,
+        string: Ref<RestorableString>,
+        boolean: Ref<RestorableBool>,
+        int_n: Ref<RestorableIntN>,
+        double_n: Ref<RestorableDoubleN>,
+        string_n: Ref<RestorableStringN>,
+        bool_n: Ref<RestorableBoolN>,
+        date_time: Ref<RestorableDateTime>,
+        date_time_n: Ref<RestorableDateTimeN>,
+        direction: Ref<RestorableEnum<Direction>>,
+        direction_n: Ref<RestorableEnumN<Direction>>,
     }
 
     impl Properties {
-        fn create(app: &mut App) -> Properties {
+        fn new(app: &mut App) -> Properties {
             Properties {
                 int: RestorableInt::new(app, 1),
                 double: RestorableDouble::new(app, 1.5),
@@ -1683,11 +1684,11 @@ mod tests {
             _old_bucket: Option<Handle<RestorationBucket>>,
             _initial_restore: bool,
         ) {
-            let properties = match app.get(self).properties {
+            let properties = match app.get(self).properties.clone() {
                 Some(properties) => properties,
                 None => {
-                    let properties = Properties::create(app);
-                    app.get_mut(self).properties = Some(properties);
+                    let properties = Properties::new(app);
+                    app.get_mut(self).properties = Some(properties.clone());
                     properties
                 }
             };
@@ -1744,7 +1745,11 @@ mod tests {
                 .expect("the bag is in the tree")
                 .state_handle::<BagState>(&app)
                 .expect("a BagState");
-            let properties = app.get(state).properties.expect("restore_state ran");
+            let properties = app
+                .get(state)
+                .properties
+                .clone()
+                .expect("restore_state ran");
             let bucket = state.bucket(&app).expect("the bag claimed a bucket");
             drop(app);
             Fixture {
@@ -1787,7 +1792,7 @@ mod tests {
     #[test]
     fn a_property_with_no_stored_value_takes_the_default_it_was_created_with() {
         let fixture = Fixture::mount(None);
-        let properties = fixture.properties;
+        let properties = fixture.properties.clone();
         let app = &mut fixture.cell.borrow_mut();
 
         assert_eq!(*properties.int.value(app), 1);
@@ -1828,7 +1833,7 @@ mod tests {
     #[test]
     fn every_property_restores_the_value_the_data_describes() {
         let fixture = Fixture::mount(filled());
-        let properties = fixture.properties;
+        let properties = fixture.properties.clone();
         let app = &mut fixture.cell.borrow_mut();
 
         assert_eq!(*properties.int.value(app), 7);
@@ -1854,7 +1859,7 @@ mod tests {
     #[test]
     fn a_new_value_is_written_back_as_the_data_it_was_restored_from() {
         let mut fixture = Fixture::mount(filled());
-        let properties = fixture.properties;
+        let properties = fixture.properties.clone();
         {
             let app = &mut fixture.cell.borrow_mut();
             properties.int.set_value(app, 8);
@@ -1890,7 +1895,7 @@ mod tests {
     #[test]
     fn setting_the_value_it_already_has_writes_nothing() {
         let fixture = Fixture::mount(filled());
-        let int = fixture.properties.int;
+        let int = fixture.properties.int.clone();
         let notified = Rc::new(std::cell::Cell::new(0usize));
         let seen = Rc::clone(&notified);
         int.add_listener(
@@ -1908,7 +1913,7 @@ mod tests {
     #[test]
     fn an_unregistered_property_is_removed_from_the_data() {
         let mut fixture = Fixture::mount(filled());
-        let int = fixture.properties.int;
+        let int = fixture.properties.int.clone();
         let state = int.state(&fixture.cell.borrow());
         let bag = state
             .downcast::<BagState>(&fixture.cell.borrow())
@@ -1927,10 +1932,10 @@ mod tests {
             &mut app,
             TextEditingValue::new().text("hello"),
         );
-        let controller = RestorableProperty::create_default_value(property, &mut app);
+        let controller = RestorableProperty::create_default_value(property.handle(), &mut app);
         assert_eq!(controller.text_value(&app), "hello");
         let restored = RestorableProperty::from_primitives(
-            property,
+            property.handle(),
             &mut app,
             &RestorationData::String("hello".into()),
         );
@@ -1961,7 +1966,7 @@ mod tests {
     struct EditorState {
         state: StateData<Editor>,
         restoration: RestorationMixinData,
-        controller: Option<Handle<RestorableTextEditingController>>,
+        controller: Option<Ref<RestorableTextEditingController>>,
     }
 
     impl RestorationMixin for EditorState {
@@ -1977,12 +1982,13 @@ mod tests {
             _old_bucket: Option<Handle<RestorationBucket>>,
             _initial_restore: bool,
         ) {
-            let controller = match app.get(self).controller {
+            let controller = match app.get(self).controller.handle() {
                 Some(controller) => controller,
                 None => {
                     let controller = RestorableTextEditingController::text(app, "hello");
+                    let handle = controller.handle();
                     app.get_mut(self).controller = Some(controller);
-                    controller
+                    handle
                 }
             };
             self.register_for_restoration(app, controller.as_property(), "controller");
@@ -2031,7 +2037,11 @@ mod tests {
             .expect("the editor is in the tree")
             .state_handle::<EditorState>(&app)
             .expect("an EditorState");
-        let controller = app.get(state).controller.expect("restore_state ran");
+        let controller = app
+            .get(state)
+            .controller
+            .handle()
+            .expect("restore_state ran");
         assert_eq!(
             RestorableListenable::value(controller, &app).text_value(&app),
             "hello"

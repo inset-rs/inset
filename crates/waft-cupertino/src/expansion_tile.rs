@@ -4,9 +4,9 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
 
-use waft_animation::{Animatable, AnyAnimation, Curve, CurveTween, Curves, Tween};
+use waft_animation::{Animatable, AnimationRef, Curve, CurveTween, Curves, Drive, Tween};
 use waft_embedder::{FontWeight, Offset, TargetPlatform};
-use waft_foundation::{App, Handle, Task};
+use waft_foundation::{App, Handle, OptionRetained, Ref, Task};
 use waft_rendering::{BoxConstraints, MainAxisSize};
 use waft_widgets::{
     BuildContext, Center, Column, ConstrainedBox, Expansible, ExpansibleController, FadeTransition,
@@ -89,7 +89,7 @@ pub struct CupertinoExpansionTile {
     /// In cases where control over the tile's state is needed from a
     /// callback triggered by a widget within the tile, [`ExpansibleController::of`]
     /// may be more convenient than supplying a controller.
-    pub controller: Option<Handle<ExpansibleController>>,
+    pub controller: Option<Ref<ExpansibleController>>,
 
     /// The body of the [`CupertinoExpansionTile`].
     pub child: WidgetRef,
@@ -125,10 +125,7 @@ impl CupertinoExpansionTile {
     }
 
     /// Dart `CupertinoExpansionTile(controller:)`.
-    pub fn controller(
-        mut self,
-        controller: Handle<ExpansibleController>,
-    ) -> CupertinoExpansionTile {
+    pub fn controller(mut self, controller: Ref<ExpansibleController>) -> CupertinoExpansionTile {
         self.controller = Some(controller);
         self
     }
@@ -169,25 +166,27 @@ pub struct CupertinoExpansionTileState {
     header_key: GlobalKey,
     /// Dart's `final OverlayPortalController _fadeController`, created in `init_state`
     /// because an arena object needs the [`App`].
-    fade_controller: Option<Handle<OverlayPortalController>>,
+    fade_controller: Option<Ref<OverlayPortalController>>,
     /// Dart's `static final Animatable<double> _quarterTween`, created in `init_state`
     /// because an arena object needs the [`App`]; with it the `CurveTween` it is chained to.
-    quarter_tween: Option<Handle<Tween<f64>>>,
-    curve_tween: Option<Handle<CurveTween>>,
-    tile_controller: Option<Handle<ExpansibleController>>,
-    icon_turns: Option<AnyAnimation<f64>>,
+    quarter_tween: Option<Ref<Tween<f64>>>,
+    curve_tween: Option<Ref<CurveTween>>,
+    tile_controller: Option<Ref<ExpansibleController>>,
+    icon_turns: Option<AnimationRef<f64>>,
 }
 
 impl CupertinoExpansionTileState {
     fn tile_controller(self: Handle<Self>, app: &App) -> Handle<ExpansibleController> {
         app.get(self)
             .tile_controller
+            .handle()
             .expect("created in init_state")
     }
 
     fn fade_controller(self: Handle<Self>, app: &App) -> Handle<OverlayPortalController> {
         app.get(self)
             .fade_controller
+            .handle()
             .expect("created in init_state")
     }
 
@@ -195,12 +194,20 @@ impl CupertinoExpansionTileState {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
-        let quarter_tween = app.get(self).quarter_tween.expect("created in init_state");
-        let curve_tween = app.get(self).curve_tween.expect("created in init_state");
+        let quarter_tween = app
+            .get(self)
+            .quarter_tween
+            .clone()
+            .expect("created in init_state");
+        let curve_tween = app
+            .get(self)
+            .curve_tween
+            .clone()
+            .expect("created in init_state");
         let icon_turns = animation.drive(app, quarter_tween.chain(curve_tween));
-        app.get_mut(self).icon_turns = Some(icon_turns);
+        app.get_mut(self).icon_turns = Some(icon_turns.clone());
         let font_size = CupertinoTheme::of(app, context)
             .text_theme()
             .text_style()
@@ -233,7 +240,7 @@ impl CupertinoExpansionTileState {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let localizations = <dyn CupertinoLocalizations>::of(app, context);
         let is_expanded = self.tile_controller(app).is_expanded(app);
@@ -288,7 +295,7 @@ impl CupertinoExpansionTileState {
         _context: BuildContext,
         header: &WidgetRef,
         body: &WidgetRef,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let transition_mode = self.widget(app).transition_mode;
         let fading =
@@ -306,10 +313,17 @@ impl CupertinoExpansionTileState {
             return child;
         }
         debug_assert!(transition_mode == ExpansionTileTransitionMode::Fade);
-        let fade_controller = self.fade_controller(app);
+        let fade_controller = app
+            .get(self)
+            .fade_controller
+            .clone()
+            .expect("created in init_state");
         LayoutBuilder::new(move |_app, _context, constraints| {
-            OverlayPortal::new(fade_controller, move |app, _context| {
-                self.build_fading_child(app, constraints.constraints(), animation)
+            OverlayPortal::new(fade_controller.clone(), {
+                let animation = animation.clone();
+                move |app, _context| {
+                    self.build_fading_child(app, constraints.constraints(), animation.clone())
+                }
             })
             .child(child.clone())
             .into_widget()
@@ -323,7 +337,7 @@ impl CupertinoExpansionTileState {
         self: Handle<Self>,
         app: &mut App,
         constraints: BoxConstraints,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let header_context = app
             .get(self)
@@ -347,7 +361,7 @@ impl CupertinoExpansionTileState {
         let child = self.widget(app).child.clone();
         Positioned::new(
             ConstrainedBox::new(constraints).child(
-                Visibility::new(FadeTransition::new(animation).child(child))
+                Visibility::new(FadeTransition::new(animation.clone()).child(child))
                     .visible(animation.is_animating(app)),
             ),
         )
@@ -365,7 +379,7 @@ impl State for CupertinoExpansionTileState {
         let fade_controller = OverlayPortalController::new(app, None);
         let quarter_tween = Tween::new(app, Some(0.0), Some(0.25));
         let curve_tween = CurveTween::new(app, k_animation_curve());
-        let tile_controller = match self.widget(app).controller {
+        let tile_controller = match self.widget(app).controller.clone() {
             Some(controller) => controller,
             None => ExpansibleController::new(app),
         };
@@ -377,11 +391,11 @@ impl State for CupertinoExpansionTileState {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &CupertinoExpansionTile) {
-        if old_widget.controller != self.widget(app).controller {
+        if old_widget.controller.handle() != self.widget(app).controller.handle() {
             if old_widget.controller.is_none() {
                 self.tile_controller(app).dispose(app);
             }
-            let tile_controller = match self.widget(app).controller {
+            let tile_controller = match self.widget(app).controller.clone() {
                 Some(controller) => controller,
                 None => ExpansibleController::new(app),
             };
@@ -393,26 +407,15 @@ impl State for CupertinoExpansionTileState {
         if self.widget(app).controller.is_none() {
             self.tile_controller(app).dispose(app);
         }
-        let state = app.get_mut(self);
-        let fade_controller = state.fade_controller.take();
-        let quarter_tween = state.quarter_tween.take();
-        let curve_tween = state.curve_tween.take();
-        state.tile_controller = None;
-        state.icon_turns = None;
-        if let Some(fade_controller) = fade_controller {
-            app.destroy(fade_controller);
-        }
-        if let Some(quarter_tween) = quarter_tween {
-            app.destroy(quarter_tween);
-        }
-        if let Some(curve_tween) = curve_tween {
-            app.destroy(curve_tween);
-        }
     }
 
     #[allow(deprecated)]
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let tile_controller = self.tile_controller(app);
+        let tile_controller = app
+            .get(self)
+            .tile_controller
+            .clone()
+            .expect("created in init_state");
         let child = self.widget(app).child.clone();
         Expansible::new(
             Rc::new(move |app, context, animation| self.build_header(app, context, animation)),
@@ -625,7 +628,7 @@ mod tests {
                         SizedBox::new().width(100.0).height(20.0),
                         SizedBox::new().width(100.0).height(50.0),
                     )
-                    .controller(controller)
+                    .controller(controller.clone())
                     .transition_mode(ExpansionTileTransitionMode::Scroll)
                     .key(key),
                 ),
@@ -635,7 +638,7 @@ mod tests {
         let state = global_key
             .current_state::<CupertinoExpansionTileState>(&app)
             .expect("the tile mounted");
-        assert_eq!(state.tile_controller(&app), controller);
+        assert_eq!(state.tile_controller(&app), controller.handle());
 
         controller.expand(&mut app);
         drop(app);
@@ -654,6 +657,7 @@ mod tests {
             .borrow()
             .get(mounted.state)
             .icon_turns
+            .clone()
             .expect("built with the header");
         assert_eq!(turns.value(&mounted.cell.borrow()), 0.0);
 
@@ -665,6 +669,7 @@ mod tests {
             .borrow()
             .get(mounted.state)
             .icon_turns
+            .clone()
             .expect("rebuilt with the header");
         assert_eq!(turns.value(&mounted.cell.borrow()), 0.25);
     }

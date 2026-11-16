@@ -10,13 +10,11 @@
 use super::flyout::shadow::PopupShadow;
 use crate::*;
 use std::{cell::Cell, collections::HashMap, fmt, rc::Rc, time::Duration};
-use waft_animation::{
-    AnimationStatus, AnimationStatusListener, AnyAnimation, Cubic, Curve, Curves,
-};
+use waft_animation::{AnimationStatus, AnimationStatusListener, Cubic, Curve, Curves};
 use waft_embedder::{FontWeight, TextDirection};
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Completer, CompleterFuture, Handle, HandleId,
-    ListenableObject, Listener,
+    ListenableObject, Listener, OptionRetained, Ref,
 };
 use waft_painting::{BorderRadius, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, CrossAxisAlignment, MainAxisSize};
@@ -228,7 +226,7 @@ pub struct ContentDialog {
     /// `m_spClosingDeferralManager`.
     closing_deferrals: Rc<DeferralManager>,
 
-    /// Set by `dispose`; the object is destroyed once no showing needs it.
+    /// Set by `dispose`; the dialog is freed once its owner and its route let go.
     disposed: bool,
 }
 
@@ -280,7 +278,7 @@ impl ChangeNotifier for ContentDialog {
 
 impl ContentDialog {
     /// Creates a dialog with no title, no content and no buttons.
-    pub fn new(app: &mut App) -> Handle<Self> {
+    pub fn new(app: &mut App) -> Ref<Self> {
         app.create(Self {
             title: None,
             content: None,
@@ -306,75 +304,47 @@ impl ContentDialog {
     }
 
     /// Sets Title.
-    pub fn title<K>(self: Handle<Self>, app: &mut App, title: impl IntoWidget<K>) -> Handle<Self> {
+    pub fn title<K>(self: Handle<Self>, app: &mut App, title: impl IntoWidget<K>) {
         self.change(app, |dialog| dialog.title = Some(title.into_widget()))
     }
 
     /// Sets Content.
-    pub fn content<K>(
-        self: Handle<Self>,
-        app: &mut App,
-        content: impl IntoWidget<K>,
-    ) -> Handle<Self> {
+    pub fn content<K>(self: Handle<Self>, app: &mut App, content: impl IntoWidget<K>) {
         self.change(app, |dialog| dialog.content = Some(content.into_widget()))
     }
 
     /// Sets PrimaryButtonText.
-    pub fn primary_button_text(
-        self: Handle<Self>,
-        app: &mut App,
-        text: impl Into<String>,
-    ) -> Handle<Self> {
+    pub fn primary_button_text(self: Handle<Self>, app: &mut App, text: impl Into<String>) {
         self.change(app, |dialog| dialog.primary_button_text = text.into())
     }
 
     /// Sets SecondaryButtonText.
-    pub fn secondary_button_text(
-        self: Handle<Self>,
-        app: &mut App,
-        text: impl Into<String>,
-    ) -> Handle<Self> {
+    pub fn secondary_button_text(self: Handle<Self>, app: &mut App, text: impl Into<String>) {
         self.change(app, |dialog| dialog.secondary_button_text = text.into())
     }
 
     /// Sets CloseButtonText.
-    pub fn close_button_text(
-        self: Handle<Self>,
-        app: &mut App,
-        text: impl Into<String>,
-    ) -> Handle<Self> {
+    pub fn close_button_text(self: Handle<Self>, app: &mut App, text: impl Into<String>) {
         self.change(app, |dialog| dialog.close_button_text = text.into())
     }
 
     /// Sets IsPrimaryButtonEnabled.
-    pub fn is_primary_button_enabled(
-        self: Handle<Self>,
-        app: &mut App,
-        value: bool,
-    ) -> Handle<Self> {
+    pub fn is_primary_button_enabled(self: Handle<Self>, app: &mut App, value: bool) {
         self.change(app, |dialog| dialog.is_primary_button_enabled = value)
     }
 
     /// Sets IsSecondaryButtonEnabled.
-    pub fn is_secondary_button_enabled(
-        self: Handle<Self>,
-        app: &mut App,
-        value: bool,
-    ) -> Handle<Self> {
+    pub fn is_secondary_button_enabled(self: Handle<Self>, app: &mut App, value: bool) {
         self.change(app, |dialog| dialog.is_secondary_button_enabled = value)
     }
 
     /// Sets DefaultButton.
-    pub fn default_button(
-        self: Handle<Self>,
-        app: &mut App,
-        button: ContentDialogButton,
-    ) -> Handle<Self> {
+    pub fn default_button(self: Handle<Self>, app: &mut App, button: ContentDialogButton) {
         self.change(app, |dialog| dialog.default_button = button)
     }
 
     /// Sets FullSizeDesired.
-    pub fn full_size_desired(self: Handle<Self>, app: &mut App, value: bool) -> Handle<Self> {
+    pub fn full_size_desired(self: Handle<Self>, app: &mut App, value: bool) {
         self.change(app, |dialog| dialog.full_size_desired = value)
     }
 
@@ -383,9 +353,8 @@ impl ContentDialog {
         self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, &Rc<ContentDialogButtonClickEventArgs>) + 'static,
-    ) -> Handle<Self> {
+    ) {
         app.get_mut(self).primary_button_click = Some(Rc::new(handler));
-        self
     }
 
     /// Sets the SecondaryButtonClick handler.
@@ -393,9 +362,8 @@ impl ContentDialog {
         self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, &Rc<ContentDialogButtonClickEventArgs>) + 'static,
-    ) -> Handle<Self> {
+    ) {
         app.get_mut(self).secondary_button_click = Some(Rc::new(handler));
-        self
     }
 
     /// Sets the CloseButtonClick handler.
@@ -403,15 +371,13 @@ impl ContentDialog {
         self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, &Rc<ContentDialogButtonClickEventArgs>) + 'static,
-    ) -> Handle<Self> {
+    ) {
         app.get_mut(self).close_button_click = Some(Rc::new(handler));
-        self
     }
 
     /// Sets the Opened handler.
-    pub fn opened(self: Handle<Self>, app: &mut App, handler: Listener) -> Handle<Self> {
+    pub fn opened(self: Handle<Self>, app: &mut App, handler: Listener) {
         app.get_mut(self).opened = Some(handler);
-        self
     }
 
     /// Sets the Closing handler.
@@ -419,9 +385,8 @@ impl ContentDialog {
         self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, &Rc<ContentDialogClosingEventArgs>) + 'static,
-    ) -> Handle<Self> {
+    ) {
         app.get_mut(self).closing = Some(Rc::new(handler));
-        self
     }
 
     /// Sets the Closed handler.
@@ -429,9 +394,8 @@ impl ContentDialog {
         self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, ContentDialogClosedEventArgs) + 'static,
-    ) -> Handle<Self> {
+    ) {
         app.get_mut(self).closed = Some(Rc::new(handler));
-        self
     }
 
     /// `ShowAsync`: shows the dialog over the window of `context`'s root navigator. The future
@@ -468,9 +432,9 @@ impl ContentDialog {
         });
         app.get_mut(metadata).open.insert(navigator.id(), self);
         navigator
-            .push(app, route)
+            .push(app, dialog_route.clone().into_erased())
             .then(app, move |app, _| self.route_popped(app, route));
-        self.finish_closing_when_dismissed(app, dialog_route);
+        self.finish_closing_when_dismissed(app, dialog_route.handle());
         Ok(result)
     }
 
@@ -488,17 +452,15 @@ impl ContentDialog {
         app.get_mut(self).disposed = true;
         if app.get(self).showing.is_none() {
             self.notifier_dispose(app);
-            app.destroy(self);
             return;
         }
         self.hide_internal(app, ContentDialogResult::None);
     }
 
     /// Applies `change` to the dialog's properties and rebuilds a shown presenter.
-    fn change(self: Handle<Self>, app: &mut App, change: impl FnOnce(&mut Self)) -> Handle<Self> {
+    fn change(self: Handle<Self>, app: &mut App, change: impl FnOnce(&mut Self)) {
         change(app.get_mut(self));
         self.notify_listeners(app);
-        self
     }
 
     /// The route the dialog is shown in, with the smoke layer of `resources`.
@@ -506,9 +468,10 @@ impl ContentDialog {
         self: Handle<Self>,
         app: &mut App,
         resources: &ThemeResources,
-    ) -> Handle<ContentDialogRoute> {
+    ) -> Ref<ContentDialogRoute> {
         let smoke = resources.content_dialog_smoke_fill;
-        ContentDialogRoute::new(app, self, smoke)
+        let dialog = self.keep(app);
+        ContentDialogRoute::new(app, dialog, smoke)
     }
 
     /// Ends the showing once `route` has animated out, even when its page never mounted, as
@@ -716,7 +679,6 @@ impl ContentDialog {
         if app.get(self).disposed {
             showing.completion.complete(app, result);
             self.notifier_dispose(app);
-            app.destroy(self);
             return;
         }
         if let Some(closed) = app.get(self).closed.clone() {
@@ -749,7 +711,7 @@ impl ContentDialog {
     }
 
     fn notifier_dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -898,9 +860,13 @@ struct ContentDialogRoute {
 
 impl ContentDialogRoute {
     /// A route showing `dialog` over a `smoke` layer.
-    fn new(app: &mut App, dialog: Handle<ContentDialog>, smoke: Color) -> Handle<Self> {
+    fn new(app: &mut App, dialog: Ref<ContentDialog>, smoke: Color) -> Ref<Self> {
         let page_builder: RoutePageBuilder = Rc::new(move |_, _, animation, _| {
-            ContentDialogPresenter { dialog, animation }.into_widget()
+            ContentDialogPresenter {
+                dialog: dialog.handle(),
+                animation,
+            }
+            .into_widget()
         });
         let mut raw_dialog_route = RawDialogRouteData::new(page_builder);
         raw_dialog_route.barrier_dismissible = false;
@@ -958,11 +924,12 @@ impl RawDialogRouteLeaf for ContentDialogRoute {
     /// `SmokeLayerBackground`: blocks input to the page beneath and fades with the dialog.
     fn build_modal_barrier(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let animation = TransitionRoute::animation(self, app).expect("an installed route");
+        let kept = animation.keep(app);
         let smoke = self
             .raw_dialog_route_data(app)
             .barrier_color
             .expect("the smoke fill");
-        ListenableBuilder::new(Rc::new(animation), move |app, _, _| {
+        ListenableBuilder::new(Rc::new(kept), move |app, _, _| {
             let (opacity, _) = open_close_transition(animation.status(app), animation.value(app));
             ModalBarrier::new()
                 .color(smoke.with_values(Some(smoke.a * opacity), None, None, None, None))
@@ -979,7 +946,7 @@ struct ContentDialogPresenter {
     dialog: Handle<ContentDialog>,
 
     /// The route's animation, which drives the showing and hiding storyboards.
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
 }
 
 /// The focus nodes the template's behavior needs, and the showing the presenter belongs to.
@@ -990,10 +957,10 @@ struct ContentDialogPresenterState {
     route: Option<AnyRoute>,
 
     /// Encloses `Content`, whose first focusable element takes the initial focus.
-    content_focus: Option<Handle<FocusNode>>,
+    content_focus: Option<Ref<FocusNode>>,
 
     /// The primary, secondary and close buttons' focus, which decides the accented button.
-    button_focus: Vec<(ContentDialogButton, Handle<FocusNode>)>,
+    button_focus: Vec<(ContentDialogButton, Ref<FocusNode>)>,
 
     /// Rebuilds the presenter for property and focus changes.
     rebuild: Option<Listener>,
@@ -1025,7 +992,7 @@ impl State for ContentDialogPresenterState {
             .as_ref()
             .map(|showing| showing.route);
         let rebuild = Listener::new(move |app| {
-            if app.contains(self) && self.mounted(app) {
+            if self.mounted(app) {
                 self.set_state(app, |_| {});
             }
         });
@@ -1068,7 +1035,6 @@ impl State for ContentDialogPresenterState {
         for node in nodes {
             node.as_node().remove_listener(app, &rebuild);
             node.as_node().dispose(app);
-            app.destroy(node);
         }
         if let Some(route) = route {
             after_next_frame(
@@ -1087,8 +1053,8 @@ impl State for ContentDialogPresenterState {
         };
         let (resources, direction) = (showing.resources.clone(), showing.direction);
         let background = self.background_element(app, &resources);
-        let animation = self.widget(app).animation;
-        let animated = ListenableBuilder::new(Rc::new(animation), move |app, _, child| {
+        let animation = self.widget(app).animation.clone();
+        let animated = ListenableBuilder::new(Rc::new(animation.clone()), move |app, _, child| {
             let status = animation.status(app);
             let (opacity, scale) = open_close_transition(status, animation.value(app));
             // The template makes the dialog unreachable while its closing transition plays;
@@ -1274,6 +1240,7 @@ impl ContentDialogPresenterState {
             let focus = app
                 .get(self)
                 .content_focus
+                .clone()
                 .expect("an initialized presenter");
             children.push(
                 Focus::new(DefaultTextStyle::new(
@@ -1285,7 +1252,7 @@ impl ContentDialogPresenterState {
                     ),
                     content,
                 ))
-                .focus_node(focus.as_node())
+                .focus_node(focus.erase())
                 .can_request_focus(false)
                 .skip_traversal(true)
                 .into_widget(),
@@ -1359,7 +1326,7 @@ impl ContentDialogPresenterState {
                 let button = Button::text(text, click)
                     .style(style)
                     .is_enabled(enabled)
-                    .focus_node(node.as_node());
+                    .focus_node(node.erase());
                 Some(GridCell::new(button).column(column).into_widget())
             })
             .collect();
@@ -1383,12 +1350,12 @@ impl ContentDialogPresenterState {
             .map(|(button, _)| button)
     }
 
-    fn focus_of(self: Handle<Self>, app: &App, button: ContentDialogButton) -> Handle<FocusNode> {
+    fn focus_of(self: Handle<Self>, app: &App, button: ContentDialogButton) -> Ref<FocusNode> {
         app.get(self)
             .button_focus
             .iter()
             .find(|(candidate, _)| *candidate == button)
-            .map(|(_, node)| *node)
+            .map(|(_, node)| node.clone())
             .expect("a command button")
     }
 
@@ -1398,7 +1365,7 @@ impl ContentDialogPresenterState {
         SchedulerBinding::add_post_frame_callback(
             app,
             FrameCallback::new(move |app, _| {
-                if !app.contains(self) || !self.mounted(app) {
+                if !self.mounted(app) {
                     return;
                 }
                 let dialog = self.widget(app).dialog;
@@ -1418,6 +1385,7 @@ impl ContentDialogPresenterState {
         let content = app
             .get(self)
             .content_focus
+            .handle()
             .expect("an initialized presenter");
         let first_in_content = content
             .as_node()

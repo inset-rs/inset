@@ -4,22 +4,25 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::Curve;
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, Listener};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, Listener, OptionRetained,
+};
 use waft_gestures::{Drag, DragStartDetails};
 use waft_painting::AxisDirection;
 use waft_physics::near_equal;
 use waft_rendering::{ScrollDirection, ViewportOffset};
 
 use crate::widgets::scroll_activity::{
-    AnyScrollActivity, BallisticScrollActivity, DragScrollActivity, DrivenScrollActivity,
-    HoldScrollActivity, IdleScrollActivity, ScrollActivity, ScrollActivityDelegate,
-    ScrollDragController, ScrollHoldController,
+    BallisticScrollActivity, DragScrollActivity, DrivenScrollActivity, HoldScrollActivity,
+    IdleScrollActivity, ScrollActivityDelegate, ScrollActivityRef, ScrollDragController,
+    ScrollHoldController,
 };
 use crate::widgets::scroll_context::ScrollContext;
 use crate::widgets::scroll_physics::ScrollPhysicsRef;
 use crate::widgets::scroll_position::{
     AnyScrollPosition, ScrollPosition, ScrollPositionBase, ScrollPositionData,
 };
+use waft_foundation::Ref;
 
 /// The fields of Dart's `ScrollPositionWithSingleContext`, which its subclasses carry.
 pub struct ScrollPositionWithSingleContextData {
@@ -27,7 +30,7 @@ pub struct ScrollPositionWithSingleContextData {
     /// potentially transfer to a next activity.
     held_previous_velocity: f64,
     user_scroll_direction: ScrollDirection,
-    current_drag: Option<Handle<ScrollDragController>>,
+    current_drag: Option<Ref<ScrollDragController>>,
 }
 
 impl ScrollPositionWithSingleContextData {
@@ -110,7 +113,7 @@ pub trait ScrollPositionWithSingleContextLeaf: ScrollPosition + ScrollActivityDe
     }
 
     /// Dart's `ScrollPositionWithSingleContext.beginActivity`.
-    fn begin_activity(self: Handle<Self>, app: &mut App, new_activity: Option<AnyScrollActivity>) {
+    fn begin_activity(self: Handle<Self>, app: &mut App, new_activity: Option<ScrollActivityRef>) {
         ScrollPositionWithSingleContext::begin_activity(self, app, new_activity);
     }
 
@@ -338,7 +341,7 @@ macro_rules! scroll_position_with_single_context_overrides {
         fn begin_activity(
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
-            new_activity: ::std::option::Option<$crate::AnyScrollActivity>,
+            new_activity: ::std::option::Option<$crate::ScrollActivityRef>,
         ) {
             $crate::ScrollPositionWithSingleContextLeaf::begin_activity(self, app, new_activity);
         }
@@ -489,7 +492,7 @@ impl ScrollPositionWithSingleContext {
         keep_scroll_offset: bool,
         old_position: Option<AnyScrollPosition>,
         debug_label: Option<String>,
-    ) -> Handle<ScrollPositionWithSingleContext> {
+    ) -> Ref<ScrollPositionWithSingleContext> {
         let scroll_position =
             ScrollPositionData::new(app, physics, context, keep_scroll_offset, debug_label);
         let this = app.create(ScrollPositionWithSingleContext {
@@ -497,7 +500,7 @@ impl ScrollPositionWithSingleContext {
             scroll_position,
             single_context: ScrollPositionWithSingleContextData::new(),
         });
-        ScrollPositionWithSingleContext::init(this, app, initial_pixels, old_position);
+        ScrollPositionWithSingleContext::init(this.handle(), app, initial_pixels, old_position);
         this
     }
 
@@ -566,10 +569,9 @@ impl ScrollPositionWithSingleContext {
         this.single_context_data_mut(app).user_scroll_direction =
             other.single_context_data(app).user_scroll_direction;
         debug_assert!(this.single_context_data(app).current_drag.is_none());
-        if let Some(current_drag) = other.single_context_data(app).current_drag {
-            this.single_context_data_mut(app).current_drag = Some(current_drag);
+        if let Some(current_drag) = other.single_context_data_mut(app).current_drag.take() {
             current_drag.update_delegate(app, delegate);
-            other.single_context_data_mut(app).current_drag = None;
+            this.single_context_data_mut(app).current_drag = Some(current_drag);
         }
     }
 
@@ -589,7 +591,7 @@ impl ScrollPositionWithSingleContext {
     pub fn begin_activity<P: ScrollPositionWithSingleContextLeaf>(
         this: Handle<P>,
         app: &mut App,
-        new_activity: Option<AnyScrollActivity>,
+        new_activity: Option<ScrollActivityRef>,
     ) {
         this.single_context_data_mut(app).held_previous_velocity = 0.0;
         let Some(new_activity) = new_activity else {
@@ -597,7 +599,7 @@ impl ScrollPositionWithSingleContext {
         };
         debug_assert!(new_activity.delegate(app) == this.as_scroll_activity_delegate());
         ScrollPositionBase::begin_activity(this, app, Some(new_activity));
-        if let Some(current_drag) = this.single_context_data(app).current_drag {
+        if let Some(current_drag) = this.single_context_data(app).current_drag.handle() {
             current_drag.dispose(app);
         }
         this.single_context_data_mut(app).current_drag = None;
@@ -632,7 +634,7 @@ impl ScrollPositionWithSingleContext {
     /// See [`ScrollPositionWithSingleContextLeaf::go_idle`].
     pub fn go_idle<P: ScrollPositionWithSingleContextLeaf>(this: Handle<P>, app: &mut App) {
         let activity = IdleScrollActivity::new(app, this.as_scroll_activity_delegate());
-        ScrollPosition::begin_activity(this, app, Some(activity.as_activity()));
+        ScrollPosition::begin_activity(this, app, Some(activity.into_erased()));
     }
 
     /// See [`ScrollPositionWithSingleContextLeaf::go_ballistic`].
@@ -655,7 +657,7 @@ impl ScrollPositionWithSingleContext {
                     vsync,
                     should_ignore_pointer,
                 );
-                ScrollPosition::begin_activity(this, app, Some(activity.as_activity()));
+                ScrollPosition::begin_activity(this, app, Some(activity.into_erased()));
             }
             None => ScrollActivityDelegate::go_idle(this, app),
         }
@@ -692,7 +694,7 @@ impl ScrollPositionWithSingleContext {
             curve,
             vsync,
         );
-        ScrollPosition::begin_activity(this, app, Some(activity.as_activity()));
+        ScrollPosition::begin_activity(this, app, Some(activity.erase()));
         activity.done(app)
     }
 
@@ -781,7 +783,7 @@ impl ScrollPositionWithSingleContext {
             this.as_scroll_activity_delegate(),
             Some(hold_cancel_callback),
         );
-        ScrollPosition::begin_activity(this, app, Some(hold_activity.as_activity()));
+        ScrollPosition::begin_activity(this, app, Some(hold_activity.erase()));
         this.single_context_data_mut(app).held_previous_velocity = previous_velocity;
         Rc::new(hold_activity)
     }
@@ -803,16 +805,18 @@ impl ScrollPositionWithSingleContext {
             Some(physics.carried_momentum(held_previous_velocity)),
             physics.drag_start_distance_motion_threshold(),
         );
-        let activity = DragScrollActivity::new(app, this.as_scroll_activity_delegate(), drag);
-        ScrollPosition::begin_activity(this, app, Some(activity.as_activity()));
+        let activity =
+            DragScrollActivity::new(app, this.as_scroll_activity_delegate(), drag.clone());
+        ScrollPosition::begin_activity(this, app, Some(activity.into_erased()));
         debug_assert!(this.single_context_data(app).current_drag.is_none());
-        this.single_context_data_mut(app).current_drag = Some(drag);
+        this.single_context_data_mut(app).current_drag = Some(drag.clone());
+        // Dart's `Scrollable._drag` keeps the drag, as the position's `current_drag` does.
         Rc::new(drag)
     }
 
     /// See [`ScrollPositionWithSingleContextLeaf::dispose`].
     pub fn dispose<P: ScrollPositionWithSingleContextLeaf>(this: Handle<P>, app: &mut App) {
-        if let Some(current_drag) = this.single_context_data(app).current_drag {
+        if let Some(current_drag) = this.single_context_data(app).current_drag.handle() {
             current_drag.dispose(app);
         }
         this.single_context_data_mut(app).current_drag = None;
@@ -885,7 +889,7 @@ mod tests {
         app: &mut App,
         harness: &ScrollHarness,
         physics: ScrollPhysicsRef,
-    ) -> Handle<ScrollPositionWithSingleContext> {
+    ) -> Ref<ScrollPositionWithSingleContext> {
         ScrollPositionWithSingleContext::new(
             app,
             physics,
@@ -924,7 +928,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         assert!(!position.have_dimensions(&app));
         assert_eq!(ViewportOffset::pixels(position, &app), 0.0);
 
@@ -936,7 +941,7 @@ mod tests {
         assert_eq!(position.viewport_dimension(&app), 100.0);
         assert_eq!(position.extent_inside(&app), 100.0);
         assert_eq!(position.extent_after(&app), 400.0);
-        assert_eq!(app.get(harness.context).can_drag, vec![true]);
+        assert_eq!(app.get(&harness.context).can_drag, vec![true]);
 
         position.move_to(&mut app, 500.0, None, None, None);
         assert_eq!(ViewportOffset::pixels(position, &app), 400.0);
@@ -950,7 +955,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
@@ -970,7 +976,7 @@ mod tests {
             *harness.notifications.borrow(),
             ["start", "update 120.0", "end"]
         );
-        assert_eq!(app.get(harness.context).saved_offsets, vec![120.0]);
+        assert_eq!(app.get(&harness.context).saved_offsets, vec![120.0]);
         assert!(!is_scrolling(&app, position));
     }
 
@@ -979,7 +985,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         ViewportOffset::animate_to(
@@ -1008,7 +1015,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let done = ViewportOffset::animate_to(
@@ -1051,7 +1059,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let done = ViewportOffset::animate_to(
@@ -1086,7 +1095,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let done = ViewportOffset::animate_to(
@@ -1116,7 +1126,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
@@ -1138,7 +1149,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
@@ -1181,7 +1193,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(BouncingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(BouncingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let drag = ScrollPosition::drag(
@@ -1218,11 +1231,12 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let old = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept_old = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let old = kept_old.handle();
         lay_out(&mut app, old);
         ViewportOffset::jump_to(old, &mut app, 75.0);
 
-        let new = ScrollPositionWithSingleContext::new(
+        let kept_new = ScrollPositionWithSingleContext::new(
             &mut app,
             Rc::new(ClampingScrollPhysics::new()),
             Rc::clone(&harness.scroll_context),
@@ -1231,6 +1245,7 @@ mod tests {
             Some(old.as_scroll_position()),
             None,
         );
+        let new = kept_new.handle();
 
         assert_eq!(ViewportOffset::pixels(new, &app), 75.0);
         assert_eq!(new.max_scroll_extent(&app), 400.0);
@@ -1243,7 +1258,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
@@ -1264,7 +1280,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
-        let position = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let description = position.describe(&app);

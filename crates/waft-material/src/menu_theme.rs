@@ -599,9 +599,8 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             use test_menu::*;
             let mut tester = tester();
-            let controller = waft_widgets::MenuControllerLeaf::as_menu_controller(
-                waft_widgets::MenuController::new(&mut tester.cell.borrow_mut()),
-            );
+            let controller = waft_widgets::MenuController::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyMenuController>();
             let disabled_icon = Icons::close_fullscreen();
             let hovered_icon = Icons::ac_unit();
             let focused_icon = Icons::zoom_out();
@@ -660,7 +659,7 @@ pub(crate) mod tests {
                                     )
                                     .into_widget(),
                                 ])
-                                .controller(controller),
+                                .controller(controller.clone()),
                             )
                             .into_widget(),
                     )

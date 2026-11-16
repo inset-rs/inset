@@ -509,7 +509,7 @@ mod tests {
     use waft_foundation::Handle;
     use waft_services::{MouseCursorRef, SystemMouseCursors};
     use waft_widgets::{
-        AnyElement, Builder, Center, Column, GlobalKey, PageRouteBuilder, Route, RoutePageBuilder,
+        AnyElement, Builder, Center, Column, GlobalKey, PageRouteBuilder, RoutePageBuilder,
         SizedBox, Text, WidgetStatePropertyAll,
     };
 
@@ -598,7 +598,7 @@ mod tests {
             let page_builder: RoutePageBuilder = Rc::new(move |_app, _context, _, _| next());
             let route = PageRouteBuilder::new(&mut app, page_builder);
             let context = self.0.get().expect("the home page built");
-            drop(Navigator::push(&mut app, context, Route::as_route(route)));
+            drop(Navigator::push(&mut app, context, route.erase()));
         }
     }
 

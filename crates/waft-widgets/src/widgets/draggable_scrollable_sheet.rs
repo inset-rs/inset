@@ -9,7 +9,7 @@ use waft_animation::{Animation, AnimationBehavior, AnimationController, Curve};
 use waft_embedder::clamp_double;
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, ListenableObject, Listener,
-    ValueListenable, ValueNotifier,
+    OptionRetained, ValueListenable, ValueNotifier,
 };
 use waft_gestures::{Drag, DragStartDetails};
 use waft_painting::AlignmentGeometry;
@@ -23,14 +23,16 @@ use crate::view::View;
 use crate::widgets::basic::{FractionallySizedBox, SizedBox};
 use crate::widgets::inherited_notifier::{InheritedNotifier, InheritedNotifierKind};
 use crate::widgets::layout_builder::LayoutBuilder;
-use crate::widgets::scroll_activity::AnyScrollActivity;
+use crate::widgets::scroll_activity::ScrollActivityRef;
 use crate::widgets::scroll_context::ScrollContext;
 use crate::widgets::scroll_controller::{
-    AnyScrollController, ScrollController, ScrollControllerData, ScrollControllerLeaf,
+    ScrollController, ScrollControllerData, ScrollControllerLeaf, ScrollControllerRef,
 };
 use crate::widgets::scroll_notification::{ViewportNotificationData, ViewportNotificationMixin};
 use crate::widgets::scroll_physics::{AlwaysScrollableScrollPhysics, ScrollPhysicsRef};
-use crate::widgets::scroll_position::{AnyScrollPosition, ScrollPosition, ScrollPositionData};
+use crate::widgets::scroll_position::{
+    AnyScrollPosition, ScrollPosition, ScrollPositionData, ScrollPositionRef,
+};
 use crate::widgets::scroll_position_with_single_context::{
     ScrollPositionWithSingleContext, ScrollPositionWithSingleContextData,
     ScrollPositionWithSingleContextLeaf,
@@ -38,6 +40,7 @@ use crate::widgets::scroll_position_with_single_context::{
 use crate::widgets::scroll_simulation::ClampingScrollSimulation;
 use crate::widgets::value_listenable_builder::ValueListenableBuilder;
 use crate::{InheritedWidget, ScrollActivityDelegate};
+use waft_foundation::Ref;
 
 /// The signature of a method that provides a [`BuildContext`] and
 /// `ScrollController` for building a widget that may overflow the draggable
@@ -51,7 +54,7 @@ use crate::{InheritedWidget, ScrollActivityDelegate};
 /// to a scroll view such as `SingleChildScrollView` or `ListView`, to have the whole sheet
 /// be draggable.
 pub type ScrollableWidgetBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, AnyScrollController) -> WidgetRef>;
+    Rc<dyn Fn(&mut App, BuildContext, ScrollControllerRef) -> WidgetRef>;
 
 /// Dart's `_DraggableSheetExtent Function()`: the sheet's current extent, which the state
 /// replaces on every rebuild.
@@ -79,13 +82,13 @@ type GetSheetExtent = Rc<dyn Fn(&App) -> Handle<DraggableSheetExtent>>;
 /// sheet change.
 pub struct DraggableScrollableController {
     change_notifier: ChangeNotifierData,
-    attached_controller: Option<Handle<DraggableScrollableSheetScrollController>>,
-    animation_controllers: Vec<Handle<AnimationController>>,
+    attached_controller: Option<Ref<DraggableScrollableSheetScrollController>>,
+    animation_controllers: Vec<Ref<AnimationController>>,
 }
 
 impl DraggableScrollableController {
     /// Creates a controller for [`DraggableScrollableSheet`].
-    pub fn new(app: &mut App) -> Handle<DraggableScrollableController> {
+    pub fn new(app: &mut App) -> Ref<DraggableScrollableController> {
         app.create(DraggableScrollableController {
             change_notifier: ChangeNotifierData::new(),
             attached_controller: None,
@@ -121,6 +124,7 @@ impl DraggableScrollableController {
     pub fn is_attached(self: Handle<Self>, app: &App) -> bool {
         app.get(self)
             .attached_controller
+            .as_ref()
             .is_some_and(|controller| controller.has_clients(app))
     }
 
@@ -161,10 +165,10 @@ impl DraggableScrollableController {
         debug_assert!((0.0..=1.0).contains(&size));
         debug_assert!(!duration.is_zero());
         let attached = self.attached_controller(app);
-        let extent = self.extent(app);
+        let extent = app.get(attached).extent.clone();
         let position = attached.position(app);
         let vsync = position.context(app).vsync();
-        let animation_controller = AnimationController::create_unbounded(
+        let animation_controller = AnimationController::unbounded(
             app,
             extent.current_size(app),
             None,
@@ -174,30 +178,34 @@ impl DraggableScrollableController {
         );
         app.get_mut(self)
             .animation_controllers
-            .push(animation_controller);
+            .push(animation_controller.clone());
         ScrollActivityDelegate::go_idle(position, app);
         // This disables any snapping until the next user interaction with the sheet.
-        app.get_mut(extent).has_dragged = false;
-        app.get_mut(extent).has_changed = true;
+        app.get_mut(&extent).has_dragged = false;
+        app.get_mut(&extent).has_changed = true;
+        let canceled = animation_controller.clone();
         extent.start_activity(
             app,
             Listener::new(move |app| {
                 // Don't stop the controller if it's already finished and may have been
                 // disposed.
-                if animation_controller.is_animating(app) {
-                    animation_controller.stop(app, true);
+                if canceled.is_animating(app) {
+                    canceled.stop(app, true);
                 }
             }),
         );
+        let ticking = animation_controller.handle();
         Animation::add_listener(
-            animation_controller,
+            ticking,
             app,
             Listener::new(move |app: &mut App| {
-                let value = animation_controller.value(app);
+                let value = ticking.value(app);
+                let position = self.attached_controller(app).position(app);
                 let context = position.context(app).notification_context(app);
                 extent.update_size(app, value, context.expect("a mounted scrollable"));
             }),
         );
+        let extent = self.extent(app);
         let target = clamp_double(size, extent.min_size(app), extent.max_size(app));
         let animated = animation_controller.animate_to(app, target, Some(duration), curve);
         CompleterFuture::spawn(app, animated)
@@ -238,7 +246,7 @@ impl DraggableScrollableController {
 
     /// Discards any resources used by the object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     fn assert_attached(self: Handle<Self>, app: &App) {
@@ -256,11 +264,12 @@ impl DraggableScrollableController {
     ) -> Handle<DraggableScrollableSheetScrollController> {
         app.get(self)
             .attached_controller
+            .handle()
             .expect("the controller is attached to a sheet")
     }
 
     fn extent(self: Handle<Self>, app: &App) -> Handle<DraggableSheetExtent> {
-        app.get(self.attached_controller(app)).extent
+        app.get(self.attached_controller(app)).extent.handle()
     }
 
     /// Dart's `notifyListeners` tear-off, which the extent's size is listened to with.
@@ -275,17 +284,20 @@ impl DraggableScrollableController {
     fn attach(
         self: Handle<Self>,
         app: &mut App,
-        scroll_controller: Handle<DraggableScrollableSheetScrollController>,
+        scroll_controller: Ref<DraggableScrollableSheetScrollController>,
     ) {
         debug_assert!(
             app.get(self).attached_controller.is_none(),
             "Draggable scrollable controller is already attached to a sheet."
         );
-        app.get_mut(self).attached_controller = Some(scroll_controller);
-        let current_size = app.get(app.get(scroll_controller).extent).current_size;
+        app.get_mut(self).attached_controller = Some(scroll_controller.clone());
+        let current_size = app
+            .get(&app.get(&scroll_controller).extent)
+            .current_size
+            .handle();
         let listener = self.notification_listener();
         ListenableObject::add_listener(current_size, app, listener);
-        app.get_mut(scroll_controller).on_position_detached = Some(Listener::handle_method(
+        app.get_mut(&scroll_controller).on_position_detached = Some(Listener::handle_method(
             self,
             DraggableScrollableController::dispose_animation_controllers,
         ));
@@ -300,7 +312,7 @@ impl DraggableScrollableController {
         // the controller will point to a new extent. We have to add our listener to
         // the new extent.
         let extent = self.extent(app);
-        let current_size = app.get(extent).current_size;
+        let current_size = app.get(extent).current_size.handle();
         let listener = self.notification_listener();
         ListenableObject::add_listener(current_size, app, listener);
         if previous_extent.current_size(app) != extent.current_size(app) {
@@ -311,12 +323,12 @@ impl DraggableScrollableController {
     }
 
     fn detach(self: Handle<Self>, app: &mut App, dispose_extent: bool) {
-        if let Some(attached_controller) = app.get(self).attached_controller {
-            let extent = app.get(attached_controller).extent;
+        if let Some(attached_controller) = app.get(self).attached_controller.handle() {
+            let extent = app.get(attached_controller).extent.handle();
             if dispose_extent {
                 extent.dispose(app);
             } else {
-                let current_size = app.get(extent).current_size;
+                let current_size = app.get(extent).current_size.handle();
                 ListenableObject::remove_listener(current_size, app, &self.notification_listener());
             }
         }
@@ -442,7 +454,7 @@ pub struct DraggableScrollableSheet {
     /// target divided by the velocity of the widget.
     pub snap_animation_duration: Option<Duration>,
     /// A controller that can be used to programmatically control this sheet.
-    pub controller: Option<Handle<DraggableScrollableController>>,
+    pub controller: Option<Ref<DraggableScrollableController>>,
     /// Whether the sheet, when dragged (or flung) to its minimum size, should
     /// cause its parent sheet to close.
     ///
@@ -529,7 +541,7 @@ impl DraggableScrollableSheet {
     /// Dart `DraggableScrollableSheet(controller:)`.
     pub fn controller(
         mut self,
-        controller: Handle<DraggableScrollableController>,
+        controller: Ref<DraggableScrollableController>,
     ) -> DraggableScrollableSheet {
         self.controller = Some(controller);
         self
@@ -713,7 +725,7 @@ struct DraggableSheetExtent {
     snap_animation_duration: Option<Duration>,
     initial_size: f64,
     should_close_on_min_extent: bool,
-    current_size: Handle<ValueNotifier<f64>>,
+    current_size: Ref<ValueNotifier<f64>>,
     available_pixels: f64,
     // Used to disable snapping until the user has dragged on the sheet.
     has_dragged: bool,
@@ -739,11 +751,11 @@ impl DraggableSheetExtent {
         snap_sizes: Vec<f64>,
         initial_size: f64,
         snap_animation_duration: Option<Duration>,
-        current_size: Option<Handle<ValueNotifier<f64>>>,
+        current_size: Option<Ref<ValueNotifier<f64>>>,
         has_dragged: Option<bool>,
         has_changed: Option<bool>,
         should_close_on_min_extent: bool,
-    ) -> Handle<DraggableSheetExtent> {
+    ) -> Ref<DraggableSheetExtent> {
         debug_assert!(min_size >= 0.0);
         debug_assert!(max_size <= 1.0);
         debug_assert!(min_size <= initial_size);
@@ -786,7 +798,7 @@ impl DraggableSheetExtent {
 
     /// The fraction of the parent height the sheet currently takes.
     pub fn current_size(self: Handle<Self>, app: &App) -> f64 {
-        *app.get(app.get(self).current_size).value()
+        *app.get(&app.get(self).current_size).value()
     }
 
     /// The pixel height the sheet currently takes.
@@ -848,7 +860,8 @@ impl DraggableSheetExtent {
         if self.current_size(app) == clamped_size {
             return;
         }
-        app.get(self).current_size.set_value(app, clamped_size);
+        let current_size = app.get(self).current_size.handle();
+        current_size.set_value(app, clamped_size);
         let extent = app.get(self);
         DraggableScrollableNotification::new(
             self.current_size(app),
@@ -875,8 +888,8 @@ impl DraggableSheetExtent {
 
     /// Discards any resources used by the object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        let current_size = app.get(self).current_size;
-        app.get_mut(current_size).dispose();
+        let current_size = app.get(self).current_size.handle();
+        current_size.dispose(app);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -890,7 +903,7 @@ impl DraggableSheetExtent {
         initial_size: f64,
         snap_animation_duration: Option<Duration>,
         should_close_on_min_extent: bool,
-    ) -> Handle<DraggableSheetExtent> {
+    ) -> Ref<DraggableSheetExtent> {
         let has_changed = app.get(self).has_changed;
         let has_dragged = app.get(self).has_dragged;
         // Set the current size to the possibly updated initial size if the sheet
@@ -933,8 +946,8 @@ impl Debug for DraggableSheetExtent {
 /// Dart's `_DraggableScrollableSheetState`.
 pub struct DraggableScrollableSheetState {
     state: StateData<DraggableScrollableSheet>,
-    scroll_controller: Option<Handle<DraggableScrollableSheetScrollController>>,
-    extent: Option<Handle<DraggableSheetExtent>>,
+    scroll_controller: Option<Ref<DraggableScrollableSheetScrollController>>,
+    extent: Option<Ref<DraggableSheetExtent>>,
 }
 
 impl DraggableScrollableSheetState {
@@ -942,11 +955,14 @@ impl DraggableScrollableSheetState {
         self: Handle<Self>,
         app: &App,
     ) -> Handle<DraggableScrollableSheetScrollController> {
-        app.get(self).scroll_controller.expect("init_state has run")
+        app.get(self)
+            .scroll_controller
+            .handle()
+            .expect("init_state has run")
     }
 
     fn extent(self: Handle<Self>, app: &App) -> Handle<DraggableSheetExtent> {
-        app.get(self).extent.expect("init_state has run")
+        app.get(self).extent.handle().expect("init_state has run")
     }
 
     fn implied_snap_sizes(self: Handle<Self>, app: &App) -> Vec<f64> {
@@ -1006,14 +1022,14 @@ impl DraggableScrollableSheetState {
             duration,
             close_on_min,
         );
-        app.get_mut(self).extent = Some(extent);
+        app.get_mut(self).extent = Some(extent.clone());
         // Modify the existing scroll controller instead of replacing it so that
         // developers listening to the controller do not have to rebuild their listeners.
         let scroll_controller = self.scroll_controller(app);
         app.get_mut(scroll_controller).extent = extent;
         // If an external facing controller was provided, let it know that the
         // extent has been replaced.
-        if let Some(controller) = self.widget(app).controller {
+        if let Some(controller) = self.widget(app).controller.handle() {
             controller.on_extent_replaced(app, previous_extent);
         }
         previous_extent.dispose(app);
@@ -1023,6 +1039,11 @@ impl DraggableScrollableSheetState {
             // callback so that `build` can update `extent.available_pixels` before
             // this runs — we can't use the previous extent's available pixels as it may
             // have changed when the widget was updated.
+            let scroll_controller = app
+                .get(self)
+                .scroll_controller
+                .clone()
+                .expect("init_state has run");
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _timestamp| {
@@ -1067,22 +1088,26 @@ impl State for DraggableScrollableSheetState {
             None,
             close_on_min,
         );
-        app.get_mut(self).extent = Some(extent);
+        app.get_mut(self).extent = Some(extent.clone());
         let scroll_controller = DraggableScrollableSheetScrollController::new(app, extent);
-        app.get_mut(self).scroll_controller = Some(scroll_controller);
-        if let Some(controller) = self.widget(app).controller {
+        app.get_mut(self).scroll_controller = Some(scroll_controller.clone());
+        if let Some(controller) = self.widget(app).controller.handle() {
             controller.attach(app, scroll_controller);
         }
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &DraggableScrollableSheet) {
-        let controller = self.widget(app).controller;
-        if controller != old_widget.controller {
-            if let Some(old_controller) = old_widget.controller {
+        let controller = self.widget(app).controller.handle();
+        if controller != old_widget.controller.handle() {
+            if let Some(old_controller) = old_widget.controller.handle() {
                 old_controller.detach(app, false);
             }
             if let Some(controller) = controller {
-                let scroll_controller = self.scroll_controller(app);
+                let scroll_controller = app
+                    .get(self)
+                    .scroll_controller
+                    .clone()
+                    .expect("init_state has run");
                 controller.attach(app, scroll_controller);
             }
         }
@@ -1097,7 +1122,7 @@ impl State for DraggableScrollableSheetState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        match self.widget(app).controller {
+        match self.widget(app).controller.handle() {
             None => self.extent(app).dispose(app),
             Some(controller) => controller.detach(app, true),
         }
@@ -1109,15 +1134,22 @@ impl State for DraggableScrollableSheetState {
         let expand = self.widget(app).expand;
         let max_child_size = self.widget(app).max_child_size;
         let builder = Rc::clone(&self.widget(app).builder);
-        let scroll_controller = self.scroll_controller(app);
-        let child = builder(app, context, scroll_controller.as_controller());
-        let current_size: Rc<dyn ValueListenable<f64>> = Rc::new(app.get(extent).current_size);
+        let scroll_controller = app
+            .get(self)
+            .scroll_controller
+            .clone()
+            .expect("init_state has run");
+        let child = builder(app, context, scroll_controller.into_erased());
+        let current_size: Rc<dyn ValueListenable<f64>> =
+            Rc::new(app.get(extent).current_size.clone());
         ValueListenableBuilder::<f64>::new(
             current_size,
             move |_app, _context, current_size, child| {
                 let current_size = *current_size;
                 let child = child.cloned();
                 LayoutBuilder::new(move |app, _context, constraints| {
+                    // Dart's `_extent`, read through the state when the layout runs.
+                    let extent = self.extent(app);
                     app.get_mut(extent).available_pixels =
                         max_child_size * constraints.biggest().height();
                     let mut sheet = FractionallySizedBox::new()
@@ -1159,15 +1191,15 @@ impl State for DraggableScrollableSheetState {
 struct DraggableScrollableSheetScrollController {
     change_notifier: ChangeNotifierData,
     scroll_controller: ScrollControllerData,
-    extent: Handle<DraggableSheetExtent>,
+    extent: Ref<DraggableSheetExtent>,
     on_position_detached: Option<Listener>,
 }
 
 impl DraggableScrollableSheetScrollController {
     fn new(
         app: &mut App,
-        extent: Handle<DraggableSheetExtent>,
-    ) -> Handle<DraggableScrollableSheetScrollController> {
+        extent: Ref<DraggableSheetExtent>,
+    ) -> Ref<DraggableScrollableSheetScrollController> {
         app.create(DraggableScrollableSheetScrollController {
             change_notifier: ChangeNotifierData::new(),
             scroll_controller: ScrollControllerData::new(0.0, true, None, None, None),
@@ -1188,7 +1220,7 @@ impl DraggableScrollableSheetScrollController {
     }
 
     fn reset(self: Handle<Self>, app: &mut App) {
-        let extent = app.get(self).extent;
+        let extent = app.get(self).extent.handle();
         if let Some(cancel_activity) = app.get(extent).cancel_activity.clone() {
             cancel_activity.call(app);
         }
@@ -1230,16 +1262,16 @@ impl ScrollControllerLeaf for DraggableScrollableSheetScrollController {
         physics: ScrollPhysicsRef,
         context: Rc<dyn ScrollContext>,
         old_position: Option<AnyScrollPosition>,
-    ) -> AnyScrollPosition {
+    ) -> ScrollPositionRef {
         let physics = physics.apply_to(Some(Rc::new(AlwaysScrollableScrollPhysics::new())));
         DraggableScrollableSheetScrollPosition::new(
             app,
             physics,
             context,
             old_position,
-            Rc::new(move |app: &App| app.get(self).extent),
+            Rc::new(move |app: &App| app.get(self).extent.handle()),
         )
-        .as_scroll_position()
+        .into_erased()
     }
 
     fn debug_fill_description(self: Handle<Self>, app: &App, description: &mut Vec<String>) {
@@ -1270,7 +1302,7 @@ struct DraggableScrollableSheetScrollPosition {
     single_context: ScrollPositionWithSingleContextData,
     drag_cancel_callback: Option<Listener>,
     get_extent: GetSheetExtent,
-    ballistic_controllers: Vec<Handle<AnimationController>>,
+    ballistic_controllers: Vec<Ref<AnimationController>>,
 }
 
 impl DraggableScrollableSheetScrollPosition {
@@ -1280,7 +1312,7 @@ impl DraggableScrollableSheetScrollPosition {
         context: Rc<dyn ScrollContext>,
         old_position: Option<AnyScrollPosition>,
         get_extent: GetSheetExtent,
-    ) -> Handle<DraggableScrollableSheetScrollPosition> {
+    ) -> Ref<DraggableScrollableSheetScrollPosition> {
         let scroll_position = ScrollPositionData::new(app, physics, context, true, None);
         let this = app.create(DraggableScrollableSheetScrollPosition {
             change_notifier: ChangeNotifierData::new(),
@@ -1290,7 +1322,7 @@ impl DraggableScrollableSheetScrollPosition {
             get_extent,
             ballistic_controllers: Vec::new(),
         });
-        ScrollPositionWithSingleContext::init(this, app, Some(0.0), old_position);
+        ScrollPositionWithSingleContext::init(this.handle(), app, Some(0.0), old_position);
         this
     }
 
@@ -1368,7 +1400,7 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
         }
     }
 
-    fn begin_activity(self: Handle<Self>, app: &mut App, new_activity: Option<AnyScrollActivity>) {
+    fn begin_activity(self: Handle<Self>, app: &mut App, new_activity: Option<ScrollActivityRef>) {
         // Cancel the running ballistic simulations
         for ballistic_controller in app.get(self).ballistic_controllers.clone() {
             ballistic_controller.stop(app, true);
@@ -1437,7 +1469,7 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
         };
 
         let vsync = self.context(app).vsync();
-        let ballistic_controller = AnimationController::create_unbounded(
+        let ballistic_controller = AnimationController::unbounded(
             app,
             0.0,
             None,
@@ -1447,7 +1479,8 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
         );
         app.get_mut(self)
             .ballistic_controllers
-            .push(ballistic_controller);
+            .push(ballistic_controller.clone());
+        let ballistic_controller = ballistic_controller.handle();
 
         let last_position = Rc::new(Cell::new(extent.current_pixels(app)));
         let velocity = Rc::new(Cell::new(velocity));
@@ -1459,6 +1492,8 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
                 let delta = value - last_position.get();
                 last_position.set(value);
                 let context = self.context(app).notification_context(app);
+                // Dart's `extent` getter, read when the tick runs.
+                let extent = self.extent(app);
                 extent.add_pixel_delta(app, delta, context.expect("a mounted scrollable"));
                 if (velocity.get() > 0.0 && extent.is_at_max(app))
                     || (velocity.get() < 0.0 && extent.is_at_min(app))
@@ -1481,7 +1516,11 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
                     // it reaches minSize.
                     if let Some(snap_size) = self.get_current_snap_size(app) {
                         let context = self.context(app).notification_context(app);
-                        extent.update_size(app, snap_size, context.expect("a mounted scrollable"));
+                        self.extent(app).update_size(
+                            app,
+                            snap_size,
+                            context.expect("a mounted scrollable"),
+                        );
                     }
                     ScrollPositionWithSingleContext::go_ballistic(self, app, 0.0);
                 }
@@ -1496,10 +1535,10 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
                 let controllers = &mut app.get_mut(self).ballistic_controllers;
                 if let Some(index) = controllers
                     .iter()
-                    .position(|controller| *controller == ballistic_controller)
+                    .position(|controller| controller == ballistic_controller)
                 {
-                    controllers.remove(index);
-                    ballistic_controller.dispose(app);
+                    let removed = controllers.remove(index);
+                    removed.dispose(app);
                 }
             }),
         );
@@ -1563,7 +1602,7 @@ impl DraggableScrollableActuator {
     pub fn reset(app: &mut App, context: BuildContext) -> bool {
         let notifier = context
             .depend_on_inherited_widget_of_exact_type::<InheritedResetNotifier>(app)
-            .map(|widget| widget.notifier);
+            .map(|widget| widget.notifier.handle());
         notifier.is_some_and(|notifier| notifier.send_reset(app))
     }
 }
@@ -1586,7 +1625,7 @@ impl StatefulWidget for DraggableScrollableActuator {
 /// Dart's `_DraggableScrollableActuatorState`.
 pub struct DraggableScrollableActuatorState {
     state: StateData<DraggableScrollableActuator>,
-    notifier: Option<Handle<ResetNotifier>>,
+    notifier: Option<Ref<ResetNotifier>>,
 }
 
 impl State for DraggableScrollableActuatorState {
@@ -1599,14 +1638,14 @@ impl State for DraggableScrollableActuatorState {
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         InheritedResetNotifier {
-            notifier: app.get(self).notifier.expect("init_state has run"),
+            notifier: app.get(self).notifier.clone().expect("init_state has run"),
             child: self.widget(app).child.clone(),
         }
         .into_widget()
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let notifier = app.get(self).notifier.expect("init_state has run");
+        let notifier = app.get(self).notifier.handle().expect("init_state has run");
         notifier.dispose(app);
     }
 }
@@ -1622,7 +1661,7 @@ struct ResetNotifier {
 }
 
 impl ResetNotifier {
-    fn new(app: &mut App) -> Handle<ResetNotifier> {
+    fn new(app: &mut App) -> Ref<ResetNotifier> {
         app.create(ResetNotifier {
             change_notifier: ChangeNotifierData::new(),
             was_called: false,
@@ -1643,7 +1682,7 @@ impl ResetNotifier {
 
     /// Discards any resources used by the object.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -1662,7 +1701,7 @@ impl ChangeNotifier for ResetNotifier {
 /// Dart's `_InheritedResetNotifier`.
 #[derive(Debug)]
 struct InheritedResetNotifier {
-    notifier: Handle<ResetNotifier>,
+    notifier: Ref<ResetNotifier>,
     child: WidgetRef,
 }
 
@@ -1683,7 +1722,7 @@ impl InheritedResetNotifier {
         else {
             return false;
         };
-        let notifier = widget.notifier;
+        let notifier = widget.notifier.handle();
         let was_called = app.get(notifier).was_called;
         app.get_mut(notifier).was_called = false;
         was_called
@@ -1702,7 +1741,7 @@ impl InheritedNotifier for InheritedResetNotifier {
     type Notifier = ResetNotifier;
 
     fn notifier(&self) -> Option<Handle<ResetNotifier>> {
-        Some(self.notifier)
+        Some(self.notifier.handle())
     }
 }
 
@@ -1873,7 +1912,7 @@ mod tests {
 
     fn position(
         app: &App,
-        controller: Handle<DraggableScrollableController>,
+        controller: Ref<DraggableScrollableController>,
     ) -> Handle<DraggableScrollableSheetScrollPosition> {
         controller.attached_controller(app).position(app)
     }
@@ -1889,7 +1928,7 @@ mod tests {
             wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.4)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ),
         );
         let app = cell.borrow();
@@ -1911,12 +1950,12 @@ mod tests {
             wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.5)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ),
         );
         let mut app = cell.borrow_mut();
 
-        let position = position(&app, controller);
+        let position = position(&app, controller.clone());
         let drag = ScrollPosition::drag(
             position,
             &mut app,
@@ -1958,7 +1997,7 @@ mod tests {
             wrap(
                 DraggableScrollableSheet::new(scrollable_builder())
                     .initial_child_size(0.5)
-                    .controller(controller),
+                    .controller(controller.clone()),
             ),
         );
         let mut app = cell.borrow_mut();
@@ -1966,7 +2005,7 @@ mod tests {
         let notified = Rc::new(Cell::new(0));
         let counter = Rc::clone(&notified);
         ListenableObject::add_listener(
-            controller,
+            controller.handle(),
             &mut app,
             Listener::new(move |_app| counter.set(counter.get() + 1)),
         );
@@ -2014,12 +2053,12 @@ mod tests {
                     .initial_child_size(0.5)
                     .snap(true)
                     .snap_sizes(vec![0.5])
-                    .controller(controller),
+                    .controller(controller.clone()),
             ),
         );
         let mut app = cell.borrow_mut();
 
-        let position = position(&app, controller);
+        let position = position(&app, controller.clone());
         let drag = ScrollPosition::drag(
             position,
             &mut app,
@@ -2055,6 +2094,7 @@ mod tests {
         let controller = DraggableScrollableController::new(&mut app);
         let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::new(Cell::new(None));
         let reported = Rc::clone(&inner_context);
+        let sheet_controller = controller.clone();
         drop(app);
         binding_mount(
             &cell,
@@ -2063,7 +2103,7 @@ mod tests {
                     reported.set(Some(context));
                     DraggableScrollableSheet::new(scrollable_builder())
                         .initial_child_size(0.5)
-                        .controller(controller)
+                        .controller(sheet_controller.clone())
                         .into_widget()
                 },
             ))),

@@ -14,7 +14,7 @@ use waft_embedder::{
     Brightness, Color, ColorFilter, ImageFilter, Offset, PointerDeviceKind, Radius, SemanticsRole,
     Size, TargetPlatform, TextAlign, TextBaseline, TextDirection, lerp_double,
 };
-use waft_foundation::{App, Handle, K_IS_WEB, Listener, ValueSetter};
+use waft_foundation::{App, Handle, K_IS_WEB, Listener, OptionRetained, Ref, ValueSetter};
 use waft_gestures::{
     DragData, DragDirection, DragDownDetails, DragEndDetails, DragGestureRecognizer, DragLeaf,
     DragLeafData, DragStartBehavior, GestureBinding, GestureRecognizer, GestureRecognizerData,
@@ -36,14 +36,14 @@ use waft_rendering::{
 };
 use waft_services::{HapticFeedback, MouseCursor, MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
-    Action, ActivateIntent, AnimatedPadding, AnyAction, AnyFocusNode, AnyScrollController,
-    BackdropFilter, BuildContext, CallbackAction, Center, ClipRSuperellipse, ColoredBox, Column,
-    ConstrainedBox, Container, DecoratedBox, DefaultTextStyle, Directionality, FittedBox, Flexible,
-    FocusableActionDetector, GestureRecognizerFactories, GestureRecognizerFactory,
-    GestureRecognizerFactoryWithHandlers, IntoWidget, KeyRef, LayoutBuilder, LimitedBox,
-    MediaQuery, MergeSemantics, MetaData, MouseRegion, MultiChildRenderObjectWidget,
-    NotificationListener, Orientation, Padding, Positioned, RawGestureDetector, RenderObjectWidget,
-    SafeArea, ScrollBehaviorRef, ScrollConfiguration, ScrollController, ScrollControllerLeaf,
+    ActionRef, ActivateIntent, AnimatedPadding, BackdropFilter, BuildContext, CallbackAction,
+    Center, ClipRSuperellipse, ColoredBox, Column, ConstrainedBox, Container, DecoratedBox,
+    DefaultTextStyle, Directionality, FittedBox, Flexible, FocusNodeRef, FocusableActionDetector,
+    GestureRecognizerFactories, GestureRecognizerFactory, GestureRecognizerFactoryWithHandlers,
+    IntoWidget, KeyRef, LayoutBuilder, LimitedBox, MediaQuery, MergeSemantics, MetaData,
+    MouseRegion, MultiChildRenderObjectWidget, NotificationListener, Orientation, Padding,
+    Positioned, RawGestureDetector, RenderObjectWidget, SafeArea, ScrollBehaviorRef,
+    ScrollConfiguration, ScrollController, ScrollControllerLeaf, ScrollControllerRef,
     ScrollNotification, ScrollUpdateNotification, Semantics, SingleChildScrollView, SizedBox,
     Stack, State, StateData, StatefulWidget, StatelessWidget, View, WidgetRef,
 };
@@ -280,7 +280,7 @@ pub struct CupertinoAlertDialog {
     ///
     ///  * [`action_scroll_controller`](Self::action_scroll_controller), which can be used for
     ///    controlling the actions section when there are many actions.
-    pub scroll_controller: Option<AnyScrollController>,
+    pub scroll_controller: Option<ScrollControllerRef>,
     /// A scroll controller that can be used to control the scrolling of the
     /// actions in the dialog.
     ///
@@ -291,7 +291,7 @@ pub struct CupertinoAlertDialog {
     ///
     ///  * [`scroll_controller`](Self::scroll_controller), which can be used for controlling the
     ///    [`content`](Self::content) section when it is long.
-    pub action_scroll_controller: Option<AnyScrollController>,
+    pub action_scroll_controller: Option<ScrollControllerRef>,
     /// The duration of the animation of the dialog's padding when the view insets change.
     pub inset_animation_duration: Duration,
     /// The curve of the animation of the dialog's padding when the view insets change.
@@ -340,7 +340,7 @@ impl CupertinoAlertDialog {
     /// Dart `CupertinoAlertDialog(scrollController:)`.
     pub fn scroll_controller(
         mut self,
-        scroll_controller: AnyScrollController,
+        scroll_controller: ScrollControllerRef,
     ) -> CupertinoAlertDialog {
         self.scroll_controller = Some(scroll_controller);
         self
@@ -349,7 +349,7 @@ impl CupertinoAlertDialog {
     /// Dart `CupertinoAlertDialog(actionScrollController:)`.
     pub fn action_scroll_controller(
         mut self,
-        action_scroll_controller: AnyScrollController,
+        action_scroll_controller: ScrollControllerRef,
     ) -> CupertinoAlertDialog {
         self.action_scroll_controller = Some(action_scroll_controller);
         self
@@ -414,36 +414,36 @@ pub struct CupertinoAlertDialogState {
     ///
     /// `None` if the user is not holding on any buttons.
     pressed_index: Option<i32>,
-    backup_scroll_controller: Option<AnyScrollController>,
-    backup_action_scroll_controller: Option<AnyScrollController>,
+    backup_scroll_controller: Option<Ref<ScrollController>>,
+    backup_action_scroll_controller: Option<Ref<ScrollController>>,
 }
 
 impl CupertinoAlertDialogState {
-    fn effective_scroll_controller(self: Handle<Self>, app: &mut App) -> AnyScrollController {
-        if let Some(controller) = self.widget(app).scroll_controller {
+    fn effective_scroll_controller(self: Handle<Self>, app: &mut App) -> ScrollControllerRef {
+        if let Some(controller) = self.widget(app).scroll_controller.clone() {
             return controller;
         }
-        if let Some(controller) = app.get(self).backup_scroll_controller {
-            return controller;
+        if let Some(controller) = &app.get(self).backup_scroll_controller {
+            return controller.erase();
         }
-        let controller = ScrollController::default(app).as_controller();
-        app.get_mut(self).backup_scroll_controller = Some(controller);
-        controller
+        let controller = ScrollController::default(app);
+        app.get_mut(self).backup_scroll_controller = Some(controller.clone());
+        controller.into_erased()
     }
 
     fn effective_action_scroll_controller(
         self: Handle<Self>,
         app: &mut App,
-    ) -> AnyScrollController {
-        if let Some(controller) = self.widget(app).action_scroll_controller {
+    ) -> ScrollControllerRef {
+        if let Some(controller) = self.widget(app).action_scroll_controller.clone() {
             return controller;
         }
-        if let Some(controller) = app.get(self).backup_action_scroll_controller {
-            return controller;
+        if let Some(controller) = &app.get(self).backup_action_scroll_controller {
+            return controller.erase();
         }
-        let controller = ScrollController::default(app).as_controller();
-        app.get_mut(self).backup_action_scroll_controller = Some(controller);
-        controller
+        let controller = ScrollController::default(app);
+        app.get_mut(self).backup_action_scroll_controller = Some(controller.clone());
+        controller.into_erased()
     }
 
     fn build_content(
@@ -598,11 +598,11 @@ impl State for CupertinoAlertDialogState {
     waft_widgets::state_accessors!();
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = app.get(self).backup_scroll_controller {
-            ScrollController::dispose(controller, app);
+        if let Some(controller) = app.get(self).backup_scroll_controller.handle() {
+            ScrollController::dispose(controller.as_controller(), app);
         }
-        if let Some(controller) = app.get(self).backup_action_scroll_controller {
-            ScrollController::dispose(controller, app);
+        if let Some(controller) = app.get(self).backup_action_scroll_controller.handle() {
+            ScrollController::dispose(controller.as_controller(), app);
         }
     }
 
@@ -972,7 +972,7 @@ struct SlidingTapGestureRecognizer {
 }
 
 impl SlidingTapGestureRecognizer {
-    fn new(app: &mut App) -> Handle<SlidingTapGestureRecognizer> {
+    fn new(app: &mut App) -> Ref<SlidingTapGestureRecognizer> {
         let mut recognizer = GestureRecognizerData::new();
         recognizer.set_allowed_buttons_filter(Rc::new(primary_button_only));
         let this = app.create(SlidingTapGestureRecognizer {
@@ -1255,19 +1255,20 @@ struct TargetSelectionGestureRecognizer {
     one_sequence: OneSequenceData,
     hit_test: HitTester,
     current_targets: Vec<Rc<dyn SlideTarget>>,
-    sliding_tap: Handle<SlidingTapGestureRecognizer>,
+    sliding_tap: Ref<SlidingTapGestureRecognizer>,
 }
 
 impl TargetSelectionGestureRecognizer {
-    fn new(app: &mut App, hit_test: HitTester) -> Handle<TargetSelectionGestureRecognizer> {
+    fn new(app: &mut App, hit_test: HitTester) -> Ref<TargetSelectionGestureRecognizer> {
         let sliding_tap = SlidingTapGestureRecognizer::new(app);
-        let this = app.create(TargetSelectionGestureRecognizer {
+        let target = app.create(TargetSelectionGestureRecognizer {
             recognizer: GestureRecognizerData::new(),
             one_sequence: OneSequenceData::new(),
             hit_test,
             current_targets: Vec::new(),
-            sliding_tap,
+            sliding_tap: sliding_tap.clone(),
         });
+        let this = target.handle();
         sliding_tap.set_on_down(
             app,
             Some(Rc::new(move |app: &mut App, details: DragDownDetails| {
@@ -1287,7 +1288,7 @@ impl TargetSelectionGestureRecognizer {
             })),
         );
         sliding_tap.set_on_cancel(app, Some(Listener::new(move |app| this.on_cancel(app))));
-        this
+        target
     }
 
     // Collect the `SlideTarget`s that are currently hit by the pointer, check
@@ -1389,12 +1390,12 @@ impl OneSequenceLeafData for TargetSelectionGestureRecognizer {
 
 impl RecognizerLeaf for TargetSelectionGestureRecognizer {
     fn add_pointer(self: Handle<Self>, app: &mut App, event: PointerDownEvent) {
-        let sliding_tap = app.get(self).sliding_tap;
+        let sliding_tap = app.get(self).sliding_tap.handle();
         RecognizerLeaf::add_pointer(sliding_tap, app, event);
     }
 
     fn add_pointer_pan_zoom(self: Handle<Self>, app: &mut App, event: PointerPanZoomStartEvent) {
-        let sliding_tap = app.get(self).sliding_tap;
+        let sliding_tap = app.get(self).sliding_tap.handle();
         RecognizerLeaf::add_pointer_pan_zoom(sliding_tap, app, event);
     }
 
@@ -1403,12 +1404,12 @@ impl RecognizerLeaf for TargetSelectionGestureRecognizer {
     }
 
     fn accept_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
-        let sliding_tap = app.get(self).sliding_tap;
+        let sliding_tap = app.get(self).sliding_tap.handle();
         RecognizerLeaf::accept_gesture(sliding_tap, app, pointer);
     }
 
     fn reject_gesture(self: Handle<Self>, app: &mut App, pointer: i64) {
-        let sliding_tap = app.get(self).sliding_tap;
+        let sliding_tap = app.get(self).sliding_tap.handle();
         RecognizerLeaf::reject_gesture(sliding_tap, app, pointer);
     }
 
@@ -1417,7 +1418,7 @@ impl RecognizerLeaf for TargetSelectionGestureRecognizer {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let sliding_tap = app.get(self).sliding_tap;
+        let sliding_tap = app.get(self).sliding_tap.handle();
         RecognizerLeaf::dispose(sliding_tap, app);
         GestureRecognizer::dispose(self, app);
     }
@@ -1534,13 +1535,13 @@ pub struct CupertinoActionSheet {
     ///
     /// Defaults to null, which means the [`CupertinoActionSheet`] will create a
     /// scroll controller internally.
-    pub message_scroll_controller: Option<AnyScrollController>,
+    pub message_scroll_controller: Option<ScrollControllerRef>,
     /// A scroll controller that can be used to control the scrolling of the
     /// [`actions`](Self::actions) in the action sheet.
     ///
     /// Defaults to null, which means the [`CupertinoActionSheet`] will create an
     /// action scroll controller internally.
-    pub action_scroll_controller: Option<AnyScrollController>,
+    pub action_scroll_controller: Option<ScrollControllerRef>,
     /// The optional cancel button that is grouped separately from the other
     /// actions.
     ///
@@ -1588,7 +1589,7 @@ impl CupertinoActionSheet {
     /// Dart `CupertinoActionSheet(messageScrollController:)`.
     pub fn message_scroll_controller(
         mut self,
-        message_scroll_controller: AnyScrollController,
+        message_scroll_controller: ScrollControllerRef,
     ) -> CupertinoActionSheet {
         self.message_scroll_controller = Some(message_scroll_controller);
         self
@@ -1597,7 +1598,7 @@ impl CupertinoActionSheet {
     /// Dart `CupertinoActionSheet(actionScrollController:)`.
     pub fn action_scroll_controller(
         mut self,
-        action_scroll_controller: AnyScrollController,
+        action_scroll_controller: ScrollControllerRef,
     ) -> CupertinoActionSheet {
         self.action_scroll_controller = Some(action_scroll_controller);
         self
@@ -1642,8 +1643,8 @@ impl StatefulWidget for CupertinoActionSheet {
 pub struct CupertinoActionSheetState {
     state: StateData<CupertinoActionSheet>,
     pressed_index: Option<i32>,
-    backup_message_scroll_controller: Option<AnyScrollController>,
-    backup_action_scroll_controller: Option<AnyScrollController>,
+    backup_message_scroll_controller: Option<Ref<ScrollController>>,
+    backup_action_scroll_controller: Option<Ref<ScrollController>>,
 }
 
 impl CupertinoActionSheetState {
@@ -1652,31 +1653,31 @@ impl CupertinoActionSheetState {
     fn effective_message_scroll_controller(
         self: Handle<Self>,
         app: &mut App,
-    ) -> AnyScrollController {
-        if let Some(controller) = self.widget(app).message_scroll_controller {
+    ) -> ScrollControllerRef {
+        if let Some(controller) = self.widget(app).message_scroll_controller.clone() {
             return controller;
         }
-        if let Some(controller) = app.get(self).backup_message_scroll_controller {
-            return controller;
+        if let Some(controller) = &app.get(self).backup_message_scroll_controller {
+            return controller.erase();
         }
-        let controller = ScrollController::default(app).as_controller();
-        app.get_mut(self).backup_message_scroll_controller = Some(controller);
-        controller
+        let controller = ScrollController::default(app);
+        app.get_mut(self).backup_message_scroll_controller = Some(controller.clone());
+        controller.into_erased()
     }
 
     fn effective_action_scroll_controller(
         self: Handle<Self>,
         app: &mut App,
-    ) -> AnyScrollController {
-        if let Some(controller) = self.widget(app).action_scroll_controller {
+    ) -> ScrollControllerRef {
+        if let Some(controller) = self.widget(app).action_scroll_controller.clone() {
             return controller;
         }
-        if let Some(controller) = app.get(self).backup_action_scroll_controller {
-            return controller;
+        if let Some(controller) = &app.get(self).backup_action_scroll_controller {
+            return controller.erase();
         }
-        let controller = ScrollController::default(app).as_controller();
-        app.get_mut(self).backup_action_scroll_controller = Some(controller);
-        controller
+        let controller = ScrollController::default(app);
+        app.get_mut(self).backup_action_scroll_controller = Some(controller.clone());
+        controller.into_erased()
     }
 
     fn has_content(self: Handle<Self>, app: &App) -> bool {
@@ -1857,11 +1858,11 @@ impl State for CupertinoActionSheetState {
     waft_widgets::state_accessors!();
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = app.get(self).backup_message_scroll_controller {
-            ScrollController::dispose(controller, app);
+        if let Some(controller) = app.get(self).backup_message_scroll_controller.handle() {
+            ScrollController::dispose(controller.as_controller(), app);
         }
-        if let Some(controller) = app.get(self).backup_action_scroll_controller {
-            ScrollController::dispose(controller, app);
+        if let Some(controller) = app.get(self).backup_action_scroll_controller.handle() {
+            ScrollController::dispose(controller.as_controller(), app);
         }
     }
 
@@ -1995,7 +1996,7 @@ pub struct CupertinoActionSheetAction {
     /// `MouseCursor::defer()` on other platforms.
     pub mouse_cursor: Option<MouseCursorRef>,
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// The color of the background that highlights active focus.
     ///
     /// A transparency of `K_CUPERTINO_BUTTON_TINTED_OPACITY_LIGHT` (light mode) or
@@ -2054,7 +2055,7 @@ impl CupertinoActionSheetAction {
     }
 
     /// Dart `CupertinoActionSheetAction(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> CupertinoActionSheetAction {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> CupertinoActionSheetAction {
         self.focus_node = Some(focus_node);
         self
     }
@@ -2098,7 +2099,7 @@ pub struct CupertinoActionSheetActionState {
     state: StateData<CupertinoActionSheetAction>,
     show_highlight: bool,
     /// Dart's `late final _actionMap`, filled in `init_state` (an action is an arena object).
-    action_map: HashMap<TypeId, AnyAction>,
+    action_map: HashMap<TypeId, ActionRef>,
     /// This state as the `SlideTarget` its `MetaData` carries, minted once in `init_state`.
     slide_target: Option<Rc<dyn SlideTarget>>,
 }
@@ -2167,14 +2168,8 @@ impl State for CupertinoActionSheetActionState {
         );
         app.get_mut(self)
             .action_map
-            .insert(TypeId::of::<ActivateIntent>(), activate.as_action());
+            .insert(TypeId::of::<ActivateIntent>(), activate.into_erased());
         app.get_mut(self).slide_target = Some(Rc::new(self));
-    }
-
-    fn dispose(self: Handle<Self>, app: &mut App) {
-        for action in std::mem::take(&mut app.get_mut(self).action_map).into_values() {
-            app.destroy(action.id());
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -2202,7 +2197,7 @@ impl State for CupertinoActionSheetActionState {
             .on_show_focus_highlight(move |app, show_highlight| {
                 self.on_show_focus_highlight(app, show_highlight)
             });
-        if let Some(focus_node) = widget.focus_node {
+        if let Some(focus_node) = widget.focus_node.clone() {
             detector = detector.focus_node(focus_node);
         }
         let cursor = widget.mouse_cursor.unwrap_or_else(|| {
@@ -2641,7 +2636,7 @@ struct ActionSheetActionSection {
     pressed_index: Option<i32>,
     divider_color: AnyColor,
     background_color: AnyColor,
-    scroll_controller: AnyScrollController,
+    scroll_controller: ScrollControllerRef,
 }
 
 impl ActionSheetActionSection {
@@ -2651,7 +2646,7 @@ impl ActionSheetActionSection {
         divider_color: AnyColor,
         background_color: AnyColor,
         on_pressed_update: PressedUpdateHandler,
-        scroll_controller: AnyScrollController,
+        scroll_controller: ScrollControllerRef,
     ) -> ActionSheetActionSection {
         ActionSheetActionSection {
             actions,
@@ -2713,14 +2708,14 @@ impl StatelessWidget for ActionSheetActionSection {
 
         CupertinoScrollbar::new(
             SingleChildScrollView::new()
-                .controller(self.scroll_controller)
+                .controller(self.scroll_controller.clone())
                 .child(
                     Column::new()
                         .cross_axis_alignment(CrossAxisAlignment::Stretch)
                         .children(column),
                 ),
         )
-        .controller(self.scroll_controller)
+        .controller(self.scroll_controller.clone())
         .into_widget()
     }
 }
@@ -2730,7 +2725,7 @@ impl StatelessWidget for ActionSheetActionSection {
 struct ActionSheetMainSheet {
     pressed_index: Option<i32>,
     on_pressed_update: PressedUpdateHandler,
-    scroll_controller: AnyScrollController,
+    scroll_controller: ScrollControllerRef,
     actions: Vec<WidgetRef>,
     content_section: Option<WidgetRef>,
     divider_color: AnyColor,
@@ -2740,7 +2735,7 @@ impl ActionSheetMainSheet {
     fn new(
         pressed_index: Option<i32>,
         on_pressed_update: PressedUpdateHandler,
-        scroll_controller: AnyScrollController,
+        scroll_controller: ScrollControllerRef,
         actions: Vec<WidgetRef>,
         content_section: Option<WidgetRef>,
         divider_color: AnyColor,
@@ -2777,7 +2772,7 @@ impl ActionSheetMainSheet {
                     self.divider_color.clone(),
                     background_color,
                     Rc::clone(&self.on_pressed_update),
-                    self.scroll_controller,
+                    self.scroll_controller.clone(),
                 ),
             ),
         )
@@ -2847,7 +2842,7 @@ struct CupertinoAlertContentSection {
     message: Option<WidgetRef>,
     // A scroll controller that can be used to control the scrolling of the
     // content in the dialog.
-    scroll_controller: AnyScrollController,
+    scroll_controller: ScrollControllerRef,
     // Paddings used around title and message.
     // CupertinoAlertDialog and CupertinoActionSheet have different paddings.
     title_padding: Option<EdgeInsets>,
@@ -2862,7 +2857,7 @@ struct CupertinoAlertContentSection {
 }
 
 impl CupertinoAlertContentSection {
-    fn new(scroll_controller: AnyScrollController) -> CupertinoAlertContentSection {
+    fn new(scroll_controller: ScrollControllerRef) -> CupertinoAlertContentSection {
         CupertinoAlertContentSection {
             title: None,
             message: None,
@@ -2926,7 +2921,7 @@ impl StatelessWidget for CupertinoAlertContentSection {
         );
         if self.title.is_none() && self.message.is_none() {
             return SingleChildScrollView::new()
-                .controller(self.scroll_controller)
+                .controller(self.scroll_controller.clone())
                 .child(SizedBox::shrink())
                 .into_widget();
         }
@@ -2968,14 +2963,14 @@ impl StatelessWidget for CupertinoAlertContentSection {
 
         CupertinoScrollbar::new(
             SingleChildScrollView::new()
-                .controller(self.scroll_controller)
+                .controller(self.scroll_controller.clone())
                 .child(
                     Column::new()
                         .cross_axis_alignment(CrossAxisAlignment::Stretch)
                         .children(title_content_group),
                 ),
         )
-        .controller(self.scroll_controller)
+        .controller(self.scroll_controller.clone())
         .into_widget()
     }
 }
@@ -2994,7 +2989,7 @@ struct CupertinoAlertActionSection {
     pressed_index: Option<i32>,
     // A scroll controller that can be used to control the scrolling of the
     // actions in the dialog.
-    scroll_controller: AnyScrollController,
+    scroll_controller: ScrollControllerRef,
 }
 
 impl CupertinoAlertActionSection {
@@ -3002,7 +2997,7 @@ impl CupertinoAlertActionSection {
         actions: Vec<WidgetRef>,
         on_pressed_update: PressedUpdateHandler,
         pressed_index: Option<i32>,
-        scroll_controller: AnyScrollController,
+        scroll_controller: ScrollControllerRef,
     ) -> CupertinoAlertActionSection {
         debug_assert!(!actions.is_empty());
         CupertinoAlertActionSection {
@@ -3062,10 +3057,10 @@ impl StatelessWidget for CupertinoAlertActionSection {
 
         CupertinoScrollbar::new(
             SingleChildScrollView::new()
-                .controller(self.scroll_controller)
+                .controller(self.scroll_controller.clone())
                 .child(AlertDialogActionsLayout::new(K_DIVIDER_THICKNESS, column)),
         )
-        .controller(self.scroll_controller)
+        .controller(self.scroll_controller.clone())
         .into_widget()
     }
 }

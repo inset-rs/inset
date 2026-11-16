@@ -124,7 +124,11 @@ fn fixture(mode: NavigationViewPaneDisplayMode) -> (Fixture, Rc<Cell<Option<Hand
             app,
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
-                .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
+                .builder(move |_, _, _| {
+                    Overlay::new()
+                        .initial_entries([entry.clone()])
+                        .into_widget()
+                })
                 .into_widget(),
         );
     });
@@ -272,7 +276,7 @@ fn active_indicator_follows_scroll_and_mode_reparenting() {
             let widget = element.widget(&app);
             let observer = downcast_widget::<ScrollMetricsObserver>(&**widget)?;
             (observer.controller.metrics(&app).scrollable_length > 0.0)
-                .then_some(observer.controller)
+                .then(|| observer.controller.clone())
         })
         .unwrap();
     scroll.scroll_by(&mut f.cell.borrow_mut(), 20.0, true);

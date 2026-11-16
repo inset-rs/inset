@@ -3,7 +3,7 @@
 use crate::*;
 use std::fmt;
 use waft_embedder::FontWeight;
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Listener, Ref};
 use waft_painting::EdgeInsetsGeometry;
 use waft_widgets::*;
 
@@ -14,7 +14,7 @@ pub struct DropDownButton {
     pub content: WidgetRef,
 
     /// Associated persistent flyout, owned and disposed by the caller.
-    pub flyout: Option<Handle<Flyout>>,
+    pub flyout: Option<Ref<Flyout>>,
 
     /// Called before opening the associated flyout.
     pub click: Option<Listener>,
@@ -26,7 +26,7 @@ pub struct DropDownButton {
     pub is_tab_stop: bool,
 
     /// Optional caller-owned focus node.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// Widget identity across parent rebuilds.
     pub key: Option<KeyRef>,
@@ -61,7 +61,7 @@ impl DropDownButton {
     }
 
     /// Associates a reusable flyout with the button.
-    pub fn flyout(mut self, flyout: Handle<Flyout>) -> Self {
+    pub fn flyout(mut self, flyout: Ref<Flyout>) -> Self {
         self.flyout = Some(flyout);
         self
     }
@@ -85,7 +85,7 @@ impl DropDownButton {
     }
 
     /// Supplies a caller-owned focus node.
-    pub fn focus_node(mut self, node: AnyFocusNode) -> Self {
+    pub fn focus_node(mut self, node: FocusNodeRef) -> Self {
         self.focus_node = Some(node);
         self
     }
@@ -105,7 +105,7 @@ impl StatelessWidget for DropDownButton {
     fn build(&self, _: &mut App, _: BuildContext) -> WidgetRef {
         let widget = self.clone();
         FlyoutTarget::new(Builder::new(move |_, context| {
-            let flyout = widget.flyout;
+            let flyout = widget.flyout.clone();
             let click = widget.click.clone();
             let mut button = Button::new(
                 widget.content.clone(),
@@ -113,7 +113,7 @@ impl StatelessWidget for DropDownButton {
                     if let Some(click) = &click {
                         click.call(app);
                     }
-                    if let Some(flyout) = flyout {
+                    if let Some(flyout) = &flyout {
                         flyout.show_at(app, context);
                     }
                 }),
@@ -121,7 +121,7 @@ impl StatelessWidget for DropDownButton {
             .is_enabled(widget.is_enabled)
             .is_tab_stop(widget.is_tab_stop)
             .template(template);
-            if let Some(focus) = widget.focus_node {
+            if let Some(focus) = widget.focus_node.clone() {
                 button = button.focus_node(focus);
             }
             button.into_widget()

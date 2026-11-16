@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use waft_animation::Curve;
 use waft_embedder::{Matrix4, Offset, Rect};
-use waft_foundation::{App, Handle, ListenableObject, Listener};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained};
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, AnyRenderSliverFloatingPersistentHeader,
     FloatingHeaderSnapConfiguration, OverScrollHeaderStretchConfiguration, PaintingContext,
@@ -26,7 +26,7 @@ use crate::framework::{
     StatefulWidget, StatelessWidget, Widget, WidgetKind, WidgetRef, downcast_widget,
     short_type_name,
 };
-use crate::widgets::scroll_position::AnyScrollPosition;
+use crate::widgets::scroll_position::ScrollPositionRef;
 use crate::widgets::scrollable::Scrollable;
 
 // ---------------------------------------------------------------------------------------------
@@ -264,7 +264,7 @@ where
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        SliverPersistentHeaderElement::<W>::create(app, this).as_element()
+        SliverPersistentHeaderElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -484,7 +484,7 @@ impl StatefulWidget for FloatingHeader {
 /// when pointer scrolling by updating the last known `ScrollDirection` when scrolling began.
 struct FloatingHeaderState {
     state: StateData<FloatingHeader>,
-    position: Option<AnyScrollPosition>,
+    position: Option<ScrollPositionRef>,
 }
 
 impl FloatingHeaderState {
@@ -514,6 +514,7 @@ impl FloatingHeaderState {
         let position = app
             .get(self)
             .position
+            .handle()
             .expect("the listener is only registered while a position is held");
 
         // When a scroll stops, then maybe snap the app bar into view.
@@ -544,14 +545,15 @@ impl State for FloatingHeaderState {
     crate::state_accessors!();
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
-        if let Some(position) = app.get(self).position {
+        if let Some(position) = app.get(self).position.handle() {
             position
                 .is_scrolling_notifier(app)
                 .remove_listener(app, &self.is_scrolling_listener_tear_off());
         }
         let context = self.context(app);
-        let position = Scrollable::maybe_of(app, context, None).map(|state| state.position(app));
-        app.get_mut(self).position = position;
+        let position =
+            Scrollable::maybe_of(app, context, None).map(|state| state.kept_position(app));
+        app.get_mut(self).position = position.clone();
         if let Some(position) = position {
             position
                 .is_scrolling_notifier(app)
@@ -560,7 +562,7 @@ impl State for FloatingHeaderState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(position) = app.get(self).position {
+        if let Some(position) = app.get(self).position.handle() {
             position
                 .is_scrolling_notifier(app)
                 .remove_listener(app, &self.is_scrolling_listener_tear_off());
@@ -599,7 +601,7 @@ impl<W: SliverPersistentHeaderRenderObjectWidget> SliverPersistentHeaderElement<
 where
     W::RenderObject: RenderSliverPersistentHeaderForWidgets,
 {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<SliverPersistentHeaderElement<W>> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<SliverPersistentHeaderElement<W>> {
         let floating = downcast_widget::<W>(&*widget)
             .expect("a header element is created from its own widget")
             .floating();
@@ -610,6 +612,7 @@ where
             child: None,
             marker: std::marker::PhantomData,
         })
+        .into_tree_node(app)
     }
 
     fn header(self: Handle<Self>, app: &App) -> RenderHandle<W::RenderObject> {
@@ -1372,6 +1375,7 @@ header_protocol!(
 mod tests {
     use std::cell::RefCell;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
     use waft_embedder::TextDirection;
     use waft_rendering::{
@@ -1425,7 +1429,7 @@ mod tests {
     }
 
     fn header_tree(
-        offset: Handle<FixedViewportOffset>,
+        offset: &Ref<FixedViewportOffset>,
         shrink_offsets: &ShrinkOffsets,
         pinned: bool,
         floating: bool,
@@ -1437,7 +1441,7 @@ mod tests {
         }) as SliverPersistentHeaderDelegateRef;
         Directionality::new(
             TextDirection::Ltr,
-            Viewport::new(offset.as_viewport_offset())
+            Viewport::new(offset.erase())
                 .scroll_cache_extent(ScrollCacheExtent::Pixels(0.0))
                 .slivers(vec![
                     SliverPersistentHeader::new(delegate)
@@ -1482,7 +1486,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let shrink_offsets: ShrinkOffsets = Rc::default();
-        let harness = Harness::mount(&mut app, header_tree(offset, &shrink_offsets, true, false));
+        let harness = Harness::mount(&mut app, header_tree(&offset, &shrink_offsets, true, false));
         harness.pump(&mut app);
 
         let header = viewport_of(&harness, &app)
@@ -1493,7 +1497,7 @@ mod tests {
         assert_eq!(header.geometry(&app).max_scroll_obstruction_extent, 40.0);
         assert_eq!(*shrink_offsets.borrow(), vec![0.0]);
 
-        scroll_to(&harness, &mut app, offset, 100.0);
+        scroll_to(&harness, &mut app, offset.handle(), 100.0);
 
         // Shrunk to the minimum extent, still painting at the leading edge.
         assert_eq!(header.geometry(&app).paint_extent, 40.0);
@@ -1509,7 +1513,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let shrink_offsets: ShrinkOffsets = Rc::default();
-        let harness = Harness::mount(&mut app, header_tree(offset, &shrink_offsets, false, true));
+        let harness = Harness::mount(&mut app, header_tree(&offset, &shrink_offsets, false, true));
         harness.pump(&mut app);
 
         let header = viewport_of(&harness, &app)
@@ -1519,7 +1523,7 @@ mod tests {
         assert_eq!(header.geometry(&app).paint_extent, 120.0);
         assert_eq!(*shrink_offsets.borrow(), vec![0.0]);
 
-        scroll_to(&harness, &mut app, offset, 100.0);
+        scroll_to(&harness, &mut app, offset.handle(), 100.0);
 
         assert_eq!(header.geometry(&app).paint_extent, 20.0);
         assert_eq!(header.geometry(&app).max_scroll_obstruction_extent, 0.0);

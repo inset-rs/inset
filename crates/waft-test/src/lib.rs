@@ -11,6 +11,8 @@
 //! `TestFlutterView`: real implementations of the host traits that answer what a test
 //! configures and record what the framework asks of them. Its fonts are flutter_test's: every
 //! family is FlutterTest ([`TestFontSource`]) unless the test gives the platform other fonts.
+//! In a debug build, [`object_snapshot`] and [`assert_no_new_objects`] check that a piece of a
+//! test leaves no object behind in the `App`'s arena.
 //!
 //! A dev-dependency of a crate with tests:
 //!
@@ -27,6 +29,8 @@ mod image_codecs;
 mod media;
 mod menus;
 mod notifications;
+#[cfg(debug_assertions)]
+mod objects;
 mod opener;
 mod platform;
 mod test_font_manager;
@@ -48,6 +52,8 @@ pub use menus::{
     MockDockMenu, MockMenuBar, MockPopupMenus, MockTrayIcons, ShownMenu, ShownTrayIcon,
 };
 pub use notifications::MockNotifications;
+#[cfg(debug_assertions)]
+pub use objects::{ObjectSnapshot, assert_no_new_objects, object_snapshot};
 pub use opener::{MockOpener, Opened};
 pub use platform::{TestDispatcher, TestPlatform};
 pub use test_font_manager::TestFontSource;

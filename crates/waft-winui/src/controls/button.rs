@@ -133,7 +133,7 @@ pub struct Button {
     /// Whether sequential keyboard navigation stops here.
     pub is_tab_stop: bool,
     /// Optional caller-owned focus node used by composite controls.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// An alternate source template, such as TabView's close button chrome.
     pub template: Option<ButtonTemplate>,
     /// Identity retained across parent rebuilds.
@@ -186,7 +186,7 @@ impl Button {
     }
 
     /// Uses a focus node whose lifetime is owned by the enclosing control.
-    pub fn focus_node(mut self, node: AnyFocusNode) -> Self {
+    pub fn focus_node(mut self, node: FocusNodeRef) -> Self {
         self.focus_node = Some(node);
         self
     }
@@ -233,7 +233,7 @@ impl StatelessWidget for Button {
         })
         .is_enabled(self.is_enabled)
         .is_tab_stop(self.is_tab_stop);
-        if let Some(node) = self.focus_node {
+        if let Some(node) = self.focus_node.clone() {
             states = states.focus_node(node);
         }
         states.into_widget()

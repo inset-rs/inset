@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use waft_embedder::{Rect, TargetPlatform};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained};
 use waft_rendering::RenderBox;
 use waft_services::TextSelectionDelegate;
 use waft_services::{IOSSystemContextMenuItemData, SystemContextMenuController};
@@ -17,6 +17,7 @@ use crate::widgets::editable_text::EditableTextState;
 use crate::widgets::localizations::WidgetsLocalizations;
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::text_selection_toolbar_anchors::TextSelectionToolbarAnchors;
+use waft_foundation::Ref;
 
 static NEXT_CUSTOM_CALLBACK_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -160,7 +161,7 @@ impl StatefulWidget for SystemContextMenu {
 /// State for [`SystemContextMenu`].
 pub struct SystemContextMenuState {
     state: StateData<SystemContextMenu>,
-    controller: Option<Handle<SystemContextMenuController>>,
+    controller: Option<Ref<SystemContextMenuController>>,
 }
 
 impl State for SystemContextMenuState {
@@ -174,7 +175,7 @@ impl State for SystemContextMenuState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             controller.dispose(app);
         }
     }
@@ -189,7 +190,11 @@ impl State for SystemContextMenuState {
                 .iter()
                 .map(|item| item.get_data(localizations.as_ref()))
                 .collect();
-            let controller = app.get(self).controller.expect("created in initState");
+            let controller = app
+                .get(self)
+                .controller
+                .handle()
+                .expect("created in initState");
             controller.show_with_items(app, anchor, item_datas);
         }
         SizedBox::shrink().into_widget()

@@ -1,6 +1,6 @@
 //! Flutter counterpart: `gestures/drag.dart`.
 
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 
 use crate::drag_details::{DragEndDetails, DragUpdateDetails};
 
@@ -55,5 +55,21 @@ impl<T: DragObject> Drag for Handle<T> {
 
     fn cancel(&self, app: &mut App) {
         T::cancel(*self, app);
+    }
+}
+
+/// A drag kept by whoever holds the `Rc<dyn Drag>`: Dart's `Scrollable._drag` keeps its drag
+/// controller.
+impl<T: DragObject> Drag for Ref<T> {
+    fn update(&self, app: &mut App, details: DragUpdateDetails) {
+        T::update(self.handle(), app, details);
+    }
+
+    fn end(&self, app: &mut App, details: DragEndDetails) {
+        T::end(self.handle(), app, details);
+    }
+
+    fn cancel(&self, app: &mut App) {
+        T::cancel(self.handle(), app);
     }
 }

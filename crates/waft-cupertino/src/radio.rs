@@ -9,17 +9,18 @@
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use waft_animation::Animation;
 use waft_embedder::valo::Cap;
 use waft_embedder::{
     Brightness, Canvas, Color, FillRule, Offset, Paint, PaintStyle, PathBuilder, Rect, Size, Stroke,
 };
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, ValueChanged};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, OptionRetained, Ref, ValueChanged,
+};
 use waft_painting::{AlignmentGeometry, AnyColor, Gradient, HSLColor, LinearGradient};
 use waft_services::{MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
-    AnyFocusNode, AnyRadioClient, AnyRadioGroupRegistry, AnyToggleableState, BuildContext,
-    CustomPaint, FocusNode, FocusNodeLeaf, IntoWidget, KeyRef, RadioBuilder, RadioGroup,
+    AnyRadioClient, AnyRadioGroupRegistry, AnyToggleableState, BuildContext, CustomPaint,
+    FocusNode, FocusNodeLeaf, FocusNodeRef, IntoWidget, KeyRef, RadioBuilder, RadioGroup,
     RadioGroupRegistry, RawRadio, State, StateData, StatefulWidget, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, WidgetRef, WidgetState, WidgetStateProperty,
     WidgetStatePropertyRef, WidgetStates,
@@ -198,7 +199,7 @@ pub struct CupertinoRadio<T: Clone + PartialEq + 'static> {
     /// If one is not supplied, then one will be automatically allocated, owned, and managed by
     /// this widget. The widget will be focusable even if a `focus_node` is not supplied. If
     /// supplied, the given `focus_node` will be _hosted_ by this widget, but not owned.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
     pub autofocus: bool,
@@ -311,7 +312,7 @@ impl<T: Clone + PartialEq + 'static> CupertinoRadio<T> {
     }
 
     /// Dart `CupertinoRadio(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> CupertinoRadio<T> {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> CupertinoRadio<T> {
         self.focus_node = Some(focus_node);
         self
     }
@@ -370,21 +371,21 @@ impl<T: Clone + PartialEq + 'static> StatefulWidget for CupertinoRadio<T> {
 /// Dart's `_CupertinoRadioState`.
 pub struct CupertinoRadioState<T: Clone + PartialEq + 'static> {
     state: StateData<CupertinoRadio<T>>,
-    internal_focus_node: Option<AnyFocusNode>,
-    internal_radio_registry: Option<Handle<RadioRegistry<T>>>,
+    internal_focus_node: Option<Ref<FocusNode>>,
+    internal_radio_registry: Option<Ref<RadioRegistry<T>>>,
 }
 
 impl<T: Clone + PartialEq + 'static> CupertinoRadioState<T> {
-    fn effective_focus_node(self: Handle<Self>, app: &mut App) -> AnyFocusNode {
-        if let Some(focus_node) = self.widget(app).focus_node {
+    fn effective_focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
+        if let Some(focus_node) = self.widget(app).focus_node.clone() {
             return focus_node;
         }
-        if let Some(focus_node) = app.get(self).internal_focus_node {
-            return focus_node;
+        if let Some(focus_node) = &app.get(self).internal_focus_node {
+            return focus_node.erase();
         }
-        let focus_node = FocusNode::new(app).as_node();
-        app.get_mut(self).internal_focus_node = Some(focus_node);
-        focus_node
+        let focus_node = FocusNode::new(app);
+        app.get_mut(self).internal_focus_node = Some(focus_node.clone());
+        focus_node.into_erased()
     }
 
     fn enabled(self: Handle<Self>, app: &mut App) -> bool {
@@ -410,12 +411,13 @@ impl<T: Clone + PartialEq + 'static> CupertinoRadioState<T> {
         }
 
         // Handles deprecated API.
-        let registry = match app.get(self).internal_radio_registry {
+        let registry = match app.get(self).internal_radio_registry.handle() {
             Some(registry) => registry,
             None => {
                 let registry = app.create(RadioRegistry { state: self });
+                let handle = registry.handle();
                 app.get_mut(self).internal_radio_registry = Some(registry);
-                registry
+                handle
             }
         };
         registry.as_radio_group_registry()
@@ -469,12 +471,8 @@ impl<T: Clone + PartialEq + 'static> State for CupertinoRadioState<T> {
     waft_widgets::state_accessors!();
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(focus_node) = app.get(self).internal_focus_node {
+        if let Some(focus_node) = app.get(self).internal_focus_node.handle() {
             focus_node.dispose(app);
-        }
-        // The raw radio below has unregistered already: children dispose first.
-        if let Some(registry) = app.get_mut(self).internal_radio_registry.take() {
-            app.destroy(registry);
         }
     }
 
@@ -577,12 +575,15 @@ struct RadioPaintState {
     state: StateData<RadioPaint>,
     /// Dart's `final _RadioPainter _painter = _RadioPainter()`, created in `init_state` because
     /// a painter is an arena object and a state is created without the `App`.
-    painter: Option<Handle<RadioPainter>>,
+    painter: Option<Ref<RadioPainter>>,
 }
 
 impl RadioPaintState {
     fn painter(self: Handle<Self>, app: &App) -> Handle<RadioPainter> {
-        app.get(self).painter.expect("created in init_state")
+        app.get(self)
+            .painter
+            .handle()
+            .expect("created in init_state")
     }
 
     /// Dart's `_defaultOuterColor` resolved in `states`: its closure resolves a dynamic colour
@@ -657,8 +658,6 @@ impl State for RadioPaintState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let painter = self.painter(app);
         ToggleablePainter::dispose(painter, app);
-        app.get_mut(self).painter = None;
-        app.destroy(painter);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -691,9 +690,13 @@ impl State for RadioPaintState {
 
         let effective_border_color = Self::default_border_color(app, context, &current_states);
 
-        let painter = self.painter(app);
-        painter.set_position(app, toggleable_state.position(app).as_animation());
-        painter.set_reaction(app, toggleable_state.reaction(app).as_animation());
+        let painter = app
+            .get(self)
+            .painter
+            .clone()
+            .expect("created in init_state");
+        painter.set_position(app, toggleable_state.position(app).erase());
+        painter.set_reaction(app, toggleable_state.reaction(app).erase());
         painter.set_focus_color(app, effective_focus_overlay_color);
         painter.set_down_position(app, toggleable_state.down_position(app));
         painter.set_is_focused(app, Some(self.widget(app).focused));
@@ -726,7 +729,7 @@ struct RadioPainter {
 }
 
 impl RadioPainter {
-    fn new(app: &mut App) -> Handle<RadioPainter> {
+    fn new(app: &mut App) -> Ref<RadioPainter> {
         app.create(RadioPainter {
             change_notifier: ChangeNotifierData::new(),
             toggleable_painter: ToggleablePainterData::new(),
@@ -1447,7 +1450,7 @@ mod tests {
 
     /// Dart's `StatefulBuilder` around three radios that share `groupValue`.
     struct KeyboardHost {
-        focus_node2: AnyFocusNode,
+        focus_node2: FocusNodeRef,
         group_value: Rc<RefCell<Option<i32>>>,
     }
 
@@ -1477,7 +1480,7 @@ mod tests {
 
         fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
             let group_value = Rc::clone(&self.widget(app).group_value);
-            let focus_node2 = self.widget(app).focus_node2;
+            let focus_node2 = self.widget(app).focus_node2.clone();
             let on_changed = || {
                 let group_value = Rc::clone(&group_value);
                 Rc::new(move |app: &mut App, new_value: Option<i32>| {
@@ -1508,13 +1511,13 @@ mod tests {
         let mut tester = Tester::new();
         tester.highlight_traditionally();
         let group_value = Rc::new(RefCell::new(Some(1)));
-        let focus_node2 = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+        let focus_node2: FocusNodeRef = FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
         focus_node2.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio2".into()));
 
         tester.pump_app(
             None,
             KeyboardHost {
-                focus_node2,
+                focus_node2: focus_node2.clone(),
                 group_value: Rc::clone(&group_value),
             }
             .into_widget(),
@@ -1818,9 +1821,9 @@ mod tests {
         tester: &mut Tester,
         key: &GlobalKey,
         configure: fn(CupertinoRadio<i32>) -> CupertinoRadio<i32>,
-    ) -> AnyFocusNode {
+    ) -> FocusNodeRef {
         tester.highlight_traditionally();
-        let node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+        let node: FocusNodeRef = FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
         tester.pump_app(
             None,
             keyed(
@@ -1828,7 +1831,7 @@ mod tests {
                     radio(1)
                         .group_value(1)
                         .on_changed(Rc::new(|_app, _value| {}))
-                        .focus_node(node)
+                        .focus_node(node.clone())
                         .autofocus(true),
                 ),
                 key,
@@ -1930,7 +1933,7 @@ mod tests {
         .into();
         let mut tester = Tester::new();
         let key = GlobalKey::new();
-        let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+        let focus_node: FocusNodeRef = FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
         focus_node.set_debug_label(&mut tester.cell.borrow_mut(), Some("Radio".into()));
         tester.highlight_traditionally();
 
@@ -1941,7 +1944,7 @@ mod tests {
                     .group_value(1)
                     .on_changed(Rc::new(|_app, _value| {}))
                     .mouse_cursor(Rc::clone(&cursor))
-                    .focus_node(focus_node),
+                    .focus_node(focus_node.clone()),
                 &key,
             ),
         );

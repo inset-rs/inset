@@ -2,7 +2,7 @@
 
 use crate::{column, example, example_row, label, section};
 use waft_embedder::TextSelection;
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 use waft_widgets::*;
 use waft_winui::*;
 
@@ -43,7 +43,7 @@ struct TextExamplesState {
     state: StateData<TextExamples>,
 
     /// Independent controllers for the examples.
-    controllers: Vec<Handle<TextEditingController>>,
+    controllers: Vec<Ref<TextEditingController>>,
 
     /// Interactive enabled-state option.
     enabled: bool,
@@ -92,8 +92,7 @@ impl State for TextExamplesState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         for controller in app.get(self).controllers.clone() {
-            app.get_mut(controller).dispose();
-            app.destroy(controller);
+            controller.dispose(app);
         }
     }
 
@@ -141,7 +140,7 @@ impl State for TextExamplesState {
                                     vec![enable.into_widget(), change_mode.into_widget()],
                                     16.0,
                                 ),
-                                PasswordBox::new(controllers[0].as_controller())
+                                PasswordBox::new(controllers[0].erase())
                                     .header(Text::new("Password"))
                                     .placeholder_text("Enter a password")
                                     .description(Text::new(
@@ -166,11 +165,11 @@ impl State for TextExamplesState {
                         &r,
                         column(
                             vec![
-                                PasswordBox::new(controllers[1].as_controller())
+                                PasswordBox::new(controllers[1].erase())
                                     .header(Text::new("Stored password"))
                                     .is_enabled(false)
                                     .into_widget(),
-                                PasswordBox::new(controllers[2].as_controller())
+                                PasswordBox::new(controllers[2].erase())
                                     .header(Text::new("Limited password"))
                                     .placeholder_text("Up to 12 characters")
                                     .max_length(12)
@@ -183,7 +182,8 @@ impl State for TextExamplesState {
                 20.0,
             )
         } else {
-            let controller = controllers[0];
+            let controller = controllers[0].clone();
+            let select_all_controller = controller.clone();
 
             column(
                 vec![
@@ -204,6 +204,7 @@ impl State for TextExamplesState {
                                         Button::text(
                                             "Select all text",
                                             Listener::new(move |app| {
+                                                let controller = select_all_controller.clone();
                                                 let length = controller
                                                     .text_value(app)
                                                     .encode_utf16()
@@ -219,7 +220,7 @@ impl State for TextExamplesState {
                                     ],
                                     16.0,
                                 ),
-                                TextBox::new(controller.as_controller())
+                                TextBox::new(controller.erase())
                                     .header(Text::new("Name"))
                                     .placeholder_text("Enter your name")
                                     .description(Text::new(
@@ -234,7 +235,7 @@ impl State for TextExamplesState {
                                     TextBlockStyle::Caption,
                                     r.text_fill_color_secondary,
                                 ),
-                                TextBox::new(controllers[1].as_controller())
+                                TextBox::new(controllers[1].erase())
                                     .header(Text::new("Read-only sample"))
                                     .is_read_only(true)
                                     .into_widget(),
@@ -246,7 +247,7 @@ impl State for TextExamplesState {
                         "Multiline text",
                         "Enter line breaks; long lines wrap and the editor scrolls after four visible lines.",
                         &r,
-                        TextBox::new(controllers[2].as_controller())
+                        TextBox::new(controllers[2].erase())
                             .header(Text::new("Notes"))
                             .placeholder_text("Write a few lines…")
                             .accepts_return(true)
@@ -259,12 +260,12 @@ impl State for TextExamplesState {
                         "With TextWrapping NoWrap each line stays whole; the box scrolls sideways to the caret, with a scroll bar under the pointer. The line numbers are placed by GetRectFromCharacterIndex.",
                         &r,
                         super::line_numbers::LineNumbers {
-                            text_box: TextBox::new(controllers[3].as_controller())
+                            text_box: TextBox::new(controllers[3].erase())
                                 .placeholder_text("Write markup…")
                                 .accepts_return(true)
                                 .horizontal_scroll_bar_visibility(ScrollBarVisibility::Auto)
                                 .max_lines(6),
-                            controller: controllers[3],
+                            controller: controllers[3].clone(),
                         }
                         .into_widget(),
                     ),

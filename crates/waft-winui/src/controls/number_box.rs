@@ -24,7 +24,7 @@ use std::{any::Any, fmt, rc::Rc};
 use waft_embedder::{
     Color, FontWeight, Offset, Rect, Size, TextAffinity, TextAlign, TextSelection,
 };
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref};
 use waft_gestures::{GestureBinding, PointerEvent};
 use waft_painting::{AlignmentGeometry, transform_rect};
 use waft_rendering::{BoxConstraints, SingleChildLayoutDelegate};
@@ -555,14 +555,14 @@ pub struct NumberBoxState {
     state: StateData<NumberBox>,
 
     /// `InputBox`'s text.
-    controller: Option<Handle<TextEditingController>>,
+    controller: Option<Ref<TextEditingController>>,
 
     /// `InputBox`'s focus, which takes the arrow, page, Enter and Escape keys before the text
     /// box does, as `PreviewKeyDown` and `KeyUp` do.
-    focus: Option<Handle<FocusNode>>,
+    focus: Option<Ref<FocusNode>>,
 
     /// Shows `UpDownPopup`.
-    popup: Option<Handle<OverlayPortalController>>,
+    popup: Option<Ref<OverlayPortalController>>,
 
     /// `Value`: the application's value, as `CoerceValue` left it.
     value: f64,
@@ -579,15 +579,24 @@ pub struct NumberBoxState {
 
 impl NumberBoxState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<TextEditingController> {
-        app.get(self).controller.expect("an initialized NumberBox")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("an initialized NumberBox")
     }
 
     fn focus(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-        app.get(self).focus.expect("an initialized NumberBox")
+        app.get(self)
+            .focus
+            .handle()
+            .expect("an initialized NumberBox")
     }
 
     fn popup(self: Handle<Self>, app: &App) -> Handle<OverlayPortalController> {
-        app.get(self).popup.expect("an initialized NumberBox")
+        app.get(self)
+            .popup
+            .handle()
+            .expect("an initialized NumberBox")
     }
 
     /// `Value()` as the box's own logic reads it: the value it last asked for, until the
@@ -619,7 +628,7 @@ impl NumberBoxState {
                 },
             );
         }
-        if app.contains(self) && self.mounted(app) {
+        if self.mounted(app) {
             self.update_text_to_value(app, new);
         }
     }
@@ -757,7 +766,7 @@ impl NumberBoxState {
         let PointerEvent::Scroll(scroll) = event else {
             return;
         };
-        if !app.contains(self) || !self.mounted(app) {
+        if !self.mounted(app) {
             return;
         }
         let delta = if scroll.scroll_delta.dy() != 0.0 {
@@ -792,7 +801,7 @@ impl NumberBoxState {
             }
         } else {
             self.validate_input(app);
-            if app.contains(self) && self.mounted(app) {
+            if self.mounted(app) {
                 popup.hide(app);
             }
         }
@@ -873,7 +882,7 @@ impl NumberBoxState {
             app,
             view,
             FrameCallback::new(move |app, _| {
-                if !app.contains(self) || !self.mounted(app) || differs(app.get(self).value, new) {
+                if !self.mounted(app) || differs(app.get(self).value, new) {
                     return;
                 }
                 let handler = self.widget(app).value_changed.clone();
@@ -896,7 +905,7 @@ impl NumberBoxState {
             app,
             view,
             FrameCallback::new(move |app, _| {
-                if app.contains(self) && self.mounted(app) {
+                if self.mounted(app) {
                     self.validate_input(app);
                 }
             }),
@@ -919,7 +928,7 @@ impl State for NumberBoxState {
         let popup = OverlayPortalController::new(app, Some("NumberBox UpDownPopup".into()));
         let state = app.get_mut(self);
         state.controller = Some(controller);
-        state.focus = Some(focus);
+        state.focus = Some(focus.clone());
         state.popup = Some(popup);
         self.apply_widget(app, None);
     }
@@ -937,10 +946,8 @@ impl State for NumberBoxState {
         );
         focus.remove_listener(app, &Listener::handle_method(self, Self::focus_changed));
         focus.dispose(app);
-        app.destroy(focus);
-        app.get_mut(controller).dispose();
-        app.destroy(controller);
-        app.destroy(popup);
+        controller.dispose(app);
+        drop(popup);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1083,17 +1090,29 @@ impl NumberBoxState {
         spin_buttons: SpinButtonsState,
     ) -> WidgetRef {
         let widget = self.widget(app);
-        let mut config = TextBox::new(self.controller(app).as_controller())
-            .focus_node(self.focus(app))
-            .placeholder_text(widget.placeholder_text.clone())
-            .is_enabled(widget.is_enabled)
-            .font_size(
-                widget
-                    .font_size
-                    .unwrap_or(r.control_content_theme_font_size),
-            )
-            .corner_radius(widget.corner_radius.unwrap_or(r.control_corner_radius[0]))
-            .text_alignment(widget.text_alignment);
+        let mut config = TextBox::new(
+            app.get(self)
+                .controller
+                .as_ref()
+                .expect("an initialized NumberBox")
+                .erase(),
+        )
+        .focus_node(
+            app.get(self)
+                .focus
+                .as_ref()
+                .expect("an initialized NumberBox")
+                .erase(),
+        )
+        .placeholder_text(widget.placeholder_text.clone())
+        .is_enabled(widget.is_enabled)
+        .font_size(
+            widget
+                .font_size
+                .unwrap_or(r.control_content_theme_font_size),
+        )
+        .corner_radius(widget.corner_radius.unwrap_or(r.control_corner_radius[0]))
+        .text_alignment(widget.text_alignment);
         if let Some(color) = widget.selection_highlight_color {
             config = config.selection_highlight_color(color);
         }
@@ -1212,22 +1231,28 @@ impl NumberBoxState {
     /// `UpDownPopup`: no light dismiss, opened and closed by the focus; its content is placed
     /// from where the popup is in the template.
     fn up_down_popup(self: Handle<Self>, app: &App) -> WidgetRef {
-        OverlayPortal::overlay_child_layout_builder(self.popup(app), move |app, context, info| {
-            let r = ThemeResources::of(app, context);
-            let slot = transform_rect(
-                &info.child_paint_transform(),
-                Offset::ZERO & info.child_size(),
-            );
-            CustomSingleChildLayout::new(Rc::new(PopupLayout {
-                slot,
-                offset: Offset::new(
-                    r.number_box_popup_horizonal_offset,
-                    r.number_box_popup_vertical_offset,
-                ),
-            }))
-            .child(self.popup_content_root(app, context))
-            .into_widget()
-        })
+        OverlayPortal::overlay_child_layout_builder(
+            app.get(self)
+                .popup
+                .clone()
+                .expect("an initialized NumberBox"),
+            move |app, context, info| {
+                let r = ThemeResources::of(app, context);
+                let slot = transform_rect(
+                    &info.child_paint_transform(),
+                    Offset::ZERO & info.child_size(),
+                );
+                CustomSingleChildLayout::new(Rc::new(PopupLayout {
+                    slot,
+                    offset: Offset::new(
+                        r.number_box_popup_horizonal_offset,
+                        r.number_box_popup_vertical_offset,
+                    ),
+                }))
+                .child(self.popup_content_root(app, context))
+                .into_widget()
+            },
+        )
         .overlay_location(OverlayChildLocation::RootOverlay)
         .child(SizedBox::shrink())
         .into_widget()

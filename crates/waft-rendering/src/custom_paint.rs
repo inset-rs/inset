@@ -579,7 +579,7 @@ mod tests {
     use waft_foundation::AppCell;
 
     use waft_embedder::{Color, Paint, valo};
-    use waft_foundation::ValueNotifier;
+    use waft_foundation::{Ref, ValueNotifier};
     use waft_gestures::HitTestResult;
 
     use super::*;
@@ -650,7 +650,7 @@ mod tests {
     }
 
     /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
-    fn first_frame(app: &mut App, root: AnyRenderBox) -> Handle<PipelineOwner> {
+    fn first_frame(app: &mut App, root: AnyRenderBox) -> Ref<PipelineOwner> {
         let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, BoxConstraints::tight(Size::new(100.0, 100.0)), false);
@@ -707,7 +707,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(custom.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         assert_eq!((background.paints.get(), foreground.paints.get()), (1, 1));
         assert_eq!(
@@ -723,7 +723,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(0));
         let painter = Rc::new(Recorder {
-            repaint: Some(Rc::new(notifier)),
+            repaint: Some(Rc::new(notifier.clone())),
             ..Recorder::new(RED)
         });
         let custom = RenderCustomPaint::new(
@@ -742,7 +742,7 @@ mod tests {
 
         notifier.set_value(&mut app, 1);
         assert!(custom.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, owner.handle());
         assert_eq!(painter.paints.get(), 2);
     }
 
@@ -753,7 +753,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let notifier = app.create(ValueNotifier::new(0));
         let painter = Rc::new(Recorder {
-            repaint: Some(Rc::new(notifier)),
+            repaint: Some(Rc::new(notifier.clone())),
             ..Recorder::new(RED)
         });
         let custom = RenderCustomPaint::new(
@@ -786,7 +786,7 @@ mod tests {
         });
         custom.set_painter(&mut app, Some(eager.clone()));
         assert!(custom.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, owner.handle());
         assert_eq!((quiet.paints.get(), eager.paints.get()), (0, 1));
 
         custom.set_painter(&mut app, None);

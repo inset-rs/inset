@@ -100,7 +100,7 @@ impl<W: InheritedNotifier> Widget for InheritedNotifierWrapper<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        InheritedNotifierElement::<W>::create(app, this)
+        InheritedNotifierElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -141,19 +141,21 @@ pub struct InheritedNotifierElement<W: InheritedNotifier> {
 
 impl<W: InheritedNotifier> InheritedNotifierElement<W> {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        let this = app.create(InheritedNotifierElement::<W> {
-            element: ElementData::new(widget),
-            component: ComponentElementData::default(),
-            dependents: HashMap::new(),
-            dirty: false,
-            marker: PhantomData,
-        });
+        let this = app
+            .create(InheritedNotifierElement::<W> {
+                element: ElementData::new(widget),
+                component: ComponentElementData::default(),
+                dependents: HashMap::new(),
+                dirty: false,
+                marker: PhantomData,
+            })
+            .into_tree_node(app);
         if let Some(notifier) = this.widget(app).notifier() {
             notifier.add_listener(app, this.update_listener());
         }
-        this.as_element()
+        this
     }
 
     /// The widget, typed.

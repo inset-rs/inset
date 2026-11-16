@@ -10,17 +10,20 @@ use waft_embedder::{
     AppLifecycleState, BoxHeightStyle, BoxWidthStyle, Color, Offset, Radius, TargetPlatform,
     TextAlign, TextDirection, TextEditingValue, TextHeightBehavior, TextSelection,
 };
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, ListenableObject, Listener,
+    OptionRetained, Ref,
+};
 use waft_gestures::{DragStartBehavior, GestureTapCallback, TapDragUpDetails};
 use waft_painting::{InlineSpan, TextScaler, TextSpan, TextStyle, TextWidthBasis};
 use waft_rendering::HitTestBehavior;
 use waft_scheduler::SchedulerBinding;
 use waft_services::SelectionChangedCause;
 use waft_widgets::{
-    BuildContext, DefaultSelectionStyle, DefaultTextStyle, EditableText,
-    EditableTextContextMenuBuilder, EditableTextState, FocusNode, FocusNodeLeaf, GlobalKey,
-    IntoWidget, KeyRef, MediaQuery, RepaintBoundary, ScrollBehaviorRef, ScrollPhysicsRef,
-    SelectionChangedCallback, Semantics, State, StateData, StatefulWidget,
+    AnyTextEditingController, BuildContext, DefaultSelectionStyle, DefaultTextStyle, EditableText,
+    EditableTextContextMenuBuilder, EditableTextState, FocusNode, FocusNodeLeaf, FocusNodeRef,
+    GlobalKey, IntoWidget, KeyRef, MediaQuery, RepaintBoundary, ScrollBehaviorRef,
+    ScrollPhysicsRef, SelectionChangedCallback, Semantics, State, StateData, StatefulWidget,
     TextEditingControllerData, TextEditingControllerLeaf, TextMagnifierConfiguration,
     TextSelectionControls, TextSelectionGestureDetectorBuilder,
     TextSelectionGestureDetectorBuilderBase, TextSelectionGestureDetectorBuilderData,
@@ -55,7 +58,7 @@ struct TextSpanEditingController {
 }
 
 impl TextSpanEditingController {
-    fn new(app: &mut App, text_span: TextSpan) -> Handle<TextSpanEditingController> {
+    fn new(app: &mut App, text_span: TextSpan) -> Ref<TextSpanEditingController> {
         let text = text_span.to_plain_text(false, true);
         app.create(TextSpanEditingController {
             change_notifier: ChangeNotifierData::new(),
@@ -182,7 +185,7 @@ pub struct SelectableText {
     /// If null, this widget will create its own [`FocusNode`] with `FocusNode::skip_traversal`
     /// parameter set to `true`, which causes the widget to be skipped over during focus
     /// traversal.
-    pub focus_node: Option<Handle<FocusNode>>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// The style to use for the text.
     ///
@@ -378,7 +381,7 @@ impl SelectableText {
     }
 
     /// Dart `SelectableText(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: Handle<FocusNode>) -> SelectableText {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> SelectableText {
         self.focus_node = Some(focus_node);
         self
     }
@@ -670,11 +673,10 @@ impl StatefulWidget for SelectableText {
 /// Dart's `_SelectableTextState`.
 pub struct SelectableTextState {
     state: StateData<SelectableText>,
-    controller: Option<Handle<TextSpanEditingController>>,
-    focus_node: Option<Handle<FocusNode>>,
+    controller: Option<Ref<TextSpanEditingController>>,
+    focus_node: Option<Ref<FocusNode>>,
     show_selection_handles: bool,
-    selection_gesture_detector_builder:
-        Option<Handle<SelectableTextSelectionGestureDetectorBuilder>>,
+    selection_gesture_detector_builder: Option<Ref<SelectableTextSelectionGestureDetectorBuilder>>,
     /// Dart's `late bool forcePressEnabled`, which `build` sets.
     force_press_enabled: Option<bool>,
     editable_text_key: GlobalKey,
@@ -687,20 +689,23 @@ impl SelectableTextState {
     }
 
     fn controller(self: Handle<Self>, app: &App) -> Handle<TextSpanEditingController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 
-    fn effective_focus_node(self: Handle<Self>, app: &mut App) -> Handle<FocusNode> {
-        if let Some(focus_node) = self.widget(app).focus_node {
+    fn effective_focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
+        if let Some(focus_node) = self.widget(app).focus_node.clone() {
             return focus_node;
         }
-        if let Some(focus_node) = app.get(self).focus_node {
-            return focus_node;
+        if let Some(focus_node) = app.get(self).focus_node.as_ref() {
+            return focus_node.erase();
         }
         let focus_node = FocusNode::new(app);
         focus_node.set_skip_traversal(app, true);
-        app.get_mut(self).focus_node = Some(focus_node);
-        focus_node
+        app.get_mut(self).focus_node = Some(focus_node.clone());
+        focus_node.into_erased()
     }
 
     fn selection_gesture_detector_builder(
@@ -709,13 +714,14 @@ impl SelectableTextState {
     ) -> Handle<SelectableTextSelectionGestureDetectorBuilder> {
         app.get(self)
             .selection_gesture_detector_builder
+            .handle()
             .expect("created in init_state")
     }
 
     fn create_controller(self: Handle<Self>, app: &mut App) {
         let text_span = self.widget(app).effective_text_span();
         let controller = TextSpanEditingController::new(app, text_span);
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         controller.add_listener(
             app,
             Listener::handle_method(self, Self::on_controller_changed),
@@ -866,13 +872,22 @@ impl State for SelectableTextState {
             self.create_controller(app);
         }
         if self.widget(app).focus_node != old_widget.focus_node {
-            if let Some(old_focus) = old_widget.focus_node.or(app.get(self).focus_node) {
+            if let Some(old_focus) = old_widget
+                .focus_node
+                .clone()
+                .or_else(|| app.get(self).focus_node.as_ref().map(Ref::erase))
+            {
                 old_focus.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_focus_changed),
                 );
             }
-            if let Some(new_focus) = self.widget(app).focus_node.or(app.get(self).focus_node) {
+            if let Some(new_focus) = self
+                .widget(app)
+                .focus_node
+                .clone()
+                .or_else(|| app.get(self).focus_node.as_ref().map(Ref::erase))
+            {
                 new_focus.add_listener(
                     app,
                     Listener::handle_method(self, Self::handle_focus_changed),
@@ -891,13 +906,10 @@ impl State for SelectableTextState {
             app,
             &Listener::handle_method(self, Self::handle_focus_changed),
         );
-        if let Some(focus_node) = app.get(self).focus_node {
+        if let Some(focus_node) = app.get(self).focus_node.handle() {
             focus_node.dispose(app);
         }
         self.controller(app).as_controller().dispose(app);
-        if let Some(builder) = app.get_mut(self).selection_gesture_detector_builder.take() {
-            app.destroy(builder);
-        }
     }
 
     #[allow(deprecated)]
@@ -1010,13 +1022,17 @@ impl State for SelectableTextState {
 
         let default_text_style = DefaultTextStyle::of(app, context);
         let widget = self.widget(app);
-        let controller = self.controller(app);
+        let controller = app
+            .get(self)
+            .controller
+            .clone()
+            .expect("created in init_state");
         let mut effective_text_style = widget.style.clone();
         if effective_text_style
             .as_ref()
             .is_none_or(|style| style.inherit)
         {
-            let span_style = app.get(controller).text_span.style.clone();
+            let span_style = app.get(&controller).text_span.style.clone();
             effective_text_style = Some(
                 default_text_style
                     .style
@@ -1030,8 +1046,8 @@ impl State for SelectableTextState {
 
         let this = self;
         let mut editable = EditableText::new(
-            controller.as_controller(),
-            focus_node,
+            controller.erase::<AnyTextEditingController>(),
+            focus_node.clone(),
             effective_text_style.expect("filled above"),
             cursor_color,
             CupertinoColors::INACTIVE_GRAY.color(),
@@ -1231,13 +1247,17 @@ mod tests {
         tester.find_by_type::<EditableText>()
     }
 
-    fn controller_at(tester: &WidgetTester, index: usize) -> AnyTextEditingController {
-        tester
-            .widget::<EditableText, _>(editable_elements(tester)[index], |widget| widget.controller)
+    fn controller_at(
+        tester: &WidgetTester,
+        index: usize,
+    ) -> waft_widgets::TextEditingControllerRef {
+        tester.widget(editable_elements(tester)[index], |widget: &EditableText| {
+            widget.controller.clone()
+        })
     }
 
     fn controller(tester: &WidgetTester) -> AnyTextEditingController {
-        controller_at(tester, 0)
+        controller_at(tester, 0).handle()
     }
 
     fn selection(tester: &WidgetTester) -> TextSelection {
@@ -2006,19 +2026,19 @@ mod tests {
             let empty = TextSelection::collapsed(-1, TextAffinity::Downstream);
 
             assert_eq!(
-                read(&tester, controller_a),
+                read(&tester, controller_a.handle()),
                 TextSelection::collapsed(5, TextAffinity::Downstream)
             );
-            assert_eq!(read(&tester, controller_b), empty);
+            assert_eq!(read(&tester, controller_b.handle()), empty);
 
             // Tapping on the second SelectableText sets the cursor on it, and clears the
             // selection from the first SelectableText.
             let selectable_text_start = top_left_of_selectable_text(&tester, 1);
             tester.tap(selectable_text_start, 2);
             tester.pump_and_settle();
-            assert_eq!(read(&tester, controller_a), empty);
+            assert_eq!(read(&tester, controller_a.handle()), empty);
             assert_eq!(
-                read(&tester, controller_b),
+                read(&tester, controller_b.handle()),
                 TextSelection::collapsed(0, TextAffinity::Downstream)
             );
 
@@ -2029,9 +2049,9 @@ mod tests {
                 AppLifecycleState::Inactive,
             );
             tester.pump_and_settle();
-            assert_eq!(read(&tester, controller_a), empty);
+            assert_eq!(read(&tester, controller_a.handle()), empty);
             assert_eq!(
-                read(&tester, controller_b),
+                read(&tester, controller_b.handle()),
                 TextSelection::collapsed(0, TextAffinity::Downstream)
             );
         });
@@ -2050,12 +2070,12 @@ mod tests {
                 &mut tester,
                 Center::new().child(Column::new().children(vec![
                     Focus::new(SizedBox::new().width(10.0).height(10.0))
-                        .focus_node(first_field_focus.as_node())
+                        .focus_node(first_field_focus.erase())
                         .autofocus(true)
                         .into_widget(),
                     SelectableText::new("some text").into_widget(),
                     Focus::new(SizedBox::new().width(10.0).height(10.0))
-                        .focus_node(last_field_focus.as_node())
+                        .focus_node(last_field_focus.erase())
                         .into_widget(),
                 ])),
             );

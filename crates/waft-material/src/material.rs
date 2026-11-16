@@ -2,7 +2,7 @@
 
 use std::any::Any;
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -10,7 +10,7 @@ use waft_animation::{Animatable, ColorTween, Curves, Tween};
 use waft_embedder::{
     Canvas, ClipOp, Color, Matrix4, Offset, Path, Radius, Rect, Size, TextBaseline, TextDirection,
 };
-use waft_foundation::{App, Handle, HandleId, Listener};
+use waft_foundation::{App, Handle, HandleId, Listener, Ref, Retained};
 use waft_painting::{
     BorderRadius, BorderRadiusGeometry, BorderSide, CircleBorder, Clip, ClipContext,
     RoundedRectangleBorder, ShapeBorderRef, TextStyle,
@@ -122,7 +122,7 @@ pub trait MaterialInkController: Sized + 'static {
     /// [`InkHighlight`](crate::InkHighlight).
     ///
     /// The ink feature will paint as part of this controller.
-    fn add_ink_feature(self: Handle<Self>, app: &mut App, feature: AnyInkFeature);
+    fn add_ink_feature(self: Handle<Self>, app: &mut App, feature: InkFeatureRef);
 
     /// Notifies the controller that one of its ink features needs to repaint.
     fn mark_needs_paint(self: Handle<Self>, app: &mut App);
@@ -133,7 +133,7 @@ struct MaterialInkControllerVTable {
     type_name: fn() -> &'static str,
     color: fn(&App, HandleId) -> Option<Color>,
     vsync: fn(&App, HandleId) -> Rc<dyn TickerProvider>,
-    add_ink_feature: fn(&mut App, HandleId, AnyInkFeature),
+    add_ink_feature: fn(&mut App, HandleId, InkFeatureRef),
     mark_needs_paint: fn(&mut App, HandleId),
 }
 
@@ -194,7 +194,7 @@ impl AnyMaterialInkController {
     }
 
     /// See [`MaterialInkController::add_ink_feature`].
-    pub fn add_ink_feature(self, app: &mut App, feature: AnyInkFeature) {
+    pub fn add_ink_feature(self, app: &mut App, feature: InkFeatureRef) {
         (self.vtable.add_ink_feature)(app, self.id, feature);
     }
 
@@ -678,7 +678,7 @@ impl TickerProviderStateMixin for MaterialWidgetState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for MaterialWidgetState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -850,7 +850,7 @@ pub(crate) struct RenderInkFeatures {
     // WidgetState build method.
     color: Option<Color>,
     absorb_hit_test: bool,
-    ink_features: Option<Vec<AnyInkFeature>>,
+    ink_features: Option<Vec<InkFeatureRef>>,
 }
 
 impl RenderInkFeatures {
@@ -881,7 +881,12 @@ impl RenderInkFeatures {
         app: &App,
     ) -> Option<Vec<AnyInkFeature>> {
         if cfg!(debug_assertions) {
-            return self.get(app).ink_features.clone();
+            return self.get(app).ink_features.as_ref().map(|ink_features| {
+                ink_features
+                    .iter()
+                    .map(|ink_feature| ink_feature.handle())
+                    .collect()
+            });
         }
         None
     }
@@ -942,7 +947,7 @@ impl MaterialInkController for RenderInkFeatures {
         Rc::clone(&app.get(self).vsync)
     }
 
-    fn add_ink_feature(self: Handle<Self>, app: &mut App, feature: AnyInkFeature) {
+    fn add_ink_feature(self: Handle<Self>, app: &mut App, feature: InkFeatureRef) {
         debug_assert!(!feature.debug_disposed(app));
         debug_assert!(feature.controller(app).id() == self.id());
         let ink_features = app.get_mut(self).ink_features.get_or_insert_with(Vec::new);
@@ -1207,6 +1212,13 @@ pub trait InkFeatureObject: Sized + 'static {
     fn as_ink_feature(self: Handle<Self>) -> AnyInkFeature;
 }
 
+/// What a field Dart types as `InkFeature` holds: the material's list, an ink well's state.
+pub type InkFeatureRef = Retained<AnyInkFeature>;
+
+waft_foundation::erased_handle!(
+    AnyInkFeature: InkFeatureLeaf => InkFeatureObject::as_ink_feature
+);
+
 impl<F: InkFeatureLeaf> InkFeatureObject for F {
     fn as_ink_feature(self: Handle<Self>) -> AnyInkFeature {
         AnyInkFeature {
@@ -1246,20 +1258,6 @@ impl InkFeatureVTable {
 pub struct AnyInkFeature {
     id: HandleId,
     vtable: &'static InkFeatureVTable,
-}
-
-impl PartialEq for AnyInkFeature {
-    fn eq(&self, other: &AnyInkFeature) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyInkFeature {}
-
-impl Hash for AnyInkFeature {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
 }
 
 impl fmt::Debug for AnyInkFeature {
@@ -1338,8 +1336,8 @@ impl InkFeature {
         app.get(this).ink_feature().on_removed.clone()
     }
 
-    /// Dart's `InkFeature.dispose`: frees up the resources associated with this ink feature,
-    /// the arena entry included.
+    /// Dart's `InkFeature.dispose`: frees up the resources associated with this ink feature.
+    /// The feature itself goes once the controller's list and its owner let go of it.
     pub fn dispose<F: InkFeatureLeaf>(this: Handle<F>, app: &mut App) {
         debug_assert!(!app.get(this).ink_feature().debug_disposed);
         if cfg!(debug_assertions) {
@@ -1350,7 +1348,6 @@ impl InkFeature {
         if let Some(on_removed) = InkFeature::on_removed(this, app) {
             on_removed.call(app);
         }
-        app.destroy_lingering(this);
     }
 
     // Returns the paint transform that allows `fromRenderObject` to perform paint
@@ -1599,9 +1596,9 @@ struct MaterialInteriorState {
     state: StateData<MaterialInterior>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
-    elevation: Option<Handle<Tween<f64>>>,
-    surface_tint_color: Option<Handle<ColorTween>>,
-    shadow_color: Option<Handle<ColorTween>>,
+    elevation: Option<Ref<Tween<f64>>>,
+    surface_tint_color: Option<Ref<ColorTween>>,
+    shadow_color: Option<Ref<ColorTween>>,
     border: Option<ShapeBorderTween>,
 }
 
@@ -1622,7 +1619,7 @@ impl SingleTickerProviderStateMixin for MaterialInteriorState {
 }
 
 impl TickerProviderObject for MaterialInteriorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1631,27 +1628,23 @@ impl ImplicitlyAnimatedWidgetState for MaterialInteriorState {
     waft_widgets::implicitly_animated_widget_state_accessors!();
 
     fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
-        let tween = app.get(self).elevation;
+        let tween = app.get(self).elevation.clone();
         let target = Some(self.widget(app).elevation);
         app.get_mut(self).elevation = visitor.visit(app, tween, target, |app, value| {
             Tween::new(app, Some(*value), None)
         });
-        let tween = app.get(self).shadow_color;
+        let tween = app.get(self).shadow_color.clone();
         let target = Some(Some(self.widget(app).shadow_color));
         app.get_mut(self).shadow_color = visitor.visit(app, tween, target, |app, value| {
             ColorTween::new(app, *value, None)
         });
         let surface_tint_color = self.widget(app).surface_tint_color;
         app.get_mut(self).surface_tint_color = if surface_tint_color.is_some() {
-            let tween = app.get(self).surface_tint_color;
+            let tween = app.get(self).surface_tint_color.clone();
             visitor.visit(app, tween, Some(surface_tint_color), |app, value| {
                 ColorTween::new(app, *value, None)
             })
         } else {
-            // The dispose pass never sees this tween again, so it is freed here.
-            if let Some(tween) = app.get_mut(self).surface_tint_color.take() {
-                tween.dispose(app);
-            }
             None
         };
         let tween = app.get(self).border.clone();
@@ -1688,9 +1681,15 @@ impl State for MaterialInteriorState {
         let animation = self.animation(app);
         let state = app.get(self);
         let border = state.border.clone().expect("for_each_tween made the tween");
-        let elevation_tween = state.elevation.expect("for_each_tween made the tween");
-        let surface_tint_color = state.surface_tint_color;
-        let shadow_color_tween = state.shadow_color.expect("for_each_tween made the tween");
+        let elevation_tween = state
+            .elevation
+            .clone()
+            .expect("for_each_tween made the tween");
+        let surface_tint_color = state.surface_tint_color.clone();
+        let shadow_color_tween = state
+            .shadow_color
+            .clone()
+            .expect("for_each_tween made the tween");
         let shape = border
             .evaluate(app, animation)
             .expect("the shape tween has a shape");
@@ -2640,7 +2639,7 @@ mod tests {
                     ink_feature,
                     paint_count: Rc::clone(&paint_count),
                 });
-                controller.add_ink_feature(&mut app, tracker.as_ink_feature());
+                controller.add_ink_feature(&mut app, tracker.erase());
             }
             assert_eq!(paint_count.get(), 0);
 
@@ -2853,7 +2852,7 @@ mod tests {
                     ink_feature,
                     paint_count: Rc::clone(&paint_count),
                 });
-                controller.add_ink_feature(&mut app, tracker.as_ink_feature());
+                controller.add_ink_feature(&mut app, tracker.erase());
             }
             tester.pump(Duration::ZERO);
             assert_eq!(paint_count.get(), 1);
@@ -3076,7 +3075,12 @@ mod tests {
                 .find_map(|element| element.downcast::<StatefulElement<MaterialInterior>>(&app))
                 .expect("a material interior")
                 .state(&app);
-            let tween = app.get(state).surface_tint_color.expect("a tint tween");
+            let tween = app
+                .get(state)
+                .surface_tint_color
+                .as_ref()
+                .expect("a tint tween")
+                .handle();
             drop(app);
             tester.pump_widget(tinted(None));
             assert!(tester.cell.borrow().get(state).surface_tint_color.is_none());

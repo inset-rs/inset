@@ -196,7 +196,7 @@ mod tests {
     use waft_embedder::TextDirection;
     use waft_rendering::{AnyRenderObject, RenderDecoratedBox, RenderHandle, RenderObject};
     use waft_widgets::{
-        Directionality, FocusNode, FocusNodeLeaf, GlobalKey, SizedBox, UnfocusDisposition,
+        Directionality, FocusNode, FocusNodeRef, GlobalKey, SizedBox, UnfocusDisposition,
     };
 
     use super::*;
@@ -239,7 +239,7 @@ mod tests {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
-        let node = FocusNode::new(&mut app).as_node();
+        let node: FocusNodeRef = FocusNode::new(&mut app).into_erased();
         drop(app);
         build(
             &cell,
@@ -247,7 +247,7 @@ mod tests {
                 TextDirection::Ltr,
                 CupertinoFocusHalo::with_rounded_superellipse(
                     BorderRadius::circular(10.0).into(),
-                    Focus::new(SizedBox::square(Some(40.0))).focus_node(node),
+                    Focus::new(SizedBox::square(Some(40.0))).focus_node(node.clone()),
                 )
                 .key(key.clone().into()),
             )

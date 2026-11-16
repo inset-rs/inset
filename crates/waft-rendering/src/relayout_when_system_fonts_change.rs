@@ -2,11 +2,12 @@
 
 use std::time::Duration;
 
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listener};
 use waft_painting::PaintingBinding;
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 
 use crate::object::{RenderHandle, RenderObject};
+use waft_foundation::ListenableObject;
 
 /// Flutter's `RelayoutWhenSystemFontsChangeMixin` fields.
 #[derive(Debug, Default)]

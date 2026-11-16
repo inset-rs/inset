@@ -4,6 +4,8 @@
 //! the host directly, and `shaderWarmUp` waits.
 
 use waft_embedder::{FontCollection, FontId, set_default_font_manager};
+use waft_foundation::OptionRetained;
+use waft_foundation::Ref;
 use waft_foundation::{App, ChangeNotifierData, Handle};
 
 /// Binding for the painting library: the fonts every paragraph shapes against.
@@ -14,9 +16,9 @@ use waft_foundation::{App, ChangeNotifierData, Handle};
 /// through [`fonts`](Self::fonts).
 #[derive(Default)]
 pub struct PaintingBinding {
-    fonts: Option<Handle<FontCollection>>,
+    fonts: Option<Ref<FontCollection>>,
     /// Flutter's `_systemFonts`. Created with the binding so paragraphs can listen.
-    system_fonts: Option<Handle<ChangeNotifierData>>,
+    system_fonts: Option<Ref<ChangeNotifierData>>,
 }
 
 impl PaintingBinding {
@@ -41,6 +43,7 @@ impl PaintingBinding {
     pub fn system_fonts(self: Handle<Self>, app: &App) -> Handle<ChangeNotifierData> {
         app.get(self)
             .system_fonts
+            .handle()
             .expect("PaintingBinding::instance creates the systemFonts listenable")
     }
 
@@ -61,8 +64,9 @@ impl PaintingBinding {
         let mut fonts = FontCollection::new();
         install(&mut fonts);
         let fonts = app.create(fonts);
+        let handle = fonts.handle();
         app.get_mut(self).fonts = Some(fonts);
-        fonts
+        handle
     }
 
     /// Installs the app-wide font collection seeded with the platform's own font lookup
@@ -93,7 +97,7 @@ impl PaintingBinding {
         family: &str,
         bytes: Vec<u8>,
     ) -> Option<FontId> {
-        let fonts = match app.get(self).fonts {
+        let fonts = match app.get(self).fonts.handle() {
             Some(fonts) => fonts,
             None => self.install_fonts(app, |_| {}),
         };
@@ -111,7 +115,7 @@ impl PaintingBinding {
     ///
     /// If none was installed.
     pub fn fonts(self: Handle<Self>, app: &App) -> Handle<FontCollection> {
-        app.get(self).fonts.expect(
+        app.get(self).fonts.handle().expect(
             "text needs fonts: call `PaintingBinding::install_fonts` (the shell installs the \
              platform's at start-up)",
         )
@@ -149,7 +153,7 @@ mod tests {
     #[test]
     fn system_fonts_notify_reaches_a_listener() {
         use std::cell::Cell;
-        use waft_foundation::{Listenable, Listener};
+        use waft_foundation::{ListenableObject, Listener};
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();

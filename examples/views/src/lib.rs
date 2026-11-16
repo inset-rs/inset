@@ -36,7 +36,7 @@ use waft_embedder::{
 use waft_painting::EdgeInsetsGeometry;
 use waft_widgets::{
     BuildContext, Builder, IntoWidget, ListView, MediaQuery, MultiViewApp, Navigator, Padding,
-    PopScope, Route, State, StateData, StatefulWidget, Text, View, WidgetRef, WidgetsBinding,
+    PopScope, State, StateData, StatefulWidget, Text, View, WidgetRef, WidgetsBinding,
     WidgetsBindingObserver, WidgetsBindingObserverRef, WindowScope, run_widget,
 };
 
@@ -293,7 +293,7 @@ fn push_page(app: &mut App, context: BuildContext, number: u32) {
         )
     });
     let route = CupertinoPageRoute::new(app, builder);
-    Navigator::push(app, context, route.as_route());
+    drop(Navigator::push(app, context, route.into_erased()));
 }
 
 fn button(label: &str, on_pressed: Listener) -> WidgetRef {

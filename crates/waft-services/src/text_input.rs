@@ -14,6 +14,8 @@ pub use waft_embedder::{
     SmartDashesType, SmartQuotesType, TextCapitalization, TextEditingValue, TextInputAction,
     TextInputConfiguration, TextInputType,
 };
+use waft_foundation::OptionRetained;
+use waft_foundation::Ref;
 
 /// Indicates what triggered the change in selected text (including changes to
 /// the cursor location).
@@ -527,6 +529,7 @@ impl TextInputConnection {
         let input = TextInput::instance(app);
         app.get(input)
             .current_connection
+            .handle()
             .is_some_and(|current| current == self)
     }
 
@@ -659,10 +662,10 @@ impl TextInputConnection {
 ///
 /// Dart's `TextInput._instance` is [`instance`](Self::instance), the App's singleton.
 pub struct TextInput {
-    current_connection: Option<Handle<TextInputConnection>>,
+    current_connection: Option<Ref<TextInputConnection>>,
     current_configuration: Option<TextInputConfiguration>,
     #[allow(dead_code)]
-    last_connection: Option<Handle<TextInputConnection>>,
+    last_connection: Option<Ref<TextInputConnection>>,
     next_id: i32,
     hide_pending: bool,
 }
@@ -690,7 +693,7 @@ impl TextInput {
         self: Handle<Self>,
         app: &App,
     ) -> Option<Handle<TextInputConnection>> {
-        app.get(self).current_connection
+        app.get(self).current_connection.handle()
     }
 
     /// Ensure that a [`TextInput`] instance has been set up so that the platform
@@ -712,7 +715,7 @@ impl TextInput {
         app: &mut App,
         client: AnyTextInputClient,
         configuration: TextInputConfiguration,
-    ) -> Handle<TextInputConnection> {
+    ) -> Ref<TextInputConnection> {
         let input = Self::instance(app);
         let id = {
             let input = app.get_mut(input);
@@ -729,7 +732,7 @@ impl TextInput {
             cached_caret_rect: None,
             cached_selection_rects: Vec::new(),
         });
-        input.attach_connection(app, connection, configuration);
+        input.attach_connection(app, connection.clone(), configuration);
         connection
     }
 
@@ -789,11 +792,11 @@ impl TextInput {
     fn attach_connection(
         self: Handle<Self>,
         app: &mut App,
-        connection: Handle<TextInputConnection>,
+        connection: Ref<TextInputConnection>,
         configuration: TextInputConfiguration,
     ) {
         debug_ensure_input_action_works_on_platform(configuration.input_action);
-        app.get_mut(self).current_connection = Some(connection);
+        app.get_mut(self).current_connection = Some(connection.clone());
         app.get_mut(self).current_configuration = Some(configuration.clone());
         app.get_mut(self).last_connection = Some(connection);
         platform_attach(app, &configuration);
@@ -888,7 +891,7 @@ impl TextInput {
     /// Does not echo the value back to the host (Flutter excludes
     /// `_PlatformTextInputControl`).
     pub fn update_editing_value(self: Handle<Self>, app: &mut App, value: TextEditingValue) {
-        let Some(connection) = app.get(self).current_connection else {
+        let Some(connection) = app.get(self).current_connection.handle() else {
             return;
         };
         let client = app.get(connection).client;
@@ -897,7 +900,7 @@ impl TextInput {
 
     /// Flutter `TextInputClient.performAction`.
     pub fn perform_action(self: Handle<Self>, app: &mut App, action: TextInputAction) {
-        let Some(connection) = app.get(self).current_connection else {
+        let Some(connection) = app.get(self).current_connection.handle() else {
             return;
         };
         let client = app.get(connection).client;
@@ -906,7 +909,7 @@ impl TextInput {
 
     /// Flutter `TextInputClient.onConnectionClosed`.
     pub fn connection_closed(self: Handle<Self>, app: &mut App) {
-        let Some(connection) = app.get(self).current_connection else {
+        let Some(connection) = app.get(self).current_connection.handle() else {
             return;
         };
         let client = app.get(connection).client;
@@ -1065,7 +1068,7 @@ mod tests {
             TextInputConfiguration::default(),
         );
         TextInput::instance(&mut app).connection_closed(&mut app);
-        assert!(app.get(client).closed);
+        assert!(app.get(&client).closed);
     }
 
     #[test]
@@ -1081,7 +1084,7 @@ mod tests {
                 .build(),
         );
         TextInput::instance(&mut app).perform_action(&mut app, TextInputAction::Done);
-        assert_eq!(app.get(client).actions, [TextInputAction::Done]);
+        assert_eq!(app.get(&client).actions, [TextInputAction::Done]);
     }
 
     #[test]
@@ -1096,7 +1099,7 @@ mod tests {
         );
         let invalid = Rect::from_ltrb(f64::NAN, 0.0, 1.0, 1.0);
         connection.set_composing_rect(&mut app, invalid);
-        assert!(!app.get(connection).cached_rect.unwrap().is_finite());
+        assert!(!app.get(&connection).cached_rect.unwrap().is_finite());
     }
 
     #[test]

@@ -22,6 +22,8 @@ use crate::recognizer::{
     RecognizerLeafData,
 };
 use crate::velocity_tracker::VelocityTracker;
+use waft_foundation::Ref;
+use waft_foundation::Retained;
 
 /// Signature for when `MultiDragGestureRecognizer` recognizes the start of a drag gesture.
 pub type GestureMultiDragStartCallback = Rc<dyn Fn(&mut App, Offset) -> Option<Rc<dyn Drag>>>;
@@ -117,7 +119,6 @@ fn dispose_pointer_state<P: MultiDragPointerState>(this: Handle<P>, app: &mut Ap
     if cfg!(debug_assertions) {
         state.pending_delta = None;
     }
-    app.destroy(this);
 }
 
 fn move_pointer<P: MultiDragPointerState>(this: Handle<P>, app: &mut App, event: PointerMoveEvent) {
@@ -188,11 +189,7 @@ pub struct AnyMultiDragPointerState {
     table: &'static PointerStateVTable,
 }
 
-impl From<AnyMultiDragPointerState> for HandleId {
-    fn from(state: AnyMultiDragPointerState) -> HandleId {
-        state.id
-    }
-}
+waft_foundation::erased_handle!(AnyMultiDragPointerState: MultiDragPointerState => MultiDragPointerState::as_pointer_state);
 
 struct PointerStateVTable {
     set_entry: fn(&mut App, HandleId, GestureArenaEntry),
@@ -227,7 +224,7 @@ impl PointerStateVTable {
 /// Unlike one-sequence recognizers, multiple drags can be recognized concurrently.
 pub struct MultiDragGestureRecognizerData {
     on_start: Option<GestureMultiDragStartCallback>,
-    pointers: Option<HashMap<i64, AnyMultiDragPointerState>>,
+    pointers: Option<HashMap<i64, Retained<AnyMultiDragPointerState>>>,
 }
 
 impl Default for MultiDragGestureRecognizerData {
@@ -249,7 +246,7 @@ pub trait MultiDragGestureRecognizer: RecognizerLeaf {
         self: Handle<Self>,
         app: &mut App,
         event: PointerDownEvent,
-    ) -> AnyMultiDragPointerState;
+    ) -> Retained<AnyMultiDragPointerState>;
 
     fn on_start(self: Handle<Self>, app: &App) -> Option<GestureMultiDragStartCallback> {
         app.get(self).multi_drag().on_start.clone()
@@ -303,12 +300,14 @@ fn add_allowed_pointer<R: MultiDragGestureRecognizer>(
             .contains_key(&pointer)
     );
     let state = this.create_new_pointer_state(app, event);
+    let state_handle = state.handle();
     app.get_mut(this)
         .multi_drag_mut()
         .pointers
         .as_mut()
         .unwrap()
         .insert(pointer, state);
+    let state = state_handle;
     let binding = GestureBinding::instance(app);
     binding.pointer_router(app).add_route(
         app,
@@ -326,10 +325,8 @@ fn handle_event<R: MultiDragGestureRecognizer>(
     event: PointerEvent,
 ) {
     let pointer = event.pointer();
-    let state = app.get(this).multi_drag().pointers.as_ref().unwrap()[&pointer];
+    let state = app.get(this).multi_drag().pointers.as_ref().unwrap()[&pointer].handle();
     // Dart keeps the receiver alive if a client's callback disposes the recognizer.
-    let _retained = app.retain(this);
-    let _state_retained = app.retain(state);
     match event {
         PointerEvent::Move(event) => (state.table.moved)(app, state.id, event),
         PointerEvent::Up(_) | PointerEvent::Cancel(_) => {
@@ -349,7 +346,7 @@ fn accept_gesture<R: MultiDragGestureRecognizer>(this: Handle<R>, app: &mut App,
         .as_ref()
         .unwrap()
         .get(&pointer)
-        .copied();
+        .map(|state| state.handle());
     if let Some(state) = state {
         (state.table.accepted)(
             app,
@@ -365,9 +362,7 @@ fn start_drag<R: MultiDragGestureRecognizer>(
     position: Offset,
     pointer: i64,
 ) -> Option<Rc<dyn Drag>> {
-    let state = app.get(this).multi_drag().pointers.as_ref().unwrap()[&pointer];
-    let _retained = app.retain(this);
-    let _state_retained = app.retain(state);
+    let state = app.get(this).multi_drag().pointers.as_ref().unwrap()[&pointer].handle();
     let drag = this.on_start(app).and_then(|callback| {
         GestureRecognizer::invoke_callback(this, app, "onStart", |app| callback(app, position))
             .flatten()
@@ -388,7 +383,7 @@ fn reject_gesture<R: MultiDragGestureRecognizer>(this: Handle<R>, app: &mut App,
         .as_ref()
         .unwrap()
         .get(&pointer)
-        .copied();
+        .map(|state| state.handle());
     if let Some(state) = state {
         (state.table.rejected)(app, state.id);
         remove_state(this, app, pointer);
@@ -474,7 +469,7 @@ impl DelayedPointerState {
         delay: Duration,
         kind: PointerDeviceKind,
         settings: Option<DeviceGestureSettings>,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         let this = app.create(Self {
             state: MultiDragPointerStateData::new(initial_position, kind, settings),
             timer: None,
@@ -483,14 +478,13 @@ impl DelayedPointerState {
         let timer = Timer::new(
             app,
             delay,
-            Listener::handle_method(this, Self::delay_passed),
+            Listener::handle_method(this.handle(), Self::delay_passed),
         );
-        app.get_mut(this).timer = Some(timer);
+        app.get_mut(&this).timer = Some(timer);
         this
     }
 
     fn delay_passed(self: Handle<Self>, app: &mut App) {
-        let _retained = app.retain(self);
         debug_assert!(app.get(self).timer.is_some());
         app.get_mut(self).timer = None;
         if let Some(starter) = app.get(self).starter.clone() {
@@ -535,7 +529,6 @@ impl MultiDragPointerState for DelayedPointerState {
         if state.pending_delta.unwrap().distance()
             > compute_hit_slop(state.kind, state.gesture_settings)
         {
-            let _retained = app.retain(self);
             self.resolve(app, GestureDisposition::Rejected);
             self.ensure_timer_stopped(app);
         }
@@ -556,7 +549,7 @@ macro_rules! recognizer {
         }
 
         impl $name {
-            pub fn new(app: &mut App) -> Handle<Self> {
+            pub fn new(app: &mut App) -> Ref<Self> {
                 let mut recognizer = GestureRecognizerData::new();
                 recognizer.set_allowed_buttons_filter(Rc::new(|buttons| buttons == K_PRIMARY_BUTTON));
                 app.create(Self {
@@ -590,7 +583,7 @@ macro_rules! recognizer {
                 self: Handle<Self>,
                 app: &mut App,
                 event: PointerDownEvent,
-            ) -> AnyMultiDragPointerState {
+            ) -> Retained<AnyMultiDragPointerState> {
                 ($create)(self, app, event)
             }
         }
@@ -632,8 +625,7 @@ recognizer!(
             event.kind,
             app.get(this).recognizer.gesture_settings,
         );
-        app.create(ImmediatePointerState { state })
-            .as_pointer_state()
+        app.create(ImmediatePointerState { state }).into_erased()
     }
 );
 
@@ -646,8 +638,7 @@ recognizer!(
             event.kind,
             app.get(this).recognizer.gesture_settings,
         );
-        app.create(HorizontalPointerState { state })
-            .as_pointer_state()
+        app.create(HorizontalPointerState { state }).into_erased()
     }
 );
 
@@ -660,8 +651,7 @@ recognizer!(
             event.kind,
             app.get(this).recognizer.gesture_settings,
         );
-        app.create(VerticalPointerState { state })
-            .as_pointer_state()
+        app.create(VerticalPointerState { state }).into_erased()
     }
 );
 
@@ -676,7 +666,7 @@ recognizer!(
             event.kind,
             app.get(this).recognizer.gesture_settings,
         )
-        .as_pointer_state()
+        .into_erased()
     },
     delay: Duration = K_LONG_PRESS_TIMEOUT
 );

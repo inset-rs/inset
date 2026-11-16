@@ -3,7 +3,7 @@
 use crate::*;
 use std::{rc::Rc, time::Duration};
 use waft_embedder::{Color, Radius, TextDirection};
-use waft_foundation::{App, Handle, Listener, Timer};
+use waft_foundation::{App, Handle, Listener, Ref, Timer};
 use waft_painting::{Axis, EdgeInsetsGeometry, TextStyle};
 use waft_widgets::*;
 
@@ -11,7 +11,7 @@ use waft_widgets::*;
 #[derive(Clone, Debug)]
 pub(crate) struct ScrollBarViewport {
     /// Caller-owned scroll state, also used by the native scrollbar drag recognizer.
-    controller: Handle<ScrollViewportController>,
+    controller: Ref<ScrollViewportController>,
     /// Content measured by the native single-child scrolling viewport, or a scroller of its own.
     child: WidgetRef,
     /// Scroll direction; navigation uses vertical and flyouts may use either axis.
@@ -24,7 +24,7 @@ pub(crate) struct ScrollBarViewport {
 impl ScrollBarViewport {
     /// Wraps content without changing controller ownership or native focus scrolling.
     pub(crate) fn new<K>(
-        controller: Handle<ScrollViewportController>,
+        controller: Ref<ScrollViewportController>,
         child: impl IntoWidget<K>,
     ) -> Self {
         Self {
@@ -38,7 +38,7 @@ impl ScrollBarViewport {
     /// Puts the scrollbar on `scroller`, a native scroller attached to `controller` with
     /// whatever lies between them, such as a lazy ListView inside a fixed margin.
     pub(crate) fn scroller<K>(
-        controller: Handle<ScrollViewportController>,
+        controller: Ref<ScrollViewportController>,
         scroller: impl IntoWidget<K>,
     ) -> Self {
         Self {
@@ -114,9 +114,9 @@ impl ScrollBarViewportState {
         let overflow = metrics.scrollable_length > 0.0;
         let expanded = app.get(self).expanded && overflow;
         let viewport = if widget.child_scrolls {
-            ScrollMetricsObserver::new(widget.controller, widget.child).into_widget()
+            ScrollMetricsObserver::new(widget.controller.clone(), widget.child).into_widget()
         } else {
-            ScrollViewport::new(widget.axis, widget.controller, widget.child).into_widget()
+            ScrollViewport::new(widget.axis, widget.controller.clone(), widget.child).into_widget()
         };
         let mut parts = vec![viewport];
         if overflow {
@@ -133,7 +133,7 @@ impl ScrollBarViewportState {
                     .into_widget(),
                 );
                 for increase in [false, true] {
-                    let controller = widget.controller;
+                    let controller = widget.controller.clone();
                     let button = RepeatButton::new(
                         FontIcon::symbol(if vertical {
                             if increase {
@@ -247,7 +247,7 @@ impl State for ScrollBarViewportState {
         }
     }
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.clone();
         MouseRegion::new()
             .opaque(false)
             .on_enter(Rc::new(move |app, _| {

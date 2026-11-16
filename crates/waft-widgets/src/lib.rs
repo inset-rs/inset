@@ -23,14 +23,15 @@ pub use media::*;
 // beside `Animation` they would make its methods ambiguous.
 pub use waft_animation::{
     AlwaysStoppedAnimation, Animatable, Animation, AnimationBehavior, AnimationController,
-    AnimationMax, AnimationMean, AnimationMin, AnimationStatus, AnimationStatusListener,
-    AnimationStyle, AnimationWithParent, AnyAnimation, CallbackAnimatable, ChainedEvaluation,
-    ColorTween, CompoundAnimation, ConstantTween, Cubic, Curve, CurveTween, CurvedAnimation,
-    Curves, ElasticInCurve, ElasticInOutCurve, ElasticOutCurve, FlippedCurve, FlippedTweenSequence,
-    IntTween, Interval, ProxyAnimation, RectTween, ReverseAnimation, ReverseTween, SawTooth,
-    SizeTween, Split, StepTween, ThreePointCubic, Threshold, TrainHoppingAnimation, Tween,
-    TweenLerp, TweenSequence, TweenSequenceItem, ValueConstantTween, ValueCurveTween, ValueTween,
-    k_always_complete_animation, k_always_dismissed_animation,
+    AnimationMax, AnimationMean, AnimationMin, AnimationRef, AnimationStatus,
+    AnimationStatusListener, AnimationStyle, AnimationWithParent, AnyAnimation, CallbackAnimatable,
+    ChainedEvaluation, ColorTween, CompoundAnimation, ConstantTween, Cubic, Curve, CurveTween,
+    CurvedAnimation, Curves, Drive, ElasticInCurve, ElasticInOutCurve, ElasticOutCurve,
+    FlippedCurve, FlippedTweenSequence, IntTween, Interval, ProxyAnimation, RectTween,
+    ReverseAnimation, ReverseTween, SawTooth, SizeTween, Split, StepTween, ThreePointCubic,
+    Threshold, TrainHoppingAnimation, Tween, TweenLerp, TweenSequence, TweenSequenceItem,
+    ValueConstantTween, ValueCurveTween, ValueTween, k_always_complete_animation,
+    k_always_dismissed_animation,
 };
 pub use waft_painting::*;
 pub use waft_rendering::{

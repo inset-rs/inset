@@ -3,7 +3,7 @@
 //! The layer tree: what a repaint boundary's recording is between paint and compositing, and
 //! what `RenderView.compositeFrame` uploads through a [`SceneBuilder`]. A layer is an arena
 //! object; edges are [`AnyLayer`] / [`AnyContainerLayer`] and lifetime is Flutter's
-//! [`LayerHandle`] count, which ends in `dispose` and `App::destroy`.
+//! [`LayerHandle`] count, which ends in `dispose` and `App::release_tree_node`.
 //!
 //! A layer keeps the [`EngineLayer`] its `add_to_scene` last made, a node of the scene's tree, and
 //! hands it to [`SceneBuilder::add_retained`] while nothing in its subtree changed, as Flutter's
@@ -24,7 +24,7 @@ use waft_embedder::{
     SceneBuilder, Size,
 };
 use waft_embedder::{CompositionLayer, VideoFrameReader};
-use waft_foundation::{App, Handle, HandleId, RetainedHandle};
+use waft_foundation::{App, Handle, HandleId, Ref};
 use waft_gestures::remove_perspective_transform;
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 
@@ -319,7 +319,8 @@ pub trait Layer: Sized + 'static {
     /// [`LayerHandle`] objects are typically held by the parent layer of this layer and any
     /// `RenderObject`s that participated in creating it.
     ///
-    /// After calling this method, the object is unusable: the base body destroys the arena entry.
+    /// After calling this method, the object is unusable: the base body gives up the tree's hold
+    /// on it, and the arena frees it at the next checkpoint unless a `Ref` still keeps it.
     /// An override ends with `LayerBase::dispose(self, app)`.
     fn dispose(self: Handle<Self>, app: &mut App) {
         LayerBase::dispose(self, app);
@@ -415,8 +416,8 @@ pub trait LayerBase: Layer {
             "Do not directly call dispose on a layer. Instead, use a LayerHandle."
         );
         data.debug_disposed = true;
-        // Dart's engine layer is dropped here; the arena entry goes with it.
-        app.destroy(self);
+        // Dart's engine layer is dropped here; the tree's part of the entry goes with it.
+        app.release_tree_node(self);
     }
 
     /// `Layer.attach`.
@@ -635,11 +636,9 @@ impl AnyLayer {
         self.update_subtree_composition_observer_count(app, 1);
         let callback_id = NEXT_CALLBACK_ID.fetch_add(1, Ordering::Relaxed) + 1;
         self.data_mut(app).callbacks.push((callback_id, callback));
+        // Dart's closure keeps the layer it names alive, disposed or not.
+        let layer = self.id.keep(app);
         Box::new(move |app: &mut App| {
-            // Dart's closure still finds a disposed layer; here dispose freed the entry.
-            if !app.contains(self.id) {
-                return;
-            }
             let index = self
                 .data(app)
                 .callbacks
@@ -650,6 +649,7 @@ impl AnyLayer {
                 self.data_mut(app).callbacks.remove(index);
             }
             self.update_subtree_composition_observer_count(app, -1);
+            drop(layer);
         })
     }
 
@@ -1018,7 +1018,7 @@ impl<T: ErasedLayer> LayerHandle<T> {
             return;
         }
         // The write comes before the unref, not after as in Dart: a layer's `parent_handle`
-        // lives in the layer it holds, and the unref may destroy that entry.
+        // lives in the layer it holds, and the unref may dispose that layer.
         at(app).layer = layer;
         if let Some(layer) = layer {
             layer.as_layer().data_mut(app).ref_count += 1;
@@ -1070,6 +1070,7 @@ impl PictureLayer {
             is_complex_hint: false,
             will_change_hint: false,
         })
+        .into_tree_node(app)
     }
 
     /// The picture recorded for this layer.
@@ -1176,6 +1177,7 @@ impl EmbeddedLayer {
             composition_layer,
             rect,
         })
+        .into_tree_node(app)
     }
 
     pub fn composition_layer(self: Handle<Self>, app: &App) -> &Arc<dyn CompositionLayer> {
@@ -1226,6 +1228,7 @@ impl VideoLayer {
             reader,
             rect,
         })
+        .into_tree_node(app)
     }
 
     pub fn reader(self: Handle<Self>, app: &App) -> &Arc<dyn VideoFrameReader> {
@@ -2044,6 +2047,7 @@ impl OffsetLayer {
             container_layer: ContainerLayerData::new(),
             offset_layer: OffsetLayerData::new(offset),
         })
+        .into_tree_node(app)
     }
 }
 
@@ -2158,6 +2162,7 @@ impl ClipRectLayer {
             clip_rect: None,
             clip_behavior: Clip::HardEdge,
         })
+        .into_tree_node(app)
     }
 
     /// The rectangle to clip in the parent's coordinate system.
@@ -2292,6 +2297,7 @@ impl ClipRRectLayer {
             clip_rrect: None,
             clip_behavior: Clip::AntiAlias,
         })
+        .into_tree_node(app)
     }
 
     /// The rounded-rect to clip in the parent's coordinate system.
@@ -2426,6 +2432,7 @@ impl ClipPathLayer {
             clip_path: None,
             clip_behavior: Clip::AntiAlias,
         })
+        .into_tree_node(app)
     }
 
     /// The path to clip in the parent's coordinate system.
@@ -2571,6 +2578,7 @@ impl ImageFilterLayer {
             offset_layer: OffsetLayerData::new(Offset::ZERO),
             image_filter: None,
         })
+        .into_tree_node(app)
     }
 
     /// The image filter to apply to children.
@@ -2688,6 +2696,7 @@ impl TransformLayer {
             inverted_transform: Cell::new(None),
             inverse_dirty: Cell::new(true),
         })
+        .into_tree_node(app)
     }
 
     /// The matrix to apply.
@@ -2851,6 +2860,7 @@ impl OpacityLayer {
             offset_layer: OffsetLayerData::new(Offset::ZERO),
             alpha: None,
         })
+        .into_tree_node(app)
     }
 
     /// The amount to multiply into the alpha channel.
@@ -2982,6 +2992,7 @@ impl BackdropFilterLayer {
             blend_mode: BlendMode::SrcOver,
             backdrop_key: None,
         })
+        .into_tree_node(app)
     }
 
     /// The filter to apply to the existing contents of the scene.
@@ -3120,7 +3131,7 @@ pub struct LayerLink {
 
 impl LayerLink {
     /// Creates a link with no leader.
-    pub fn new(app: &mut App) -> Handle<LayerLink> {
+    pub fn new(app: &mut App) -> Ref<LayerLink> {
         app.create(LayerLink {
             leader: None,
             debug_previous_leaders: None,
@@ -3198,9 +3209,7 @@ impl LayerLink {
 pub struct LeaderLayer {
     layer: LayerData,
     container_layer: ContainerLayerData,
-    /// `None` only while [`Layer::dispose`] takes the retain so it can [`App::release`] it
-    /// before the arena entry is destroyed.
-    link: Option<RetainedHandle<Handle<LayerLink>>>,
+    link: Ref<LayerLink>,
     offset: Offset,
 }
 
@@ -3212,14 +3221,14 @@ impl LeaderLayer {
     ///
     /// The [`offset`](Self::offset) property must be non-null before the compositing phase of
     /// the pipeline.
-    pub fn new(app: &mut App, link: Handle<LayerLink>) -> Handle<LeaderLayer> {
-        let link = app.retain(link);
+    pub fn new(app: &mut App, link: Ref<LayerLink>) -> Handle<LeaderLayer> {
         app.create(LeaderLayer {
             layer: LayerData::new(),
             container_layer: ContainerLayerData::new(),
-            link: Some(link),
+            link,
             offset: Offset::ZERO,
         })
+        .into_tree_node(app)
     }
 
     /// The object with which this layer should register.
@@ -3227,15 +3236,11 @@ impl LeaderLayer {
     /// The link will be established when this layer is [`Layer::attach`]ed, and will be cleared
     /// when this layer is [`Layer::detach`]ed.
     pub fn link(self: Handle<Self>, app: &App) -> Handle<LayerLink> {
-        app.get(self)
-            .link
-            .as_ref()
-            .expect("a LeaderLayer holds its link until dispose")
-            .get()
+        app.get(self).link.handle()
     }
 
     /// See [`link`](Self::link).
-    pub fn set_link(self: Handle<Self>, app: &mut App, value: Handle<LayerLink>) {
+    pub fn set_link(self: Handle<Self>, app: &mut App, value: Ref<LayerLink>) {
         let current = self.link(app);
         if current == value {
             return;
@@ -3244,13 +3249,7 @@ impl LeaderLayer {
             current.unregister_leader(app, self);
             value.register_leader(app, self);
         }
-        let retained = app.retain(value);
-        let old = app
-            .get_mut(self)
-            .link
-            .replace(retained)
-            .expect("a LeaderLayer holds its link until dispose");
-        app.release(old);
+        app.get_mut(self).link = value;
     }
 
     /// Offset from parent in the parent's coordinate system.
@@ -3284,13 +3283,7 @@ impl Layer for LeaderLayer {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let link = app
-            .get_mut(self)
-            .link
-            .take()
-            .expect("a LeaderLayer holds its link until dispose");
         ContainerLayer::dispose(self, app);
-        app.release(link);
     }
 
     fn attach(self: Handle<Self>, app: &mut App, owner: HandleId) {
@@ -3377,9 +3370,7 @@ impl ContainerLayer for LeaderLayer {
 pub struct FollowerLayer {
     layer: LayerData,
     container_layer: ContainerLayerData,
-    /// `None` only while [`Layer::dispose`] takes the retain so it can [`App::release`] it
-    /// before the arena entry is destroyed.
-    link: Option<RetainedHandle<Handle<LayerLink>>>,
+    link: Ref<LayerLink>,
     show_when_unlinked: bool,
     unlinked_offset: Offset,
     linked_offset: Offset,
@@ -3395,12 +3386,11 @@ impl FollowerLayer {
     /// The [`unlinked_offset`](Self::unlinked_offset), [`linked_offset`](Self::linked_offset),
     /// and [`show_when_unlinked`](Self::show_when_unlinked) properties must be non-null before
     /// the compositing phase of the pipeline.
-    pub fn new(app: &mut App, link: Handle<LayerLink>) -> Handle<FollowerLayer> {
-        let link = app.retain(link);
+    pub fn new(app: &mut App, link: Ref<LayerLink>) -> Handle<FollowerLayer> {
         app.create(FollowerLayer {
             layer: LayerData::new(),
             container_layer: ContainerLayerData::new(),
-            link: Some(link),
+            link,
             show_when_unlinked: true,
             unlinked_offset: Offset::ZERO,
             linked_offset: Offset::ZERO,
@@ -3409,6 +3399,7 @@ impl FollowerLayer {
             inverted_transform: Cell::new(None),
             inverse_dirty: Cell::new(true),
         })
+        .into_tree_node(app)
     }
 
     /// The link to the [`LeaderLayer`].
@@ -3417,25 +3408,15 @@ impl FollowerLayer {
     /// tree. When this layer is composited, it will apply a transform that moves its children
     /// to match the position of the [`LeaderLayer`].
     pub fn link(self: Handle<Self>, app: &App) -> Handle<LayerLink> {
-        app.get(self)
-            .link
-            .as_ref()
-            .expect("a FollowerLayer holds its link until dispose")
-            .get()
+        app.get(self).link.handle()
     }
 
     /// See [`link`](Self::link).
-    pub fn set_link(self: Handle<Self>, app: &mut App, value: Handle<LayerLink>) {
+    pub fn set_link(self: Handle<Self>, app: &mut App, value: Ref<LayerLink>) {
         if self.link(app) == value {
             return;
         }
-        let retained = app.retain(value);
-        let old = app
-            .get_mut(self)
-            .link
-            .replace(retained)
-            .expect("a FollowerLayer holds its link until dispose");
-        app.release(old);
+        app.get_mut(self).link = value;
     }
 
     /// Whether to show the layer's contents when the [`link`](Self::link) does not point to a
@@ -3698,13 +3679,7 @@ impl Layer for FollowerLayer {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let link = app
-            .get_mut(self)
-            .link
-            .take()
-            .expect("a FollowerLayer holds its link until dispose");
         ContainerLayer::dispose(self, app);
-        app.release(link);
     }
 
     fn attach(self: Handle<Self>, app: &mut App, owner: HandleId) {
@@ -3844,6 +3819,7 @@ impl AnnotatedRegionLayer {
             offset: Offset::ZERO,
             opaque: false,
         })
+        .into_tree_node(app)
     }
 
     /// The annotated object, which is added to the result if all restrictions are met.
@@ -4031,13 +4007,16 @@ mod tests {
         let mut app = cell.borrow_mut();
         let layer = offset_layer(&mut app);
         let handle = app.create(LayerHandle::<AnyLayer>::new());
-        LayerHandle::set_layer(&mut app, |app| app.get_mut(handle), Some(layer));
+        LayerHandle::set_layer(&mut app, |app| app.get_mut(&handle), Some(layer));
         assert_eq!(layer.debug_handle_count(&app), 1);
-        LayerHandle::set_layer(&mut app, |app| app.get_mut(handle), None);
+        LayerHandle::set_layer(&mut app, |app| app.get_mut(&handle), None);
         assert!(layer.debug_disposed(&app));
+        assert!(app.contains(layer.id()), "readable until the checkpoint");
+        drop(app);
+        cell.checkpoint();
         assert!(
-            !app.contains(layer.id()),
-            "dispose destroys the arena entry"
+            !cell.borrow().contains(layer.id()),
+            "dispose released the tree's part of the arena entry"
         );
     }
 
@@ -4060,12 +4039,12 @@ mod tests {
         let parent = OffsetLayer::new(&mut app, Offset::ZERO).as_container_layer();
         let child = offset_layer(&mut app);
         let handle = app.create(LayerHandle::<AnyLayer>::new());
-        LayerHandle::set_layer(&mut app, |app| app.get_mut(handle), Some(child));
+        LayerHandle::set_layer(&mut app, |app| app.get_mut(&handle), Some(child));
         parent.append(&mut app, child);
         child.remove(&mut app);
         assert!(!child.debug_disposed(&app));
         assert_eq!(child.parent(&app), None);
-        LayerHandle::set_layer(&mut app, |app| app.get_mut(handle), None);
+        LayerHandle::set_layer(&mut app, |app| app.get_mut(&handle), None);
         assert!(child.debug_disposed(&app));
     }
 
@@ -4098,8 +4077,8 @@ mod tests {
         let child = offset_layer(&mut app);
         parent.append(&mut app, child);
         let handle = app.create(LayerHandle::<AnyContainerLayer>::new());
-        LayerHandle::set_layer(&mut app, |app| app.get_mut(handle), Some(parent));
-        LayerHandle::set_layer(&mut app, |app| app.get_mut(handle), None);
+        LayerHandle::set_layer(&mut app, |app| app.get_mut(&handle), Some(parent));
+        LayerHandle::set_layer(&mut app, |app| app.get_mut(&handle), None);
         assert!(parent.as_layer().debug_disposed(&app));
         assert!(child.debug_disposed(&app));
     }
@@ -4511,7 +4490,7 @@ mod tests {
         let owner = app.create(());
         let link = LayerLink::new(&mut app);
         assert!(link.leader(&app).is_none());
-        let leader = LeaderLayer::new(&mut app, link);
+        let leader = LeaderLayer::new(&mut app, link.clone());
         leader.as_layer().attach(&mut app, owner.id());
         assert_eq!(link.leader(&app), Some(leader));
         leader.as_layer().detach(&mut app);
@@ -4525,7 +4504,7 @@ mod tests {
         let owner = app.create(());
         let root = OffsetLayer::new(&mut app, Offset::ZERO);
         let link = LayerLink::new(&mut app);
-        let leader = LeaderLayer::new(&mut app, link);
+        let leader = LeaderLayer::new(&mut app, link.clone());
         root.as_container_layer()
             .append(&mut app, leader.as_layer());
         root.as_layer().attach(&mut app, owner.id());
@@ -4540,8 +4519,8 @@ mod tests {
         let mut app = cell.borrow_mut();
         let owner = app.create(());
         let link = LayerLink::new(&mut app);
-        let leader1 = LeaderLayer::new(&mut app, link);
-        let leader2 = LeaderLayer::new(&mut app, link);
+        let leader1 = LeaderLayer::new(&mut app, link.clone());
+        let leader2 = LeaderLayer::new(&mut app, link.clone());
         leader1.as_layer().attach(&mut app, owner.id());
         leader2.as_layer().attach(&mut app, owner.id());
         assert_eq!(link.leader(&app), Some(leader2));
@@ -4556,10 +4535,10 @@ mod tests {
         let mut app = cell.borrow_mut();
         let owner = app.create(());
         let link = LayerLink::new(&mut app);
-        let leader = LeaderLayer::new(&mut app, link);
+        let leader = LeaderLayer::new(&mut app, link.clone());
         leader.as_layer().attach(&mut app, owner.id());
         let link2 = LayerLink::new(&mut app);
-        leader.set_link(&mut app, link2);
+        leader.set_link(&mut app, link2.clone());
         leader.as_layer().detach(&mut app);
         assert_eq!(leader.link(&app), link2);
         assert!(link.leader(&app).is_none());
@@ -4573,7 +4552,7 @@ mod tests {
         let owner = app.create(());
         let root = OffsetLayer::new(&mut app, Offset::ZERO);
         let link = LayerLink::new(&mut app);
-        let leader = LeaderLayer::new(&mut app, link);
+        let leader = LeaderLayer::new(&mut app, link.clone());
         leader.set_offset(&mut app, Offset::new(10.0, 20.0));
         let follower = FollowerLayer::new(&mut app, link);
         root.as_container_layer()

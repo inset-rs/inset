@@ -8,22 +8,22 @@ use std::time::Duration;
 
 use waft_animation::{
     AnimationBehavior, AnimationController, AnimationLocalListenersMixin,
-    AnimationLocalStatusListenersMixin, AnimationStatus, AnimationStatusListener, AnyAnimation,
-    IntTween, Tween,
+    AnimationLocalStatusListenersMixin, AnimationRef, AnimationStatus, AnimationStatusListener,
+    Drive, IntTween, Tween,
 };
 use waft_embedder::{Canvas, Color, Matrix4, Offset, Paint, Size, TextDirection};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{BorderRadius, ShapeBorderRef};
 use waft_rendering::AnyRenderBox;
 
 use crate::ink_well::{
-    AnyInteractiveInkFeature, InteractiveInkFeature, InteractiveInkFeatureData,
-    InteractiveInkFeatureFactory, InteractiveInkFeatureFactoryRef, InteractiveInkFeatureLeaf,
-    InteractiveInkFeatureLeafData, InteractiveInkFeatureObject,
+    InteractiveInkFeature, InteractiveInkFeatureData, InteractiveInkFeatureFactory,
+    InteractiveInkFeatureFactoryRef, InteractiveInkFeatureLeaf, InteractiveInkFeatureLeafData,
+    InteractiveInkFeatureRef,
 };
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, Material, RectCallback,
+    Material, RectCallback,
 };
 
 const K_UNCONFIRMED_SPLASH_DURATION: Duration = Duration::from_secs(1);
@@ -91,7 +91,7 @@ impl InteractiveInkFeatureFactory for InkSplashFactory {
         custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
-    ) -> AnyInteractiveInkFeature {
+    ) -> InteractiveInkFeatureRef {
         InkSplash::new(
             app,
             controller,
@@ -106,7 +106,7 @@ impl InteractiveInkFeatureFactory for InkSplashFactory {
             radius,
             on_removed,
         )
-        .as_interactive_ink_feature()
+        .into_erased()
     }
 }
 
@@ -142,12 +142,10 @@ pub struct InkSplash {
     clip_callback: Option<RectCallback>,
     reposition_to_reference_box: bool,
     text_direction: TextDirection,
-    radius: Option<AnyAnimation<f64>>,
-    radius_controller: Option<Handle<AnimationController>>,
-    radius_tween: Option<Handle<Tween<f64>>>,
-    alpha: Option<AnyAnimation<i64>>,
-    alpha_controller: Option<Handle<AnimationController>>,
-    alpha_tween: Option<Handle<IntTween>>,
+    radius: Option<AnimationRef<f64>>,
+    radius_controller: Option<Ref<AnimationController>>,
+    alpha: Option<AnimationRef<i64>>,
+    alpha_controller: Option<Ref<AnimationController>>,
 }
 
 impl InkSplash {
@@ -179,7 +177,7 @@ impl InkSplash {
         custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
-    ) -> Handle<InkSplash> {
+    ) -> Ref<InkSplash> {
         let target_radius = radius.unwrap_or_else(|| {
             get_target_radius(
                 app,
@@ -201,13 +199,12 @@ impl InkSplash {
             text_direction,
             radius: None,
             radius_controller: None,
-            radius_tween: None,
             alpha: None,
             alpha_controller: None,
-            alpha_tween: None,
         });
+        let handle = this.handle();
         let vsync = controller.vsync(app);
-        let radius_controller = AnimationController::create(
+        let radius_controller = AnimationController::new(
             app,
             None,
             Some(K_UNCONFIRMED_SPLASH_DURATION),
@@ -221,7 +218,7 @@ impl InkSplash {
         radius_controller.forward(app, None);
         let radius_tween = Tween::new(app, Some(K_SPLASH_INITIAL_SIZE), Some(target_radius));
         let radius = radius_controller.drive(app, radius_tween);
-        let alpha_controller = AnimationController::create(
+        let alpha_controller = AnimationController::new(
             app,
             None,
             Some(K_SPLASH_FADE_DURATION),
@@ -235,20 +232,18 @@ impl InkSplash {
         alpha_controller.add_status_listener(
             app,
             AnimationStatusListener::new(move |status, app| {
-                this.handle_alpha_status_changed(app, status)
+                handle.handle_alpha_status_changed(app, status)
             }),
         );
         let alpha_tween = IntTween::new(app, Some(i64::from(color.alpha())), Some(0));
         let alpha = alpha_controller.drive(app, alpha_tween);
-        let splash = app.get_mut(this);
+        let splash = app.get_mut(handle);
         splash.radius_controller = Some(radius_controller);
-        splash.radius_tween = Some(radius_tween);
         splash.radius = Some(radius);
         splash.alpha_controller = Some(alpha_controller);
-        splash.alpha_tween = Some(alpha_tween);
         splash.alpha = Some(alpha);
 
-        controller.add_ink_feature(app, this.as_ink_feature());
+        controller.add_ink_feature(app, this.erase());
         this
     }
 
@@ -264,7 +259,10 @@ impl InkSplash {
     }
 
     fn radius_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).radius_controller.expect("created in new")
+        app.get(self)
+            .radius_controller
+            .handle()
+            .expect("created in new")
     }
 
     fn handle_alpha_status_changed(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
@@ -302,12 +300,13 @@ impl InteractiveInkFeatureLeaf for InkSplash {
         radius_controller.forward(app, None);
         app.get(self)
             .alpha_controller
+            .as_ref()
             .expect("not disposed")
             .forward(app, None);
     }
 
     fn cancel(self: Handle<Self>, app: &mut App) {
-        if let Some(alpha_controller) = app.get(self).alpha_controller {
+        if let Some(alpha_controller) = app.get(self).alpha_controller.handle() {
             alpha_controller.forward(app, None);
         }
     }
@@ -323,32 +322,13 @@ impl InkFeatureLeaf for InkSplash {
             .take()
             .expect("disposed once");
         alpha_controller.dispose(app);
-        app.destroy_lingering(radius_controller);
-        app.destroy_lingering(alpha_controller);
-        let splash = app.get_mut(self);
-        let radius_tween = splash.radius_tween.take();
-        let alpha_tween = splash.alpha_tween.take();
-        if let Some(radius_tween) = radius_tween {
-            app.destroy_lingering(radius_tween);
-        }
-        if let Some(alpha_tween) = alpha_tween {
-            app.destroy_lingering(alpha_tween);
-        }
-        let splash = app.get_mut(self);
-        let driven = [
-            splash.radius.take().map(|radius| radius.id()),
-            splash.alpha.take().map(|alpha| alpha.id()),
-        ];
-        for animation in driven.into_iter().flatten() {
-            app.destroy_lingering(animation);
-        }
         InkFeature::dispose(self, app);
     }
 
     fn paint_feature(self: Handle<Self>, app: &mut App, canvas: &mut Canvas, transform: &Matrix4) {
         let splash = app.get(self);
-        let alpha = splash.alpha.expect("created in new").value(app);
-        let radius = splash.radius.expect("created in new").value(app);
+        let alpha = splash.alpha.as_ref().expect("created in new").value(app);
+        let radius = splash.radius.as_ref().expect("created in new").value(app);
         let color = InteractiveInkFeature::color(self, app);
         let paint = Paint::from_color(color.with_alpha(alpha as i32).into());
         let mut center = splash.position;

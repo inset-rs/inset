@@ -984,7 +984,7 @@ impl HitTestTarget for BoxHitTestEntry {
         self.target.handle_event(app, event, self);
     }
 
-    fn retained_handle(&self) -> Option<HandleId> {
+    fn arena_id(&self) -> Option<HandleId> {
         Some(self.target.id)
     }
 }

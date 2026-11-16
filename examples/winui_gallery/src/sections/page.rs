@@ -1,7 +1,7 @@
 //! The Page example: the gallery itself is a `Page`, and this destination fills the area the page leaves free, its text box on the bottom edge, so the system's bars and the keyboard can be seen to stay clear of it.
 
 use crate::{example, label};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 use waft_painting::EdgeInsetsGeometry;
 use waft_rendering::{CrossAxisAlignment, MainAxisSize};
 use waft_widgets::*;
@@ -53,7 +53,7 @@ struct BottomMessageState {
     /// Native widget state identity.
     state: StateData<BottomMessage>,
     /// The message being written.
-    controller: Option<Handle<TextEditingController>>,
+    controller: Option<Ref<TextEditingController>>,
 }
 
 impl StatefulWidget for BottomMessage {
@@ -78,14 +78,17 @@ impl State for BottomMessageState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(controller) = app.get_mut(self).controller.take() {
-            app.get_mut(controller).dispose();
-            app.destroy(controller);
+            controller.dispose(app);
         }
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let controller = app.get(self).controller.expect("made in init_state");
-        TextBox::new(controller.as_controller())
+        let controller = app
+            .get(self)
+            .controller
+            .clone()
+            .expect("made in init_state");
+        TextBox::new(controller.into_erased())
             .header(Text::new("Message"))
             .placeholder_text("Type a message")
             .into_widget()

@@ -22,6 +22,7 @@ use crate::widgets::basic::Directionality;
 use crate::widgets::ticker_provider::{
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData,
 };
+use waft_foundation::Ref;
 
 /// Animated widget that automatically transitions its size over a given
 /// duration whenever the given child's size changes.
@@ -155,7 +156,7 @@ impl SingleTickerProviderStateMixin for AnimatedSizeState {
 }
 
 impl TickerProviderObject for AnimatedSizeState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }

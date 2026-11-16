@@ -79,7 +79,7 @@ use waft_animation::{
     AnimationStatusListener,
 };
 use waft_embedder::{Clip, Color, Offset, Size, TextBaseline};
-use waft_foundation::{App, Handle, Listenable, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref, ValueChanged};
 use waft_painting::{Alignment, EdgeInsets, EdgeInsetsGeometry, ShapeBorderRef, force_to_point};
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
@@ -90,7 +90,7 @@ use waft_rendering::{
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    Align, AnyFocusNode, BuildContext, ConstrainedBox, IconTheme, IconThemeData, IntoWidget,
+    Align, BuildContext, ConstrainedBox, FocusNodeRef, IconTheme, IconThemeData, IntoWidget,
     KeyRef, Padding, RenderObjectWidget, Semantics, SingleChildRenderObjectWidget, State,
     StateData, StatefulWidget, TickerProviderStateMixin, TickerProviderStateMixinData, WidgetRef,
     WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
@@ -189,7 +189,7 @@ pub struct ButtonStyleButtonData {
     pub clip_behavior: Option<Clip>,
 
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// True if this widget will be selected as the initial focus when no other
     /// node in its scope is currently focused.
@@ -201,7 +201,7 @@ pub struct ButtonStyleButtonData {
     /// Classes based on this one can provide their own [`MaterialStatesController`] to which
     /// they've added listeners. They can also update the controller's value however, this may
     /// only be done when it's safe to call `State::set_state`, like in an event handler.
-    pub states_controller: Option<Handle<MaterialStatesController>>,
+    pub states_controller: Option<Ref<MaterialStatesController>>,
 
     /// Whether this button is in the selected state.
     ///
@@ -341,7 +341,7 @@ macro_rules! button_style_button_setters {
     };
     (@setter $name:ident focus_node) => {
         $crate::button_style_button_setters!(
-            @option $name focus_node: ::waft_widgets::AnyFocusNode => "focusNode"
+            @option $name focus_node: ::waft_widgets::FocusNodeRef => "focusNode"
         );
     };
     (@setter $name:ident clip_behavior) => {
@@ -352,7 +352,7 @@ macro_rules! button_style_button_setters {
     (@setter $name:ident states_controller) => {
         $crate::button_style_button_setters!(
             @option $name states_controller:
-                ::waft_foundation::Handle<::waft_widgets::WidgetStatesController> => "statesController"
+                ::waft_foundation::Ref<::waft_widgets::WidgetStatesController> => "statesController"
         );
     };
     (@setter $name:ident is_selected) => {
@@ -558,10 +558,10 @@ where
 {
     state: StateData<W>,
     ticker_provider: TickerProviderStateMixinData,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
     elevation: Option<f64>,
     background_color: Option<Color>,
-    internal_states_controller: Option<Handle<MaterialStatesController>>,
+    internal_states_controller: Option<Ref<MaterialStatesController>>,
 }
 
 impl<W> ButtonStyleState<W>
@@ -585,11 +585,12 @@ where
         self.set_state(app, |_state| {});
     }
 
-    fn states_controller(self: Handle<Self>, app: &App) -> Handle<MaterialStatesController> {
+    fn states_controller(self: Handle<Self>, app: &App) -> Ref<MaterialStatesController> {
         self.widget(app)
             .button_style_button_data()
             .states_controller
-            .or(app.get(self).internal_states_controller)
+            .clone()
+            .or_else(|| app.get(self).internal_states_controller.clone())
             .expect("created in init_states_controller")
     }
 
@@ -653,7 +654,7 @@ impl<W> TickerProviderObject for ButtonStyleState<W>
 where
     W: ButtonStyleButton + StatefulWidget<State = ButtonStyleState<W>>,
 {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -674,9 +675,10 @@ where
         let widget_states_controller = self
             .widget(app)
             .button_style_button_data()
-            .states_controller;
+            .states_controller
+            .clone();
         if widget_states_controller != old.states_controller {
-            if let Some(old_states_controller) = old.states_controller {
+            if let Some(old_states_controller) = old.states_controller.clone() {
                 old_states_controller.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_states_controller_change),
@@ -685,8 +687,7 @@ where
             if widget_states_controller.is_some()
                 && let Some(internal) = app.get_mut(self).internal_states_controller.take()
             {
-                app.get_mut(internal).dispose();
-                app.destroy(internal);
+                internal.dispose(app);
             }
             self.init_states_controller(app);
         }
@@ -716,10 +717,9 @@ where
             &Listener::handle_method(self, Self::handle_states_controller_change),
         );
         if let Some(internal) = app.get_mut(self).internal_states_controller.take() {
-            app.get_mut(internal).dispose();
-            app.destroy(internal);
+            internal.dispose(app);
         }
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             controller.dispose(app);
         }
         TickerProviderStateMixin::dispose(self, app);
@@ -737,7 +737,7 @@ where
             theme_style: widget.theme_style_of(app, context),
             default_style: widget.default_style_of(app, context),
         };
-        let states = app.get(self.states_controller(app)).value().clone();
+        let states = app.get(&self.states_controller(app)).value().clone();
 
         let resolved_elevation = styles.resolve(app, &states, |style, app| style.elevation(app));
         let resolved_text_style = styles.resolve(app, &states, |style, app| style.text_style(app));
@@ -857,14 +857,14 @@ where
                 < 1.0
             && resolved_elevation == Some(0.0)
         {
-            let controller = app.get(self).controller;
+            let controller = app.get(self).controller.handle();
             if controller.map(|controller| app.get(controller).duration)
                 != Some(Some(resolved_animation_duration))
             {
                 if let Some(controller) = controller {
                     controller.dispose(app);
                 }
-                let controller = AnimationController::create(
+                let controller = AnimationController::new(
                     app,
                     None,
                     Some(resolved_animation_duration),
@@ -881,7 +881,7 @@ where
                 app.get_mut(self).controller = Some(controller);
             }
             resolved_background_color = Some(background_color); // Defer changing the background color.
-            let controller = app.get(self).controller.expect("created above");
+            let controller = app.get(self).controller.handle().expect("created above");
             controller.set_value(app, 0.0);
             controller.forward(app, None);
         }
@@ -926,7 +926,7 @@ where
         ink_well.ink_response.on_tap = button.on_pressed.clone();
         ink_well.ink_response.on_long_press = button.on_long_press.clone();
         ink_well.ink_response.on_hover = button.on_hover.clone();
-        ink_well.ink_response.focus_node = button.focus_node;
+        ink_well.ink_response.focus_node = button.focus_node.clone();
         ink_well.ink_response.on_focus_change = button.on_focus_change.clone();
         ink_well.ink_response.splash_factory = resolved_splash_factory;
         let mut result = AnimatedTheme::new(
@@ -1362,7 +1362,7 @@ mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{
         Builder, Center, Column, DecoratedBox, DefaultTextStyle, Directionality, FocusNode,
-        FocusNodeLeaf, GlobalKey, MainAxisSize, SizedBox, WidgetStatePropertyAll,
+        GlobalKey, MainAxisSize, SizedBox, WidgetStatePropertyAll,
     };
 
     use super::*;
@@ -1888,7 +1888,7 @@ mod tests {
                     Center::new().child(
                         TestButton::new(enabled.then(pressed), sized(40.0, 10.0))
                             .key(key.clone().into())
-                            .states_controller(controller),
+                            .states_controller(controller.clone()),
                     ),
                 )
             };
@@ -1896,7 +1896,7 @@ mod tests {
             let frame = build_frame(&tester, true);
             tester.pump_widget(frame);
 
-            assert_eq!(value(&tester, controller), states(&[]));
+            assert_eq!(value(&tester, controller.handle()), states(&[]));
             assert_eq!(count.get(), 0);
 
             let center = tester.center_of(&key);
@@ -1905,26 +1905,32 @@ mod tests {
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
 
-            assert_eq!(value(&tester, controller), states(&[WidgetState::Hovered]));
+            assert_eq!(
+                value(&tester, controller.handle()),
+                states(&[WidgetState::Hovered])
+            );
             assert_eq!(count.get(), 1);
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
 
-            assert_eq!(value(&tester, controller), states(&[]));
+            assert_eq!(value(&tester, controller.handle()), states(&[]));
             assert_eq!(count.get(), 2);
 
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
 
-            assert_eq!(value(&tester, controller), states(&[WidgetState::Hovered]));
+            assert_eq!(
+                value(&tester, controller.handle()),
+                states(&[WidgetState::Hovered])
+            );
             assert_eq!(count.get(), 3);
 
             tester.send(&gesture, waft_embedder::PointerChange::Down);
             tester.pump_and_settle();
 
             assert_eq!(
-                value(&tester, controller),
+                value(&tester, controller.handle()),
                 states(&[WidgetState::Hovered, WidgetState::Pressed])
             );
             assert_eq!(count.get(), 4);
@@ -1932,19 +1938,22 @@ mod tests {
             tester.up(&gesture);
             tester.pump_and_settle();
 
-            assert_eq!(value(&tester, controller), states(&[WidgetState::Hovered]));
+            assert_eq!(
+                value(&tester, controller.handle()),
+                states(&[WidgetState::Hovered])
+            );
             assert_eq!(count.get(), 5);
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
 
-            assert_eq!(value(&tester, controller), states(&[]));
+            assert_eq!(value(&tester, controller.handle()), states(&[]));
             assert_eq!(count.get(), 6);
 
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester, controller),
+                value(&tester, controller.handle()),
                 states(&[WidgetState::Hovered, WidgetState::Pressed])
             );
             assert_eq!(count.get(), 8); // adds hovered and pressed - two changes
@@ -1955,13 +1964,16 @@ mod tests {
             tester.pump_widget(frame);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester, controller),
+                value(&tester, controller.handle()),
                 states(&[WidgetState::Hovered, WidgetState::Disabled])
             );
             assert_eq!(count.get(), 10); // removes pressed and adds disabled - two changes
             tester.move_to(&mut gesture, Offset::ZERO, true);
             tester.pump_and_settle();
-            assert_eq!(value(&tester, controller), states(&[WidgetState::Disabled]));
+            assert_eq!(
+                value(&tester, controller.handle()),
+                states(&[WidgetState::Disabled])
+            );
             assert_eq!(count.get(), 11);
         });
     }
@@ -1978,11 +1990,15 @@ mod tests {
             let frame = themed(
                 &tester,
                 theme,
-                Center::new()
-                    .child(TestButton::new(None, sized(40.0, 10.0)).states_controller(controller)),
+                Center::new().child(
+                    TestButton::new(None, sized(40.0, 10.0)).states_controller(controller.clone()),
+                ),
             );
             tester.pump_widget(frame);
-            assert_eq!(value(&tester, controller), states(&[WidgetState::Disabled]));
+            assert_eq!(
+                value(&tester, controller.handle()),
+                states(&[WidgetState::Disabled])
+            );
             assert_eq!(count.get(), 1);
         });
     }
@@ -1995,7 +2011,7 @@ mod tests {
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             let build_button = |tester: &WidgetTester, is_selected: Option<bool>| {
                 let mut button = TestButton::new(Some(pressed()), sized(40.0, 10.0))
-                    .states_controller(controller);
+                    .states_controller(controller.clone());
                 button.button_style_button.is_selected = is_selected;
                 let theme = ThemeData::new(&tester.cell.borrow());
                 themed(tester, theme, Center::new().child(button))
@@ -2003,19 +2019,19 @@ mod tests {
 
             let frame = build_button(&tester, Some(true));
             tester.pump_widget(frame);
-            assert!(value(&tester, controller).contains(&WidgetState::Selected));
+            assert!(value(&tester, controller.handle()).contains(&WidgetState::Selected));
 
             let frame = build_button(&tester, Some(false));
             tester.pump_widget(frame);
-            assert!(!value(&tester, controller).contains(&WidgetState::Selected));
+            assert!(!value(&tester, controller.handle()).contains(&WidgetState::Selected));
 
             let frame = build_button(&tester, Some(true));
             tester.pump_widget(frame);
-            assert!(value(&tester, controller).contains(&WidgetState::Selected));
+            assert!(value(&tester, controller.handle()).contains(&WidgetState::Selected));
 
             let frame = build_button(&tester, None);
             tester.pump_widget(frame);
-            assert!(!value(&tester, controller).contains(&WidgetState::Selected));
+            assert!(!value(&tester, controller.handle()).contains(&WidgetState::Selected));
         });
     }
 
@@ -2158,7 +2174,8 @@ mod tests {
             let mut tester = tester();
             let foreground_states = Rc::new(RefCell::new(WidgetStates::new()));
             let background_states = Rc::new(RefCell::new(WidgetStates::new()));
-            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             let key = GlobalKey::new();
             let record = |seen: &Rc<RefCell<WidgetStates>>| {
                 let seen = Rc::clone(seen);
@@ -2174,7 +2191,7 @@ mod tests {
                 Center::new().child(
                     TestButton::new(Some(pressed()), sized(40.0, 10.0))
                         .key(key.clone().into())
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .style(
                             ButtonStyle::new()
                                 .background_builder(record(&background_states))

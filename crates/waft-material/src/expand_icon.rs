@@ -4,10 +4,11 @@ use std::f64::consts::PI;
 use std::fmt;
 
 use waft_animation::{
-    Animatable, AnimationBehavior, AnimationController, AnyAnimation, CurveTween, Curves, Tween,
+    Animatable, AnimationBehavior, AnimationController, AnimationRef, CurveTween, Curves, Drive,
+    Tween,
 };
 use waft_embedder::{Brightness, Color};
-use waft_foundation::{App, Handle, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listener, Ref, ValueChanged};
 use waft_painting::EdgeInsetsGeometry;
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
@@ -220,21 +221,28 @@ pub struct ExpandIconState {
     state: StateData<ExpandIcon>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     /// Created in `init_state`, because a state is created without the [`App`].
-    controller: Option<Handle<AnimationController>>,
-    icon_turns: Option<AnyAnimation<f64>>,
+    controller: Option<Ref<AnimationController>>,
+    icon_turns: Option<AnimationRef<f64>>,
     /// Dart's `static final Animatable<double> _iconTurnTween`, a `Tween` chained to a
     /// `CurveTween`, created in `init_state` because an arena object needs the [`App`].
-    half_turn_tween: Option<Handle<Tween<f64>>>,
-    fast_out_slow_in_tween: Option<Handle<CurveTween>>,
+    half_turn_tween: Option<Ref<Tween<f64>>>,
+    fast_out_slow_in_tween: Option<Ref<CurveTween>>,
 }
 
 impl ExpandIconState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .as_ref()
+            .expect("created in init_state")
+            .handle()
     }
 
-    fn icon_turns(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).icon_turns.expect("created in init_state")
+    fn icon_turns(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
+        app.get(self)
+            .icon_turns
+            .clone()
+            .expect("created in init_state")
     }
 
     fn handle_pressed(self: Handle<Self>, app: &mut App) {
@@ -287,7 +295,7 @@ impl SingleTickerProviderStateMixin for ExpandIconState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for ExpandIconState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -299,7 +307,7 @@ impl State for ExpandIconState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let half_turn_tween = Tween::new(app, Some(0.0), Some(0.5));
         let fast_out_slow_in_tween = CurveTween::new(app, Curves::fast_out_slow_in());
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(K_THEME_ANIMATION_DURATION),
@@ -309,11 +317,16 @@ impl State for ExpandIconState {
             AnimationBehavior::Normal,
             self,
         );
-        let icon_turns = controller.drive(app, half_turn_tween.chain(fast_out_slow_in_tween));
+        let icon_turns = controller.drive(
+            app,
+            half_turn_tween
+                .clone()
+                .chain(fast_out_slow_in_tween.clone()),
+        );
         let state = app.get_mut(self);
         state.half_turn_tween = Some(half_turn_tween);
         state.fast_out_slow_in_tween = Some(fast_out_slow_in_tween);
-        state.controller = Some(controller);
+        state.controller = Some(controller.clone());
         state.icon_turns = Some(icon_turns);
         // If the widget is initially expanded, rotate the icon without animating it.
         if self.widget(app).is_expanded {
@@ -329,21 +342,6 @@ impl State for ExpandIconState {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        let state = app.get_mut(self);
-        let icon_turns = state.icon_turns.take();
-        let half_turn_tween = state.half_turn_tween.take();
-        let fast_out_slow_in_tween = state.fast_out_slow_in_tween.take();
-        state.controller = None;
-        app.destroy(controller);
-        if let Some(icon_turns) = icon_turns {
-            app.destroy(icon_turns.id());
-        }
-        if let Some(half_turn_tween) = half_turn_tween {
-            app.destroy(half_turn_tween);
-        }
-        if let Some(fast_out_slow_in_tween) = fast_out_slow_in_tween {
-            app.destroy(fast_out_slow_in_tween);
-        }
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &ExpandIcon) {

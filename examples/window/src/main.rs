@@ -17,6 +17,7 @@
 //! cargo run -p window -- beta
 //! ```
 #![windows_subsystem = "windows"]
+#![feature(arbitrary_self_types)]
 
 use std::cell::Cell;
 use std::ffi::OsString;

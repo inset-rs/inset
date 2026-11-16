@@ -12,7 +12,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Image, ImageDecodeError};
-use waft_foundation::{App, Handle, Listener, RetainedHandle};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 
 /// A decoded image and how to read it. Flutter `ImageInfo`.
 ///
@@ -158,18 +158,17 @@ impl Debug for ImageStreamListener {
 /// the receiver allocated while disposal invokes callbacks, as a Dart reference would.
 #[must_use = "dispose the keep-alive handle when its owner releases the completer"]
 pub struct ImageStreamCompleterHandle {
-    completer: RetainedHandle<Handle<ImageStreamCompleter>>,
+    completer: Ref<ImageStreamCompleter>,
 }
 
 impl ImageStreamCompleterHandle {
     /// Releases this keep-alive and disposes the completer if it has no listeners or other holds.
     pub fn dispose(self, app: &mut App) {
-        let completer = self.completer.get();
+        let completer = self.completer.handle();
         debug_assert!(!app.is_disposed(completer));
         debug_assert!(app.get(completer).keep_alive_handles > 0);
         app.get_mut(completer).keep_alive_handles -= 1;
         completer.maybe_dispose(app);
-        app.release(self.completer);
     }
 }
 
@@ -194,7 +193,7 @@ pub type WatchedCallback = Rc<dyn Fn(&mut App, bool)>;
 
 impl ImageStreamCompleter {
     /// Creates a completer with no image yet.
-    pub fn new(app: &mut App) -> Handle<ImageStreamCompleter> {
+    pub fn new(app: &mut App) -> Ref<ImageStreamCompleter> {
         app.create(ImageStreamCompleter::default())
     }
 
@@ -203,7 +202,7 @@ impl ImageStreamCompleter {
         debug_assert!(!app.is_disposed(self));
         app.get_mut(self).keep_alive_handles += 1;
         ImageStreamCompleterHandle {
-            completer: app.retain(self),
+            completer: self.keep(app),
         }
     }
 
@@ -243,18 +242,16 @@ impl ImageStreamCompleter {
         {
             return;
         }
-        let retained = app.retain(self);
         let data = app.get_mut(self);
         data.current_image = None;
         data.current_error = None;
         data.on_watched = None;
         data.on_last_listener_removed.clear();
         let cleanup = data.on_disposed.take();
-        app.destroy(self);
+        app.mark_disposed(self);
         if let Some(cleanup) = cleanup {
             cleanup.call(app);
         }
-        app.release(retained);
     }
 
     /// The frame this completer holds, if one has arrived.
@@ -289,7 +286,6 @@ impl ImageStreamCompleter {
     /// Adds a listener, calling it at once if the image or the failure is already here.
     pub fn add_listener(self: Handle<Self>, app: &mut App, listener: ImageStreamListener) {
         debug_assert!(!app.is_disposed(self));
-        let _retained = app.retain(self);
         let was_watched = !app.get(self).listeners.is_empty();
         app.get_mut(self).listeners.push(listener.clone());
         if !was_watched {
@@ -309,7 +305,6 @@ impl ImageStreamCompleter {
     /// Removes a listener added with [`add_listener`](Self::add_listener).
     pub fn remove_listener(self: Handle<Self>, app: &mut App, listener: &ImageStreamListener) {
         debug_assert!(!app.is_disposed(self));
-        let _retained = app.retain(self);
         let listeners = &mut app.get_mut(self).listeners;
         if let Some(index) = listeners.iter().position(|held| held.is(listener)) {
             listeners.remove(index);
@@ -334,7 +329,6 @@ impl ImageStreamCompleter {
     /// Hands a frame to every listener and keeps it for listeners still to come.
     pub fn set_image(self: Handle<Self>, app: &mut App, image: ImageInfo) {
         debug_assert!(!app.is_disposed(self));
-        let _retained = app.retain(self);
         app.get_mut(self).current_image = Some(image.clone());
         app.get_mut(self).current_error = None;
         // A copy, so a listener that adds or removes one while being called does not disturb
@@ -347,7 +341,6 @@ impl ImageStreamCompleter {
     /// Tells every listener that the image failed, and keeps the failure for later listeners.
     pub fn report_error(self: Handle<Self>, app: &mut App, error: ImageDecodeError) {
         debug_assert!(!app.is_disposed(self));
-        let _retained = app.retain(self);
         app.get_mut(self).current_error = Some(error.clone());
         for listener in app.get(self).listeners.clone() {
             if let Some(on_error) = &listener.on_error {
@@ -364,13 +357,13 @@ impl ImageStreamCompleter {
 /// [`set_completer`](Self::set_completer) arrives.
 #[derive(Default)]
 pub struct ImageStream {
-    completer: Option<RetainedHandle<Handle<ImageStreamCompleter>>>,
+    completer: Option<Ref<ImageStreamCompleter>>,
     listeners: Vec<ImageStreamListener>,
 }
 
 impl ImageStream {
     /// Creates a stream with no completer yet.
-    pub fn new(app: &mut App) -> Handle<ImageStream> {
+    pub fn new(app: &mut App) -> Ref<ImageStream> {
         app.create(ImageStream::default())
     }
 
@@ -380,21 +373,20 @@ impl ImageStream {
     /// serve every widget showing it. Comparing these is how a widget tells whether the image it
     /// resolved to has actually changed.
     pub fn completer(self: Handle<Self>, app: &App) -> Option<Handle<ImageStreamCompleter>> {
-        app.get(self).completer.as_ref().map(RetainedHandle::get)
+        app.get(self).completer.handle()
     }
 
     /// Releases the stream and unregisters its listeners. The resolving consumer owns this call.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        let _retained = app.retain(self);
         let listeners = std::mem::take(&mut app.get_mut(self).listeners);
         if let Some(completer) = app.get_mut(self).completer.take() {
             for listener in listeners {
                 completer.remove_listener(app, &listener);
             }
             completer.maybe_dispose(app);
-            app.release(completer);
+            drop(completer);
         }
-        app.destroy(self);
+        app.mark_disposed(self);
     }
 
     /// Assigns the completer, handing it every listener added while there was none.
@@ -402,18 +394,14 @@ impl ImageStream {
     /// # Panics
     ///
     /// Panics if a completer was already assigned, as Dart's assert does; a stream resolves once.
-    pub fn set_completer(
-        self: Handle<Self>,
-        app: &mut App,
-        completer: Handle<ImageStreamCompleter>,
-    ) {
+    pub fn set_completer(self: Handle<Self>, app: &mut App, completer: Ref<ImageStreamCompleter>) {
         assert!(
             app.get(self).completer.is_none(),
             "an ImageStream takes its completer once"
         );
-        let _retained = app.retain(self);
-        let retained_completer = app.retain(completer);
-        app.get_mut(self).completer = Some(retained_completer);
+        let kept = completer.clone();
+        let completer = completer.handle();
+        app.get_mut(self).completer = Some(kept);
         for listener in app.get(self).listeners.clone() {
             completer.add_listener(app, listener);
         }
@@ -550,7 +538,7 @@ mod tests {
 
         let completer = ImageStreamCompleter::new(&mut app);
         completer.set_image(&mut app, an_image());
-        stream.set_completer(&mut app, completer);
+        stream.set_completer(&mut app, completer.clone());
 
         assert_eq!(record.images.borrow().as_slice(), &[(2.0, true)]);
         assert_eq!(completer.listener_count(&app), 1);
@@ -567,7 +555,7 @@ mod tests {
         stream.remove_listener(&mut app, &listener);
 
         let completer = ImageStreamCompleter::new(&mut app);
-        stream.set_completer(&mut app, completer);
+        stream.set_completer(&mut app, completer.clone());
         completer.set_image(&mut app, an_image());
 
         assert!(record.images.borrow().is_empty());
@@ -585,20 +573,23 @@ mod tests {
         let mut app = cell.borrow_mut();
         let stream = ImageStream::new(&mut app);
         let completer = ImageStreamCompleter::new(&mut app);
-        stream.set_completer(&mut app, completer);
-        stream.add_listener(
-            &mut app,
+        stream.set_completer(&mut app, completer.clone());
+        let listener = {
+            let stream = stream.handle();
             ImageStreamListener::new(Rc::new(move |app, _, _| {
                 stream.dispose(app);
-            })),
-        );
+            }))
+        };
+        stream.add_listener(&mut app, listener);
         completer.set_image(&mut app, an_image());
-        assert!(app.is_disposed(completer));
+        assert!(app.is_disposed(&completer));
         assert!(completer.current_image(&app).is_none());
+        let (stream_handle, completer_handle) = (stream.handle(), completer.handle());
+        drop((stream, completer));
         drop(app);
         cell.checkpoint();
         let app = cell.borrow();
-        assert!(!app.contains(stream));
-        assert!(!app.contains(completer));
+        assert!(!app.contains(stream_handle));
+        assert!(!app.contains(completer_handle));
     }
 }

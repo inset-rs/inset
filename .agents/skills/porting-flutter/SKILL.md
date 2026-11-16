@@ -19,6 +19,7 @@ A pattern earns a file under `patterns/` on its second instance. Until then, the
 ## Verified
 
 - Handle receiver and erased edges: [patterns/handle-receiver.md](patterns/handle-receiver.md)
+- Ownership (`Ref`, `Handle`, who keeps what): [patterns/ownership.md](patterns/ownership.md)
 - Mixins and base classes: [patterns/mixin.md](patterns/mixin.md)
 - Leaf inheritance: [patterns/leaf-inheritance.md](patterns/leaf-inheritance.md)
 - Many optional fields: [patterns/many-optional-fields.md](patterns/many-optional-fields.md)

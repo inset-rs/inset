@@ -23,6 +23,7 @@ use crate::shifted_box::{
     RenderAligningShiftedBox, RenderAligningShiftedBoxData, RenderShiftedBox,
 };
 use crate::sliver_persistent_header::TickerProviderRef;
+use waft_foundation::Ref;
 
 /// A [`RenderAnimatedSize`] can be in exactly one of these states.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,9 +56,9 @@ pub struct RenderAnimatedSize {
     aligning: RenderAligningShiftedBoxData,
     vsync: TickerProviderRef,
     clip_behavior: Clip,
-    controller: Handle<AnimationController>,
-    animation: Handle<CurvedAnimation>,
-    size_tween: Handle<SizeTween>,
+    controller: Ref<AnimationController>,
+    animation: Ref<CurvedAnimation>,
+    size_tween: Ref<SizeTween>,
     has_visual_overflow: bool,
     last_value: Option<f64>,
     state: RenderAnimatedSizeState,
@@ -81,7 +82,7 @@ impl RenderAnimatedSize {
         on_end: Option<Listener>,
         child: Option<AnyRenderBox>,
     ) -> RenderHandle<Self> {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(duration),
@@ -91,8 +92,9 @@ impl RenderAnimatedSize {
             AnimationBehavior::Normal,
             vsync.clone(),
         );
-        let animation = CurvedAnimation::create(app, controller.view(), curve, None);
+        let animation = CurvedAnimation::new(app, controller.erase(), curve, None);
         let size_tween = SizeTween::new(app, None, None);
+        let controller_handle = controller.handle();
         let this = RenderHandle::new_box(
             app,
             RenderAnimatedSize {
@@ -113,7 +115,7 @@ impl RenderAnimatedSize {
                 clip_rect_layer: LayerHandle::new(),
             },
         );
-        controller.add_listener(
+        controller_handle.add_listener(
             app,
             Listener::handle_method(this.handle(), on_controller_tick),
         );
@@ -123,14 +125,14 @@ impl RenderAnimatedSize {
 
     /// The duration of the animation.
     pub fn duration(self: RenderHandle<Self>, app: &App) -> Duration {
-        app.get(self.get(app).controller)
+        app.get(&self.get(app).controller)
             .duration
             .expect("duration")
     }
 
     /// Sets [`duration`](Self::duration).
     pub fn set_duration(self: RenderHandle<Self>, app: &mut App, value: Duration) {
-        let controller = self.get(app).controller;
+        let controller = self.get(app).controller.handle();
         if app.get(controller).duration == Some(value) {
             return;
         }
@@ -139,12 +141,12 @@ impl RenderAnimatedSize {
 
     /// The duration of the animation when running in reverse.
     pub fn reverse_duration(self: RenderHandle<Self>, app: &App) -> Option<Duration> {
-        app.get(self.get(app).controller).reverse_duration
+        app.get(&self.get(app).controller).reverse_duration
     }
 
     /// Sets [`reverse_duration`](Self::reverse_duration).
     pub fn set_reverse_duration(self: RenderHandle<Self>, app: &mut App, value: Option<Duration>) {
-        let controller = self.get(app).controller;
+        let controller = self.get(app).controller.handle();
         if app.get(controller).reverse_duration == value {
             return;
         }
@@ -153,12 +155,12 @@ impl RenderAnimatedSize {
 
     /// The curve of the animation.
     pub fn curve(self: RenderHandle<Self>, app: &App) -> Rc<dyn Curve> {
-        app.get(self.get(app).animation).curve.clone()
+        app.get(&self.get(app).animation).curve.clone()
     }
 
     /// Sets [`curve`](Self::curve).
     pub fn set_curve(self: RenderHandle<Self>, app: &mut App, value: Rc<dyn Curve>) {
-        let animation = self.get(app).animation;
+        let animation = self.get(app).animation.handle();
         if Rc::ptr_eq(&app.get(animation).curve, &value) {
             return;
         }
@@ -195,7 +197,7 @@ impl RenderAnimatedSize {
             return;
         }
         self.get_mut(app).vsync = value.clone();
-        let controller = self.get(app).controller;
+        let controller = self.get(app).controller.handle();
         controller.resync(app, value);
     }
 
@@ -215,20 +217,19 @@ impl RenderAnimatedSize {
     }
 
     fn animated_size(self: RenderHandle<Self>, app: &App) -> Option<Size> {
-        let size_tween = self.get(app).size_tween;
-        let animation = self.get(app).animation;
-        Animatable::evaluate(&size_tween, app, animation.as_animation())
+        let this = self.get(app);
+        Animatable::evaluate(&this.size_tween, app, this.animation.as_animation())
     }
 
     fn restart_animation(self: RenderHandle<Self>, app: &mut App) {
         self.get_mut(app).last_value = Some(0.0);
-        let controller = self.get(app).controller;
+        let controller = self.get(app).controller.handle();
         controller.forward(app, Some(0.0));
     }
 
     fn layout_start(self: RenderHandle<Self>, app: &mut App) {
         let child_size = self.child(app).expect("child").size(app);
-        let size_tween = self.get(app).size_tween;
+        let size_tween = self.get(app).size_tween.handle();
         app.get_mut(size_tween).begin = Some(child_size);
         app.get_mut(size_tween).end = Some(child_size);
         self.get_mut(app).state = RenderAnimatedSizeState::Stable;
@@ -236,7 +237,7 @@ impl RenderAnimatedSize {
 
     fn layout_stable(self: RenderHandle<Self>, app: &mut App) {
         let child_size = self.child(app).expect("child").size(app);
-        let size_tween = self.get(app).size_tween;
+        let size_tween = self.get(app).size_tween.handle();
         let end = app.get(size_tween).end;
         if end != Some(child_size) {
             let size = self.size(app);
@@ -245,7 +246,7 @@ impl RenderAnimatedSize {
             self.restart_animation(app);
             self.get_mut(app).state = RenderAnimatedSizeState::Changed;
         } else {
-            let controller = self.get(app).controller;
+            let controller = self.get(app).controller.handle();
             let value = controller.value(app);
             let upper = app.get(controller).upper_bound;
             if value == upper {
@@ -259,7 +260,7 @@ impl RenderAnimatedSize {
 
     fn layout_changed(self: RenderHandle<Self>, app: &mut App) {
         let child_size = self.child(app).expect("child").size(app);
-        let size_tween = self.get(app).size_tween;
+        let size_tween = self.get(app).size_tween.handle();
         if app.get(size_tween).end != Some(child_size) {
             app.get_mut(size_tween).begin = Some(child_size);
             app.get_mut(size_tween).end = Some(child_size);
@@ -267,7 +268,7 @@ impl RenderAnimatedSize {
             self.get_mut(app).state = RenderAnimatedSizeState::Unstable;
         } else {
             self.get_mut(app).state = RenderAnimatedSizeState::Stable;
-            let controller = self.get(app).controller;
+            let controller = self.get(app).controller.handle();
             if !controller.is_animating(app) {
                 controller.forward(app, None);
             }
@@ -276,13 +277,13 @@ impl RenderAnimatedSize {
 
     fn layout_unstable(self: RenderHandle<Self>, app: &mut App) {
         let child_size = self.child(app).expect("child").size(app);
-        let size_tween = self.get(app).size_tween;
+        let size_tween = self.get(app).size_tween.handle();
         if app.get(size_tween).end != Some(child_size) {
             app.get_mut(size_tween).begin = Some(child_size);
             app.get_mut(size_tween).end = Some(child_size);
             self.restart_animation(app);
         } else {
-            let controller = self.get(app).controller;
+            let controller = self.get(app).controller.handle();
             controller.stop(app, true);
             self.get_mut(app).state = RenderAnimatedSizeState::Stable;
         }
@@ -332,7 +333,7 @@ impl RenderObject for RenderAnimatedSize {
                 RenderBox::mark_needs_layout(self, app);
             }
         }
-        let controller = self.get(app).controller;
+        let controller = self.get(app).controller.handle();
         controller.add_status_listener(
             app,
             AnimationStatusListener::handle_method(self.handle(), animation_status_listener),
@@ -340,7 +341,7 @@ impl RenderObject for RenderAnimatedSize {
     }
 
     fn did_detach(self: RenderHandle<Self>, app: &mut App) {
-        let controller = self.get(app).controller;
+        let controller = self.get(app).controller.handle();
         controller.stop(app, true);
         controller.remove_status_listener(
             app,
@@ -352,7 +353,7 @@ impl RenderObject for RenderAnimatedSize {
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
-        let controller = self.get(app).controller;
+        let controller = self.get(app).controller.handle();
         let value = controller.value(app);
         self.get_mut(app).last_value = Some(value);
         self.get_mut(app).has_visual_overflow = false;
@@ -360,7 +361,7 @@ impl RenderObject for RenderAnimatedSize {
         if self.child(app).is_none() || constraints.is_tight() {
             controller.stop(app, true);
             let smallest = constraints.smallest();
-            let size_tween = self.get(app).size_tween;
+            let size_tween = self.get(app).size_tween.handle();
             app.get_mut(size_tween).begin = Some(smallest);
             app.get_mut(size_tween).end = Some(smallest);
             self.set_size(app, smallest);
@@ -388,7 +389,7 @@ impl RenderObject for RenderAnimatedSize {
         self.get_mut(app).current_size = size;
         self.align_child(app);
 
-        let end = app.get(self.get(app).size_tween).end.expect("end");
+        let end = app.get(&self.get(app).size_tween).end.expect("end");
         if size.width() < end.width() || size.height() < end.height() {
             self.get_mut(app).has_visual_overflow = true;
         }
@@ -435,8 +436,8 @@ impl RenderObject for RenderAnimatedSize {
 
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
         LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
-        let controller = self.get(app).controller;
-        let animation = self.get(app).animation;
+        let controller = self.get(app).controller.handle();
+        let animation = self.get(app).animation.handle();
         controller.dispose(app);
         animation.dispose(app);
         RenderObjectBase::dispose(self, app);
@@ -494,16 +495,16 @@ impl RenderBox for RenderAnimatedSize {
         match self.get(app).state {
             RenderAnimatedSizeState::Start => return constraints.constrain(child_size),
             RenderAnimatedSizeState::Stable => {
-                if app.get(self.get(app).size_tween).end != Some(child_size) {
+                if app.get(&self.get(app).size_tween).end != Some(child_size) {
                     return constraints.constrain(self.get(app).current_size);
                 }
-                let controller = self.get(app).controller;
+                let controller = self.get(app).controller.handle();
                 if controller.value(app) == app.get(controller).upper_bound {
                     return constraints.constrain(child_size);
                 }
             }
             RenderAnimatedSizeState::Unstable | RenderAnimatedSizeState::Changed => {
-                if app.get(self.get(app).size_tween).end != Some(child_size) {
+                if app.get(&self.get(app).size_tween).end != Some(child_size) {
                     return constraints.constrain(child_size);
                 }
             }

@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{AnimationBehavior, AnimationController, AnyAnimation, Curve, Curves};
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listener};
+use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listener, Ref};
 use waft_scheduler::{Ticker, TickerCallback, TickerProvider, TickerProviderObject};
 use waft_widgets::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, SingleTickerProviderStateMixin,
@@ -30,11 +30,11 @@ use crate::constants::K_TAB_SCROLL_DURATION;
 ///
 /// A disposed controller stays in the arena, as a Dart object outlives its `dispose` while
 /// something still holds it: a `TabBar` rebuilt with a new controller reads the old one's
-/// [`animation`](Self::animation), `None`, to learn it was disposed. Its owner destroys it
-/// once nothing holds it.
+/// [`animation`](Self::animation), `None`, to learn it was disposed. It is freed once nothing
+/// holds it.
 pub struct TabController {
     change_notifier: ChangeNotifierData,
-    animation_controller: Option<Handle<AnimationController>>,
+    animation_controller: Option<Ref<AnimationController>>,
     animation_duration: Duration,
 
     /// The total number of tabs.
@@ -63,9 +63,9 @@ impl TabController {
         animation_duration: Option<Duration>,
         length: usize,
         vsync: impl TickerProvider,
-    ) -> Handle<TabController> {
+    ) -> Ref<TabController> {
         debug_assert!(length == 0 || initial_index < length);
-        let animation_controller = AnimationController::create_unbounded(
+        let animation_controller = AnimationController::unbounded(
             app,
             initial_index as f64,
             None,
@@ -90,10 +90,10 @@ impl TabController {
         app: &mut App,
         index: usize,
         previous_index: usize,
-        animation_controller: Option<Handle<AnimationController>>,
+        animation_controller: Option<Ref<AnimationController>>,
         animation_duration: Duration,
         length: usize,
-    ) -> Handle<TabController> {
+    ) -> Ref<TabController> {
         app.create(TabController {
             change_notifier: ChangeNotifierData::new(),
             animation_controller,
@@ -121,7 +121,7 @@ impl TabController {
         length: Option<usize>,
         previous_index: Option<usize>,
         animation_duration: Option<Duration>,
-    ) -> Handle<TabController> {
+    ) -> Ref<TabController> {
         if let Some(index) = index {
             self.animation_controller_handle(app)
                 .set_value(app, index as f64);
@@ -133,7 +133,7 @@ impl TabController {
             this.previous_index,
             this.animation_duration,
         );
-        let animation_controller = this.animation_controller;
+        let animation_controller = this.animation_controller.clone();
         let result = TabController::new_private(
             app,
             index.unwrap_or(current_index),
@@ -150,7 +150,9 @@ impl TabController {
     fn animation_controller_handle(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .animation_controller
+            .as_ref()
             .expect("a TabController is used after dispose")
+            .handle()
     }
 
     /// An animation whose value represents the current position of the `TabBar`'s
@@ -166,6 +168,7 @@ impl TabController {
     pub fn animation(self: Handle<Self>, app: &App) -> Option<AnyAnimation<f64>> {
         app.get(self)
             .animation_controller
+            .as_ref()
             .map(|controller| controller.view())
     }
 
@@ -211,13 +214,17 @@ impl TabController {
                 Some(duration),
                 curve.expect("a duration comes with a curve"),
             );
+            // Dart's closure captures `this`, so the controller stays alive until the
+            // animation ends, even if it was disposed and every other reference went.
+            let this = self.keep(app);
             future.when_complete_or_cancel(
                 app,
                 Listener::new(move |app| {
+                    let this = this.handle();
                     // don't notify if we've been disposed
-                    if app.get(self).animation_controller.is_some() {
-                        app.get_mut(self).index_is_changing_count -= 1;
-                        self.notify_listeners(app);
+                    if app.get(this).animation_controller.is_some() {
+                        app.get_mut(this).index_is_changing_count -= 1;
+                        this.notify_listeners(app);
                     }
                 }),
             );
@@ -318,14 +325,14 @@ impl TabController {
 
     /// Discards the controller's animation; Dart's `dispose`.
     ///
-    /// The disposed animation controller stays in the arena, as Dart's outlives its `dispose`:
-    /// a tab bar's indicator painter and its tabs' animations still hold it, and take their
+    /// The disposed animation controller lives on, as Dart's outlives its `dispose`: a tab
+    /// bar's indicator painter and its tabs' animations still hold it, and take their
     /// listeners off it only when they are replaced.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(animation_controller) = app.get_mut(self).animation_controller.take() {
             animation_controller.dispose(app);
         }
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -342,7 +349,7 @@ impl ChangeNotifier for TabController {
 /// Dart's `_TabControllerScope`.
 #[derive(Debug)]
 struct TabControllerScope {
-    controller: Handle<TabController>,
+    controller: Ref<TabController>,
     enabled: bool,
     child: WidgetRef,
 }
@@ -444,10 +451,10 @@ impl DefaultTabController {
     ///
     /// * [`DefaultTabController::of`], which is similar to this method, but asserts
     ///   if no [`DefaultTabController`] ancestor is found.
-    pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<Handle<TabController>> {
+    pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<Ref<TabController>> {
         context
             .depend_on_inherited_widget_of_exact_type::<TabControllerScope>(app)
-            .map(|scope| scope.controller)
+            .map(|scope| scope.controller.clone())
     }
 
     /// The closest instance of [`DefaultTabController`] that encloses the given
@@ -469,7 +476,7 @@ impl DefaultTabController {
     ///
     /// * [`DefaultTabController::maybe_of`], which is similar to this method, but
     ///   returns `None` if no [`DefaultTabController`] ancestor is found.
-    pub fn of(app: &mut App, context: BuildContext) -> Handle<TabController> {
+    pub fn of(app: &mut App, context: BuildContext) -> Ref<TabController> {
         let controller = DefaultTabController::maybe_of(app, context);
         if cfg!(debug_assertions) && controller.is_none() {
             panic!(
@@ -521,12 +528,15 @@ pub struct DefaultTabControllerState {
     state: StateData<DefaultTabController>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     /// Dart's `late TabController _controller`, created in `init_state`.
-    controller: Option<Handle<TabController>>,
+    controller: Option<Ref<TabController>>,
 }
 
 impl DefaultTabControllerState {
-    fn controller(self: Handle<Self>, app: &App) -> Handle<TabController> {
-        app.get(self).controller.expect("created in init_state")
+    fn controller(self: Handle<Self>, app: &App) -> Ref<TabController> {
+        app.get(self)
+            .controller
+            .clone()
+            .expect("created in init_state")
     }
 }
 
@@ -548,7 +558,7 @@ impl SingleTickerProviderStateMixin for DefaultTabControllerState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for DefaultTabControllerState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }

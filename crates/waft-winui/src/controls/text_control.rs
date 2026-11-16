@@ -6,7 +6,7 @@ use super::{PasswordRevealMode, ScrollBarVisibility, TextBox, TextWrapping};
 use crate::*;
 use std::{any::TypeId, collections::HashMap, rc::Rc};
 use waft_embedder::{Clip, FontWeight};
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref};
 use waft_painting::{Axis, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, HitTestBehavior};
 use waft_services::{
@@ -64,22 +64,22 @@ pub(super) struct TextControlState {
     editable_key: GlobalKey,
 
     /// Native selection gesture builder; never duplicates caret hit testing.
-    gestures: Option<Handle<TextControlSelectionBuilder>>,
+    gestures: Option<Ref<TextControlSelectionBuilder>>,
 
     /// Locally owned focus node when no node was supplied.
-    owned_focus: Option<Handle<FocusNode>>,
+    owned_focus: Option<Ref<FocusNode>>,
 
     /// Focus node whose listener is currently attached.
-    focus: Option<Handle<FocusNode>>,
+    focus: Option<FocusNodeRef>,
 
     /// Controller whose listener is currently attached.
-    controller: Option<AnyTextEditingController>,
+    controller: Option<TextEditingControllerRef>,
 
     /// Native editing history retained across theme and template changes.
-    undo: Option<Handle<UndoHistoryController>>,
+    undo: Option<Ref<UndoHistoryController>>,
 
     /// Source password policy rejects copy and cut even while the text is revealed.
-    password_clipboard_action: Option<AnyAction>,
+    password_clipboard_action: Option<ActionRef>,
 
     /// Last text, used for the source empty-to-nonempty reveal rule.
     previous_text: String,
@@ -106,7 +106,7 @@ pub(super) struct TextControlState {
     password_revealed: bool,
 
     /// `ContentElement`'s horizontal scrolling, for a multiline box that does not wrap.
-    horizontal_scroll: Option<Handle<ScrollViewportController>>,
+    horizontal_scroll: Option<Ref<ScrollViewportController>>,
 }
 
 /// Default Flutter selection gestures around the WinUI ContentElement.
@@ -181,16 +181,17 @@ impl TextControlState {
         let scroll = app
             .get(self)
             .horizontal_scroll
+            .clone()
             .expect("made in `init_state`");
         LayoutBuilder::new(move |_, _, constraints| {
             let lines = ConstrainedBox::new(BoxConstraints::new().min_width(constraints.max_width))
                 .child(IntrinsicWidth::new().child(content.clone()));
             match visibility {
-                ScrollBarVisibility::Auto => ScrollBarViewport::new(scroll, lines)
+                ScrollBarVisibility::Auto => ScrollBarViewport::new(scroll.clone(), lines)
                     .axis(Axis::Horizontal)
                     .into_widget(),
                 ScrollBarVisibility::Hidden => {
-                    ScrollViewport::new(Axis::Horizontal, scroll, lines).into_widget()
+                    ScrollViewport::new(Axis::Horizontal, scroll.clone(), lines).into_widget()
                 }
                 ScrollBarVisibility::Disabled => UnconstrainedBox::new()
                     .constrained_axis(Axis::Vertical)
@@ -256,7 +257,7 @@ impl TextControlState {
 
     /// A new focus session resets PasswordBox's reveal eligibility.
     fn focus_did_change(self: Handle<Self>, app: &mut App) {
-        let focused = app.get(self).focus.unwrap().has_focus(app);
+        let focused = app.get(self).focus.handle().unwrap().has_focus(app);
         if focused == app.get(self).focused {
             return;
         }
@@ -320,9 +321,9 @@ impl TextControlState {
 
     /// Connects replacement controller and focus handles using stable listener identities.
     fn sync_handles(self: Handle<Self>, app: &mut App) {
-        let controller = self.widget(app).config.controller;
-        if app.get(self).controller != Some(controller) {
-            if let Some(old) = app.get(self).controller {
+        let controller = self.widget(app).config.controller.clone();
+        if app.get(self).controller.handle() != Some(controller.handle()) {
+            if let Some(old) = app.get(self).controller.clone() {
                 old.remove_listener(app, &Listener::handle_method(self, Self::text_did_change));
             }
 
@@ -335,18 +336,18 @@ impl TextControlState {
             s.password_revealed = false;
         }
 
-        let external = self.widget(app).config.focus_node;
-        let focus = external.unwrap_or_else(|| {
-            if let Some(node) = app.get(self).owned_focus {
-                return node;
+        let external = self.widget(app).config.focus_node.clone();
+        let focus: FocusNodeRef = external.unwrap_or_else(|| {
+            if let Some(node) = &app.get(self).owned_focus {
+                return node.erase();
             }
 
             let node = FocusNode::new(app);
-            app.get_mut(self).owned_focus = Some(node);
-            node
+            app.get_mut(self).owned_focus = Some(node.clone());
+            node.into_erased()
         });
-        if app.get(self).focus != Some(focus) {
-            if let Some(old) = app.get(self).focus {
+        if app.get(self).focus.handle() != Some(focus.handle()) {
+            if let Some(old) = app.get(self).focus.clone() {
                 old.remove_listener(app, &Listener::handle_method(self, Self::focus_did_change));
             }
 
@@ -438,7 +439,7 @@ impl State for TextControlState {
         app.get_mut(self).undo = Some(undo);
         if self.widget(app).password.is_some() {
             let action = DoNothingAction::new(app);
-            app.get_mut(self).password_clipboard_action = Some(action.as_action());
+            app.get_mut(self).password_clipboard_action = Some(action.into_erased());
         }
 
         let delegate = self.as_text_selection_gesture_detector_builder_delegate();
@@ -465,39 +466,24 @@ impl State for TextControlState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.clone() {
             controller.remove_listener(app, &Listener::handle_method(self, Self::text_did_change));
         }
 
-        if let Some(focus) = app.get(self).focus {
+        if let Some(focus) = app.get(self).focus.clone() {
             focus.remove_listener(app, &Listener::handle_method(self, Self::focus_did_change));
         }
 
-        if let Some(focus) = app.get(self).owned_focus {
+        if let Some(focus) = app.get(self).owned_focus.handle() {
             focus.dispose(app);
-            app.destroy(focus);
-        }
-
-        if let Some(gestures) = app.get(self).gestures {
-            app.destroy(gestures);
-        }
-
-        if let Some(action) = app.get(self).password_clipboard_action {
-            app.destroy(action.id());
         }
 
         if let Some(scroll) = app.get_mut(self).horizontal_scroll.take() {
             scroll.dispose(app);
-            app.destroy(scroll);
         }
 
-        if let Some(undo) = app.get(self).undo {
-            let on_undo = undo.on_undo(app);
-            let on_redo = undo.on_redo(app);
+        if let Some(undo) = app.get(self).undo.handle() {
             undo.dispose(app);
-            app.destroy(on_undo);
-            app.destroy(on_redo);
-            app.destroy(undo);
         }
     }
 
@@ -586,8 +572,8 @@ impl State for TextControlState {
             foreground,
         );
         let mut editable = EditableText::new(
-            config.controller,
-            app.get(self).focus.unwrap(),
+            config.controller.clone(),
+            app.get(self).focus.clone().unwrap(),
             style.clone(),
             foreground,
             foreground,
@@ -600,7 +586,7 @@ impl State for TextControlState {
         .text_align(config.text_alignment)
         .autofocus(config.autofocus)
         .renderer_ignores_pointer(true)
-        .undo_controller(app.get(self).undo.unwrap())
+        .undo_controller(app.get(self).undo.clone().unwrap())
         .selection_color(
             config
                 .selection_highlight_color
@@ -618,7 +604,7 @@ impl State for TextControlState {
         .key(app.get(self).editable_key.clone().into());
         // A WinUI text box keeps the focus on Enter: the platform's done action ends the
         // composition without the unfocusing Flutter defaults to.
-        let controller = config.controller;
+        let controller = config.controller.clone();
         editable = editable.on_editing_complete(move |app| controller.clear_composing(app));
         // A multiline box grows with its text from one line, as WinUI's does up to its height.
         if multiline && config.max_lines.is_some() {
@@ -645,14 +631,14 @@ impl State for TextControlState {
         editable = if let Some(builder) = config.context_menu_builder.clone() {
             editable.context_menu_builder(builder)
         } else {
-            let undo = app.get(self).undo.unwrap();
+            let undo = app.get(self).undo.handle().unwrap();
             editable.context_menu_builder(Rc::new(move |app, context, editor| {
                 super::text_edit_menu::build(app, context, editor, undo, password.is_some())
             }))
         };
 
         // EditableText exposes its copy/cut action for an enclosing control to override.
-        let editable = if let Some(action) = app.get(self).password_clipboard_action {
+        let editable = if let Some(action) = app.get(self).password_clipboard_action.clone() {
             Actions::new(
                 HashMap::from([(TypeId::of::<CopySelectionTextIntent>(), action)]),
                 editable,
@@ -703,7 +689,7 @@ impl State for TextControlState {
             content = self.scrolled_sideways(app, content);
         }
 
-        let gestures = app.get(self).gestures.unwrap();
+        let gestures = app.get(self).gestures.handle().unwrap();
         let content = TextSelectionGestureDetectorBuilder::build_gesture_detector(
             gestures,
             app,

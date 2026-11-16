@@ -8,15 +8,15 @@
 use std::fmt::{self, Debug};
 
 use waft_embedder::Color;
-use waft_foundation::{App, Handle, ValueChanged};
+use waft_foundation::{App, Handle, OptionRetained, Ref, ValueChanged};
 use waft_gestures::GestureTapCallback;
 use waft_painting::{AnyBorderSide, EdgeInsetsGeometry, ShapeBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     AnyFocusNode, AnyRadioClient, AnyRadioGroupRegistry, BuildContext, ExcludeFocus, FocusNode,
-    FocusNodeLeaf, IntoWidget, KeyRef, MergeSemantics, RadioClient, RadioClientData, RadioGroup,
-    RadioGroupRegistry, State, StateData, StatefulWidget, Transform, WidgetRef, WidgetState,
-    WidgetStatePropertyRef, WidgetStates, WidgetStatesController,
+    FocusNodeLeaf, FocusNodeRef, IntoWidget, KeyRef, MergeSemantics, RadioClient, RadioClientData,
+    RadioGroup, RadioGroupRegistry, State, StateData, StatefulWidget, Transform, WidgetRef,
+    WidgetState, WidgetStatePropertyRef, WidgetStates, WidgetStatesController,
 };
 
 use crate::list_tile::{ListTile, ListTileControlAffinity, ListTileTitleAlignment};
@@ -241,9 +241,9 @@ pub struct RadioListTile<T: Clone + PartialEq + 'static> {
     /// Defines how compact the list tile's layout will be.
     pub visual_density: Option<VisualDensity>,
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// Controls the interactive states of the backing [`ListTile`].
-    pub states_controller: Option<Handle<WidgetStatesController>>,
+    pub states_controller: Option<Ref<WidgetStatesController>>,
     /// Handler called when the focus changes.
     ///
     /// Called with true if this widget's node gains focus, and false if it loses
@@ -474,8 +474,8 @@ impl<T: Clone + PartialEq + 'static> RadioListTile<T> {
         tile_color: Color => "tileColor",
         selected_tile_color: Color => "selectedTileColor",
         visual_density: VisualDensity => "visualDensity",
-        focus_node: AnyFocusNode => "focusNode",
-        states_controller: Handle<WidgetStatesController> => "statesController",
+        focus_node: FocusNodeRef => "focusNode",
+        states_controller: Ref<WidgetStatesController> => "statesController",
         on_focus_change: ValueChanged<bool> => "onFocusChange",
         enable_feedback: bool => "enableFeedback",
         horizontal_title_gap: f64 => "horizontalTitleGap",
@@ -595,33 +595,33 @@ impl<T: Clone + PartialEq + 'static> StatefulWidget for RadioListTile<T> {
 pub struct RadioListTileState<T: Clone + PartialEq + 'static> {
     state: StateData<RadioListTile<T>>,
     radio_client: RadioClientData<T>,
-    internal_focus_node: Option<AnyFocusNode>,
-    radio_registry: Option<Handle<RadioRegistry<T>>>,
+    internal_focus_node: Option<Ref<FocusNode>>,
+    radio_registry: Option<Ref<RadioRegistry<T>>>,
 }
 
 impl<T: Clone + PartialEq + 'static> RadioListTileState<T> {
     /// Dart's `focusNode` getter, which makes the internal node on first read; the
     /// [`RadioClient`] side reads the node this made.
-    fn focus_node(self: Handle<Self>, app: &mut App) -> AnyFocusNode {
-        if let Some(focus_node) = self.widget(app).focus_node {
+    fn focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
+        if let Some(focus_node) = self.widget(app).focus_node.clone() {
             return focus_node;
         }
-        if let Some(focus_node) = app.get(self).internal_focus_node {
-            return focus_node;
+        if let Some(focus_node) = app.get(self).internal_focus_node.as_ref() {
+            return focus_node.erase();
         }
-        let focus_node = FocusNode::new(app).as_node();
-        app.get_mut(self).internal_focus_node = Some(focus_node);
-        focus_node
+        let focus_node = FocusNode::new(app);
+        app.get_mut(self).internal_focus_node = Some(focus_node.clone());
+        focus_node.into_erased()
     }
 
     /// Dart's `_radioRegistry`, made on first read as Dart's `late final` is.
     fn radio_registry(self: Handle<Self>, app: &mut App) -> AnyRadioGroupRegistry<T> {
-        let registry = match app.get(self).radio_registry {
+        let registry = match app.get(self).radio_registry.handle() {
             Some(registry) => registry,
             None => {
                 let registry = app.create(RadioRegistry { state: self });
-                app.get_mut(self).radio_registry = Some(registry);
-                registry
+                app.get_mut(self).radio_registry = Some(registry.clone());
+                registry.handle()
             }
         };
         registry.as_radio_group_registry()
@@ -716,7 +716,13 @@ impl<T: Clone + PartialEq + 'static> RadioClient<T> for RadioListTileState<T> {
     fn focus_node(self: Handle<Self>, app: &App) -> AnyFocusNode {
         self.widget(app)
             .focus_node
-            .or(app.get(self).internal_focus_node)
+            .handle()
+            .or_else(|| {
+                app.get(self)
+                    .internal_focus_node
+                    .as_ref()
+                    .map(|node| AnyFocusNode::from(node.handle()))
+            })
             .expect("the tile has built, which makes its focus node")
     }
 }
@@ -733,13 +739,10 @@ impl<T: Clone + PartialEq + 'static> State for RadioListTileState<T> {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.set_registry(app, None);
-        if let Some(focus_node) = app.get(self).internal_focus_node {
+        if let Some(focus_node) = app.get(self).internal_focus_node.handle() {
             focus_node.dispose(app);
         }
         // The radio below has unregistered already: children dispose first.
-        if let Some(registry) = app.get_mut(self).radio_registry.take() {
-            app.destroy(registry);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -814,7 +817,7 @@ impl<T: Clone + PartialEq + 'static> State for RadioListTileState<T> {
         };
         list_tile.content_padding = widget.content_padding;
         list_tile.visual_density = widget.visual_density;
-        list_tile.states_controller = widget.states_controller;
+        list_tile.states_controller = widget.states_controller.clone();
         list_tile.on_focus_change = widget.on_focus_change.clone();
         list_tile.enable_feedback = widget.enable_feedback;
         list_tile.horizontal_title_gap = widget.horizontal_title_gap;
@@ -1029,11 +1032,11 @@ mod tests {
                 RadioListTile::new(1)
                     .group_value(1)
                     .on_changed(no_op())
-                    .states_controller(controller)
+                    .states_controller(controller.clone())
                     .into_widget()
             });
             let forwarded = tester.widget(nth::<ListTile>(&tester, 0), |tile: &ListTile| {
-                tile.states_controller
+                tile.states_controller.clone()
             });
             assert_eq!(forwarded, Some(controller));
         });

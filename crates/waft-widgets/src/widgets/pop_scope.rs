@@ -1,8 +1,9 @@
 //! Flutter counterpart: `widgets/pop_scope.dart`.
 
+use crate::widgets::routes::ModalRouteRef;
 use std::rc::Rc;
 
-use waft_foundation::{App, Handle, ValueListenable, ValueNotifier};
+use waft_foundation::{App, Handle, OptionRetained, ValueListenable, ValueNotifier};
 
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
@@ -11,6 +12,7 @@ use crate::widgets::navigator::RouteResult;
 use crate::widgets::routes::{
     AnyModalRoute, PopEntry, PopEntryObject, PopInvokedWithResultCallback,
 };
+use waft_foundation::Ref;
 
 /// Manages back navigation gestures.
 ///
@@ -142,8 +144,8 @@ impl StatefulWidget for PopScope {
 /// Dart's `_PopScopeState`.
 pub struct PopScopeState {
     state: StateData<PopScope>,
-    route: Option<AnyModalRoute>,
-    can_pop_notifier: Option<Handle<ValueNotifier<bool>>>,
+    route: Option<ModalRouteRef>,
+    can_pop_notifier: Option<Ref<ValueNotifier<bool>>>,
     /// This state as the `PopEntry` it registers, minted once in `init_state`: the route
     /// unregisters by identity, and Dart passes `this`.
     pop_entry: Option<Rc<dyn PopEntry>>,
@@ -173,7 +175,12 @@ impl PopEntryObject for PopScopeState {
     }
 
     fn can_pop_notifier(self: Handle<Self>, app: &App) -> Rc<dyn ValueListenable<bool>> {
-        Rc::new(app.get(self).can_pop_notifier.expect("init_state has run"))
+        Rc::new(
+            app.get(self)
+                .can_pop_notifier
+                .clone()
+                .expect("init_state has run"),
+        )
     }
 }
 
@@ -190,11 +197,11 @@ impl State for PopScopeState {
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
         let context = self.context(app);
         let next_route = AnyModalRoute::of(app, context);
-        if next_route != app.get(self).route {
-            if let Some(route) = app.get(self).route {
+        if next_route != app.get(self).route.handle() {
+            if let Some(route) = app.get(self).route.handle() {
                 route.unregister_pop_entry(app, self.pop_entry(app));
             }
-            app.get_mut(self).route = next_route;
+            app.get_mut(self).route = next_route.and_then(|route| route.upgrade(app));
             if let Some(route) = next_route {
                 route.register_pop_entry(app, self.pop_entry(app));
             }
@@ -203,16 +210,24 @@ impl State for PopScopeState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old_widget: &PopScope) {
         let can_pop = self.widget(app).can_pop;
-        let notifier = app.get(self).can_pop_notifier.expect("init_state has run");
+        let notifier = app
+            .get(self)
+            .can_pop_notifier
+            .handle()
+            .expect("init_state has run");
         notifier.set_value(app, can_pop);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(route) = app.get(self).route {
+        if let Some(route) = app.get(self).route.handle() {
             route.unregister_pop_entry(app, self.pop_entry(app));
         }
-        let notifier = app.get(self).can_pop_notifier.expect("init_state has run");
-        app.get_mut(notifier).dispose();
+        let notifier = app
+            .get(self)
+            .can_pop_notifier
+            .handle()
+            .expect("init_state has run");
+        notifier.dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {

@@ -7,6 +7,8 @@ use std::rc::Rc;
 use waft_foundation::{App, Handle, HandleId, Listener};
 
 use crate::debug::debug_print_gesture_arena_diagnostics;
+use waft_foundation::AnyRef;
+use waft_foundation::Ref;
 
 /// Whether the gesture was accepted or rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,24 +38,33 @@ pub trait GestureArenaMember: 'static {
     fn member_id(&self) -> HandleId;
 }
 
+/// A member in an arena or a team, which keeps the member's object, as Dart's arena keeps the
+/// recognizers that entered it until it is swept.
 #[derive(Clone)]
-pub(crate) struct MemberBox(Rc<dyn GestureArenaMember>);
+pub(crate) struct MemberBox {
+    member: Rc<dyn GestureArenaMember>,
+    _keep: Option<AnyRef>,
+}
 
 impl MemberBox {
-    pub(crate) fn new(member: impl GestureArenaMember) -> MemberBox {
-        MemberBox(Rc::new(member))
+    pub(crate) fn new(app: &App, member: impl GestureArenaMember) -> MemberBox {
+        let keep = member.member_id().upgrade(app);
+        MemberBox {
+            member: Rc::new(member),
+            _keep: keep,
+        }
     }
 
     pub(crate) fn member_id(&self) -> HandleId {
-        self.0.member_id()
+        self.member.member_id()
     }
 
     pub(crate) fn accept_gesture(&self, app: &mut App, pointer: i64) {
-        self.0.accept_gesture(app, pointer);
+        self.member.accept_gesture(app, pointer);
     }
 
     pub(crate) fn reject_gesture(&self, app: &mut App, pointer: i64) {
-        self.0.reject_gesture(app, pointer);
+        self.member.reject_gesture(app, pointer);
     }
 }
 
@@ -172,7 +183,7 @@ pub struct GestureArenaManager {
 
 impl GestureArenaManager {
     /// Creates an empty manager.
-    pub fn new(app: &mut App) -> Handle<GestureArenaManager> {
+    pub fn new(app: &mut App) -> Ref<GestureArenaManager> {
         app.create(GestureArenaManager {
             next_id: 0,
             arenas: HashMap::new(),
@@ -186,7 +197,7 @@ impl GestureArenaManager {
         pointer: i64,
         member: impl GestureArenaMember,
     ) -> GestureArenaEntry {
-        let member = MemberBox::new(member);
+        let member = MemberBox::new(app, member);
         {
             let data = app.get_mut(self);
             if !data.arenas.contains_key(&pointer) {
@@ -474,6 +485,7 @@ fn debug_log_diagnostic(pointer: i64, message: &str, member_count: Option<usize>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waft_foundation::Ref;
     use waft_foundation::{App, AppCell, Handle};
 
     const PRIMARY_KEY: i64 = 4;
@@ -484,7 +496,7 @@ mod tests {
     }
 
     impl TestMember {
-        fn new(app: &mut App) -> Handle<TestMember> {
+        fn new(app: &mut App) -> Ref<TestMember> {
             app.create(TestMember {
                 accept_ran: false,
                 reject_ran: false,
@@ -535,9 +547,9 @@ mod tests {
             drop(app);
             GestureTester {
                 cell,
-                arena,
-                first,
-                second,
+                arena: arena.handle(),
+                first: first.handle(),
+                second: second.handle(),
                 first_entry: None,
                 second_entry: None,
             }
@@ -776,9 +788,9 @@ mod tests {
         let member_b = TestMember::new(&mut app);
         let member_c = TestMember::new(&mut app);
 
-        let entry_a = arena.add(&mut app, PRIMARY_KEY, member_a);
-        arena.add(&mut app, PRIMARY_KEY, member_b);
-        arena.add(&mut app, PRIMARY_KEY, member_c);
+        let entry_a = arena.add(&mut app, PRIMARY_KEY, member_a.handle());
+        arena.add(&mut app, PRIMARY_KEY, member_b.handle());
+        arena.add(&mut app, PRIMARY_KEY, member_c.handle());
 
         entry_a.resolve(&mut app, GestureDisposition::Accepted);
         assert!(!member_a.accept_ran(&app));
@@ -806,7 +818,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let arena = GestureArenaManager::new(&mut app);
         let member = TestMember::new(&mut app);
-        arena.add(&mut app, PRIMARY_KEY, member);
+        arena.add(&mut app, PRIMARY_KEY, member.handle());
         arena.close(&mut app, PRIMARY_KEY);
         assert!(!member.accept_ran(&app));
         app.drain_microtasks();

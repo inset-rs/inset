@@ -12,6 +12,7 @@
 //! Run through `cargo waft`, the app is a bundle that says why it uses the camera
 //! (`usage_descriptions` in its `Cargo.toml`), without which macOS ends an app that opens one.
 #![windows_subsystem = "windows"]
+#![feature(arbitrary_self_types)]
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -21,7 +22,7 @@ use waft_embedder::{
     PlayerActivity, TextDirection, WindowConfig,
 };
 use waft_embedder_winit::{LinuxSettings, WinitEmbedder};
-use waft_foundation::{App, AsyncApp, Entity, Handle, Listenable, Listener};
+use waft_foundation::{App, AsyncApp, Entity, Listenable, Listener, Ref};
 use waft_painting::{BoxDecoration, TextStyle};
 use waft_shell::Shell;
 use waft_widgets::{
@@ -57,9 +58,9 @@ fn url_of(argument: String) -> String {
 
 fn start(app: &mut App, url: Option<String>) {
     let player = url.and_then(|url| Player::new(app, &url));
-    if let Some(player) = player {
-        Player::set_looping(player, app, true);
-        Player::play(player, app);
+    if let Some(player) = &player {
+        player.set_looping(app, true);
+        player.play(app);
     }
     print_cameras(app);
     let camera = app.new_entity(|_cx| CameraPane::Opening);
@@ -100,7 +101,7 @@ fn print_camera_list(cameras: &[Camera]) {
 enum CameraPane {
     Opening,
     NoCamera,
-    Running(Handle<CameraSession>),
+    Running(Ref<CameraSession>),
     Failed(CameraError),
 }
 
@@ -147,7 +148,7 @@ async fn start_preview(
     cx: &AsyncApp,
     camera: &Camera,
     device: &dyn CameraDevice,
-) -> Result<Handle<CameraSession>, CameraError> {
+) -> Result<Ref<CameraSession>, CameraError> {
     let formats = device.formats();
     println!("camera: {}", camera.name);
     for format in &formats {
@@ -165,11 +166,8 @@ async fn start_preview(
     let session = starting.await?;
     cx.update(|app| {
         println!("  picked {}", described(format));
-        println!(
-            "  runs in {}",
-            described(CameraSession::format(session, app))
-        );
-        print_states(app, session);
+        println!("  runs in {}", described(session.format(app)));
+        print_states(app, &session);
     });
     Ok(session)
 }
@@ -208,16 +206,17 @@ fn described(format: &CameraFormat) -> String {
 }
 
 /// Prints `session`'s state now and each time it changes.
-fn print_states(app: &mut App, session: Handle<CameraSession>) {
-    println!("  state: {:?}", CameraSession::state(session, app));
-    let listenable: Rc<dyn Listenable> = Rc::new(session);
+fn print_states(app: &mut App, session: &Ref<CameraSession>) {
+    let handle = session.handle();
+    println!("  state: {:?}", handle.state(app));
+    let listenable: Rc<dyn Listenable> = Rc::new(session.clone());
     listenable.add_listener(
         app,
-        Listener::new(move |app| println!("  state: {:?}", CameraSession::state(session, app))),
+        Listener::new(move |app| println!("  state: {:?}", handle.state(app))),
     );
 }
 
-fn home(player: Option<Handle<Player>>, camera: Entity<CameraPane>) -> WidgetRef {
+fn home(player: Option<Ref<Player>>, camera: Entity<CameraPane>) -> WidgetRef {
     let video = match player {
         Some(player) => clickable(player),
         None => label("No movie: pass a path or a link, on a platform with players"),
@@ -244,22 +243,21 @@ impl StatelessWidget for CameraSide {
             CameraPane::Opening => label("Opening the camera…"),
             CameraPane::NoCamera => label("No camera"),
             CameraPane::Failed(error) => label(&format!("No camera: {error}")),
-            CameraPane::Running(session) => CameraPreview::new(*session).into_widget(),
+            CameraPane::Running(session) => CameraPreview::new(session.clone()).into_widget(),
         }
     }
 }
 
 /// `player`'s video, which a click pauses or plays.
-fn clickable(player: Handle<Player>) -> WidgetRef {
+fn clickable(player: Ref<Player>) -> WidgetRef {
+    let tapped = player.clone();
     GestureDetector::new()
         .on_tap(Listener::new(move |app| {
-            if matches!(
-                Player::state(player, app).activity,
-                PlayerActivity::Paused(_)
-            ) {
-                Player::play(player, app);
+            let player = tapped.handle();
+            if matches!(player.state(app).activity, PlayerActivity::Paused(_)) {
+                player.play(app);
             } else {
-                Player::pause(player, app);
+                player.pause(app);
             }
         }))
         .child(PlayerView::new(player))

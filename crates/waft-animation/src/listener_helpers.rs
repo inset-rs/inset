@@ -646,7 +646,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host = app.create(LazyHost::default());
-        let log = Rc::clone(&app.get(host).log);
+        let log = Rc::clone(&app.get(&host).log);
 
         let first = recording(&log, "first");
         let second = recording(&log, "second");
@@ -671,7 +671,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host = app.create(LazyHost::default());
-        let log = Rc::clone(&app.get(host).log);
+        let log = Rc::clone(&app.get(&host).log);
 
         let registered = recording(&log, "registered");
         host.add_listener(&mut app, registered);
@@ -687,7 +687,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host = app.create(LazyHost::default());
-        let log = Rc::clone(&app.get(host).log);
+        let log = Rc::clone(&app.get(&host).log);
 
         let listener = recording(&log, "listener");
         host.add_listener(&mut app, listener.clone());
@@ -707,8 +707,8 @@ mod tests {
         host.add_listener(&mut app, recording(&log, "listener"));
         assert!(!host.local_listeners_data(&app).is_empty());
 
-        AnimationEagerListenerMixin::dispose(host, &mut app);
-        assert!(app.get(host).disposed);
+        AnimationEagerListenerMixin::dispose(host.handle(), &mut app);
+        assert!(app.get(&host).disposed);
         assert!(
             host.local_listeners_data(&app).is_empty(),
             "dispose cleared the listeners"
@@ -749,6 +749,7 @@ mod tests {
         let remover = {
             let log = Rc::clone(&log);
             let doomed = doomed.clone();
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("remover".to_string());
                 host.remove_listener(app, &doomed);
@@ -772,7 +773,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host = app.create(ReverseHost::default());
-        let log = Rc::clone(&app.get(host).log);
+        let log = Rc::clone(&app.get(&host).log);
 
         let listener = recording_status(&log, "status");
         host.add_status_listener(&mut app, listener.clone());
@@ -798,12 +799,13 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host = app.create(ReverseHost::default());
-        let log = Rc::clone(&app.get(host).log);
+        let log = Rc::clone(&app.get(&host).log);
 
         let doomed = recording_status(&log, "doomed");
         let remover = {
             let log = Rc::clone(&log);
             let doomed = doomed.clone();
+            let host = host.handle();
             AnimationStatusListener::new(move |_status, app: &mut App| {
                 log.borrow_mut().push("remover".to_string());
                 host.remove_status_listener(app, &doomed);
@@ -835,8 +837,8 @@ mod tests {
         let mut app = cell.borrow_mut();
         let parent = app.create(EagerHost::default());
         let proxy = app.create(ProxyLikeHost::default());
-        let log = Rc::clone(&app.get(proxy).log);
-        app.get_mut(proxy).parent = Some(parent);
+        let log = Rc::clone(&app.get(&proxy).log);
+        app.get_mut(&proxy).parent = Some(parent.handle());
 
         // No listeners yet, so the proxy has not subscribed to its parent.
         assert!(parent.local_listeners_data(&app).is_empty());
@@ -864,7 +866,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host = app.create(LazyHost::default());
-        let log = Rc::clone(&app.get(host).log);
+        let log = Rc::clone(&app.get(&host).log);
 
         host.add_listener(&mut app, recording(&log, "listener"));
         host.clear_listeners(&mut app);

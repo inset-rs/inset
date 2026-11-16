@@ -597,6 +597,7 @@ sliver_fill_remaining_widget!(
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+    use waft_foundation::Ref;
 
     use waft_embedder::{Color, Offset, Rect, Size, TargetPlatform, TextDirection};
     use waft_foundation::{App, Handle, Listener};
@@ -832,14 +833,14 @@ mod tests {
     /// The test file's `boilerplate`.
     fn boilerplate(
         slivers: Vec<WidgetRef>,
-        controller: Option<Handle<ScrollController>>,
+        controller: Option<Ref<ScrollController>>,
         scroll_direction: Axis,
     ) -> WidgetRef {
         let mut scroll_view = CustomScrollView::new()
             .scroll_direction(scroll_direction)
             .slivers(slivers);
         if let Some(controller) = controller {
-            scroll_view = scroll_view.controller(controller.as_controller());
+            scroll_view = scroll_view.controller(controller.erase());
         }
         ltr(scroll_view)
     }
@@ -886,13 +887,13 @@ mod tests {
                     .child(SizedBox::new().key(key.clone().into()))
                     .into_widget(),
             ],
-            Some(controller),
+            Some(controller.clone()),
             Axis::Vertical,
         ));
         assert_eq!(size_of(&tester, &key).height(), 600.0);
 
         for pixels in [50.0, -100.0, 0.0] {
-            jump_to(&mut tester, controller, pixels);
+            jump_to(&mut tester, controller.handle(), pixels);
             assert_eq!(size_of(&tester, &key).height(), 600.0, "at {pixels}");
         }
     }
@@ -911,13 +912,13 @@ mod tests {
                     .child(SizedBox::new().key(key.clone().into()))
                     .into_widget(),
             ],
-            Some(controller),
+            Some(controller.clone()),
             Axis::Vertical,
         ));
         assert_eq!(size_of(&tester, &key).height(), 500.0);
 
         for (pixels, height) in [(50.0, 550.0), (-100.0, 400.0), (0.0, 500.0)] {
-            jump_to(&mut tester, controller, pixels);
+            jump_to(&mut tester, controller.handle(), pixels);
             assert_eq!(size_of(&tester, &key).height(), height, "at {pixels}");
         }
     }
@@ -934,13 +935,13 @@ mod tests {
                     .child(ColoredBox::new(DEBUG_RED).key(fill_key.clone().into()))
                     .into_widget(),
             ],
-            Some(controller),
+            Some(controller.clone()),
             Axis::Vertical,
         ));
-        assert_eq!(offset(&tester, controller), 0.0);
+        assert_eq!(offset(&tester, controller.handle()), 0.0);
         controller.jump_to(&mut tester.cell.borrow_mut(), 150.0);
         tester.settle();
-        assert_eq!(offset(&tester, controller), 150.0);
+        assert_eq!(offset(&tester, controller.handle()), 150.0);
         assert_eq!(rect_of(&tester, &fill_key).top, 0.0);
     }
 
@@ -999,13 +1000,13 @@ mod tests {
         let controller = ScrollController::default(&mut tester.cell.borrow_mut());
         tester.pump_widget(boilerplate(
             without_scroll_body(ColoredBox::new(DEBUG_RED).into_widget()),
-            Some(controller),
+            Some(controller.clone()),
             Axis::Vertical,
         ));
-        assert_eq!(offset(&tester, controller), 0.0);
+        assert_eq!(offset(&tester, controller.handle()), 0.0);
         controller.jump_to(&mut tester.cell.borrow_mut(), 150.0);
         tester.settle();
-        assert_eq!(offset(&tester, controller), 0.0);
+        assert_eq!(offset(&tester, controller.handle()), 0.0);
     }
 
     #[test]
@@ -1388,7 +1389,7 @@ mod tests {
             let fill_key = GlobalKey::new();
             tester.pump_widget(boilerplate(
                 overscrolling_slivers(&fill_key, true),
-                Some(controller),
+                Some(controller.clone()),
                 Axis::Vertical,
             ));
             assert_eq!(
@@ -1399,13 +1400,13 @@ mod tests {
 
             // Overscroll by 200: the preceding box frees up 150 of paint room
             // and the remaining 50 become this sliver's scrollOffset.
-            jump_to(&mut tester, controller, 200.0);
+            jump_to(&mut tester, controller.handle(), 200.0);
 
             let rect = rect_of(&tester, &fill_key);
             assert_eq!(rect.bottom, 600.0, "{platform:?}");
             assert_eq!(rect.height(), 650.0, "{platform:?}");
 
-            jump_to(&mut tester, controller, 0.0);
+            jump_to(&mut tester, controller.handle(), 0.0);
             assert_eq!(
                 rect_of(&tester, &fill_key),
                 Rect::from_ltrb(0.0, 150.0, 800.0, 600.0),
@@ -1422,7 +1423,7 @@ mod tests {
             let fill_key = GlobalKey::new();
             tester.pump_widget(boilerplate(
                 overscrolling_slivers(&fill_key, false),
-                Some(controller),
+                Some(controller.clone()),
                 Axis::Vertical,
             ));
             assert_eq!(
@@ -1431,13 +1432,13 @@ mod tests {
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, controller, 50.0);
+            jump_to(&mut tester, controller.handle(), 50.0);
 
             let rect = rect_of(&tester, &fill_key);
             assert_eq!(rect.bottom, 600.0, "{platform:?}");
             assert_eq!(rect.height(), 650.0, "{platform:?}");
 
-            jump_to(&mut tester, controller, 0.0);
+            jump_to(&mut tester, controller.handle(), 0.0);
             assert_eq!(
                 rect_of(&tester, &fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
@@ -1471,7 +1472,7 @@ mod tests {
     /// A lone stretching child in a reversed scroll view, with a tap target that answers
     /// whether a hit test at a point reaches it.
     fn reversed_overscrolling_view(
-        controller: Handle<ScrollController>,
+        controller: Ref<ScrollController>,
         scroll_direction: Axis,
         fill_key: &GlobalKey,
         taps: &Rc<std::cell::Cell<u32>>,
@@ -1480,7 +1481,7 @@ mod tests {
         ltr(CustomScrollView::new()
             .scroll_direction(scroll_direction)
             .reverse(true)
-            .controller(controller.as_controller())
+            .controller(controller.erase())
             .slivers(vec![fill_without_scroll_body(
                 true,
                 SizedBox::expand()
@@ -1501,7 +1502,7 @@ mod tests {
             let fill_key = GlobalKey::new();
             let taps = Rc::new(std::cell::Cell::new(0));
             tester.pump_widget(reversed_overscrolling_view(
-                controller,
+                controller.clone(),
                 Axis::Vertical,
                 &fill_key,
                 &taps,
@@ -1512,7 +1513,7 @@ mod tests {
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, controller, 50.0);
+            jump_to(&mut tester, controller.handle(), 50.0);
 
             let rect = rect_of(&tester, &fill_key);
             assert_eq!(rect.top, 0.0, "{platform:?}");
@@ -1522,7 +1523,7 @@ mod tests {
             tester.up(gesture);
             assert_eq!(taps.get(), 1, "{platform:?}");
 
-            jump_to(&mut tester, controller, 0.0);
+            jump_to(&mut tester, controller.handle(), 0.0);
             assert_eq!(
                 rect_of(&tester, &fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
@@ -1539,7 +1540,7 @@ mod tests {
             let fill_key = GlobalKey::new();
             let taps = Rc::new(std::cell::Cell::new(0));
             tester.pump_widget(reversed_overscrolling_view(
-                controller,
+                controller.clone(),
                 Axis::Horizontal,
                 &fill_key,
                 &taps,
@@ -1550,13 +1551,13 @@ mod tests {
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, controller, 50.0);
+            jump_to(&mut tester, controller.handle(), 50.0);
 
             let rect = rect_of(&tester, &fill_key);
             assert_eq!(rect.left, 0.0, "{platform:?}");
             assert_eq!(rect.width(), 850.0, "{platform:?}");
 
-            jump_to(&mut tester, controller, 0.0);
+            jump_to(&mut tester, controller.handle(), 0.0);
             assert_eq!(
                 rect_of(&tester, &fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
@@ -1611,12 +1612,12 @@ mod tests {
                     five_fixed_extent_items(),
                     fill_without_scroll_body(true, padded_center_button(platform, &key, &button)),
                 ],
-                Some(controller),
+                Some(controller.clone()),
                 Axis::Vertical,
             ));
 
             // Scroll to the end
-            jump_to_max_scroll_extent(&mut tester, controller);
+            jump_to_max_scroll_extent(&mut tester, controller.handle());
             assert_eq!(
                 size_of(&tester, &key).height(),
                 148.0 + density_vertical * 4.0,
@@ -1672,14 +1673,14 @@ mod tests {
                             .into_widget(),
                     ),
                 ],
-                Some(controller),
+                Some(controller.clone()),
                 Axis::Vertical,
             ));
             assert!(!fill_is_onstage(&tester), "{platform:?}");
             assert!(!fixed_extent_item_is_onstage(&tester, 4), "{platform:?}");
 
             // Scroll to bottom
-            jump_to_max_scroll_extent(&mut tester, controller);
+            jump_to_max_scroll_extent(&mut tester, controller.handle());
             // End of list
             assert!(!fill_is_onstage(&tester), "{platform:?}");
             assert!(fixed_extent_item_is_onstage(&tester, 4), "{platform:?}");
@@ -1717,14 +1718,14 @@ mod tests {
                         .into_widget(),
                 ),
             ],
-            Some(controller),
+            Some(controller.clone()),
             Axis::Vertical,
         ));
         assert!(!fill_is_onstage(&tester));
         assert!(!fixed_extent_item_is_onstage(&tester, 4));
 
         // Scroll to bottom
-        jump_to_max_scroll_extent(&mut tester, controller);
+        jump_to_max_scroll_extent(&mut tester, controller.handle());
 
         // End of list
         assert!(!fill_is_onstage(&tester));
@@ -1778,12 +1779,12 @@ mod tests {
                     padded_center_button(TargetPlatform::Android, &key, &button),
                 ),
             ],
-            Some(controller),
+            Some(controller.clone()),
             Axis::Vertical,
         ));
 
         // Scroll to the end
-        jump_to_max_scroll_extent(&mut tester, controller);
+        jump_to_max_scroll_extent(&mut tester, controller.handle());
         assert_eq!(size_of(&tester, &key).height(), 148.0);
 
         // Check that the button alignment is true to expectations

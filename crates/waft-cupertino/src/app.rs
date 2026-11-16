@@ -9,16 +9,16 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Brightness, Locale, SystemUiOverlayStyle, TargetPlatform};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, OptionRetained, Ref};
 use waft_gestures::MultitouchDragStrategy;
 use waft_painting::AnyColor;
 use waft_services::SystemChrome;
 use waft_widgets::{
-    AnyAction, AnyNavigatorObserver, AnyRoute, BouncingScrollPhysics, BuildContext, Builder,
-    DefaultSelectionStyle, GenerateAppTitle, GlobalKey, HeroController, HeroControllerScope,
-    InitialRouteListFactory, IntoWidget, KeyRef, LocaleListResolutionCallback,
-    LocaleResolutionCallback, LocalizationsDelegateRef, MediaQuery, NavigationNotification,
-    NotificationListenerCallback, PageRoute, RouteFactory, RouteSettingsRef, ScrollBehavior,
+    ActionRef, BouncingScrollPhysics, BuildContext, Builder, DefaultSelectionStyle,
+    GenerateAppTitle, GlobalKey, HeroController, HeroControllerScope, InitialRouteListFactory,
+    IntoWidget, KeyRef, LocaleListResolutionCallback, LocaleResolutionCallback,
+    LocalizationsDelegateRef, MediaQuery, NavigationNotification, NavigatorObserverRef,
+    NotificationListenerCallback, RouteFactory, RouteRef, RouteSettingsRef, ScrollBehavior,
     ScrollBehaviorRef, ScrollConfiguration, ScrollDecelerationRate, ScrollPhysicsRef,
     ScrollableDetails, ShortcutMap, State, StateData, StatefulWidget, TransitionBuilder, View,
     WidgetBuilder, WidgetRef, WidgetsApp,
@@ -129,7 +129,7 @@ pub struct CupertinoApp {
     pub on_navigation_notification: Option<NotificationListenerCallback<NavigationNotification>>,
 
     /// See [`WidgetsApp::navigator_observers`].
-    pub navigator_observers: Vec<AnyNavigatorObserver>,
+    pub navigator_observers: Vec<NavigatorObserverRef>,
 
     /// See [`WidgetsApp::builder`].
     pub builder: Option<TransitionBuilder>,
@@ -192,7 +192,7 @@ pub struct CupertinoApp {
     pub shortcuts: Option<ShortcutMap>,
 
     /// See [`WidgetsApp::actions`].
-    pub actions: Option<HashMap<TypeId, AnyAction>>,
+    pub actions: Option<HashMap<TypeId, ActionRef>>,
 
     /// See [`WidgetsApp::restoration_scope_id`].
     pub restoration_scope_id: Option<String>,
@@ -307,7 +307,7 @@ impl CupertinoApp {
     /// Dart `CupertinoApp(onGenerateRoute:)`.
     pub fn on_generate_route(
         mut self,
-        on_generate_route: impl Fn(&mut App, &waft_widgets::RouteSettings) -> Option<AnyRoute> + 'static,
+        on_generate_route: impl Fn(&mut App, &waft_widgets::RouteSettings) -> Option<RouteRef> + 'static,
     ) -> CupertinoApp {
         self.on_generate_route = Some(Rc::new(on_generate_route));
         self
@@ -316,7 +316,7 @@ impl CupertinoApp {
     /// Dart `CupertinoApp(onGenerateInitialRoutes:)`.
     pub fn on_generate_initial_routes(
         mut self,
-        on_generate_initial_routes: impl Fn(&mut App, &str) -> Vec<AnyRoute> + 'static,
+        on_generate_initial_routes: impl Fn(&mut App, &str) -> Vec<RouteRef> + 'static,
     ) -> CupertinoApp {
         self.on_generate_initial_routes = Some(Rc::new(on_generate_initial_routes));
         self
@@ -325,7 +325,7 @@ impl CupertinoApp {
     /// Dart `CupertinoApp(onUnknownRoute:)`.
     pub fn on_unknown_route(
         mut self,
-        on_unknown_route: impl Fn(&mut App, &waft_widgets::RouteSettings) -> Option<AnyRoute> + 'static,
+        on_unknown_route: impl Fn(&mut App, &waft_widgets::RouteSettings) -> Option<RouteRef> + 'static,
     ) -> CupertinoApp {
         self.on_unknown_route = Some(Rc::new(on_unknown_route));
         self
@@ -343,7 +343,7 @@ impl CupertinoApp {
     /// Dart `CupertinoApp(navigatorObservers:)`.
     pub fn navigator_observers(
         mut self,
-        navigator_observers: impl IntoIterator<Item = AnyNavigatorObserver>,
+        navigator_observers: impl IntoIterator<Item = NavigatorObserverRef>,
     ) -> CupertinoApp {
         self.navigator_observers = navigator_observers.into_iter().collect();
         self
@@ -468,7 +468,7 @@ impl CupertinoApp {
     }
 
     /// Dart `CupertinoApp(actions:)`.
-    pub fn actions(mut self, actions: HashMap<TypeId, AnyAction>) -> CupertinoApp {
+    pub fn actions(mut self, actions: HashMap<TypeId, ActionRef>) -> CupertinoApp {
         self.actions = Some(actions);
         self
     }
@@ -494,7 +494,7 @@ impl CupertinoApp {
     /// The [`HeroController`] used for Cupertino page transitions.
     ///
     /// Used by `CupertinoTabView` and [`CupertinoApp`].
-    pub fn create_cupertino_hero_controller(app: &mut App) -> Handle<HeroController> {
+    pub fn create_cupertino_hero_controller(app: &mut App) -> Ref<HeroController> {
         // Linear tweening.
         HeroController::new(app)
     }
@@ -529,13 +529,14 @@ impl StatefulWidget for CupertinoApp {
 /// Dart's `_CupertinoAppState`.
 pub struct CupertinoAppState {
     state: StateData<CupertinoApp>,
-    hero_controller: Option<Handle<HeroController>>,
+    hero_controller: Option<Ref<HeroController>>,
 }
 
 impl CupertinoAppState {
     fn hero_controller(self: Handle<Self>, app: &App) -> Handle<HeroController> {
         app.get(self)
             .hero_controller
+            .handle()
             .expect("init_state creates the controller")
     }
 
@@ -576,7 +577,7 @@ impl CupertinoAppState {
             .page_route_builder(|app, settings, builder| {
                 let route = CupertinoPageRoute::new(app, builder)
                     .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                PageRoute::as_page_route(route)
+                route.into_erased()
             })
             .routes(widget.routes.clone())
             .text_style(effective_theme_data.text_theme().text_style())
@@ -693,7 +694,11 @@ impl State for CupertinoAppState {
             .scroll_behavior
             .clone()
             .unwrap_or_else(|| ScrollBehaviorRef::new(CupertinoScrollBehavior::new()));
-        let hero_controller = self.hero_controller(app);
+        let hero_controller = app
+            .get(self)
+            .hero_controller
+            .clone()
+            .expect("init_state creates the controller");
         // Dart's deprecated `withOpacity`: its rounding to an 8-bit alpha is part of the
         // behaviour being ported.
         #[allow(deprecated)]
@@ -761,7 +766,7 @@ impl ScrollBehavior for CupertinoScrollBehavior {
             TargetPlatform::Linux | TargetPlatform::MacOS | TargetPlatform::Windows => {
                 debug_assert!(details.controller.is_some());
                 let mut scrollbar = CupertinoScrollbar::new(child);
-                if let Some(controller) = details.controller {
+                if let Some(controller) = details.controller.clone() {
                     scrollbar = scrollbar.controller(controller);
                 }
                 scrollbar.into_widget()
@@ -815,9 +820,8 @@ mod tests {
     use waft_painting::PaintingBinding;
     use waft_test::TestPlatform;
     use waft_widgets::{
-        AnyElement, AnyModalRoute, Localizations, Navigator, ScrollController,
-        ScrollControllerLeaf, SizedBox, StatelessWidget, WidgetsBinding, WidgetsLocalizations,
-        downcast_widget,
+        AnyElement, AnyModalRoute, Localizations, Navigator, ScrollController, ScrollControllerRef,
+        SizedBox, StatelessWidget, WidgetsBinding, WidgetsLocalizations, downcast_widget,
     };
 
     use super::*;
@@ -1052,7 +1056,7 @@ mod tests {
                     asked_for.set(settings.name.clone());
                     let builder = Rc::clone(&details_page);
                     let route = CupertinoPageRoute::new(app, builder);
-                    Some(waft_widgets::Route::as_route(route))
+                    Some(route.into_erased())
                 })
         });
         assert_eq!(generated.take().as_deref(), Some("/details"));
@@ -1162,7 +1166,7 @@ mod tests {
     }
 
     fn is_cupertino_scrollbar(app: &mut App, context: BuildContext) -> bool {
-        let controller = ScrollController::default(app).as_controller();
+        let controller: ScrollControllerRef = ScrollController::default(app).into_erased();
         let details = ScrollableDetails::vertical(false).controller(controller);
         let child: WidgetRef = SizedBox::new().into_widget();
         let decorated =

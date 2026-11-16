@@ -11,18 +11,19 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationController, AnimationMin, AnimationStatus,
+    Animatable, Animation, AnimationController, AnimationMin, AnimationRef, AnimationStatus,
     AnimationStatusListener, AnimationStyle, AnyAnimation, Curve, CurveTween, CurvedAnimation,
-    Curves, Interval, Split, TrainHoppingAnimation, Tween,
+    Curves, Drive, Interval, Split, TrainHoppingAnimation, Tween,
 };
 use waft_embedder::{Clip, Color, Offset, Rect, Size, TargetPlatform, TextDirection, clamp_double};
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Completer, CompleterFuture, Handle, HandleId,
-    Listenable, Listener, PRECISION_ERROR_TOLERANCE, Timer, UniqueKey, ValueKey, VoidCallback,
+    App, ChangeNotifier, ChangeNotifierData, Completer, CompleterFuture, Handle, Listenable,
+    Listener, OptionRetained, PRECISION_ERROR_TOLERANCE, Ref, Timer, UniqueKey, ValueKey,
+    VoidCallback,
 };
 use waft_gestures::{DragEndDetails, DragStartDetails, GestureBinding, HitTestResult};
 use waft_painting::{
@@ -45,7 +46,7 @@ use waft_widgets::{
     RestorationMixinData, RotationTransition, SafeArea, ScaleTransition,
     ScrollNotificationObserver, Semantics, SizedBox, Stack, State, StateData, StateSetter,
     StatefulBuilder, StatefulBuilderState, StatefulWidget, StatelessWidget,
-    TickerProviderStateMixin, TickerProviderStateMixinData, View, WidgetBuilder, WidgetRef,
+    TickerProviderStateMixin, TickerProviderStateMixinData, View, Widget, WidgetBuilder, WidgetRef,
     WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef, downcast_widget,
 };
 
@@ -257,9 +258,9 @@ pub struct ScaffoldMessengerState {
     scaffolds: Vec<Handle<ScaffoldState>>,
     material_banners:
         VecDeque<Rc<ScaffoldFeatureController<MaterialBanner, MaterialBannerClosedReason>>>,
-    material_banner_controller: Option<Handle<AnimationController>>,
+    material_banner_controller: Option<Ref<AnimationController>>,
     snack_bars: VecDeque<Rc<ScaffoldFeatureController<SnackBar, SnackBarClosedReason>>>,
-    snack_bar_controller: Option<Handle<AnimationController>>,
+    snack_bar_controller: Option<Ref<AnimationController>>,
     snack_bar_timer: Option<Timer>,
     /// Dart's `late bool _accessibleNavigation`, set before the first build.
     accessible_navigation: bool,
@@ -390,7 +391,7 @@ impl ScaffoldMessengerState {
             );
             app.get_mut(self).snack_bar_controller = Some(controller);
         }
-        let snack_bar_controller = self.snack_bar_controller(app);
+        let snack_bar_controller = self.snack_bar_controller(app).handle();
         if app.get(self).snack_bars.is_empty() {
             debug_assert!(snack_bar_controller.is_dismissed(app));
             snack_bar_controller.forward(app, None);
@@ -405,7 +406,7 @@ impl ScaffoldMessengerState {
                     // match in structure, material ink splashes and highlights don't survive
                     // from one to the next.
                     snack_bar.with_animation(
-                        snack_bar_controller.view(),
+                        self.snack_bar_controller(app).erase(),
                         Some(KeyRef::Local(Rc::new(UniqueKey::new()))),
                     ),
                     Completer::new(),
@@ -458,7 +459,7 @@ impl ScaffoldMessengerState {
         snack_bar_animation_style: Option<&AnimationStyle>,
     ) {
         if let Some(snack_bar_animation_style) = snack_bar_animation_style {
-            let controller = app.get(self).snack_bar_controller;
+            let controller = app.get(self).snack_bar_controller.handle();
             let (duration, reverse_duration) = match controller {
                 Some(controller) => {
                     let controller = app.get(controller);
@@ -477,15 +478,17 @@ impl ScaffoldMessengerState {
         }
     }
 
-    fn snack_bar_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn snack_bar_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .snack_bar_controller
+            .as_ref()
             .expect("a snack bar was shown")
     }
 
-    fn material_banner_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn material_banner_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .material_banner_controller
+            .as_ref()
             .expect("a material banner was shown")
     }
 
@@ -554,7 +557,7 @@ impl ScaffoldMessengerState {
             .expect("checked above")
             .completer
             .clone();
-        let controller = self.snack_bar_controller(app);
+        let controller = self.snack_bar_controller(app).handle();
         if app.get(self).accessible_navigation {
             controller.set_value(app, 0.0);
             completer.complete(app, reason);
@@ -637,7 +640,7 @@ impl ScaffoldMessengerState {
             );
             app.get_mut(self).material_banner_controller = Some(controller);
         }
-        let material_banner_controller = self.material_banner_controller(app);
+        let material_banner_controller = self.material_banner_controller(app).handle();
         if app.get(self).material_banners.is_empty() {
             debug_assert!(material_banner_controller.is_dismissed(app));
             material_banner_controller.forward(app, None);
@@ -652,7 +655,7 @@ impl ScaffoldMessengerState {
                     // to match in structure, material ink splashes and highlights don't survive
                     // from one to the next.
                     material_banner.with_animation(
-                        material_banner_controller.view(),
+                        self.material_banner_controller(app).erase(),
                         Some(KeyRef::Local(Rc::new(UniqueKey::new()))),
                     ),
                     Completer::new(),
@@ -749,7 +752,7 @@ impl ScaffoldMessengerState {
             .expect("checked above")
             .completer
             .clone();
-        let controller = self.material_banner_controller(app);
+        let controller = self.material_banner_controller(app).handle();
         if app.get(self).accessible_navigation {
             controller.set_value(app, 0.0);
             completer.complete(app, reason);
@@ -797,7 +800,7 @@ impl TickerProviderStateMixin for ScaffoldMessengerState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for ScaffoldMessengerState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -824,7 +827,7 @@ impl State for ScaffoldMessengerState {
         if let Some(first) = app.get(self).snack_bars.front().cloned() {
             let route = AnyModalRoute::of(app, context);
             if route.is_none_or(|route| route.as_route().is_current(app)) {
-                let controller = self.snack_bar_controller(app);
+                let controller = self.snack_bar_controller(app).handle();
                 if controller.is_completed(app) && app.get(self).snack_bar_timer.is_none() {
                     let snack_bar = first.widget();
                     let persist = snack_bar.effective_persist();
@@ -853,10 +856,10 @@ impl State for ScaffoldMessengerState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = app.get(self).material_banner_controller {
+        if let Some(controller) = app.get(self).material_banner_controller.handle() {
             controller.dispose(app);
         }
-        if let Some(controller) = app.get(self).snack_bar_controller {
+        if let Some(controller) = app.get(self).snack_bar_controller.handle() {
             controller.dispose(app);
         }
         if let Some(timer) = app.get_mut(self).snack_bar_timer.take() {
@@ -1138,7 +1141,7 @@ pub struct ScaffoldGeometryNotifier {
 }
 
 impl ScaffoldGeometryNotifier {
-    fn new(app: &mut App, geometry: ScaffoldGeometry, context: BuildContext) -> Handle<Self> {
+    fn new(app: &mut App, geometry: ScaffoldGeometry, context: BuildContext) -> Ref<Self> {
         app.create(ScaffoldGeometryNotifier {
             change_notifier: ChangeNotifierData::default(),
             context,
@@ -1195,7 +1198,7 @@ impl ScaffoldGeometryNotifier {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -1429,11 +1432,11 @@ struct ScaffoldLayout {
     min_insets: EdgeInsets,
     min_view_padding: EdgeInsets,
     text_direction: TextDirection,
-    geometry_notifier: Handle<ScaffoldGeometryNotifier>,
+    geometry_notifier: Ref<ScaffoldGeometryNotifier>,
 
     previous_floating_action_button_location: FloatingActionButtonLocationRef,
     current_floating_action_button_location: FloatingActionButtonLocationRef,
-    floating_action_button_move_animation: AnyAnimation<f64>,
+    floating_action_button_move_animation: AnimationRef<f64>,
     /// Dart's `super(relayout: floatingActionButtonMoveAnimation)`.
     relayout: Rc<dyn Listenable>,
     floating_action_button_motion_animator: FloatingActionButtonAnimatorRef,
@@ -1854,12 +1857,12 @@ impl Debug for ScaffoldLayout {
 ///   when its [`FloatingActionButtonLocation`] is updated.
 struct FloatingActionButtonTransition {
     child: Option<WidgetRef>,
-    fab_move_animation: AnyAnimation<f64>,
+    fab_move_animation: AnimationRef<f64>,
     fab_motion_animator: FloatingActionButtonAnimatorRef,
-    geometry_notifier: Handle<ScaffoldGeometryNotifier>,
+    geometry_notifier: Ref<ScaffoldGeometryNotifier>,
 
     /// Controls the current child widget.child as it exits.
-    current_controller: Handle<AnimationController>,
+    current_controller: Ref<AnimationController>,
 }
 
 impl Debug for FloatingActionButtonTransition {
@@ -1888,16 +1891,15 @@ impl StatefulWidget for FloatingActionButtonTransition {
             extended_current_scale_animation: None,
             current_rotation_animation: None,
             previous_child: None,
-            made_animations: Vec::new(),
         }
     }
 }
 
 /// Dart's `static final _FloatingActionButtonTransitionState._entranceTurnTween`, kept per
-/// [`App`] and made on first use; shared by every transition, so never destroyed.
+/// [`App`] and made on first use; shared by every transition, so the `App` keeps it for its life.
 #[derive(Default)]
 struct EntranceTurnTween {
-    tweens: Option<(Handle<Tween<f64>>, Handle<CurveTween>)>,
+    tweens: Option<(Ref<Tween<f64>>, Ref<CurveTween>)>,
 }
 
 /// Dart's `_FloatingActionButtonTransitionState`.
@@ -1906,35 +1908,32 @@ struct FloatingActionButtonTransitionState {
     ticker_provider: TickerProviderStateMixinData,
     // The animations applied to the Floating Action Button when it is entering or exiting.
     // Controls the previous widget.child as it exits.
-    previous_controller: Option<Handle<AnimationController>>,
-    previous_exit_scale_animation: Option<Handle<CurvedAnimation>>,
-    previous_exit_rotation_curved_animation: Option<Handle<CurvedAnimation>>,
-    current_entrance_scale_animation: Option<Handle<CurvedAnimation>>,
-    previous_scale_animation: Option<AnyAnimation<f64>>,
-    previous_rotation_animation: Option<Handle<TrainHoppingAnimation>>,
+    previous_controller: Option<Ref<AnimationController>>,
+    previous_exit_scale_animation: Option<Ref<CurvedAnimation>>,
+    previous_exit_rotation_curved_animation: Option<Ref<CurvedAnimation>>,
+    current_entrance_scale_animation: Option<Ref<CurvedAnimation>>,
+    previous_scale_animation: Option<AnimationRef<f64>>,
+    previous_rotation_animation: Option<Ref<TrainHoppingAnimation>>,
     // The animations to run, considering the widget's fabMoveAnimation and the
     // current/previous entrance/exit animations.
-    current_scale_animation: Option<AnyAnimation<f64>>,
-    extended_current_scale_animation: Option<AnyAnimation<f64>>,
-    current_rotation_animation: Option<Handle<TrainHoppingAnimation>>,
+    current_scale_animation: Option<AnimationRef<f64>>,
+    extended_current_scale_animation: Option<AnimationRef<f64>>,
+    current_rotation_animation: Option<Ref<TrainHoppingAnimation>>,
     previous_child: Option<WidgetRef>,
-    /// The tweens, driven animations and `AnimationMin`s the last `update_animations` made that
-    /// no field above owns, which Dart's collector frees once the animations using them are
-    /// replaced; `free_made_animations` frees them then.
-    made_animations: Vec<HandleId>,
 }
 
 impl FloatingActionButtonTransitionState {
     fn previous_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .previous_controller
+            .handle()
             .expect("set in init_state")
     }
 
     /// Dart's `static final _entranceTurnTween`.
     fn entrance_turn_tween(app: &mut App) -> impl Animatable<f64> + Clone + 'static {
         let statics = app.singleton::<EntranceTurnTween>();
-        let (tween, curve_tween) = match app.get(statics).tweens {
+        let (tween, curve_tween) = match app.get(statics).tweens.clone() {
             Some(tweens) => tweens,
             None => {
                 let tween = Tween::new(
@@ -1943,7 +1942,7 @@ impl FloatingActionButtonTransitionState {
                     Some(1.0),
                 );
                 let curve_tween = CurveTween::new(app, Curves::ease_in());
-                app.get_mut(statics).tweens = Some((tween, curve_tween));
+                app.get_mut(statics).tweens = Some((tween.clone(), curve_tween.clone()));
                 (tween, curve_tween)
             }
         };
@@ -1951,25 +1950,25 @@ impl FloatingActionButtonTransitionState {
     }
 
     fn dispose_animations(self: Handle<Self>, app: &mut App) {
-        if let Some(animation) = app.get(self).previous_rotation_animation {
+        if let Some(animation) = app.get(self).previous_rotation_animation.handle() {
             animation.dispose(app);
-            app.destroy_lingering(animation);
         }
-        if let Some(animation) = app.get(self).current_rotation_animation {
+        if let Some(animation) = app.get(self).current_rotation_animation.handle() {
             animation.dispose(app);
-            app.destroy_lingering(animation);
         }
-        self.free_made_animations(app);
+        self.remove_scale_listeners(app);
     }
 
-    /// Frees what the last `update_animations` made, once its two scale animations no longer
-    /// call `on_progress_changed`; the transitions that still listen to them let go when they
-    /// rebuild, before the entries go at the next checkpoint.
-    fn free_made_animations(self: Handle<Self>, app: &mut App) {
+    /// Stops the two scale animations of the last `update_animations` from calling
+    /// `on_progress_changed`.
+    fn remove_scale_listeners(self: Handle<Self>, app: &mut App) {
         let this = app.get(self);
-        for animation in [this.previous_scale_animation, this.current_scale_animation]
-            .into_iter()
-            .flatten()
+        for animation in [
+            this.previous_scale_animation.clone(),
+            this.current_scale_animation.clone(),
+        ]
+        .into_iter()
+        .flatten()
         {
             animation.remove_listener(
                 app,
@@ -1979,63 +1978,63 @@ impl FloatingActionButtonTransitionState {
                 ),
             );
         }
-        for made in std::mem::take(&mut app.get_mut(self).made_animations) {
-            app.destroy_lingering(made);
-        }
     }
 
-    /// Dart's `curvedAnimation?.dispose()`, then frees it.
+    /// Dart's `curvedAnimation?.dispose()`.
     fn dispose_curved_animation(app: &mut App, animation: Option<Handle<CurvedAnimation>>) {
         if let Some(animation) = animation {
             animation.dispose(app);
-            app.destroy_lingering(animation);
         }
     }
 
     fn update_animations(self: Handle<Self>, app: &mut App) {
-        let previous_controller = self.previous_controller(app);
+        let previous_controller = app
+            .get(self)
+            .previous_controller
+            .clone()
+            .expect("set in init_state");
         FloatingActionButtonTransitionState::dispose_curved_animation(
             app,
-            app.get(self).previous_exit_scale_animation,
+            app.get(self).previous_exit_scale_animation.handle(),
         );
         // Get the animations for exit and entrance.
         let previous_exit_scale_animation =
-            CurvedAnimation::create(app, previous_controller.view(), Curves::ease_in(), None);
-        app.get_mut(self).previous_exit_scale_animation = Some(previous_exit_scale_animation);
+            CurvedAnimation::new(app, previous_controller.erase(), Curves::ease_in(), None);
+        app.get_mut(self).previous_exit_scale_animation =
+            Some(previous_exit_scale_animation.clone());
         FloatingActionButtonTransitionState::dispose_curved_animation(
             app,
-            app.get(self).previous_exit_rotation_curved_animation,
+            app.get(self)
+                .previous_exit_rotation_curved_animation
+                .handle(),
         );
         let previous_exit_rotation_curved_animation =
-            CurvedAnimation::create(app, previous_controller.view(), Curves::ease_in(), None);
+            CurvedAnimation::new(app, previous_controller.erase(), Curves::ease_in(), None);
         app.get_mut(self).previous_exit_rotation_curved_animation =
-            Some(previous_exit_rotation_curved_animation);
+            Some(previous_exit_rotation_curved_animation.clone());
 
         let previous_exit_rotation_tween = Tween::new(app, Some(1.0), Some(1.0));
         let previous_exit_rotation_animation = previous_exit_rotation_tween
-            .animate(app, previous_exit_rotation_curved_animation.as_animation());
+            .animate(app, previous_exit_rotation_curved_animation.erase());
 
         FloatingActionButtonTransitionState::dispose_curved_animation(
             app,
-            app.get(self).current_entrance_scale_animation,
+            app.get(self).current_entrance_scale_animation.handle(),
         );
-        let current_controller = self.widget(app).current_controller;
+        let current_controller = self.widget(app).current_controller.clone();
         let current_entrance_scale_animation =
-            CurvedAnimation::create(app, current_controller.view(), Curves::ease_in(), None);
-        app.get_mut(self).current_entrance_scale_animation = Some(current_entrance_scale_animation);
+            CurvedAnimation::new(app, current_controller.erase(), Curves::ease_in(), None);
+        app.get_mut(self).current_entrance_scale_animation =
+            Some(current_entrance_scale_animation.clone());
         let entrance_turn_tween = FloatingActionButtonTransitionState::entrance_turn_tween(app);
         let current_entrance_rotation_animation =
             current_controller.drive(app, entrance_turn_tween);
-        app.get_mut(self).made_animations.extend([
-            previous_exit_rotation_tween.into(),
-            previous_exit_rotation_animation.id(),
-            current_entrance_rotation_animation.id(),
-        ]);
 
         // Get the animations for when the FAB is moving.
         let fab_motion_animator = Rc::clone(&self.widget(app).fab_motion_animator);
-        let fab_move_animation = self.widget(app).fab_move_animation;
-        let move_scale_animation = fab_motion_animator.get_scale_animation(app, fab_move_animation);
+        let fab_move_animation = self.widget(app).fab_move_animation.clone();
+        let move_scale_animation =
+            fab_motion_animator.get_scale_animation(app, fab_move_animation.clone());
         let move_rotation_animation =
             fab_motion_animator.get_rotation_animation(app, fab_move_animation);
 
@@ -2050,37 +2049,34 @@ impl FloatingActionButtonTransitionState {
             &<dyn FloatingActionButtonAnimator>::no_animation(),
         ) {
             (
+                move_scale_animation.clone(),
                 move_scale_animation,
-                move_scale_animation,
-                TrainHoppingAnimation::create(app, move_rotation_animation, None, None),
-                TrainHoppingAnimation::create(app, move_rotation_animation, None, None),
+                TrainHoppingAnimation::new(app, move_rotation_animation.clone(), None, None),
+                TrainHoppingAnimation::new(app, move_rotation_animation, None, None),
             )
         } else {
-            let previous_scale = app
-                .create(AnimationMin::new(
-                    move_scale_animation,
-                    previous_exit_scale_animation.as_animation(),
-                ))
-                .as_animation();
-            let current_scale = app
-                .create(AnimationMin::new(
-                    move_scale_animation,
-                    current_entrance_scale_animation.as_animation(),
-                ))
-                .as_animation();
-            app.get_mut(self)
-                .made_animations
-                .extend([previous_scale.id(), current_scale.id()]);
+            let previous_scale = AnimationMin::new(
+                app,
+                move_scale_animation.clone(),
+                previous_exit_scale_animation.erase(),
+            )
+            .into_erased();
+            let current_scale = AnimationMin::new(
+                app,
+                move_scale_animation.clone(),
+                current_entrance_scale_animation.erase(),
+            )
+            .into_erased();
             (
                 previous_scale,
                 current_scale,
-                TrainHoppingAnimation::create(
+                TrainHoppingAnimation::new(
                     app,
                     previous_exit_rotation_animation,
-                    Some(move_rotation_animation),
+                    Some(move_rotation_animation.clone()),
                     None,
                 ),
-                TrainHoppingAnimation::create(
+                TrainHoppingAnimation::new(
                     app,
                     current_entrance_rotation_animation,
                     Some(move_rotation_animation),
@@ -2089,8 +2085,8 @@ impl FloatingActionButtonTransitionState {
             )
         };
         let this = app.get_mut(self);
-        this.previous_scale_animation = Some(previous_scale_animation);
-        this.current_scale_animation = Some(current_scale_animation);
+        this.previous_scale_animation = Some(previous_scale_animation.clone());
+        this.current_scale_animation = Some(current_scale_animation.clone());
         this.previous_rotation_animation = Some(previous_rotation);
         this.current_rotation_animation = Some(current_rotation);
 
@@ -2099,8 +2095,6 @@ impl FloatingActionButtonTransitionState {
         let extended_current_scale_animation = current_scale_animation.drive(app, interval_tween);
         let this = app.get_mut(self);
         this.extended_current_scale_animation = Some(extended_current_scale_animation);
-        this.made_animations
-            .extend([interval_tween.into(), extended_current_scale_animation.id()]);
         current_scale_animation.add_listener(
             app,
             Listener::handle_method(
@@ -2123,7 +2117,7 @@ impl FloatingActionButtonTransitionState {
         status: AnimationStatus,
     ) {
         if self.widget(app).child.is_some() && status.is_dismissed() {
-            let current_controller = self.widget(app).current_controller;
+            let current_controller = self.widget(app).current_controller.clone();
             debug_assert!(current_controller.is_dismissed(app));
             current_controller.forward(app, None);
         }
@@ -2140,16 +2134,18 @@ impl FloatingActionButtonTransitionState {
         let this = app.get(self);
         let previous = this
             .previous_scale_animation
+            .clone()
             .expect("set by update_animations");
         let current = this
             .current_scale_animation
+            .clone()
             .expect("set by update_animations");
         let scale = f64::max(previous.value(app), current.value(app));
         self.update_geometry_scale(app, scale);
     }
 
     fn update_geometry_scale(self: Handle<Self>, app: &mut App, scale: f64) {
-        let geometry_notifier = self.widget(app).geometry_notifier;
+        let geometry_notifier = self.widget(app).geometry_notifier.clone();
         geometry_notifier.update_with(app, None, None, Some(scale));
     }
 }
@@ -2169,7 +2165,7 @@ impl TickerProviderStateMixin for FloatingActionButtonTransitionState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for FloatingActionButtonTransitionState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2179,7 +2175,7 @@ impl State for FloatingActionButtonTransitionState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let previous_controller = AnimationController::create(
+        let previous_controller = AnimationController::new(
             app,
             None,
             Some(K_FLOATING_ACTION_BUTTON_SEGUE),
@@ -2217,15 +2213,17 @@ impl State for FloatingActionButtonTransitionState {
         self.previous_controller(app).dispose(app);
         FloatingActionButtonTransitionState::dispose_curved_animation(
             app,
-            app.get(self).previous_exit_scale_animation,
+            app.get(self).previous_exit_scale_animation.handle(),
         );
         FloatingActionButtonTransitionState::dispose_curved_animation(
             app,
-            app.get(self).previous_exit_rotation_curved_animation,
+            app.get(self)
+                .previous_exit_rotation_curved_animation
+                .handle(),
         );
         FloatingActionButtonTransitionState::dispose_curved_animation(
             app,
-            app.get(self).current_entrance_scale_animation,
+            app.get(self).current_entrance_scale_animation.handle(),
         );
         self.dispose_animations(app);
         TickerProviderStateMixin::dispose(self, app);
@@ -2259,7 +2257,7 @@ impl State for FloatingActionButtonTransitionState {
         }
         let previous_controller = self.previous_controller(app);
         if previous_controller.is_dismissed(app) {
-            let current_controller = widget.current_controller;
+            let current_controller = widget.current_controller.clone();
             let current_value = current_controller.value(app);
             if current_value == 0.0 || old_widget.child.is_none() {
                 // The current child hasn't started its entrance animation yet. We can
@@ -2282,15 +2280,26 @@ impl State for FloatingActionButtonTransitionState {
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let this = app.get(self);
-        let previous_scale_animation = this.previous_scale_animation.expect("update_animations");
-        let previous_rotation_animation =
-            this.previous_rotation_animation.expect("update_animations");
-        let current_scale_animation = this.current_scale_animation.expect("update_animations");
+        let previous_scale_animation = this
+            .previous_scale_animation
+            .clone()
+            .expect("update_animations");
+        let previous_rotation_animation = this
+            .previous_rotation_animation
+            .clone()
+            .expect("update_animations");
+        let current_scale_animation = this
+            .current_scale_animation
+            .clone()
+            .expect("update_animations");
         let extended_current_scale_animation = this
             .extended_current_scale_animation
+            .clone()
             .expect("update_animations");
-        let current_rotation_animation =
-            this.current_rotation_animation.expect("update_animations");
+        let current_rotation_animation = this
+            .current_rotation_animation
+            .clone()
+            .expect("update_animations");
         let previous_child = this.previous_child.clone();
         let child = self.widget(app).child.clone();
 
@@ -2305,8 +2314,7 @@ impl State for FloatingActionButtonTransitionState {
                 }
                 children.push(fade.into_widget());
             } else {
-                let mut rotation =
-                    RotationTransition::new(previous_rotation_animation.as_animation());
+                let mut rotation = RotationTransition::new(previous_rotation_animation.erase());
                 if let Some(previous_child) = previous_child {
                     rotation = rotation.child(previous_child);
                 }
@@ -2328,7 +2336,7 @@ impl State for FloatingActionButtonTransitionState {
                     .into_widget(),
             );
         } else {
-            let mut rotation = RotationTransition::new(current_rotation_animation.as_animation());
+            let mut rotation = RotationTransition::new(current_rotation_animation.erase());
             if let Some(child) = child {
                 rotation = rotation.child(child);
             }
@@ -2348,7 +2356,7 @@ impl State for FloatingActionButtonTransitionState {
 /// Dart's `Scaffold.bottomSheetScrimBuilder`: builds the scrim behind a bottom sheet from
 /// the scaffold's scrim animation, or nothing.
 pub type BottomSheetScrimBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, AnyAnimation<f64>) -> Option<WidgetRef>>;
+    Rc<dyn Fn(&mut App, BuildContext, AnimationRef<f64>) -> Option<WidgetRef>>;
 
 /// Implements the basic Material Design visual layout structure.
 ///
@@ -2897,7 +2905,7 @@ impl Scaffold {
         bottom_sheet_scrim_builder: impl Fn(
             &mut App,
             BuildContext,
-            AnyAnimation<f64>,
+            AnimationRef<f64>,
         ) -> Option<WidgetRef>
         + 'static,
     ) -> Scaffold {
@@ -3025,11 +3033,11 @@ impl Scaffold {
     /// # Panics
     ///
     /// If no [`Scaffold`] encloses `context`.
-    pub fn geometry_of(app: &mut App, context: BuildContext) -> Handle<ScaffoldGeometryNotifier> {
+    pub fn geometry_of(app: &mut App, context: BuildContext) -> Ref<ScaffoldGeometryNotifier> {
         let scaffold_scope =
             ScaffoldScope::inherit_from(app, context, Some(ScaffoldAspect::Geometry));
         match scaffold_scope {
-            Some(scaffold_scope) => scaffold_scope.geometry_notifier,
+            Some(scaffold_scope) => scaffold_scope.geometry_notifier.clone(),
             None => panic!(
                 "Scaffold.geometryOf() called with a context that does not contain a Scaffold.\n\
                  This usually happens when the context provided is from the same StatefulWidget \
@@ -3081,10 +3089,10 @@ impl Scaffold {
     fn default_bottom_sheet_scrim_builder(
         _app: &mut App,
         _context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> Option<WidgetRef> {
         Some(
-            ListenableBuilder::new(Rc::new(animation), move |app, _context, _child| {
+            ListenableBuilder::new(Rc::new(animation.clone()), move |app, _context, _child| {
                 let extent_remaining =
                     K_BOTTOM_SHEET_DOMINATES_PERCENTAGE * (1.0 - animation.value(app));
                 let floating_button_visibility_value =
@@ -3162,7 +3170,6 @@ impl StatefulWidget for Scaffold {
             geometry_notifier: None,
             bottom_sheet_scrim_animation_controller: None,
             show_body_scrim: false,
-            dismiss_drawer_action: None,
         }
     }
 }
@@ -3191,9 +3198,9 @@ pub struct ScaffoldState {
 
     /// Dart's `final RestorableBool _drawerOpened = RestorableBool(false)`, made in
     /// `init_state` because a property is an arena object.
-    drawer_opened: Option<Handle<RestorableBool>>,
+    drawer_opened: Option<Ref<RestorableBool>>,
     /// Dart's `_endDrawerOpened`, made in `init_state`.
-    end_drawer_opened: Option<Handle<RestorableBool>>,
+    end_drawer_opened: Option<Ref<RestorableBool>>,
 
     // Used for both the snackbar and material banner APIs
     scaffold_messenger: Option<Handle<ScaffoldMessengerState>>,
@@ -3217,24 +3224,21 @@ pub struct ScaffoldState {
     dismissed_bottom_sheets: Vec<WidgetRef>,
     current_bottom_sheet: Option<Rc<PersistentBottomSheetController>>,
     current_bottom_sheet_key: GlobalKey,
-    persistent_sheet_history_entry: Option<Handle<LocalHistoryEntry>>,
+    persistent_sheet_history_entry: Option<Ref<LocalHistoryEntry>>,
 
     // Floating Action Button API
-    floating_action_button_move_controller: Option<Handle<AnimationController>>,
+    floating_action_button_move_controller: Option<Ref<AnimationController>>,
     floating_action_button_animator: Option<FloatingActionButtonAnimatorRef>,
     previous_floating_action_button_location: Option<FloatingActionButtonLocationRef>,
     floating_action_button_location: Option<FloatingActionButtonLocationRef>,
 
-    floating_action_button_visibility_controller: Option<Handle<AnimationController>>,
+    floating_action_button_visibility_controller: Option<Ref<AnimationController>>,
 
     // INTERNALS
-    geometry_notifier: Option<Handle<ScaffoldGeometryNotifier>>,
+    geometry_notifier: Option<Ref<ScaffoldGeometryNotifier>>,
 
-    bottom_sheet_scrim_animation_controller: Option<Handle<AnimationController>>,
+    bottom_sheet_scrim_animation_controller: Option<Ref<AnimationController>>,
     show_body_scrim: bool,
-    /// The `_DismissDrawerAction` Dart's build makes anew for the scaffold's `Builder`, kept for
-    /// the state's life so builds do not fill the arena; the `Builder` gives it its context.
-    dismiss_drawer_action: Option<Handle<DismissDrawerAction>>,
 }
 
 impl ScaffoldState {
@@ -3268,11 +3272,17 @@ impl ScaffoldState {
     }
 
     fn drawer_opened(self: Handle<Self>, app: &App) -> Handle<RestorableBool> {
-        app.get(self).drawer_opened.expect("made in init_state")
+        app.get(self)
+            .drawer_opened
+            .handle()
+            .expect("made in init_state")
     }
 
     fn end_drawer_opened(self: Handle<Self>, app: &App) -> Handle<RestorableBool> {
-        app.get(self).end_drawer_opened.expect("made in init_state")
+        app.get(self)
+            .end_drawer_opened
+            .handle()
+            .expect("made in init_state")
     }
 
     /// Whether the [`Scaffold::drawer`] is opened.
@@ -3440,13 +3450,15 @@ impl ScaffoldState {
                                     app.get_mut(self).persistent_sheet_history_entry = None;
                                 }),
                             );
-                            app.get_mut(self).persistent_sheet_history_entry = Some(entry);
+                            app.get_mut(self).persistent_sheet_history_entry = Some(entry.clone());
                             let context = self.context(app);
                             AnyModalRoute::of(app, context)
                                 .expect("a persistent bottom sheet inside a modal route")
                                 .add_local_history_entry(app, entry);
                         }
-                    } else if let Some(entry) = app.get(self).persistent_sheet_history_entry {
+                    } else if let Some(entry) =
+                        app.get(self).persistent_sheet_history_entry.handle()
+                    {
                         entry.remove(app);
                     }
                     false
@@ -3460,7 +3472,8 @@ impl ScaffoldState {
                 for sheet in sheets {
                     let animation_controller = downcast_widget::<StandardBottomSheet>(&*sheet)
                         .expect("a dismissed sheet is a standard bottom sheet")
-                        .animation_controller;
+                        .animation_controller
+                        .clone();
                     animation_controller.reset(app);
                 }
                 debug_assert!(app.get(self).dismissed_bottom_sheets.is_empty());
@@ -3492,7 +3505,7 @@ impl ScaffoldState {
                 app,
                 builder,
                 true,
-                animation_controller,
+                animation_controller.clone(),
                 BottomSheetOptions::default(),
             );
             app.get_mut(self).current_bottom_sheet = Some(current_bottom_sheet);
@@ -3557,7 +3570,7 @@ impl ScaffoldState {
         app: &mut App,
         builder: WidgetBuilder,
         is_persistent: bool,
-        animation_controller: Handle<AnimationController>,
+        animation_controller: Ref<AnimationController>,
         options: BottomSheetOptions,
     ) -> Rc<PersistentBottomSheetController> {
         debug_assert!(
@@ -3571,15 +3584,18 @@ impl ScaffoldState {
 
         let completer = Completer::<()>::new();
         let bottom_sheet_key = GlobalKey::new();
-        // Dart's `late _StandardBottomSheet bottomSheet`, read by the closures below.
-        let bottom_sheet: Rc<std::cell::OnceCell<WidgetRef>> = Rc::new(std::cell::OnceCell::new());
+        // Dart's `late _StandardBottomSheet bottomSheet`, read by the closures below. They are
+        // kept inside the sheet and its history entry, so they name it weakly: a strong `Rc`
+        // would make a ring with the sheet, which Dart's collector frees and nothing here does.
+        let bottom_sheet: Rc<std::cell::OnceCell<Weak<dyn Widget>>> =
+            Rc::new(std::cell::OnceCell::new());
 
         let removed_entry = Rc::new(Cell::new(false));
         let doing_dispose = Rc::new(Cell::new(false));
 
         let remove_persistent_sheet_history_entry_if_needed = move |app: &mut App| {
             debug_assert!(is_persistent);
-            if let Some(entry) = app.get(self).persistent_sheet_history_entry {
+            if let Some(entry) = app.get(self).persistent_sheet_history_entry.handle() {
                 entry.remove(app);
                 app.get_mut(self).persistent_sheet_history_entry = None;
             }
@@ -3590,12 +3606,16 @@ impl ScaffoldState {
             let bottom_sheet = Rc::clone(&bottom_sheet);
             let bottom_sheet_key = bottom_sheet_key.clone();
             let completer = completer.clone();
+            let animation_controller = animation_controller.clone();
             move |app: &mut App| {
                 removed_entry.set(true);
                 let Some(current_bottom_sheet) = app.get(self).current_bottom_sheet.clone() else {
                     return;
                 };
-                let bottom_sheet = Rc::clone(bottom_sheet.get().expect("built below"));
+                let bottom_sheet = bottom_sheet
+                    .get()
+                    .and_then(Weak::upgrade)
+                    .expect("built below, and the current sheet keeps it");
                 debug_assert!(Rc::ptr_eq(
                     &current_bottom_sheet.feature.widget,
                     &bottom_sheet
@@ -3644,9 +3664,9 @@ impl ScaffoldState {
                         .current_bottom_sheet
                         .as_ref()
                         .is_some_and(|current| {
-                            bottom_sheet
-                                .get()
-                                .is_some_and(|sheet| Rc::ptr_eq(&current.feature.widget, sheet))
+                            bottom_sheet.get().is_some_and(|sheet| {
+                                Weak::ptr_eq(&Rc::downgrade(&current.feature.widget), sheet)
+                            })
                         });
                     if !removed_entry.get() && current_is_this_sheet && !doing_dispose.get() {
                         remove_current_bottom_sheet(app);
@@ -3657,15 +3677,17 @@ impl ScaffoldState {
 
         let remove_entry_if_needed = {
             let removed_entry = Rc::clone(&removed_entry);
+            let entry = entry.clone();
             Rc::new(move |app: &mut App| {
                 if !is_persistent && !removed_entry.get() {
                     debug_assert!(entry.is_some());
-                    entry.expect("not persistent").remove(app);
+                    entry.as_ref().expect("not persistent").remove(app);
                     removed_entry.set(true);
                 }
             })
         };
 
+        let dispose_controller = animation_controller.clone();
         let sheet: WidgetRef = StandardBottomSheet {
             key: bottom_sheet_key.clone().into(),
             animation_controller,
@@ -3679,8 +3701,8 @@ impl ScaffoldState {
                     else {
                         return;
                     };
-                    debug_assert!(bottom_sheet.get().is_some_and(|sheet| Rc::ptr_eq(
-                        &current_bottom_sheet.feature.widget,
+                    debug_assert!(bottom_sheet.get().is_some_and(|sheet| Weak::ptr_eq(
+                        &Rc::downgrade(&current_bottom_sheet.feature.widget),
                         sheet
                     )));
                     remove_entry_if_needed(app);
@@ -3694,7 +3716,7 @@ impl ScaffoldState {
                         .get(self)
                         .dismissed_bottom_sheets
                         .iter()
-                        .position(|dismissed| Rc::ptr_eq(dismissed, sheet));
+                        .position(|dismissed| Weak::ptr_eq(&Rc::downgrade(dismissed), sheet));
                     if let Some(position) = position {
                         self.set_state(app, |state| {
                             state.dismissed_bottom_sheets.remove(position);
@@ -3711,7 +3733,7 @@ impl ScaffoldState {
                     doing_dispose.set(true);
                     remove_entry_if_needed(app);
                     if should_dispose_animation_controller {
-                        animation_controller.dispose(app);
+                        dispose_controller.dispose(app);
                     }
                 }
             })),
@@ -3724,13 +3746,13 @@ impl ScaffoldState {
             constraints: options.constraints,
         }
         .into_widget();
-        assert!(bottom_sheet.set(Rc::clone(&sheet)).is_ok());
+        assert!(bottom_sheet.set(Rc::downgrade(&sheet)).is_ok());
 
         if !is_persistent {
             let context = self.context(app);
             AnyModalRoute::of(app, context)
                 .expect("a bottom sheet inside a modal route")
-                .add_local_history_entry(app, entry.expect("not persistent"));
+                .add_local_history_entry(app, entry.clone().expect("not persistent"));
         }
 
         let close: VoidCallback = match entry {
@@ -3824,7 +3846,7 @@ impl ScaffoldState {
         constraints: Option<BoxConstraints>,
         enable_drag: Option<bool>,
         show_drag_handle: Option<bool>,
-        transition_animation_controller: Option<Handle<AnimationController>>,
+        transition_animation_controller: Option<Ref<AnimationController>>,
         sheet_animation_style: Option<AnimationStyle>,
     ) -> Rc<PersistentBottomSheetController> {
         debug_assert!(
@@ -3839,6 +3861,7 @@ impl ScaffoldState {
         });
 
         self.close_current_bottom_sheet(app);
+        let should_dispose_animation_controller = transition_animation_controller.is_none();
         let controller = transition_animation_controller.unwrap_or_else(|| {
             BottomSheet::create_animation_controller(app, self, sheet_animation_style.as_ref())
         });
@@ -3856,7 +3879,7 @@ impl ScaffoldState {
                 constraints,
                 enable_drag,
                 show_drag_handle,
-                should_dispose_animation_controller: transition_animation_controller.is_none(),
+                should_dispose_animation_controller,
             },
         );
         self.set_state(app, |state| {
@@ -3876,6 +3899,7 @@ impl ScaffoldState {
     ) -> Handle<AnimationController> {
         app.get(self)
             .floating_action_button_move_controller
+            .handle()
             .expect("made in init_state")
     }
 
@@ -3885,6 +3909,7 @@ impl ScaffoldState {
     ) -> Handle<AnimationController> {
         app.get(self)
             .floating_action_button_visibility_controller
+            .handle()
             .expect("made in init_state")
     }
 
@@ -3982,8 +4007,11 @@ impl ScaffoldState {
 
     // INTERNALS
 
-    fn geometry_notifier(self: Handle<Self>, app: &App) -> Handle<ScaffoldGeometryNotifier> {
-        app.get(self).geometry_notifier.expect("made in init_state")
+    fn geometry_notifier(self: Handle<Self>, app: &App) -> Ref<ScaffoldGeometryNotifier> {
+        app.get(self)
+            .geometry_notifier
+            .clone()
+            .expect("made in init_state")
     }
 
     fn resize_to_avoid_bottom_inset(self: Handle<Self>, app: &App) -> bool {
@@ -4130,6 +4158,7 @@ impl ScaffoldState {
     ) -> Handle<AnimationController> {
         app.get(self)
             .bottom_sheet_scrim_animation_controller
+            .handle()
             .expect("made in init_state")
     }
 
@@ -4178,7 +4207,7 @@ impl TickerProviderStateMixin for ScaffoldState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for ScaffoldState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -4225,7 +4254,7 @@ impl State for ScaffoldState {
             .floating_action_button_animator
             .clone()
             .unwrap_or_else(default_floating_action_button_animator);
-        let floating_action_button_move_controller = AnimationController::create(
+        let floating_action_button_move_controller = AnimationController::new(
             app,
             Some(1.0),
             Some(K_FLOATING_ACTION_BUTTON_SEGUE * 2),
@@ -4236,7 +4265,7 @@ impl State for ScaffoldState {
             self,
         );
 
-        let floating_action_button_visibility_controller = AnimationController::create(
+        let floating_action_button_visibility_controller = AnimationController::new(
             app,
             None,
             Some(K_FLOATING_ACTION_BUTTON_SEGUE),
@@ -4247,7 +4276,7 @@ impl State for ScaffoldState {
             self,
         );
 
-        let bottom_sheet_scrim_animation_controller = AnimationController::create(
+        let bottom_sheet_scrim_animation_controller = AnimationController::new(
             app,
             None,
             None,
@@ -4257,9 +4286,7 @@ impl State for ScaffoldState {
             waft_animation::AnimationBehavior::Normal,
             self,
         );
-        let dismiss_drawer_action = DismissDrawerAction::new(app, context);
         let this = app.get_mut(self);
-        this.dismiss_drawer_action = Some(dismiss_drawer_action);
         this.drawer_opened = Some(drawer_opened);
         this.end_drawer_opened = Some(end_drawer_opened);
         this.geometry_notifier = Some(geometry_notifier);
@@ -4386,11 +4413,6 @@ impl State for ScaffoldState {
         RestorableProperty::dispose(self.end_drawer_opened(app), app);
         self.bottom_sheet_scrim_animation_controller(app)
             .dispose(app);
-        let dismiss_drawer_action = app
-            .get(self)
-            .dismiss_drawer_action
-            .expect("set in init_state");
-        app.destroy_lingering(dismiss_drawer_action);
         self.dispose_restoration(app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -4432,7 +4454,12 @@ impl State for ScaffoldState {
         );
         if app.get(self).show_body_scrim {
             let scrim_builder = Rc::clone(&self.widget(app).bottom_sheet_scrim_builder);
-            let scrim_animation = self.bottom_sheet_scrim_animation_controller(app).view();
+            let scrim_animation: AnimationRef<f64> = app
+                .get(self)
+                .bottom_sheet_scrim_animation_controller
+                .as_ref()
+                .expect("set in init_state")
+                .erase();
             let scrim = scrim_builder(app, context, scrim_animation);
             self.add_if_non_null(
                 app,
@@ -4628,10 +4655,19 @@ impl State for ScaffoldState {
 
         let fab_transition = FloatingActionButtonTransition {
             child: self.widget(app).floating_action_button.clone(),
-            fab_move_animation: self.floating_action_button_move_controller(app).view(),
+            fab_move_animation: app
+                .get(self)
+                .floating_action_button_move_controller
+                .as_ref()
+                .expect("set in init_state")
+                .erase(),
             fab_motion_animator: self.floating_action_button_animator(app),
             geometry_notifier: self.geometry_notifier(app),
-            current_controller: self.floating_action_button_visibility_controller(app),
+            current_controller: app
+                .get(self)
+                .floating_action_button_visibility_controller
+                .clone()
+                .expect("set in init_state"),
         };
         self.add_if_non_null(
             app,
@@ -4699,7 +4735,12 @@ impl State for ScaffoldState {
             (resize_to_avoid_bottom_inset && view_insets_bottom != 0.0).then_some(0.0),
         );
 
-        let move_animation = self.floating_action_button_move_controller(app).view();
+        let move_animation: AnimationRef<f64> = app
+            .get(self)
+            .floating_action_button_move_controller
+            .as_ref()
+            .expect("set in init_state")
+            .erase();
         let extend_body = self.widget(app).extend_body;
         let extend_body_behind_app_bar = self.widget(app).extend_body_behind_app_bar;
         let this = app.get(self);
@@ -4713,14 +4754,14 @@ impl State for ScaffoldState {
                     .as_ref()
                     .expect("set in init_state"),
             ),
+            relayout: Rc::new(move_animation.clone()),
             floating_action_button_move_animation: move_animation,
-            relayout: Rc::new(move_animation),
             floating_action_button_motion_animator: Rc::clone(
                 this.floating_action_button_animator
                     .as_ref()
                     .expect("set in init_state"),
             ),
-            geometry_notifier: this.geometry_notifier.expect("made in init_state"),
+            geometry_notifier: this.geometry_notifier.clone().expect("made in init_state"),
             previous_floating_action_button_location: Rc::clone(
                 this.previous_floating_action_button_location
                     .as_ref()
@@ -4732,10 +4773,6 @@ impl State for ScaffoldState {
             snack_bar_width,
         });
 
-        let dismiss_drawer_action = app
-            .get(self)
-            .dismiss_drawer_action
-            .expect("set in init_state");
         ScaffoldScope {
             has_drawer: self.has_drawer(app),
             has_end_drawer: self.has_end_drawer(app),
@@ -4750,11 +4787,11 @@ impl State for ScaffoldState {
                             .unwrap_or(theme_data.scaffold_background_color),
                     )
                     .child(Builder::new(move |app, context| {
-                        app.get_mut(dismiss_drawer_action).context = context;
+                        let dismiss_drawer_action = DismissDrawerAction::new(app, context);
                         let mut actions = HashMap::new();
                         actions.insert(
                             <DismissDrawerAction as Action>::intent_type(),
-                            Action::as_action(dismiss_drawer_action),
+                            dismiss_drawer_action.erase(),
                         );
                         Actions::new(
                             actions,
@@ -4800,7 +4837,7 @@ struct DismissDrawerAction {
 }
 
 impl DismissDrawerAction {
-    fn new(app: &mut App, context: BuildContext) -> Handle<DismissDrawerAction> {
+    fn new(app: &mut App, context: BuildContext) -> Ref<DismissDrawerAction> {
         app.create(DismissDrawerAction {
             action: ActionData::new(),
             context,
@@ -4894,7 +4931,7 @@ impl<T, U> Debug for ScaffoldFeatureController<T, U> {
 struct StandardBottomSheet {
     key: KeyRef,
     // we control it, but it must be disposed by whoever created it.
-    animation_controller: Handle<AnimationController>,
+    animation_controller: Ref<AnimationController>,
     enable_drag: bool,
     show_drag_handle: Option<bool>,
     on_closing: Option<VoidCallback>,
@@ -4941,7 +4978,7 @@ struct StandardBottomSheetState {
 
 impl StandardBottomSheetState {
     fn close(self: Handle<Self>, app: &mut App) {
-        let animation_controller = self.widget(app).animation_controller;
+        let animation_controller = self.widget(app).animation_controller.clone();
         let on_closing = self.widget(app).on_closing.clone();
         animation_controller.reverse(app, None);
         if let Some(on_closing) = on_closing {
@@ -5018,7 +5055,7 @@ impl State for StandardBottomSheetState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let animation_controller = self.widget(app).animation_controller;
+        let animation_controller = self.widget(app).animation_controller.clone();
         debug_assert!(animation_controller.is_forward_or_completed(app));
         animation_controller.add_status_listener(
             app,
@@ -5030,7 +5067,7 @@ impl State for StandardBottomSheetState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let animation_controller = self.widget(app).animation_controller;
+        let animation_controller = self.widget(app).animation_controller.clone();
         let on_dispose = self.widget(app).on_dispose.clone();
         animation_controller.remove_status_listener(
             app,
@@ -5058,7 +5095,7 @@ impl State for StandardBottomSheetState {
         let widget = self.widget(app);
         let constraints = widget.constraints.or(theme_constraints);
 
-        let animation_controller = widget.animation_controller;
+        let animation_controller = widget.animation_controller.clone();
         let is_persistent = widget.is_persistent;
         let builder = Rc::clone(&widget.builder);
         let mut bottom_sheet = BottomSheet::new(
@@ -5074,7 +5111,7 @@ impl State for StandardBottomSheetState {
                     .into_widget()
             }),
         )
-        .animation_controller(animation_controller)
+        .animation_controller(animation_controller.clone())
         .enable_drag(widget.enable_drag)
         .on_drag_start(move |app: &mut App, details: DragStartDetails| {
             self.handle_drag_start(app, details)
@@ -5108,7 +5145,7 @@ impl State for StandardBottomSheetState {
         }
 
         ListenableBuilder::new(
-            Rc::new(animation_controller.view()),
+            Rc::new(animation_controller.erase::<AnyAnimation<f64>>()),
             move |app, _context, child| {
                 let animation_curve = Rc::clone(&app.get(self).animation_curve);
                 let mut align = Align::new()
@@ -5210,7 +5247,7 @@ struct ScaffoldScope {
     has_end_drawer: bool,
     is_drawer_open: bool,
     is_end_drawer_open: bool,
-    geometry_notifier: Handle<ScaffoldGeometryNotifier>,
+    geometry_notifier: Ref<ScaffoldGeometryNotifier>,
     child: WidgetRef,
 }
 
@@ -5439,7 +5476,7 @@ mod tests {
                         .resize_to_avoid_bottom_inset(false)
                         .body(
                             SingleChildScrollView::new()
-                                .controller(controller.as_controller())
+                                .controller(controller.erase())
                                 // Dart's `FlutterLogo(size: 1107)`: a box of that size.
                                 .child(SizedBox::square(Some(1107.0))),
                         ),
@@ -6717,7 +6754,7 @@ mod tests {
 
     struct GeometryListenerState {
         state: StateData<GeometryListener>,
-        geometry_listenable: Option<Handle<ScaffoldGeometryNotifier>>,
+        geometry_listenable: Option<Ref<ScaffoldGeometryNotifier>>,
         on_geometry_changed: Listener,
     }
 
@@ -6728,11 +6765,11 @@ mod tests {
         fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
             let context = self.context(app);
             let new_listenable = Scaffold::geometry_of(app, context);
-            if app.get(self).geometry_listenable == Some(new_listenable) {
+            if app.get(self).geometry_listenable.as_ref() == Some(&new_listenable) {
                 return;
             }
             let on_geometry_changed = app.get(self).on_geometry_changed.clone();
-            if let Some(old) = app.get(self).geometry_listenable {
+            if let Some(old) = app.get(self).geometry_listenable.clone() {
                 old.remove_listener(app, &on_geometry_changed);
             }
             new_listenable.add_listener(app, on_geometry_changed);
@@ -6743,10 +6780,11 @@ mod tests {
             let notifier = app
                 .get(self)
                 .geometry_listenable
+                .clone()
                 .expect("set by did_change_dependencies");
             CustomPaint::new()
                 .painter(GeometryCachePainter {
-                    notifier,
+                    notifier: notifier.clone(),
                     repaint: Rc::new(notifier),
                     cache: Rc::clone(&self.widget(app).cache),
                 })
@@ -6756,7 +6794,7 @@ mod tests {
 
     /// Dart's `_GeometryCachePainter`.
     struct GeometryCachePainter {
-        notifier: Handle<ScaffoldGeometryNotifier>,
+        notifier: Ref<ScaffoldGeometryNotifier>,
         repaint: Rc<dyn waft_foundation::Listenable>,
         cache: GeometryCache,
     }
@@ -7454,11 +7492,7 @@ mod tests {
                                         .into_widget()
                                 });
                             let route = waft_widgets::PageRouteBuilder::new(app, page_builder);
-                            drop(waft_widgets::Navigator::push(
-                                app,
-                                context,
-                                waft_widgets::Route::as_route(route),
-                            ));
+                            drop(waft_widgets::Navigator::push(app, context, route.erase()));
                         })))
                         .into_widget()
                 })
@@ -7991,6 +8025,25 @@ mod tests {
         });
     }
 
+    /// Not a Dart case: what Flutter's leak tracking checks, that showing and closing a
+    /// bottom sheet leaves nothing behind. The sheet's callbacks name the sheet itself, a ring
+    /// Dart's collector frees.
+    #[test]
+    fn showing_and_closing_a_bottom_sheet_leaves_nothing_behind() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            let sheet_key = GlobalKey::new();
+            pump_bottom_sheet_app(&mut tester, &sheet_key, None);
+            tester.assert_leaves_nothing_behind(|tester| {
+                tap_text(tester, "X", 1);
+                tester.pump_and_settle();
+                tap_text(tester, "Close", 2);
+                tester.pump_and_settle();
+                assert!(sheet_key.current_context(&tester.cell.borrow()).is_none());
+            });
+        });
+    }
+
     // 'Scaffold showBottomSheet animation can be customized'.
     #[test]
     fn the_sheet_animation_style_sets_show_bottom_sheets_durations() {
@@ -8152,7 +8205,7 @@ mod tests {
     }
 
     fn draggable_sheet(
-        controller: Handle<DraggableScrollableController>,
+        controller: Ref<DraggableScrollableController>,
         child: fn() -> WidgetRef,
     ) -> DraggableScrollableSheet {
         DraggableScrollableSheet::new(Rc::new(move |_app, _context, scroll_controller| {
@@ -8194,8 +8247,12 @@ mod tests {
             let sheet_controller = show_sheet(
                 &mut tester.cell.borrow_mut(),
                 scaffold,
-                move |_app, _context| {
-                    draggable_sheet(draggable_controller, || placeholder(None)).into_widget()
+                {
+                    let draggable_controller = draggable_controller.clone();
+                    move |_app, _context| {
+                        draggable_sheet(draggable_controller.clone(), || placeholder(None))
+                            .into_widget()
+                    }
                 },
                 None,
             );
@@ -8236,7 +8293,7 @@ mod tests {
                             .key(KeyRef::Local(Rc::new(ValueKey::new("one".to_string()))))
                             .child(waft_widgets::Text::new("1")),
                     )
-                    .bottom_sheet(draggable_sheet(draggable_controller, || {
+                    .bottom_sheet(draggable_sheet(draggable_controller.clone(), || {
                         SizedBox::new().into_widget()
                     }))
                     .into_widget()
@@ -8279,7 +8336,7 @@ mod tests {
             const K_MAX_BOTTOM_SHEET_SCRIM_OPACITY: f64 = 0.6;
             pump_app(&mut tester, |_app| {
                 Scaffold::new()
-                    .bottom_sheet(draggable_sheet(draggable_controller, || {
+                    .bottom_sheet(draggable_sheet(draggable_controller.clone(), || {
                         SizedBox::new().into_widget()
                     }))
                     .into_widget()
@@ -8331,7 +8388,7 @@ mod tests {
                         let scrim_key = scrim_key.clone();
                         Some(
                             ListenableBuilder::new(
-                                Rc::new(animation),
+                                Rc::new(animation.clone()),
                                 move |app, _context, _child| {
                                     #[allow(deprecated)]
                                     let color = Colors::BLACK.with_opacity(animation.value(app));
@@ -8343,7 +8400,7 @@ mod tests {
                             .into_widget(),
                         )
                     })
-                    .bottom_sheet(draggable_sheet(draggable_controller, || {
+                    .bottom_sheet(draggable_sheet(draggable_controller.clone(), || {
                         SizedBox::new().into_widget()
                     }))
                     .into_widget()
@@ -8612,7 +8669,7 @@ mod tests {
             pump_app(&mut tester, |_app| {
                 let dirty = Rc::clone(&dirty);
                 waft_widgets::ValueListenableBuilder::new(
-                    Rc::new(fab_location),
+                    Rc::new(fab_location.clone()),
                     move |app, _context, location: &LocationValue, _child| {
                         dirty.set(scaffold_layout_builder_dirty(app));
 
@@ -8734,7 +8791,7 @@ mod tests {
         drop(waft_widgets::Navigator::push(
             &mut app,
             context,
-            waft_widgets::Route::as_route(route),
+            route.erase(),
         ));
     }
 

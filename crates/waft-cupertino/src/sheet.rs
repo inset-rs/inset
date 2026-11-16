@@ -5,11 +5,13 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatus,
-    AnimationStatusListener, AnyAnimation, CurvedAnimation, Curves, ValueTween,
+    Animatable, AnimationBehavior, AnimationController, AnimationRef, CurvedAnimation, Curves,
+    Drive, ValueTween,
 };
 use waft_embedder::{Brightness, Color, Offset, Radius, SystemUiOverlayStyle};
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, Listener};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, Listener, OptionRetained, Ref,
+};
 use waft_gestures::{
     Drag, DragEndDetails, DragGestureRecognizer, DragStartDetails, DragUpdateDetails,
     IOSScrollViewFlingVelocityTracker, PointerDownEvent, PointerEvent, RecognizerLeaf,
@@ -25,23 +27,23 @@ use waft_scheduler::{
 };
 use waft_widgets::{
     Align, AlwaysScrollableScrollPhysics, AnimatedBuilder, AnnotatedRegion, AnyRoute,
-    AnyScrollActivity, AnyScrollController, AnyScrollPosition, AnyTransitionRoute, BuildContext,
-    ClipRSuperellipse, ColoredBox, DecoratedBox, DelegatedTransitionBuilder, FadeTransition,
-    GlobalKey, InheritedWidget, IntoWidget, KeyRef, LocalHistoryRoute, LocalHistoryRouteData,
-    MediaQuery, ModalRoute, ModalRouteData, Navigator, NavigatorPopHandler, NavigatorState,
-    OverlayRoute, OverlayRouteData, Padding, PageRoute, PageRouteData, PopScope,
-    PredictiveBackRoute, Route, RouteData, RouteResult, RouteSettingsRef, ScaleTransition,
-    ScrollActivityDelegate, ScrollContext, ScrollControllerData, ScrollControllerLeaf,
-    ScrollPhysicsRef, ScrollPosition, ScrollPositionData, ScrollPositionWithSingleContext,
-    ScrollPositionWithSingleContextData, ScrollPositionWithSingleContextLeaf,
-    ScrollableWidgetBuilder, SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData,
-    SizedBox, SlideTransition, Stack, State, StateData, StatefulWidget, TransitionRoute,
-    TransitionRouteData, WidgetBuilder, WidgetRef,
+    AnyScrollPosition, AnyTransitionRoute, BuildContext, ClipRSuperellipse, ColoredBox,
+    DecoratedBox, DelegatedTransitionBuilder, FadeTransition, GlobalKey, InheritedWidget,
+    IntoWidget, KeyRef, LocalHistoryRoute, LocalHistoryRouteData, MediaQuery, ModalRoute,
+    ModalRouteData, Navigator, NavigatorPopHandler, NavigatorState, OverlayRoute, OverlayRouteData,
+    Padding, PageRoute, PageRouteData, PopScope, PredictiveBackRoute, Route, RouteData,
+    RouteResult, RouteSettingsRef, ScaleTransition, ScrollActivityDelegate, ScrollActivityRef,
+    ScrollContext, ScrollControllerData, ScrollControllerLeaf, ScrollControllerRef,
+    ScrollPhysicsRef, ScrollPosition, ScrollPositionData, ScrollPositionRef,
+    ScrollPositionWithSingleContext, ScrollPositionWithSingleContextData,
+    ScrollPositionWithSingleContextLeaf, ScrollableWidgetBuilder, SingleTickerProviderStateMixin,
+    SingleTickerProviderStateMixinData, SizedBox, SlideTransition, Stack, State, StateData,
+    StatefulWidget, TransitionRoute, TransitionRouteData, WidgetBuilder, WidgetRef,
 };
 
 use crate::colors::CupertinoColors;
 use crate::interface_level::{CupertinoUserInterfaceLevel, CupertinoUserInterfaceLevelData};
-use crate::route::CupertinoPageRoute;
+use crate::route::{CupertinoPageRoute, stop_user_gesture_when_the_animation_ends};
 use crate::theme::CupertinoTheme;
 
 // Smoothing factor applied to the device's top padding (which approximates the corner radius)
@@ -145,7 +147,7 @@ const K_SCALE_TWEEN: ValueTween<f64> = ValueTween::new(1.0, 1.0 - K_SHEET_SCALE_
 type RouteFlagGetter = Rc<dyn Fn(&App) -> bool>;
 
 /// Dart's `ValueGetter<_CupertinoDragGestureController<T>>`.
-type StartPopGestureCallback = Rc<dyn Fn(&mut App) -> Handle<CupertinoDragGestureController>>;
+type StartPopGestureCallback = Rc<dyn Fn(&mut App) -> Ref<CupertinoDragGestureController>>;
 
 /// Dart's `ValueGetter<bool>` on the route's `enableDrag`.
 type DragEnabledCallback = Rc<dyn Fn() -> bool>;
@@ -250,25 +252,25 @@ pub fn show_cupertino_sheet(
     let effective_builder = builder;
     let nested_navigator_key = GlobalKey::new();
     if !use_nested_navigation {
-        let route = CupertinoSheetRoute::new(app).enable_drag(app, enable_drag);
+        let mut route = CupertinoSheetRoute::new(app).enable_drag(app, enable_drag);
         if let Some(effective_builder) = effective_builder {
-            route.builder(app, effective_builder);
+            route = route.builder(app, effective_builder);
         }
         if let Some(scrollable_builder) = scrollable_builder {
-            route.scrollable_builder(app, scrollable_builder);
+            route = route.scrollable_builder(app, scrollable_builder);
         }
         if let Some(settings) = settings {
-            route.settings(app, settings);
+            route = route.settings(app, settings);
         }
         if let Some(top_gap) = top_gap {
-            route.top_gap(app, top_gap);
+            route = route.top_gap(app, top_gap);
         }
-        route.show_drag_handle(app, show_drag_handle);
+        let route = route.show_drag_handle(app, show_drag_handle);
 
         let navigator = Navigator::of(app, context, true);
-        navigator.push(app, Route::as_route(route))
+        navigator.push(app, route.into_erased())
     } else {
-        let route = CupertinoSheetRoute::new(app)
+        let mut route = CupertinoSheetRoute::new(app)
             .enable_drag(app, enable_drag)
             .scrollable_builder(
                 app,
@@ -277,7 +279,7 @@ pub fn show_cupertino_sheet(
                         Some(scrollable_builder) => {
                             let scrollable_builder = Rc::clone(scrollable_builder);
                             Rc::new(move |app: &mut App, context: BuildContext| {
-                                scrollable_builder(app, context, controller)
+                                scrollable_builder(app, context, controller.clone())
                             })
                         }
                         None => Rc::clone(
@@ -290,14 +292,14 @@ pub fn show_cupertino_sheet(
                 }),
             );
         if let Some(settings) = settings {
-            route.settings(app, settings);
+            route = route.settings(app, settings);
         }
         if let Some(top_gap) = top_gap {
-            route.top_gap(app, top_gap);
+            route = route.top_gap(app, top_gap);
         }
-        route.show_drag_handle(app, show_drag_handle);
+        let route = route.show_drag_handle(app, show_drag_handle);
         let navigator = Navigator::of(app, context, true);
-        navigator.push(app, Route::as_route(route))
+        navigator.push(app, route.into_erased())
     }
 }
 
@@ -315,24 +317,27 @@ fn nested_navigation_content(
             .on_generate_initial_routes(
                 move |app: &mut App, _navigator: Handle<NavigatorState>, _initial_route_name| {
                     let builder = Rc::clone(&builder);
-                    vec![Route::as_route(CupertinoPageRoute::new(
-                        app,
-                        Rc::new(move |app: &mut App, context: BuildContext| {
-                            let child = builder(app, context);
-                            PopScope::new(child)
-                                .can_pop(false)
-                                .on_pop_invoked_with_result(Rc::new(
-                                    move |app: &mut App, did_pop: bool, result: RouteResult| {
-                                        if did_pop {
-                                            return;
-                                        }
-                                        let navigator = Navigator::of(app, context, true);
-                                        navigator.pop(app, result);
-                                    },
-                                ))
-                                .into_widget()
-                        }),
-                    ))]
+                    vec![
+                        CupertinoPageRoute::new(
+                            app,
+                            Rc::new(move |app: &mut App, context: BuildContext| {
+                                let child = builder(app, context);
+                                PopScope::new(child)
+                                    .can_pop(false)
+                                    .on_pop_invoked_with_result(Rc::new(
+                                        move |app: &mut App, did_pop: bool, result: RouteResult| {
+                                            if did_pop {
+                                                return;
+                                            }
+                                            let navigator = Navigator::of(app, context, true);
+                                            navigator.pop(app, result);
+                                        },
+                                    ))
+                                    .into_widget()
+                            }),
+                        )
+                        .into_erased(),
+                    ]
                 },
             ),
     )
@@ -359,11 +364,11 @@ pub struct CupertinoSheetTransition {
     pub key: Option<KeyRef>,
 
     /// A linear route animation from 0.0 to 1.0 when this screen is being pushed.
-    pub primary_route_animation: AnyAnimation<f64>,
+    pub primary_route_animation: AnimationRef<f64>,
 
     /// A linear route animation from 0.0 to 1.0 when another screen is being pushed on top of
     /// this one.
-    pub secondary_route_animation: AnyAnimation<f64>,
+    pub secondary_route_animation: AnimationRef<f64>,
 
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
@@ -387,8 +392,8 @@ pub struct CupertinoSheetTransition {
 impl CupertinoSheetTransition {
     /// Creates an iOS style sheet transition; Dart's optional arguments are the setters.
     pub fn new<K>(
-        primary_route_animation: AnyAnimation<f64>,
-        secondary_route_animation: AnyAnimation<f64>,
+        primary_route_animation: AnimationRef<f64>,
+        secondary_route_animation: AnimationRef<f64>,
         child: impl IntoWidget<K>,
         linear_transition: bool,
     ) -> CupertinoSheetTransition {
@@ -423,8 +428,8 @@ impl CupertinoSheetTransition {
     pub fn delegate_transition(
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         allow_snapshotting: bool,
         child: Option<&WidgetRef>,
     ) -> Option<WidgetRef> {
@@ -432,7 +437,7 @@ impl CupertinoSheetTransition {
         if CupertinoSheetRoute::has_parent_sheet(app, context) {
             return CupertinoSheetTransition::delegated_cover_sheet_secondary_transition(
                 app,
-                secondary_animation,
+                secondary_animation.clone(),
                 child,
             );
         }
@@ -449,7 +454,7 @@ impl CupertinoSheetTransition {
             Curves::ease_in_to_linear()
         };
         let curved_animation =
-            CurvedAnimation::create(app, secondary_animation, curve, Some(reverse_curve));
+            CurvedAnimation::new(app, secondary_animation.clone(), curve, Some(reverse_curve));
 
         let device_corner_radius = MediaQuery::maybe_view_padding_of(app, context)
             .map_or(0.0, |view_padding| view_padding.top)
@@ -468,23 +473,11 @@ impl CupertinoSheetTransition {
             BorderRadiusGeometry::BorderRadius(BorderRadius::all(Radius::circular(12.0))),
         );
 
-        let radius_animation = curved_animation.as_animation().drive(app, decoration_tween);
-        let opacity_animation = curved_animation.as_animation().drive(app, K_OPACITY_TWEEN);
-        let slide_animation = curved_animation.as_animation().drive(app, K_TOP_DOWN_TWEEN);
-        let scale_animation = curved_animation.as_animation().drive(app, K_SCALE_TWEEN);
+        let radius_animation = curved_animation.drive(app, decoration_tween);
+        let opacity_animation = curved_animation.drive(app, K_OPACITY_TWEEN);
+        let slide_animation = curved_animation.drive(app, K_TOP_DOWN_TWEEN);
+        let scale_animation = curved_animation.drive(app, K_SCALE_TWEEN);
         curved_animation.dispose(app);
-        // The builder below reads the radius on every frame, so it retains it; the driven
-        // animations retain the curve, and the transitions they are handed retain them.
-        let retained_radius_animation = app.retain(radius_animation);
-        app.destroy_lingering(curved_animation);
-        for driven in [
-            radius_animation.id(),
-            opacity_animation.id(),
-            slide_animation.id(),
-            scale_animation.id(),
-        ] {
-            app.destroy_lingering(driven);
-        }
 
         let is_dark_mode = CupertinoTheme::brightness_of(app, context) == Brightness::Dark;
         let overlay_color = if is_dark_mode {
@@ -524,11 +517,11 @@ impl CupertinoSheetTransition {
                             ScaleTransition::new(scale_animation)
                                 .alignment(Alignment::TOP_CENTER)
                                 .child(AnimatedBuilder::new(
-                                    Rc::new(radius_animation),
+                                    Rc::new(radius_animation.clone()),
                                     move |app, _context, _child| {
                                         let mut clip = ClipRSuperellipse::new().border_radius(
                                             if !secondary_animation.is_dismissed(app) {
-                                                retained_radius_animation.value(app)
+                                                radius_animation.value(app)
                                             } else {
                                                 BorderRadiusGeometry::ZERO
                                             },
@@ -549,21 +542,17 @@ impl CupertinoSheetTransition {
     /// Dart's `CupertinoSheetTransition._delegatedCoverSheetSecondaryTransition`.
     fn delegated_cover_sheet_secondary_transition(
         app: &mut App,
-        secondary_animation: AnyAnimation<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: Option<&WidgetRef>,
     ) -> Option<WidgetRef> {
         let curve = Curves::linear_to_ease_out();
         let reverse_curve = Curves::ease_in_to_linear();
         let curved_animation =
-            CurvedAnimation::create(app, secondary_animation, curve, Some(reverse_curve));
+            CurvedAnimation::new(app, secondary_animation, curve, Some(reverse_curve));
 
-        let slide_animation = curved_animation.as_animation().drive(app, K_MID_UP_TWEEN);
-        let scale_animation = curved_animation.as_animation().drive(app, K_SCALE_TWEEN);
+        let slide_animation = curved_animation.drive(app, K_MID_UP_TWEEN);
+        let scale_animation = curved_animation.drive(app, K_SCALE_TWEEN);
         curved_animation.dispose(app);
-        // The driven animations retain the curve, and the transitions below retain them.
-        app.destroy_lingering(curved_animation);
-        app.destroy_lingering(slide_animation);
-        app.destroy_lingering(scale_animation);
 
         let mut clip = ClipRSuperellipse::new().border_radius(BorderRadiusGeometry::BorderRadius(
             BorderRadius::vertical(Radius::circular(12.0), Radius::ZERO),
@@ -610,38 +599,39 @@ pub struct CupertinoSheetTransitionState {
     state: StateData<CupertinoSheetTransition>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     // Controls the top padding animation when the sheet is being slightly stretched upward.
-    stretch_drag_controller: Option<Handle<AnimationController>>,
+    stretch_drag_controller: Option<Ref<AnimationController>>,
     // Animates the top padding of the sheet based on the stretch drag controller's value.
-    stretch_drag_animation: Option<AnyAnimation<f64>>,
+    stretch_drag_animation: Option<AnimationRef<f64>>,
     // The offset animation when this page is being covered by another sheet.
-    secondary_position_animation: Option<AnyAnimation<Offset>>,
+    secondary_position_animation: Option<AnimationRef<Offset>>,
     // The scale animation when this page is being covered by another sheet.
-    secondary_scale_animation: Option<AnyAnimation<f64>>,
+    secondary_scale_animation: Option<AnimationRef<f64>>,
     // Curve of primary page which is coming in to cover another route.
-    primary_position_curve: Option<Handle<CurvedAnimation>>,
+    primary_position_curve: Option<Ref<CurvedAnimation>>,
     // Curve of secondary page which is becoming covered by another sheet.
-    secondary_position_curve: Option<Handle<CurvedAnimation>>,
+    secondary_position_curve: Option<Ref<CurvedAnimation>>,
 }
 
 impl CupertinoSheetTransitionState {
     fn stretch_drag_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .stretch_drag_controller
+            .handle()
             .expect("init_state ran first")
     }
 
     fn setup_animation(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let primary_route_animation = widget.primary_route_animation;
-        let secondary_route_animation = widget.secondary_route_animation;
+        let primary_route_animation = widget.primary_route_animation.clone();
+        let secondary_route_animation = widget.secondary_route_animation.clone();
         let top_gap = widget.top_gap;
-        let primary_position_curve = CurvedAnimation::create(
+        let primary_position_curve = CurvedAnimation::new(
             app,
             primary_route_animation,
             Curves::fast_ease_in_to_slow_ease_out(),
             Some(Rc::new(Curves::fast_ease_in_to_slow_ease_out().flipped())),
         );
-        let secondary_position_curve = CurvedAnimation::create(
+        let secondary_position_curve = CurvedAnimation::new(
             app,
             secondary_route_animation,
             Curves::linear_to_ease_out(),
@@ -649,20 +639,19 @@ impl CupertinoSheetTransitionState {
         );
         let state = app.get_mut(self);
         state.primary_position_curve = Some(primary_position_curve);
-        state.secondary_position_curve = Some(secondary_position_curve);
+        state.secondary_position_curve = Some(secondary_position_curve.clone());
         // Maintain the same stretch distance (0.008 of screen height) regardless of custom
         // top_gap.
         const STRETCH_DISTANCE: f64 = K_TOP_GAP_RATIO - K_STRETCHED_TOP_GAP_RATIO;
         let stretched_top_gap = top_gap - STRETCH_DISTANCE;
-        let stretch_drag_animation = self
-            .stretch_drag_controller(app)
+        let stretch_drag_animation = app
+            .get(self)
+            .stretch_drag_controller
+            .clone()
+            .expect("init_state ran first")
             .drive(app, ValueTween::new(top_gap, stretched_top_gap));
-        let secondary_position_animation = secondary_position_curve
-            .as_animation()
-            .drive(app, K_MID_UP_TWEEN);
-        let secondary_scale_animation = secondary_position_curve
-            .as_animation()
-            .drive(app, K_SCALE_TWEEN);
+        let secondary_position_animation = secondary_position_curve.drive(app, K_MID_UP_TWEEN);
+        let secondary_scale_animation = secondary_position_curve.drive(app, K_SCALE_TWEEN);
         let state = app.get_mut(self);
         state.stretch_drag_animation = Some(stretch_drag_animation);
         state.secondary_position_animation = Some(secondary_position_animation);
@@ -670,39 +659,13 @@ impl CupertinoSheetTransitionState {
     }
 
     fn dispose_curve(self: Handle<Self>, app: &mut App) {
-        let state = app.get(self);
-        let curves = [state.primary_position_curve, state.secondary_position_curve];
+        let state = app.get_mut(self);
+        let curves = [
+            state.primary_position_curve.take(),
+            state.secondary_position_curve.take(),
+        ];
         for curve in curves.into_iter().flatten() {
             curve.dispose(app);
-            // The animations driven from it retain it until the transitions move off them.
-            app.destroy_lingering(curve);
-        }
-        let state = app.get_mut(self);
-        state.primary_position_curve = None;
-        state.secondary_position_curve = None;
-    }
-
-    /// Frees the driven animations `setup_animation` made, which Dart's collector frees once
-    /// they are replaced; the builder and transitions built from them retain them until they
-    /// move off.
-    fn free_animations(self: Handle<Self>, app: &mut App) {
-        let state = app.get_mut(self);
-        let animations = [
-            state
-                .stretch_drag_animation
-                .take()
-                .map(|animation| animation.id()),
-            state
-                .secondary_position_animation
-                .take()
-                .map(|animation| animation.id()),
-            state
-                .secondary_scale_animation
-                .take()
-                .map(|animation| animation.id()),
-        ];
-        for animation in animations.into_iter().flatten() {
-            app.destroy_lingering(animation);
         }
     }
 
@@ -710,7 +673,7 @@ impl CupertinoSheetTransitionState {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         linear_transition: bool,
         child: WidgetRef,
     ) -> WidgetRef {
@@ -730,14 +693,11 @@ impl CupertinoSheetTransitionState {
         } else {
             Rc::new(Curves::fast_ease_in_to_slow_ease_out().flipped())
         };
-        let curved_animation = CurvedAnimation::create(app, animation, curve, Some(reverse_curve));
+        let curved_animation = CurvedAnimation::new(app, animation, curve, Some(reverse_curve));
 
-        let position_animation = curved_animation.as_animation().drive(app, offset_tween);
+        let position_animation = curved_animation.drive(app, offset_tween);
 
         curved_animation.dispose(app);
-        // The position animation retains the curve, and the `SlideTransition` the position.
-        app.destroy_lingering(curved_animation);
-        app.destroy_lingering(position_animation);
 
         SlideTransition::new(position_animation)
             .child(child)
@@ -747,16 +707,18 @@ impl CupertinoSheetTransitionState {
     fn cover_sheet_secondary_transition(
         self: Handle<Self>,
         app: &App,
-        secondary_animation: AnyAnimation<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let _ = secondary_animation;
         let state = app.get(self);
         let secondary_position_animation = state
             .secondary_position_animation
+            .clone()
             .expect("init_state ran first");
         let secondary_scale_animation = state
             .secondary_scale_animation
+            .clone()
             .expect("init_state ran first");
         SlideTransition::new(secondary_position_animation)
             .transform_hit_tests(false)
@@ -787,7 +749,7 @@ impl SingleTickerProviderStateMixin for CupertinoSheetTransitionState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for CupertinoSheetTransitionState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -797,7 +759,7 @@ impl State for CupertinoSheetTransitionState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let stretch_drag_controller = AnimationController::create(
+        let stretch_drag_controller = AnimationController::new(
             app,
             None,
             Some(Duration::from_micros(1)),
@@ -821,14 +783,12 @@ impl State for CupertinoSheetTransitionState {
             || old_widget.secondary_route_animation != widget.secondary_route_animation;
         if changed {
             self.dispose_curve(app);
-            self.free_animations(app);
             self.setup_animation(app);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_curve(app);
-        self.free_animations(app);
         self.stretch_drag_controller(app).dispose(app);
     }
 
@@ -837,18 +797,24 @@ impl State for CupertinoSheetTransitionState {
         let stretch_drag_animation = app
             .get(self)
             .stretch_drag_animation
+            .clone()
+            .expect("init_state ran first");
+        let stretch_drag_controller = app
+            .get(self)
+            .stretch_drag_controller
+            .clone()
             .expect("init_state ran first");
         StretchDragControllerProvider {
-            controller: self.stretch_drag_controller(app),
+            controller: stretch_drag_controller,
             child: SizedBox::expand()
                 .child(AnimatedBuilder::new(
-                    Rc::new(stretch_drag_animation),
+                    Rc::new(stretch_drag_animation.clone()),
                     move |app: &mut App, context: BuildContext, _child: Option<&WidgetRef>| {
                         let top =
                             MediaQuery::height_of(app, context) * stretch_drag_animation.value(app);
                         let widget = self.widget(app);
-                        let primary_route_animation = widget.primary_route_animation;
-                        let secondary_route_animation = widget.secondary_route_animation;
+                        let primary_route_animation = widget.primary_route_animation.clone();
+                        let secondary_route_animation = widget.secondary_route_animation.clone();
                         let linear_transition = widget.linear_transition;
                         let child = widget.child.clone();
                         let primary = self.cover_sheet_primary_transition(
@@ -876,7 +842,7 @@ impl State for CupertinoSheetTransitionState {
 /// Internally used to provide the controller for upward stretch animation.
 #[derive(Debug)]
 struct StretchDragControllerProvider {
-    controller: Handle<AnimationController>,
+    controller: Ref<AnimationController>,
     child: WidgetRef,
 }
 
@@ -884,7 +850,7 @@ impl StretchDragControllerProvider {
     fn maybe_of(app: &App, context: BuildContext) -> Option<Handle<AnimationController>> {
         context
             .get_inherited_widget_of_exact_type::<StretchDragControllerProvider>(app)
-            .map(|provider| provider.controller)
+            .map(|provider| provider.controller.handle())
     }
 }
 
@@ -958,7 +924,7 @@ impl CupertinoSheetRoute {
     ///
     /// Dart's assert that one of `builder` and `scrollable_builder` is given runs on the
     /// first build, since neither is a required argument.
-    pub fn new(app: &mut App) -> Handle<CupertinoSheetRoute> {
+    pub fn new(app: &mut App) -> Ref<CupertinoSheetRoute> {
         let route = RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -978,50 +944,46 @@ impl CupertinoSheetRoute {
     }
 
     /// Dart `CupertinoSheetRoute(builder:)`.
-    pub fn builder(self: Handle<Self>, app: &mut App, builder: WidgetBuilder) -> Handle<Self> {
-        app.get_mut(self).builder = Some(builder);
+    pub fn builder(self: Ref<Self>, app: &mut App, builder: WidgetBuilder) -> Ref<Self> {
+        app.get_mut(&self).builder = Some(builder);
         self
     }
 
     /// Dart `CupertinoSheetRoute(scrollableBuilder:)`.
     pub fn scrollable_builder(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         scrollable_builder: ScrollableWidgetBuilder,
-    ) -> Handle<Self> {
-        app.get_mut(self).scrollable_builder = Some(scrollable_builder);
+    ) -> Ref<Self> {
+        app.get_mut(&self).scrollable_builder = Some(scrollable_builder);
         self
     }
 
     /// Dart `CupertinoSheetRoute(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `CupertinoSheetRoute(enableDrag:)`.
-    pub fn enable_drag(self: Handle<Self>, app: &mut App, enable_drag: bool) -> Handle<Self> {
-        app.get_mut(self).enable_drag = enable_drag;
+    pub fn enable_drag(self: Ref<Self>, app: &mut App, enable_drag: bool) -> Ref<Self> {
+        app.get_mut(&self).enable_drag = enable_drag;
         self
     }
 
     /// Dart `CupertinoSheetRoute(showDragHandle:)`.
-    pub fn show_drag_handle(
-        self: Handle<Self>,
-        app: &mut App,
-        show_drag_handle: bool,
-    ) -> Handle<Self> {
-        app.get_mut(self).show_drag_handle = show_drag_handle;
+    pub fn show_drag_handle(self: Ref<Self>, app: &mut App, show_drag_handle: bool) -> Ref<Self> {
+        app.get_mut(&self).show_drag_handle = show_drag_handle;
         self
     }
 
     /// Dart `CupertinoSheetRoute(topGap:)`.
-    pub fn top_gap(self: Handle<Self>, app: &mut App, top_gap: f64) -> Handle<Self> {
+    pub fn top_gap(self: Ref<Self>, app: &mut App, top_gap: f64) -> Ref<Self> {
         debug_assert!(
             (0.0..=0.9).contains(&top_gap),
             "topGap must be between 0.0 and 0.9"
         );
-        app.get_mut(self).top_gap = Some(top_gap);
+        app.get_mut(&self).top_gap = Some(top_gap);
         self
     }
 
@@ -1043,7 +1005,7 @@ impl CupertinoSheetRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        controller: AnyScrollController,
+        controller: ScrollControllerRef,
     ) -> WidgetRef {
         let builder = self.effective_builder(app);
         if !app.get(self).show_drag_handle {
@@ -1192,8 +1154,8 @@ impl ModalRoute for CupertinoSheetRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         CupertinoSheetRouteTransitionMixin::build_page(
             self,
@@ -1208,8 +1170,8 @@ impl ModalRoute for CupertinoSheetRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         CupertinoSheetRouteTransitionMixin::build_transitions(
@@ -1346,8 +1308,8 @@ trait CupertinoSheetRouteTransitionMixin: PageRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let _ = (animation, secondary_animation);
         self.build_content(app, context)
@@ -1380,8 +1342,8 @@ trait CupertinoSheetRouteTransitionMixin: PageRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let enable_drag = self.enable_drag(app);
@@ -1412,17 +1374,22 @@ fn start_pop_gesture<R: ModalRoute>(
     this: Handle<R>,
     app: &mut App,
     top_gap: f64,
-) -> Handle<CupertinoDragGestureController> {
+) -> Ref<CupertinoDragGestureController> {
     let navigator = Route::navigator(this, app).expect("an installed route");
-    let controller =
-        TransitionRoute::controller(this, app).expect("an installed route has a controller");
-    let route = Route::as_route(this);
+    let controller = TransitionRoute::controller(this, app)
+        .expect("an installed route has a controller")
+        .keep(app);
+    // Dart's closures keep the route for as long as the gesture lasts.
+    let kept_route = this.keep(app);
     CupertinoDragGestureController::new(
         app,
         top_gap,
         navigator,
-        Rc::new(move |app| route.is_current(app)),
-        Rc::new(move |app| route.is_active(app)),
+        Rc::new({
+            let kept_route = kept_route.clone();
+            move |app| kept_route.as_route().is_current(app)
+        }),
+        Rc::new(move |app| kept_route.as_route().is_active(app)),
         controller,
     )
 }
@@ -1437,8 +1404,8 @@ fn build_page_transitions<R: ModalRoute>(
     this: Handle<R>,
     app: &mut App,
     context: BuildContext,
-    animation: AnyAnimation<f64>,
-    secondary_animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
+    secondary_animation: AnimationRef<f64>,
     child: WidgetRef,
     enable_drag: bool,
     top_gap: f64,
@@ -1507,8 +1474,9 @@ impl StatefulWidget for CupertinoDragGestureDetector {
 /// Dart's `_CupertinoDragGestureDetectorState`.
 struct CupertinoDragGestureDetectorState {
     state: StateData<CupertinoDragGestureDetector>,
-    drag_gesture_controller: Option<Handle<CupertinoDragGestureController>>,
-    recognizer: Option<Handle<VerticalDragGestureRecognizer>>,
+    drag_gesture_controller: Option<Ref<CupertinoDragGestureController>>,
+    recognizer: Option<Ref<VerticalDragGestureRecognizer>>,
+    /// The enclosing transition's controller, an ancestor's.
     stretch_drag_controller: Option<Handle<AnimationController>>,
 }
 
@@ -1521,7 +1489,10 @@ impl CupertinoDragGestureDetectorState {
     }
 
     fn recognizer(self: Handle<Self>, app: &App) -> Handle<VerticalDragGestureRecognizer> {
-        app.get(self).recognizer.expect("init_state ran first")
+        app.get(self)
+            .recognizer
+            .handle()
+            .expect("init_state ran first")
     }
 
     fn handle_drag_start(self: Handle<Self>, app: &mut App, _details: DragStartDetails) {
@@ -1537,6 +1508,7 @@ impl CupertinoDragGestureDetectorState {
         let controller = app
             .get(self)
             .drag_gesture_controller
+            .handle()
             .expect("a drag start ran first");
         let Some(stretch_drag_controller) = app.get(self).stretch_drag_controller else {
             return;
@@ -1556,6 +1528,7 @@ impl CupertinoDragGestureDetectorState {
         let controller = app
             .get(self)
             .drag_gesture_controller
+            .handle()
             .expect("a drag start ran first");
         let Some(stretch_drag_controller) = app.get(self).stretch_drag_controller else {
             app.get_mut(self).drag_gesture_controller = None;
@@ -1579,7 +1552,7 @@ impl CupertinoDragGestureDetectorState {
             app.get_mut(self).drag_gesture_controller = None;
             return;
         };
-        if let Some(controller) = app.get(self).drag_gesture_controller {
+        if let Some(controller) = app.get(self).drag_gesture_controller.handle() {
             controller.drag_end(app, 0.0, Some(stretch_drag_controller));
         }
         app.get_mut(self).drag_gesture_controller = None;
@@ -1646,16 +1619,19 @@ impl State for CupertinoDragGestureDetectorState {
 
         // If this is disposed during a drag, call navigator.didStopUserGesture.
         if app.get(self).drag_gesture_controller.is_some() {
+            // The callback keeps the disposed state, as Dart's closure keeps `this`.
+            let this = self.keep(app);
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _timestamp| {
-                    if let Some(controller) = app.get(self).drag_gesture_controller {
+                    let state = this.handle();
+                    if let Some(controller) = app.get(state).drag_gesture_controller.handle() {
                         let navigator = app.get(controller).navigator;
                         if navigator.mounted(app) {
                             navigator.did_stop_user_gesture(app);
                         }
                     }
-                    app.get_mut(self).drag_gesture_controller = None;
+                    app.get_mut(state).drag_gesture_controller = None;
                 }),
                 None,
             );
@@ -1682,7 +1658,7 @@ impl State for CupertinoDragGestureDetectorState {
 /// controls the animation controller owned by the route, based on the input provided by the
 /// gesture detector.
 struct CupertinoDragGestureController {
-    pop_drag_controller: Handle<AnimationController>,
+    pop_drag_controller: Ref<AnimationController>,
     navigator: Handle<NavigatorState>,
     get_is_active: RouteFlagGetter,
     get_is_current: RouteFlagGetter,
@@ -1701,8 +1677,8 @@ impl CupertinoDragGestureController {
         navigator: Handle<NavigatorState>,
         get_is_current: RouteFlagGetter,
         get_is_active: RouteFlagGetter,
-        pop_drag_controller: Handle<AnimationController>,
-    ) -> Handle<CupertinoDragGestureController> {
+        pop_drag_controller: Ref<AnimationController>,
+    ) -> Ref<CupertinoDragGestureController> {
         let this = app.create(CupertinoDragGestureController {
             pop_drag_controller,
             navigator,
@@ -1722,7 +1698,7 @@ impl CupertinoDragGestureController {
         delta: f64,
         up_controller: Option<Handle<AnimationController>>,
     ) {
-        let pop_drag_controller = app.get(self).pop_drag_controller;
+        let pop_drag_controller = app.get(self).pop_drag_controller.handle();
         if let Some(up_controller) = up_controller
             && pop_drag_controller.value(app) == 1.0
             && (up_controller.value(app) > 0.0 || delta < 0.0)
@@ -1772,7 +1748,7 @@ impl CupertinoDragGestureController {
         // This curve has been determined through rigorously eyeballing native iOS
         // animations on a simulator running iOS 18.0.
         let animation_curve = Curves::ease_out();
-        let pop_drag_controller = app.get(self).pop_drag_controller;
+        let pop_drag_controller = app.get(self).pop_drag_controller.handle();
         let is_current = (Rc::clone(&app.get(self).get_is_current))(app);
         let animate_forward = if !is_current {
             // If the page has already been navigated away from, then the animation
@@ -1822,32 +1798,12 @@ impl CupertinoDragGestureController {
             // Keep the userGestureInProgress in true state so we don't change the
             // curve of the page transition mid-flight since CupertinoPageTransition
             // depends on userGestureInProgress.
-            Animation::add_status_listener(
-                pop_drag_controller,
-                app,
-                AnimationStatusListener::handle_method(
-                    self,
-                    CupertinoDragGestureController::handle_animation_status,
-                ),
-            );
+            let navigator = app.get(self).navigator;
+            stop_user_gesture_when_the_animation_ends(app, navigator, pop_drag_controller);
         } else {
             let navigator = app.get(self).navigator;
             navigator.did_stop_user_gesture(app);
         }
-    }
-
-    fn handle_animation_status(self: Handle<Self>, app: &mut App, _status: AnimationStatus) {
-        let navigator = app.get(self).navigator;
-        navigator.did_stop_user_gesture(app);
-        let pop_drag_controller = app.get(self).pop_drag_controller;
-        Animation::remove_status_listener(
-            pop_drag_controller,
-            app,
-            &AnimationStatusListener::handle_method(
-                self,
-                CupertinoDragGestureController::handle_animation_status,
-            ),
-        );
     }
 }
 
@@ -1872,7 +1828,7 @@ impl CupertinoSheetScrollController {
         on_drag_update: DragUpdateCallback,
         on_drag_end: DragEndCallback,
         sheet_is_dragged_down: GetSheetDragged,
-    ) -> Handle<CupertinoSheetScrollController> {
+    ) -> Ref<CupertinoSheetScrollController> {
         app.create(CupertinoSheetScrollController {
             change_notifier: ChangeNotifierData::new(),
             scroll_controller: ScrollControllerData::new(0.0, true, None, None, None),
@@ -1903,7 +1859,7 @@ impl ScrollControllerLeaf for CupertinoSheetScrollController {
         physics: ScrollPhysicsRef,
         context: Rc<dyn ScrollContext>,
         old_position: Option<AnyScrollPosition>,
-    ) -> AnyScrollPosition {
+    ) -> ScrollPositionRef {
         let physics = physics.apply_to(Some(Rc::new(AlwaysScrollableScrollPhysics::new())));
         let controller = app.get(self);
         let on_drag_start = Rc::clone(&controller.on_drag_start);
@@ -1920,7 +1876,7 @@ impl ScrollControllerLeaf for CupertinoSheetScrollController {
             on_drag_end,
             sheet_is_dragged_down,
         )
-        .as_scroll_position()
+        .into_erased()
     }
 }
 
@@ -1942,7 +1898,7 @@ struct CupertinoSheetScrollPosition {
     scroll_position: ScrollPositionData,
     single_context: ScrollPositionWithSingleContextData,
     drag_cancel_callback: Option<Listener>,
-    ballistic_controllers: Vec<Handle<AnimationController>>,
+    ballistic_controllers: Vec<Ref<AnimationController>>,
     on_drag_start: DragStartCallback,
     on_drag_update: DragUpdateCallback,
     on_drag_end: DragEndCallback,
@@ -1963,7 +1919,7 @@ impl CupertinoSheetScrollPosition {
         on_drag_update: DragUpdateCallback,
         on_drag_end: DragEndCallback,
         sheet_is_dragged_down: GetSheetDragged,
-    ) -> Handle<CupertinoSheetScrollPosition> {
+    ) -> Ref<CupertinoSheetScrollPosition> {
         let scroll_position = ScrollPositionData::new(app, physics, context, true, None);
         let this = app.create(CupertinoSheetScrollPosition {
             change_notifier: ChangeNotifierData::new(),
@@ -1976,7 +1932,7 @@ impl CupertinoSheetScrollPosition {
             on_drag_end,
             sheet_is_dragged_down,
         });
-        ScrollPositionWithSingleContext::init(this, app, Some(0.0), old_position);
+        ScrollPositionWithSingleContext::init(this.handle(), app, Some(0.0), old_position);
         this
     }
 
@@ -2024,7 +1980,7 @@ impl ScrollPositionWithSingleContextLeaf for CupertinoSheetScrollPosition {
         }
     }
 
-    fn begin_activity(self: Handle<Self>, app: &mut App, new_activity: Option<AnyScrollActivity>) {
+    fn begin_activity(self: Handle<Self>, app: &mut App, new_activity: Option<ScrollActivityRef>) {
         // Cancel the running ballistic simulations
         for ballistic_controller in app.get(self).ballistic_controllers.clone() {
             ballistic_controller.stop(app, true);
@@ -2120,13 +2076,16 @@ impl StatefulWidget for CupertinoDraggableScrollableSheet {
 /// Dart's `_CupertinoDraggableScrollableSheetState`.
 struct CupertinoDraggableScrollableSheetState {
     state: StateData<CupertinoDraggableScrollableSheet>,
-    scroll_controller: Option<Handle<CupertinoSheetScrollController>>,
-    drag_gesture_controller: Option<Handle<CupertinoDragGestureController>>,
+    scroll_controller: Option<Ref<CupertinoSheetScrollController>>,
+    drag_gesture_controller: Option<Ref<CupertinoDragGestureController>>,
 }
 
 impl CupertinoDraggableScrollableSheetState {
     fn scroll_controller(self: Handle<Self>, app: &App) -> Handle<CupertinoSheetScrollController> {
-        app.get(self).scroll_controller.expect("init_state has run")
+        app.get(self)
+            .scroll_controller
+            .handle()
+            .expect("init_state has run")
     }
 
     fn drag_start(self: Handle<Self>, app: &mut App) {
@@ -2140,7 +2099,7 @@ impl CupertinoDraggableScrollableSheetState {
 
     fn drag_update(self: Handle<Self>, app: &mut App, delta: f64) {
         debug_assert!(self.mounted(app));
-        if let Some(controller) = app.get(self).drag_gesture_controller {
+        if let Some(controller) = app.get(self).drag_gesture_controller.handle() {
             let sheet_height = sheet_height_of(app, self.context(app));
             controller.drag_update(
                 app,
@@ -2152,7 +2111,7 @@ impl CupertinoDraggableScrollableSheetState {
 
     fn handle_drag_end(self: Handle<Self>, app: &mut App, velocity: f64) {
         debug_assert!(self.mounted(app));
-        if let Some(controller) = app.get(self).drag_gesture_controller {
+        if let Some(controller) = app.get(self).drag_gesture_controller.handle() {
             controller.drag_end(
                 app,
                 -velocity / sheet_height_of(app, self.context(app)),
@@ -2176,6 +2135,7 @@ impl State for CupertinoDraggableScrollableSheetState {
             Rc::new(move |app: &App| {
                 app.get(self)
                     .drag_gesture_controller
+                    .handle()
                     .is_some_and(|controller| controller.is_dragged(app))
             }),
         );
@@ -2185,16 +2145,19 @@ impl State for CupertinoDraggableScrollableSheetState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         // If this is disposed during a drag, call `navigator.did_stop_user_gesture`.
         if app.get(self).drag_gesture_controller.is_some() {
+            // The callback keeps the disposed state, as Dart's closure keeps `this`.
+            let this = self.keep(app);
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _timestamp| {
-                    if let Some(controller) = app.get(self).drag_gesture_controller {
+                    let state = this.handle();
+                    if let Some(controller) = app.get(state).drag_gesture_controller.handle() {
                         let navigator = app.get(controller).navigator;
                         if navigator.mounted(app) {
                             navigator.did_stop_user_gesture(app);
                         }
                     }
-                    app.get_mut(self).drag_gesture_controller = None;
+                    app.get_mut(state).drag_gesture_controller = None;
                 }),
                 None,
             );
@@ -2204,8 +2167,13 @@ impl State for CupertinoDraggableScrollableSheetState {
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let builder = Rc::clone(&self.widget(app).builder);
-        let scroll_controller = self.scroll_controller(app);
-        builder(app, context, scroll_controller.as_controller())
+        let scroll_controller = app
+            .get(self)
+            .scroll_controller
+            .as_ref()
+            .expect("init_state has run")
+            .erase();
+        builder(app, context, scroll_controller)
     }
 }
 
@@ -2226,6 +2194,7 @@ mod tests {
     use crate::localizations::DefaultCupertinoLocalizations;
     use crate::route::CupertinoPageRoute;
     use crate::test_support::{build, pump, test_cell};
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     /// The test view is 800x600 physical at 2x.
     const VIEW_WIDTH: f64 = 400.0;
@@ -2326,10 +2295,7 @@ mod tests {
             &cell,
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
-                    Some(Route::as_route(CupertinoPageRoute::new(
-                        app,
-                        Rc::clone(&builder),
-                    )))
+                    Some(CupertinoPageRoute::new(app, Rc::clone(&builder)).into_erased())
                 })
             }),
         );
@@ -2418,10 +2384,10 @@ mod tests {
             }
         }
         cell.checkpoint();
-        let before = cell.borrow().debug_object_count();
+        let snapshot = object_snapshot(&cell.borrow());
         pump(&mut cell.borrow_mut(), at + Duration::from_millis(20));
         cell.checkpoint();
-        assert_eq!(cell.borrow().debug_object_count(), before);
+        assert_no_new_objects(&cell.borrow(), &snapshot);
     }
 
     #[test]
@@ -2599,7 +2565,7 @@ mod tests {
         let context = page_probe.context.get().expect("the page built");
         let second =
             CupertinoSheetRoute::new(&mut app).builder(&mut app, page(&second_probe, &second_key));
-        Navigator::of(&mut app, context, false).push(&mut app, Route::as_route(second));
+        Navigator::of(&mut app, context, false).push(&mut app, second.clone().into_erased());
         let at = settle(&mut app, at);
 
         let third_probe: Rc<Probe> = Rc::default();
@@ -2607,7 +2573,7 @@ mod tests {
         let context = second_probe.context.get().expect("the second sheet built");
         let third =
             CupertinoSheetRoute::new(&mut app).builder(&mut app, page(&third_probe, &third_key));
-        Navigator::of(&mut app, context, false).push(&mut app, Route::as_route(third));
+        Navigator::of(&mut app, context, false).push(&mut app, third.clone().into_erased());
         settle(&mut app, at);
 
         let page1_top = top_left(&page_key, &mut app).dy();
@@ -3020,7 +2986,7 @@ mod tests {
         let inner_builder = page(&inner_probe, &inner_key);
         let inner_route = CupertinoPageRoute::new(&mut app, inner_builder);
         let nested = Navigator::of(&mut app, sheet_context, false);
-        nested.push(&mut app, Route::as_route(inner_route));
+        nested.push(&mut app, inner_route.clone().into_erased());
         let at = settle(&mut app, at);
         assert!(inner_route.is_active(&app), "the inner route was pushed");
         assert!(!sheet_popped.is_completed(), "the sheet is still up");

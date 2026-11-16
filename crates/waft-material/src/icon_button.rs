@@ -7,14 +7,14 @@
 use std::fmt::{self, Debug};
 
 use waft_embedder::{Brightness, Clip, Color, Size};
-use waft_foundation::{App, Handle, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listener, Ref, ValueChanged};
 use waft_painting::{
     Alignment, AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, OutlinedBorderRef,
 };
 use waft_rendering::BoxConstraints;
 use waft_services::{MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
-    Align, AnyFocusNode, BuildContext, ConstrainedBox, IconTheme, IconThemeData, IntoWidget,
+    Align, BuildContext, ConstrainedBox, FocusNodeRef, IconTheme, IconThemeData, IntoWidget,
     KeyRef, Padding, Semantics, SizedBox, State, StateData, StatefulWidget, StatelessWidget,
     WidgetRef, WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef,
 };
@@ -330,7 +330,7 @@ pub struct IconButton {
     pub mouse_cursor: Option<MouseCursorRef>,
 
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// True if this widget will be selected as the initial focus when no other
     /// node in its scope is currently focused.
@@ -423,7 +423,7 @@ pub struct IconButton {
     /// Represents the interactive "state" of this widget in terms of a set of
     /// [`WidgetState`]s, including [`WidgetState::Pressed`], [`WidgetState::Hovered`] and
     /// [`WidgetState::Focused`].
-    pub states_controller: Option<Handle<MaterialStatesController>>,
+    pub states_controller: Option<Ref<MaterialStatesController>>,
 
     variant: IconButtonVariant,
 }
@@ -538,11 +538,11 @@ impl IconButton {
         on_hover: ValueChanged<bool> => "onHover",
         on_long_press: Listener => "onLongPress",
         mouse_cursor: MouseCursorRef => "mouseCursor",
-        focus_node: AnyFocusNode => "focusNode",
+        focus_node: FocusNodeRef => "focusNode",
         enable_feedback: bool => "enableFeedback",
         constraints: BoxConstraints => "constraints",
         style: ButtonStyle => "style",
-        states_controller: Handle<MaterialStatesController> => "statesController",
+        states_controller: Ref<MaterialStatesController> => "statesController",
     );
 
     /// Dart `IconButton(splashRadius:)`.
@@ -682,14 +682,14 @@ impl StatelessWidget for IconButton {
             return SelectableIconButton {
                 is_selected: self.is_selected,
                 style: Some(adjusted_style),
-                focus_node: self.focus_node,
+                focus_node: self.focus_node.clone(),
                 on_long_press: if self.on_pressed.is_some() {
                     self.on_long_press.clone()
                 } else {
                     None
                 },
                 on_hover: self.on_hover.clone(),
-                states_controller: self.states_controller,
+                states_controller: self.states_controller.clone(),
                 variant: self.variant,
                 style_variant: effective_variant,
                 autofocus: self.autofocus,
@@ -767,7 +767,7 @@ impl StatelessWidget for IconButton {
                 )
             }))
             .child(result);
-        ink_response.focus_node = self.focus_node;
+        ink_response.focus_node = self.focus_node.clone();
         ink_response.on_tap = self.on_pressed.clone();
         ink_response.on_hover = self.on_hover.clone();
         ink_response.on_long_press = if self.on_pressed.is_some() {
@@ -1016,7 +1016,7 @@ impl Debug for IconButtonStyleFromBuilder {
 struct SelectableIconButton {
     is_selected: Option<bool>,
     style: Option<ButtonStyle>,
-    focus_node: Option<AnyFocusNode>,
+    focus_node: Option<FocusNodeRef>,
     variant: IconButtonVariant,
     style_variant: StyleVariant,
     autofocus: bool,
@@ -1025,7 +1025,7 @@ struct SelectableIconButton {
     child: WidgetRef,
     on_long_press: Option<Listener>,
     on_hover: Option<ValueChanged<bool>>,
-    states_controller: Option<Handle<MaterialStatesController>>,
+    states_controller: Option<Ref<MaterialStatesController>>,
 }
 
 impl Debug for SelectableIconButton {
@@ -1052,14 +1052,15 @@ impl StatefulWidget for SelectableIconButton {
 /// Dart's private `_SelectableIconButtonState`.
 struct SelectableIconButtonState {
     state: StateData<SelectableIconButton>,
-    internal_states_controller: Option<Handle<MaterialStatesController>>,
+    internal_states_controller: Option<Ref<MaterialStatesController>>,
 }
 
 impl SelectableIconButtonState {
-    fn states_controller(self: Handle<Self>, app: &App) -> Handle<MaterialStatesController> {
+    fn states_controller(self: Handle<Self>, app: &App) -> Ref<MaterialStatesController> {
         self.widget(app)
             .states_controller
-            .or(app.get(self).internal_states_controller)
+            .clone()
+            .or_else(|| app.get(self).internal_states_controller.clone())
             .expect("created in init_state or init_states_controller")
     }
 
@@ -1099,9 +1100,7 @@ impl State for SelectableIconButtonState {
             if self.widget(app).states_controller.is_some()
                 && let Some(internal) = app.get_mut(self).internal_states_controller.take()
             {
-                app.get_mut(internal).dispose();
-                // `IconButtonM3`'s state still listens to it until its own update below.
-                app.destroy_lingering(internal);
+                internal.dispose(app);
             }
             self.init_states_controller(app);
         }
@@ -1133,7 +1132,7 @@ impl State for SelectableIconButtonState {
         data.states_controller = Some(states_controller);
         data.style = widget.style.clone();
         data.autofocus = widget.autofocus;
-        data.focus_node = widget.focus_node;
+        data.focus_node = widget.focus_node.clone();
         data.on_hover = widget.on_hover.clone();
         data.on_long_press = if widget.on_pressed.is_some() {
             widget.on_long_press.clone()
@@ -1146,8 +1145,7 @@ impl State for SelectableIconButtonState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(internal) = app.get_mut(self).internal_states_controller.take() {
-            app.get_mut(internal).dispose();
-            app.destroy(internal);
+            internal.dispose(app);
         }
     }
 }
@@ -1403,8 +1401,8 @@ mod tests {
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::{
         AnyElement, Builder, Center, Column, CrossAxisAlignment, Directionality, FocusNode,
-        FocusNodeLeaf, FocusTraversalGroup, FocusTraversalPolicy, GlobalKey, Icon, IconData,
-        ReadingOrderTraversalPolicy, RichText, Row, StatefulBuilder, WidgetStates,
+        FocusTraversalGroup, GlobalKey, Icon, IconData, ReadingOrderTraversalPolicy, RichText, Row,
+        StatefulBuilder, WidgetStates,
     };
 
     use super::*;
@@ -1447,7 +1445,8 @@ mod tests {
 
     /// Dart's `wrap(child:, useMaterial3:)` at the bottom of `icon_button_test.dart`.
     fn wrap<K>(tester: &WidgetTester, child: impl IntoWidget<K>, use_material3: bool) -> WidgetRef {
-        let policy = ReadingOrderTraversalPolicy::new(&mut tester.cell.borrow_mut()).as_policy();
+        let policy = ReadingOrderTraversalPolicy::new(&mut tester.cell.borrow_mut())
+            .into_erased::<waft_widgets::AnyFocusTraversalPolicy>();
         if use_material3 {
             material_app(
                 m3_theme(tester),
@@ -1455,7 +1454,7 @@ mod tests {
                     TextDirection::Ltr,
                     Center::new().child(child),
                 ))
-                .policy(policy)
+                .policy(policy.clone())
                 .into_widget(),
             )
         } else {
@@ -1463,7 +1462,7 @@ mod tests {
                 TextDirection::Ltr,
                 Material::new().child(Center::new().child(child)),
             ))
-            .policy(policy)
+            .policy(policy.clone())
             .into_widget()
         }
     }
@@ -1641,8 +1640,8 @@ mod tests {
             .expect("the mouse is over the view")
     }
 
-    fn focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     fn states_value(
@@ -2193,7 +2192,7 @@ mod tests {
             let widget = wrap(
                 &tester,
                 IconButton::new(noop(), icon(Icons::link()))
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .autofocus(true),
                 true,
             );
@@ -2204,7 +2203,7 @@ mod tests {
             let widget = wrap(
                 &tester,
                 IconButton::new(None, icon(Icons::link()))
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .autofocus(true),
                 true,
             );
@@ -2227,7 +2226,7 @@ mod tests {
                         waft_widgets::MediaQueryData::default()
                             .navigation_mode(waft_widgets::NavigationMode::Directional),
                         IconButton::new(on_pressed, icon(Icons::link()))
-                            .focus_node(focus_node)
+                            .focus_node(focus_node.clone())
                             .autofocus(true),
                     )
                     .into_widget(),
@@ -2257,11 +2256,11 @@ mod tests {
                 &tester,
                 Column::new().children([
                     IconButton::new(noop(), icon(Icons::link()))
-                        .focus_node(focus_node1)
+                        .focus_node(focus_node1.clone())
                         .autofocus(true)
                         .into_widget(),
                     IconButton::new(None, icon(Icons::link()))
-                        .focus_node(focus_node2)
+                        .focus_node(focus_node2.clone())
                         .into_widget(),
                 ]),
                 true,
@@ -2480,10 +2479,13 @@ mod tests {
         let widget = material_app(
             theme,
             Center::new()
-                .child(Builder::new(move |_app, _context| {
-                    button(noop(), icon(Icons::add()))
-                        .focus_node(focus_node)
-                        .into_widget()
+                .child(Builder::new({
+                    let focus_node = focus_node.clone();
+                    move |_app, _context| {
+                        button(noop(), icon(Icons::add()))
+                            .focus_node(focus_node.clone())
+                            .into_widget()
+                    }
                 }))
                 .into_widget(),
         );
@@ -2822,22 +2824,27 @@ mod tests {
                 });
             let widget = material_app(
                 m3_theme(&tester),
-                StatefulBuilder::new(move |_app, _context, set_state| {
-                    let is_selected_now = Rc::clone(&is_selected);
-                    Center::new()
-                        .child(
-                            IconButton::new(
-                                Some(Listener::new(move |app| {
-                                    let is_selected = Rc::clone(&is_selected_now);
-                                    set_state(app, &mut |_app| is_selected.set(!is_selected.get()));
-                                })),
-                                icon(Icons::ac_unit()),
+                StatefulBuilder::new({
+                    let focus_node = focus_node.clone();
+                    move |_app, _context, set_state| {
+                        let is_selected_now = Rc::clone(&is_selected);
+                        Center::new()
+                            .child(
+                                IconButton::new(
+                                    Some(Listener::new(move |app| {
+                                        let is_selected = Rc::clone(&is_selected_now);
+                                        set_state(app, &mut |_app| {
+                                            is_selected.set(!is_selected.get())
+                                        });
+                                    })),
+                                    icon(Icons::ac_unit()),
+                                )
+                                .style(ButtonStyle::new().foreground_color(Rc::clone(&foreground)))
+                                .is_selected(is_selected.get())
+                                .focus_node(focus_node.clone()),
                             )
-                            .style(ButtonStyle::new().foreground_color(Rc::clone(&foreground)))
-                            .is_selected(is_selected.get())
-                            .focus_node(focus_node),
-                        )
-                        .into_widget()
+                            .into_widget()
+                    }
                 })
                 .into_widget(),
             );
@@ -3717,12 +3724,12 @@ mod tests {
         let widget = material_app(
             default_theme(&tester),
             Center::new()
-                .child(button(noop(), icon(Icons::add())).states_controller(controller))
+                .child(button(noop(), icon(Icons::add())).states_controller(controller.clone()))
                 .into_widget(),
         );
         tester.pump_widget(widget);
 
-        assert_eq!(states_value(&tester, controller), states(&[]));
+        assert_eq!(states_value(&tester, controller.handle()), states(&[]));
         assert_eq!(count.get(), 0);
 
         let icon = tester.render_box_of(tester.find_by_type::<Icon>()[0]);
@@ -3733,7 +3740,7 @@ mod tests {
         tester.pump_and_settle();
 
         assert_eq!(
-            states_value(&tester, controller),
+            states_value(&tester, controller.handle()),
             states(&[WidgetState::Hovered])
         );
         assert_eq!(count.get(), 1);
@@ -3741,14 +3748,14 @@ mod tests {
         tester.move_to(&mut mouse, Offset::ZERO, false);
         tester.pump_and_settle();
 
-        assert_eq!(states_value(&tester, controller), states(&[]));
+        assert_eq!(states_value(&tester, controller.handle()), states(&[]));
         assert_eq!(count.get(), 2);
 
         tester.move_to(&mut mouse, center, false);
         tester.pump_and_settle();
 
         assert_eq!(
-            states_value(&tester, controller),
+            states_value(&tester, controller.handle()),
             states(&[WidgetState::Hovered])
         );
         assert_eq!(count.get(), 3);
@@ -3757,7 +3764,7 @@ mod tests {
         tester.pump_and_settle();
 
         assert_eq!(
-            states_value(&tester, controller),
+            states_value(&tester, controller.handle()),
             states(&[WidgetState::Hovered, WidgetState::Pressed])
         );
         assert_eq!(count.get(), 4);
@@ -3766,7 +3773,7 @@ mod tests {
         tester.pump_and_settle();
 
         assert_eq!(
-            states_value(&tester, controller),
+            states_value(&tester, controller.handle()),
             states(&[WidgetState::Hovered])
         );
         assert_eq!(count.get(), 5);
@@ -3774,13 +3781,13 @@ mod tests {
         tester.move_to(&mut mouse, Offset::ZERO, false);
         tester.pump_and_settle();
 
-        assert_eq!(states_value(&tester, controller), states(&[]));
+        assert_eq!(states_value(&tester, controller.handle()), states(&[]));
         assert_eq!(count.get(), 6);
 
         tester.down(&mut mouse, center);
         tester.pump_and_settle();
         assert_eq!(
-            states_value(&tester, controller),
+            states_value(&tester, controller.handle()),
             states(&[WidgetState::Hovered, WidgetState::Pressed])
         );
         assert_eq!(count.get(), 8); // adds hovered and pressed - two changes
@@ -4002,7 +4009,7 @@ mod tests {
                 &tester,
                 None,
                 IconButton::new(noop(), icon(Icons::add()))
-                    .states_controller(controller)
+                    .states_controller(controller.clone())
                     .is_selected(true),
             );
             tester.pump_widget(widget);
@@ -4025,7 +4032,7 @@ mod tests {
                     tester,
                     None,
                     IconButton::new(noop(), icon(Icons::add()))
-                        .states_controller(controller)
+                        .states_controller(controller.clone())
                         .is_selected(is_selected)
                         .style(
                             ButtonStyle::new()
@@ -4067,7 +4074,7 @@ mod tests {
                 &tester,
                 None,
                 IconButton::new(noop(), icon(Icons::add()))
-                    .states_controller(controller)
+                    .states_controller(controller.clone())
                     .style(ButtonStyle::new().shape(shape)),
             );
             tester.pump_widget(widget);
@@ -4250,7 +4257,7 @@ mod tests {
             let widget = m3e_app(
                 &tester,
                 None,
-                favorite_button(None).states_controller(controller),
+                favorite_button(None).states_controller(controller.clone()),
             );
             tester.pump_widget(widget);
             assert!(material_shape_is(&tester, &stadium()));
@@ -4266,7 +4273,7 @@ mod tests {
             let mut tester = tester();
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             let selected = |tester: &WidgetTester| {
-                states_value(tester, controller).contains(&WidgetState::Selected)
+                states_value(tester, controller.handle()).contains(&WidgetState::Selected)
             };
             for (is_selected, expected) in [
                 (Some(true), true),
@@ -4277,7 +4284,7 @@ mod tests {
                 let widget = m3e_app(
                     &tester,
                     None,
-                    favorite_button(is_selected).states_controller(controller),
+                    favorite_button(is_selected).states_controller(controller.clone()),
                 );
                 tester.pump_widget(widget);
                 assert_eq!(selected(&tester), expected);

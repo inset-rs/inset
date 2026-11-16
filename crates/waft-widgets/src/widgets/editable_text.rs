@@ -19,7 +19,8 @@ use waft_embedder::{
 };
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listenable,
-    ListenableObject, Listener, Task, Timer, ValueListenable, ValueNotifier,
+    ListenableHandle, ListenableObject, Listener, OptionRetained, Retained, Task, Timer,
+    ValueListenable, ValueListenableHandle, ValueNotifier,
 };
 use waft_gestures::{DragStartBehavior, PointerDownEvent, PointerUpEvent};
 use waft_painting::{
@@ -28,11 +29,11 @@ use waft_painting::{
 };
 use waft_physics::{Simulation, Tolerance};
 use waft_rendering::{
-    AnyLayer, AnyRenderBox, AnyRenderObject, AnyViewportOffset, BoxConstraints, BoxHitTestResult,
-    CompositionCallback, HitTestBehavior, LayerLink, LineBoundary, PaintingContext, RenderBox,
-    RenderBoxData, RenderEditable, RenderHandle, RenderObject, RenderObjectData,
-    RenderObjectWithChildData, RenderObjectWithChildMixin, RenderProxyBoxMixin,
-    RenderProxyBoxWithHitTestBehavior, RevealedOffset, ScrollDirection, VerticalCaretMovementRun,
+    AnyLayer, AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, CompositionCallback,
+    HitTestBehavior, LayerLink, LineBoundary, PaintingContext, RenderBox, RenderBoxData,
+    RenderEditable, RenderHandle, RenderObject, RenderObjectData, RenderObjectWithChildData,
+    RenderObjectWithChildMixin, RenderProxyBoxMixin, RenderProxyBoxWithHitTestBehavior,
+    RevealedOffset, ScrollDirection, VerticalCaretMovementRun, ViewportOffsetRef,
 };
 use waft_scheduler::{
     FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
@@ -55,8 +56,8 @@ use crate::framework::{
 use crate::state_accessors;
 use crate::view::View;
 use crate::widgets::actions::{
-    Action, ActionData, Actions, AnyAction, CallbackAction, ContextAction, DismissIntent,
-    DoNothingAction, Intent, OnInvokeCallback,
+    Action, ActionData, ActionRef, Actions, AnyAction, CallbackAction, ContextAction,
+    DismissIntent, DoNothingAction, Intent, OnInvokeCallback,
 };
 use crate::widgets::app_lifecycle_listener::AppLifecycleListener;
 use crate::widgets::autofill::{AutofillGroup, AutofillGroupState};
@@ -69,14 +70,16 @@ use crate::widgets::basic::{Builder, Directionality};
 use crate::widgets::constants::K_MIN_INTERACTIVE_DIMENSION;
 use crate::widgets::context_menu_button_item::{ContextMenuButtonItem, ContextMenuButtonType};
 use crate::widgets::default_text_editing_shortcuts::intent_for_macos_selector;
-use crate::widgets::focus_manager::{FocusManager, FocusNode, FocusNodeLeaf, UnfocusDisposition};
+use crate::widgets::focus_manager::{FocusManager, FocusNodeRef, UnfocusDisposition};
 use crate::widgets::focus_scope::{Focus, FocusScope};
 use crate::widgets::focus_traversal::{DirectionalFocusAction, DirectionalFocusIntent};
 use crate::widgets::magnifier::TextMagnifierConfiguration;
 use crate::widgets::media_query::{MediaQuery, Orientation};
 use crate::widgets::notification_listener::NotificationListener;
 use crate::widgets::scroll_configuration::{ScrollBehaviorRef, ScrollConfiguration};
-use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
+use crate::widgets::scroll_controller::{
+    ScrollController, ScrollControllerLeaf, ScrollControllerRef,
+};
 use crate::widgets::scroll_notification::ScrollNotification;
 use crate::widgets::scroll_physics::{ScrollPhysics, ScrollPhysicsBase, ScrollPhysicsRef};
 use crate::widgets::scrollable::{Scrollable, ScrollableState, ViewportBuilder};
@@ -111,6 +114,7 @@ use crate::widgets::ticker_provider::{
 };
 use crate::widgets::undo_history::{UndoHistory, UndoHistoryController};
 use crate::widgets::widget_span::WidgetSpan;
+use waft_foundation::Ref;
 
 /// The fields of Dart's `TextEditingController`, held under the field
 /// `text_editing_controller`.
@@ -273,13 +277,13 @@ impl TextEditingController {
     /// string.
     ///
     /// The initial selection is `TextSelection::collapsed(-1, …)`.
-    pub fn new(app: &mut App) -> Handle<TextEditingController> {
+    pub fn new(app: &mut App) -> Ref<TextEditingController> {
         TextEditingController::from_value(app, None)
     }
 
     /// Dart `TextEditingController(text:)`.
-    pub fn text(self: Handle<Self>, app: &mut App, text: impl Into<String>) -> Handle<Self> {
-        app.get_mut(self).text_editing_controller.value = TextEditingValue::new().text(text);
+    pub fn text(self: Ref<Self>, app: &mut App, text: impl Into<String>) -> Ref<Self> {
+        app.get_mut(&self).text_editing_controller.value = TextEditingValue::new().text(text);
         self
     }
 
@@ -287,7 +291,7 @@ impl TextEditingController {
     pub fn from_value(
         app: &mut App,
         value: Option<TextEditingValue>,
-    ) -> Handle<TextEditingController> {
+    ) -> Ref<TextEditingController> {
         let value = value.unwrap_or(TextEditingValue::EMPTY);
         debug_assert!(
             !value.composing.is_valid() || value.is_composing_range_valid(),
@@ -349,10 +353,12 @@ impl TextEditingController {
                 .into_span(),
         ])
     }
+}
 
-    /// Discards any resources used by the object.
-    pub fn dispose(&mut self) {
-        self.change_notifier.dispose();
+impl TextEditingController {
+    /// Discards any resources used by the object; see [`ChangeNotifierData::dispose`].
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -398,9 +404,7 @@ impl TextEditingControllerVTable {
             },
             notify_listeners: |app, id| Handle::<C>::from_id(id).notify_listeners(app),
             dispose_change_notifier: |app, id| {
-                app.get_mut(Handle::<C>::from_id(id))
-                    .change_notifier_data_mut()
-                    .dispose();
+                ChangeNotifierData::dispose(app, Handle::<C>::from_id(id));
             },
             data: |app, id| C::text_editing_controller_data(Handle::from_id(id), app),
             data_mut: |app, id| C::text_editing_controller_data_mut(Handle::from_id(id), app),
@@ -420,6 +424,11 @@ pub struct AnyTextEditingController {
     id: HandleId,
     vtable: &'static TextEditingControllerVTable,
 }
+
+/// A field Dart types as the erased object, kept: AnyTextEditingController with its count.
+pub type TextEditingControllerRef = Retained<AnyTextEditingController>;
+
+waft_foundation::erased_handle!(AnyTextEditingController: TextEditingControllerLeaf => TextEditingControllerLeaf::as_controller);
 
 impl AnyTextEditingController {
     fn data(self, app: &App) -> &TextEditingControllerData {
@@ -553,38 +562,36 @@ impl AnyTextEditingController {
     }
 }
 
-impl PartialEq for AnyTextEditingController {
-    fn eq(&self, other: &AnyTextEditingController) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyTextEditingController {}
-
 impl Debug for AnyTextEditingController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AnyTextEditingController({:?})", self.id)
     }
 }
 
-impl std::hash::Hash for AnyTextEditingController {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-impl Listenable for AnyTextEditingController {
-    fn add_listener(&self, app: &mut App, listener: Listener) {
+impl AnyTextEditingController {
+    /// See [`Listenable::add_listener`].
+    pub fn add_listener(self, app: &mut App, listener: Listener) {
         (self.vtable.add_listener)(app, self.id, listener);
     }
 
-    fn remove_listener(&self, app: &mut App, listener: &Listener) {
+    /// See [`Listenable::remove_listener`].
+    pub fn remove_listener(self, app: &mut App, listener: &Listener) {
         (self.vtable.remove_listener)(app, self.id, listener);
     }
 }
 
-impl ValueListenable<TextEditingValue> for AnyTextEditingController {
-    fn value<'a>(&'a self, app: &'a App) -> &'a TextEditingValue {
+impl ListenableHandle for AnyTextEditingController {
+    fn add_listener_to(self, app: &mut App, listener: Listener) {
+        AnyTextEditingController::add_listener(self, app, listener);
+    }
+
+    fn remove_listener_from(self, app: &mut App, listener: &Listener) {
+        AnyTextEditingController::remove_listener(self, app, listener);
+    }
+}
+
+impl ValueListenableHandle<TextEditingValue> for AnyTextEditingController {
+    fn value_of(self, app: &App) -> &TextEditingValue {
         &self.data(app).value
     }
 }
@@ -841,8 +848,9 @@ impl RenderObject for RenderCompositionCallback {
         }
     }
 
-    /// Not in Dart: the callback holds the state's `Handle`, which is stale once the state is
-    /// destroyed, where Dart's tear-off keeps the state alive to find `renderEditable` detached.
+    /// Not in Dart: the callback holds the state's bare `Handle` (the state keeps the callback,
+    /// so it cannot keep the state), which is stale once the state is freed, where Dart's
+    /// tear-off keeps the state alive to find `renderEditable` detached.
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
         if let Some(cancel) = self.get_mut(app).cancel_callback.take() {
             cancel(app);
@@ -1110,9 +1118,9 @@ impl Simulation for DiscreteKeyFrameSimulation {
 pub struct EditableText {
     pub key: Option<KeyRef>,
     /// Controls the text being edited.
-    pub controller: AnyTextEditingController,
+    pub controller: TextEditingControllerRef,
     /// Controls whether this widget has keyboard focus.
-    pub focus_node: Handle<FocusNode>,
+    pub focus_node: FocusNodeRef,
     pub read_only: bool,
     pub obscuring_character: String,
     pub obscure_text: bool,
@@ -1167,7 +1175,7 @@ pub struct EditableText {
     pub drag_start_behavior: DragStartBehavior,
     pub enable_interactive_selection: Option<bool>,
     pub select_all_on_focus: Option<bool>,
-    pub scroll_controller: Option<Handle<ScrollController>>,
+    pub scroll_controller: Option<ScrollControllerRef>,
     pub scroll_physics: Option<ScrollPhysicsRef>,
     pub autocorrection_text_rect_color: Option<Color>,
     pub toolbar_options: Option<ToolbarOptions>,
@@ -1183,7 +1191,7 @@ pub struct EditableText {
     pub context_menu_builder: Option<EditableTextContextMenuBuilder>,
     pub spell_check_configuration: Option<SpellCheckConfiguration>,
     pub magnifier_configuration: TextMagnifierConfiguration,
-    pub undo_controller: Option<Handle<UndoHistoryController>>,
+    pub undo_controller: Option<Ref<UndoHistoryController>>,
     pub hint_locales: Option<Vec<Locale>>,
     pub enable_inline_prediction: Option<bool>,
 }
@@ -1222,8 +1230,8 @@ impl EditableText {
 
     /// Creates a basic text input field.
     pub fn new(
-        controller: AnyTextEditingController,
-        focus_node: Handle<FocusNode>,
+        controller: TextEditingControllerRef,
+        focus_node: FocusNodeRef,
         style: TextStyle,
         cursor_color: Color,
         background_cursor_color: Color,
@@ -1656,7 +1664,7 @@ impl EditableText {
     }
 
     /// Dart `EditableText(scrollController:)`.
-    pub fn scroll_controller(mut self, scroll_controller: Handle<ScrollController>) -> Self {
+    pub fn scroll_controller(mut self, scroll_controller: ScrollControllerRef) -> Self {
         self.scroll_controller = Some(scroll_controller);
         self
     }
@@ -1776,7 +1784,7 @@ impl EditableText {
     }
 
     /// Dart `EditableText(undoController:)`.
-    pub fn undo_controller(mut self, undo_controller: Handle<UndoHistoryController>) -> Self {
+    pub fn undo_controller(mut self, undo_controller: Ref<UndoHistoryController>) -> Self {
         self.undo_controller = Some(undo_controller);
         self
     }
@@ -2283,11 +2291,11 @@ pub struct EditableTextState {
     automatic_keep_alive_client: AutomaticKeepAliveClientMixinData,
     ticker_provider: TickerProviderStateMixinData,
     cursor_timer: Option<Timer>,
-    backing_cursor_blink_opacity_controller: Option<Handle<AnimationController>>,
-    cursor_visibility_notifier: Option<Handle<ValueNotifier<bool>>>,
-    clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
-    live_text_input_status: Option<Handle<LiveTextInputStatusNotifier>>,
-    text_input_connection: Option<Handle<TextInputConnection>>,
+    backing_cursor_blink_opacity_controller: Option<Ref<AnimationController>>,
+    cursor_visibility_notifier: Option<Ref<ValueNotifier<bool>>>,
+    clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
+    live_text_input_status: Option<Ref<LiveTextInputStatusNotifier>>,
+    text_input_connection: Option<Ref<TextInputConnection>>,
     /// Dart's `_viewId`: the view the field is in, which the platform's text input is attached
     /// to.
     view_id: Option<ViewId>,
@@ -2295,20 +2303,20 @@ pub struct EditableTextState {
     composite_callback: Option<CompositionCallback>,
     last_known_remote_text_editing_value: Option<TextEditingValue>,
     scribble_cache_key: Option<ScribbleCacheKey>,
-    internal_scroll_controller: Option<Handle<ScrollController>>,
-    toolbar_layer_link: Option<Handle<LayerLink>>,
-    start_handle_layer_link: Option<Handle<LayerLink>>,
-    end_handle_layer_link: Option<Handle<LayerLink>>,
+    internal_scroll_controller: Option<Ref<ScrollController>>,
+    toolbar_layer_link: Option<Ref<LayerLink>>,
+    start_handle_layer_link: Option<Ref<LayerLink>>,
+    end_handle_layer_link: Option<Ref<LayerLink>>,
     did_auto_focus: bool,
     process_text_service: Rc<dyn ProcessTextService>,
     process_text_actions: Vec<ProcessTextAction>,
     spell_check_configuration: SpellCheckConfiguration,
     spell_check_results: Option<SpellCheckResults>,
     current_autofill_scope: Option<Handle<AutofillGroupState>>,
-    app_lifecycle_listener: Option<Handle<AppLifecycleListener>>,
+    app_lifecycle_listener: Option<Ref<AppLifecycleListener>>,
     just_resumed: bool,
     had_focus_on_tap_down: bool,
-    actions: Option<HashMap<TypeId, AnyAction>>,
+    actions: Option<HashMap<TypeId, ActionRef>>,
     /// Dart keeps these on the one shared vertical action; both vertical intents map
     /// to that instance, so the run is shared here instead.
     vertical_movement_run: Option<VerticalCaretMovementRun>,
@@ -2328,7 +2336,7 @@ pub struct EditableTextState {
     last_bottom_view_inset: f64,
     has_focus: bool,
     next_focus_change_is_internal: bool,
-    selection_overlay: Option<Handle<TextSelectionOverlay>>,
+    selection_overlay: Option<Ref<TextSelectionOverlay>>,
     /// Dart's `late final renderEditable`, found on its first read and kept, so a composition
     /// callback of the detaching layer, which runs while the element is inactive, finds it
     /// detached rather than looking for it through an inactive element.
@@ -2349,6 +2357,7 @@ impl EditableTextState {
     pub fn clipboard_status(self: Handle<Self>, app: &App) -> Handle<ClipboardStatusNotifier> {
         app.get(self)
             .clipboard_status
+            .handle()
             .expect("clipboardStatus is created in initState")
     }
 
@@ -2707,6 +2716,7 @@ impl EditableTextState {
     pub fn cursor_currently_visible(self: Handle<Self>, app: &App) -> bool {
         app.get(self)
             .backing_cursor_blink_opacity_controller
+            .handle()
             .is_some_and(|controller| controller.value(app) > 0.0)
     }
 
@@ -2722,7 +2732,7 @@ impl EditableTextState {
             self.open_input_connection(app);
         } else {
             app.get_mut(self).next_focus_change_is_internal = true;
-            let focus_node = self.widget(app).focus_node;
+            let focus_node = self.widget(app).focus_node.handle();
             focus_node.request_focus(app, None);
         }
     }
@@ -2732,14 +2742,14 @@ impl EditableTextState {
         self: Handle<Self>,
         app: &App,
     ) -> Option<Handle<TextSelectionOverlay>> {
-        app.get(self).selection_overlay
+        app.get(self).selection_overlay.handle()
     }
 
     fn web_context_menu_enabled() -> bool {
         K_IS_WEB
     }
 
-    fn create_selection_overlay(self: Handle<Self>, app: &mut App) -> Handle<TextSelectionOverlay> {
+    fn create_selection_overlay(self: Handle<Self>, app: &mut App) -> Ref<TextSelectionOverlay> {
         let value = self.value(app);
         let context = self.context(app);
         let debug_required_for = context.widget(app).clone();
@@ -2749,7 +2759,11 @@ impl EditableTextState {
         let render_object = self.render_editable(app);
         let selection_delegate = self.as_text_selection_delegate();
         let magnifier_configuration = self.widget(app).magnifier_configuration.clone();
-        let clipboard_status = self.clipboard_status(app);
+        let clipboard_status = app
+            .get(self)
+            .clipboard_status
+            .clone()
+            .expect("clipboardStatus is created in initState");
         let drag_start_behavior = self.widget(app).drag_start_behavior;
         let selection_controls = self.widget(app).selection_controls.clone();
         let on_selection_handle_tapped = self.widget(app).on_selection_handle_tapped.clone();
@@ -2786,7 +2800,7 @@ impl EditableTextState {
     }
 
     fn update_or_dispose_selection_overlay_if_needed(self: Handle<Self>, app: &mut App) {
-        if let Some(overlay) = app.get(self).selection_overlay {
+        if let Some(overlay) = app.get(self).selection_overlay.handle() {
             if self.has_focus(app) {
                 overlay.update(app, self.value(app));
             } else {
@@ -2869,13 +2883,13 @@ impl EditableTextState {
         if Self::web_context_menu_enabled() {
             return false;
         }
-        let Some(overlay) = app.get(self).selection_overlay else {
+        let Some(overlay) = app.get(self).selection_overlay.handle() else {
             return false;
         };
         if overlay.toolbar_is_visible(app) {
             return false;
         }
-        if let Some(status) = app.get(self).live_text_input_status {
+        if let Some(status) = app.get(self).live_text_input_status.handle() {
             status.update(app);
         }
         self.clipboard_status(app).update(app);
@@ -2886,10 +2900,10 @@ impl EditableTextState {
     /// Hides the text selection toolbar.
     pub fn hide_toolbar(self: Handle<Self>, app: &mut App, hide_handles: bool) {
         if hide_handles {
-            if let Some(overlay) = app.get(self).selection_overlay {
+            if let Some(overlay) = app.get(self).selection_overlay.handle() {
                 overlay.hide(app);
             }
-        } else if let Some(overlay) = app.get(self).selection_overlay
+        } else if let Some(overlay) = app.get(self).selection_overlay.handle()
             && overlay.toolbar_is_visible(app)
         {
             overlay.hide_toolbar(app);
@@ -2902,7 +2916,11 @@ impl EditableTextState {
             let overlay = self.create_selection_overlay(app);
             app.get_mut(self).selection_overlay = Some(overlay);
         }
-        let overlay = app.get(self).selection_overlay.expect("created above");
+        let overlay = app
+            .get(self)
+            .selection_overlay
+            .handle()
+            .expect("created above");
         if overlay.toolbar_is_visible(app) {
             self.hide_toolbar(app, hide_handles);
         } else {
@@ -2940,7 +2958,11 @@ impl EditableTextState {
             return false;
         };
         let this = self;
-        let overlay = app.get(self).selection_overlay.expect("checked above");
+        let overlay = app
+            .get(self)
+            .selection_overlay
+            .handle()
+            .expect("checked above");
         overlay.show_spell_check_suggestions_toolbar(
             app,
             Rc::new(move |app, context| builder(app, context, this)),
@@ -2951,7 +2973,7 @@ impl EditableTextState {
     /// Shows the magnifier at the position given by `position_to_show`,
     /// if no magnifier exists.
     pub fn show_magnifier(self: Handle<Self>, app: &mut App, position_to_show: Offset) {
-        let Some(overlay) = app.get(self).selection_overlay else {
+        let Some(overlay) = app.get(self).selection_overlay.handle() else {
             return;
         };
         if overlay.magnifier_exists(app) {
@@ -2963,7 +2985,7 @@ impl EditableTextState {
 
     /// Hides the magnifier.
     pub fn hide_magnifier(self: Handle<Self>, app: &mut App) {
-        if let Some(overlay) = app.get(self).selection_overlay {
+        if let Some(overlay) = app.get(self).selection_overlay.handle() {
             overlay.hide_magnifier(app);
         }
     }
@@ -3002,7 +3024,7 @@ impl EditableTextState {
 
     fn post_frame_rebuild_toolbar(self: Handle<Self>, app: &mut App, _time_stamp: Duration) {
         if self.mounted(app)
-            && let Some(overlay) = app.get(self).selection_overlay
+            && let Some(overlay) = app.get(self).selection_overlay.handle()
             && overlay.toolbar_is_visible(app)
         {
             overlay.show_toolbar(app);
@@ -3010,12 +3032,7 @@ impl EditableTextState {
     }
 
     fn post_frame_update_for_scroll(self: Handle<Self>, app: &mut App, _time_stamp: Duration) {
-        // Not in Dart: a disposed state's handle is gone, where Dart's disposed state has no
-        // selection overlay and does nothing below.
-        if !app.contains(self) {
-            return;
-        }
-        if let Some(overlay) = app.get(self).selection_overlay {
+        if let Some(overlay) = app.get(self).selection_overlay.handle() {
             overlay.update_for_scroll(app);
         }
     }
@@ -3042,7 +3059,7 @@ impl EditableTextState {
         let obscure_text = widget.obscure_text;
         let obscuring_character = widget.obscuring_character.clone();
         let read_only = widget.read_only;
-        let controller = widget.controller;
+        let controller = widget.controller.handle();
         let style = app.get(self).style.clone();
         let value = self.value(app);
         if obscure_text {
@@ -3137,6 +3154,7 @@ impl EditableTextState {
     fn has_input_connection(self: Handle<Self>, app: &mut App) -> bool {
         app.get(self)
             .text_input_connection
+            .handle()
             .is_some_and(|connection| connection.attached(app))
     }
 
@@ -3146,39 +3164,43 @@ impl EditableTextState {
             || !self.widget(app).read_only
     }
 
-    fn scroll_controller(self: Handle<Self>, app: &mut App) -> Handle<ScrollController> {
-        if let Some(controller) = self.widget(app).scroll_controller {
+    fn scroll_controller(self: Handle<Self>, app: &mut App) -> ScrollControllerRef {
+        if let Some(controller) = self.widget(app).scroll_controller.clone() {
             return controller;
         }
-        if let Some(controller) = app.get(self).internal_scroll_controller {
-            return controller;
+        if let Some(controller) = &app.get(self).internal_scroll_controller {
+            return controller.erase();
         }
         let controller = ScrollController::default(app);
-        app.get_mut(self).internal_scroll_controller = Some(controller);
-        controller
+        app.get_mut(self).internal_scroll_controller = Some(controller.clone());
+        controller.into_erased()
     }
 
     fn cursor_visibility_notifier(self: Handle<Self>, app: &App) -> Handle<ValueNotifier<bool>> {
         app.get(self)
             .cursor_visibility_notifier
+            .handle()
             .expect("created in initState")
     }
 
-    fn start_handle_layer_link(self: Handle<Self>, app: &App) -> Handle<LayerLink> {
+    fn start_handle_layer_link(self: Handle<Self>, app: &App) -> Ref<LayerLink> {
         app.get(self)
             .start_handle_layer_link
+            .clone()
             .expect("created in initState")
     }
 
-    fn end_handle_layer_link(self: Handle<Self>, app: &App) -> Handle<LayerLink> {
+    fn end_handle_layer_link(self: Handle<Self>, app: &App) -> Ref<LayerLink> {
         app.get(self)
             .end_handle_layer_link
+            .clone()
             .expect("created in initState")
     }
 
-    fn toolbar_layer_link(self: Handle<Self>, app: &App) -> Handle<LayerLink> {
+    fn toolbar_layer_link(self: Handle<Self>, app: &App) -> Ref<LayerLink> {
         app.get(self)
             .toolbar_layer_link
+            .clone()
             .expect("created in initState")
     }
 
@@ -3186,10 +3208,14 @@ impl EditableTextState {
         self: Handle<Self>,
         app: &mut App,
     ) -> Handle<AnimationController> {
-        if let Some(controller) = app.get(self).backing_cursor_blink_opacity_controller {
+        if let Some(controller) = app
+            .get(self)
+            .backing_cursor_blink_opacity_controller
+            .handle()
+        {
             return controller;
         }
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             None,
@@ -3203,8 +3229,9 @@ impl EditableTextState {
             app,
             Listener::handle_method(self, Self::on_cursor_color_tick),
         );
+        let handle = controller.handle();
         app.get_mut(self).backing_cursor_blink_opacity_controller = Some(controller);
-        controller
+        handle
     }
 
     fn observer(self: Handle<Self>, app: &mut App) -> WidgetsBindingObserverRef {
@@ -3304,7 +3331,7 @@ impl EditableTextState {
         context: BuildContext,
         event: PointerDownEvent,
     ) {
-        let focus_node = self.widget(app).focus_node.as_node();
+        let focus_node = self.widget(app).focus_node.erase();
         Actions::invoke(
             app,
             context,
@@ -3318,7 +3345,7 @@ impl EditableTextState {
         context: BuildContext,
         event: PointerUpEvent,
     ) {
-        let focus_node = self.widget(app).focus_node.as_node();
+        let focus_node = self.widget(app).focus_node.erase();
         Actions::invoke(
             app,
             context,
@@ -3626,6 +3653,7 @@ impl EditableTextState {
         if app
             .get(self)
             .selection_overlay
+            .handle()
             .is_some_and(|overlay| overlay.toolbar_is_visible(app))
         {
             self.hide_toolbar(app, false);
@@ -3661,17 +3689,17 @@ impl EditableTextState {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-    ) -> HashMap<TypeId, AnyAction> {
+    ) -> HashMap<TypeId, ActionRef> {
         if let Some(actions) = app.get(self).actions.clone() {
             return actions;
         }
-        let mut actions: HashMap<TypeId, AnyAction> = HashMap::new();
+        let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
 
         let do_nothing = DoNothingAction::new(app);
         do_nothing.set_consumes_key(app, false);
         actions.insert(
             TypeId::of::<DoNothingAndStopPropagationTextIntent>(),
-            Action::as_action(do_nothing),
+            do_nothing.into_erased(),
         );
 
         let replace_text = CallbackAction::<ReplaceTextIntent>::new(
@@ -3683,7 +3711,7 @@ impl EditableTextState {
         );
         actions.insert(
             TypeId::of::<ReplaceTextIntent>(),
-            Action::as_action(replace_text),
+            replace_text.into_erased(),
         );
 
         let update_selection = CallbackAction::<UpdateSelectionIntent>::new(
@@ -3695,20 +3723,20 @@ impl EditableTextState {
         );
         actions.insert(
             TypeId::of::<UpdateSelectionIntent>(),
-            Action::as_action(update_selection),
+            update_selection.into_erased(),
         );
 
         let directional_focus = DirectionalFocusAction::for_text_field(app);
         actions.insert(
             TypeId::of::<DirectionalFocusIntent>(),
-            Action::as_action(directional_focus),
+            directional_focus.into_erased(),
         );
 
         let dismiss = CallbackAction::<DismissIntent>::new(
             app,
             Rc::new(move |app, _intent| self.hide_toolbar_if_visible(app)),
         );
-        actions.insert(TypeId::of::<DismissIntent>(), Action::as_action(dismiss));
+        actions.insert(TypeId::of::<DismissIntent>(), dismiss.into_erased());
 
         // Delete
         let delete_character = DeleteTextAction::<DeleteCharacterIntent>::new(
@@ -3722,7 +3750,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<DeleteCharacterIntent>(),
-            Action::as_action(delete_character),
+            delete_character.into_erased(),
         );
         let delete_word = DeleteTextAction::<DeleteToNextWordBoundaryIntent>::new(
             app,
@@ -3735,7 +3763,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<DeleteToNextWordBoundaryIntent>(),
-            Action::as_action(delete_word),
+            delete_word.into_erased(),
         );
         let delete_to_line_break = DeleteTextAction::<DeleteToLineBreakIntent>::new(
             app,
@@ -3748,7 +3776,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<DeleteToLineBreakIntent>(),
-            Action::as_action(delete_to_line_break),
+            delete_to_line_break.into_erased(),
         );
 
         // Extend/Move Selection
@@ -3764,7 +3792,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionByCharacterIntent>(),
-            Action::as_action(by_character),
+            by_character.into_erased(),
         );
         let by_word = UpdateTextSelectionAction::<ExtendSelectionToNextWordBoundaryIntent>::new(
             app,
@@ -3778,7 +3806,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionToNextWordBoundaryIntent>(),
-            Action::as_action(by_word),
+            by_word.into_erased(),
         );
         let by_paragraph =
             UpdateTextSelectionAction::<ExtendSelectionToNextParagraphBoundaryIntent>::new(
@@ -3793,7 +3821,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionToNextParagraphBoundaryIntent>(),
-            Action::as_action(by_paragraph),
+            by_paragraph.into_erased(),
         );
         let to_line_break = UpdateTextSelectionAction::<ExtendSelectionToLineBreakIntent>::new(
             app,
@@ -3807,7 +3835,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionToLineBreakIntent>(),
-            Action::as_action(to_line_break),
+            to_line_break.into_erased(),
         );
         let by_line = UpdateTextSelectionVerticallyAction::<
             ExtendSelectionVerticallyToAdjacentLineIntent,
@@ -3817,7 +3845,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionVerticallyToAdjacentLineIntent>(),
-            Action::as_action(by_line),
+            by_line.into_erased(),
         );
         let by_page = UpdateTextSelectionVerticallyAction::<
             ExtendSelectionVerticallyToAdjacentPageIntent,
@@ -3827,7 +3855,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionVerticallyToAdjacentPageIntent>(),
-            Action::as_action(by_page),
+            by_page.into_erased(),
         );
         let by_paragraph_or_caret = UpdateTextSelectionAction::<
             ExtendSelectionToNextParagraphBoundaryOrCaretLocationIntent,
@@ -3843,7 +3871,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionToNextParagraphBoundaryOrCaretLocationIntent>(),
-            Action::as_action(by_paragraph_or_caret),
+            by_paragraph_or_caret.into_erased(),
         );
         let to_document = UpdateTextSelectionAction::<ExtendSelectionToDocumentBoundaryIntent>::new(
             app,
@@ -3857,7 +3885,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionToDocumentBoundaryIntent>(),
-            Action::as_action(to_document),
+            to_document.into_erased(),
         );
         let by_word_or_caret = UpdateTextSelectionAction::<
             ExtendSelectionToNextWordBoundaryOrCaretLocationIntent,
@@ -3873,7 +3901,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExtendSelectionToNextWordBoundaryOrCaretLocationIntent>(),
-            Action::as_action(by_word_or_caret),
+            by_word_or_caret.into_erased(),
         );
 
         let scroll_to_boundary =
@@ -3890,7 +3918,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ScrollToDocumentBoundaryIntent>(),
-            Action::as_action(scroll_to_boundary),
+            scroll_to_boundary.into_erased(),
         );
 
         let scroll = CallbackAction::<ScrollIntent>::new(
@@ -3900,7 +3928,7 @@ impl EditableTextState {
                 None
             }),
         );
-        actions.insert(TypeId::of::<ScrollIntent>(), Action::as_action(scroll));
+        actions.insert(TypeId::of::<ScrollIntent>(), scroll.into_erased());
 
         // Expand Selection
         let expand_to_line_break =
@@ -3917,7 +3945,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExpandSelectionToLineBreakIntent>(),
-            Action::as_action(expand_to_line_break),
+            expand_to_line_break.into_erased(),
         );
         let expand_to_document =
             UpdateTextSelectionAction::<ExpandSelectionToDocumentBoundaryIntent>::new(
@@ -3933,7 +3961,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<ExpandSelectionToDocumentBoundaryIntent>(),
-            Action::as_action(expand_to_document),
+            expand_to_document.into_erased(),
         );
 
         // Copy Paste
@@ -3943,7 +3971,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<SelectAllTextIntent>(),
-            Action::as_action(select_all),
+            select_all.into_erased(),
         );
         let copy = CopySelectionAction::new(app, self);
         insert_overridable(
@@ -3951,7 +3979,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<CopySelectionTextIntent>(),
-            Action::as_action(copy),
+            copy.into_erased(),
         );
         let paste = PasteSelectionAction::new(app, self);
         insert_overridable(
@@ -3959,7 +3987,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<PasteTextIntent>(),
-            Action::as_action(paste),
+            paste.into_erased(),
         );
 
         let transpose = CallbackAction::<TransposeCharactersIntent>::new(
@@ -3974,7 +4002,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<TransposeCharactersIntent>(),
-            Action::as_action(transpose),
+            transpose.into_erased(),
         );
 
         let tap_outside = CallbackAction::<EditableTextTapOutsideIntent>::new(
@@ -3989,7 +4017,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<EditableTextTapOutsideIntent>(),
-            Action::as_action(tap_outside),
+            tap_outside.into_erased(),
         );
         let tap_up_outside = CallbackAction::<EditableTextTapUpOutsideIntent>::new(
             app,
@@ -4000,7 +4028,7 @@ impl EditableTextState {
             &mut actions,
             context,
             TypeId::of::<EditableTextTapUpOutsideIntent>(),
-            Action::as_action(tap_up_outside),
+            tap_up_outside.into_erased(),
         );
 
         app.get_mut(self).actions = Some(actions.clone());
@@ -4017,7 +4045,7 @@ impl EditableTextState {
 
     fn did_change_text_editing_value(self: Handle<Self>, app: &mut App) {
         if self.has_focus(app) && !self.value(app).selection.is_valid() {
-            let controller = self.widget(app).controller;
+            let controller = self.widget(app).controller.handle();
             controller.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::did_change_text_editing_value),
@@ -4101,7 +4129,11 @@ impl EditableTextState {
         if app.get(self).last_known_remote_text_editing_value.as_ref() == Some(&local_value) {
             return;
         }
-        let connection = app.get(self).text_input_connection.expect("attached");
+        let connection = app
+            .get(self)
+            .text_input_connection
+            .handle()
+            .expect("attached");
         connection.set_editing_state(app, local_value.clone());
         app.get_mut(self).last_known_remote_text_editing_value = Some(local_value);
     }
@@ -4137,7 +4169,7 @@ impl EditableTextState {
                 .effective_autofill_client(app)
                 .text_input_configuration(app);
             let connection = TextInput::attach(app, self.as_text_input_client(), config);
-            app.get_mut(self).text_input_connection = Some(connection);
+            app.get_mut(self).text_input_connection = Some(connection.clone());
             self.update_size_and_transform(app);
             self.schedule_periodic_post_frame_callbacks(app, Duration::ZERO);
             if let Some(context) = self.mounted(app).then(|| self.context(app)) {
@@ -4147,14 +4179,14 @@ impl EditableTextState {
             connection.set_editing_state(app, local_value.clone());
             connection.show(app);
             app.get_mut(self).last_known_remote_text_editing_value = Some(local_value);
-        } else if let Some(connection) = app.get(self).text_input_connection {
+        } else if let Some(connection) = app.get(self).text_input_connection.handle() {
             connection.show(app);
         }
     }
 
     fn close_input_connection_if_needed(self: Handle<Self>, app: &mut App) {
         if self.has_input_connection(app) {
-            if let Some(connection) = app.get(self).text_input_connection {
+            if let Some(connection) = app.get(self).text_input_connection.handle() {
                 connection.close(app);
             }
             app.get_mut(self).text_input_connection = None;
@@ -4165,12 +4197,12 @@ impl EditableTextState {
 
     fn open_or_close_input_connection_if_needed(self: Handle<Self>, app: &mut App) {
         let has_focus = self.has_focus(app);
-        let focus_node = self.widget(app).focus_node;
+        let focus_node = self.widget(app).focus_node.handle();
         if has_focus && focus_node.consume_keyboard_token(app) {
             self.open_input_connection(app);
         } else if !has_focus {
             self.close_input_connection_if_needed(app);
-            let controller = self.widget(app).controller;
+            let controller = self.widget(app).controller.handle();
             controller.clear_composing(app);
         }
     }
@@ -4284,7 +4316,7 @@ impl EditableTextState {
         if self.widget(app).selection_controls.is_none()
             && self.widget(app).context_menu_builder.is_none()
         {
-            if let Some(overlay) = app.get(self).selection_overlay {
+            if let Some(overlay) = app.get(self).selection_overlay.handle() {
                 overlay.dispose(app);
             }
             app.get_mut(self).selection_overlay = None;
@@ -4292,10 +4324,10 @@ impl EditableTextState {
             if app.get(self).selection_overlay.is_none() {
                 let overlay = self.create_selection_overlay(app);
                 app.get_mut(self).selection_overlay = Some(overlay);
-            } else if let Some(overlay) = app.get(self).selection_overlay {
+            } else if let Some(overlay) = app.get(self).selection_overlay.handle() {
                 overlay.update(app, self.value(app));
             }
-            if let Some(overlay) = app.get(self).selection_overlay {
+            if let Some(overlay) = app.get(self).selection_overlay.handle() {
                 overlay.set_handles_visible(app, self.widget(app).show_selection_handles);
                 overlay.show_handles(app);
             }
@@ -4364,6 +4396,7 @@ impl EditableTextState {
         let selection_controls = app
             .get(self)
             .selection_overlay
+            .as_ref()
             .and_then(|overlay| app.get(overlay).selection_controls.clone());
         if let Some(selection_controls) = selection_controls {
             let handle_height = selection_controls.get_handle_size(line_height).height();
@@ -4437,7 +4470,7 @@ impl EditableTextState {
         } else {
             self.widget(app).controller.clear_composing(app);
             if should_unfocus {
-                let focus = self.widget(app).focus_node.as_node();
+                let focus = self.widget(app).focus_node.handle();
                 match action {
                     TextInputAction::Next => {
                         focus.next_focus(app);
@@ -4481,6 +4514,7 @@ impl EditableTextState {
             let animating = app
                 .get(self)
                 .backing_cursor_blink_opacity_controller
+                .handle()
                 .is_some_and(|controller| controller.is_animating(app));
             debug_assert!(!timer_active || !animating);
         }
@@ -4607,9 +4641,9 @@ impl EditableTextState {
             return;
         }
         app.get_mut(self).next_focus_change_is_internal = true;
-        let focus_node = self.widget(app).focus_node;
+        let focus_node = self.widget(app).focus_node.handle();
         let context = self.context(app);
-        FocusScope::of(app, context, true).autofocus(app, focus_node.as_node());
+        FocusScope::of(app, context, true).autofocus(app, focus_node);
     }
 
     fn post_frame_open_connection(self: Handle<Self>, app: &mut App, _elapsed: Duration) {
@@ -4623,7 +4657,7 @@ impl EditableTextState {
             return;
         }
         let context = self.context(app);
-        if let Some(connection) = app.get(self).text_input_connection {
+        if let Some(connection) = app.get(self).text_input_connection.handle() {
             let style = self.get_text_input_style(app, context);
             connection.update_style(app, style);
         }
@@ -4655,9 +4689,7 @@ impl EditableTextState {
         app: &mut App,
         _duration: Duration,
     ) {
-        // Not in Dart: a disposed state's handle is gone, where Dart's disposed state has no
-        // input connection and stops below.
-        if !app.contains(self) || !self.has_input_connection(app) {
+        if !self.has_input_connection(app) {
             return;
         }
         self.update_selection_rects(app, false);
@@ -4809,6 +4841,7 @@ impl EditableTextState {
     fn text_input_connection(self: Handle<Self>, app: &App) -> Handle<TextInputConnection> {
         app.get(self)
             .text_input_connection
+            .handle()
             .expect("EditableText has an input connection")
     }
 
@@ -4816,13 +4849,17 @@ impl EditableTextState {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
     ) -> WidgetRef {
         let inline_span = self.build_text_span(app, context).into_span();
         let value = self.value(app);
         let cursor_color = self.cursor_color(app);
         let background_cursor_color = self.widget(app).background_cursor_color;
-        let show_cursor = self.cursor_visibility_notifier(app);
+        let show_cursor = app
+            .get(self)
+            .cursor_visibility_notifier
+            .clone()
+            .expect("created in initState");
         let force_line = self.widget(app).force_line;
         let read_only = self.widget(app).read_only;
         let has_focus = self.has_focus(app);
@@ -4927,28 +4964,30 @@ impl State for EditableTextState {
         let toolbar_link = LayerLink::new(app);
         let start_link = LayerLink::new(app);
         let end_link = LayerLink::new(app);
+        let live_text_handle = live_text.handle();
+        let clipboard_status_handle = clipboard_status.handle();
         app.get_mut(self).clipboard_status = Some(clipboard_status);
         app.get_mut(self).live_text_input_status = live_text;
         app.get_mut(self).cursor_visibility_notifier = Some(cursor_visibility);
         app.get_mut(self).toolbar_layer_link = Some(toolbar_link);
         app.get_mut(self).start_handle_layer_link = Some(start_link);
         app.get_mut(self).end_handle_layer_link = Some(end_link);
-        if let Some(live_text) = live_text {
+        if let Some(live_text) = live_text_handle {
             live_text.add_listener(
                 app,
                 Listener::handle_method(self, Self::on_changed_live_text_input_status),
             );
         }
-        clipboard_status.add_listener(
+        clipboard_status_handle.add_listener(
             app,
             Listener::handle_method(self, Self::on_changed_clipboard_status),
         );
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.handle();
         controller.add_listener(
             app,
             Listener::handle_method(self, Self::did_change_text_editing_value),
         );
-        let focus_node = self.widget(app).focus_node;
+        let focus_node = self.widget(app).focus_node.handle();
         focus_node.add_listener(
             app,
             Listener::handle_method(self, Self::handle_focus_changed),
@@ -5016,7 +5055,7 @@ impl State for EditableTextState {
         let view_id = View::maybe_of(app, context).map(|view| view.id());
         let view_changed = app.get(self).view_id != view_id;
         app.get_mut(self).view_id = view_id;
-        if let Some(connection) = app.get(self).text_input_connection
+        if let Some(connection) = app.get(self).text_input_connection.handle()
             && self.has_input_connection(app)
         {
             if view_changed {
@@ -5051,7 +5090,7 @@ impl State for EditableTextState {
                 app,
                 &Listener::handle_method(self, Self::did_change_text_editing_value),
             );
-            let controller = self.widget(app).controller;
+            let controller = self.widget(app).controller.handle();
             controller.add_listener(
                 app,
                 Listener::handle_method(self, Self::did_change_text_editing_value),
@@ -5063,7 +5102,7 @@ impl State for EditableTextState {
                 app,
                 &Listener::handle_method(self, Self::handle_focus_changed),
             );
-            let focus_node = self.widget(app).focus_node;
+            let focus_node = self.widget(app).focus_node.handle();
             focus_node.add_listener(
                 app,
                 Listener::handle_method(self, Self::handle_focus_changed),
@@ -5100,7 +5139,7 @@ impl State for EditableTextState {
                     app.get_mut(self).obscure_show_char_ticks_pending = 0;
                     app.get_mut(self).obscure_latest_char_index = None;
                 }
-                if let Some(connection) = app.get(self).text_input_connection {
+                if let Some(connection) = app.get(self).text_input_connection.handle() {
                     let config = self
                         .effective_autofill_client(app)
                         .text_input_configuration(app);
@@ -5152,7 +5191,7 @@ impl State for EditableTextState {
         if self.widget(app).effective_show_cursor() != old_widget.effective_show_cursor() {
             self.start_or_stop_cursor_timer_if_needed(app);
         }
-        let selection_overlay = app.get(self).selection_overlay;
+        let selection_overlay = app.get(self).selection_overlay.handle();
         if let Some(overlay) = selection_overlay
             && overlay.toolbar_is_visible(app)
             && !option_rc_eq(
@@ -5183,7 +5222,11 @@ impl State for EditableTextState {
                     .magnifier_configuration
                     .same_configuration(&old_widget.magnifier_configuration))
         {
-            let overlay = app.get(self).selection_overlay.expect("checked above");
+            let overlay = app
+                .get(self)
+                .selection_overlay
+                .handle()
+                .expect("checked above");
             let should_show_toolbar = overlay.toolbar_is_visible(app);
             let should_show_handles = overlay.handles_visible_value(app);
             overlay.dispose(app);
@@ -5194,7 +5237,7 @@ impl State for EditableTextState {
                 SchedulerBinding::add_post_frame_callback(
                     app,
                     FrameCallback::new(move |app, _| {
-                        if let Some(overlay) = app.get(this).selection_overlay {
+                        if let Some(overlay) = app.get(this).selection_overlay.handle() {
                             if should_show_toolbar {
                                 overlay.show_toolbar(app);
                             }
@@ -5207,11 +5250,11 @@ impl State for EditableTextState {
                 );
             }
         } else if self.widget(app).controller.selection(app) != old_widget.controller.selection(app)
-            && let Some(overlay) = app.get(self).selection_overlay
+            && let Some(overlay) = app.get(self).selection_overlay.handle()
         {
             overlay.update(app, self.value(app));
         }
-        if let Some(overlay) = app.get(self).selection_overlay {
+        if let Some(overlay) = app.get(self).selection_overlay.handle() {
             overlay.set_handles_visible(app, self.widget(app).show_selection_handles);
         }
         #[allow(deprecated)]
@@ -5240,14 +5283,14 @@ impl State for EditableTextState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = app.get(self).internal_scroll_controller {
+        if let Some(controller) = app.get(self).internal_scroll_controller.handle() {
             controller.dispose(app);
         }
         if let Some(scope) = app.get(self).current_autofill_scope {
             let autofill_id = self.as_autofill_client().autofill_id(app);
             scope.unregister(app, &autofill_id);
         }
-        let editing_controller = self.widget(app).controller;
+        let editing_controller = self.widget(app).controller.handle();
         editing_controller.remove_listener(
             app,
             &Listener::handle_method(self, Self::did_change_text_editing_value),
@@ -5258,15 +5301,19 @@ impl State for EditableTextState {
             timer.cancel(app);
         }
         app.get_mut(self).cursor_timer = None;
-        if let Some(controller) = app.get(self).backing_cursor_blink_opacity_controller {
+        if let Some(controller) = app
+            .get(self)
+            .backing_cursor_blink_opacity_controller
+            .handle()
+        {
             controller.dispose(app);
         }
         app.get_mut(self).backing_cursor_blink_opacity_controller = None;
-        if let Some(overlay) = app.get(self).selection_overlay {
+        if let Some(overlay) = app.get(self).selection_overlay.handle() {
             overlay.dispose(app);
         }
         app.get_mut(self).selection_overlay = None;
-        let focus_node = self.widget(app).focus_node;
+        let focus_node = self.widget(app).focus_node.handle();
         focus_node.remove_listener(
             app,
             &Listener::handle_method(self, Self::handle_focus_changed),
@@ -5276,35 +5323,24 @@ impl State for EditableTextState {
             WidgetsBinding::instance(app).remove_observer(app, &observer);
             app.get_mut(self).registered_as_observer = false;
         }
-        if let Some(live_text) = app.get(self).live_text_input_status {
+        if let Some(live_text) = app.get(self).live_text_input_status.handle() {
             live_text.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::on_changed_live_text_input_status),
             );
             live_text.dispose(app);
         }
-        if let Some(clipboard) = app.get(self).clipboard_status {
+        if let Some(clipboard) = app.get(self).clipboard_status.handle() {
             clipboard.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::on_changed_clipboard_status),
             );
             clipboard.dispose(app);
         }
-        if let Some(notifier) = app.get(self).cursor_visibility_notifier {
-            app.get_mut(notifier).dispose();
+        if let Some(notifier) = app.get(self).cursor_visibility_notifier.handle() {
+            notifier.dispose(app);
         }
-        // Dart lets the links go with the state; the recordings that still name them retain
-        // them past this.
-        let this = app.get_mut(self);
-        let links = [
-            this.toolbar_layer_link.take(),
-            this.start_handle_layer_link.take(),
-            this.end_handle_layer_link.take(),
-        ];
-        for link in links.into_iter().flatten() {
-            app.destroy(link);
-        }
-        if let Some(listener) = app.get(self).app_lifecycle_listener {
+        if let Some(listener) = app.get(self).app_lifecycle_listener.handle() {
             listener.dispose(app);
         }
         FocusManager::instance(app).remove_listener(
@@ -5341,7 +5377,7 @@ impl State for EditableTextState {
         let restoration_id = self.widget(app).restoration_id.clone();
         let drag_start_behavior = self.widget(app).drag_start_behavior;
         let controller = self.scroll_controller(app);
-        let focus_node = self.widget(app).focus_node;
+        let focus_node = self.widget(app).focus_node.clone();
         let state = self;
         let viewport_builder: ViewportBuilder =
             Rc::new(move |app, context, offset| state.build_editable(app, context, offset));
@@ -5352,7 +5388,7 @@ impl State for EditableTextState {
             } else {
                 AxisDirection::Right
             })
-            .controller(controller.as_controller())
+            .controller(controller.into_erased())
             .drag_start_behavior(drag_start_behavior)
             .scroll_behavior(scroll_behavior);
         if let Some(physics) = physics {
@@ -5369,10 +5405,10 @@ impl State for EditableTextState {
             })
             .into_widget();
         let focused = Focus::new(scrollable)
-            .focus_node(focus_node.as_node())
+            .focus_node(focus_node.erase())
             .include_semantics(false);
-        let editing_controller = self.widget(app).controller;
-        let undo_controller = self.widget(app).undo_controller;
+        let editing_controller = self.widget(app).controller.clone();
+        let undo_controller = self.widget(app).undo_controller.clone();
         let state = self;
         let mut history = UndoHistory::new(
             editing_controller,
@@ -5484,7 +5520,7 @@ impl TickerProviderStateMixin for EditableTextState {
 }
 
 impl TickerProviderObject for EditableTextState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -5610,12 +5646,12 @@ impl TextInputClient for EditableTextState {
 
     fn connection_closed(self: Handle<Self>, app: &mut App) {
         if self.has_input_connection(app) {
-            if let Some(connection) = app.get(self).text_input_connection {
+            if let Some(connection) = app.get(self).text_input_connection.handle() {
                 connection.connection_closed_received(app);
             }
             app.get_mut(self).text_input_connection = None;
             app.get_mut(self).last_known_remote_text_editing_value = None;
-            let focus_node = self.widget(app).focus_node;
+            let focus_node = self.widget(app).focus_node.handle();
             focus_node.unfocus(
                 app,
                 crate::widgets::focus_manager::UnfocusDisposition::Scope,
@@ -5733,7 +5769,7 @@ impl TextSelectionDelegate for EditableTextState {
         if value == self.value(app) {
             if !self.has_focus(app) {
                 app.get_mut(self).next_focus_change_is_internal = true;
-                let focus_node = self.widget(app).focus_node;
+                let focus_node = self.widget(app).focus_node.handle();
                 focus_node.request_focus(app, None);
                 if app.get(self).selection_overlay.is_none() {
                     let overlay = self.create_selection_overlay(app);
@@ -5845,7 +5881,7 @@ impl TextSelectionDelegate for EditableTextState {
     }
 
     fn live_text_input_enabled(self: Handle<Self>, app: &App) -> bool {
-        let Some(status) = app.get(self).live_text_input_status else {
+        let Some(status) = app.get(self).live_text_input_status.handle() else {
             return false;
         };
         status.value(app) == LiveTextInputStatus::Enabled
@@ -5969,11 +6005,11 @@ struct Editable {
     children: Vec<WidgetRef>,
     inline_span: InlineSpanRef,
     value: TextEditingValue,
-    start_handle_layer_link: Handle<LayerLink>,
-    end_handle_layer_link: Handle<LayerLink>,
+    start_handle_layer_link: Ref<LayerLink>,
+    end_handle_layer_link: Ref<LayerLink>,
     cursor_color: Option<Color>,
     background_cursor_color: Option<Color>,
-    show_cursor: Handle<ValueNotifier<bool>>,
+    show_cursor: Ref<ValueNotifier<bool>>,
     force_line: bool,
     read_only: bool,
     has_focus: bool,
@@ -5989,7 +6025,7 @@ struct Editable {
     obscure_text: bool,
     text_height_behavior: Option<TextHeightBehavior>,
     text_width_basis: TextWidthBasis,
-    offset: AnyViewportOffset,
+    offset: ViewportOffsetRef,
     renderer_ignores_pointer: bool,
     cursor_width: f64,
     cursor_height: Option<f64>,
@@ -6019,10 +6055,10 @@ impl Editable {
     fn apply_to_render_object(&self, app: &mut App, render_object: RenderHandle<RenderEditable>) {
         render_object.set_text(app, Some(self.inline_span.clone()));
         render_object.set_cursor_color(app, self.cursor_color);
-        render_object.set_start_handle_layer_link(app, self.start_handle_layer_link);
-        render_object.set_end_handle_layer_link(app, self.end_handle_layer_link);
+        render_object.set_start_handle_layer_link(app, self.start_handle_layer_link.clone());
+        render_object.set_end_handle_layer_link(app, self.end_handle_layer_link.clone());
         render_object.set_background_cursor_color(app, self.background_cursor_color);
-        render_object.set_show_cursor(app, self.show_cursor);
+        render_object.set_show_cursor(app, self.show_cursor.clone());
         render_object.set_force_line(app, self.force_line);
         render_object.set_read_only(app, self.read_only);
         render_object.set_has_focus(app, self.has_focus);
@@ -6034,7 +6070,7 @@ impl Editable {
         render_object.set_text_align(app, self.text_align);
         render_object.set_text_direction(app, self.text_direction);
         render_object.set_selection(app, Some(self.value.selection));
-        render_object.set_offset(app, self.offset);
+        render_object.set_offset(app, self.offset.clone());
         render_object.get_mut(app).ignore_pointer = self.renderer_ignores_pointer;
         render_object.set_text_height_behavior(app, self.text_height_behavior);
         render_object.set_text_width_basis(app, self.text_width_basis);
@@ -6069,9 +6105,9 @@ impl RenderObjectWidget for Editable {
         let render_object = RenderEditable::new(
             app,
             self.text_direction,
-            self.start_handle_layer_link,
-            self.end_handle_layer_link,
-            self.offset,
+            self.start_handle_layer_link.clone(),
+            self.end_handle_layer_link.clone(),
+            self.offset.clone(),
             self.text_selection_delegate,
         );
         self.apply_to_render_object(app, render_object);
@@ -6179,10 +6215,10 @@ type GetTextBoundary = fn(Handle<EditableTextState>, &mut App) -> Box<dyn TextBo
 /// Dart's `_makeOverridable`, at the one place the map needs it.
 fn insert_overridable(
     app: &mut App,
-    actions: &mut HashMap<TypeId, AnyAction>,
+    actions: &mut HashMap<TypeId, ActionRef>,
     context: BuildContext,
     intent: TypeId,
-    action: AnyAction,
+    action: ActionRef,
 ) {
     actions.insert(intent, AnyAction::overridable(app, action, context));
 }
@@ -6285,7 +6321,7 @@ impl<T: DirectionalTextEditingIntent> DeleteTextAction<T> {
         state: Handle<EditableTextState>,
         get_text_boundary: GetTextBoundary,
         apply_text_boundary: ApplyTextBoundary,
-    ) -> Handle<DeleteTextAction<T>> {
+    ) -> Ref<DeleteTextAction<T>> {
         app.create(DeleteTextAction {
             action: ActionData::new(),
             state,
@@ -6300,6 +6336,7 @@ impl<T: DirectionalTextEditingIntent> DeleteTextAction<T> {
         let visible = app
             .get(state)
             .selection_overlay
+            .as_ref()
             .is_some_and(|overlay| overlay.toolbar_is_visible(app));
         if !visible {
             return;
@@ -6416,7 +6453,7 @@ impl<T: DirectionalCaretMovementIntent> UpdateTextSelectionAction<T> {
         get_text_boundary: GetTextBoundary,
         apply_text_boundary: ApplyTextBoundary,
         ignore_non_collapsed_selection: bool,
-    ) -> Handle<UpdateTextSelectionAction<T>> {
+    ) -> Ref<UpdateTextSelectionAction<T>> {
         app.create(UpdateTextSelectionAction {
             action: ActionData::new(),
             state,
@@ -6431,12 +6468,12 @@ impl<T: DirectionalCaretMovementIntent> UpdateTextSelectionAction<T> {
 
     /// Dart's named `isExpand` and `extentAtIndex` arguments.
     fn expanding(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         extent_at_index: bool,
-    ) -> Handle<UpdateTextSelectionAction<T>> {
-        app.get_mut(self).is_expand = true;
-        app.get_mut(self).extent_at_index = extent_at_index;
+    ) -> Ref<UpdateTextSelectionAction<T>> {
+        app.get_mut(&self).is_expand = true;
+        app.get_mut(&self).extent_at_index = extent_at_index;
         self
     }
 
@@ -6611,7 +6648,7 @@ impl<T: DirectionalCaretMovementIntent> UpdateTextSelectionVerticallyAction<T> {
         app: &mut App,
         state: Handle<EditableTextState>,
         by_page: bool,
-    ) -> Handle<UpdateTextSelectionVerticallyAction<T>> {
+    ) -> Ref<UpdateTextSelectionVerticallyAction<T>> {
         app.create(UpdateTextSelectionVerticallyAction {
             action: ActionData::new(),
             state,
@@ -6728,7 +6765,7 @@ impl<T: Intent> WebComposingDisablingCallbackAction<T> {
         app: &mut App,
         state: Handle<EditableTextState>,
         on_invoke: OnInvokeCallback<T>,
-    ) -> Handle<WebComposingDisablingCallbackAction<T>> {
+    ) -> Ref<WebComposingDisablingCallbackAction<T>> {
         app.create(WebComposingDisablingCallbackAction {
             action: ActionData::new(),
             state,
@@ -6762,7 +6799,7 @@ struct SelectAllAction {
 }
 
 impl SelectAllAction {
-    fn new(app: &mut App, state: Handle<EditableTextState>) -> Handle<SelectAllAction> {
+    fn new(app: &mut App, state: Handle<EditableTextState>) -> Ref<SelectAllAction> {
         app.create(SelectAllAction {
             action: ActionData::new(),
             state,
@@ -6805,7 +6842,7 @@ struct CopySelectionAction {
 }
 
 impl CopySelectionAction {
-    fn new(app: &mut App, state: Handle<EditableTextState>) -> Handle<CopySelectionAction> {
+    fn new(app: &mut App, state: Handle<EditableTextState>) -> Ref<CopySelectionAction> {
         app.create(CopySelectionAction {
             action: ActionData::new(),
             state,
@@ -6850,7 +6887,7 @@ struct PasteSelectionAction {
 }
 
 impl PasteSelectionAction {
-    fn new(app: &mut App, state: Handle<EditableTextState>) -> Handle<PasteSelectionAction> {
+    fn new(app: &mut App, state: Handle<EditableTextState>) -> Ref<PasteSelectionAction> {
         app.create(PasteSelectionAction {
             action: ActionData::new(),
             state,
@@ -6883,6 +6920,7 @@ impl ContextAction for PasteSelectionAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf};
     use waft_foundation::AppCell;
 
     fn field(app: &mut App) -> EditableText {
@@ -6890,8 +6928,8 @@ mod tests {
         let focus_node = FocusNode::new(app);
         let color = Color::from_argb(255, 0, 0, 0);
         EditableText::new(
-            controller.as_controller(),
-            focus_node,
+            controller.erase(),
+            focus_node.into_erased(),
             TextStyle::new(),
             color,
             color,
@@ -7131,8 +7169,8 @@ mod tests {
         let focus_node = FocusNode::new(&mut app);
         let color = Color::from_argb(255, 0, 0, 0);
         let editable = EditableText::new(
-            controller.as_controller(),
-            focus_node,
+            controller.erase(),
+            focus_node.into_erased(),
             TextStyle::new().font_size(14.0),
             color,
             color,
@@ -7174,8 +7212,8 @@ mod tests {
             let controller = TextEditingController::new(&mut app).text(&mut app, "blah blah");
             let focus_node = FocusNode::new(&mut app);
             let editable = EditableText::new(
-                controller.as_controller(),
-                focus_node,
+                controller.erase(),
+                focus_node.into_erased(),
                 TextStyle::new(),
                 Color::from_argb(255, 255, 0, 0),
                 Color::from_argb(255, 128, 128, 128),
@@ -7239,13 +7277,13 @@ mod tests {
             );
             let focus_node = FocusNode::new(&mut app);
             let editable = EditableText::new(
-                controller.as_controller(),
-                focus_node,
+                controller.erase(),
+                focus_node.erase(),
                 TextStyle::new().font_size(36.0),
                 Color::from_argb(255, 255, 0, 0),
                 Color::from_argb(255, 128, 128, 128),
             )
-            .scroll_controller(scroll_controller)
+            .scroll_controller(scroll_controller.erase())
             .max_lines(None)
             .key(key.clone().into());
             let tree = MediaQuery::new(
@@ -7307,13 +7345,13 @@ mod tests {
             )
         };
         let editable = EditableText::new(
-            controller.as_controller(),
-            focus_node,
+            controller.erase(),
+            focus_node.erase(),
             TextStyle::new().font_size(20.0),
             Color::from_argb(255, 255, 0, 0),
             Color::from_argb(255, 128, 128, 128),
         )
-        .scroll_controller(scroll_controller)
+        .scroll_controller(scroll_controller.erase())
         .max_lines(None)
         .key(key.clone().into());
         let tree = MediaQuery::new(
@@ -7364,15 +7402,15 @@ mod tests {
     fn focused_field(
         clipboard: &Rc<waft_test::MockClipboard>,
         text: &str,
-    ) -> (Rc<AppCell>, Harness, Handle<TextEditingController>) {
+    ) -> (Rc<AppCell>, Harness, Ref<TextEditingController>) {
         let cell = app_with_clipboard(clipboard);
         let (harness, controller) = {
             let mut app = cell.borrow_mut();
             let controller = TextEditingController::new(&mut app).text(&mut app, text);
             let focus_node = FocusNode::new(&mut app);
             let editable = EditableText::new(
-                controller.as_controller(),
-                focus_node,
+                controller.erase(),
+                focus_node.erase(),
                 TextStyle::new(),
                 Color::from_argb(255, 255, 0, 0),
                 Color::from_argb(255, 128, 128, 128),
@@ -7459,8 +7497,8 @@ mod tests {
         let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
         let focus_node = FocusNode::new(&mut app);
         let editable = EditableText::new(
-            controller.as_controller(),
-            focus_node,
+            controller.erase(),
+            focus_node.into_erased(),
             TextStyle::new(),
             Color::from_argb(255, 0, 0, 0),
             Color::from_argb(255, 128, 128, 128),
@@ -7499,13 +7537,14 @@ mod tests {
             let shown = app.create(ValueNotifier::new(true));
             let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
             let focus_node = FocusNode::new(&mut app);
-            let field = ListenableBuilder::new(Rc::new(shown), move |app, _, _| {
-                if !*app.get(shown).value() {
+            let visible = shown.handle();
+            let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
+                if !*app.get(visible).value() {
                     return SizedBox::shrink().into_widget();
                 }
                 EditableText::new(
-                    controller.as_controller(),
-                    focus_node,
+                    controller.erase(),
+                    focus_node.erase(),
                     TextStyle::new(),
                     Color::from_argb(255, 0, 0, 0),
                     Color::from_argb(255, 128, 128, 128),
@@ -7590,13 +7629,14 @@ mod tests {
             let shown = app.create(ValueNotifier::new(true));
             let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
             let focus_node = FocusNode::new(&mut app);
-            let field = ListenableBuilder::new(Rc::new(shown), move |app, _, _| {
-                if !*app.get(shown).value() {
+            let visible = shown.handle();
+            let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
+                if !*app.get(visible).value() {
                     return SizedBox::shrink().into_widget();
                 }
                 EditableText::new(
-                    controller.as_controller(),
-                    focus_node,
+                    controller.erase(),
+                    focus_node.erase(),
                     TextStyle::new(),
                     Color::from_argb(255, 0, 0, 0),
                     Color::from_argb(255, 128, 128, 128),
@@ -7645,7 +7685,7 @@ mod tests {
         /// The `obscureText` the field is built with, which a `StatefulBuilder` holds in Dart.
         obscure_text: Rc<Cell<bool>>,
         /// What rebuilds the field: the `StatefulBuilder`'s `setState`.
-        rebuild: Handle<waft_foundation::ValueNotifier<u32>>,
+        rebuild: Ref<waft_foundation::ValueNotifier<u32>>,
         now: Duration,
     }
 
@@ -7674,10 +7714,10 @@ mod tests {
                 let focus_node = FocusNode::new(&mut app);
                 let field_key = key.clone();
                 let obscured = Rc::clone(&obscure_text);
-                let field = ListenableBuilder::new(Rc::new(rebuild), move |_, _, _| {
+                let field = ListenableBuilder::new(Rc::new(rebuild.clone()), move |_, _, _| {
                     EditableText::new(
-                        controller.as_controller(),
-                        focus_node,
+                        controller.erase(),
+                        focus_node.erase(),
                         TextStyle::new(),
                         Color::from_argb(255, 0, 0, 255),
                         Color::from_argb(255, 128, 128, 128),
@@ -7745,7 +7785,7 @@ mod tests {
         fn set_obscure_text(&mut self, obscure_text: bool) {
             self.obscure_text.set(obscure_text);
             let mut app = self.cell.borrow_mut();
-            let next = *app.get(self.rebuild).value() + 1;
+            let next = *app.get(&self.rebuild).value() + 1;
             self.rebuild.set_value(&mut app, next);
         }
 

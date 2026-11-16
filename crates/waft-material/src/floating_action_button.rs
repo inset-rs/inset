@@ -19,7 +19,7 @@ use waft_rendering::{
 use waft_rendering::{RenderAligningShiftedBox, RenderAligningShiftedBoxData};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnyFocusNode, BuildContext, Directionality, Hero, HeroTagRef, IconTheme, IconThemeData,
+    BuildContext, Directionality, FocusNodeRef, Hero, HeroTagRef, IconTheme, IconThemeData,
     IntoWidget, KeyRef, MainAxisSize, MergeSemantics, Padding, RenderObjectWidget, Row,
     SingleChildRenderObjectWidget, SizedBox, StatelessWidget, WidgetRef, WidgetStateMouseCursor,
     WidgetStateProperty, WidgetStatePropertyRef,
@@ -282,7 +282,7 @@ pub struct FloatingActionButton {
     /// An optional focus node to use as the focus node for this widget.
     ///
     /// See `Focus::focus_node`.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
@@ -581,7 +581,7 @@ impl FloatingActionButton {
     }
 
     /// Dart `FloatingActionButton(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> FloatingActionButton {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> FloatingActionButton {
         self.focus_node = Some(focus_node);
         self
     }
@@ -860,7 +860,7 @@ impl StatelessWidget for FloatingActionButton {
             .clip_behavior(self.clip_behavior)
             .autofocus(self.autofocus)
             .enable_feedback(enable_feedback);
-        if let Some(focus_node) = self.focus_node {
+        if let Some(focus_node) = self.focus_node.clone() {
             button = button.focus_node(focus_node);
         }
         if let Some(resolved_child) = resolved_child {
@@ -1295,8 +1295,7 @@ mod tests {
     use waft_painting::{BeveledRectangleBorder, BorderRadius, RoundedRectangleBorder};
     use waft_services::SystemMouseCursors;
     use waft_widgets::{
-        Align, AnyElement, Center, FocusNode, FocusNodeLeaf, GlobalKey, Icon, IconData,
-        PhysicalShape, Text,
+        Align, AnyElement, Center, FocusNode, GlobalKey, Icon, IconData, PhysicalShape, Text,
     };
 
     use super::*;
@@ -1429,8 +1428,8 @@ mod tests {
         });
     }
 
-    fn focus_node(tester: &WidgetTester) -> waft_foundation::Handle<FocusNode> {
-        FocusNode::new(&mut tester.cell.borrow_mut())
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased::<waft_widgets::AnyFocusNode>()
     }
 
     #[test]
@@ -1694,7 +1693,7 @@ mod tests {
             Scaffold::new()
                 .body(
                     FloatingActionButton::extended(noop(), Text::new("tooltip"))
-                        .focus_node(focus_node.as_node()),
+                        .focus_node(focus_node.clone()),
                 )
                 .into_widget(),
         ));
@@ -1924,7 +1923,7 @@ mod tests {
         drop(waft_widgets::Navigator::push(
             &mut app,
             context,
-            waft_widgets::Route::as_route(route),
+            route.erase(),
         ));
     }
 
@@ -1976,11 +1975,7 @@ mod tests {
                         Some(Listener::new(move |app| {
                             let route =
                                 waft_widgets::PageRouteBuilder::new(app, Rc::clone(&second_page));
-                            drop(waft_widgets::Navigator::push(
-                                app,
-                                context,
-                                waft_widgets::Route::as_route(route),
-                            ));
+                            drop(waft_widgets::Navigator::push(app, context, route.erase()));
                         })),
                         Text::new("A long FAB label"),
                     )
@@ -2115,7 +2110,7 @@ mod tests {
                     // to make sure the button is enabled
                 },
             )))
-            .focus_node(focus_node.as_node())));
+            .focus_node(focus_node.clone())));
 
             focus_node.unfocus(&mut tester.cell.borrow_mut(), Default::default());
             tester.pump(Duration::ZERO);

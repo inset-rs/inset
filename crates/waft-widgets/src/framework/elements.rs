@@ -161,14 +161,14 @@ pub struct StatelessElement<W: StatelessWidget> {
 
 impl<W: StatelessWidget> StatelessElement<W> {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
         app.create(StatelessElement::<W> {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
             marker: std::marker::PhantomData,
         })
-        .as_element()
+        .into_tree_node(app)
     }
 }
 
@@ -225,24 +225,26 @@ pub struct StatefulElement<W: StatefulWidget> {
 
 impl<W: StatefulWidget> StatefulElement<W> {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         let state = {
             let stateful = &downcast_widget::<W>(&*widget)
                 .expect("a StatefulElement holds its StatefulWidget");
             stateful.create_state()
         };
-        let state = app.create(state);
-        let this = app.create(StatefulElement::<W> {
-            element: ElementData::new(widget.clone()),
-            component: ComponentElementData::default(),
-            state: Some(state),
-            did_change_dependencies: false,
-        });
+        let state = app.create(state).into_tree_node(app);
+        let this = app
+            .create(StatefulElement::<W> {
+                element: ElementData::new(widget.clone()),
+                component: ComponentElementData::default(),
+                state: Some(state),
+                did_change_dependencies: false,
+            })
+            .into_tree_node(app);
         debug_assert!(state.state_data(app).element().is_none());
         state.state_data_mut(app).set_element(Some(this));
         state.state_data_mut(app).set_widget(widget);
         debug_assert!(state.state_data(app).debug_lifecycle_state() == StateLifecycle::Created);
-        this.as_element()
+        this
     }
 
     /// The [`State`] instance associated with this location in the tree.
@@ -370,7 +372,7 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
         }
         state.state_data_mut(app).set_element(None);
         app.get_mut(self).state = None;
-        app.destroy(state);
+        app.release_tree_node(state);
     }
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
@@ -431,7 +433,7 @@ pub struct InheritedElement<W: InheritedWidget> {
 
 impl<W: InheritedWidget> InheritedElement<W> {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
         app.create(InheritedElement::<W> {
             element: ElementData::new(widget),
@@ -439,7 +441,7 @@ impl<W: InheritedWidget> InheritedElement<W> {
             dependents: HashMap::new(),
             marker: std::marker::PhantomData,
         })
-        .as_element()
+        .into_tree_node(app)
     }
 
     /// The widget, typed.
@@ -619,14 +621,14 @@ pub struct ParentDataElement<W: ParentDataWidget> {
 
 impl<W: ParentDataWidget> ParentDataElement<W> {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
         app.create(ParentDataElement::<W> {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
             marker: std::marker::PhantomData,
         })
-        .as_element()
+        .into_tree_node(app)
     }
 
     /// The widget, typed.
@@ -1105,14 +1107,14 @@ pub struct LeafRenderObjectElement<W: LeafRenderObjectWidget> {
 
 impl<W: LeafRenderObjectWidget> LeafRenderObjectElement<W> {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
         app.create(LeafRenderObjectElement::<W> {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
             marker: std::marker::PhantomData,
         })
-        .as_element()
+        .into_tree_node(app)
     }
 }
 
@@ -1314,7 +1316,7 @@ where
     W::RenderObject: RenderObjectWithChildMixin,
 {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
         app.create(SingleChildRenderObjectElement::<W> {
             element: ElementData::new(widget),
@@ -1322,7 +1324,7 @@ where
             single_child: SingleChildRenderObjectElementData::default(),
             marker: std::marker::PhantomData,
         })
-        .as_element()
+        .into_tree_node(app)
     }
 }
 
@@ -1685,7 +1687,7 @@ where
     W::RenderObject: ContainerRenderObjectMixin,
 {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
         app.create(MultiChildRenderObjectElement::<W> {
             element: ElementData::new(widget),
@@ -1693,7 +1695,7 @@ where
             multi_child: MultiChildRenderObjectElementData::default(),
             marker: std::marker::PhantomData,
         })
-        .as_element()
+        .into_tree_node(app)
     }
 }
 

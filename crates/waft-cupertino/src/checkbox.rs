@@ -6,13 +6,14 @@
 
 use std::fmt::{self, Debug};
 
-use waft_animation::Animation;
 use waft_embedder::valo::Cap;
 use waft_embedder::{
     Brightness, Canvas, Color, FillRule, Offset, Paint, PaintStyle, PathBuilder, Radius, Rect,
     Size, Stroke, TargetPlatform,
 };
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, ValueChanged};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, OptionRetained, Ref, ValueChanged,
+};
 use waft_painting::{
     AlignmentGeometry, AnyBorderSide, AnyColor, BorderRadiusGeometry, BorderSide, Gradient,
     HSLColor, LinearGradient, OutlinedBorder, OutlinedBorderRef, RoundedRectangleBorder,
@@ -21,7 +22,7 @@ use waft_painting::{
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
-    AnyFocusNode, BuildContext, IntoWidget, KeyRef, Semantics, State, StateData, StatefulWidget,
+    BuildContext, FocusNodeRef, IntoWidget, KeyRef, Semantics, State, StateData, StatefulWidget,
     TickerProviderStateMixin, TickerProviderStateMixinData, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, ToggleableStateMixin, ToggleableStateMixinData,
     WidgetRef, WidgetState, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
@@ -206,7 +207,7 @@ pub struct CupertinoCheckbox {
     /// If one is not supplied, then one will be automatically allocated, owned, and managed by
     /// this widget. The widget will be focusable even if a `focus_node` is not supplied. If
     /// supplied, the given `focus_node` will be _hosted_ by this widget, but not owned.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
     pub autofocus: bool,
@@ -336,7 +337,7 @@ impl CupertinoCheckbox {
     }
 
     /// Dart `CupertinoCheckbox(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> CupertinoCheckbox {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> CupertinoCheckbox {
         self.focus_node = Some(focus_node);
         self
     }
@@ -419,7 +420,7 @@ pub struct CupertinoCheckboxState {
     toggleable: ToggleableStateMixinData,
     /// Dart's `final _CheckboxPainter _painter = _CheckboxPainter()`, created in `init_state`
     /// because a painter is an arena object and a state is created without the `App`.
-    painter: Option<Handle<CheckboxPainter>>,
+    painter: Option<Ref<CheckboxPainter>>,
     previous_value: Option<bool>,
     #[expect(
         dead_code,
@@ -430,7 +431,10 @@ pub struct CupertinoCheckboxState {
 
 impl CupertinoCheckboxState {
     fn painter(self: Handle<Self>, app: &App) -> Handle<CheckboxPainter> {
-        app.get(self).painter.expect("created in init_state")
+        app.get(self)
+            .painter
+            .handle()
+            .expect("created in init_state")
     }
 
     /// Dart's `_defaultFillColor` resolved in `states`: its closure resolves a dynamic colour
@@ -580,7 +584,7 @@ impl TickerProviderStateMixin for CupertinoCheckboxState {
 
 /// Dart's `with TickerProviderStateMixin`.
 impl TickerProviderObject for CupertinoCheckboxState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -631,8 +635,6 @@ impl State for CupertinoCheckboxState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let painter = self.painter(app);
         ToggleablePainter::dispose(painter, app);
-        app.get_mut(self).painter = None;
-        app.destroy(painter);
         ToggleableStateMixin::dispose(self, app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -688,9 +690,13 @@ impl State for CupertinoCheckboxState {
             ))
         });
 
-        let painter = self.painter(app);
-        painter.set_position(app, self.position(app).as_animation());
-        painter.set_reaction(app, self.reaction(app).as_animation());
+        let painter = app
+            .get(self)
+            .painter
+            .clone()
+            .expect("created in init_state");
+        painter.set_position(app, self.position(app).erase());
+        painter.set_reaction(app, self.reaction(app).erase());
         painter.set_focus_color(app, effective_focus_overlay_color);
         painter.set_down_position(app, self.down_position(app));
         painter.set_is_focused(app, Some(current_states.contains(&WidgetState::Focused)));
@@ -739,7 +745,7 @@ struct CheckboxPainter {
 }
 
 impl CheckboxPainter {
-    fn new(app: &mut App) -> Handle<CheckboxPainter> {
+    fn new(app: &mut App) -> Ref<CheckboxPainter> {
         app.create(CheckboxPainter {
             change_notifier: ChangeNotifierData::new(),
             toggleable_painter: ToggleablePainterData::new(),
@@ -1073,21 +1079,22 @@ mod tests {
     use waft_services::{KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_test::TestPlatform;
     use waft_widgets::{
-        Center, FocusHighlightStrategy, FocusManager, FocusNode, FocusNodeLeaf, GlobalKey,
-        IntoWidget, SizedBox, WidgetStateMouseCursor,
+        Center, FocusHighlightStrategy, FocusManager, FocusNode, GlobalKey, IntoWidget, SizedBox,
+        WidgetStateMouseCursor,
     };
 
     use super::*;
     use crate::app::CupertinoApp;
     use crate::test_support::{build, pump, test_view};
     use crate::theme::CupertinoThemeData;
+    use waft_widgets::AnyFocusNode;
 
     /// The `StatefulBuilder` every Dart test wraps its checkbox in: it owns the value.
     struct Host {
         key: Option<KeyRef>,
         initial: Option<bool>,
         theme: Option<CupertinoThemeData>,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         configure: Rc<dyn Fn(CupertinoCheckbox) -> CupertinoCheckbox>,
     }
 
@@ -1133,7 +1140,7 @@ mod tests {
             });
             let mut checkbox = CupertinoCheckbox::new(app.get(self).value, on_changed)
                 .key(app.get(self).checkbox_key.clone().into());
-            if let Some(focus_node) = self.widget(app).focus_node {
+            if let Some(focus_node) = self.widget(app).focus_node.clone() {
                 checkbox = checkbox.focus_node(focus_node);
             }
             let checkbox = (self.widget(app).configure)(checkbox);
@@ -1210,13 +1217,13 @@ mod tests {
             let cell = AppCell::with_platform(Rc::new(platform));
             let focus_node = self
                 .focusable
-                .then(|| FocusNode::new(&mut cell.borrow_mut()).as_node());
+                .then(|| FocusNode::new(&mut cell.borrow_mut()).into_erased());
             let host_key = GlobalKey::new();
             let host = Host {
                 key: Some(host_key.clone().into()),
                 initial: self.initial,
                 theme: self.theme,
-                focus_node,
+                focus_node: focus_node.clone(),
                 configure: self.configure,
             };
             let root = if self.in_app {
@@ -1250,7 +1257,7 @@ mod tests {
     struct Fixture {
         cell: Rc<AppCell>,
         host: Handle<HostState>,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         clock: Duration,
     }
 
@@ -1263,7 +1270,9 @@ mod tests {
         }
 
         fn node(&self) -> AnyFocusNode {
-            self.focus_node.expect("mounted with Setup::focus_node")
+            self.focus_node
+                .handle()
+                .expect("mounted with Setup::focus_node")
         }
 
         /// Rebuilds the host with `change` applied, as a Dart test's second `pumpWidget`.
@@ -1911,8 +1920,15 @@ mod tests {
         let state = key
             .current_state::<CupertinoCheckboxState>(&fixture.cell.borrow_mut())
             .expect("the checkbox mounted");
-        let painter = fixture.cell.borrow().get(state).painter.expect("created");
+        let painter = fixture
+            .cell
+            .borrow()
+            .get(state)
+            .painter
+            .handle()
+            .expect("created");
         build(&fixture.cell, SizedBox::shrink().into_widget());
+        fixture.cell.checkpoint();
         assert!(!fixture.cell.borrow().contains(painter));
     }
 }

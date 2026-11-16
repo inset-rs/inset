@@ -7,6 +7,7 @@ use std::ops::{BitAnd, BitOr, Deref, Not};
 use std::rc::Rc;
 
 use waft_embedder::{Canvas, Color, Offset, Paint, Path, Rect};
+use waft_foundation::Ref;
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB};
 use waft_painting::{
     AnyBorderSide, AnyColor, AnyTextStyle, BorderSide, BorderSideExtension, ColorExtension,
@@ -1888,7 +1889,7 @@ pub struct WidgetStatesController {
 
 impl WidgetStatesController {
     /// Creates a WidgetStatesController.
-    pub fn new(app: &mut App, value: Option<WidgetStates>) -> Handle<WidgetStatesController> {
+    pub fn new(app: &mut App, value: Option<WidgetStates>) -> Ref<WidgetStatesController> {
         app.create(WidgetStatesController {
             change_notifier: ChangeNotifierData::new(),
             value: value.unwrap_or_default(),
@@ -1910,9 +1911,9 @@ impl WidgetStatesController {
         self.notify_listeners(app);
     }
 
-    /// Discards any resources used by the object.
-    pub fn dispose(&mut self) {
-        self.change_notifier.dispose();
+    /// Discards any resources used by the object; see [`ChangeNotifierData::dispose`].
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Adds `state` to [`value`](Self::value) if `add` is true, and removes it otherwise,
@@ -2567,9 +2568,9 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let empty = WidgetStatesController::new(&mut app, None);
-        assert_eq!(*app.get(empty).value(), WidgetStates::new());
+        assert_eq!(*app.get(&empty).value(), WidgetStates::new());
         let selected = WidgetStatesController::new(&mut app, Some(states([WidgetState::Selected])));
-        assert_eq!(*app.get(selected).value(), states([WidgetState::Selected]));
+        assert_eq!(*app.get(&selected).value(), states([WidgetState::Selected]));
     }
 
     // widget_states_controller_test.dart 'WidgetStatesController update, listener'.
@@ -2588,7 +2589,7 @@ mod tests {
 
         let expect = |app: &App, expected: &[WidgetState], expected_count: i32| {
             assert_eq!(
-                *app.get(controller).value(),
+                *app.get(&controller).value(),
                 states(expected.iter().copied())
             );
             assert_eq!(count.get(), expected_count);
@@ -2649,13 +2650,13 @@ mod tests {
 
         controller.update(&mut app, WidgetState::Selected, true);
         assert_eq!(
-            *app.get(controller).value(),
+            *app.get(&controller).value(),
             states([WidgetState::Selected])
         );
         assert_eq!(count.get(), 0);
 
         controller.update(&mut app, WidgetState::Selected, false);
-        assert_eq!(*app.get(controller).value(), WidgetStates::new());
+        assert_eq!(*app.get(&controller).value(), WidgetStates::new());
         assert_eq!(count.get(), 1);
 
         controller.set_value(&mut app, states([WidgetState::Hovered]));
@@ -2663,7 +2664,7 @@ mod tests {
         controller.set_value(&mut app, states([WidgetState::Hovered]));
         assert_eq!(count.get(), 2);
 
-        app.get_mut(controller).dispose();
-        assert!(!app.get(controller).change_notifier_data().has_listeners());
+        controller.dispose(&mut app);
+        assert!(!app.get(&controller).change_notifier_data().has_listeners());
     }
 }

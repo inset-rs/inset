@@ -27,7 +27,7 @@ fn an_auto_row_follows_a_stretched_child_that_changes_its_height() {
     let slot = &mut height;
     let mut fixture = Fixture::with_root([300, 300], |app: &mut App| {
         let notifier = app.create(ValueNotifier::new(100.0));
-        *slot = Some(notifier);
+        *slot = Some(notifier.clone());
         let grid = Grid::new()
             .key(key.into())
             .column_definitions([ColumnDefinition::new(GridLength::AUTO)])

@@ -10,8 +10,8 @@ use waft_embedder::{
     Canvas, Clip, Color, Paint, PathBuilder, PlaceholderAlignment, RRect, Size, TextAlign,
     TextBaseline, rrect_radii_elliptical,
 };
-use waft_foundation::{App, Handle, Listener};
-use waft_gestures::{AnyGestureRecognizer, GestureRecognizerLeaf, TapGestureRecognizer};
+use waft_foundation::{App, Handle, Listener, Ref};
+use waft_gestures::{RecognizerRef, TapGestureRecognizer};
 use waft_painting::{
     Axis, EdgeInsets, InlineSpanRef, K_DEFAULT_FONT_SIZE, TextSpan, TextStyle, draw_drrect,
 };
@@ -52,7 +52,7 @@ pub struct RenderContext<'a> {
     list_depth: usize,
     /// Every recognizer made for a link. Whoever made the context disposes of them once the
     /// spans holding them are replaced.
-    recognizers: &'a mut Vec<AnyGestureRecognizer>,
+    recognizers: &'a mut Vec<RecognizerRef>,
 }
 
 impl<'a> RenderContext<'a> {
@@ -60,7 +60,7 @@ impl<'a> RenderContext<'a> {
         style_sheet: &'a MarkdownStyleSheet,
         hooks: &'a MarkdownHooks,
         fit_content: bool,
-        recognizers: &'a mut Vec<AnyGestureRecognizer>,
+        recognizers: &'a mut Vec<RecognizerRef>,
     ) -> RenderContext<'a> {
         RenderContext {
             style_sheet,
@@ -79,8 +79,8 @@ impl<'a> RenderContext<'a> {
         let on_tap = Listener::new(move |app| on_tap_link(app, &url, &title));
         let recognizer = TapGestureRecognizer::new(app);
         recognizer.set_on_tap(app, Some(on_tap.clone()));
-        let recognizer = recognizer.as_recognizer();
-        self.recognizers.push(recognizer);
+        let recognizer: RecognizerRef = recognizer.into_erased();
+        self.recognizers.push(recognizer.clone());
         Some(LinkTap { recognizer, on_tap })
     }
 }
@@ -321,7 +321,7 @@ pub fn spans(
 
 /// What tapping a link's text or image does.
 struct LinkTap {
-    recognizer: AnyGestureRecognizer,
+    recognizer: RecognizerRef,
     on_tap: Listener,
 }
 
@@ -390,7 +390,7 @@ fn push_spans(
 fn text_span(text: &str, style: &TextStyle, link: Option<&LinkTap>) -> InlineSpanRef {
     let mut span = TextSpan::new().text(text).style(style.clone());
     if let Some(link) = link {
-        span = span.recognizer(link.recognizer);
+        span = span.recognizer(link.recognizer.clone());
     }
     span.into_span()
 }
@@ -566,7 +566,7 @@ impl StatefulWidget for SidewaysScroll {
 struct SidewaysScrollState {
     state: StateData<SidewaysScroll>,
     /// Made in `init_state`, disposed of in `dispose`.
-    controller: Option<Handle<ScrollController>>,
+    controller: Option<Ref<ScrollController>>,
 }
 
 impl State for SidewaysScrollState {
@@ -585,14 +585,15 @@ impl State for SidewaysScrollState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let controller = app
+        let controller: waft_widgets::ScrollControllerRef = app
             .get(self)
             .controller
+            .as_ref()
             .expect("made in init_state")
-            .as_controller();
+            .erase();
         let widget = self.widget(app);
         let scroll_view = SingleChildScrollView::new()
-            .controller(controller)
+            .controller(controller.clone())
             .scroll_direction(Axis::Horizontal)
             .padding(widget.padding.into())
             .child(widget.child.clone());

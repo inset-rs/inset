@@ -102,7 +102,7 @@ fn label_center(f: &Fixture, text: &str) -> Option<Offset> {
 /// The editable box's text box: its text, its focus and a point inside it.
 struct EditableText {
     controller: AnyTextEditingController,
-    focus: Handle<FocusNode>,
+    focus: AnyFocusNode,
 }
 
 fn editable_text(f: &Fixture, placeholder: &str) -> EditableText {
@@ -114,8 +114,8 @@ fn editable_text(f: &Fixture, placeholder: &str) -> EditableText {
             downcast_widget::<waft_widgets::EditableText>(element.widget(&app).as_ref())
         {
             return EditableText {
-                controller: editable.controller,
-                focus: editable.focus_node,
+                controller: editable.controller.handle(),
+                focus: editable.focus_node.handle(),
             };
         }
     }
@@ -730,7 +730,7 @@ fn owner() -> (Fixture, Rc<Log>) {
                         Rc::new(move |app, context, _, _| builder(app, context)),
                     )
                     .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                    PageRoute::as_page_route(route)
+                    route.into_erased()
                 })
                 .home(ThemeScope::new(
                     Theme::Light,

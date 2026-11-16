@@ -6,7 +6,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use waft_embedder::{Canvas, Color, Matrix4, Offset};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{
     BoxDecoration, BoxPainter, DecorationRef, EdgeInsets, EdgeInsetsGeometry, ImageConfiguration,
     get_as_translation,
@@ -20,7 +20,7 @@ use waft_widgets::{
 use crate::debug::debug_check_has_material;
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, Material,
+    Material,
 };
 
 /// A convenience widget for drawing images and other decorations on [`Material`]
@@ -227,7 +227,7 @@ impl StatefulWidget for Ink {
 pub struct InkState {
     state: StateData<Ink>,
     box_key: GlobalKey,
-    ink: Option<Handle<InkDecoration>>,
+    ink: Option<Ref<InkDecoration>>,
 }
 
 impl InkState {
@@ -241,7 +241,7 @@ impl InkState {
         let decoration = self.widget(app).effective_decoration();
         let is_visible = Visibility::of(app, context);
         let configuration = create_local_image_configuration(app, context, None);
-        match app.get(self).ink {
+        match app.get(self).ink.clone() {
             None => {
                 let controller = Material::of(app, context);
                 let box_key = app.get(self).box_key.clone();
@@ -279,7 +279,7 @@ impl State for InkState {
     waft_widgets::state_accessors!();
 
     fn deactivate(self: Handle<Self>, app: &mut App) {
-        if let Some(ink) = app.get(self).ink {
+        if let Some(ink) = app.get(self).ink.handle() {
             InkFeatureLeaf::dispose(ink, app);
         }
         debug_assert!(app.get(self).ink.is_none());
@@ -346,7 +346,7 @@ impl InkDecoration {
         controller: AnyMaterialInkController,
         reference_box: AnyRenderBox,
         on_removed: Option<Listener>,
-    ) -> Handle<InkDecoration> {
+    ) -> Ref<InkDecoration> {
         let ink_feature = InkFeatureData::new(app, controller, reference_box, on_removed);
         let this = app.create(InkDecoration {
             ink_feature,
@@ -357,7 +357,7 @@ impl InkDecoration {
         });
         this.set_decoration(app, decoration);
         this.set_is_visible(app, is_visible);
-        controller.add_ink_feature(app, this.as_ink_feature());
+        controller.add_ink_feature(app, this.erase());
         this
     }
 

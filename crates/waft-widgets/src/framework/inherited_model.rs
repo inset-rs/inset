@@ -209,7 +209,7 @@ impl<W: InheritedModel> Widget for InheritedModelWrapper<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        InheritedModelElement::<W>::create(app, this)
+        InheritedModelElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -252,7 +252,7 @@ pub struct InheritedModelElement<W: InheritedModel> {
 
 impl<W: InheritedModel> InheritedModelElement<W> {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
         app.create(InheritedModelElement::<W> {
             element: ElementData::new(widget),
@@ -260,7 +260,7 @@ impl<W: InheritedModel> InheritedModelElement<W> {
             dependents: HashMap::new(),
             marker: PhantomData,
         })
-        .as_element()
+        .into_tree_node(app)
     }
 
     /// The widget, typed.

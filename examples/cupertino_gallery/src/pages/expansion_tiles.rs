@@ -8,7 +8,7 @@ use waft_cupertino::{
     CupertinoButton, CupertinoColors, CupertinoDynamicColor, CupertinoExpansionTile,
     CupertinoIcons, CupertinoListTile, ExpansionTileTransitionMode,
 };
-use waft_foundation::{App, Handle, ListenableObject, Listener};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, Ref};
 use waft_painting::AnyColor;
 use waft_rendering::MainAxisSize;
 use waft_widgets::{
@@ -54,7 +54,7 @@ pub struct DrivenTile {
     state: StateData<ExpansionTilesDemo>,
     /// Shared by the last section between its button and its tile, so the two drive one
     /// expansion rather than two.
-    controller: Option<Handle<ExpansibleController>>,
+    controller: Option<Ref<ExpansibleController>>,
 }
 
 impl StatefulWidget for ExpansionTilesDemo {
@@ -90,11 +90,11 @@ impl State for DrivenTile {
             app,
             Listener::handle_method(self, Self::handle_expansion_changed),
         );
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             controller.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::handle_expansion_changed),
@@ -107,9 +107,13 @@ impl State for DrivenTile {
         let controller = app
             .get(self)
             .controller
+            .clone()
             .expect("init_state made the controller");
         let expanded = controller.is_expanded(app);
-        let toggle = Listener::new(move |app: &mut App| controller.toggle(app));
+        let toggle = Listener::new({
+            let controller = controller.clone();
+            move |app: &mut App| controller.toggle(app)
+        });
 
         screen(scrolling_body(vec![
             section_with_footer(
@@ -158,7 +162,7 @@ impl State for DrivenTile {
 fn tile(
     title: &str,
     transition_mode: ExpansionTileTransitionMode,
-    controller: Option<Handle<ExpansibleController>>,
+    controller: Option<Ref<ExpansibleController>>,
     app: &mut App,
     context: BuildContext,
 ) -> WidgetRef {

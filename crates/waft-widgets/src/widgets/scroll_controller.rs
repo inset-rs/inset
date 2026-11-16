@@ -2,7 +2,6 @@
 
 use std::any::TypeId;
 use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -10,13 +9,14 @@ use indexmap::IndexMap;
 use waft_animation::Curve;
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, HandleId, Listenable,
-    ListenableObject, Listener, wait_all,
+    ListenableObject, Listener, OptionRetained, Retained, wait_all,
 };
 
 use crate::widgets::scroll_context::ScrollContext;
 use crate::widgets::scroll_physics::ScrollPhysicsRef;
-use crate::widgets::scroll_position::{AnyScrollPosition, ScrollPosition};
+use crate::widgets::scroll_position::{AnyScrollPosition, ScrollPositionRef};
 use crate::widgets::scroll_position_with_single_context::ScrollPositionWithSingleContext;
+use waft_foundation::Ref;
 
 /// Signature for when a [`ScrollController`] has added or removed a
 /// [`AnyScrollPosition`].
@@ -39,7 +39,7 @@ pub struct ScrollControllerData {
     on_attach: Option<ScrollControllerCallback>,
     on_detach: Option<ScrollControllerCallback>,
     debug_label: Option<String>,
-    positions: Vec<AnyScrollPosition>,
+    positions: Vec<ScrollPositionRef>,
 }
 
 impl ScrollControllerData {
@@ -114,7 +114,7 @@ pub trait ScrollControllerLeaf: ChangeNotifier + Sized + 'static {
     /// After this function returns, the [`animate_to`](Self::animate_to) and
     /// [`jump_to`](Self::jump_to) methods on this controller will manipulate the given
     /// position.
-    fn attach(self: Handle<Self>, app: &mut App, position: AnyScrollPosition) {
+    fn attach(self: Handle<Self>, app: &mut App, position: ScrollPositionRef) {
         ScrollController::attach(self.as_controller(), app, position);
     }
 
@@ -162,7 +162,7 @@ pub trait ScrollControllerLeaf: ChangeNotifier + Sized + 'static {
         physics: ScrollPhysicsRef,
         context: Rc<dyn ScrollContext>,
         old_position: Option<AnyScrollPosition>,
-    ) -> AnyScrollPosition {
+    ) -> ScrollPositionRef {
         ScrollController::create_scroll_position(
             self.as_controller(),
             app,
@@ -309,7 +309,7 @@ impl ScrollController {
         debug_label: Option<String>,
         on_attach: Option<ScrollControllerCallback>,
         on_detach: Option<ScrollControllerCallback>,
-    ) -> Handle<ScrollController> {
+    ) -> Ref<ScrollController> {
         app.create(ScrollController {
             change_notifier: ChangeNotifierData::new(),
             scroll_controller: ScrollControllerData::new(
@@ -323,7 +323,7 @@ impl ScrollController {
     }
 
     /// A controller with all of Dart's defaults; `ScrollController()`.
-    pub fn default(app: &mut App) -> Handle<ScrollController> {
+    pub fn default(app: &mut App) -> Ref<ScrollController> {
         ScrollController::new(app, 0.0, true, None, None, None)
     }
 
@@ -333,9 +333,10 @@ impl ScrollController {
     }
 
     /// See [`ScrollControllerLeaf::attach`].
-    pub fn attach(controller: AnyScrollController, app: &mut App, position: AnyScrollPosition) {
+    pub fn attach(controller: AnyScrollController, app: &mut App, position: ScrollPositionRef) {
         debug_assert!(!controller.data(app).positions.contains(&position));
-        controller.data_mut(app).positions.push(position);
+        controller.data_mut(app).positions.push(position.clone());
+        let position = position.handle();
         position.add_listener(app, controller.notification_listener());
         if let Some(on_attach) = controller.on_attach(app) {
             on_attach(app, position);
@@ -344,7 +345,13 @@ impl ScrollController {
 
     /// See [`ScrollControllerLeaf::detach`].
     pub fn detach(controller: AnyScrollController, app: &mut App, position: AnyScrollPosition) {
-        debug_assert!(controller.data(app).positions.contains(&position));
+        debug_assert!(
+            controller
+                .data(app)
+                .positions
+                .iter()
+                .any(|attached| attached == position)
+        );
         if let Some(on_detach) = controller.on_detach(app) {
             on_detach(app, position);
         }
@@ -352,7 +359,7 @@ impl ScrollController {
         controller
             .data_mut(app)
             .positions
-            .retain(|attached| *attached != position);
+            .retain(|attached| attached != position);
     }
 
     /// See [`ScrollControllerLeaf::dispose`].
@@ -371,7 +378,7 @@ impl ScrollController {
         physics: ScrollPhysicsRef,
         context: Rc<dyn ScrollContext>,
         old_position: Option<AnyScrollPosition>,
-    ) -> AnyScrollPosition {
+    ) -> ScrollPositionRef {
         let initial_pixels = controller.initial_scroll_offset(app);
         let keep_scroll_offset = controller.keep_scroll_offset(app);
         let debug_label = controller.debug_label(app);
@@ -384,7 +391,7 @@ impl ScrollController {
             old_position,
             debug_label,
         )
-        .as_scroll_position()
+        .into_erased()
     }
 
     /// See [`ScrollControllerLeaf::debug_fill_description`].
@@ -435,8 +442,8 @@ impl ScrollControllerLeaf for ScrollController {
 pub struct TrackingScrollController {
     change_notifier: ChangeNotifierData,
     scroll_controller: ScrollControllerData,
-    position_to_listener: IndexMap<AnyScrollPosition, Listener>,
-    last_updated: Option<AnyScrollPosition>,
+    position_to_listener: IndexMap<ScrollPositionRef, Listener>,
+    last_updated: Option<ScrollPositionRef>,
     last_updated_offset: Option<f64>,
 }
 
@@ -451,7 +458,7 @@ impl TrackingScrollController {
         debug_label: Option<String>,
         on_attach: Option<ScrollControllerCallback>,
         on_detach: Option<ScrollControllerCallback>,
-    ) -> Handle<TrackingScrollController> {
+    ) -> Ref<TrackingScrollController> {
         app.create(TrackingScrollController {
             change_notifier: ChangeNotifierData::new(),
             scroll_controller: ScrollControllerData::new(
@@ -468,7 +475,7 @@ impl TrackingScrollController {
     }
 
     /// A tracking controller with all of Dart's defaults.
-    pub fn default(app: &mut App) -> Handle<TrackingScrollController> {
+    pub fn default(app: &mut App) -> Ref<TrackingScrollController> {
         TrackingScrollController::new(app, 0.0, true, None, None, None)
     }
 
@@ -479,7 +486,7 @@ impl TrackingScrollController {
         self: Handle<Self>,
         app: &App,
     ) -> Option<AnyScrollPosition> {
-        app.get(self).last_updated
+        app.get(self).last_updated.handle()
     }
 }
 
@@ -505,19 +512,23 @@ impl ScrollControllerLeaf for TrackingScrollController {
             .unwrap_or_else(|| ScrollController::initial_scroll_offset(self.as_controller(), app))
     }
 
-    fn attach(self: Handle<Self>, app: &mut App, position: AnyScrollPosition) {
-        ScrollController::attach(self.as_controller(), app, position);
+    fn attach(self: Handle<Self>, app: &mut App, position: ScrollPositionRef) {
+        ScrollController::attach(self.as_controller(), app, position.clone());
         debug_assert!(!app.get(self).position_to_listener.contains_key(&position));
+        let listened = position.handle();
         let listener = Listener::new(move |app| {
-            let pixels = position.pixels(app);
+            let pixels = listened.pixels(app);
             let tracker = app.get_mut(self);
-            tracker.last_updated = Some(position);
+            tracker.last_updated = tracker
+                .position_to_listener
+                .get_key_value(&listened)
+                .map(|(kept, _)| kept.clone());
             tracker.last_updated_offset = Some(pixels);
         });
         app.get_mut(self)
             .position_to_listener
             .insert(position, listener.clone());
-        position.add_listener(app, listener);
+        listened.add_listener(app, listener);
     }
 
     fn detach(self: Handle<Self>, app: &mut App, position: AnyScrollPosition) {
@@ -529,7 +540,7 @@ impl ScrollControllerLeaf for TrackingScrollController {
             .shift_remove(&position)
             .expect("an attached position has a listener");
         position.remove_listener(app, &listener);
-        if app.get(self).last_updated == Some(position) {
+        if app.get(self).last_updated.handle() == Some(position) {
             app.get_mut(self).last_updated = None;
         }
         if app.get(self).position_to_listener.is_empty() {
@@ -554,7 +565,7 @@ type CreateScrollPositionFn = fn(
     ScrollPhysicsRef,
     Rc<dyn ScrollContext>,
     Option<AnyScrollPosition>,
-) -> AnyScrollPosition;
+) -> ScrollPositionRef;
 
 /// The vtable of an erased [`AnyScrollController`]: one `&'static` table per leaf type.
 struct ScrollControllerVTable {
@@ -567,7 +578,7 @@ struct ScrollControllerVTable {
     data_mut: fn(&mut App, HandleId) -> &mut ScrollControllerData,
     notification_listener: fn(HandleId) -> Listener,
     initial_scroll_offset: fn(&App, HandleId) -> f64,
-    attach: fn(&mut App, HandleId, AnyScrollPosition),
+    attach: fn(&mut App, HandleId, ScrollPositionRef),
     detach: fn(&mut App, HandleId, AnyScrollPosition),
     dispose: fn(&mut App, HandleId),
     create_scroll_position: CreateScrollPositionFn,
@@ -591,11 +602,7 @@ impl ScrollControllerVTable {
             remove_listener: |app, id, listener| {
                 ListenableObject::remove_listener(resolve::<C>(id), app, listener);
             },
-            dispose_change_notifier: |app, id| {
-                app.get_mut(resolve::<C>(id))
-                    .change_notifier_data_mut()
-                    .dispose();
-            },
+            dispose_change_notifier: |app, id| ChangeNotifierData::dispose(app, resolve::<C>(id)),
             data: |app, id| C::scroll_controller_data(resolve(id), app),
             data_mut: |app, id| C::scroll_controller_data_mut(resolve(id), app),
             notification_listener: |id| C::notification_listener(resolve(id)),
@@ -622,6 +629,11 @@ pub struct AnyScrollController {
     id: HandleId,
     vtable: &'static ScrollControllerVTable,
 }
+
+/// A field Dart types as the erased object, kept: AnyScrollController with its count.
+pub type ScrollControllerRef = Retained<AnyScrollController>;
+
+waft_foundation::erased_handle!(AnyScrollController: ScrollControllerLeaf => ScrollControllerLeaf::as_controller);
 
 impl AnyScrollController {
     fn data(self, app: &App) -> &ScrollControllerData {
@@ -689,7 +701,11 @@ impl AnyScrollController {
     /// This should not be mutated directly. [`ScrollPosition`] objects can be added
     /// and removed using [`attach`](Self::attach) and [`detach`](Self::detach).
     pub fn positions(self, app: &App) -> Vec<AnyScrollPosition> {
-        self.data(app).positions.clone()
+        self.data(app)
+            .positions
+            .iter()
+            .map(ScrollPositionRef::handle)
+            .collect()
     }
 
     /// Whether any [`ScrollPosition`] objects have attached themselves to this
@@ -716,7 +732,7 @@ impl AnyScrollController {
             positions.len() == 1,
             "ScrollController attached to multiple scroll views."
         );
-        positions[0]
+        positions[0].handle()
     }
 
     /// The current scroll offset of the scrollable widget.
@@ -792,7 +808,7 @@ impl AnyScrollController {
     }
 
     /// See [`ScrollControllerLeaf::attach`].
-    pub fn attach(self, app: &mut App, position: AnyScrollPosition) {
+    pub fn attach(self, app: &mut App, position: ScrollPositionRef) {
         (self.vtable.attach)(app, self.id, position);
     }
 
@@ -813,7 +829,7 @@ impl AnyScrollController {
         physics: ScrollPhysicsRef,
         context: Rc<dyn ScrollContext>,
         old_position: Option<AnyScrollPosition>,
-    ) -> AnyScrollPosition {
+    ) -> ScrollPositionRef {
         (self.vtable.create_scroll_position)(app, self.id, physics, context, old_position)
     }
 
@@ -832,23 +848,9 @@ impl AnyScrollController {
     }
 }
 
-impl PartialEq for AnyScrollController {
-    fn eq(&self, other: &AnyScrollController) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyScrollController {}
-
 impl Debug for AnyScrollController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AnyScrollController({:?})", self.id)
-    }
-}
-
-impl Hash for AnyScrollController {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
     }
 }
 
@@ -879,14 +881,14 @@ mod tests {
         app: &mut App,
         harness: &ScrollHarness,
         controller: AnyScrollController,
-    ) -> AnyScrollPosition {
+    ) -> ScrollPositionRef {
         let position = controller.create_scroll_position(
             app,
             Rc::new(ClampingScrollPhysics::new()),
             Rc::clone(&harness.scroll_context),
             None,
         );
-        controller.attach(app, position);
+        controller.attach(app, position.clone());
         position.apply_viewport_dimension(app, 100.0);
         position.apply_content_dimensions(app, 0.0, 400.0);
         app.drain_microtasks();
@@ -907,14 +909,14 @@ mod tests {
 
         assert!(controller.has_clients(&app));
         assert_eq!(controller.offset(&app), 25.0);
-        assert_eq!(controller.positions(&app), vec![position]);
+        assert_eq!(controller.positions(&app), vec![position.handle()]);
         assert!(
             controller
                 .describe(&app)
                 .contains("one client, offset 25.0")
         );
 
-        controller.detach(&mut app, position);
+        controller.detach(&mut app, position.handle());
         assert!(!controller.has_clients(&app));
         assert!(controller.describe(&app).contains("no clients"));
     }
@@ -930,7 +932,7 @@ mod tests {
         let notified = Rc::new(Cell::new(0));
         let counter = notified.clone();
         ListenableObject::add_listener(
-            controller,
+            controller.handle(),
             &mut app,
             Listener::new(move |_app| counter.set(counter.get() + 1)),
         );
@@ -939,7 +941,7 @@ mod tests {
         assert_eq!(controller.offset(&app), 60.0);
         assert_eq!(notified.get(), 1);
 
-        controller.detach(&mut app, position);
+        controller.detach(&mut app, position.handle());
         position.jump_to(&mut app, 90.0);
         assert_eq!(notified.get(), 1);
     }
@@ -1007,7 +1009,7 @@ mod tests {
         assert_eq!(attaches.get(), 1);
         assert_eq!(detaches.get(), 0);
 
-        controller.detach(&mut app, position);
+        controller.detach(&mut app, position.handle());
         assert_eq!(detaches.get(), 1);
     }
 
@@ -1027,10 +1029,10 @@ mod tests {
         assert_eq!(controller.initial_scroll_offset(&app), 80.0);
         assert_eq!(
             controller.most_recently_updated_position(&app),
-            Some(position)
+            Some(position.handle())
         );
 
-        controller.detach(&mut app, position);
+        controller.detach(&mut app, position.handle());
         assert!(controller.most_recently_updated_position(&app).is_none());
         assert_eq!(controller.initial_scroll_offset(&app), 10.0);
     }

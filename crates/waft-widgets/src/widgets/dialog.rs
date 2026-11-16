@@ -7,13 +7,14 @@ use waft_foundation::{App, CompleterFuture};
 use crate::framework::BuildContext;
 use crate::widgets::basic::WidgetBuilder;
 use crate::widgets::debug::debug_check_has_widgets_localizations;
-use crate::widgets::navigator::{AnyRoute, Navigator, Route, RouteResult, RouteSettingsRef};
+use crate::widgets::navigator::RouteRef;
+use crate::widgets::navigator::{Navigator, RouteResult, RouteSettingsRef};
 use crate::widgets::routes::{RawDialogRoute, RoutePageBuilder};
 
 /// Signature for a function that creates a [`Route`] for a dialog.
 ///
 /// Used by [`show_raw_dialog`] to allow customization of the route.
-pub type RawDialogRouteBuilder = Rc<dyn Fn(&mut App, BuildContext, WidgetBuilder) -> AnyRoute>;
+pub type RawDialogRouteBuilder = Rc<dyn Fn(&mut App, BuildContext, WidgetBuilder) -> RouteRef>;
 
 /// Displays a dialog above the current contents of the app.
 ///
@@ -54,12 +55,12 @@ pub fn show_raw_dialog(
                 Rc::new(move |app, context, _animation, _secondary_animation| {
                     builder(app, context)
                 });
-            let route =
+            let mut route =
                 RawDialogRoute::new(app, page_builder).fullscreen_dialog(app, fullscreen_dialog);
             if let Some(route_settings) = route_settings {
-                route.settings(app, route_settings);
+                route = route.settings(app, route_settings);
             }
-            route.as_route()
+            route.into_erased()
         }
     };
 
@@ -136,12 +137,12 @@ mod tests {
                             .on_generate_route(move |app, _settings| {
                                 Some(
                                     PageRouteBuilder::new(app, page_route(Rc::clone(&page)))
-                                        .as_route(),
+                                        .into_erased(),
                                 )
                             })
                             .into_widget()
                     });
-                    Some(PageRouteBuilder::new(app, builder).as_route())
+                    Some(PageRouteBuilder::new(app, builder).into_erased())
                 });
         let tree: WidgetRef = Localizations::new(
             Locale::new("en"),
@@ -270,7 +271,7 @@ mod tests {
                 got.set(Some(context));
                 let page_builder: RoutePageBuilder =
                     Rc::new(move |app, context, _animation, _secondary| builder(app, context));
-                PageRouteBuilder::new(app, page_builder).as_route()
+                PageRouteBuilder::new(app, page_builder).into_erased()
             });
             drop(show_raw_dialog(
                 &mut app,

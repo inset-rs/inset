@@ -95,7 +95,7 @@ impl<T: ?Sized + NotificationTarget> Widget for NotificationListener<T> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        NotificationElement::<T>::create(app, this).as_element()
+        NotificationElement::<T>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -119,13 +119,14 @@ pub struct NotificationElement<T: ?Sized + NotificationTarget> {
 }
 
 impl<T: ?Sized + NotificationTarget> NotificationElement<T> {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<NotificationElement<T>> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<NotificationElement<T>> {
         debug_assert!(downcast_widget::<NotificationListener<T>>(&*widget).is_some());
         app.create(NotificationElement {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
             marker: PhantomData,
         })
+        .into_tree_node(app)
     }
 
     fn widget(self: Handle<Self>, app: &App) -> &NotificationListener<T> {

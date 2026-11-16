@@ -77,9 +77,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## framework/ → framework.dart
 
-- Change: a `State` is destroyed with its element at unmount, and `mounted` is the only safe call on a retained handle afterwards.
-  Reason: language — no garbage collector keeps Dart's disposed `State` alive; the arena frees the slot.
-  Affect: Dart's `if (mounted) setState(..)` guard from a timer or listener still works, but reading `widget` or `context` on an unmounted state panics with a stale-handle message instead of returning the last widget.
+- Change: a `State` is released with its element at unmount and freed at the next checkpoint unless a `Ref` keeps it; a callback that outlives the state holds a `Ref` (from `Handle::upgrade`) or checks `mounted`.
+  Reason: language — no garbage collector keeps Dart's disposed `State` alive; the tree code keeps a state only while it is mounted.
+  Affect: Dart's `if (mounted) setState(..)` guard from a timer or listener still works, but reading `widget` or `context` through a bare handle after the checkpoint panics with a stale-handle message instead of returning the last widget.
 
 - Change: a panic in `build` unwinds; there is no `ErrorWidget` and no `FlutterError.reportError`, and a failed `of` lookup panics with its message in every build.
   Reason: language — no catchable exception for ordinary control flow.
@@ -91,7 +91,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: `ObjectKey` and `GlobalKey::object` compare by an object's `HandleId`: an object's identity is its handle.
   Reason: language — a Rust value has no identity, and the objects Dart keys by identity (a `State`, a controller) live in the arena under handles (the lead's decision).
-  Affect: only an arena object can key a widget by identity, and a key made from a destroyed object never matches the slot's next occupant; `CupertinoApp` and `WidgetsApp` key their `WidgetsApp` and navigator by `GlobalKey::object(self.id())`, as Dart's `GlobalObjectKey(this)`.
+  Affect: only an arena object can key a widget by identity; the key names the object without keeping it, where Dart's key holds it, so a key stays `Copy` and a key made from a freed object never matches the slot's next occupant; `CupertinoApp` and `WidgetsApp` key their `WidgetsApp` and navigator by `GlobalKey::object(self.id())`, as Dart's `GlobalObjectKey(this)`.
 
 - Change: a `ParentDataWidget` names the parent-data types it accepts, and `Positioned` accepts an overlay theater's parent data as well as a `Stack`'s.
   Reason: language — no subtyping between parent-data types, so Dart's `is StackParentData` test cannot pass for a subclass.
@@ -106,6 +106,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `WidgetsBindingObserver::did_change_drag` and the `DropListener` hear what is dragged from outside the application, from `EmbedderClient::drag_report`, and the listener's `on_dropped` hands over the dropped items as a paste hands over its own; Flutter has no drop in its framework and leaves it to plugins.
   Reason: platform — the host reports the drag at the window, and the binding's observers are where window-level events reach the tree.
   Affect: any observer hears every drag over any view, an `on_dropped` callback starts each read it wants before it returns, as the HTML spec's drag data store is protected until the drop, and with a host that reports no position the whole view is the target.
+
+- Change: the binding keeps an observer as `Rc<dyn WidgetsBindingObserver>`. `DropListener` and `LocalizationsResolver` register an `Rc` that holds a `Ref` to themselves, which their `dispose` removes; `AppLifecycleListener` registers its bare handle, and a bare-handle observer whose object is freed is skipped as a tear-off is (`App::tear_off_receiver_is_live`).
+  Reason: language — Dart's `_observers` list holds each observer until `removeObserver`, which a `Ref` in the `Rc` is; `AppLifecycleListener` keeps that `Rc` in its own `observer` field, where a `Ref` would be a ring.
+  Affect: a `DropListener` or `LocalizationsResolver` never disposed is never freed, as in Dart; an `AppLifecycleListener` dropped without `dispose` stops hearing at the next checkpoint, and a debug build reports it once among the skipped tear-offs.
 
 - Change: `WidgetsBinding` follows the platform's caption settings itself and tells its observers each change through `WidgetsBindingObserver::did_change_caption_style`, which Flutter has no counterpart of.
   Reason: platform — the caption settings tell their changes by a future of their own, where the other system settings reach the binding through the dispatcher.
@@ -234,16 +238,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `TickerMode::get_notifier` returns a fresh wrapper on every call, and its fallback is a fresh constant listenable.
   Reason: language — a `dyn` value has no identity of its own, and foundation's erased `Listenable` value is deferred (this is its trigger).
   Affect: two notifiers for one `TickerMode` never compare equal, so the ticker mixins drop and re-add their listener on every `activate`.
-
-- Change: a ticker vended by `TickerProviderStateMixin` stays in the state's set after it is disposed.
-  Reason: language — Dart's `_WidgetTicker` subclasses `Ticker` to unregister itself, and `dispose` here is an inherent method on a concrete arena struct.
-  Affect: a state that churns animation controllers holds one handle per dead ticker until it is itself disposed, and muting a disposed ticker does nothing.
-
-## widgets/dual_transition_builder.rs → dual_transition_builder.dart
-
-- Change: `DualTransitionBuilderState` retains the widget's animation while it listens to it and while its `ReverseAnimation` reverses it, and frees its two proxies and that `ReverseAnimation` in `dispose`, lingering until the next checkpoint.
-  Reason: language — Dart's references keep the animation alive and its collector frees the state's objects with it; the arena frees one its owner destroyed, and a page transition's build makes the `ReverseAnimation` it hands this widget and frees it at once.
-  Affect: the animation stays readable past its owner's `destroy` until the state moves off it, and a handle to one of the state's proxies is stale after the checkpoint that follows its disposal.
 
 ## widgets/transitions.rs → transitions.dart
 
@@ -422,6 +416,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/focus_manager.rs → focus_manager.dart
 
+- Change: `remove_child` clears the cached ancestors of the removed node and its descendants, which Dart's `_removeChild` leaves until the node is reattached.
+  Reason: language — Dart's collector keeps the old ancestors readable, but the arena frees them.
+  Affect: a node outside the tree reads no ancestors until it is reattached, so its `skipTraversal` no longer depends on where it used to be.
+
 - Change: the manager takes key events one at a time from `HardwareKeyboard`; there is no `KeyMessage`, no `RawKeyEvent` and no `FocusNode.onKey`.
   Reason: platform — services' raw key path and `KeyEventManager.keyMessageHandler` are deferred (`waft-services/src/PORTING.md`).
   Affect: a node handles keys through `on_key_event` only, and the Android virtual-keyboard check that suppresses a highlight change does not run.
@@ -492,27 +490,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart keeps the animation in a private field and offers a getter over it, and a `ModalRoute` overrides that getter with a proxy that reads complete while the route is offstage. Where the route behind measures the one ahead, Dart reaches past the override to the field, which library privacy lets it do; an erased route here is reached through a vtable, so the field needs an edge of its own, as `controller_value` already has.
   Affect: a route behind follows the next route's own animation and stays where it is while that route is offstage to be measured, instead of flashing the end of the transition before it plays.
 
-- Change: `ModalRouteBase::build_modal_barrier` keeps the colour and curve tweens and the colour animation it drove and frees the last build's (`replace_barrier_animations`, which an override calls too), and `_ModalScopeState` keeps the `_DismissModalAction` its build made and frees the last build's, and its own at `dispose`; they stay readable until the next checkpoint.
-  Reason: language — no collector frees what each build replaces, and the barrier and the `Actions` built from the old ones let go of them only when the new build replaces them.
-  Affect: a handle to a replaced barrier tween or animation, or to a replaced dismiss action, is stale after the checkpoint that follows the build that replaced it.
-
-- Change: `ModalRoute::build_flexible_transitions` keeps the static `ProxyAnimation` it hands the route's transitions in place of the secondary animation and frees the last build's, lingering until the next checkpoint.
-  Reason: language — the transitions read the proxy across frames, through wrappers such as `ReverseAnimation` that hold their parent without retaining it, and Dart's collector frees it only once the next build has replaced it.
-  Affect: a handle to a replaced proxy is stale after the checkpoint that follows the build that replaced it.
-
-- Change: `TransitionRoute::dispose` frees, for a `ModalRoute`, what its last builds made and still keeps: the tweens and colour animation of `build_modal_barrier` and the proxy of `build_flexible_transitions` (`ModalRouteBase::free_last_build_objects`), where Dart's `ModalRoute` has no `dispose` and its collector frees them with the route.
-  Reason: language — no collector, and `TransitionRoute.dispose` is the route disposal every modal route's own `dispose` reaches, as Dart's `super.dispose()` chain does.
-  Affect: a handle to one of them is stale after the checkpoint that follows the route's disposal; the navigator disposes a route only once its overlay entries have unmounted, so nothing reads them by then.
-
 ## widgets/implicit_animations.rs → implicit_animations.dart
 
 - Change: this file's tweens are value tweens in transitions.rs's shape, and the ones over a nullable Dart value animate an `Option` whose endpoints flatten, so an unset endpoint and one set to `None` are the same thing.
   Reason: language — the same orphan rule; Dart's `BorderRadius??` flattens where `Option<Option<_>>` does not, and `_constructTweens`' `tween.end ?? tween.begin` depends on that.
   Affect: a tween with an unset `begin` returns `None` at `t == 0` rather than panicking, and `Matrix4Tween` interpolates the host's f32 matrices, so a `decompose` / `compose` round trip is exact only to f32.
-
-- Change: `ImplicitlyAnimatedWidgetState::dispose` runs `for_each_tween` once more to free each slot's tween; Dart's leaves its tweens alone.
-  Reason: language — no garbage collector: a tween a slot's constructor made would hold its arena slot for the life of the `App`.
-  Affect: a tween handle a state made is stale once the state is disposed, and a slot that `for_each_tween` skips (Dart's `_AnimatedAlignState` skips one when its factor is null) is never freed.
 
 - `AnimatedOpacity` has no `alwaysIncludeSemantics`; see basic.rs's semantics-flags entry.
 - `AnimatedContainer`'s colour / decoration exclusion and its other constructor asserts run on the setters, as container.rs records; `width` and `height` fold into `constraints` on assignment, as `Container`'s do.
@@ -629,17 +611,13 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 - Change: `RenderTapRegion` registers after `perform_layout` and unregisters in `did_detach`, where Dart overrides `layout` and `dispose`.
   Reason: language — `layout` and `dispose` are not virtuals a leaf can wrap.
-  Affect: a region stops being registered as soon as it detaches, not only when its slot is destroyed, and the next layout registers it again.
+  Affect: a region stops being registered as soon as it detaches, not only when it is disposed, and the next layout registers it again.
 
 ## widgets/drag_target.rs → drag_target.dart
 
 - Change: a drag payload is an `Rc<T>` and a target accepts a draggable by matching that concrete Rust type.
   Reason: language — Rust has no runtime subtype relation to test a payload against a target's type.
   Affect: a draggable and a target pair up only on the same type, so a shared payload model has to be one type (an enum), where Dart also matches subtypes.
-
-- Change: an active drag retains its source state, entered targets and feedback avatar in the arena until it ends.
-  Reason: language — no garbage collector, and the pointer callbacks outlive the widgets that started the drag.
-  Affect: a drag continues after its source widget is removed, and the retained objects are released when it completes or is cancelled.
 
 ## widgets/widget_span.rs → widget_span.dart
 
@@ -671,27 +649,11 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — no canonical `const` objects: Dart's `const FadeUpwardsPageTransitionsBuilder()` is one object wherever it is written.
   Affect: two themes or builder maps built with separately made builders compare unequal where Dart's const builders are identical.
 
-- Change: `FadeUpwardsPageTransitionsBuilder::build_transitions` frees the slide and fade animations `_FadeUpwardsPageTransition` drives with `destroy_lingering` once it has made the widget; the `SlideTransition` and `FadeTransition` its build makes retain them.
-  Reason: language — Dart's collector frees what each frame's build replaces, and the transition is a stateless widget with no state to keep them in.
-  Affect: a handle to one of them is stale once the transition that holds it moves to the next frame's.
-
-- Change: `_OpenUpwardsPageTransition`'s layout builder frees the four animations it drives with `destroy_lingering` once the `AnimatedBuilder` closure that reads them on every frame has retained them, and its state frees its two curves when it replaces them and at `dispose`, which the driven animations retain.
-  Reason: language — Dart's collector frees what each layout replaces, and a closure's captures are references it keeps alive.
-  Affect: a handle to one of them is stale once the builder that reads it has gone.
-
 ## widgets/raw_menu_anchor.rs → raw_menu_anchor.dart
 
 - Change: `MenuController` is a leaf of `MenuControllerLeaf`, holding Dart's fields as a `MenuControllerData` bag; a field or parameter Dart types as `MenuController` is the erased `AnyMenuController`, and an app's subclass is a second leaf that overrides `is_open`, `open`, `close` or `close_children` and calls `MenuController::open` (and the others) where Dart writes `super`.
   Reason: language — a Rust struct cannot be subclassed, and Flutter's `MenuController` is a plain class apps extend (its `final` modifier was removed for that).
   Affect: an anchor is given `controller.as_menu_controller()`, and `MenuController::maybe_of` returns an `AnyMenuController`.
-
-- Change: each `RawMenuAnchor` and `RawMenuAnchorGroup` state makes one `DismissMenuAction` in `init_state`, gives it the current controller on every build and frees it in `dispose`; Dart's build makes a new action each time it builds an open menu.
-  Reason: language — no collector frees the action each build replaces.
-  Affect: the anchor's `Actions` holds the same action across builds, so widgets that found `DismissIntent` through it are not rebuilt when the anchor rebuilds, as Dart's new action makes them.
-
-- Change: `RawMenuAnchor` and `RawMenuAnchorGroup` detach from the replaced controller in `did_update_widget` only while the arena still holds it.
-  Reason: language — no GC keeps a dropped `MenuController` alive: Material's `MenuAnchor` and `SubmenuButton` drop their internal controller in their own `didUpdateWidget`, before the anchor's runs, and Dart's object lives on until the anchor detaches.
-  Affect: an owner can destroy the controller it replaces before the anchor rebuilds; the anchor then skips the detach instead of panicking.
 
 ## widgets/raw_tooltip.rs → raw_tooltip.dart
 
@@ -700,7 +662,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Affect: `RawTooltip::dismiss_all_tool_tips(app)` dismisses only that `App`'s tooltips, and two `App`s can each show a hovered tooltip at once.
 
 - Change: `RawTooltipState::ensure_tooltip_visible` cannot be called after the state is disposed.
-  Reason: language — the arena frees the state's slot at dispose, while Dart keeps the object until it is collected.
+  Reason: language — the arena frees the state at the checkpoint after its element unmounts, unless a `Ref` keeps it, while Dart keeps the object until it is collected.
   Affect: calling it on a stale handle panics, where Dart returns false; reaching it through a `GlobalKey`, as Material's `TooltipState` does, gives `None` (Dart's `?? false`).
 
 ## widgets/form.rs → form.dart
@@ -752,7 +714,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - focus_manager.rs, focus_scope.rs: `FocusManager`'s semantics action listener (`handleSemanticsAction`). Trigger: the semantics tree.
 - focus_manager.rs, focus_scope.rs: focus-tree diagnostics and the debug focus border. Trigger: diagnostics.
 - focus_scope.rs: `_FocusInheritedScope` keeps the copy of the inherited-notifier element it grew before inherited_notifier.rs was ported. Trigger: the next change to that element.
-- A disposed arena object keeps its slot — `dispose` does Dart's work and frees nothing — across elements (an unmounted element is never freed), routes with their `AnimationController`s, the `ProxyAnimation` of `TransitionRoute.secondaryAnimation` and `ModalRoute`'s animation proxies (a dialog pushed and popped leaves about 68 such objects), the focus, scroll, draggable-sheet, restoration, action, shortcut and traversal objects, the animations, tweens and proxies `AnimatedCrossFade` creates, the transitions' `AnimationController`s (Material's zoom transitions, Cupertino's sheet), the overscroll indicators' glow controllers, `Dismissible`'s move tween and driven animation, and the `Ticker` of every `AnimationController`, freed or not, which the `TickerProviderStateMixin` that vended it keeps in its set (Dart's `_WidgetTicker.dispose` unregisters it). Trigger: an arena-slot lifetime for disposed foundation objects; for the tickers, `Ticker::dispose` unregistering from its provider.
 - framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks, `Table`'s checks for duplicate row and cell keys among them. Trigger: diagnostics.
 - framework/: `reassemble`. Trigger: hot reload.
 - binding.rs: the observer callbacks no host reports (memory pressure, pushed routes and route information, the text scale, accessibility features), `scheduleWarmUpFrame`. Trigger: a host that reports those events.
@@ -773,7 +734,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - visibility.rs: `SliverVisibility`. Trigger: `SliverOpacity`, `SliverIgnorePointer` and `SliverOffstage`.
 - visibility.rs: what `Visibility.maintainSemantics` controls. Trigger: the semantics tree.
 - visibility.rs: `Visibility` diagnostics. Trigger: diagnostics.
-- ticker_provider.rs: the ticker unregistration Dart's `_WidgetTicker` does, and `TickerMode.merge`. Trigger: a dispose hook on scheduler's `Ticker`; the next edit of ticker_provider.rs for `TickerMode.merge` (`Builder` exists).
+- ticker_provider.rs: `TickerMode.merge`. Trigger: the next edit of ticker_provider.rs (`Builder` exists).
 - transitions.rs: `SliverFadeTransition`, and with it implicit_animations.rs's `SliverAnimatedOpacity`. Trigger: `SliverOpacity`'s render sliver.
 - transitions.rs, implicit_animations.rs: diagnostics. Trigger: diagnostics.
 - icon_theme: `IconThemeData.hashCode` (no `Hash` over `f64`). Trigger: a map keyed by `IconThemeData`.

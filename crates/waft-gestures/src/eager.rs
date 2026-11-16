@@ -10,6 +10,7 @@ use crate::recognizer::{
     GestureRecognizerData, OneSequenceData, OneSequenceGestureRecognizer, OneSequenceLeafData,
     RecognizerLeaf, RecognizerLeafData,
 };
+use waft_foundation::Ref;
 
 /// A gesture recognizer that eagerly claims victory in all gesture arenas.
 ///
@@ -21,7 +22,7 @@ pub struct EagerGestureRecognizer {
 }
 
 impl EagerGestureRecognizer {
-    pub fn new(app: &mut App) -> Handle<EagerGestureRecognizer> {
+    pub fn new(app: &mut App) -> Ref<EagerGestureRecognizer> {
         app.create(EagerGestureRecognizer {
             recognizer: GestureRecognizerData::new(),
             one_sequence: OneSequenceData::new(),

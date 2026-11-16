@@ -154,10 +154,6 @@ The key constants and the four tables are machine-written from the Dart, as Flut
   Reason: platform — the host answers a `Platform` call in place; there is no channel reply to await.
   Affect: the root bucket is there for the first frame that asks for it, and listeners still fire from `handle_restoration_update_from_engine` as in Dart.
 
-- Change: `dispose` destroys the bucket's arena slot.
-  Reason: language — the arena owns the object, and no collector keeps a disposed bucket alive.
-  Affect: using a bucket after `dispose` panics in a release build too, where Dart only asserts in debug.
-
 - Change: `RestorationBucket::root` takes the raw map by value and the hierarchy owns it from then on.
   Reason: language — a Rust value has one owner, so the caller cannot keep watching the map it handed over.
   Affect: a child bucket's writes are no longer visible through the caller's map; read the data back through the buckets or from what `Restoration::put` receives.
@@ -184,7 +180,7 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 - Platform channels, `SystemChannels`, `BinaryMessenger`. Trigger: the first service that needs a named channel rather than a `Platform` method.
 - `MouseCursor` diagnostics (`debugFillProperties`, `toString(minLevel)`). Trigger: diagnostics.
 - An `EmbedderClient` hook for restoration data that arrives while the app runs. Trigger: an embedder whose OS hands it new data after start; until then the host calls `RestorationManager::handle_restoration_update_from_engine`.
-- The rest of text input: `ScribbleClient`, `DeltaTextInputClient`, `TextInputControl` / `setInputControl`, `setSelectionRects` and `updateStyle` reaching the host, asset bundles. Trigger: scribble, a custom input control, or a host that implements autofill.
+- The rest of text input: `ScribbleClient`, `DeltaTextInputClient`, `TextInputControl` / `setInputControl`, `updateStyle` reaching the host, and asset bundles. Trigger: scribble, a custom input control, or a host that implements autofill.
 - The rest of `SystemChrome`: `setPreferredOrientations`, `setEnabledSystemUIMode`, `restoreSystemUIOverlays`, `setSystemUIChangeCallback`, `DeviceOrientation`, `SystemUiMode`. Trigger: an orientation-aware or fullscreen-capable host.
 - The raw key path (`RawKeyboard`, `RawKeyEvent`, `KeyMessage`, `KeyDataTransitMode`, `KeyEventManager.handleRawKeyMessage`), which Flutter has deprecated. Trigger: an embedder that can only send raw key data.
 - `debugPrintKeyboardEvents` and `HardwareKeyboard._logEventIfIrregular`. Trigger: `services/debug.dart`.

@@ -4,8 +4,8 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
 
-use waft_animation::AnyAnimation;
-use waft_foundation::{App, Handle, HandleId};
+use waft_animation::AnimationRef;
+use waft_foundation::{App, Handle, HandleId, Retained};
 use waft_painting::Color;
 
 use crate::framework::{BuildContext, WidgetRef};
@@ -15,6 +15,7 @@ use crate::widgets::routes::{
     ModalRouteData, OverlayRoute, OverlayRouteData, PredictiveBackRoute, RoutePageBuilder,
     RouteTransitionsBuilder, TransitionRoute, TransitionRouteData,
 };
+use waft_foundation::Ref;
 
 /// The fields Dart's `PageRoute` declares; every page route carries this bag under the field
 /// `page_route`.
@@ -162,13 +163,24 @@ pub struct AnyPageRoute {
     vtable: &'static PageRouteVTable,
 }
 
-impl PartialEq for AnyPageRoute {
-    fn eq(&self, other: &AnyPageRoute) -> bool {
-        self.id == other.id
+/// A kept page route as a [`RouteRef`] or a [`ModalRouteRef`], through
+/// [`Retained::erase`]: Dart's upcast.
+impl From<AnyPageRoute> for AnyRoute {
+    fn from(route: AnyPageRoute) -> AnyRoute {
+        route.as_route()
     }
 }
 
-impl Eq for AnyPageRoute {}
+impl From<AnyPageRoute> for AnyModalRoute {
+    fn from(route: AnyPageRoute) -> AnyModalRoute {
+        route.as_modal_route()
+    }
+}
+
+/// A field Dart types as the erased object, kept: AnyPageRoute with its count.
+pub type PageRouteRef = Retained<AnyPageRoute>;
+
+waft_foundation::erased_handle!(AnyPageRoute: PageRoute => PageRoute::as_page_route);
 
 impl Debug for AnyPageRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -257,8 +269,8 @@ macro_rules! page_route_overrides {
 fn default_transitions_builder(
     _app: &mut App,
     _context: BuildContext,
-    _animation: AnyAnimation<f64>,
-    _secondary_animation: AnyAnimation<f64>,
+    _animation: AnimationRef<f64>,
+    _secondary_animation: AnimationRef<f64>,
     child: WidgetRef,
 ) -> WidgetRef {
     child
@@ -310,7 +322,7 @@ impl PageRouteBuilder {
     /// Dart's defaults: `transitions_builder` a jump cut, `transition_duration` and
     /// `reverse_transition_duration` 300 ms, `opaque` true, `barrier_dismissible` false,
     /// `maintain_state` true, `fullscreen_dialog` false, `allow_snapshotting` true.
-    pub fn new(app: &mut App, page_builder: RoutePageBuilder) -> Handle<PageRouteBuilder> {
+    pub fn new(app: &mut App, page_builder: RoutePageBuilder) -> Ref<PageRouteBuilder> {
         let route = RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -334,13 +346,13 @@ impl PageRouteBuilder {
     }
 
     /// Dart `PageRouteBuilder(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `PageRouteBuilder(requestFocus:)`.
-    pub fn request_focus(self: Handle<Self>, app: &mut App, request_focus: bool) -> Handle<Self> {
+    pub fn request_focus(self: Ref<Self>, app: &mut App, request_focus: bool) -> Ref<Self> {
         self.route_data_mut(app)
             .set_request_focus(Some(request_focus));
         self
@@ -348,84 +360,80 @@ impl PageRouteBuilder {
 
     /// Dart `PageRouteBuilder(transitionsBuilder:)`.
     pub fn transitions_builder(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         transitions_builder: RouteTransitionsBuilder,
-    ) -> Handle<Self> {
-        app.get_mut(self).transitions_builder = transitions_builder;
+    ) -> Ref<Self> {
+        app.get_mut(&self).transitions_builder = transitions_builder;
         self
     }
 
     /// Dart `PageRouteBuilder(transitionDuration:)`.
     pub fn transition_duration(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         transition_duration: Duration,
-    ) -> Handle<Self> {
-        app.get_mut(self).transition_duration = transition_duration;
+    ) -> Ref<Self> {
+        app.get_mut(&self).transition_duration = transition_duration;
         self
     }
 
     /// Dart `PageRouteBuilder(reverseTransitionDuration:)`.
     pub fn reverse_transition_duration(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         reverse_transition_duration: Duration,
-    ) -> Handle<Self> {
-        app.get_mut(self).reverse_transition_duration = reverse_transition_duration;
+    ) -> Ref<Self> {
+        app.get_mut(&self).reverse_transition_duration = reverse_transition_duration;
         self
     }
 
     /// Dart `PageRouteBuilder(opaque:)`.
-    pub fn opaque(self: Handle<Self>, app: &mut App, opaque: bool) -> Handle<Self> {
-        app.get_mut(self).opaque = opaque;
+    pub fn opaque(self: Ref<Self>, app: &mut App, opaque: bool) -> Ref<Self> {
+        app.get_mut(&self).opaque = opaque;
         self
     }
 
     /// Dart `PageRouteBuilder(barrierDismissible:)`.
     pub fn barrier_dismissible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_dismissible: bool,
-    ) -> Handle<Self> {
-        app.get_mut(self).barrier_dismissible = barrier_dismissible;
+    ) -> Ref<Self> {
+        app.get_mut(&self).barrier_dismissible = barrier_dismissible;
         self
     }
 
     /// Dart `PageRouteBuilder(barrierColor:)`.
-    pub fn barrier_color(self: Handle<Self>, app: &mut App, barrier_color: Color) -> Handle<Self> {
-        app.get_mut(self).barrier_color = Some(barrier_color);
+    pub fn barrier_color(self: Ref<Self>, app: &mut App, barrier_color: Color) -> Ref<Self> {
+        app.get_mut(&self).barrier_color = Some(barrier_color);
         self
     }
 
     /// Dart `PageRouteBuilder(barrierLabel:)`.
-    pub fn barrier_label(self: Handle<Self>, app: &mut App, barrier_label: String) -> Handle<Self> {
-        app.get_mut(self).barrier_label = Some(barrier_label);
+    pub fn barrier_label(self: Ref<Self>, app: &mut App, barrier_label: String) -> Ref<Self> {
+        app.get_mut(&self).barrier_label = Some(barrier_label);
         self
     }
 
     /// Dart `PageRouteBuilder(maintainState:)`.
-    pub fn maintain_state(self: Handle<Self>, app: &mut App, maintain_state: bool) -> Handle<Self> {
-        app.get_mut(self).maintain_state = maintain_state;
+    pub fn maintain_state(self: Ref<Self>, app: &mut App, maintain_state: bool) -> Ref<Self> {
+        app.get_mut(&self).maintain_state = maintain_state;
         self
     }
 
     /// Dart `PageRouteBuilder(fullscreenDialog:)`.
-    pub fn fullscreen_dialog(
-        self: Handle<Self>,
-        app: &mut App,
-        fullscreen_dialog: bool,
-    ) -> Handle<Self> {
+    pub fn fullscreen_dialog(self: Ref<Self>, app: &mut App, fullscreen_dialog: bool) -> Ref<Self> {
         self.page_route_data_mut(app).fullscreen_dialog = fullscreen_dialog;
         self
     }
 
     /// Dart `PageRouteBuilder(allowSnapshotting:)`.
     pub fn allow_snapshotting(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         allow_snapshotting: bool,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.page_route_data_mut(app).allow_snapshotting = allow_snapshotting;
         self
     }
@@ -490,8 +498,8 @@ impl ModalRoute for PageRouteBuilder {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let page_builder = Rc::clone(&app.get(self).page_builder);
         page_builder(app, context, animation, secondary_animation)
@@ -501,8 +509,8 @@ impl ModalRoute for PageRouteBuilder {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let transitions_builder = Rc::clone(&app.get(self).transitions_builder);

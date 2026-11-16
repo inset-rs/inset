@@ -79,10 +79,6 @@ Pattern: same leaf-inheritance. Each per-pointer state is an arena object, and a
 
 Pattern: [leaf-inheritance](../../../.agents/skills/porting-flutter/patterns/leaf-inheritance.md). The field bags, leaf traits and `super` namespaces of every level are public, since a leaf written in another crate has to name each piece it would have inherited; `AnyGestureRecognizer` is the erased form Dart uses `GestureRecognizer` as a type for.
 
-- Change: `dispose` frees the arena slot after Dart's body, on the typed and the erased handle alike.
-  Reason: language — Dart leaves the disposed object to the collector; the arena has none.
-  Affect: every handle to the recognizer is stale after `dispose`, and disposing twice panics instead of being ignored.
-
 ## velocity_tracker.rs → velocity_tracker.dart
 
 - Change: `VelocityTracker` measures the time since the last sample with `Instant::now()`, not `GestureBinding.samplingClock`.

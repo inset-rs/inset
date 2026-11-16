@@ -1315,7 +1315,8 @@ mod tests {
         use waft_embedder::{
             Color, FontStyle, FontWeight, Offset, RRect, Radius, Rect, Size, TextDirection,
         };
-        use waft_foundation::Handle;
+
+        use waft_foundation::Ref;
         use waft_painting::{
             AlignmentGeometry, AnyColor, EdgeInsets, EdgeInsetsGeometry, TextScaler, TextStyle,
         };
@@ -1390,7 +1391,7 @@ mod tests {
             (tabs, keys)
         }
 
-        fn controller(tester: &WidgetTester, length: usize) -> Handle<TabController> {
+        fn controller(tester: &WidgetTester, length: usize) -> Ref<TabController> {
             let mut app = tester.cell.borrow_mut();
             TabController::new(&mut app, 0, None, length, TestVSync)
         }
@@ -2717,7 +2718,7 @@ mod tests {
                 };
 
                 let theme = theme_with(&tester, None, true);
-                tester.pump_widget(build(theme.clone()));
+                tester.pump_widget(build.clone()(theme.clone()));
                 assert!(paints_rrect_color(&tester, theme.color_scheme.primary));
 
                 let theme = theme_with(
@@ -2948,7 +2949,7 @@ mod tests {
                             .child(
                                 Container::new()
                                     .alignment(AlignmentGeometry::TOP_LEFT)
-                                    .child(TabBar::new(tabs).controller(controller)),
+                                    .child(TabBar::new(tabs).controller(controller.clone())),
                             )
                             .into_widget(),
                     )

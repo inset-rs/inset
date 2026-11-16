@@ -14,7 +14,7 @@ use waft_embedder::{
     Clip, Color, Offset, Size, SystemUiOverlayStyle, TargetPlatform, TextBaseline, TextDirection,
     clamp_double,
 };
-use waft_foundation::{App, AsyncCallback, Handle};
+use waft_foundation::{App, AsyncCallback, Handle, Ref};
 use waft_painting::{
     Alignment, AlignmentDirectional, AlignmentGeometry, AnyColor, EdgeInsets, EdgeInsetsGeometry,
     ShapeBorderRef, TextOverflow, TextStyle,
@@ -2613,7 +2613,7 @@ impl TickerProviderStateMixin for SliverAppBarState {
 }
 
 impl TickerProviderObject for SliverAppBarState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -5233,41 +5233,45 @@ mod tests {
         let controller = ScrollController::default(&mut tester.cell.borrow_mut());
         let tab_bar_key = GlobalKey::new();
         let bottom_key = tab_bar_key.clone();
-        pump_app(tester, m3, move |_app| {
-            let mut sliver_app_bar = SliverAppBar::new()
-                .title(Text::new("AppBar Title"))
-                .floating(arguments.floating)
-                .pinned(arguments.pinned)
-                .toolbar_height(arguments.toolbar_height)
-                .snap(arguments.snap)
-                .bottom(PreferredSizeWidgetRef::new(
-                    TabBar::new(
-                        ["A", "B", "C"].map(|t| Tab::new().text(format!("TAB {t}")).into_widget()),
-                    )
-                    .key(bottom_key.into()),
-                ));
-            sliver_app_bar.collapsed_height = arguments.collapsed_height;
-            sliver_app_bar.expanded_height = arguments.expanded_height;
-            Scaffold::new()
-                .body(DefaultTabController::new(
-                    3,
-                    CustomScrollView::new()
-                        .controller(controller.as_controller())
-                        .slivers([
-                            sliver_app_bar.into_widget(),
-                            SliverToBoxAdapter::new()
-                                .child(
-                                    Container::new()
-                                        .height(1200.0)
-                                        .color(crate::colors::Colors::ORANGE.shade400()),
-                                )
-                                .into_widget(),
-                        ]),
-                ))
-                .into_widget()
+        pump_app(tester, m3, {
+            let controller = controller.clone();
+            move |_app| {
+                let mut sliver_app_bar = SliverAppBar::new()
+                    .title(Text::new("AppBar Title"))
+                    .floating(arguments.floating)
+                    .pinned(arguments.pinned)
+                    .toolbar_height(arguments.toolbar_height)
+                    .snap(arguments.snap)
+                    .bottom(PreferredSizeWidgetRef::new(
+                        TabBar::new(
+                            ["A", "B", "C"]
+                                .map(|t| Tab::new().text(format!("TAB {t}")).into_widget()),
+                        )
+                        .key(bottom_key.into()),
+                    ));
+                sliver_app_bar.collapsed_height = arguments.collapsed_height;
+                sliver_app_bar.expanded_height = arguments.expanded_height;
+                Scaffold::new()
+                    .body(DefaultTabController::new(
+                        3,
+                        CustomScrollView::new()
+                            .controller(controller.erase())
+                            .slivers([
+                                sliver_app_bar.into_widget(),
+                                SliverToBoxAdapter::new()
+                                    .child(
+                                        Container::new()
+                                            .height(1200.0)
+                                            .color(crate::colors::Colors::ORANGE.shade400()),
+                                    )
+                                    .into_widget(),
+                            ]),
+                    ))
+                    .into_widget()
+            }
         });
         SliverAppBarAppHandles {
-            controller,
+            controller: controller.handle(),
             tab_bar_key,
         }
     }
@@ -5705,25 +5709,28 @@ mod tests {
             const COLLAPSED_APP_BAR_HEIGHT: f64 = 64.0;
             let mut tester = tester();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
-            pump_app(&mut tester, m3, move |_app| {
-                Scaffold::new()
-                    .body(
-                        CustomScrollView::new()
-                            .controller(controller.as_controller())
-                            .slivers([
-                                sliver_app_bar()
-                                    .title(Text::new("AppBar Title"))
-                                    .into_widget(),
-                                SliverToBoxAdapter::new()
-                                    .child(
-                                        Container::new()
-                                            .height(1200.0)
-                                            .color(crate::colors::Colors::ORANGE.shade400()),
-                                    )
-                                    .into_widget(),
-                            ]),
-                    )
-                    .into_widget()
+            pump_app(&mut tester, m3, {
+                let controller = controller.clone();
+                move |_app| {
+                    Scaffold::new()
+                        .body(
+                            CustomScrollView::new()
+                                .controller(controller.erase())
+                                .slivers([
+                                    sliver_app_bar()
+                                        .title(Text::new("AppBar Title"))
+                                        .into_widget(),
+                                    SliverToBoxAdapter::new()
+                                        .child(
+                                            Container::new()
+                                                .height(1200.0)
+                                                .color(crate::colors::Colors::ORANGE.shade400()),
+                                        )
+                                        .into_widget(),
+                                ]),
+                        )
+                        .into_widget()
+                }
             });
 
             // There are two widgets for the title. The first title is a larger version
@@ -5745,7 +5752,7 @@ mod tests {
             let clip_height = |tester: &WidgetTester| rect_of(tester, expanded_title_clip).height();
 
             // Default, fully expanded app bar.
-            assert_eq!(scroll_offset(&tester, controller), 0.0);
+            assert_eq!(scroll_offset(&tester, controller.handle()), 0.0);
             assert!(sliver_app_bar_is_onstage(&tester));
             assert_eq!(app_bar_rect(&tester).height(), expanded_app_bar_height);
             assert_eq!(opacity(&tester), 0.0);
@@ -5779,7 +5786,7 @@ mod tests {
             assert_eq!(tester.text_color("AppBar Title"), on_surface);
 
             // Scroll the expanded app bar partially out of view.
-            jump_to(&mut tester, controller, 45.0);
+            jump_to(&mut tester, controller.handle(), 45.0);
             assert!(sliver_app_bar_is_onstage(&tester));
             assert_eq!(
                 app_bar_rect(&tester).height(),
@@ -5792,7 +5799,7 @@ mod tests {
             );
 
             // Scroll so that it is completely collapsed.
-            jump_to(&mut tester, controller, 600.0);
+            jump_to(&mut tester, controller.handle(), 600.0);
             assert!(sliver_app_bar_is_onstage(&tester));
             assert_eq!(app_bar_rect(&tester).height(), COLLAPSED_APP_BAR_HEIGHT);
             assert_eq!(opacity(&tester), 1.0);
@@ -5833,38 +5840,41 @@ mod tests {
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             let tab_bar_key = GlobalKey::new();
             let bottom_key = tab_bar_key.clone();
-            pump_app(&mut tester, m3, move |_app| {
-                DefaultTabController::new(
-                    3,
-                    Scaffold::new().body(
-                        CustomScrollView::new()
-                            .controller(controller.as_controller())
-                            .slivers([
-                                sliver_app_bar()
-                                    .leading(IconButton::new(
-                                        Some(Listener::new(|_app| {})),
-                                        Icon::new(Some(Icons::menu())),
-                                    ))
-                                    .title(Text::new(title))
-                                    .bottom(PreferredSizeWidgetRef::new(
-                                        TabBar::new(
-                                            ["Tab 1", "Tab 2", "Tab 3"]
-                                                .map(|tab| Tab::new().text(tab).into_widget()),
+            pump_app(&mut tester, m3, {
+                let controller = controller.clone();
+                move |_app| {
+                    DefaultTabController::new(
+                        3,
+                        Scaffold::new().body(
+                            CustomScrollView::new()
+                                .controller(controller.erase())
+                                .slivers([
+                                    sliver_app_bar()
+                                        .leading(IconButton::new(
+                                            Some(Listener::new(|_app| {})),
+                                            Icon::new(Some(Icons::menu())),
+                                        ))
+                                        .title(Text::new(title))
+                                        .bottom(PreferredSizeWidgetRef::new(
+                                            TabBar::new(
+                                                ["Tab 1", "Tab 2", "Tab 3"]
+                                                    .map(|tab| Tab::new().text(tab).into_widget()),
+                                            )
+                                            .key(bottom_key.into()),
+                                        ))
+                                        .into_widget(),
+                                    SliverToBoxAdapter::new()
+                                        .child(
+                                            Container::new()
+                                                .height(1200.0)
+                                                .color(crate::colors::Colors::ORANGE.shade400()),
                                         )
-                                        .key(bottom_key.into()),
-                                    ))
-                                    .into_widget(),
-                                SliverToBoxAdapter::new()
-                                    .child(
-                                        Container::new()
-                                            .height(1200.0)
-                                            .color(crate::colors::Colors::ORANGE.shade400()),
-                                    )
-                                    .into_widget(),
-                            ]),
-                    ),
-                )
-                .into_widget()
+                                        .into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget()
+                }
             });
 
             assert_eq!(tester.find_by_type::<SliverAppBar>().len(), 1);

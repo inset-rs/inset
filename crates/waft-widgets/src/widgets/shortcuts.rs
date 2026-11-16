@@ -11,6 +11,7 @@ use std::sync::LazyLock;
 
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, ListenableObject, Listener,
+    OptionRetained, Ref, Retained,
 };
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 use waft_services::{
@@ -949,7 +950,7 @@ impl ShortcutManagerVTable {
             },
             dispose: |app, id| {
                 let handle: Handle<L> = resolve(id);
-                app.get_mut(handle).change_notifier_data_mut().dispose();
+                ChangeNotifierData::dispose(app, handle);
             },
         }
     }
@@ -964,13 +965,10 @@ pub struct AnyShortcutManager {
     vtable: &'static ShortcutManagerVTable,
 }
 
-impl PartialEq for AnyShortcutManager {
-    fn eq(&self, other: &AnyShortcutManager) -> bool {
-        self.id == other.id
-    }
-}
+/// A field Dart types as the erased object, kept: AnyShortcutManager with its count.
+pub type ShortcutManagerRef = Retained<AnyShortcutManager>;
 
-impl Eq for AnyShortcutManager {}
+waft_foundation::erased_handle!(AnyShortcutManager: ShortcutManagerBase => ShortcutManagerBase::as_shortcut_manager);
 
 impl fmt::Debug for AnyShortcutManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1042,7 +1040,7 @@ impl ShortcutManager {
     /// Constructs a [`ShortcutManager`].
     ///
     /// Dart's optional `shortcuts` and `modal` arguments are the setters.
-    pub fn new(app: &mut App) -> Handle<ShortcutManager> {
+    pub fn new(app: &mut App) -> Ref<ShortcutManager> {
         app.create(ShortcutManager {
             change_notifier: ChangeNotifierData::new(),
             shortcut_manager: ShortcutManagerData::new(),
@@ -1126,7 +1124,7 @@ pub struct Shortcuts {
     /// [`ShortcutManagerBase::shortcuts`] will be used as the source for shortcuts. If
     /// [`Shortcuts::new`] is used, this manager will be `None`, and a default-constructed
     /// [`ShortcutManager`] will be used.
-    pub manager: Option<AnyShortcutManager>,
+    pub manager: Option<ShortcutManagerRef>,
 
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
@@ -1170,7 +1168,7 @@ impl Shortcuts {
     ///
     /// If this constructor is used, [`get_shortcuts`](Self::get_shortcuts) will return the
     /// contents of [`ShortcutManagerBase::shortcuts`].
-    pub fn manager<K>(manager: AnyShortcutManager, child: impl IntoWidget<K>) -> Shortcuts {
+    pub fn manager<K>(manager: ShortcutManagerRef, child: impl IntoWidget<K>) -> Shortcuts {
         Shortcuts {
             manager: Some(manager),
             ..Shortcuts::new(Vec::new(), child)
@@ -1199,7 +1197,7 @@ impl Shortcuts {
     /// [`ShortcutActivator`] and the `Intent` that will be emitted when that key sequence is
     /// pressed.
     pub fn get_shortcuts(&self, app: &App) -> ShortcutMap {
-        match self.manager {
+        match self.manager.handle() {
             None => self.shortcuts.clone(),
             Some(manager) => manager.shortcuts(app),
         }
@@ -1233,7 +1231,7 @@ impl StatefulWidget for Shortcuts {
 /// Dart's `_ShortcutsState`.
 pub struct ShortcutsState {
     state: StateData<Shortcuts>,
-    internal_manager: Option<Handle<ShortcutManager>>,
+    internal_manager: Option<Ref<ShortcutManager>>,
 }
 
 impl ShortcutsState {
@@ -1241,9 +1239,11 @@ impl ShortcutsState {
     pub fn manager(self: Handle<Self>, app: &App) -> AnyShortcutManager {
         self.widget(app)
             .manager
+            .handle()
             .or_else(|| {
                 app.get(self)
                     .internal_manager
+                    .handle()
                     .map(ShortcutManagerBase::as_shortcut_manager)
             })
             .expect("a Shortcuts state has either the widget's manager or its own")
@@ -1269,7 +1269,7 @@ impl State for ShortcutsState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         if self.widget(app).manager.is_none() {
             let manager = ShortcutManager::new(app);
-            app.get_mut(self).internal_manager = Some(manager);
+            app.get_mut(self).internal_manager = Some(manager.clone());
             let shortcuts = self.widget(app).get_shortcuts(app);
             manager.set_shortcuts(app, shortcuts);
         }
@@ -1279,22 +1279,22 @@ impl State for ShortcutsState {
         if self.widget(app).manager != old_widget.manager {
             if self.widget(app).manager.is_some() {
                 if let Some(internal) = app.get_mut(self).internal_manager.take() {
-                    app.get_mut(internal).change_notifier.dispose();
+                    ChangeNotifierData::dispose(app, &internal);
                 }
             } else if app.get(self).internal_manager.is_none() {
                 let manager = ShortcutManager::new(app);
                 app.get_mut(self).internal_manager = Some(manager);
             }
         }
-        if let Some(internal) = app.get(self).internal_manager {
+        if let Some(internal) = app.get(self).internal_manager.handle() {
             let shortcuts = self.widget(app).get_shortcuts(app);
             internal.set_shortcuts(app, shortcuts);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(internal) = app.get(self).internal_manager {
-            app.get_mut(internal).change_notifier.dispose();
+        if let Some(internal) = app.get(self).internal_manager.handle() {
+            ChangeNotifierData::dispose(app, internal);
         }
     }
 
@@ -1433,13 +1433,13 @@ impl StatelessWidget for CallbackShortcuts {
 /// entry should no longer be used.
 pub struct ShortcutRegistryEntry {
     /// The [`ShortcutRegistry`] that this entry was issued by.
-    registry: Handle<ShortcutRegistry>,
+    registry: Ref<ShortcutRegistry>,
 }
 
 impl ShortcutRegistryEntry {
     /// The [`ShortcutRegistry`] that this entry was issued by.
     pub fn registry(self: Handle<Self>, app: &App) -> Handle<ShortcutRegistry> {
-        app.get(self).registry
+        app.get(self).registry.handle()
     }
 
     /// Replaces the given shortcut bindings in the [`ShortcutRegistry`] that this entry was
@@ -1450,7 +1450,7 @@ impl ShortcutRegistryEntry {
     /// If two equivalent, but different, [`ShortcutActivator`]s are added, all of them will be
     /// executed when triggered.
     pub fn replace_all(self: Handle<Self>, app: &mut App, value: ShortcutMap) {
-        let registry = app.get(self).registry;
+        let registry = app.get(self).registry.handle();
         registry.replace_all(app, self, value);
     }
 
@@ -1459,7 +1459,7 @@ impl ShortcutRegistryEntry {
     /// Calling this will remove all shortcuts associated with this [`ShortcutRegistryEntry`]
     /// from the [`registry`](Self::registry).
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        let registry = app.get(self).registry;
+        let registry = app.get(self).registry.handle();
         registry.dispose_entry(app, self);
     }
 }
@@ -1480,12 +1480,15 @@ pub struct ShortcutRegistry {
     disposed: bool,
     /// Dart's `_registeredShortcuts`, in insertion order: that is the order
     /// [`shortcuts`](Self::shortcuts) merges the entries in.
+    ///
+    /// An entry is named, not kept: it is its caller's, and keeps this registry; the registration
+    /// is cut by [`ShortcutRegistryEntry::dispose`].
     registered_shortcuts: Vec<(Handle<ShortcutRegistryEntry>, ShortcutMap)>,
 }
 
 impl ShortcutRegistry {
     /// Creates an instance of [`ShortcutRegistry`].
-    pub fn new(app: &mut App) -> Handle<ShortcutRegistry> {
+    pub fn new(app: &mut App) -> Ref<ShortcutRegistry> {
         app.create(ShortcutRegistry {
             change_notifier: ChangeNotifierData::new(),
             notification_scheduled: false,
@@ -1496,9 +1499,8 @@ impl ShortcutRegistry {
 
     /// Discards any resources used by this object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        let this = app.get_mut(self);
-        this.change_notifier.dispose();
-        this.disposed = true;
+        ChangeNotifierData::dispose(app, self);
+        app.get_mut(self).disposed = true;
     }
 
     /// Gets the combined shortcut bindings from all contexts that are registered with this
@@ -1537,7 +1539,7 @@ impl ShortcutRegistry {
         self: Handle<Self>,
         app: &mut App,
         value: ShortcutMap,
-    ) -> Handle<ShortcutRegistryEntry> {
+    ) -> Ref<ShortcutRegistryEntry> {
         debug_assert!(ChangeNotifierData::debug_assert_not_disposed(
             app.get(self).change_notifier_data()
         ));
@@ -1545,8 +1547,11 @@ impl ShortcutRegistry {
             !value.is_empty(),
             "Cannot register an empty map of shortcuts"
         );
-        let entry = app.create(ShortcutRegistryEntry { registry: self });
-        app.get_mut(self).registered_shortcuts.push((entry, value));
+        let registry = self.keep(app);
+        let entry = app.create(ShortcutRegistryEntry { registry });
+        app.get_mut(self)
+            .registered_shortcuts
+            .push((entry.handle(), value));
         self.notify_listeners_next_frame(app);
         entry
     }
@@ -1557,12 +1562,13 @@ impl ShortcutRegistry {
     /// `notification_scheduled` check makes sure we only notify once per frame.
     fn notify_listeners_next_frame(self: Handle<Self>, app: &mut App) {
         if !app.get(self).notification_scheduled {
+            let this = self.keep(app);
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _duration| {
-                    app.get_mut(self).notification_scheduled = false;
-                    if !app.get(self).disposed {
-                        self.notify_listeners(app);
+                    app.get_mut(&this).notification_scheduled = false;
+                    if !app.get(&this).disposed {
+                        this.notify_listeners(app);
                     }
                 }),
                 // The registry knows no element, so no view.
@@ -1597,7 +1603,7 @@ impl ShortcutRegistry {
     pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<Handle<ShortcutRegistry>> {
         context
             .depend_on_inherited_widget_of_exact_type::<ShortcutRegistrarScope>(app)
-            .map(|inherited| inherited.registry)
+            .map(|inherited| inherited.registry.handle())
     }
 
     /// Replaces all the shortcuts associated with the given entry from this registry.
@@ -1726,8 +1732,8 @@ impl StatefulWidget for ShortcutRegistrar {
 /// Dart's `_ShortcutRegistrarState`.
 pub struct ShortcutRegistrarState {
     state: StateData<ShortcutRegistrar>,
-    registry: Option<Handle<ShortcutRegistry>>,
-    manager: Option<Handle<ShortcutManager>>,
+    registry: Option<Ref<ShortcutRegistry>>,
+    manager: Option<Ref<ShortcutManager>>,
     /// Dart's `_shortcutsChanged` tear-off, kept so that it can be removed again.
     shortcuts_changed: Option<Listener>,
 }
@@ -1735,12 +1741,18 @@ pub struct ShortcutRegistrarState {
 impl ShortcutRegistrarState {
     /// The registry this state owns.
     pub fn registry(self: Handle<Self>, app: &App) -> Handle<ShortcutRegistry> {
-        app.get(self).registry.expect("created in init_state")
+        app.get(self)
+            .registry
+            .handle()
+            .expect("created in init_state")
     }
 
     /// The manager this state owns.
     pub fn manager(self: Handle<Self>, app: &App) -> Handle<ShortcutManager> {
-        app.get(self).manager.expect("created in init_state")
+        app.get(self)
+            .manager
+            .handle()
+            .expect("created in init_state")
     }
 
     fn shortcuts_changed(self: Handle<Self>, app: &mut App) {
@@ -1760,7 +1772,7 @@ impl State for ShortcutRegistrarState {
         let registry = ShortcutRegistry::new(app);
         let manager = ShortcutManager::new(app);
         let this = app.get_mut(self);
-        this.registry = Some(registry);
+        this.registry = Some(registry.clone());
         this.manager = Some(manager);
         let listener = Listener::handle_method(self, ShortcutRegistrarState::shortcuts_changed);
         app.get_mut(self).shortcuts_changed = Some(listener.clone());
@@ -1774,16 +1786,21 @@ impl State for ShortcutRegistrarState {
         }
         registry.dispose(app);
         let manager = self.manager(app);
-        app.get_mut(manager).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, manager);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let registry = self.registry(app);
-        let manager = self.manager(app);
+        let this = app.get(self);
+        let registry = this.registry.clone().expect("created in init_state");
+        let manager: ShortcutManagerRef = this
+            .manager
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
         let child = self.widget(app).child.clone();
         ShortcutRegistrarScope {
             registry,
-            child: Shortcuts::manager(manager.as_shortcut_manager(), child)
+            child: Shortcuts::manager(manager, child)
                 .debug_label("<Shortcut Registrar>")
                 .into_widget(),
         }
@@ -1794,7 +1811,7 @@ impl State for ShortcutRegistrarState {
 /// Dart's `_ShortcutRegistrarScope`.
 #[derive(Debug)]
 struct ShortcutRegistrarScope {
-    registry: Handle<ShortcutRegistry>,
+    registry: Ref<ShortcutRegistry>,
     child: WidgetRef,
 }
 
@@ -1817,7 +1834,7 @@ mod tests {
     use waft_services::{KeyDownEvent, KeyUpEvent, PhysicalKeyboardKey};
 
     use super::*;
-    use crate::widgets::actions::{Action, AnyAction, CallbackAction, Intent};
+    use crate::widgets::actions::{ActionRef, CallbackAction, Intent};
     use crate::widgets::basic::SizedBox;
     use crate::widgets::focus_manager::tests::{app_with_view, mount};
 
@@ -1839,7 +1856,7 @@ mod tests {
     }
 
     /// A `CallbackAction` for [`SaveIntent`] that records that it ran.
-    fn save_action(app: &mut App, log: &Rc<RefCell<Vec<&'static str>>>) -> AnyAction {
+    fn save_action(app: &mut App, log: &Rc<RefCell<Vec<&'static str>>>) -> ActionRef {
         let log = Rc::clone(log);
         let action = CallbackAction::<SaveIntent>::new(
             app,
@@ -1848,7 +1865,7 @@ mod tests {
                 None
             }),
         );
-        Action::as_action(action)
+        action.into_erased()
     }
 
     #[test]

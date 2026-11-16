@@ -2,10 +2,11 @@
 
 use std::collections::HashMap;
 
-use waft_foundation::{App, Handle, HandleId};
+use waft_foundation::{App, Handle, HandleId, OptionRetained};
 
 use crate::arena::{GestureArenaEntry, GestureArenaMember, GestureDisposition, MemberBox};
 use crate::binding::GestureBinding;
+use waft_foundation::Ref;
 
 struct CombiningGestureArenaMember {
     owner: Handle<GestureArenaTeam>,
@@ -21,7 +22,7 @@ impl CombiningGestureArenaMember {
         app: &mut App,
         owner: Handle<GestureArenaTeam>,
         pointer: i64,
-    ) -> Handle<CombiningGestureArenaMember> {
+    ) -> Ref<CombiningGestureArenaMember> {
         app.create(CombiningGestureArenaMember {
             owner,
             pointer,
@@ -58,7 +59,7 @@ impl CombiningGestureArenaMember {
         let owner = app.get(self).owner;
         let pointer = app.get(self).pointer;
         let removed = app.get_mut(owner).combiners.remove(&pointer);
-        debug_assert_eq!(removed, Some(self));
+        debug_assert_eq!(removed.handle(), Some(self));
     }
 
     fn resolve_member(
@@ -163,13 +164,13 @@ impl GestureArenaMember for Handle<CombiningGestureArenaMember> {
 /// team members claims victory or there are no other competing gestures in the
 /// arena, the captain wins the arena, and all other team members lose.
 pub struct GestureArenaTeam {
-    combiners: HashMap<i64, Handle<CombiningGestureArenaMember>>,
+    combiners: HashMap<i64, Ref<CombiningGestureArenaMember>>,
     captain: Option<MemberBox>,
 }
 
 impl GestureArenaTeam {
     /// Creates an empty team.
-    pub fn new(app: &mut App) -> Handle<GestureArenaTeam> {
+    pub fn new(app: &mut App) -> Ref<GestureArenaTeam> {
         app.create(GestureArenaTeam {
             combiners: HashMap::new(),
             captain: None,
@@ -187,7 +188,7 @@ impl GestureArenaTeam {
 
     /// Sets [`captain`](Self::captain).
     pub fn set_captain(self: Handle<Self>, app: &mut App, captain: impl GestureArenaMember) {
-        app.get_mut(self).captain = Some(MemberBox::new(captain));
+        app.get_mut(self).captain = Some(MemberBox::new(app, captain));
     }
 
     /// Adds a new member to the arena on behalf of this team.
@@ -203,13 +204,19 @@ impl GestureArenaTeam {
         pointer: i64,
         member: impl GestureArenaMember,
     ) -> GestureArenaEntry {
-        let member = MemberBox::new(member);
-        let combiner = match app.get(self).combiners.get(&pointer).copied() {
+        let member = MemberBox::new(app, member);
+        let combiner = match app
+            .get(self)
+            .combiners
+            .get(&pointer)
+            .map(|combiner| combiner.handle())
+        {
             Some(combiner) => combiner,
             None => {
                 let combiner = CombiningGestureArenaMember::new(app, self, pointer);
+                let handle = combiner.handle();
                 app.get_mut(self).combiners.insert(pointer, combiner);
-                combiner
+                handle
             }
         };
         combiner.add_member(app, pointer, member)
@@ -219,6 +226,7 @@ impl GestureArenaTeam {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waft_foundation::Ref;
     use waft_foundation::{App, AppCell};
 
     use crate::binding::GestureBinding;
@@ -231,7 +239,7 @@ mod tests {
     }
 
     impl TestMember {
-        fn new(app: &mut App) -> Handle<TestMember> {
+        fn new(app: &mut App) -> Ref<TestMember> {
             app.create(TestMember {
                 accept_ran: false,
                 reject_ran: false,
@@ -271,11 +279,12 @@ mod tests {
         let second = TestMember::new(&mut app);
         let outsider = TestMember::new(&mut app);
 
-        team.add(&mut app, PRIMARY_KEY, first);
-        team.add(&mut app, PRIMARY_KEY, second);
-        let outsider_entry = binding
-            .gesture_arena(&app)
-            .add(&mut app, PRIMARY_KEY, outsider);
+        team.add(&mut app, PRIMARY_KEY, first.handle());
+        team.add(&mut app, PRIMARY_KEY, second.handle());
+        let outsider_entry =
+            binding
+                .gesture_arena(&app)
+                .add(&mut app, PRIMARY_KEY, outsider.handle());
 
         binding.gesture_arena(&app).close(&mut app, PRIMARY_KEY);
         outsider_entry.resolve(&mut app, GestureDisposition::Rejected);
@@ -297,8 +306,8 @@ mod tests {
         let first = TestMember::new(&mut app);
         let second = TestMember::new(&mut app);
 
-        let first_entry = team.add(&mut app, PRIMARY_KEY, first);
-        team.add(&mut app, PRIMARY_KEY, second);
+        let first_entry = team.add(&mut app, PRIMARY_KEY, first.handle());
+        team.add(&mut app, PRIMARY_KEY, second.handle());
         binding.gesture_arena(&app).close(&mut app, PRIMARY_KEY);
         first_entry.resolve(&mut app, GestureDisposition::Accepted);
         assert!(first.accept_ran(&app));
@@ -315,9 +324,9 @@ mod tests {
         let first = TestMember::new(&mut app);
         let second = TestMember::new(&mut app);
 
-        team.set_captain(&mut app, captain);
-        let first_entry = team.add(&mut app, PRIMARY_KEY, first);
-        team.add(&mut app, PRIMARY_KEY, second);
+        team.set_captain(&mut app, captain.handle());
+        let first_entry = team.add(&mut app, PRIMARY_KEY, first.handle());
+        team.add(&mut app, PRIMARY_KEY, second.handle());
         binding.gesture_arena(&app).close(&mut app, PRIMARY_KEY);
         first_entry.resolve(&mut app, GestureDisposition::Accepted);
         assert!(captain.accept_ran(&app));

@@ -362,7 +362,6 @@ mod tests {
         use waft_embedder::TextDirection;
         use waft_rendering::{
             ContainerRenderObjectMixin, FixedViewportOffset, RenderSliverPadding, RenderViewport,
-            ViewportOffset,
         };
 
         use crate::widgets::basic::{Directionality, SliverToBoxAdapter};
@@ -379,7 +378,7 @@ mod tests {
             TextDirection::Ltr,
             MediaQuery::new(
                 MediaQueryData::new().padding(EdgeInsets::only(10.0, 20.0, 30.0, 40.0)),
-                Viewport::new(offset.as_viewport_offset()).slivers(vec![area.into_widget()]),
+                Viewport::new(offset.erase()).slivers(vec![area.into_widget()]),
             )
             .into_widget(),
         )

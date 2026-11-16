@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Offset, Rect, Size, clamp_double};
-use waft_foundation::{App, Handle, Listenable, Listener, Task};
+use waft_foundation::{App, Handle, Listenable, Listener, Ref, Task};
 use waft_rendering::TextSelectionPoint;
 use waft_services::{AnyTextSelectionDelegate, SelectionChangedCause};
 use waft_widgets::{
@@ -55,7 +55,7 @@ impl TextSelectionControls for DesktopTextSelectionControls {
         selection_midpoint: Offset,
         endpoints: &[TextSelectionPoint],
         delegate: AnyTextSelectionDelegate,
-        clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+        clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
         last_secondary_tap_down_position: Option<Offset>,
     ) -> WidgetRef {
         let handle_cut = self.can_cut(app, delegate).then(|| {
@@ -153,7 +153,7 @@ impl TextSelectionControls for DesktopTextSelectionHandleControls {
         selection_midpoint: Offset,
         endpoints: &[TextSelectionPoint],
         delegate: AnyTextSelectionDelegate,
-        clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+        clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
         last_secondary_tap_down_position: Option<Offset>,
     ) -> WidgetRef {
         TextSelectionHandleControls::build_toolbar(
@@ -268,7 +268,7 @@ pub fn desktop_text_selection_controls() -> Rc<dyn TextSelectionControls> {
 // Generates the child that's passed into DesktopTextSelectionToolbar.
 struct DesktopTextSelectionControlsToolbar {
     key: Option<KeyRef>,
-    clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+    clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
     #[allow(dead_code)]
     endpoints: Vec<TextSelectionPoint>,
     global_editable_region: Rect,
@@ -320,7 +320,7 @@ impl State for DesktopTextSelectionControlsToolbarState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        if let Some(clipboard_status) = self.widget(app).clipboard_status {
+        if let Some(clipboard_status) = self.widget(app).clipboard_status.clone() {
             clipboard_status.add_listener(
                 app,
                 Listener::handle_method(self, Self::on_changed_clipboard_status),
@@ -334,13 +334,13 @@ impl State for DesktopTextSelectionControlsToolbarState {
         old_widget: &DesktopTextSelectionControlsToolbar,
     ) {
         if old_widget.clipboard_status != self.widget(app).clipboard_status {
-            if let Some(clipboard_status) = old_widget.clipboard_status {
+            if let Some(clipboard_status) = old_widget.clipboard_status.clone() {
                 clipboard_status.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::on_changed_clipboard_status),
                 );
             }
-            if let Some(clipboard_status) = self.widget(app).clipboard_status {
+            if let Some(clipboard_status) = self.widget(app).clipboard_status.clone() {
                 clipboard_status.add_listener(
                     app,
                     Listener::handle_method(self, Self::on_changed_clipboard_status),
@@ -350,7 +350,7 @@ impl State for DesktopTextSelectionControlsToolbarState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(clipboard_status) = self.widget(app).clipboard_status {
+        if let Some(clipboard_status) = self.widget(app).clipboard_status.clone() {
             clipboard_status.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::on_changed_clipboard_status),
@@ -367,14 +367,16 @@ impl State for DesktopTextSelectionControlsToolbarState {
         let handle_copy = widget.handle_copy.clone();
         let handle_paste = widget.handle_paste.clone();
         let handle_select_all = widget.handle_select_all.clone();
-        let clipboard_status = widget.clipboard_status;
+        let clipboard_status = widget.clipboard_status.clone();
         let selection_midpoint = widget.selection_midpoint;
         let global_editable_region = widget.global_editable_region;
         let last_secondary_tap_down_position = widget.last_secondary_tap_down_position;
 
         // Don't render the menu until the state of the clipboard is known.
         if handle_paste.is_some()
-            && clipboard_status.is_some_and(|status| status.value(app) == ClipboardStatus::Unknown)
+            && clipboard_status
+                .as_ref()
+                .is_some_and(|status| status.value(app) == ClipboardStatus::Unknown)
         {
             return SizedBox::shrink().into_widget();
         }
@@ -407,6 +409,7 @@ impl State for DesktopTextSelectionControlsToolbarState {
         }
         if let Some(handle_paste) = handle_paste
             && clipboard_status
+                .as_ref()
                 .is_some_and(|status| status.value(app) == ClipboardStatus::Pasteable)
         {
             add_toolbar_button(app, localizations.paste_button_label(), handle_paste);

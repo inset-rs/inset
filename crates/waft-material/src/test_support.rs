@@ -8,7 +8,7 @@ use std::time::Duration;
 use waft_embedder::{TargetPlatform, ViewId, ViewRef};
 use waft_foundation::{App, AppCell};
 use waft_scheduler::SchedulerBinding;
-use waft_test::{TestPlatform, TestView};
+use waft_test::{TestPlatform, TestView, assert_no_new_objects, object_snapshot};
 use waft_widgets::{BuildContext, Builder, IntoWidget, SizedBox, View, WidgetRef, run_widget};
 
 /// The 800x600 physical view at 2x every test app draws into.
@@ -110,7 +110,7 @@ impl waft_scheduler::TickerProvider for TestVSync {
         &self,
         app: &mut App,
         on_tick: waft_scheduler::TickerCallback,
-    ) -> waft_foundation::Handle<waft_scheduler::Ticker> {
+    ) -> waft_foundation::Ref<waft_scheduler::Ticker> {
         waft_scheduler::Ticker::new(app, on_tick, None)
     }
 }
@@ -546,6 +546,23 @@ impl WidgetTester {
                 return count;
             }
         }
+    }
+
+    /// What Flutter's leak tracking checks: `cycle` (say, opening and closing a route) leaves no
+    /// object behind in the arena. The first run warms up what is made once and kept, such as a
+    /// singleton or a theme's cached value; the second is checked with
+    /// [`assert_no_new_objects`], which names each object left behind with its type and creation
+    /// site.
+    pub(crate) fn assert_leaves_nothing_behind(
+        &mut self,
+        mut cycle: impl FnMut(&mut WidgetTester),
+    ) {
+        cycle(self);
+        self.cell.checkpoint();
+        let snapshot = object_snapshot(&self.cell.borrow());
+        cycle(self);
+        self.cell.checkpoint();
+        assert_no_new_objects(&self.cell.borrow(), &snapshot);
     }
 
     /// A touch pointer with the primary button, as `tester.startGesture` makes.

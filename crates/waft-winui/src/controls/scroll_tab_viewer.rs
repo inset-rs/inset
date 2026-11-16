@@ -10,7 +10,7 @@ use crate::{
 };
 use std::{rc::Rc, time::Duration};
 use waft_embedder::{Color, FontWeight};
-use waft_foundation::{App, Handle, Listener, ValueKey};
+use waft_foundation::{App, Listener, Ref, ValueKey};
 use waft_painting::{Alignment, EdgeInsetsGeometry};
 use waft_widgets::*;
 
@@ -18,7 +18,7 @@ use waft_widgets::*;
 #[derive(Clone, Debug)]
 pub(crate) struct TabScrollViewer {
     /// Controller attached to the virtualized header list.
-    pub controller: Handle<ScrollViewportController>,
+    pub controller: Ref<ScrollViewportController>,
 
     /// The native horizontal header list, already attached to the controller.
     pub scrolling_child: WidgetRef,
@@ -33,7 +33,7 @@ pub(crate) struct TabScrollViewer {
 impl TabScrollViewer {
     /// Wraps the tab header list in its source scroll-button template.
     pub fn new<K>(
-        controller: Handle<ScrollViewportController>,
+        controller: Ref<ScrollViewportController>,
         scrolling_child: impl IntoWidget<K>,
     ) -> Self {
         Self {
@@ -88,7 +88,7 @@ impl TabScrollViewer {
                     2,
                 ),
             ] {
-                let controller = self.controller;
+                let controller = self.controller.clone();
                 let button = RepeatButton::new(
                     FontIcon::symbol(if increase {
                         FluentSymbol::ChevronRight
@@ -143,7 +143,10 @@ impl TabScrollViewer {
             presenter_index,
             GridCell::new(
                 Padding::new(EdgeInsetsGeometry::only(1.0, 0.0, 0.0, 0.0)).child(
-                    ScrollMetricsObserver::new(self.controller, self.scrolling_child.clone()),
+                    ScrollMetricsObserver::new(
+                        self.controller.clone(),
+                        self.scrolling_child.clone(),
+                    ),
                 ),
             )
             .column(1)
@@ -169,7 +172,7 @@ impl TabScrollViewer {
 impl StatelessWidget for TabScrollViewer {
     fn build(&self, _: &mut App, _: BuildContext) -> WidgetRef {
         let template = self.clone();
-        ListenableBuilder::new(Rc::new(self.controller), move |app, context, _| {
+        ListenableBuilder::new(Rc::new(self.controller.clone()), move |app, context, _| {
             template.build_template(app, context)
         })
         .into_widget()

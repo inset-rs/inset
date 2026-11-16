@@ -7,20 +7,19 @@
 
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
+use waft_animation::{
+    Animatable, AnimationRef, AnimationStatus, AnimationStatusListener, Cubic, Curve, Curves,
+    Interval, ReverseAnimation, TweenSequence, TweenSequenceItem, ValueCurveTween, ValueTween,
+    k_always_complete_animation,
+};
 
 use indexmap::IndexMap;
-use waft_animation::{
-    Animatable, Animation, AnimationStatus, AnimationStatusListener, AnyAnimation, Cubic, Curve,
-    Curves, Interval, ReverseAnimation, TweenSequence, TweenSequenceItem, ValueCurveTween,
-    ValueTween, k_always_complete_animation,
-};
 use waft_cupertino::CupertinoPageTransitionsBuilder;
 use waft_embedder::valo::Sampling;
 use waft_embedder::{Color, Image, Matrix4, Offset, Paint, Rect, Size, TargetPlatform};
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listener,
+    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, Listener, OptionRetained, Ref,
 };
 use waft_painting::ClipContext;
 use waft_rendering::{LayerHandle, OpacityLayer, PaintingContext, TransformLayer};
@@ -42,10 +41,10 @@ use crate::theme::Theme;
 #[derive(Debug)]
 pub(crate) struct ZoomPageTransition {
     /// The animation that drives the `child`'s entrance and exit.
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
 
     /// The animation that transitions `child` when new content is pushed on top of it.
-    secondary_animation: AnyAnimation<f64>,
+    secondary_animation: AnimationRef<f64>,
 
     /// Whether the [`SnapshotWidget`] will be used.
     ///
@@ -72,14 +71,10 @@ pub(crate) struct ZoomPageTransition {
 impl ZoomPageTransition {
     // A curve sequence that is similar to the 'fastOutExtraSlowIn' curve used in the native
     // transition.
-    #[expect(
-        clippy::arc_with_non_send_sync,
-        reason = "TweenSequenceItem holds its tween in an Arc; a curve tween's curve is an Rc"
-    )]
     fn fast_out_extra_slow_in_tween_sequence_items() -> Vec<TweenSequenceItem<f64>> {
         vec![
             TweenSequenceItem::new(
-                Arc::new(
+                Rc::new(
                     ValueTween::new(0.0, 0.4).chain(ValueCurveTween::new(Rc::new(Cubic::new(
                         0.05, 0.0, 0.133333, 0.06,
                     )))),
@@ -87,7 +82,7 @@ impl ZoomPageTransition {
                 0.166666,
             ),
             TweenSequenceItem::new(
-                Arc::new(
+                Rc::new(
                     ValueTween::new(0.4, 1.0).chain(ValueCurveTween::new(Rc::new(Cubic::new(
                         0.208333, 0.82, 0.25, 1.0,
                     )))),
@@ -110,7 +105,7 @@ impl StatelessWidget for ZoomPageTransition {
         let allow_snapshotting = self.allow_snapshotting;
         let allow_enter_route_snapshotting = self.allow_enter_route_snapshotting;
         let mut transition = DualTransitionBuilder::new(
-            self.animation,
+            self.animation.clone(),
             move |_app, _context, animation, child| {
                 ZoomEnterTransition {
                     animation,
@@ -135,8 +130,8 @@ impl StatelessWidget for ZoomPageTransition {
             ZoomPageTransitionsBuilder::snapshot_aware_delegated_transition(
                 app,
                 context,
-                self.animation,
-                self.secondary_animation,
+                self.animation.clone(),
+                self.secondary_animation.clone(),
                 self.child.clone(),
                 allow_snapshotting,
                 allow_enter_route_snapshotting,
@@ -149,7 +144,7 @@ impl StatelessWidget for ZoomPageTransition {
 
 #[derive(Debug)]
 pub(crate) struct ZoomEnterTransition {
-    pub(crate) animation: AnyAnimation<f64>,
+    pub(crate) animation: AnimationRef<f64>,
     child: Option<WidgetRef>,
     allow_snapshotting: bool,
     pub(crate) reverse: bool,
@@ -172,7 +167,7 @@ impl StatefulWidget for ZoomEnterTransition {
 pub(crate) struct ZoomEnterTransitionState {
     state: StateData<ZoomEnterTransition>,
     zoom_transition_base: ZoomTransitionBaseData,
-    delegate: Option<Handle<ZoomEnterTransitionPainter>>,
+    delegate: Option<Ref<ZoomEnterTransitionPainter>>,
 }
 
 impl ZoomEnterTransitionState {
@@ -202,22 +197,17 @@ impl ZoomEnterTransitionState {
 
     fn update_animations(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let (reverse, animation) = (widget.reverse, widget.animation);
-        let mut driven = Vec::new();
+        let (reverse, animation) = (widget.reverse, widget.animation.clone());
         let fade_transition = if reverse {
             k_always_complete_animation(app)
         } else {
-            let fade = ZoomEnterTransitionState::fade_in_transition().animate(app, animation);
-            driven.push(fade.id());
-            fade
+            ZoomEnterTransitionState::fade_in_transition().animate(app, animation.clone())
         };
         let scale_transition = if reverse {
-            ZoomEnterTransitionState::scale_down_transition().animate(app, animation)
+            ZoomEnterTransitionState::scale_down_transition().animate(app, animation.clone())
         } else {
-            ZoomEnterTransitionState::scale_up_transition().animate(app, animation)
+            ZoomEnterTransitionState::scale_up_transition().animate(app, animation.clone())
         };
-        driven.push(scale_transition.id());
-        self.replace_driven_transitions(app, driven);
         let base = self.zoom_transition_base_data_mut(app);
         base.fade_transition = Some(fade_transition);
         base.scale_transition = Some(scale_transition);
@@ -232,25 +222,29 @@ impl ZoomEnterTransitionState {
         );
     }
 
-    fn new_delegate(self: Handle<Self>, app: &mut App) -> Handle<ZoomEnterTransitionPainter> {
+    fn new_delegate(self: Handle<Self>, app: &mut App) -> Ref<ZoomEnterTransitionPainter> {
         let widget = self.widget(app);
-        let (reverse, animation, background_color) =
-            (widget.reverse, widget.animation, widget.background_color);
+        let (reverse, animation, background_color) = (
+            widget.reverse,
+            widget.animation.clone(),
+            widget.background_color,
+        );
         let fade = self.fade_transition(app);
         let scale = self.scale_transition(app);
         ZoomEnterTransitionPainter::new(app, reverse, scale, fade, animation, background_color)
     }
 
-    fn delegate(self: Handle<Self>, app: &App) -> Handle<ZoomEnterTransitionPainter> {
-        app.get(self).delegate.expect("created in init_state")
+    fn delegate(self: Handle<Self>, app: &App) -> Ref<ZoomEnterTransitionPainter> {
+        app.get(self)
+            .delegate
+            .clone()
+            .expect("created in init_state")
     }
 
-    /// Dart's `delegate.dispose()`, then frees it once the snapshot that paints with it has
-    /// moved to the next one.
+    /// Dart's `delegate.dispose()`.
     fn dispose_delegate(self: Handle<Self>, app: &mut App) {
         let delegate = self.delegate(app);
         delegate.dispose(app);
-        app.destroy_lingering(delegate);
     }
 }
 
@@ -304,7 +298,7 @@ impl State for ZoomEnterTransitionState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         animation.remove_listener(
             app,
             &Listener::handle_method(self, Self::on_animation_value_change),
@@ -319,7 +313,7 @@ impl State for ZoomEnterTransitionState {
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         SnapshotWidget::new(self.controller(app), self.widget(app).child.clone())
-            .painter(self.delegate(app).as_snapshot_painter())
+            .painter(self.delegate(app).into_erased::<AnySnapshotPainter>())
             .mode(SnapshotMode::Permissive)
             .autoresize(true)
             .into_widget()
@@ -328,7 +322,7 @@ impl State for ZoomEnterTransitionState {
 
 #[derive(Debug)]
 struct ZoomExitTransition {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
     allow_snapshotting: bool,
     reverse: bool,
     child: Option<WidgetRef>,
@@ -350,7 +344,7 @@ impl StatefulWidget for ZoomExitTransition {
 struct ZoomExitTransitionState {
     state: StateData<ZoomExitTransition>,
     zoom_transition_base: ZoomTransitionBaseData,
-    delegate: Option<Handle<ZoomExitTransitionPainter>>,
+    delegate: Option<Ref<ZoomExitTransitionPainter>>,
 }
 
 impl ZoomExitTransitionState {
@@ -372,22 +366,17 @@ impl ZoomExitTransitionState {
 
     fn update_animations(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let (reverse, animation) = (widget.reverse, widget.animation);
-        let mut driven = Vec::new();
+        let (reverse, animation) = (widget.reverse, widget.animation.clone());
         let fade_transition = if reverse {
-            let fade = ZoomExitTransitionState::fade_out_transition().animate(app, animation);
-            driven.push(fade.id());
-            fade
+            ZoomExitTransitionState::fade_out_transition().animate(app, animation.clone())
         } else {
             k_always_complete_animation(app)
         };
         let scale_transition = if reverse {
-            ZoomExitTransitionState::scale_down_transition().animate(app, animation)
+            ZoomExitTransitionState::scale_down_transition().animate(app, animation.clone())
         } else {
-            ZoomExitTransitionState::scale_up_transition().animate(app, animation)
+            ZoomExitTransitionState::scale_up_transition().animate(app, animation.clone())
         };
-        driven.push(scale_transition.id());
-        self.replace_driven_transitions(app, driven);
         let base = self.zoom_transition_base_data_mut(app);
         base.fade_transition = Some(fade_transition);
         base.scale_transition = Some(scale_transition);
@@ -402,23 +391,25 @@ impl ZoomExitTransitionState {
         );
     }
 
-    fn new_delegate(self: Handle<Self>, app: &mut App) -> Handle<ZoomExitTransitionPainter> {
+    fn new_delegate(self: Handle<Self>, app: &mut App) -> Ref<ZoomExitTransitionPainter> {
         let widget = self.widget(app);
-        let (reverse, animation) = (widget.reverse, widget.animation);
+        let (reverse, animation) = (widget.reverse, widget.animation.clone());
         let fade = self.fade_transition(app);
         let scale = self.scale_transition(app);
         ZoomExitTransitionPainter::new(app, reverse, scale, fade, animation)
     }
 
-    fn delegate(self: Handle<Self>, app: &App) -> Handle<ZoomExitTransitionPainter> {
-        app.get(self).delegate.expect("created in init_state")
+    fn delegate(self: Handle<Self>, app: &App) -> Ref<ZoomExitTransitionPainter> {
+        app.get(self)
+            .delegate
+            .clone()
+            .expect("created in init_state")
     }
 
     /// See [`ZoomEnterTransitionState::dispose_delegate`].
     fn dispose_delegate(self: Handle<Self>, app: &mut App) {
         let delegate = self.delegate(app);
         delegate.dispose(app);
-        app.destroy_lingering(delegate);
     }
 }
 
@@ -472,7 +463,7 @@ impl State for ZoomExitTransitionState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         animation.remove_listener(
             app,
             &Listener::handle_method(self, Self::on_animation_value_change),
@@ -487,7 +478,7 @@ impl State for ZoomExitTransitionState {
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         SnapshotWidget::new(self.controller(app), self.widget(app).child.clone())
-            .painter(self.delegate(app).as_snapshot_painter())
+            .painter(self.delegate(app).into_erased::<AnySnapshotPainter>())
             .mode(SnapshotMode::Permissive)
             .autoresize(true)
             .into_widget()
@@ -499,9 +490,9 @@ impl State for ZoomExitTransitionState {
 // match the Android U activity transition.
 #[derive(Debug)]
 pub(crate) struct FadeForwardsPageTransition {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
 
-    secondary_animation: AnyAnimation<f64>,
+    secondary_animation: AnimationRef<f64>,
 
     /// Whether the [`SnapshotWidget`] will be used.
     ///
@@ -535,30 +526,28 @@ impl StatelessWidget for FadeForwardsPageTransition {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let allow_snapshotting = self.allow_snapshotting;
         let mut transition = DualTransitionBuilder::new(
-            self.animation,
+            self.animation.clone(),
             move |app, _context, animation, child| {
                 let opacity = FadeForwardsPageTransitionsBuilder::fade_in_transition()
-                    .animate(app, animation);
-                let position =
-                    FadeForwardsPageTransition::forward_translation_tween().animate(app, animation);
-                let transition = FadeTransition::new(opacity)
+                    .animate(app, animation.clone());
+                let position = FadeForwardsPageTransition::forward_translation_tween()
+                    .animate(app, animation.clone());
+
+                (FadeTransition::new(opacity)
                     .child(SlideTransition::new(position).child(FadeForwardsSnapshot {
                         animation,
                         allow_snapshotting,
                         child: child.cloned(),
                     }))
-                    .into_widget();
-                // The transitions that read them retain them.
-                app.destroy_lingering(opacity);
-                app.destroy_lingering(position);
-                transition
+                    .into_widget()) as _
             },
             move |app, _context, animation, child| {
                 let opacity = FadeForwardsPageTransitionsBuilder::fade_out_transition()
-                    .animate(app, animation);
+                    .animate(app, animation.clone());
                 let position = FadeForwardsPageTransition::backward_translation_tween()
-                    .animate(app, animation);
-                let transition = IgnorePointer::new()
+                    .animate(app, animation.clone());
+
+                (IgnorePointer::new()
                     .ignoring(animation.status(app) == AnimationStatus::Forward)
                     .child(FadeTransition::new(opacity).child(
                         SlideTransition::new(position).child(FadeForwardsSnapshot {
@@ -567,18 +556,14 @@ impl StatelessWidget for FadeForwardsPageTransition {
                             child: child.cloned(),
                         }),
                     ))
-                    .into_widget();
-                // The transitions that read them retain them.
-                app.destroy_lingering(opacity);
-                app.destroy_lingering(position);
-                transition
+                    .into_widget()) as _
             },
         );
         transition.child = Some(
             FadeForwardsPageTransitionsBuilder::snapshot_aware_delegated_transition(
                 app,
                 context,
-                self.secondary_animation,
+                self.secondary_animation.clone(),
                 self.background_color,
                 allow_snapshotting,
                 self.child.clone(),
@@ -602,7 +587,7 @@ impl StatelessWidget for FadeForwardsPageTransition {
 // painted instead (see [`SnapshotMode::Permissive`]).
 #[derive(Debug)]
 pub(crate) struct FadeForwardsSnapshot {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
 
     allow_snapshotting: bool,
 
@@ -624,13 +609,16 @@ impl StatefulWidget for FadeForwardsSnapshot {
 /// `App`, so `init_state` makes it before anything reads it.
 pub(crate) struct FadeForwardsSnapshotState {
     state: StateData<FadeForwardsSnapshot>,
-    controller: Option<Handle<SnapshotController>>,
+    controller: Option<Ref<SnapshotController>>,
 }
 
 impl FadeForwardsSnapshotState {
     /// Dart's `_controller`.
     pub(crate) fn controller(self: Handle<Self>, app: &App) -> Handle<SnapshotController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 
     // See SnapshotWidget doc comment, this is disabled on web because the canvaskit backend uses
@@ -643,7 +631,7 @@ impl FadeForwardsSnapshotState {
     // Listen to value changes as well as status changes. DualTransitionBuilder may replace its
     // proxy animation's parent without a status notification, so a status listener alone can
     // miss the start of an animation.
-    fn add_listeners(self: Handle<Self>, app: &mut App, animation: AnyAnimation<f64>) {
+    fn add_listeners(self: Handle<Self>, app: &mut App, animation: AnimationRef<f64>) {
         animation.add_listener(
             app,
             Listener::handle_method(self, Self::update_snapshotting),
@@ -654,7 +642,7 @@ impl FadeForwardsSnapshotState {
         );
     }
 
-    fn remove_listeners(self: Handle<Self>, app: &mut App, animation: AnyAnimation<f64>) {
+    fn remove_listeners(self: Handle<Self>, app: &mut App, animation: AnimationRef<f64>) {
         animation.remove_listener(
             app,
             &Listener::handle_method(self, Self::update_snapshotting),
@@ -684,28 +672,33 @@ impl State for FadeForwardsSnapshotState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let controller = SnapshotController::new(app, false);
         app.get_mut(self).controller = Some(controller);
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         self.add_listeners(app, animation);
         self.update_snapshotting(app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &FadeForwardsSnapshot) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         if old_widget.animation != animation {
-            self.remove_listeners(app, old_widget.animation);
+            self.remove_listeners(app, old_widget.animation.clone());
             self.add_listeners(app, animation);
         }
         self.update_snapshotting(app);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         self.remove_listeners(app, animation);
         self.controller(app).dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        SnapshotWidget::new(self.controller(app), self.widget(app).child.clone())
+        let controller = app
+            .get(self)
+            .controller
+            .clone()
+            .expect("created in init_state");
+        SnapshotWidget::new(controller, self.widget(app).child.clone())
             .mode(SnapshotMode::Permissive)
             .autoresize(true)
             .into_widget()
@@ -846,57 +839,47 @@ impl FadeForwardsPageTransitionsBuilder {
     fn snapshot_aware_delegated_transition(
         app: &mut App,
         context: BuildContext,
-        secondary_animation: AnyAnimation<f64>,
+        secondary_animation: AnimationRef<f64>,
         background_color: Option<Color>,
         allow_snapshotting: bool,
         child: Option<WidgetRef>,
     ) -> WidgetRef {
-        let reversed = app
-            .create(ReverseAnimation::new(secondary_animation))
-            .as_animation();
+        let reversed = ReverseAnimation::new(app, secondary_animation.clone()).into_erased();
         let mut builder = DualTransitionBuilder::new(
             reversed,
             move |app, _context, animation, child| {
                 let opacity = FadeForwardsPageTransitionsBuilder::fade_in_transition()
-                    .animate(app, animation);
+                    .animate(app, animation.clone());
                 let position =
                     FadeForwardsPageTransitionsBuilder::secondary_forward_translation_tween()
-                        .animate(app, animation);
-                let transition = FadeTransition::new(opacity)
+                        .animate(app, animation.clone());
+
+                (FadeTransition::new(opacity)
                     .child(SlideTransition::new(position).child(FadeForwardsSnapshot {
                         animation,
                         allow_snapshotting,
                         child: child.cloned(),
                     }))
-                    .into_widget();
-                // The transitions that read them retain them.
-                app.destroy_lingering(opacity);
-                app.destroy_lingering(position);
-                transition
+                    .into_widget()) as _
             },
             move |app, _context, animation, child| {
                 let opacity = FadeForwardsPageTransitionsBuilder::fade_out_transition()
-                    .animate(app, animation);
+                    .animate(app, animation.clone());
                 let position =
                     FadeForwardsPageTransitionsBuilder::secondary_backward_translation_tween()
-                        .animate(app, animation);
-                let transition = FadeTransition::new(opacity)
+                        .animate(app, animation.clone());
+
+                (FadeTransition::new(opacity)
                     .child(SlideTransition::new(position).child(FadeForwardsSnapshot {
                         animation,
                         allow_snapshotting,
                         child: child.cloned(),
                     }))
-                    .into_widget();
-                // The transitions that read them retain them.
-                app.destroy_lingering(opacity);
-                app.destroy_lingering(position);
-                transition
+                    .into_widget()) as _
             },
         );
         builder.child = child;
         let builder = builder.into_widget();
-        // The `DualTransitionBuilder` that follows it retains it.
-        app.destroy_lingering(reversed);
 
         let is_opaque = AnyModalRoute::opaque_of(app, context).unwrap_or(true);
 
@@ -943,8 +926,8 @@ impl PageTransitionsBuilder for FadeForwardsPageTransitionsBuilder {
         app: &mut App,
         route: AnyPageRoute,
         _context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         FadeForwardsPageTransition {
@@ -1067,8 +1050,8 @@ impl ZoomPageTransitionsBuilder {
     fn snapshot_aware_delegated_transition(
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: Option<WidgetRef>,
         allow_snapshotting: bool,
         allow_enter_route_snapshotting: bool,
@@ -1077,9 +1060,7 @@ impl ZoomPageTransitionsBuilder {
         let _ = animation;
         let enter_transition_background_color =
             background_color.unwrap_or_else(|| Theme::of(app, context).color_scheme.surface);
-        let reversed = app
-            .create(ReverseAnimation::new(secondary_animation))
-            .as_animation();
+        let reversed = ReverseAnimation::new(app, secondary_animation.clone()).into_erased();
         let mut builder = DualTransitionBuilder::new(
             reversed,
             move |_app, _context, animation, child| {
@@ -1103,8 +1084,6 @@ impl ZoomPageTransitionsBuilder {
             },
         );
         builder.child = child;
-        // The `DualTransitionBuilder` that follows it retains it.
-        app.destroy_lingering(reversed);
         builder.into_widget()
     }
 }
@@ -1135,8 +1114,8 @@ impl PageTransitionsBuilder for ZoomPageTransitionsBuilder {
         app: &mut App,
         route: AnyPageRoute,
         _context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         ZoomPageTransition {
@@ -1262,8 +1241,8 @@ impl PageTransitionsTheme {
         app: &mut App,
         route: AnyPageRoute,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let _ = (app, context);
@@ -1322,8 +1301,8 @@ impl Debug for PageTransitionsTheme {
 pub(crate) struct PageTransitionsThemeTransitions {
     builders: Rc<IndexMap<TargetPlatform, PageTransitionsBuilderRef>>,
     route: AnyPageRoute,
-    animation: AnyAnimation<f64>,
-    secondary_animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
+    secondary_animation: AnimationRef<f64>,
     child: WidgetRef,
 }
 
@@ -1375,8 +1354,8 @@ impl State for PageTransitionsThemeTransitionsState {
 
         let widget = self.widget(app);
         let (animation, secondary_animation, child) = (
-            widget.animation,
-            widget.secondary_animation,
+            widget.animation.clone(),
+            widget.secondary_animation.clone(),
             widget.child.clone(),
         );
         match widget.builders.get(&platform).cloned() {
@@ -1476,14 +1455,10 @@ struct ZoomTransitionBaseData {
     // 2. The animation is paused/stopped.
     // 3. The values of the scale/fade transition do not
     //    benefit from rasterization.
-    controller: Option<Handle<SnapshotController>>,
+    controller: Option<Ref<SnapshotController>>,
 
-    fade_transition: Option<AnyAnimation<f64>>,
-    scale_transition: Option<AnyAnimation<f64>>,
-
-    /// The transitions the last `_updateAnimations` drove, which Dart's collector frees once
-    /// the next one replaces them; the state frees them then, and at `dispose`.
-    driven_transitions: Vec<HandleId>,
+    fade_transition: Option<AnimationRef<f64>>,
+    scale_transition: Option<AnimationRef<f64>>,
 }
 
 impl ZoomTransitionBaseData {
@@ -1492,7 +1467,6 @@ impl ZoomTransitionBaseData {
             controller: None,
             fade_transition: None,
             scale_transition: None,
-            driven_transitions: Vec::new(),
         }
     }
 }
@@ -1517,21 +1491,24 @@ trait ZoomTransitionBase: State {
         self.zoom_transition_base_data_mut(app).controller = Some(controller);
     }
 
-    fn controller(self: Handle<Self>, app: &App) -> Handle<SnapshotController> {
+    fn controller(self: Handle<Self>, app: &App) -> Ref<SnapshotController> {
         self.zoom_transition_base_data(app)
             .controller
+            .clone()
             .expect("created in init_state")
     }
 
-    fn fade_transition(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
+    fn fade_transition(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
         self.zoom_transition_base_data(app)
             .fade_transition
+            .clone()
             .expect("set in init_state")
     }
 
-    fn scale_transition(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
+    fn scale_transition(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
         self.zoom_transition_base_data(app)
             .scale_transition
+            .clone()
             .expect("set in init_state")
     }
 
@@ -1553,32 +1530,18 @@ trait ZoomTransitionBase: State {
             .set_allow_snapshotting(app, allow_snapshotting);
     }
 
-    /// Keeps `driven`, the transitions this `_updateAnimations` drove, and frees the last
-    /// ones; they linger until the next checkpoint, for the painter that listens to them to
-    /// let go.
-    fn replace_driven_transitions(self: Handle<Self>, app: &mut App, driven: Vec<HandleId>) {
-        let replaced = std::mem::replace(
-            &mut self.zoom_transition_base_data_mut(app).driven_transitions,
-            driven,
-        );
-        for replaced in replaced {
-            app.destroy_lingering(replaced);
-        }
-    }
-
     /// Dart's `_ZoomTransitionBase.dispose`, which the state's `dispose` runs last.
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.controller(app).dispose(app);
-        self.replace_driven_transitions(app, Vec::new());
     }
 }
 
 struct ZoomEnterTransitionPainter {
     change_notifier: ChangeNotifierData,
     reverse: bool,
-    animation: AnyAnimation<f64>,
-    scale: AnyAnimation<f64>,
-    fade: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
+    scale: AnimationRef<f64>,
+    fade: AnimationRef<f64>,
     background_color: Color,
     transform: Matrix4,
     opacity_handle: LayerHandle<Handle<OpacityLayer>>,
@@ -1589,29 +1552,39 @@ impl ZoomEnterTransitionPainter {
     fn new(
         app: &mut App,
         reverse: bool,
-        scale: AnyAnimation<f64>,
-        fade: AnyAnimation<f64>,
-        animation: AnyAnimation<f64>,
+        scale: AnimationRef<f64>,
+        fade: AnimationRef<f64>,
+        animation: AnimationRef<f64>,
         background_color: Color,
-    ) -> Handle<ZoomEnterTransitionPainter> {
+    ) -> Ref<ZoomEnterTransitionPainter> {
         let this = app.create(ZoomEnterTransitionPainter {
             change_notifier: ChangeNotifierData::new(),
             reverse,
-            animation,
-            scale,
-            fade,
+            animation: animation.clone(),
+            scale: scale.clone(),
+            fade: fade.clone(),
             background_color,
             transform: Matrix4::IDENTITY,
             opacity_handle: LayerHandle::new(),
             transform_handler: LayerHandle::new(),
         });
-        animation.add_listener(app, Listener::handle_method(this, Handle::notify_listeners));
+        let handle = this.handle();
+        animation.add_listener(
+            app,
+            Listener::handle_method(handle, Handle::notify_listeners),
+        );
         animation.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(this, Self::on_status_change),
+            AnimationStatusListener::handle_method(handle, Self::on_status_change),
         );
-        scale.add_listener(app, Listener::handle_method(this, Handle::notify_listeners));
-        fade.add_listener(app, Listener::handle_method(this, Handle::notify_listeners));
+        scale.add_listener(
+            app,
+            Listener::handle_method(handle, Handle::notify_listeners),
+        );
+        fade.add_listener(
+            app,
+            Listener::handle_method(handle, Handle::notify_listeners),
+        );
         this
     }
 
@@ -1639,7 +1612,7 @@ impl ZoomEnterTransitionPainter {
         // of the scrim.
         let this = app.get(self);
         let (reverse, animation, background_color) =
-            (this.reverse, this.animation, this.background_color);
+            (this.reverse, this.animation.handle(), this.background_color);
         if !reverse && !animation.is_completed(app) {
             scrim_opacity =
                 ZoomEnterTransitionState::scrim_opacity_tween().evaluate(app, animation);
@@ -1659,7 +1632,11 @@ impl ZoomEnterTransitionPainter {
     /// Dart's `dispose`: lets go of the animations and the layers, then `ChangeNotifier`'s.
     fn dispose(self: Handle<Self>, app: &mut App) {
         let this = app.get(self);
-        let (animation, scale, fade) = (this.animation, this.scale, this.fade);
+        let (animation, scale, fade) = (
+            this.animation.clone(),
+            this.scale.clone(),
+            this.fade.clone(),
+        );
         animation.remove_listener(
             app,
             &Listener::handle_method(self, Handle::notify_listeners),
@@ -1678,7 +1655,7 @@ impl ZoomEnterTransitionPainter {
         );
         LayerHandle::set_layer(app, |app| &mut app.get_mut(self).opacity_handle, None);
         LayerHandle::set_layer(app, |app| &mut app.get_mut(self).transform_handler, None);
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -1763,9 +1740,9 @@ impl SnapshotPainter for ZoomEnterTransitionPainter {
 struct ZoomExitTransitionPainter {
     change_notifier: ChangeNotifierData,
     reverse: bool,
-    scale: AnyAnimation<f64>,
-    fade: AnyAnimation<f64>,
-    animation: AnyAnimation<f64>,
+    scale: AnimationRef<f64>,
+    fade: AnimationRef<f64>,
+    animation: AnimationRef<f64>,
     transform: Matrix4,
     opacity_handle: LayerHandle<Handle<OpacityLayer>>,
     transform_handler: LayerHandle<Handle<TransformLayer>>,
@@ -1775,25 +1752,32 @@ impl ZoomExitTransitionPainter {
     fn new(
         app: &mut App,
         reverse: bool,
-        scale: AnyAnimation<f64>,
-        fade: AnyAnimation<f64>,
-        animation: AnyAnimation<f64>,
-    ) -> Handle<ZoomExitTransitionPainter> {
+        scale: AnimationRef<f64>,
+        fade: AnimationRef<f64>,
+        animation: AnimationRef<f64>,
+    ) -> Ref<ZoomExitTransitionPainter> {
         let this = app.create(ZoomExitTransitionPainter {
             change_notifier: ChangeNotifierData::new(),
             reverse,
-            scale,
-            fade,
-            animation,
+            scale: scale.clone(),
+            fade: fade.clone(),
+            animation: animation.clone(),
             transform: Matrix4::IDENTITY,
             opacity_handle: LayerHandle::new(),
             transform_handler: LayerHandle::new(),
         });
-        scale.add_listener(app, Listener::handle_method(this, Handle::notify_listeners));
-        fade.add_listener(app, Listener::handle_method(this, Handle::notify_listeners));
+        let handle = this.handle();
+        scale.add_listener(
+            app,
+            Listener::handle_method(handle, Handle::notify_listeners),
+        );
+        fade.add_listener(
+            app,
+            Listener::handle_method(handle, Handle::notify_listeners),
+        );
         animation.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(this, Self::on_status_change),
+            AnimationStatusListener::handle_method(handle, Self::on_status_change),
         );
         this
     }
@@ -1807,7 +1791,11 @@ impl ZoomExitTransitionPainter {
         LayerHandle::set_layer(app, |app| &mut app.get_mut(self).opacity_handle, None);
         LayerHandle::set_layer(app, |app| &mut app.get_mut(self).transform_handler, None);
         let this = app.get(self);
-        let (scale, fade, animation) = (this.scale, this.fade, this.animation);
+        let (scale, fade, animation) = (
+            this.scale.clone(),
+            this.fade.clone(),
+            this.animation.clone(),
+        );
         scale.remove_listener(
             app,
             &Listener::handle_method(self, Handle::notify_listeners),
@@ -1820,7 +1808,7 @@ impl ZoomExitTransitionPainter {
             app,
             &AnimationStatusListener::handle_method(self, Self::on_status_change),
         );
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -1906,7 +1894,7 @@ mod tests {
     use waft_foundation::Listener;
     use waft_rendering::AnyLayer;
     use waft_widgets::{
-        AnyElement, Builder, Navigator, NavigatorState, PageRouteBuilder, Route, SizedBox,
+        AnyElement, Builder, Navigator, NavigatorState, PageRouteBuilder, SizedBox,
         StatefulBuilder, Text, WidgetBuilder,
     };
 
@@ -1917,6 +1905,8 @@ mod tests {
     use crate::test_support::{WidgetTester, material_page_app, with_main_thread_stack};
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
+    use waft_animation::AnyAnimation;
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     fn tester_on(platform: TargetPlatform) -> WidgetTester {
         let tester = WidgetTester::on(platform);
@@ -2157,7 +2147,7 @@ mod tests {
             &self,
             app: &mut App,
             on_tick: waft_scheduler::TickerCallback,
-        ) -> Handle<waft_scheduler::Ticker> {
+        ) -> Ref<waft_scheduler::Ticker> {
             waft_scheduler::Ticker::new(app, on_tick, None)
         }
     }
@@ -2168,8 +2158,8 @@ mod tests {
         tester: &mut WidgetTester,
         animation: ValueTween<f64>,
         secondary_animation: ValueTween<f64>,
-    ) -> Handle<AnimationController> {
-        let controller = AnimationController::create(
+    ) -> Ref<AnimationController> {
+        let controller = AnimationController::new(
             &mut tester.cell.borrow_mut(),
             None,
             Some(Duration::from_millis(100)),
@@ -2181,9 +2171,9 @@ mod tests {
         );
         let (animation, secondary_animation) = {
             let mut app = tester.cell.borrow_mut();
-            let parent = controller.as_animation();
+            let parent = controller.erase::<AnyAnimation<f64>>();
             (
-                animation.animate(&mut app, parent),
+                animation.animate(&mut app, parent.clone()),
                 secondary_animation.animate(&mut app, parent),
             )
         };
@@ -2195,8 +2185,8 @@ mod tests {
                     .call(
                         app,
                         context,
-                        animation,
-                        secondary_animation,
+                        animation.clone(),
+                        secondary_animation.clone(),
                         false,
                         Some(&SizedBox::new().into_widget()),
                     )
@@ -2270,7 +2260,7 @@ mod tests {
             let light_green = Colors::LIGHT_GREEN.primary();
             let push_b = Rc::new(|app: &mut App, context: BuildContext| {
                 let route = MaterialPageRoute::new(app, text_page("page b"));
-                Navigator::of(app, context, false).push(app, Route::as_route(route));
+                Navigator::of(app, context, false).push(app, route.erase());
             });
             let home = button_page("push a", move |app, context| {
                 let push_b = Rc::clone(&push_b);
@@ -2282,7 +2272,7 @@ mod tests {
                     }),
                 )
                 .opaque(app, false);
-                Navigator::of(app, context, false).push(app, Route::as_route(route));
+                Navigator::of(app, context, false).push(app, route.erase());
             });
             pump_app(
                 &mut tester,
@@ -2324,7 +2314,7 @@ mod tests {
     }
 
     /// Not a Dart case: Dart's collector frees the transitions and the painter a zoom state's
-    /// `_updateAnimations` replaces; here the state frees them.
+    /// `_updateAnimations` replaces; here they are freed with their last reference.
     #[test]
     fn a_zoom_transition_given_a_new_animation_leaves_no_new_arena_objects() {
         with_main_thread_stack(|| {
@@ -2334,14 +2324,14 @@ mod tests {
                     .cell
                     .borrow_mut()
                     .create(waft_animation::AlwaysStoppedAnimation::new(value))
-                    .as_animation()
+                    .into_erased::<AnyAnimation<f64>>()
             });
-            let zoom = |animation: AnyAnimation<f64>, reverse: bool| -> WidgetRef {
+            let zoom = |animation: AnimationRef<f64>, reverse: bool| -> WidgetRef {
                 waft_widgets::Directionality::new(
                     waft_embedder::TextDirection::Ltr,
                     waft_widgets::Column::new().children([
                         ZoomEnterTransition {
-                            animation,
+                            animation: animation.clone(),
                             child: Some(SizedBox::new().into_widget()),
                             allow_snapshotting: true,
                             reverse,
@@ -2349,7 +2339,7 @@ mod tests {
                         }
                         .into_widget(),
                         ZoomExitTransition {
-                            animation,
+                            animation: animation.clone(),
                             allow_snapshotting: true,
                             reverse,
                             child: Some(SizedBox::new().into_widget()),
@@ -2360,76 +2350,66 @@ mod tests {
                 .into_widget()
             };
             for reverse in [false, true] {
-                tester.pump_widget(zoom(first, reverse));
-                tester.pump_widget(zoom(second, reverse));
-                let before = tester.cell.borrow().debug_object_count();
-                tester.pump_widget(zoom(first, reverse));
-                tester.pump_widget(zoom(second, reverse));
-                assert_eq!(
-                    tester.cell.borrow().debug_object_count(),
-                    before,
-                    "{reverse}"
-                );
+                tester.pump_widget(zoom(first.clone(), reverse));
+                tester.pump_widget(zoom(second.clone(), reverse));
+                let snapshot = object_snapshot(&tester.cell.borrow());
+                tester.pump_widget(zoom(first.clone(), reverse));
+                tester.pump_widget(zoom(second.clone(), reverse));
+                tester.cell.checkpoint();
+                assert_no_new_objects(&tester.cell.borrow(), &snapshot);
             }
         });
     }
 
-    /// The arena objects the frame `at` into a push, and the one `at` into the pop that
-    /// follows, leave behind with `builder`: Dart's collector frees what each frame's build
-    /// replaces, and here the transitions free what they make once they hand it on. `at` lies
-    /// between the bounds of the intervals the transitions fade over, so the frame adds and
-    /// drops no layer.
-    fn objects_a_mid_transition_frame_leaves(
+    /// Checks that the frame `at` into a push, and the one `at` into the pop that follows, leave
+    /// no new arena objects with `builder`: Dart's collector frees what each frame's build
+    /// replaces. `at` lies between the bounds of the intervals the transitions fade over, so the
+    /// frame adds and drops no layer.
+    fn assert_mid_transition_frames_leave_nothing(
         platform: TargetPlatform,
         builder: impl PageTransitionsBuilder,
         at: Duration,
-    ) -> [isize; 2] {
+    ) {
         let mut tester = tester_on(platform);
         pump_app(&mut tester, theme_with(platform, builder), |app| {
             app.routes(push_routes())
         });
-        let objects_a_frame_leaves = |tester: &mut WidgetTester| {
+        let assert_a_frame_leaves_nothing = |tester: &mut WidgetTester| {
             tester.pump(Duration::ZERO);
             tester.pump(at);
-            let before = tester.cell.borrow().debug_object_count() as isize;
+            let snapshot = object_snapshot(&tester.cell.borrow());
             tester.pump(Duration::from_millis(16));
-            tester.cell.borrow().debug_object_count() as isize - before
+            tester.cell.checkpoint();
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         };
         tap_text(&mut tester, "push");
-        let push = objects_a_frame_leaves(&mut tester);
+        assert_a_frame_leaves_nothing(&mut tester);
         tester.pump_and_settle();
         let page_b = *tester.find_onstage_text("page b").first().expect("page b");
         Navigator::pop(&mut tester.cell.borrow_mut(), page_b, None);
-        let pop = objects_a_frame_leaves(&mut tester);
-        [push, pop]
+        assert_a_frame_leaves_nothing(&mut tester);
     }
 
-    /// Not a Dart case: see [`objects_a_mid_transition_frame_leaves`].
+    /// Not a Dart case: see [`assert_mid_transition_frames_leave_nothing`].
     #[test]
     fn a_frame_of_a_zoom_push_or_pop_leaves_no_new_arena_objects() {
         with_main_thread_stack(|| {
-            assert_eq!(
-                objects_a_mid_transition_frame_leaves(
-                    TargetPlatform::Android,
-                    ZoomPageTransitionsBuilder::new(),
-                    Duration::from_millis(100),
-                ),
-                [0, 0]
+            assert_mid_transition_frames_leave_nothing(
+                TargetPlatform::Android,
+                ZoomPageTransitionsBuilder::new(),
+                Duration::from_millis(100),
             );
         });
     }
 
-    /// Not a Dart case: see [`objects_a_mid_transition_frame_leaves`].
+    /// Not a Dart case: see [`assert_mid_transition_frames_leave_nothing`].
     #[test]
     fn a_frame_of_a_fade_forwards_push_or_pop_leaves_no_new_arena_objects() {
         with_main_thread_stack(|| {
-            assert_eq!(
-                objects_a_mid_transition_frame_leaves(
-                    TargetPlatform::Android,
-                    FadeForwardsPageTransitionsBuilder::new(),
-                    Duration::from_millis(200),
-                ),
-                [0, 0]
+            assert_mid_transition_frames_leave_nothing(
+                TargetPlatform::Android,
+                FadeForwardsPageTransitionsBuilder::new(),
+                Duration::from_millis(200),
             );
         });
     }
@@ -2649,22 +2629,26 @@ mod tests {
             move |app| {
                 app.on_generate_route(move |app, settings| {
                     if settings.name.as_deref() == Some("/") {
-                        return Some(Route::as_route(MaterialPageRoute::new(
-                            app,
-                            Rc::new(|_app, _context| {
-                                Material::new().child(Text::new("Page 1")).into_widget()
-                            }),
-                        )));
+                        return Some(
+                            (MaterialPageRoute::new(
+                                app,
+                                Rc::new(|_app, _context| {
+                                    Material::new().child(Text::new("Page 1")).into_widget()
+                                }),
+                            ))
+                            .into_erased(),
+                        );
                     }
-                    Some(Route::as_route(
-                        MaterialPageRoute::new(
+                    Some(
+                        (MaterialPageRoute::new(
                             app,
                             Rc::new(|_app, _context| {
                                 Material::new().child(Text::new("Page 2")).into_widget()
                             }),
                         )
-                        .allow_snapshotting(app, second_route_allow_snapshotting),
-                    ))
+                        .allow_snapshotting(app, second_route_allow_snapshotting))
+                        .into_erased(),
+                    )
                 })
             },
         );
@@ -2850,8 +2834,8 @@ mod tests {
                 |app| {
                     app.on_generate_route(|app, settings| {
                         let first = settings.name.as_deref() == Some("/");
-                        Some(Route::as_route(
-                            MaterialPageRoute::new(
+                        Some(
+                            (MaterialPageRoute::new(
                                 app,
                                 Rc::new(move |_app, _context| {
                                     Material::new()
@@ -2859,8 +2843,9 @@ mod tests {
                                         .into_widget()
                                 }),
                             )
-                            .allow_snapshotting(app, false),
-                        ))
+                            .allow_snapshotting(app, false))
+                            .into_erased(),
+                        )
                     })
                 },
             );
@@ -3108,22 +3093,26 @@ mod tests {
             move |app| {
                 app.on_generate_route(move |app, settings| {
                     if settings.name.as_deref() == Some("/") {
-                        return Some(Route::as_route(MaterialPageRoute::new(
-                            app,
-                            Rc::new(|_app, _context| {
-                                Material::new().child(Text::new("Page 1")).into_widget()
-                            }),
-                        )));
+                        return Some(
+                            (MaterialPageRoute::new(
+                                app,
+                                Rc::new(|_app, _context| {
+                                    Material::new().child(Text::new("Page 1")).into_widget()
+                                }),
+                            ))
+                            .into_erased(),
+                        );
                     }
-                    Some(Route::as_route(
-                        MaterialPageRoute::new(
+                    Some(
+                        (MaterialPageRoute::new(
                             app,
                             Rc::new(|_app, _context| {
                                 Material::new().child(Text::new("Page 2")).into_widget()
                             }),
                         )
-                        .allow_snapshotting(app, second_route_allow_snapshotting),
-                    ))
+                        .allow_snapshotting(app, second_route_allow_snapshotting))
+                        .into_erased(),
+                    )
                 })
             },
         );
@@ -3236,7 +3225,7 @@ mod tests {
     fn the_zoom_painters_compare_their_animation_values_to_repaint() {
         let cell = crate::test_support::test_cell();
         let mut app = cell.borrow_mut();
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             &mut app,
             None,
             Some(Duration::from_millis(100)),
@@ -3246,15 +3235,26 @@ mod tests {
             AnimationBehavior::Normal,
             TestVSync,
         );
-        let animation = controller.as_animation();
+        let animation = controller.erase::<AnyAnimation<f64>>();
         let complete = k_always_complete_animation(&mut app);
-        let first = ZoomExitTransitionPainter::new(&mut app, false, animation, complete, animation);
-        let second =
-            ZoomExitTransitionPainter::new(&mut app, false, animation, complete, animation);
-        assert!(!second.should_repaint(&app, first.as_snapshot_painter()));
+        let first = ZoomExitTransitionPainter::new(
+            &mut app,
+            false,
+            animation.clone(),
+            complete.clone(),
+            animation.clone(),
+        );
+        let second = ZoomExitTransitionPainter::new(
+            &mut app,
+            false,
+            animation.clone(),
+            complete.clone(),
+            animation.clone(),
+        );
+        assert!(!second.should_repaint(&app, first.erase::<AnySnapshotPainter>().handle()));
         let reversed =
-            ZoomExitTransitionPainter::new(&mut app, true, animation, complete, animation);
-        assert!(reversed.should_repaint(&app, first.as_snapshot_painter()));
+            ZoomExitTransitionPainter::new(&mut app, true, animation.clone(), complete, animation);
+        assert!(reversed.should_repaint(&app, first.erase::<AnySnapshotPainter>().handle()));
     }
 
     #[test]
@@ -3262,7 +3262,7 @@ mod tests {
         let mut tester = tester_on(TargetPlatform::Android);
         let animation = {
             let mut app = tester.cell.borrow_mut();
-            AnimationController::create(
+            AnimationController::new(
                 &mut app,
                 None,
                 Some(Duration::from_millis(100)),
@@ -3272,10 +3272,10 @@ mod tests {
                 AnimationBehavior::Normal,
                 TestVSync,
             )
-            .as_animation()
+            .into_erased::<AnyAnimation<f64>>()
         };
         let transition = |reverse| ZoomEnterTransition {
-            animation,
+            animation: animation.clone(),
             child: Some(SizedBox::new().width(10.0).height(10.0).into_widget()),
             allow_snapshotting: true,
             reverse,

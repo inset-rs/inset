@@ -734,9 +734,8 @@ mod tests {
     use waft_rendering::{RenderPhysicalModelBase, RenderPhysicalShape};
     use waft_services::{SystemMouseCursor, SystemMouseCursors};
     use waft_widgets::{
-        Align, AnyElement, AnyFocusNode, Builder, Center, Column, Directionality, FocusNode,
-        FocusNodeLeaf, GlobalKey, Icon, IconData, IconTheme, MouseRegion, Padding, SizedBox,
-        downcast_widget,
+        Align, AnyElement, Builder, Center, Column, Directionality, FocusNode, GlobalKey, Icon,
+        IconData, IconTheme, MouseRegion, Padding, SizedBox, downcast_widget,
     };
 
     use super::*;
@@ -750,6 +749,7 @@ mod tests {
         Drawn, WidgetTester, ahem_text, material_app, with_main_thread_stack,
     };
     use crate::theme_data::ThemeData;
+    use waft_widgets::FocusNodeRef;
 
     /// A tester with the OS fonts, which the debug banner and an `Icon` need to lay out, and
     /// the Material icons.
@@ -829,8 +829,8 @@ mod tests {
         shape.elevation(&tester.cell.borrow())
     }
 
-    fn focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
@@ -1093,7 +1093,7 @@ mod tests {
                 tester.pump_widget(material_app(
                     theme,
                     Center::new()
-                        .child(button.focus_node(focus_node))
+                        .child(button.focus_node(focus_node.clone()))
                         .into_widget(),
                 ));
 
@@ -1602,7 +1602,7 @@ mod tests {
                     tester.pump_widget(material_app(
                         theme,
                         Center::new()
-                            .child(button.focus_node(focus_node).autofocus(true))
+                            .child(button.focus_node(focus_node.clone()).autofocus(true))
                             .into_widget(),
                     ));
                 };
@@ -1822,14 +1822,14 @@ mod tests {
                                 enabled.then(pressed),
                                 ahem_text("button").key(label_key.clone().into()),
                             )
-                            .states_controller(controller)
+                            .states_controller(controller.clone())
                             .icon(icon()),
                         )
                         .into_widget(),
                 )
             };
             let value =
-                |tester: &WidgetTester| tester.cell.borrow().get(controller).value().clone();
+                |tester: &WidgetTester| tester.cell.borrow().get(&controller).value().clone();
 
             let first = frame(&tester, true);
             tester.pump_widget(first);

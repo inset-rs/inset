@@ -19,7 +19,7 @@ use waft_rendering::{AnyRenderObject, RenderParagraph, RendererBinding};
 use waft_scheduler::SchedulerBinding;
 use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
 use waft_widgets::{
-    AnyElement, AnyRoute, GlobalKey, IntoWidget, NavigatorState, Text, WidgetsBinding,
+    AnyElement, GlobalKey, IntoWidget, NavigatorState, RouteRef, Text, WidgetsBinding,
     downcast_widget, run_app,
 };
 
@@ -133,7 +133,7 @@ impl Fixture {
             .expect("the CupertinoApp's navigator is mounted")
     }
 
-    fn push(&mut self, route: AnyRoute) {
+    fn push(&mut self, route: RouteRef) {
         let navigator = self.navigator();
         navigator.push(&mut self.cell.borrow_mut(), route);
         self.settle();

@@ -19,8 +19,8 @@ use super::{TreeViewSelectionMode, TreeViewState};
 use crate::*;
 use std::{cell::Cell, rc::Rc, time::Duration};
 use waft_embedder::{Offset, Rect};
-use waft_foundation::{App, Handle, Listener, Timer};
-use waft_gestures::{AnyGestureRecognizer, GestureMultiDragStartCallback};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Timer};
+use waft_gestures::{GestureMultiDragStartCallback, RecognizerRef};
 use waft_widgets::*;
 
 /// XAML `DataPackageOperation`, as a drag within the tree ends.
@@ -184,7 +184,7 @@ impl DraggableWidget for TreeViewItemDraggable {
         &self,
         app: &mut App,
         on_start: GestureMultiDragStartCallback,
-    ) -> AnyGestureRecognizer {
+    ) -> RecognizerRef {
         let data = self.draggable.data.clone().expect("a row's drag data");
         self.draggable.create_recognizer(
             app,
@@ -709,7 +709,7 @@ impl TreeViewState {
             if let Some(timer) = drag.edge_timer.take() {
                 timer.cancel(app);
             }
-            if let Some(ticker) = app.get(self).ticker
+            if let Some(ticker) = app.get(self).ticker.handle()
                 && ticker.is_active(app)
             {
                 ticker.stop(app, false);
@@ -742,7 +742,7 @@ impl TreeViewState {
         drag.velocity = std::mem::take(&mut drag.pending_velocity);
         drag.last_tick = None;
         if drag.velocity != 0.0
-            && let Some(ticker) = app.get(self).ticker
+            && let Some(ticker) = app.get(self).ticker.handle()
             && !ticker.is_active(app)
         {
             ticker.start(app);
