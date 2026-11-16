@@ -2388,6 +2388,7 @@ dependencies = [
  "waft-material",
  "waft-painting",
  "waft-rendering",
+ "waft-services",
  "waft-shell",
  "waft-test",
  "waft-widgets",
