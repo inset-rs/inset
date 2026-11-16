@@ -5,7 +5,8 @@
 //! connection, the client, and [`TextInput`].
 
 use waft_embedder::{
-    FontWeight, Matrix4, Offset, Rect, Size, TextAlign, TextDirection, ViewId, ViewRef,
+    FontWeight, Matrix4, Offset, Rect, Size, TextAlign, TextDirection, TextInputHost, ViewId,
+    ViewRef,
 };
 use waft_foundation::{App, Handle, HandleId, K_IS_WEB, Listener, Task};
 
@@ -799,26 +800,20 @@ impl TextInput {
         app.get_mut(self).current_connection = Some(connection.clone());
         app.get_mut(self).current_configuration = Some(configuration.clone());
         app.get_mut(self).last_connection = Some(connection);
-        platform_attach(app, &configuration);
+        self.with_text_input(app, |text_input| text_input.set_client(&configuration));
     }
 
     fn show(self: Handle<Self>, app: &App) {
-        if let Some(configuration) = app.get(self).current_configuration.clone() {
-            platform_attach(app, &configuration);
-        }
+        self.with_text_input(app, |text_input| text_input.show());
     }
 
     fn update_config(self: Handle<Self>, app: &mut App, configuration: TextInputConfiguration) {
         app.get_mut(self).current_configuration = Some(configuration.clone());
-        platform_attach(app, &configuration);
+        self.with_text_input(app, |text_input| text_input.update_config(&configuration));
     }
 
     fn set_editing_state(self: Handle<Self>, app: &App, value: TextEditingValue) {
-        if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.host().text_input()
-        {
-            text_input.set_editing_state(&value);
-        }
+        self.with_text_input(app, |text_input| text_input.set_editing_state(&value));
     }
 
     fn set_editable_size_and_transform(
@@ -827,45 +822,33 @@ impl TextInput {
         editable_box_size: Size,
         transform: Matrix4,
     ) {
-        if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.host().text_input()
-        {
-            text_input.set_client_geometry(editable_box_size, &transform);
-        }
+        self.with_text_input(app, |text_input| {
+            text_input.set_client_geometry(editable_box_size, &transform)
+        });
     }
 
     fn set_composing_text_rect(self: Handle<Self>, app: &App, rect: Rect) {
-        if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.host().text_input()
-        {
-            text_input.set_composing_rect(rect);
-        }
+        self.with_text_input(app, |text_input| text_input.set_composing_rect(rect));
     }
 
     fn set_caret_rect(self: Handle<Self>, app: &App, rect: Rect) {
-        if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.host().text_input()
-        {
-            text_input.set_caret_rect(rect);
-        }
+        self.with_text_input(app, |text_input| text_input.set_caret_rect(rect));
     }
 
     fn set_selection_rects(self: Handle<Self>, app: &App, selection_rects: &[SelectionRect]) {
-        if let Some(view) = self.target_view(app)
-            && let Some(text_input) = view.host().text_input()
-        {
-            text_input.set_selection_rects(selection_rects);
-        }
+        self.with_text_input(app, |text_input| {
+            text_input.set_selection_rects(selection_rects)
+        });
     }
 
     fn clear_client(self: Handle<Self>, app: &mut App) {
-        platform_detach(app, self);
+        self.with_text_input(app, |text_input| text_input.clear_client());
         app.get_mut(self).current_connection = None;
         self.schedule_hide(app);
     }
 
     fn hide(self: Handle<Self>, app: &App) {
-        platform_detach(app, self);
+        self.with_text_input(app, |text_input| text_input.hide());
     }
 
     fn schedule_hide(self: Handle<Self>, app: &mut App) {
@@ -879,6 +862,16 @@ impl TextInput {
                 self.hide(app);
             }
         }));
+    }
+
+    /// Has `call` reach the text input of the view the current configuration names, where it has
+    /// one.
+    fn with_text_input(self: Handle<Self>, app: &App, call: impl FnOnce(&dyn TextInputHost)) {
+        if let Some(view) = self.target_view(app)
+            && let Some(text_input) = view.host().text_input()
+        {
+            call(text_input);
+        }
     }
 
     fn target_view(self: Handle<Self>, app: &App) -> Option<ViewRef> {
@@ -923,22 +916,6 @@ impl TextInput {
 fn target_view(app: &App, configuration: &TextInputConfiguration) -> Option<ViewRef> {
     let id = configuration.view_id?;
     app.platform().view(ViewId(id as u64))
-}
-
-fn platform_attach(app: &App, configuration: &TextInputConfiguration) {
-    if let Some(view) = target_view(app, configuration)
-        && let Some(text_input) = view.host().text_input()
-    {
-        text_input.start(configuration);
-    }
-}
-
-fn platform_detach(app: &App, input: Handle<TextInput>) {
-    if let Some(view) = input.target_view(app)
-        && let Some(text_input) = view.host().text_input()
-    {
-        text_input.stop();
-    }
 }
 
 const ANDROID_SUPPORTED_INPUT_ACTIONS: &[TextInputAction] = &[

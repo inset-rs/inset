@@ -28,6 +28,7 @@
 // pointers; that is the `unsafe` here.
 #![allow(unsafe_code)]
 
+use std::cell::RefCell;
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use jni::errors::LogErrorAndDefault;
@@ -70,6 +71,9 @@ pub(crate) fn take() -> Vec<(ViewId, TextInputEvent)> {
 /// A view's text input, through the text input view of the activity attached to the view.
 pub(crate) struct AndroidTextInput {
     activity: AttachedActivity,
+    /// The current client's configuration, from `set_client` to `clear_client`, which `show`
+    /// shows the keyboard for again.
+    configuration: RefCell<Option<TextInputConfiguration>>,
 }
 
 impl AndroidTextInput {
@@ -79,7 +83,10 @@ impl AndroidTextInput {
         application: &Application,
         activity: AttachedActivity,
     ) -> Option<AndroidTextInput> {
-        the_keyboard_is_heard(application).then_some(AndroidTextInput { activity })
+        the_keyboard_is_heard(application).then_some(AndroidTextInput {
+            activity,
+            configuration: RefCell::new(None),
+        })
     }
 
     /// What a keyboard does through the attached activity's text input view is told as done to
@@ -103,7 +110,7 @@ impl AndroidTextInput {
 
 type CallResult = jni::errors::Result<()>;
 
-impl TextInputHost for AndroidTextInput {
+impl AndroidTextInput {
     /// Has the field take text, the keyboard told of it as `editor_info` maps its configuration,
     /// and shows the keyboard; for the field that takes text, shows the keyboard again.
     fn start(&self, configuration: &TextInputConfiguration) {
@@ -127,11 +134,39 @@ impl TextInputHost for AndroidTextInput {
         });
     }
 
+    /// No field takes text: the keyboard hides.
     fn stop(&self) {
         self.tell_view("stop", |env, view| {
             env.call_method(view, jni_str!("stop"), jni_sig!("()V"), &[])
                 .map(drop)
         });
+    }
+}
+
+impl TextInputHost for AndroidTextInput {
+    fn set_client(&self, configuration: &TextInputConfiguration) {
+        *self.configuration.borrow_mut() = Some(configuration.clone());
+        self.start(configuration);
+    }
+
+    fn show(&self) {
+        let configuration = self.configuration.borrow().clone();
+        if let Some(configuration) = configuration {
+            self.start(&configuration);
+        }
+    }
+
+    fn update_config(&self, configuration: &TextInputConfiguration) {
+        self.set_client(configuration);
+    }
+
+    fn clear_client(&self) {
+        self.configuration.borrow_mut().take();
+        self.stop();
+    }
+
+    fn hide(&self) {
+        self.stop();
     }
 
     fn set_editing_state(&self, value: &TextEditingValue) {

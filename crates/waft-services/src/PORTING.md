@@ -40,7 +40,7 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
 
 ## text_input.rs → text_input.dart
 
-- Change: text input reaches the host through `View` — start and stop, editing state, composing and caret rects, client geometry.
+- Change: text input reaches the host through `View` — Flutter's `setClient`, `show`, `updateConfig`, `clearClient` and `hide`, editing state, composing and caret rects, client geometry.
   Reason: platform — there are no method channels; the host trait is the channel.
   Affect: on a host that does not implement those methods, `TextInputConnection::show` and the rest do nothing and no IME appears.
 

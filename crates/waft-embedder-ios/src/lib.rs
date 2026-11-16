@@ -112,8 +112,9 @@ pub mod test_support {
             Field(WaftTextField::new(main_thread, ViewId(0)))
         }
 
+        /// The field as a new client's, configured with `configuration`.
         pub fn configure(&self, configuration: &TextInputConfiguration) {
-            self.0.show(Traits::of(configuration));
+            self.0.configure(Traits::of(configuration));
         }
 
         pub fn set_state(&self, value: &TextEditingValue) {
