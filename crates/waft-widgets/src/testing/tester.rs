@@ -9,13 +9,14 @@ use waft_foundation::{App, AppCell};
 use waft_scheduler::{FrameTarget, SchedulerBinding};
 use waft_test::{TestPlatform, TestView};
 
-use crate::{IntoWidget, SizedBox, View, WidgetsBinding};
+use crate::{Center, Container, IntoWidget, SizedBox, Text, View, WidgetsBinding};
 
 /// Dart's `WidgetTester`: an app on a [`TestPlatform`] with one view, and the frames, time and
 /// input a case gives it.
 ///
 /// Dropped after a case that did not panic, it disposes the tree and checks that no timer is
-/// still pending, as flutter_test does after each test.
+/// still pending, as flutter_test does after each test. A case that caught a panic out of a
+/// pump skips both: the frame unwound and left the tree half built (`PORTING.md`).
 pub struct WidgetTester {
     /// The app under test, which the case borrows to read and change the tree.
     pub cell: Rc<AppCell>,
@@ -23,6 +24,8 @@ pub struct WidgetTester {
     view: Rc<TestView>,
     device_pixel_ratio: f64,
     restoration: Option<Rc<TestRestoration>>,
+    /// Whether a pump is running, or began and unwound: a pump that panicked never clears it.
+    in_pump: bool,
 }
 
 /// The host side of flutter_test's `TestRestorationManager`: it answers `Restoration::get` with
@@ -85,15 +88,39 @@ impl WidgetTester {
         let device_pixel_ratio = waft_embedder::View::metrics(&*view).device_pixel_ratio;
         let platform = Rc::new(platform.with_view(Rc::clone(&view) as ViewRef));
         let cell = AppCell::with_platform(Rc::clone(&platform) as waft_embedder::PlatformRef);
-        let tester = WidgetTester {
+        let mut tester = WidgetTester {
             cell,
             platform,
             view,
             device_pixel_ratio,
             restoration: None,
+            in_pump: false,
         };
         tester.install_flutter_test_fonts();
+        tester.pump_pre_test_tree();
         tester
+    }
+
+    /// flutter_test's `_runTestBody` before the case: `runApp(Container(key: UniqueKey(), child:
+    /// _preTestMessage))` and a pump, which resets the tree to a known state. The case's first
+    /// [`pump_widget`](Self::pump_widget) then replaces a tree, building it within its frame, as
+    /// Dart's does.
+    fn pump_pre_test_tree(&mut self) {
+        self.pump_widget(
+            Container::new()
+                .key(waft_foundation::UniqueKey::new().into())
+                .child(
+                    Center::new().child(
+                        Text::new("Test starting...")
+                            .style(
+                                waft_painting::TextStyle::new()
+                                    .color(waft_embedder::Color::new(0xFF917FFF))
+                                    .font_size(40.0),
+                            )
+                            .text_direction(waft_embedder::TextDirection::Ltr),
+                    ),
+                ),
+        );
     }
 
     /// A tester on Android whose host restores `data`: the app that Dart's
@@ -174,6 +201,7 @@ impl WidgetTester {
     /// Dart's `tester.pumpWidget(widget)`: makes `widget` the view's child, schedules a frame
     /// and pumps once.
     pub fn pump_widget<K>(&mut self, widget: impl IntoWidget<K>) {
+        self.in_pump = true;
         {
             let mut app = self.cell.borrow_mut();
             let view = Rc::clone(&self.view) as ViewRef;
@@ -227,6 +255,7 @@ impl WidgetTester {
     /// refreshes each screen that has a frame waiting, with the microtasks flushed before each
     /// half and after the frame, as flutter_test's `pump` flushes them; then the checkpoint.
     fn frame_if_asked(&mut self) {
+        self.in_pump = true;
         {
             let mut app = self.cell.borrow_mut();
             let views = self.platform.take_frame_requests();
@@ -240,6 +269,7 @@ impl WidgetTester {
             app.drain_microtasks();
         }
         self.cell.checkpoint();
+        self.in_pump = false;
     }
 
     /// What Flutter's leak tracking checks: `cycle` (say, opening and closing a route) leaves no
@@ -272,7 +302,7 @@ impl Default for WidgetTester {
 /// flutter_test's checks after a test: the tree is disposed, and then no timer may be pending.
 impl Drop for WidgetTester {
     fn drop(&mut self) {
-        if std::thread::panicking() {
+        if std::thread::panicking() || self.in_pump {
             return;
         }
         self.pump_widget(SizedBox::shrink());

@@ -92,27 +92,24 @@ impl<T: PartialEq + Debug + 'static> SingleChildRenderObjectWidget for Annotated
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
-    use waft_embedder::{Brightness, Offset, SystemUiOverlayStyle, ViewRef};
+    use waft_embedder::{Brightness, Offset, SystemUiOverlayStyle};
     use waft_foundation::AppCell;
     use waft_rendering::{AnnotationResult, AnyContainerLayer, ErasedLayer};
-    use waft_test::{TestPlatform, TestView};
 
     use super::*;
-    use crate::test_harness::{Harness, VIEW_HEIGHT, VIEW_WIDTH, binding_mount};
+    use crate::test_harness::Harness;
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Center, Column, SizedBox};
 
-    /// Mounts `child` in a view of the platform's and runs the first frame, which is where the
-    /// system's bars are styled from the tree. Answers what the view's host was told.
-    fn styles_of_one_frame(child: WidgetRef) -> Vec<SystemUiOverlayStyle> {
-        let view = Rc::new(TestView::new(VIEW_WIDTH, VIEW_HEIGHT));
-        let platform = TestPlatform::new().with_view(Rc::clone(&view) as ViewRef);
-        let cell = AppCell::with_platform(Rc::new(platform));
-        binding_mount(&cell, child);
-        // The style is sent from a microtask, as Dart's `SystemChrome` sends it.
-        cell.checkpoint();
-        view.test_host().overlay_styles()
+    /// Pumps `child`, whose one frame is where the system's bars are styled from the tree, with
+    /// the microtask that sends the style, as Dart's `SystemChrome` sends it. Answers what the
+    /// view's host was told.
+    fn styles_of_one_frame(
+        tester: &mut WidgetTester,
+        child: WidgetRef,
+    ) -> Vec<SystemUiOverlayStyle> {
+        tester.pump_widget(child);
+        tester.view().test_host().overlay_styles()
     }
 
     /// The whole view annotated with one style, so both the status bar and the navigation
@@ -123,40 +120,49 @@ mod tests {
 
     #[test]
     fn one_region_over_the_whole_view_styles_both_of_the_system_bars() {
-        let style = SystemUiOverlayStyle::new()
-            .status_bar_icon_brightness(Brightness::Dark)
-            .system_navigation_bar_icon_brightness(Brightness::Dark);
-        assert_eq!(styles_of_one_frame(the_whole_view(style)), vec![style]);
+        test_widgets(|tester| {
+            let style = SystemUiOverlayStyle::new()
+                .status_bar_icon_brightness(Brightness::Dark)
+                .system_navigation_bar_icon_brightness(Brightness::Dark);
+            assert_eq!(
+                styles_of_one_frame(tester, the_whole_view(style)),
+                vec![style]
+            );
+        });
     }
 
     #[test]
     fn a_view_that_annotates_nothing_leaves_the_system_bars_alone() {
-        assert_eq!(
-            styles_of_one_frame(SizedBox::expand().into_widget()),
-            vec![]
-        );
+        test_widgets(|tester| {
+            assert_eq!(
+                styles_of_one_frame(tester, SizedBox::expand().into_widget()),
+                vec![]
+            );
+        });
     }
 
     #[test]
     fn the_region_under_each_bar_styles_that_bar_and_not_the_other() {
-        let half = |style: SystemUiOverlayStyle| {
-            AnnotatedRegion::new(sized(300.0, 100.0), style).into_widget()
-        };
-        let upper = SystemUiOverlayStyle::new().status_bar_icon_brightness(Brightness::Dark);
-        let lower =
-            SystemUiOverlayStyle::new().system_navigation_bar_icon_brightness(Brightness::Light);
-        let view = Column::new()
-            .children(vec![half(upper), half(lower)])
-            .into_widget();
-        assert_eq!(
-            styles_of_one_frame(view),
-            vec![
-                SystemUiOverlayStyle::new()
-                    .status_bar_icon_brightness(Brightness::Dark)
-                    .system_navigation_bar_icon_brightness(Brightness::Light)
-            ],
-            "the upper region speaks for the status bar and the lower for the navigation bar"
-        );
+        test_widgets(|tester| {
+            let half = |style: SystemUiOverlayStyle| {
+                AnnotatedRegion::new(sized(800.0, 300.0), style).into_widget()
+            };
+            let upper = SystemUiOverlayStyle::new().status_bar_icon_brightness(Brightness::Dark);
+            let lower = SystemUiOverlayStyle::new()
+                .system_navigation_bar_icon_brightness(Brightness::Light);
+            let view = Column::new()
+                .children(vec![half(upper), half(lower)])
+                .into_widget();
+            assert_eq!(
+                styles_of_one_frame(tester, view),
+                vec![
+                    SystemUiOverlayStyle::new()
+                        .status_bar_icon_brightness(Brightness::Dark)
+                        .system_navigation_bar_icon_brightness(Brightness::Light)
+                ],
+                "the upper region speaks for the status bar and the lower for the navigation bar"
+            );
+        });
     }
 
     /// The annotated value; two markers of the same type so one search finds both.

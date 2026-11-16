@@ -89,10 +89,11 @@ mod tests {
     use waft_embedder::{Offset, PointerChange};
     use waft_widgets::{Center, GestureDetector, GlobalKey, MouseRegion, RawTooltip, SizedBox};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{TestPointer, WidgetTester, with_main_thread_stack};
     use crate::tooltip::tests::{
-        TOOLTIP_TEXT, found, m3, pump_app, test_gesture_tap, tester, tooltip_center,
+        TOOLTIP_TEXT, found, m3, pump_app, test_gesture_tap, tooltip_center,
     };
     use crate::tooltip::{Tooltip, TooltipState};
     use waft_widgets::TooltipTriggerMode;
@@ -103,10 +104,10 @@ mod tests {
 
     /// Dart's mouse `TestGesture` added at the origin and wiggled before the tree is pumped.
     fn mouse_at_origin(tester: &mut WidgetTester) -> TestPointer {
-        let mut gesture = WidgetTester::mouse(1, 0);
+        let mut gesture = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut gesture, Offset::ZERO);
         tester.move_to(&mut gesture, Offset::new(1.0, 1.0), false);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         tester.move_to(&mut gesture, Offset::ZERO, false);
         gesture
     }
@@ -114,10 +115,9 @@ mod tests {
     #[test]
     fn tooltip_does_not_build_mouse_region_when_mouse_is_detected_and_in_tooltip_visibility_with_visibility_false()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let gesture = mouse_at_origin(&mut tester);
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            let gesture = mouse_at_origin(tester);
+            pump_app(tester, m3, |_app| {
                 TooltipVisibility::new(
                     false,
                     Tooltip::new().message(TOOLTIP_TEXT).child(sized_100()),
@@ -142,10 +142,9 @@ mod tests {
     }
 
     /// The hover cases: `waitDuration` zero, under a `TooltipVisibility` of `visible`.
-    fn hover(visible: bool) -> (WidgetTester, TestPointer) {
-        let mut tester = tester();
-        let mut gesture = mouse_at_origin(&mut tester);
-        pump_app(&mut tester, m3, |_app| {
+    fn hover(tester: &mut WidgetTester, visible: bool) -> TestPointer {
+        let mut gesture = mouse_at_origin(tester);
+        pump_app(tester, m3, |_app| {
             Center::new()
                 .child(TooltipVisibility::new(
                     visible,
@@ -158,35 +157,35 @@ mod tests {
         });
 
         tester.move_to(&mut gesture, Offset::ZERO, false);
-        tester.pump(Duration::ZERO);
-        let at = tooltip_center(&tester);
+        tester.pump();
+        let at = tooltip_center(tester);
         tester.move_to(&mut gesture, at, false);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         // Wait for it to appear.
-        tester.pump(Duration::ZERO);
-        (tester, gesture)
+        tester.pump();
+        gesture
     }
 
     #[test]
     fn tooltip_does_not_show_when_hovered_when_in_tooltip_visibility_with_visible_false() {
-        with_main_thread_stack(|| {
-            let (mut tester, gesture) = hover(false);
-            assert!(!found(&tester, TOOLTIP_TEXT));
+        test_widgets(|tester| {
+            let gesture = hover(tester, false);
+            assert!(!found(tester, TOOLTIP_TEXT));
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn tooltip_shows_when_hovered_when_in_tooltip_visibility_with_visible_true() {
-        with_main_thread_stack(|| {
-            let (mut tester, mut gesture) = hover(true);
+        test_widgets(|tester| {
+            let mut gesture = hover(tester, true);
             assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
 
             // Wait for it to disappear.
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
             tester.send(&gesture, PointerChange::Remove);
-            assert!(!found(&tester, TOOLTIP_TEXT));
+            assert!(!found(tester, TOOLTIP_TEXT));
         });
     }
 
@@ -210,9 +209,8 @@ mod tests {
 
     #[test]
     fn tooltip_does_not_build_gesture_detector_when_in_tooltip_visibility_with_visibility_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_widget_for_tooltip_mode(&mut tester, TooltipTriggerMode::Tap, false);
+        test_widgets(|tester| {
+            set_widget_for_tooltip_mode(tester, TooltipTriggerMode::Tap, false);
 
             assert!(tester.find_by_type::<GestureDetector>().is_empty());
         });
@@ -221,27 +219,25 @@ mod tests {
     #[test]
     fn tooltip_triggers_on_tap_when_trigger_mode_is_tap_and_in_tooltip_visibility_with_visible_true()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_widget_for_tooltip_mode(&mut tester, TooltipTriggerMode::Tap, true);
+        test_widgets(|tester| {
+            set_widget_for_tooltip_mode(tester, TooltipTriggerMode::Tap, true);
 
-            assert!(!found(&tester, TOOLTIP_TEXT));
+            assert!(!found(tester, TOOLTIP_TEXT));
 
-            let at = tooltip_center(&tester);
-            test_gesture_tap(&mut tester, at);
+            let at = tooltip_center(tester);
+            test_gesture_tap(tester, at);
             assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
         });
     }
 
     /// The manual cases: `ensureTooltipVisible` under a `TooltipVisibility` of `visible`.
-    fn ensure_visible_under(visible: bool) -> WidgetTester {
-        let mut tester = tester();
+    fn ensure_visible_under(tester: &mut WidgetTester, visible: bool) {
         let key = GlobalKey::new();
         let tooltip = Tooltip::new()
             .key(key.clone().into())
             .message(TOOLTIP_TEXT)
             .child(sized_100());
-        pump_app(&mut tester, m3, |_app| {
+        pump_app(tester, m3, |_app| {
             TooltipVisibility::new(visible, tooltip).into_widget()
         });
 
@@ -251,22 +247,21 @@ mod tests {
                 state.ensure_tooltip_visible(&mut app);
             }
         }
-        tester.pump(Duration::ZERO);
-        tester
+        tester.pump();
     }
 
     #[test]
     fn tooltip_does_not_trigger_manually_when_in_tooltip_visibility_with_visible_false() {
-        with_main_thread_stack(|| {
-            let tester = ensure_visible_under(false);
-            assert!(!found(&tester, TOOLTIP_TEXT));
+        test_widgets(|tester| {
+            ensure_visible_under(tester, false);
+            assert!(!found(tester, TOOLTIP_TEXT));
         });
     }
 
     #[test]
     fn tooltip_triggers_manually_when_in_tooltip_visibility_with_visible_true() {
-        with_main_thread_stack(|| {
-            let tester = ensure_visible_under(true);
+        test_widgets(|tester| {
+            ensure_visible_under(tester, true);
             assert_eq!(tester.find_text(TOOLTIP_TEXT).len(), 1);
         });
     }

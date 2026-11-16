@@ -1,55 +1,19 @@
-//! Shared test scaffolding: a platform with one view to run widgets under, and one pumped
-//! frame.
+//! What this crate's tests share beside `waft_widgets::testing`'s one tester.
 
-use std::rc::Rc;
-use std::time::Duration;
+use waft_embedder::Offset;
 
-use waft_embedder::{TargetPlatform, ViewId, ViewRef};
-use waft_foundation::{App, AppCell};
-use waft_scheduler::SchedulerBinding;
-use waft_test::{TestPlatform, TestView};
-use waft_widgets::{IntoWidget, View, WidgetRef, run_widget};
-
-/// The 800x600 physical view at 2x every test app draws into.
-pub(crate) fn test_view() -> ViewRef {
-    Rc::new(TestView::with_pixel_ratio(800.0, 600.0, 2.0))
+/// Dart's `expect(actual, expected)` on a position that went through a render object's
+/// transform: `Matrix4` is valo's f32 matrix, so it carries f32 rounding that Dart's f64 has
+/// not, and nothing more.
+pub(crate) fn assert_near(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() <= f64::from(f32::EPSILON) * expected.abs().max(1.0),
+        "{actual} is not {expected}"
+    );
 }
 
-/// An app on a platform with one 2x view, so pointer packets find their view.
-pub(crate) fn test_cell() -> Rc<AppCell> {
-    let platform = TestPlatform::new()
-        .on(TargetPlatform::IOS)
-        .with_view(test_view());
-    AppCell::with_platform(Rc::new(platform))
-}
-
-/// Mounts `child` under the platform's view and runs the first frame.
-pub(crate) fn build(cell: &AppCell, child: WidgetRef) {
-    {
-        let mut app = cell.borrow_mut();
-        let view = app
-            .platform()
-            .views()
-            .into_iter()
-            .next()
-            .expect("an app from test_support::test_cell");
-        run_widget(&mut app, View::new(view, child).into_widget());
-    }
-    // `run_app` attaches the root widget on the next timer turn, as Dart's `Timer.run` does.
-    cell.elapse(Duration::ZERO);
-    pump(&mut cell.borrow_mut(), Duration::ZERO);
-}
-
-/// Runs one frame at `at`, of every view the platform has.
-pub(crate) fn pump(app: &mut App, at: Duration) {
-    let views: Vec<ViewId> = app
-        .platform()
-        .views()
-        .iter()
-        .map(|view| view.id())
-        .collect();
-    SchedulerBinding::handle_begin_frame(app, &views, Some(at));
-    app.drain_microtasks();
-    SchedulerBinding::handle_draw_frame(app, &views);
-    app.drain_microtasks();
+/// [`assert_near`] on both coordinates of a global position.
+pub(crate) fn assert_offset_near(actual: Offset, expected: Offset) {
+    assert_near(actual.dx(), expected.dx());
+    assert_near(actual.dy(), expected.dy());
 }

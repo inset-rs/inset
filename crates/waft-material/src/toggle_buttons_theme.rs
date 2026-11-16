@@ -363,11 +363,12 @@ mod tests {
     use waft_widgets::{Center, Directionality, Icon, Row, Text, WidgetState, WidgetStateColor};
     use waft_widgets::{SizedBox, WidgetStates};
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
     use crate::icons::Icons;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::with_main_thread_stack;
     use crate::theme_data::MaterialTapTargetSize;
     use crate::toggle_buttons::ToggleButtons;
     use crate::toggle_buttons::tests::{
@@ -375,7 +376,6 @@ mod tests {
         icon_theme_color, material_color, paints_physical_model_then_strokes,
         select_toggle_button_objects, style_color, texts, three_icons,
     };
-    use crate::tooltip::tests::tester;
 
     /// `Material(child: boilerplate(child: ToggleButtonsTheme(data:, child:)))`.
     fn themed(data: ToggleButtonsThemeData, buttons: ToggleButtons) -> WidgetRef {
@@ -447,8 +447,7 @@ mod tests {
     // 'Theme text style, except color, is applied'
     #[test]
     fn the_theme_text_style_is_applied_except_its_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(themed(
                 ToggleButtonsThemeData::new().text_style(
                     TextStyle::new()
@@ -461,7 +460,7 @@ mod tests {
             ));
 
             for text in ["First child", "Second child"] {
-                let text_style = button_text_style(&tester, text);
+                let text_style = button_text_style(tester, text);
                 assert_eq!(text_style.text_baseline, Some(TextBaseline::Ideographic));
                 assert_eq!(text_style.font_size, Some(20.0));
                 assert_ne!(style_color(&text_style), Some(Colors::ORANGE.primary()));
@@ -472,8 +471,7 @@ mod tests {
     // 'Custom BoxConstraints'
     #[test]
     fn the_theme_box_constraints_size_the_buttons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test for minimum constraints
             tester.pump_widget(themed(
                 ToggleButtonsThemeData::new()
@@ -483,7 +481,7 @@ mod tests {
                     .on_pressed(|_app, _index| {}),
             ));
             for index in 0..3 {
-                let rect = button_rect(&tester, index);
+                let rect = button_rect(tester, index);
                 assert_eq!(rect.width(), 50.0);
                 assert_eq!(rect.height(), 60.0);
             }
@@ -497,7 +495,7 @@ mod tests {
                     .on_pressed(|_app, _index| {}),
             ));
             for index in 0..3 {
-                let rect = button_rect(&tester, index);
+                let rect = button_rect(tester, index);
                 assert_eq!(rect.width(), 20.0);
                 assert_eq!(rect.height(), 10.0);
             }
@@ -507,9 +505,8 @@ mod tests {
     // 'Theme text/icon colors for enabled, selected and disabled states'
     #[test]
     fn the_theme_text_and_icon_colors_follow_the_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let check = Icons::check();
             let enabled_color = Colors::LIME.primary();
             let selected_color = Colors::GREEN.primary();
@@ -524,10 +521,10 @@ mod tests {
             // Custom theme enabled color
             assert_ne!(theme.color_scheme.on_surface, enabled_color);
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(enabled_color)
             );
-            assert_eq!(icon_theme_color(&tester, &check), Some(enabled_color));
+            assert_eq!(icon_theme_color(tester, &check), Some(enabled_color));
 
             tester.pump_widget(themed(
                 ToggleButtonsThemeData::new().selected_color(selected_color),
@@ -539,10 +536,10 @@ mod tests {
             // Custom theme selected color
             assert_ne!(theme.color_scheme.primary, selected_color);
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(selected_color)
             );
-            assert_eq!(icon_theme_color(&tester, &check), Some(selected_color));
+            assert_eq!(icon_theme_color(tester, &check), Some(selected_color));
 
             tester.pump_widget(themed(
                 ToggleButtonsThemeData::new().disabled_color(disabled_color),
@@ -552,18 +549,17 @@ mod tests {
             // Custom theme disabled color
             assert_ne!(theme.disabled_color, disabled_color);
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(disabled_color)
             );
-            assert_eq!(icon_theme_color(&tester, &check), Some(disabled_color));
+            assert_eq!(icon_theme_color(tester, &check), Some(disabled_color));
         });
     }
 
     // 'Theme button fillColor'
     #[test]
     fn the_theme_fill_color_fills_a_selected_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_fill_color = Colors::GREEN.primary();
             tester.pump_widget(themed(
                 ToggleButtonsThemeData::new().fill_color(custom_fill_color),
@@ -572,7 +568,7 @@ mod tests {
             ));
 
             let (color, material_type) =
-                button_material(&tester, None, |material| (material.color, material.r#type));
+                button_material(tester, None, |material| (material.color, material.r#type));
             assert_eq!(color, Some(custom_fill_color));
             assert_eq!(material_type, MaterialType::Button);
         });
@@ -581,8 +577,7 @@ mod tests {
     // 'Custom Theme button fillColor in different states'
     #[test]
     fn a_widget_state_theme_fill_color_resolves_in_the_button_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let enabled_fill_color = Colors::GREEN.primary();
             let selected_fill_color = Colors::BLUE.primary();
             let disabled_fill_color = Colors::YELLOW.primary();
@@ -603,11 +598,11 @@ mod tests {
             ));
             tester.pump_and_settle();
             assert_eq!(
-                material_color(&tester, "First child"),
+                material_color(tester, "First child"),
                 Some(selected_fill_color)
             );
             assert_eq!(
-                material_color(&tester, "Second child"),
+                material_color(tester, "Second child"),
                 Some(enabled_fill_color)
             );
 
@@ -616,11 +611,11 @@ mod tests {
                 ToggleButtons::new(texts(&["First child", "Second child"]), vec![true, false]),
             ));
             assert_eq!(
-                material_color(&tester, "First child"),
+                material_color(tester, "First child"),
                 Some(disabled_fill_color)
             );
             assert_eq!(
-                material_color(&tester, "Second child"),
+                material_color(tester, "Second child"),
                 Some(disabled_fill_color)
             );
         });
@@ -629,14 +624,13 @@ mod tests {
     // 'Theme InkWell colors'
     #[test]
     fn the_theme_ink_colors_are_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let splash_color = Color::new(0xff4caf50);
             let highlight_color = Color::new(0xffcddc39);
             let hover_color = Color::new(0xffffeb3b);
             let focus_color = Color::new(0xffffff00);
             check_ink_colors(
-                &mut tester,
+                tester,
                 |focus_node| {
                     themed(
                         ToggleButtonsThemeData::new()
@@ -658,8 +652,7 @@ mod tests {
     // 'Theme border width and border colors for enabled, selected and disabled states'
     #[test]
     fn the_theme_border_width_and_colors_follow_the_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border_color = Color::new(0xff4caf50);
             let selected_border_color = Color::new(0xffcddc39);
             let disabled_border_color = Color::new(0xffffeb3b);
@@ -681,9 +674,9 @@ mod tests {
                     .border_width(CUSTOM_WIDTH),
                 button(false, true),
             ));
-            let render = select_toggle_button_objects(&tester)[0].as_object();
+            let render = select_toggle_button_objects(tester)[0].as_object();
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 render,
                 false,
                 &[(border_color, CUSTOM_WIDTH)]
@@ -695,9 +688,9 @@ mod tests {
                     .border_width(CUSTOM_WIDTH),
                 button(true, true),
             ));
-            let render = select_toggle_button_objects(&tester)[0].as_object();
+            let render = select_toggle_button_objects(tester)[0].as_object();
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 render,
                 true,
                 &[(selected_border_color, CUSTOM_WIDTH)]
@@ -709,9 +702,9 @@ mod tests {
                     .border_width(CUSTOM_WIDTH),
                 button(false, false),
             ));
-            let render = select_toggle_button_objects(&tester)[0].as_object();
+            let render = select_toggle_button_objects(tester)[0].as_object();
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 render,
                 false,
                 &[(disabled_border_color, CUSTOM_WIDTH)]

@@ -856,7 +856,6 @@ impl<T: Clone + PartialEq + 'static> RadioGroupRegistry<T> for RadioRegistry<T> 
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
-    use std::time::Duration;
 
     use waft_embedder::{Matrix4, Offset, PointerChange, Size, TargetPlatform};
     use waft_foundation::K_IS_WEB;
@@ -866,6 +865,8 @@ mod tests {
         Center, Container, FocusHighlightStrategy, GlobalKey, ListView, SizedBox, StatefulBuilder,
         Text, WidgetStateProperty,
     };
+
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
     use super::*;
     use crate::checkbox_list_tile::tests::{
@@ -888,9 +889,8 @@ mod tests {
     };
     use crate::radio_theme::RadioThemeData;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{AhemText, WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{pump_app, tester};
+    use crate::tooltip::tests::pump_app;
 
     fn log_into(log: &Rc<RefCell<Vec<Option<i32>>>>) -> ValueChanged<Option<i32>> {
         let log = Rc::clone(log);
@@ -954,8 +954,7 @@ mod tests {
     /// `Radio`, as radio.rs's toggleable case does.
     #[test]
     fn radio_list_tile_can_be_toggled_when_toggleable_is_set() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let key = GlobalKey::new();
             let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
@@ -998,8 +997,7 @@ mod tests {
 
     #[test]
     fn radio_list_tile_should_initialize_according_to_group_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_value = Rc::new(Cell::new(None));
             let log = Rc::new(RefCell::new(Vec::new()));
             let checked = |tester: &WidgetTester| -> Vec<bool> {
@@ -1013,29 +1011,28 @@ mod tests {
                     .collect()
             };
             let frame = three_tiles(&selected_value, &log, false);
-            pump_wrapped(&mut tester, |_app| frame);
-            assert_eq!(checked(&tester), [false, false, false]);
+            pump_wrapped(tester, |_app| frame);
+            assert_eq!(checked(tester), [false, false, false]);
 
             selected_value.set(Some(1));
             let frame = three_tiles(&selected_value, &log, false);
-            pump_wrapped(&mut tester, |_app| frame);
-            assert_eq!(checked(&tester), [false, true, false]);
+            pump_wrapped(tester, |_app| frame);
+            assert_eq!(checked(tester), [false, true, false]);
         });
     }
 
     #[test]
     fn radio_list_tile_forwards_states_controller_to_list_tile() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = WidgetStatesController::new(&mut tester.cell.borrow_mut(), None);
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 RadioListTile::new(1)
                     .group_value(1)
                     .on_changed(no_op())
                     .states_controller(controller.clone())
                     .into_widget()
             });
-            let forwarded = tester.widget(nth::<ListTile>(&tester, 0), |tile: &ListTile| {
+            let forwarded = tester.widget(nth::<ListTile>(tester, 0), |tile: &ListTile| {
                 tile.states_controller.clone()
             });
             assert_eq!(forwarded, Some(controller));
@@ -1044,8 +1041,7 @@ mod tests {
 
     #[test]
     fn radio_list_tile_simple_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let title_key = GlobalKey::new();
             let log = Rc::new(RefCell::new(Vec::new()));
@@ -1071,25 +1067,24 @@ mod tests {
                     tester.tap(at, 1);
                 };
 
-            frame(&mut tester, 2, true, false);
+            frame(tester, 2, true, false);
             assert_eq!(*log.borrow(), [Some(1)]);
             log.borrow_mut().clear();
 
-            frame(&mut tester, 1, true, false);
+            frame(tester, 1, true, false);
             assert!(log.borrow().is_empty());
 
-            frame(&mut tester, 2, false, false);
+            frame(tester, 2, false, false);
             assert!(log.borrow().is_empty());
 
-            frame(&mut tester, 2, true, true);
+            frame(tester, 2, true, true);
             assert_eq!(*log.borrow(), [Some(1)]);
         });
     }
 
     #[test]
     fn radio_list_tile_control_tests() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_value = Rc::new(Cell::new(None));
             let log = Rc::new(RefCell::new(Vec::new()));
             let separator = || log.borrow_mut().push(Some(-1));
@@ -1099,70 +1094,74 @@ mod tests {
             };
 
             // Tests for tapping between [Radio] and [ListTile]
-            frame(&mut tester);
-            tap_text(&mut tester, "1");
+            frame(tester);
+            tap_text(tester, "1");
             separator();
-            tap_radio(&mut tester, 2);
+            tap_radio(tester, 2);
             assert_eq!(*log.borrow(), [Some(1), Some(-1), Some(2)]);
             separator();
-            tap_text(&mut tester, "1");
+            tap_text(tester, "1");
 
             log.borrow_mut().clear();
             selected_value.set(None);
 
             // Tests for tapping across [Radio]s exclusively
-            frame(&mut tester);
-            tap_radio(&mut tester, 1);
+            frame(tester);
+            tap_radio(tester, 1);
             separator();
-            tap_radio(&mut tester, 2);
+            tap_radio(tester, 2);
             assert_eq!(*log.borrow(), [Some(1), Some(-1), Some(2)]);
 
             log.borrow_mut().clear();
             selected_value.set(None);
 
             // Tests for tapping across [ListTile]s exclusively
-            frame(&mut tester);
-            tap_text(&mut tester, "1");
+            frame(tester);
+            tap_text(tester, "1");
             separator();
-            tap_text(&mut tester, "2");
+            tap_text(tester, "2");
             assert_eq!(*log.borrow(), [Some(1), Some(-1), Some(2)]);
         });
     }
 
     /// "Selected RadioListTile should not trigger onChanged" and "... should trigger
     /// onChanged when toggleable".
-    fn tap_selected_tile(toggleable: bool, expected: [&[Option<i32>]; 3]) {
+    fn tap_selected_tile(
+        tester: &mut WidgetTester,
+        toggleable: bool,
+        expected: [&[Option<i32>]; 3],
+    ) {
         // Regression test for https://github.com/flutter/flutter/issues/30311
-        let mut tester = tester();
         let selected_value = Rc::new(Cell::new(None));
         let log = Rc::new(RefCell::new(Vec::new()));
         let frame = three_tiles(&selected_value, &log, toggleable);
-        pump_wrapped(&mut tester, |_app| frame);
+        pump_wrapped(tester, |_app| frame);
 
-        tap_text(&mut tester, "0");
-        tester.pump(Duration::ZERO);
+        tap_text(tester, "0");
+        tester.pump();
         assert_eq!(*log.borrow(), expected[0]);
 
-        tap_text(&mut tester, "0");
-        tester.pump(Duration::ZERO);
+        tap_text(tester, "0");
+        tester.pump();
         assert_eq!(*log.borrow(), expected[1]);
 
-        tap_radio(&mut tester, 0);
-        tester.pump(Duration::ZERO);
+        tap_radio(tester, 0);
+        tester.pump();
         assert_eq!(*log.borrow(), expected[2]);
     }
 
     #[test]
     fn selected_radio_list_tile_should_not_trigger_on_changed() {
-        with_main_thread_stack(|| {
-            tap_selected_tile(false, [&[Some(0)], &[Some(0)], &[Some(0)]]);
+        test_widgets(|tester| {
+            tap_selected_tile(tester, false, [&[Some(0)], &[Some(0)], &[Some(0)]]);
         });
     }
 
     #[test]
     fn selected_radio_list_tile_should_trigger_on_changed_when_toggleable() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             tap_selected_tile(
+                tester,
                 true,
                 [&[Some(0)], &[Some(0), None], &[Some(0), None, Some(0)]],
             );
@@ -1171,12 +1170,11 @@ mod tests {
 
     #[test]
     fn radio_list_tile_can_autofocus_unless_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child_key = GlobalKey::new();
             for (enabled, focused) in [(true, true), (false, false)] {
                 let key = child_key.clone();
-                pump_wrapped(&mut tester, move |_app| {
+                pump_wrapped(tester, move |_app| {
                     let mut tile = RadioListTile::new(1)
                         .group_value(2)
                         .title(Text::new("Title").key(key.into()))
@@ -1186,31 +1184,30 @@ mod tests {
                     }
                     tile.into_widget()
                 });
-                tester.pump(Duration::ZERO);
-                let node = focus_of(&tester, &child_key);
-                assert_eq!(has_primary_focus(&tester, node), focused);
+                tester.pump();
+                let node = focus_of(tester, &child_key);
+                assert_eq!(has_primary_focus(tester, node), focused);
             }
         });
     }
 
     #[test]
     fn radio_list_tile_content_padding_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         RadioListTile::new(true)
                             .group_value(true)
-                            .title(AhemText::new("Title"))
+                            .title(Text::new("Title"))
                             .on_changed(no_op())
                             .content_padding(EdgeInsets::from_ltrb(8.0, 10.0, 15.0, 20.0)),
                     )
                     .into_widget()
             });
-            let padding_rect = rect_of::<waft_widgets::SafeArea>(&tester, 0);
-            let radio_rect = rect_of::<Radio<bool>>(&tester, 0);
-            let title_rect = text_rect(&tester, "Title");
+            let padding_rect = rect_of::<waft_widgets::SafeArea>(tester, 0);
+            let radio_rect = rect_of::<Radio<bool>>(tester, 0);
+            let title_rect = text_rect(tester, "Title");
 
             // Get the taller Rect of the Radio and Text widgets
             let taller_rect = if radio_rect.height() > title_rect.height() {
@@ -1240,9 +1237,8 @@ mod tests {
 
     #[test]
     fn radio_list_tile_respects_shape() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_in_material(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_in_material(tester, m3, |_app| {
                 RadioListTile::new(true)
                     .group_value(true)
                     .title(Text::new("Title"))
@@ -1250,16 +1246,15 @@ mod tests {
                     .into_widget()
             });
             let shape: ShapeBorderRef = ShapeBorderRef::new(right_rounded_border());
-            assert!(ink_well_custom_border(&tester).as_deref() == Some(&*shape));
+            assert!(ink_well_custom_border(tester).as_deref() == Some(&*shape));
         });
     }
 
     #[test]
     fn radio_list_tile_respects_tile_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tile_color = Colors::RED.shade500();
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         RadioListTile::new(false)
@@ -1269,16 +1264,15 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(&tester).contains(&tile_color.to_argb32()));
+            assert!(ink_rect_colors(tester).contains(&tile_color.to_argb32()));
         });
     }
 
     #[test]
     fn radio_list_tile_respects_selected_tile_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_tile_color = Colors::GREEN.shade500();
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         RadioListTile::new(false)
@@ -1289,21 +1283,20 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(&tester).contains(&selected_tile_color.to_argb32()));
+            assert!(ink_rect_colors(tester).contains(&selected_tile_color.to_argb32()));
         });
     }
 
     #[test]
     fn radio_list_tile_selected_item_text_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/pull/76906
-            let mut tester = tester();
             const ACTIVE_COLOR: Color = Color::new(0xff00ff00);
             for (active_color, fill_color) in
                 [(None, Some(ACTIVE_COLOR)), (Some(ACTIVE_COLOR), None)]
             {
                 pump_app(
-                    &mut tester,
+                    tester,
                     move |app| {
                         ThemeData::builder()
                             .radio_theme(RadioThemeData::new().fill_color(
@@ -1338,9 +1331,8 @@ mod tests {
 
     #[test]
     fn radio_list_tile_respects_visual_density() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         RadioListTile::new(false)
@@ -1353,7 +1345,7 @@ mod tests {
             });
             tester.pump_and_settle();
             assert_eq!(
-                rect_of::<RadioListTile<bool>>(&tester, 0).size(),
+                rect_of::<RadioListTile<bool>>(tester, 0).size(),
                 Size::new(800.0, 56.0)
             );
         });
@@ -1361,11 +1353,10 @@ mod tests {
 
     #[test]
     fn radio_list_tile_respects_focus_node() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child_key = GlobalKey::new();
             let key = child_key.clone();
-            pump_wrapped(&mut tester, move |_app| {
+            pump_wrapped(tester, move |_app| {
                 Center::new()
                     .child(
                         RadioListTile::new(false)
@@ -1375,20 +1366,20 @@ mod tests {
                     )
                     .into_widget()
             });
-            tester.pump(Duration::ZERO);
-            let tile_node = focus_of(&tester, &child_key);
+            tester.pump();
+            let tile_node = focus_of(tester, &child_key);
             tile_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO); // Let the focus take effect.
-            let node = focus_of(&tester, &child_key);
-            assert!(has_primary_focus(&tester, node));
-            assert!(has_primary_focus(&tester, tile_node));
+            tester.pump(); // Let the focus take effect.
+            let node = focus_of(tester, &child_key);
+            assert!(has_primary_focus(tester, node));
+            assert!(has_primary_focus(tester, tile_node));
         });
     }
 
     #[test]
     fn radio_list_tile_on_focus_change_callback() {
-        with_main_thread_stack(|| {
-            check_on_focus_change(|node, on_focus_change| {
+        test_widgets(|tester| {
+            check_on_focus_change(tester, |node, on_focus_change| {
                 RadioListTile::new(true)
                     .focus_node(node)
                     .on_focus_change(on_focus_change)
@@ -1401,26 +1392,25 @@ mod tests {
 
     #[test]
     fn radio_changes_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test Radio() constructor
             pump_in_forbidden_region(
-                &mut tester,
+                tester,
                 RadioListTile::new(1)
                     .mouse_cursor(MouseCursorRef::from(SystemMouseCursors::TEXT))
                     .on_changed(no_op())
                     .group_value(2)
                     .into_widget(),
             );
-            let mut gesture = WidgetTester::mouse(1, 0);
-            let center = center_of_radio::<i32>(&tester);
+            let mut gesture = TestPointer::mouse(1, 0);
+            let center = center_of_radio::<i32>(tester);
             tester.add_pointer(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
 
             // Test default cursor
             pump_in_forbidden_region(
-                &mut tester,
+                tester,
                 RadioListTile::new(1)
                     .on_changed(no_op())
                     .group_value(2)
@@ -1434,10 +1424,7 @@ mod tests {
             assert_eq!(Some(tester.active_cursor(1)), Some(expected));
 
             // Test default cursor when disabled
-            pump_in_forbidden_region(
-                &mut tester,
-                RadioListTile::new(1).group_value(2).into_widget(),
-            );
+            pump_in_forbidden_region(tester, RadioListTile::new(1).group_value(2).into_widget());
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
             tester.send(&gesture, PointerChange::Remove);
         });
@@ -1468,7 +1455,7 @@ mod tests {
 
     #[test]
     fn radio_list_tile_respects_fill_color_in_enabled_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ACTIVE_ENABLED_FILL_COLOR: Color = Color::new(0xFF000001);
             const ACTIVE_DISABLED_FILL_COLOR: Color = Color::new(0xFF000002);
             const INACTIVE_ENABLED_FILL_COLOR: Color = Color::new(0xFF000003);
@@ -1485,7 +1472,6 @@ mod tests {
                 }
                 INACTIVE_ENABLED_FILL_COLOR
             });
-            let mut tester = tester();
             let group_value = Rc::new(Cell::new(Some(0)));
             // The tile's transparent `Ink`, Dart's `..rect()`, is not recorded.
             let selected = |color: Color| [circle(color), circle(color)];
@@ -1501,17 +1487,16 @@ mod tests {
                 let host = stateful_tile(&group_value, enabled, move |tile| {
                     tile.fill_color(Rc::clone(&fill_color))
                 });
-                pump_wrapped(&mut tester, |_app| host);
+                pump_wrapped(tester, |_app| host);
                 tester.pump_and_settle();
-                assert_paints(&tester, radio_material::<i32>(&tester), &expected);
+                assert_paints(tester, radio_material::<i32>(tester), &expected);
             }
         });
     }
 
     #[test]
     fn radio_list_tile_respects_fill_color_in_hovered_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const HOVERED_FILL_COLOR: Color = Color::new(0xFF000001);
             let fill_color = colors(|states| {
@@ -1524,16 +1509,16 @@ mod tests {
             let host = stateful_tile(&group_value, true, move |tile| {
                 tile.fill_color(Rc::clone(&fill_color))
             });
-            pump_wrapped(&mut tester, |_app| host);
+            pump_wrapped(tester, |_app| host);
             tester.pump_and_settle();
 
             // Start hovering
-            let center = center_of_radio::<i32>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<i32>(tester);
+            hover_at(tester, center);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[any_rect(), any_circle(), circle(HOVERED_FILL_COLOR)],
             );
         });
@@ -1541,8 +1526,7 @@ mod tests {
 
     #[test]
     fn material3_radio_list_tile_respects_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let hover_color = Colors::ORANGE.shade500();
             let theme = m3(&tester.cell.borrow());
@@ -1556,39 +1540,39 @@ mod tests {
                 // do not reach; the tile is on a `Material` inside the route here.
                 let theme = theme.clone();
                 pump_in_material(tester, move |_app| theme, |_app| host);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 tester.pump_and_settle();
             };
 
-            frame(&mut tester, true);
+            frame(tester, true);
             let primary = theme.color_scheme.primary;
             // The tile's transparent `Ink`, Dart's `..rect()`, is not recorded.
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(primary), circle(primary)],
             );
 
             // Start hovering
-            let center = center_of_radio::<i32>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<i32>(tester);
+            hover_at(tester, center);
 
             // Check when the radio isn't selected.
             group_value.set(Some(1));
-            frame(&mut tester, true);
+            frame(tester, true);
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[any_rect(), circle(hover_color)],
             );
 
             // Check when the radio is selected, but disabled.
             group_value.set(Some(0));
-            frame(&mut tester, false);
+            frame(tester, false);
             let disabled = theme.color_scheme.on_surface.with_opacity(0.38);
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(disabled), circle(disabled)],
             );
         });
@@ -1596,8 +1580,7 @@ mod tests {
 
     #[test]
     fn material3_radio_list_tile_respects_overlay_color_in_active_pressed_hovered_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const FILL_COLOR: Color = Color::new(0xFF000000);
             const ACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000001);
@@ -1651,24 +1634,24 @@ mod tests {
             .into_iter()
             .enumerate()
             {
-                frame(&mut tester, active, use_overlay);
-                let center = center_of_radio::<bool>(&tester);
-                press_at(&mut tester, center, pointer as i64 + 2);
+                frame(tester, active, use_overlay);
+                let center = center_of_radio::<bool>(tester);
+                press_at(tester, center, pointer as i64 + 2);
                 tester.pump_and_settle();
-                assert_paints(&tester, radio_material::<bool>(&tester), &pressed(expected));
+                assert_paints(tester, radio_material::<bool>(tester), &pressed(expected));
             }
 
             // Start hovering.
-            let center = center_of_radio::<bool>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<bool>(tester);
+            hover_at(tester, center);
             tester.pump_and_settle();
 
             tester.pump_widget(Container::new().into_widget());
-            frame(&mut tester, false, true);
+            frame(tester, false, true);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[
                     Paints::Rect {
                         color: Some(Color::new(0x0a000000)),
@@ -1682,8 +1665,7 @@ mod tests {
 
     #[test]
     fn material2_radio_list_tile_respects_overlay_color_in_active_pressed_hovered_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const FILL_COLOR: Color = Color::new(0xFF000000);
             const ACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000001);
@@ -1727,28 +1709,28 @@ mod tests {
             .into_iter()
             .enumerate()
             {
-                frame(&mut tester, active, use_overlay);
-                let center = center_of_radio::<bool>(&tester);
-                press_at(&mut tester, center, pointer as i64 + 2);
+                frame(tester, active, use_overlay);
+                let center = center_of_radio::<bool>(tester);
+                press_at(tester, center, pointer as i64 + 2);
                 tester.pump_and_settle();
                 assert_paints(
-                    &tester,
-                    radio_material::<bool>(&tester),
+                    tester,
+                    radio_material::<bool>(tester),
                     &[any_circle(), circle(expected).radius(20.0)],
                 );
             }
 
             // Start hovering.
-            let center = center_of_radio::<bool>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<bool>(tester);
+            hover_at(tester, center);
             tester.pump_and_settle();
 
             tester.pump_widget(Container::new().into_widget());
-            frame(&mut tester, false, true);
+            frame(tester, false, true);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<bool>(&tester),
+                tester,
+                radio_material::<bool>(tester),
                 &[circle(HOVER_OVERLAY_COLOR).radius(20.0)],
             );
         });
@@ -1756,8 +1738,7 @@ mod tests {
 
     #[test]
     fn material2_radio_list_tile_respects_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let hover_color = Colors::ORANGE.shade500();
             let group_value = Rc::new(Cell::new(Some(0)));
@@ -1767,39 +1748,39 @@ mod tests {
                 });
                 // As in the Material 3 case, the tile is on a `Material` inside the route.
                 pump_in_material(tester, m2, |_app| host);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 tester.pump_and_settle();
             };
 
-            frame(&mut tester, true);
+            frame(tester, true);
             let blue = Color::new(0xff2196f3);
             // The tile's transparent `Ink`, Dart's `..rect()`, is not recorded.
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(blue), circle(blue)],
             );
 
             // Start hovering
-            let center = center_of_radio::<i32>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<i32>(tester);
+            hover_at(tester, center);
 
             // Check when the radio isn't selected.
             group_value.set(Some(1));
-            frame(&mut tester, true);
+            frame(tester, true);
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[any_rect(), circle(hover_color)],
             );
 
             // Check when the radio is selected, but disabled.
             group_value.set(Some(0));
-            frame(&mut tester, false);
+            frame(tester, false);
             let disabled = Color::new(0x61000000);
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(disabled), circle(disabled)],
             );
         });
@@ -1807,12 +1788,11 @@ mod tests {
 
     #[test]
     fn radio_list_tile_respects_splash_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const SPLASH_RADIUS: f64 = 30.0;
             let orange = Colors::ORANGE.shade500();
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 RadioListTile::new(0)
                     .on_changed(no_op())
                     .hover_color(orange)
@@ -1821,12 +1801,12 @@ mod tests {
                     .into_widget()
             });
             tester.pump_and_settle();
-            let center = center_of_radio::<i32>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<i32>(tester);
+            hover_at(tester, center);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[circle(orange).radius(SPLASH_RADIUS)],
             );
         });
@@ -1834,9 +1814,8 @@ mod tests {
 
     #[test]
     fn radio_respects_material_tap_target_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_wrapped(tester, |_app| {
                 RadioListTile::new(true)
                     .group_value(true)
                     .on_changed(no_op())
@@ -1844,11 +1823,11 @@ mod tests {
             });
             // default test
             assert_eq!(
-                rect_of::<Radio<bool>>(&tester, 0).size(),
+                rect_of::<Radio<bool>>(tester, 0).size(),
                 Size::new(40.0, 40.0)
             );
 
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 RadioListTile::new(true)
                     .material_tap_target_size(MaterialTapTargetSize::Padded)
                     .group_value(true)
@@ -1856,7 +1835,7 @@ mod tests {
                     .into_widget()
             });
             assert_eq!(
-                rect_of::<Radio<bool>>(&tester, 0).size(),
+                rect_of::<Radio<bool>>(tester, 0).size(),
                 Size::new(48.0, 48.0)
             );
         });
@@ -1864,8 +1843,8 @@ mod tests {
 
     #[test]
     fn radio_list_tile_control_widget_should_not_request_focus_on_traversal() {
-        with_main_thread_stack(|| {
-            check_control_is_skipped_by_traversal(|title| {
+        test_widgets(|tester| {
+            check_control_is_skipped_by_traversal(tester, |title| {
                 let mut tile = RadioListTile::new(true)
                     .group_value(true)
                     .on_changed(no_op());
@@ -1877,8 +1856,7 @@ mod tests {
 
     #[test]
     fn radio_list_tile_adaptive_shows_the_correct_radio_platform_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (platform, cupertino) in [
                 (TargetPlatform::IOS, 1),
                 (TargetPlatform::MacOS, 1),
@@ -1888,7 +1866,7 @@ mod tests {
                 (TargetPlatform::Windows, 0),
             ] {
                 pump_in_material(
-                    &mut tester,
+                    tester,
                     move |app| ThemeData::builder().platform(platform).build(app),
                     |_app| {
                         Center::new()
@@ -1914,10 +1892,9 @@ mod tests {
 
     #[test]
     fn radio_list_tile_respects_enable_feedback() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for enable_feedback in [false, true] {
-                pump_wrapped(&mut tester, |_app| {
+                pump_wrapped(tester, |_app| {
                     Center::new()
                         .child(
                             RadioListTile::new(false)
@@ -1928,43 +1905,41 @@ mod tests {
                         )
                         .into_widget()
                 });
-                assert_eq!(ink_well_enable_feedback(&tester), enable_feedback);
+                assert_eq!(ink_well_enable_feedback(tester), enable_feedback);
             }
         });
     }
 
     #[test]
     fn radio_list_tile_uses_list_tile_theme_control_affinity() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (control_affinity, expected) in [
                 (ListTileControlAffinity::Leading, Offset::new(72.0, 16.0)),
                 (ListTileControlAffinity::Trailing, Offset::new(16.0, 16.0)),
                 (ListTileControlAffinity::Platform, Offset::new(72.0, 16.0)),
             ] {
-                let mut tester = tester();
-                pump_in_material(&mut tester, m3, |_app| {
+                pump_in_material(tester, m3, |_app| {
                     ListTileTheme::new(
                         RadioListTile::new(0.5)
                             .group_value(1.0)
-                            .title(AhemText::new("RadioListTile"))
+                            .title(Text::new("RadioListTile"))
                             .on_changed(no_op()),
                     )
                     .data(ListTileThemeData::new().control_affinity(control_affinity))
                     .into_widget()
                 });
-                assert_eq!(text_rect(&tester, "RadioListTile").top_left(), expected);
+                assert_eq!(text_rect(tester, "RadioListTile").top_left(), expected);
             }
         });
     }
 
     #[test]
     fn radio_list_tile_renders_with_default_scale() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_in_material(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_in_material(tester, m3, |_app| {
                 RadioListTile::new(false).group_value(false).into_widget()
             });
-            let radio = nth::<Radio<bool>>(&tester, 0);
+            let radio = nth::<Radio<bool>>(tester, 0);
             let app = tester.cell.borrow();
             assert!(!tester.ancestors(radio).into_iter().any(|ancestor| {
                 waft_widgets::downcast_widget::<Transform>(&**ancestor.widget(&app)).is_some()
@@ -1974,16 +1949,15 @@ mod tests {
 
     #[test]
     fn radio_list_tile_respects_radio_scale_factor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const SCALE: f64 = 1.4;
-            pump_in_material(&mut tester, m3, |_app| {
+            pump_in_material(tester, m3, |_app| {
                 RadioListTile::new(false)
                     .group_value(false)
                     .radio_scale_factor(SCALE)
                     .into_widget()
             });
-            let transform = tester.ancestor_of_type::<Transform>(nth::<Radio<bool>>(&tester, 0));
+            let transform = tester.ancestor_of_type::<Transform>(nth::<Radio<bool>>(tester, 0));
             let matrix = tester.widget(transform, |transform: &Transform| transform.transform);
             assert_eq!(matrix, Matrix4::scale(SCALE as f32, SCALE as f32));
         });
@@ -2004,8 +1978,8 @@ mod tests {
     ) -> WidgetRef {
         let group_value = if subtitle == "A" { 2 } else { 1 };
         let mut tile = tile
-            .title(AhemText::new("A"))
-            .subtitle(AhemText::new(subtitle))
+            .title(Text::new("A"))
+            .subtitle(Text::new(subtitle))
             .group_value(group_value);
         tile.is_three_line = is_three_line;
         tile.into_widget()
@@ -2013,10 +1987,11 @@ mod tests {
 
     #[test]
     fn radio_list_tile_is_three_line() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (frame, three_line) in IS_THREE_LINE_FRAMES {
                 assert_eq!(
                     is_three_line_rects::<Radio<i32>, RadioListTile<i32>>(
+                        tester,
                         TargetPlatform::Android,
                         frame,
                         three_line_tile
@@ -2035,10 +2010,11 @@ mod tests {
 
     #[test]
     fn radio_list_tile_adaptive_is_three_line() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (frame, three_line) in IS_THREE_LINE_FRAMES {
                 assert_eq!(
                     is_three_line_rects::<Radio<i32>, RadioListTile<i32>>(
+                        tester,
                         TargetPlatform::IOS,
                         frame,
                         adaptive_three_line_tile
@@ -2075,15 +2051,15 @@ mod tests {
 
     #[test]
     fn title_alignment_position_with_title_widget() {
-        with_main_thread_stack(|| {
-            check_title_alignment::<Radio<bool>>(title_alignment_tile, false);
+        test_widgets(|tester| {
+            check_title_alignment::<Radio<bool>>(tester, title_alignment_tile, false);
         });
     }
 
     #[test]
     fn title_alignment_position_with_title_and_subtitle_widgets() {
-        with_main_thread_stack(|| {
-            check_title_alignment::<Radio<bool>>(title_alignment_tile, true);
+        test_widgets(|tester| {
+            check_title_alignment::<Radio<bool>>(tester, title_alignment_tile, true);
         });
     }
 
@@ -2111,7 +2087,7 @@ mod tests {
 
     #[test]
     fn radio_list_tile_respects_radio_background_color_in_enabled_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ACTIVE_ENABLED_BACKGROUND_COLOR: Color = Color::new(0xFF000001);
             const ACTIVE_DISABLED_BACKGROUND_COLOR: Color = Color::new(0xFF000002);
             const INACTIVE_ENABLED_BACKGROUND_COLOR: Color = Color::new(0xFF000003);
@@ -2128,7 +2104,6 @@ mod tests {
                 }
                 INACTIVE_ENABLED_BACKGROUND_COLOR
             });
-            let mut tester = tester();
             let group_value = Rc::new(Cell::new(Some(0)));
             for (value, enabled, expected) in [
                 (0, true, ACTIVE_ENABLED_BACKGROUND_COLOR),
@@ -2142,18 +2117,17 @@ mod tests {
                     tile.radio_background_color(Rc::clone(&background_color))
                         .enabled(enabled)
                 });
-                pump_wrapped(&mut tester, |_app| host);
+                pump_wrapped(tester, |_app| host);
                 tester.pump_and_settle();
                 // The tile's transparent `Ink`, Dart's `..rect()`, is not recorded.
-                assert_paints(&tester, radio_material::<i32>(&tester), &[circle(expected)]);
+                assert_paints(tester, radio_material::<i32>(tester), &[circle(expected)]);
             }
         });
     }
 
     #[test]
     fn radio_list_tile_respects_radio_background_color_in_hovered_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const HOVERED_BACKGROUND_COLOR: Color = Color::new(0xFF000001);
             let background_color = colors(|states| {
@@ -2162,7 +2136,7 @@ mod tests {
                 }
                 Colors::TRANSPARENT
             });
-            pump_in_material(&mut tester, m3, |_app| {
+            pump_in_material(tester, m3, |_app| {
                 let mut group = RadioGroup::new(
                     Rc::new(|_app: &mut App, _value: Option<i32>| {}),
                     RadioListTile::new(0).radio_background_color(background_color),
@@ -2173,12 +2147,12 @@ mod tests {
             tester.pump_and_settle();
 
             // Start hovering
-            let center = center_of_radio::<i32>(&tester);
-            hover_at(&mut tester, center);
+            let center = center_of_radio::<i32>(tester);
+            hover_at(tester, center);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                radio_material::<i32>(&tester),
+                tester,
+                radio_material::<i32>(tester),
                 &[any_rect(), any_circle(), circle(HOVERED_BACKGROUND_COLOR)],
             );
         });
@@ -2186,19 +2160,18 @@ mod tests {
 
     #[test]
     fn radio_side_is_passed_to_the_radio() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let side = BorderSide {
                 color: Colors::RED.primary(),
                 width: 3.0,
                 ..BorderSide::default()
             };
-            pump_in_material(&mut tester, m3, |_app| {
+            pump_in_material(tester, m3, |_app| {
                 Center::new()
                     .child(RadioListTile::new(true).radio_side(side))
                     .into_widget()
             });
-            let passed = tester.widget(nth::<Radio<bool>>(&tester, 0), |radio: &Radio<bool>| {
+            let passed = tester.widget(nth::<Radio<bool>>(tester, 0), |radio: &Radio<bool>| {
                 radio.side.clone()
             });
             assert!(passed == Some(side.into()));
@@ -2207,16 +2180,15 @@ mod tests {
 
     #[test]
     fn radio_inner_radius_is_passed_to_the_radio() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let inner_radius = <dyn WidgetStateProperty<Option<f64>>>::all(Some(6.0));
             let given = Rc::clone(&inner_radius);
-            pump_in_material(&mut tester, m3, |_app| {
+            pump_in_material(tester, m3, |_app| {
                 Center::new()
                     .child(RadioListTile::new(true).radio_inner_radius(given))
                     .into_widget()
             });
-            let passed = tester.widget(nth::<Radio<bool>>(&tester, 0), |radio: &Radio<bool>| {
+            let passed = tester.widget(nth::<Radio<bool>>(tester, 0), |radio: &Radio<bool>| {
                 radio.inner_radius.clone()
             });
             assert!(passed.is_some_and(|passed| Rc::ptr_eq(&passed, &inner_radius)));
@@ -2225,17 +2197,13 @@ mod tests {
 
     #[test]
     fn radio_list_tile_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .body(Center::new().child(SizedBox::shrink().child(RadioListTile::new(true))))
                     .into_widget()
             });
-            assert_eq!(
-                rect_of::<RadioListTile<bool>>(&tester, 0).size(),
-                Size::ZERO
-            );
+            assert_eq!(rect_of::<RadioListTile<bool>>(tester, 0).size(), Size::ZERO);
         });
     }
 
@@ -2244,13 +2212,13 @@ mod tests {
             .group_value(1)
             .on_changed(no_op())
             .control_affinity(ListTileControlAffinity::Leading)
-            .title(AhemText::new("title"))
+            .title(Text::new("title"))
     }
 
     #[test]
     fn radio_list_tile_horizontal_title_gap_0() {
-        with_main_thread_stack(|| {
-            check_horizontal_title_gap_0([56.0, 744.0], |gap| {
+        test_widgets(|tester| {
+            check_horizontal_title_gap_0(tester, [56.0, 744.0], |gap| {
                 let mut tile = leading_title_tile();
                 tile.horizontal_title_gap = gap;
                 tile.into_widget()
@@ -2260,8 +2228,8 @@ mod tests {
 
     #[test]
     fn radio_list_tile_default_horizontal_title_gap_and_min_leading_width() {
-        with_main_thread_stack(|| {
-            check_default_horizontal_title_gap([72.0, 728.0], || {
+        test_widgets(|tester| {
+            check_default_horizontal_title_gap(tester, [72.0, 728.0], || {
                 leading_title_tile().into_widget()
             });
         });
@@ -2269,8 +2237,8 @@ mod tests {
 
     #[test]
     fn radio_list_tile_horizontal_title_gap_with_visual_density() {
-        with_main_thread_stack(|| {
-            check_horizontal_title_gap_with_visual_density(58.0, || {
+        test_widgets(|tester| {
+            check_horizontal_title_gap_with_visual_density(tester, 58.0, || {
                 leading_title_tile()
                     .visual_density(VisualDensity::new(VisualDensity::MINIMUM_DENSITY, 0.0))
                     .horizontal_title_gap(10.0)
@@ -2283,31 +2251,31 @@ mod tests {
         let mut tile = RadioListTile::new(1)
             .group_value(1)
             .on_changed(no_op())
-            .title(AhemText::new("title"));
+            .title(Text::new("title"));
         tile.min_vertical_padding = padding;
         tile.into_widget()
     }
 
     #[test]
     fn radio_list_tile_min_vertical_padding_80_material_3() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // 80 + 80 + 24(Title) = 184
-            check_min_vertical_padding_80(m3, 184.0, min_vertical_padding_tile);
+            check_min_vertical_padding_80(tester, m3, 184.0, min_vertical_padding_tile);
         });
     }
 
     #[test]
     fn radio_list_tile_min_vertical_padding_80_material_2() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // 80 + 80 + 16(Title) = 176
-            check_min_vertical_padding_80(m2, 176.0, min_vertical_padding_tile);
+            check_min_vertical_padding_80(tester, m2, 176.0, min_vertical_padding_tile);
         });
     }
 
     #[test]
     fn radio_list_tile_min_leading_width_60() {
-        with_main_thread_stack(|| {
-            check_min_leading_width_60(|width| {
+        test_widgets(|tester| {
+            check_min_leading_width_60(tester, |width| {
                 let mut tile = leading_title_tile();
                 tile.min_leading_width = width;
                 tile.into_widget()
@@ -2317,8 +2285,8 @@ mod tests {
 
     #[test]
     fn radio_list_tile_min_tile_height() {
-        with_main_thread_stack(|| {
-            check_min_tile_height(|min_tile_height| {
+        test_widgets(|tester| {
+            check_min_tile_height(tester, |min_tile_height| {
                 let mut tile = RadioListTile::new(1).group_value(1).on_changed(no_op());
                 tile.min_tile_height = min_tile_height;
                 tile.into_widget()

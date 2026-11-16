@@ -1895,14 +1895,14 @@ pub(crate) mod tests {
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey, SystemMouseCursors};
     use waft_widgets::{AnyElement, Center, Icon, IconData, Row, Text};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::icons::Icons;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{
-        Drawn, PaintInspection, WidgetTester, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{Drawn, PaintInspection, material_app};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m3, tester};
+    use crate::tooltip::tests::m3;
 
     pub(crate) fn label(text: &str) -> Text {
         Text::new(text)
@@ -1949,21 +1949,20 @@ pub(crate) mod tests {
     // 'SegmentedButton releases state controllers for deleted segments'
     #[test]
     fn a_segmented_button_releases_the_state_controllers_of_deleted_segments() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = waft_foundation::UniqueKey::new();
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(numbered(&[1, 2]), vec![2]).key(key.into()),
             );
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(numbered(&[2, 3]), vec![2]).key(key.into()),
             );
 
-            let state = state_of(&tester);
+            let state = state_of(tester);
             let app = tester.cell.borrow();
             let controllers = &app.get(state).states_controllers;
             assert_eq!(controllers.len(), 2);
@@ -1975,10 +1974,9 @@ pub(crate) mod tests {
     // 'SegmentedButton is built with Material of type MaterialType.transparency'
     #[test]
     fn a_segmented_button_is_built_with_a_transparent_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(
                     vec![
@@ -2041,8 +2039,7 @@ pub(crate) mod tests {
     // 'SegmentedButton supports exclusive choice by default'
     #[test]
     fn a_segmented_button_supports_exclusive_choice_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let recording = Recording::new(vec![2]);
             let frame_with_selection = |tester: &mut WidgetTester, selected: i32| {
                 pump_button(
@@ -2053,27 +2050,27 @@ pub(crate) mod tests {
                 );
             };
 
-            frame_with_selection(&mut tester, 2);
+            frame_with_selection(tester, 2);
             assert_eq!(recording.selection(), [2]);
             assert_eq!(recording.callback_count(), 0);
 
             // Tap on segment 1.
-            tap_text(&mut tester, "1");
+            tap_text(tester, "1");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 1);
             assert_eq!(recording.selection(), [1]);
 
             // Update the selection in the widget
-            frame_with_selection(&mut tester, 1);
+            frame_with_selection(tester, 1);
 
             // Tap on segment 1 again should do nothing.
-            tap_text(&mut tester, "1");
+            tap_text(tester, "1");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 1);
             assert_eq!(recording.selection(), [1]);
 
             // Tap on segment 3.
-            tap_text(&mut tester, "3");
+            tap_text(tester, "3");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 2);
             assert_eq!(recording.selection(), [3]);
@@ -2083,8 +2080,7 @@ pub(crate) mod tests {
     // 'SegmentedButton supports multiple selected segments'
     #[test]
     fn a_segmented_button_supports_multiple_selected_segments() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let recording = Recording::new(vec![1]);
             let frame_with_selection = |tester: &mut WidgetTester, selected: Vec<i32>| {
                 pump_button(
@@ -2096,32 +2092,32 @@ pub(crate) mod tests {
                 );
             };
 
-            frame_with_selection(&mut tester, recording.selection());
+            frame_with_selection(tester, recording.selection());
             assert_eq!(recording.selection(), [1]);
             assert_eq!(recording.callback_count(), 0);
 
             // Tap on segment 2.
-            tap_text(&mut tester, "2");
+            tap_text(tester, "2");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 1);
             assert_eq!(sorted(recording.selection()), [1, 2]);
 
             // Update the selection in the widget
-            frame_with_selection(&mut tester, vec![1, 2]);
+            frame_with_selection(tester, vec![1, 2]);
             tester.pump_and_settle();
 
             // Tap on segment 1 again should remove it from selection.
-            tap_text(&mut tester, "1");
+            tap_text(tester, "1");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 2);
             assert_eq!(recording.selection(), [2]);
 
             // Update the selection in the widget
-            frame_with_selection(&mut tester, vec![2]);
+            frame_with_selection(tester, vec![2]);
             tester.pump_and_settle();
 
             // Tap on segment 3.
-            tap_text(&mut tester, "3");
+            tap_text(tester, "3");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 3);
             assert_eq!(sorted(recording.selection()), [2, 3]);
@@ -2131,8 +2127,7 @@ pub(crate) mod tests {
     // 'SegmentedButton allows for empty selection'
     #[test]
     fn a_segmented_button_allows_for_empty_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let recording = Recording::new(vec![1]);
             let frame_with_selection = |tester: &mut WidgetTester, selected: Vec<i32>| {
                 pump_button(
@@ -2144,30 +2139,30 @@ pub(crate) mod tests {
                 );
             };
 
-            frame_with_selection(&mut tester, vec![1]);
+            frame_with_selection(tester, vec![1]);
             assert_eq!(recording.selection(), [1]);
             assert_eq!(recording.callback_count(), 0);
 
             // Tap on segment 1 should deselect it and make the selection empty.
-            tap_text(&mut tester, "1");
+            tap_text(tester, "1");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 1);
             assert_eq!(recording.selection(), Vec::<i32>::new());
 
             // Update the selection in the widget
-            frame_with_selection(&mut tester, vec![]);
+            frame_with_selection(tester, vec![]);
 
             // Tap on segment 2 should select it.
-            tap_text(&mut tester, "2");
+            tap_text(tester, "2");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 2);
             assert_eq!(recording.selection(), [2]);
 
             // Update the selection in the widget
-            frame_with_selection(&mut tester, vec![2]);
+            frame_with_selection(tester, vec![2]);
 
             // Tap on segment 3.
-            tap_text(&mut tester, "3");
+            tap_text(tester, "3");
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 3);
             assert_eq!(recording.selection(), [3]);
@@ -2218,21 +2213,20 @@ pub(crate) mod tests {
     // 'SegmentedButton shows checkboxes for selected segments'
     #[test]
     fn a_segmented_button_shows_checkboxes_for_selected_segments() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let check = Icons::check();
             for selected in [1, 2, 2] {
                 pump_button(
-                    &mut tester,
+                    tester,
                     m3,
                     SegmentedButton::new(numbered(&[1, 2, 3]), vec![selected])
                         .on_selection_changed(|_app, _selected| {}),
                 );
                 assert_eq!(
-                    icons_in_rows_with_text(&tester, &selected.to_string(), &check),
+                    icons_in_rows_with_text(tester, &selected.to_string(), &check),
                     1
                 );
-                assert_eq!(count_icons(&tester, &check), 1);
+                assert_eq!(count_icons(tester, &check), 1);
             }
         });
     }
@@ -2240,8 +2234,7 @@ pub(crate) mod tests {
     // 'SegmentedButton shows selected checkboxes in place of icon if it has a label as well'
     #[test]
     fn a_segmented_button_shows_selected_checkboxes_in_place_of_the_icon_of_a_labelled_segment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icons = [Icons::add(), Icons::add_a_photo(), Icons::add_alarm()];
             let check = Icons::check();
             for selected in 1..=3 {
@@ -2253,7 +2246,7 @@ pub(crate) mod tests {
                     })
                     .collect();
                 pump_button(
-                    &mut tester,
+                    tester,
                     m3,
                     SegmentedButton::new(segments, vec![selected])
                         .on_selection_changed(|_app, _selected| {}),
@@ -2265,9 +2258,9 @@ pub(crate) mod tests {
                     } else {
                         &icons[value as usize - 1]
                     };
-                    assert_eq!(icons_in_rows_with_text(&tester, &text, shown), 1);
+                    assert_eq!(icons_in_rows_with_text(tester, &text, shown), 1);
                     if value == selected {
-                        assert_eq!(count_icons(&tester, &icons[value as usize - 1]), 0);
+                        assert_eq!(count_icons(tester, &icons[value as usize - 1]), 0);
                     }
                 }
             }
@@ -2277,8 +2270,7 @@ pub(crate) mod tests {
     // 'SegmentedButton shows selected checkboxes next to icon if there is no label'
     #[test]
     fn a_segmented_button_shows_selected_checkboxes_next_to_the_icon_of_an_unlabelled_segment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icons = [Icons::add(), Icons::add_a_photo(), Icons::add_alarm()];
             let check = Icons::check();
             for selected in 1..=3 {
@@ -2289,7 +2281,7 @@ pub(crate) mod tests {
                     })
                     .collect();
                 pump_button(
-                    &mut tester,
+                    tester,
                     m3,
                     SegmentedButton::new(segments, vec![selected])
                         .on_selection_changed(|_app, _selected| {}),
@@ -2297,7 +2289,7 @@ pub(crate) mod tests {
                 for value in 1..=3 {
                     let expected = usize::from(value == selected);
                     assert_eq!(
-                        icons_in_rows_with_icon(&tester, &icons[value as usize - 1], &check),
+                        icons_in_rows_with_icon(tester, &icons[value as usize - 1], &check),
                         expected
                     );
                 }
@@ -2328,10 +2320,9 @@ pub(crate) mod tests {
     // 'SegmentedButton has no tooltips by default'
     #[test]
     fn a_segmented_button_has_no_tooltips_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(three_segments_with_tooltips(false), vec![2])
                     .on_selection_changed(|_app, _selected| {}),
@@ -2344,25 +2335,23 @@ pub(crate) mod tests {
     // 'SegmentedButton has correct tooltips'
     #[test]
     fn a_segmented_button_has_the_tooltips_of_its_segments() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(three_segments_with_tooltips(true), vec![2])
                     .on_selection_changed(|_app, _selected| {}),
             );
 
             assert_eq!(tester.find_by_type::<Tooltip>().len(), 2);
-            assert_eq!(tooltip_messages(&tester), ["t2", "t3"]);
+            assert_eq!(tooltip_messages(tester), ["t2", "t3"]);
         });
     }
 
     // 'Disabled SegmentedButton has correct states when rebuilding'
     #[test]
     fn a_disabled_segmented_button_keeps_its_states_when_rebuilding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Dart's `const SegmentedButton`: one widget the rebuild hands on again.
             let button = SegmentedButton::new(numbered(&[0]), vec![0]).into_widget();
             let root = {
@@ -2406,12 +2395,12 @@ pub(crate) mod tests {
                 app.get(&controller).value().clone()
             };
             // Check the initial states.
-            assert_eq!(first_states(&tester), states);
+            assert_eq!(first_states(tester), states);
             // Trigger a rebuild.
-            tap_text(&mut tester, "Trigger rebuild");
+            tap_text(tester, "Trigger rebuild");
             tester.pump_and_settle();
             // Check the states after the rebuild.
-            assert_eq!(first_states(&tester), states);
+            assert_eq!(first_states(tester), states);
         });
     }
 
@@ -2430,46 +2419,43 @@ pub(crate) mod tests {
     // 'SegmentedButton expands to fill the available width when expandedInsets is not null'
     #[test]
     fn a_segmented_button_with_expanded_insets_expands_to_the_available_width() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let segments = vec![
                 ButtonSegment::new(1).label(label("Segment 1")),
                 ButtonSegment::new(2).label(label("Segment 2")),
             ];
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(segments, vec![1]).expanded_insets(EdgeInsets::ZERO),
             );
 
             // The width of the SegmentedButton must be equal to the width of the parent widget.
-            assert_eq!(segmented_button_width(&tester), scaffold_width(&tester));
+            assert_eq!(segmented_button_width(tester), scaffold_width(tester));
         });
     }
 
     // 'SegmentedButton does not expand when expandedInsets is null'
     #[test]
     fn a_segmented_button_without_expanded_insets_does_not_expand() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let segments = vec![
                 ButtonSegment::new(1).label(label("Segment 1")),
                 ButtonSegment::new(2).label(label("Segment 2")),
             ];
-            pump_button(&mut tester, m3, SegmentedButton::new(segments, vec![1]));
+            pump_button(tester, m3, SegmentedButton::new(segments, vec![1]));
 
             // The width of the SegmentedButton must be less than the width of the parent widget.
-            assert!(segmented_button_width(&tester) < scaffold_width(&tester));
+            assert!(segmented_button_width(tester) < scaffold_width(tester));
         });
     }
 
     // 'SegmentedButton vertical aligned children'
     #[test]
     fn a_vertical_segmented_button_stacks_its_segments() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(numbered(&[0, 1, 2, 3]), vec![-1])
                     .direction(Axis::Vertical)
@@ -2494,8 +2480,7 @@ pub(crate) mod tests {
     // 'SegmentedButton does not crash at zero area'
     #[test]
     fn a_segmented_button_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = {
                 let app = tester.cell.borrow();
                 material_app(
@@ -2519,8 +2504,7 @@ pub(crate) mod tests {
     // 'SegmentedButton should expand to fill the full width'
     #[test]
     fn a_vertical_segmented_button_expands_to_fill_the_full_width() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const SCREEN_WIDTH: f64 = 800.0;
             let segments = ["All", "Top free", "Top paid"]
                 .iter()
@@ -2568,22 +2552,21 @@ pub(crate) mod tests {
     // 'SegmentedButton has expected default mouse cursor on hover'
     #[test]
     fn a_segmented_button_has_the_basic_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(numbered(&[0, 1]), vec![0])
                     .on_selection_changed(|_app, _selected| {}),
             );
 
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::new(10.0, 10.0));
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
 
-            let center = text_center(&tester, "0");
+            let center = text_center(tester, "0");
             tester.move_to(&mut gesture, center, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
         });
     }
@@ -2596,10 +2579,9 @@ pub(crate) mod tests {
     // 'SegmentedButton has expected mouse cursor when explicitly configured'
     #[test]
     fn a_segmented_button_has_the_mouse_cursor_it_is_configured_with() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(numbered(&[0, 1]), vec![0])
                     .style(
@@ -2610,7 +2592,7 @@ pub(crate) mod tests {
                     .on_selection_changed(|_app, _selected| {}),
             );
 
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             let element = tester.find_by_type::<SegmentedButton<i32>>()[0];
             let center = tester.get_rect(tester.render_box_of(element)).center();
             tester.add_pointer(&mut gesture, center);
@@ -2641,11 +2623,8 @@ pub(crate) mod tests {
             .collect()
     }
 
-    pub(crate) fn mouse_at(
-        tester: &mut WidgetTester,
-        at: Offset,
-    ) -> crate::test_support::TestPointer {
-        let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+    pub(crate) fn mouse_at(tester: &mut WidgetTester, at: Offset) -> TestPointer {
+        let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut gesture, at);
         tester.move_to(&mut gesture, at, false);
         gesture
@@ -2677,11 +2656,10 @@ pub(crate) mod tests {
     // 'SegmentedButton default overlayColor and foregroundColor resolve pressed state'
     #[test]
     fn a_segmented_button_resolves_its_default_overlay_and_foreground_colors_when_pressed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(numbered(&[1, 2]), vec![1])
                     .on_selection_changed(|_app, _selected| {}),
@@ -2702,26 +2680,25 @@ pub(crate) mod tests {
             };
 
             // Hovered.
-            let center = text_center(&tester, "2");
-            let mut gesture = mouse_at(&mut tester, center);
+            let center = text_center(tester, "2");
+            let mut gesture = mouse_at(tester, center);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(on_surface.with_opacity(0.08))));
-            assert_eq!(text_color(&tester), Some(on_surface));
+            assert!(ink_rect_colors(tester).contains(&argb(on_surface.with_opacity(0.08))));
+            assert_eq!(text_color(tester), Some(on_surface));
 
             // Highlighted (pressed).
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
-            let colors = ink_rect_colors(&tester);
+            let colors = ink_rect_colors(tester);
             assert!(colors.contains(&argb(on_surface.with_opacity(0.1))));
-            assert_eq!(text_color(&tester), Some(on_surface));
+            assert_eq!(text_color(tester), Some(on_surface));
         });
     }
 
     // 'SegmentedButton.styleFrom is applied to the SegmentedButton'
     #[test]
     fn a_segmented_button_applies_the_style_from_style_from() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xfffffff0);
             let background_color = Color::new(0xfffffff1);
             let selected_background_color = Color::new(0xfffffff2);
@@ -2764,7 +2741,7 @@ pub(crate) mod tests {
             let mut segments = numbered(&[1, 2, 3]);
             segments[2].enabled = false;
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(segments, vec![2])
                     .style(style_from_style.clone())
@@ -2773,7 +2750,7 @@ pub(crate) mod tests {
             );
 
             // Test provided button style is applied to the enabled button segment.
-            let button_style = button_style_of(&tester, 0);
+            let button_style = button_style_of(tester, 0);
             let resolve_color = |property: &Option<WidgetStatePropertyRef<Option<Color>>>,
                                  states: &WidgetStates| {
                 property
@@ -2820,7 +2797,7 @@ pub(crate) mod tests {
             assert_eq!(button_style.splash_factory, style_from_style.splash_factory);
 
             // Test provided button style is applied selected button segment.
-            let button_style = button_style_of(&tester, 1);
+            let button_style = button_style_of(tester, 1);
             assert_eq!(
                 resolve_color(&button_style.foreground_color, &selected_states()),
                 Some(selected_foreground_color)
@@ -2838,7 +2815,7 @@ pub(crate) mod tests {
             );
 
             // Test provided button style is applied disabled button segment.
-            let button_style = button_style_of(&tester, 2);
+            let button_style = button_style_of(tester, 2);
             assert_eq!(
                 resolve_color(&button_style.foreground_color, &disabled_states()),
                 Some(disabled_foreground_color)
@@ -2897,12 +2874,12 @@ pub(crate) mod tests {
             )));
 
             // Test foreground color is applied to the overlay color.
-            let center = text_center(&tester, "1");
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let center = text_center(tester, "1");
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, center);
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(foreground_color.with_opacity(0.08))));
+            assert!(ink_rect_colors(tester).contains(&argb(foreground_color.with_opacity(0.08))));
         });
     }
 
@@ -2915,11 +2892,10 @@ pub(crate) mod tests {
     // 'SegmentedButton.styleFrom overlayColor overrides default overlay color'
     #[test]
     fn a_style_from_overlay_color_overrides_the_default_overlay_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let overlay_color = Color::new(0xffff0000);
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(
                     vec![
@@ -2933,22 +2909,22 @@ pub(crate) mod tests {
             );
 
             // Hovered selected segment,
-            let center = text_center(&tester, "Option 1");
-            let mut gesture = mouse_at(&mut tester, center);
+            let center = text_center(tester, "Option 1");
+            let mut gesture = mouse_at(tester, center);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(overlay_color.with_opacity(0.08))));
+            assert!(ink_rect_colors(tester).contains(&argb(overlay_color.with_opacity(0.08))));
 
             // Hovered unselected segment,
-            let center = text_center(&tester, "Option 2");
+            let center = text_center(tester, "Option 2");
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(overlay_color.with_opacity(0.08))));
+            assert!(ink_rect_colors(tester).contains(&argb(overlay_color.with_opacity(0.08))));
 
             // Highlighted unselected segment (pressed).
-            let center = text_center(&tester, "Option 1");
+            let center = text_center(tester, "Option 1");
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
-            let colors = ink_rect_colors(&tester);
+            let colors = ink_rect_colors(tester);
             assert!(colors.contains(&argb(overlay_color.with_opacity(0.08))));
             assert!(colors.contains(&argb(overlay_color.with_opacity(0.1))));
             // Remove pressed and hovered states,
@@ -2958,10 +2934,10 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Highlighted selected segment (pressed)
-            let center = text_center(&tester, "Option 2");
+            let center = text_center(tester, "Option 2");
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
-            let colors = ink_rect_colors(&tester);
+            let colors = ink_rect_colors(tester);
             assert!(colors.contains(&argb(overlay_color.with_opacity(0.08))));
             assert!(colors.contains(&argb(overlay_color.with_opacity(0.1))));
             // Remove pressed and hovered states,
@@ -2973,20 +2949,19 @@ pub(crate) mod tests {
             // Focused unselected segment.
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(overlay_color.with_opacity(0.1))));
+            assert!(ink_rect_colors(tester).contains(&argb(overlay_color.with_opacity(0.1))));
 
             // Focused selected segment.
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&argb(overlay_color.with_opacity(0.1))));
+            assert!(ink_rect_colors(tester).contains(&argb(overlay_color.with_opacity(0.1))));
         });
     }
 
     // 'SegmentedButton.styleFrom can customize the button icon'
     #[test]
     fn a_style_from_icon_color_size_and_disabled_icon_color_customize_the_button_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_color = Color::new(0xFFF000FF);
             let icon_size = 32.0;
             let disabled_icon_color = Color::new(0xFFFFF000);
@@ -3016,7 +2991,7 @@ pub(crate) mod tests {
             };
 
             // Test enabled button.
-            pump_button(&mut tester, m3, build_button(true));
+            pump_button(tester, m3, build_button(true));
             let icon = tester.find_by_icon(&Icons::add());
             assert_eq!(
                 tester.render_box_of(icon).size(&tester.cell.borrow()),
@@ -3028,7 +3003,7 @@ pub(crate) mod tests {
             );
 
             // Test disabled button.
-            pump_button(&mut tester, m3, build_button(false));
+            pump_button(tester, m3, build_button(false));
             tester.pump_and_settle();
             let icon = tester.find_by_icon(&Icons::add());
             assert_eq!(
@@ -3107,8 +3082,7 @@ pub(crate) mod tests {
     // 'SegmentedButton border sides respect states'
     #[test]
     fn a_segmented_button_border_sides_respect_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_color = 0xFF999999;
             let hovered_color = 0xFF0000FF;
             let focused_color = 0xFF00FF00;
@@ -3118,7 +3092,7 @@ pub(crate) mod tests {
             let enabled_color = 0xFFFF0000;
 
             pump_sided(
-                &mut tester,
+                tester,
                 true,
                 border_side_style(vec![
                     (WidgetState::Hovered.into(), side_of(hovered_color)),
@@ -3128,14 +3102,14 @@ pub(crate) mod tests {
                 vec![],
             );
 
-            assert!(paints_rrect_of_color(&tester, Color::new(enabled_color)));
+            assert!(paints_rrect_of_color(tester, Color::new(enabled_color)));
 
             // Hovered.
-            let center = text_center(&tester, "Add");
-            let mut gesture = mouse_at(&mut tester, center);
+            let center = text_center(tester, "Add");
+            let mut gesture = mouse_at(tester, center);
             tester.pump_and_settle();
 
-            assert!(paints_rrect_of_color(&tester, Color::new(hovered_color)));
+            assert!(paints_rrect_of_color(tester, Color::new(hovered_color)));
 
             tester.send(&gesture, waft_embedder::PointerChange::Remove);
             tester.pump_and_settle();
@@ -3144,10 +3118,10 @@ pub(crate) mod tests {
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
             tester.pump_and_settle();
 
-            assert!(paints_rrect_of_color(&tester, Color::new(focused_color)));
+            assert!(paints_rrect_of_color(tester, Color::new(focused_color)));
 
             pump_sided(
-                &mut tester,
+                tester,
                 true,
                 border_side_style(vec![
                     (
@@ -3167,12 +3141,12 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Hovered.
-            let center = text_center(&tester, "Add");
-            gesture = mouse_at(&mut tester, center);
+            let center = text_center(tester, "Add");
+            gesture = mouse_at(tester, center);
             tester.pump_and_settle();
 
             assert!(paints_rrect_of_color(
-                &tester,
+                tester,
                 Color::new(hovered_selected_color)
             ));
 
@@ -3184,12 +3158,12 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             assert!(paints_rrect_of_color(
-                &tester,
+                tester,
                 Color::new(focused_selected_color)
             ));
 
             pump_sided(
-                &mut tester,
+                tester,
                 false,
                 border_side_style(vec![
                     (WidgetState::Disabled.into(), side_of(disabled_color)),
@@ -3199,10 +3173,10 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
 
-            assert!(paints_rrect_of_color(&tester, Color::new(disabled_color)));
+            assert!(paints_rrect_of_color(tester, Color::new(disabled_color)));
 
             pump_sided(
-                &mut tester,
+                tester,
                 true,
                 border_side_style(vec![
                     (WidgetState::Selected.into(), side_of(selected_color)),
@@ -3212,19 +3186,18 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
 
-            assert!(paints_rrect_of_color(&tester, Color::new(selected_color)));
+            assert!(paints_rrect_of_color(tester, Color::new(selected_color)));
         });
     }
 
     // 'SegmentedButton border sides respect disabled state'
     #[test]
     fn a_segmented_button_border_sides_respect_the_disabled_state_of_a_segment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_color = 0xFF999999;
             let enabled_color = 0xFFFF0000;
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(
                     vec![
@@ -3242,7 +3215,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // First segment has an enabled border, the second a disabled one, in that order.
-            let colors = rrect_colors(&tester);
+            let colors = rrect_colors(tester);
             let enabled = colors
                 .iter()
                 .position(|color| *color == Color::new(enabled_color).into())
@@ -3258,9 +3231,8 @@ pub(crate) mod tests {
     // with standard density and MaterialTapTargetSize.padded'
     #[test]
     fn a_segmented_button_is_48_high_to_hit_and_40_high_painted_by_default() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_embedder::valo::{Op, PaintStyle};
-            let mut tester = tester();
             let theme = ThemeData::new(&tester.cell.borrow());
             let icons = [
                 Icons::calendar_view_day(),
@@ -3278,7 +3250,7 @@ pub(crate) mod tests {
                 })
                 .collect();
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(segments, vec![0]).on_selection_changed(|_app, _value| {}),
             );
@@ -3331,8 +3303,7 @@ pub(crate) mod tests {
     // 'Focused segment does not lose focus when its selection state changes'
     #[test]
     fn a_focused_segment_keeps_its_focus_when_its_selection_state_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let recording = Recording::new(vec![1]);
             let frame_with_selection = |tester: &mut WidgetTester, selected: Vec<i32>| {
                 pump_button(
@@ -3344,12 +3315,12 @@ pub(crate) mod tests {
                 );
             };
 
-            frame_with_selection(&mut tester, recording.selection());
+            frame_with_selection(tester, recording.selection());
             assert_eq!(recording.selection(), [1]);
             assert_eq!(recording.callback_count(), 0);
 
             // Select segment 2.
-            frame_with_selection(&mut tester, vec![1, 2]);
+            frame_with_selection(tester, vec![1, 2]);
             tester.pump_and_settle();
 
             let segment_2_has_focus = |tester: &WidgetTester, request: bool| {
@@ -3363,27 +3334,26 @@ pub(crate) mod tests {
             };
 
             // Set focus on segment 2.
-            segment_2_has_focus(&tester, true);
+            segment_2_has_focus(tester, true);
             tester.pump_and_settle();
-            assert!(segment_2_has_focus(&tester, false));
+            assert!(segment_2_has_focus(tester, false));
 
             // Unselect segment 2.
-            frame_with_selection(&mut tester, vec![1]);
+            frame_with_selection(tester, vec![1]);
             tester.pump_and_settle();
 
             // The button should still be focused.
-            assert!(segment_2_has_focus(&tester, false));
+            assert!(segment_2_has_focus(tester, false));
         });
     }
 
     // 'SegmentedButton dividers matches border rect size'
     #[test]
     fn a_segmented_button_divider_matches_the_border_rect_size() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_embedder::valo::Op;
-            let mut tester = tester();
             pump_button(
-                &mut tester,
+                tester,
                 m3,
                 SegmentedButton::new(
                     vec![

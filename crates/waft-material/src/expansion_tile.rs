@@ -1503,6 +1503,10 @@ pub(crate) mod tests {
         GlobalKey, IconTheme, SingleChildScrollView, SizedBox, StatefulBuilder, Text,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::filled_button::FilledButton;
@@ -1510,10 +1514,7 @@ pub(crate) mod tests {
     use crate::material::RenderInkFeatures;
     use crate::motion::Easing;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{
-        AhemText, Drawn, PaintInspection, WidgetTester, is_same_color_as, material_app,
-        with_main_thread_stack,
-    };
+    use crate::test_support::{Drawn, PaintInspection, is_same_color_as, material_app};
     use crate::text_theme::TextTheme;
     use waft_foundation::HandleId;
 
@@ -1523,17 +1524,6 @@ pub(crate) mod tests {
 
     fn foreground_color() -> Color {
         Colors::BLUE_ACCENT.shade200()
-    }
-
-    /// A tester on `platform` with the OS fonts, which `MaterialApp`'s debug banner paints with.
-    pub(crate) fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
-
-    pub(crate) fn tester() -> WidgetTester {
-        tester_on(TargetPlatform::Android)
     }
 
     /// Dart's `ThemeData()`.
@@ -1734,8 +1724,7 @@ pub(crate) mod tests {
         matchers.iter().all(|matcher| rest.by_ref().any(matcher))
     }
 
-    fn initial_state_case(platform: TargetPlatform) {
-        let mut tester = tester_on(platform);
+    fn initial_state_case(tester: &mut WidgetTester) {
         let top_key = GlobalKey::new();
         let expanded_key = GlobalKey::new();
         let collapsed_key = GlobalKey::new();
@@ -1745,7 +1734,7 @@ pub(crate) mod tests {
         let default_tile_key = GlobalKey::new();
 
         pump_app(
-            &mut tester,
+            tester,
             |app| ThemeData::builder().divider_color(DIVIDER_COLOR).build(app),
             Material::new().child(
                 SingleChildScrollView::new().child(
@@ -1770,39 +1759,36 @@ pub(crate) mod tests {
             ),
         );
 
-        let tile_height = height(&tester, &expanded_tile_key);
+        let tile_height = height(tester, &expanded_tile_key);
         assert_eq!(
-            height(&tester, &top_key),
-            height(&tester, &expanded_key) - tile_height - 2.0
+            height(tester, &top_key),
+            height(tester, &expanded_key) - tile_height - 2.0
         );
         assert_eq!(
-            height(&tester, &top_key),
-            height(&tester, &collapsed_key) - 2.0
+            height(tester, &top_key),
+            height(tester, &collapsed_key) - 2.0
         );
-        assert_eq!(
-            height(&tester, &top_key),
-            height(&tester, &default_key) - 2.0
-        );
+        assert_eq!(height(tester, &top_key), height(tester, &default_key) - 2.0);
 
-        let (color, top, bottom) = decoration_of(&tester, &expanded_key);
+        let (color, top, bottom) = decoration_of(tester, &expanded_key);
         assert_eq!(color, Some(Colors::RED.primary()));
         assert_eq!(top, DIVIDER_COLOR);
         assert_eq!(bottom, DIVIDER_COLOR);
 
-        let (color, top, bottom) = decoration_of(&tester, &collapsed_key);
+        let (color, top, bottom) = decoration_of(tester, &collapsed_key);
         assert_eq!(color, Some(Colors::TRANSPARENT));
         assert_eq!(top, Colors::TRANSPARENT);
         assert_eq!(bottom, Colors::TRANSPARENT);
 
-        tap_text(&mut tester, "Expanded");
-        tap_text(&mut tester, "Collapsed");
-        tap_text(&mut tester, "Default");
+        tap_text(tester, "Expanded");
+        tap_text(tester, "Collapsed");
+        tap_text(tester, "Default");
 
-        tester.pump(Duration::ZERO);
+        tester.pump();
 
         // Pump to the middle of the animation for expansion.
-        tester.pump(Duration::from_millis(100));
-        let (color, top, bottom) = decoration_of(&tester, &collapsed_key);
+        tester.pump_by(Duration::from_millis(100));
+        let (color, top, bottom) = decoration_of(tester, &collapsed_key);
         assert_eq!(color, Some(Colors::TRANSPARENT));
         assert!(
             is_same_color_as(top, Color::new(0x15222222)),
@@ -1814,30 +1800,30 @@ pub(crate) mod tests {
         );
 
         // Pump all the way to the end now.
-        tester.pump(Duration::from_secs(1));
+        tester.pump_by(Duration::from_secs(1));
 
-        let tile_height = height(&tester, &collapsed_tile_key);
+        let tile_height = height(tester, &collapsed_tile_key);
         assert_eq!(
-            height(&tester, &top_key),
-            height(&tester, &expanded_key) - 2.0
+            height(tester, &top_key),
+            height(tester, &expanded_key) - 2.0
         );
         assert_eq!(
-            height(&tester, &top_key),
-            height(&tester, &collapsed_key) - tile_height - 2.0
+            height(tester, &top_key),
+            height(tester, &collapsed_key) - tile_height - 2.0
         );
         assert_eq!(
-            height(&tester, &top_key),
-            height(&tester, &default_key) - tile_height - 2.0
+            height(tester, &top_key),
+            height(tester, &default_key) - tile_height - 2.0
         );
 
         // Expanded should be collapsed now.
-        let (color, top, bottom) = decoration_of(&tester, &expanded_key);
+        let (color, top, bottom) = decoration_of(tester, &expanded_key);
         assert_eq!(color, Some(Colors::TRANSPARENT));
         assert_eq!(top, Colors::TRANSPARENT);
         assert_eq!(bottom, Colors::TRANSPARENT);
 
         // Collapsed should be expanded now.
-        let (color, top, bottom) = decoration_of(&tester, &collapsed_key);
+        let (color, top, bottom) = decoration_of(tester, &collapsed_key);
         assert_eq!(color, Some(Colors::TRANSPARENT));
         assert_eq!(top, DIVIDER_COLOR);
         assert_eq!(bottom, DIVIDER_COLOR);
@@ -1846,24 +1832,28 @@ pub(crate) mod tests {
     /// "ExpansionTile initial state", on iOS.
     #[test]
     fn expansion_tile_initial_state_on_ios() {
-        with_main_thread_stack(|| initial_state_case(TargetPlatform::IOS));
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            initial_state_case(tester)
+        });
     }
 
     /// "ExpansionTile initial state", on macOS.
     #[test]
     fn expansion_tile_initial_state_on_macos() {
-        with_main_thread_stack(|| initial_state_case(TargetPlatform::MacOS));
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::MacOS),
+            initial_state_case,
+        );
     }
 
-    fn theme_dependencies_case(platform: TargetPlatform) {
-        let mut tester = tester_on(platform);
+    fn theme_dependencies_case(tester: &mut WidgetTester) {
         let expanded_title = probe();
         let collapsed_title = probe();
         let expanded_icon = probe();
         let collapsed_icon = probe();
 
         pump_app(
-            &mut tester,
+            tester,
             |app| {
                 ThemeData::builder()
                     .use_material3(false)
@@ -1902,11 +1892,11 @@ pub(crate) mod tests {
         assert_eq!(collapsed_icon.get(), Some(UNSELECTED_WIDGET_COLOR));
 
         // Tap both tiles to change their state: collapse and extend respectively
-        tap_text(&mut tester, "Expanded");
-        tap_text(&mut tester, "Collapsed");
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_secs(1));
-        tester.pump(Duration::from_secs(1));
+        tap_text(tester, "Expanded");
+        tap_text(tester, "Collapsed");
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
+        tester.pump_by(Duration::from_secs(1));
 
         assert_eq!(expanded_title.get(), Some(HEADER_COLOR));
         assert_eq!(collapsed_title.get(), Some(foreground_color()));
@@ -1917,22 +1907,26 @@ pub(crate) mod tests {
     /// "ExpansionTile Theme dependencies", on iOS.
     #[test]
     fn expansion_tile_theme_dependencies_on_ios() {
-        with_main_thread_stack(|| theme_dependencies_case(TargetPlatform::IOS));
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            theme_dependencies_case(tester)
+        });
     }
 
     /// "ExpansionTile Theme dependencies", on macOS.
     #[test]
     fn expansion_tile_theme_dependencies_on_macos() {
-        with_main_thread_stack(|| theme_dependencies_case(TargetPlatform::MacOS));
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::MacOS),
+            theme_dependencies_case,
+        );
     }
 
     /// "ExpansionTile subtitle".
     #[test]
     fn expansion_tile_subtitle() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Scaffold::new().body(
                     ExpansionTile::new(Text::new("Title"))
@@ -1948,10 +1942,9 @@ pub(crate) mod tests {
     /// "ExpansionTile maintainState".
     #[test]
     fn expansion_tile_maintain_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .platform(TargetPlatform::IOS)
@@ -1984,10 +1977,9 @@ pub(crate) mod tests {
     /// "ExpansionTile padding test".
     #[test]
     fn expansion_tile_padding_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     Center::new().child(
@@ -1997,9 +1989,9 @@ pub(crate) mod tests {
                 ),
             );
 
-            let title_rect = text_rect(&tester, "Hello");
-            let trailing_rect = expand_more_rect(&tester);
-            let list_tile_rect = list_tile_rect(&tester);
+            let title_rect = text_rect(tester, "Hello");
+            let trailing_rect = expand_more_rect(tester);
+            let list_tile_rect = list_tile_rect(tester);
             let taller_widget = if title_rect.height() > trailing_rect.height() {
                 title_rect
             } else {
@@ -2045,17 +2037,16 @@ pub(crate) mod tests {
     /// "ExpansionTile expandedAlignment test".
     #[test]
     fn expansion_tile_expanded_alignment_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_expanded_centered(
-                &mut tester,
+                tester,
                 None,
                 ExpansionTile::new(Text::new("title"))
                     .expanded_alignment(Alignment::CENTER_LEFT)
                     .children([sized(100.0, 100.0), sized(80.0, 100.0)]),
             );
 
-            let column_rect = last_column_rect(&tester);
+            let column_rect = last_column_rect(tester);
 
             // The expandedAlignment is used to define the alignment of the Column widget in
             // expanded tile, not the alignment of the children inside the Column.
@@ -2069,17 +2060,16 @@ pub(crate) mod tests {
     /// "ExpansionTile expandedAlignment with directional test".
     #[test]
     fn expansion_tile_expanded_alignment_with_directional_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_expanded_centered(
-                &mut tester,
+                tester,
                 Some(TextDirection::Rtl),
                 ExpansionTile::new(Text::new("title"))
                     .expanded_alignment(AlignmentDirectional::TOP_END)
                     .children([sized(100.0, 100.0), sized(80.0, 100.0)]),
             );
 
-            let column_rect = last_column_rect(&tester);
+            let column_rect = last_column_rect(tester);
 
             // The expandedAlignment is used to define the alignment of the Column widget in
             // expanded tile, not the alignment of the children inside the Column.
@@ -2093,12 +2083,11 @@ pub(crate) mod tests {
     /// "ExpansionTile expandedCrossAxisAlignment test".
     #[test]
     fn expansion_tile_expanded_cross_axis_alignment_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child0_key = GlobalKey::new();
             let child1_key = GlobalKey::new();
             pump_expanded_centered(
-                &mut tester,
+                tester,
                 None,
                 ExpansionTile::new(Text::new("title"))
                     // Set the column's alignment to Alignment.centerRight to test
@@ -2113,9 +2102,9 @@ pub(crate) mod tests {
                     ]),
             );
 
-            let column_rect = last_column_rect(&tester);
-            let child0_rect = key_rect(&tester, &child0_key);
-            let child1_rect = key_rect(&tester, &child1_key);
+            let column_rect = last_column_rect(tester);
+            let child0_rect = key_rect(tester, &child0_key);
+            let child1_rect = key_rect(tester, &child1_key);
 
             // Since expandedAlignment is set to Alignment.centerRight, the column of children
             // should be aligned to the center right of the expanded tile. This provides
@@ -2136,12 +2125,11 @@ pub(crate) mod tests {
     /// "ExpansionTile expandedCrossAxisAlignment with directional expandedAlignment test".
     #[test]
     fn expansion_tile_expanded_cross_axis_alignment_with_directional_expanded_alignment_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child0_key = GlobalKey::new();
             let child1_key = GlobalKey::new();
             pump_expanded_centered(
-                &mut tester,
+                tester,
                 Some(TextDirection::Rtl),
                 ExpansionTile::new(Text::new("title"))
                     // Set the column's alignment to AlignmentDirectional.centerStart to test
@@ -2156,9 +2144,9 @@ pub(crate) mod tests {
                     ]),
             );
 
-            let column_rect = last_column_rect(&tester);
-            let child0_rect = key_rect(&tester, &child0_key);
-            let child1_rect = key_rect(&tester, &child1_key);
+            let column_rect = last_column_rect(tester);
+            let child0_rect = key_rect(tester, &child0_key);
+            let child1_rect = key_rect(tester, &child1_key);
 
             // With `textDirection` set to `TextDirection.rtl`,
             // `AlignmentDirectional.centerStart` resolves to `Alignment.centerRight`. The column
@@ -2192,18 +2180,17 @@ pub(crate) mod tests {
     /// "expandedCrossAxisAlignment and expandedAlignment default values".
     #[test]
     fn expanded_cross_axis_alignment_and_expanded_alignment_default_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child1_key = GlobalKey::new();
             pump_expanded_centered(
-                &mut tester,
+                tester,
                 None,
                 ExpansionTile::new(Text::new("title"))
                     .children([sized(100.0, 100.0), keyed_sized(&child1_key, 80.0, 100.0)]),
             );
 
-            let column_rect = last_column_rect(&tester);
-            let child1_rect = key_rect(&tester, &child1_key);
+            let column_rect = last_column_rect(tester);
+            let child1_rect = key_rect(tester, &child1_key);
 
             // The default viewport size is Size(800, 600).
             // By default the value of extendedAlignment is Alignment.center, hence the offset
@@ -2222,16 +2209,15 @@ pub(crate) mod tests {
     /// "childrenPadding default value".
     #[test]
     fn children_padding_default_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_expanded_centered(
-                &mut tester,
+                tester,
                 None,
                 ExpansionTile::new(Text::new("title")).children([sized(100.0, 100.0)]),
             );
 
-            let column_rect = last_column_rect(&tester);
-            let padding_rect = last_padding_rect(&tester);
+            let column_rect = last_column_rect(tester);
+            let padding_rect = last_padding_rect(tester);
 
             // By default, the value of childrenPadding is EdgeInsets.zero, hence offset
             // of all the edges from x-axis and y-axis should be equal for Padding and Column.
@@ -2245,18 +2231,17 @@ pub(crate) mod tests {
     /// "ExpansionTile childrenPadding test".
     #[test]
     fn expansion_tile_children_padding_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_expanded_centered(
-                &mut tester,
+                tester,
                 None,
                 ExpansionTile::new(Text::new("title"))
                     .children_padding(EdgeInsets::from_ltrb(10.0, 8.0, 12.0, 4.0))
                     .children([sized(100.0, 100.0)]),
             );
 
-            let column_rect = last_column_rect(&tester);
-            let padding_rect = last_padding_rect(&tester);
+            let column_rect = last_column_rect(tester);
+            let padding_rect = last_padding_rect(tester);
 
             // Check the offset of all the edges from x-axis and y-axis after childrenPadding
             // is applied.
@@ -2270,14 +2255,13 @@ pub(crate) mod tests {
     /// "ExpansionTile.collapsedBackgroundColor".
     #[test]
     fn expansion_tile_collapsed_background_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expansion_tile_key = GlobalKey::new();
             let background_color = Colors::RED.primary();
             let collapsed_background_color = Colors::BROWN.primary();
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
@@ -2288,13 +2272,13 @@ pub(crate) mod tests {
                 ),
             );
 
-            let (color, _, _) = decoration_of(&tester, &expansion_tile_key);
+            let (color, _, _) = decoration_of(tester, &expansion_tile_key);
             assert_eq!(color, Some(collapsed_background_color));
 
-            tap_text(&mut tester, "Title");
+            tap_text(tester, "Title");
             tester.pump_and_settle();
 
-            let (color, _, _) = decoration_of(&tester, &expansion_tile_key);
+            let (color, _, _) = decoration_of(tester, &expansion_tile_key);
             assert_eq!(color, Some(background_color));
         });
     }
@@ -2302,13 +2286,12 @@ pub(crate) mod tests {
     /// "ExpansionTile default iconColor, textColor".
     #[test]
     fn expansion_tile_default_icon_color_text_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_color = probe();
             let text_color = probe();
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(test_text("title", &text_color))
@@ -2324,7 +2307,7 @@ pub(crate) mod tests {
             );
             assert_eq!(text_color.get(), Some(theme.color_scheme.on_surface));
 
-            tap_text(&mut tester, "title");
+            tap_text(tester, "title");
             tester.pump_and_settle();
 
             assert_eq!(icon_color.get(), Some(theme.color_scheme.primary));
@@ -2335,18 +2318,17 @@ pub(crate) mod tests {
     /// "ExpansionTile iconColor, textColor".
     #[test]
     fn expansion_tile_icon_color_text_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/pull/78281
             let icon_color = Color::new(0xff00ff00);
             let collapsed_icon_color = Color::new(0xff0000ff);
             let text_color = Color::new(0xff00ffff);
             let collapsed_text_color = Color::new(0xffff00ff);
-            let mut tester = tester();
             let icon = probe();
             let text = probe();
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(test_text("title", &text))
@@ -2362,7 +2344,7 @@ pub(crate) mod tests {
             assert_eq!(icon.get(), Some(collapsed_icon_color));
             assert_eq!(text.get(), Some(collapsed_text_color));
 
-            tap_text(&mut tester, "title");
+            tap_text(tester, "title");
             tester.pump_and_settle();
 
             assert_eq!(icon.get(), Some(icon_color));
@@ -2380,13 +2362,12 @@ pub(crate) mod tests {
     /// "ExpansionTile shows hover color with opaque backgroundColor".
     #[test]
     fn expansion_tile_shows_hover_color_with_opaque_background_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let hover_color = Colors::GREEN.primary();
             let background_color = Colors::BLUE.primary();
-            let mut tester = tester();
 
             pump_app(
-                &mut tester,
+                tester,
                 |app| ThemeData::builder().hover_color(hover_color).build(app),
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
@@ -2395,17 +2376,17 @@ pub(crate) mod tests {
             );
 
             // Hover the tile.
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.pump(Duration::ZERO);
-            let center = text_rect(&tester, "Title").center();
+            tester.pump();
+            let center = text_rect(tester, "Title").center();
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
 
             // Dart's `paints..rect(color: Colors.transparent)..rect(color: hoverColor)`: a draw
             // with a transparent paint is not recorded at all, so the tile's transparent ink
             // decoration has no entry and the hover highlight is the first draw.
-            let drawn = tile_material_painted(&tester);
+            let drawn = tile_material_painted(tester);
             assert!(
                 matches!(drawn.first(), Some(Drawn::Rect(color, _)) if *color == hover_color.to_argb32()),
                 "{drawn:?}"
@@ -2416,13 +2397,12 @@ pub(crate) mod tests {
     /// "ExpansionTile shows focus color with opaque backgroundColor".
     #[test]
     fn expansion_tile_shows_focus_color_with_opaque_background_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let focus_color = Colors::PINK.primary();
             let background_color = Colors::AMBER.primary();
-            let mut tester = tester();
 
             pump_app(
-                &mut tester,
+                tester,
                 |app| ThemeData::builder().focus_color(focus_color).build(app),
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
@@ -2437,7 +2417,7 @@ pub(crate) mod tests {
             // Dart's `paints..rect(color: Colors.transparent)..rect(color: focusColor)`: a draw
             // with a transparent paint is not recorded at all, so the tile's transparent ink
             // decoration has no entry and the focus highlight is the first draw.
-            let drawn = tile_material_painted(&tester);
+            let drawn = tile_material_painted(tester);
             assert!(
                 matches!(drawn.first(), Some(Drawn::Rect(color, _)) if *color == focus_color.to_argb32()),
                 "{drawn:?}"
@@ -2452,7 +2432,7 @@ pub(crate) mod tests {
     /// "ExpansionTile Border".
     #[test]
     fn expansion_tile_border() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let collapsed_shape = Border {
                 top: BorderSide {
                     color: Colors::BLUE.primary(),
@@ -2470,10 +2450,9 @@ pub(crate) mod tests {
                 BorderStyle::Solid,
                 BorderSide::STROKE_ALIGN_INSIDE,
             );
-            let mut tester = tester();
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("ExpansionTile"))
@@ -2486,16 +2465,16 @@ pub(crate) mod tests {
             // When a custom shape is provided, ExpansionTile will use the
             // Material widget to draw the shape and background color
             // instead of a Container.
-            let (material_shape, _, clip_behavior) = tile_material(&tester);
+            let (material_shape, _, clip_behavior) = tile_material(tester);
             // ExpansionTile should be collapsed initially.
             assert_eq!(material_shape, some_shape(collapsed_shape));
             assert_eq!(clip_behavior, Clip::AntiAlias);
 
-            tap_text(&mut tester, "ExpansionTile");
+            tap_text(tester, "ExpansionTile");
             tester.pump_and_settle();
 
             // ExpansionTile should be Expanded now.
-            let (material_shape, _, clip_behavior) = tile_material(&tester);
+            let (material_shape, _, clip_behavior) = tile_material(tester);
             assert_eq!(material_shape, some_shape(shape));
             assert_eq!(clip_behavior, Clip::AntiAlias);
         });
@@ -2508,11 +2487,10 @@ pub(crate) mod tests {
     /// "ExpansionTile platform controlAffinity test".
     #[test]
     fn expansion_tile_platform_control_affinity_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_affinity(&mut tester, ExpansionTile::new(Text::new("Title")));
+        test_widgets(|tester| {
+            pump_affinity(tester, ExpansionTile::new(Text::new("Title")));
 
-            the_list_tile(&tester, |list_tile| {
+            the_list_tile(tester, |list_tile| {
                 assert!(list_tile.leading.is_none());
                 assert!(is_widget::<Animated<RotationTransition>>(
                     &list_tile.trailing
@@ -2524,15 +2502,14 @@ pub(crate) mod tests {
     /// "ExpansionTile trailing controlAffinity test".
     #[test]
     fn expansion_tile_trailing_control_affinity_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_affinity(
-                &mut tester,
+                tester,
                 ExpansionTile::new(Text::new("Title"))
                     .control_affinity(ListTileControlAffinity::Trailing),
             );
 
-            the_list_tile(&tester, |list_tile| {
+            the_list_tile(tester, |list_tile| {
                 assert!(list_tile.leading.is_none());
                 assert!(is_widget::<Animated<RotationTransition>>(
                     &list_tile.trailing
@@ -2544,15 +2521,14 @@ pub(crate) mod tests {
     /// "ExpansionTile leading controlAffinity test".
     #[test]
     fn expansion_tile_leading_control_affinity_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_affinity(
-                &mut tester,
+                tester,
                 ExpansionTile::new(Text::new("Title"))
                     .control_affinity(ListTileControlAffinity::Leading),
             );
 
-            the_list_tile(&tester, |list_tile| {
+            the_list_tile(tester, |list_tile| {
                 assert!(is_widget::<Animated<RotationTransition>>(
                     &list_tile.leading
                 ));
@@ -2564,16 +2540,15 @@ pub(crate) mod tests {
     /// "ExpansionTile override rotating icon test".
     #[test]
     fn expansion_tile_override_rotating_icon_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_affinity(
-                &mut tester,
+                tester,
                 ExpansionTile::new(Text::new("Title"))
                     .leading(Icon::new(Some(Icons::info())))
                     .control_affinity(ListTileControlAffinity::Leading),
             );
 
-            the_list_tile(&tester, |list_tile| {
+            the_list_tile(tester, |list_tile| {
                 assert!(is_widget::<Icon>(&list_tile.leading));
                 assert!(list_tile.trailing.is_none());
             });
@@ -2637,8 +2612,7 @@ pub(crate) mod tests {
     /// "Collapsed ExpansionTile properties can be updated with setState".
     #[test]
     fn collapsed_expansion_tile_properties_can_be_updated_with_set_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon = probe();
             let text = probe();
             let values = Rc::new(RefCell::new(TileValues {
@@ -2649,7 +2623,7 @@ pub(crate) mod tests {
             }));
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(updatable_tile(
                     values,
@@ -2673,7 +2647,7 @@ pub(crate) mod tests {
             // When a custom shape is provided, ExpansionTile will use the
             // Material widget to draw the shape and background color
             // instead of a Container.
-            let (shape, color, clip_behavior) = tile_material(&tester);
+            let (shape, color, clip_behavior) = tile_material(tester);
 
             // Test initial ExpansionTile properties.
             assert_eq!(shape, some_shape(rounded(4.0)));
@@ -2683,10 +2657,10 @@ pub(crate) mod tests {
             assert_eq!(text.get(), Some(Color::new(0xffffffff)));
 
             // Tap the button to update the ExpansionTile properties.
-            tap_text(&mut tester, "Update collapsed properties");
+            tap_text(tester, "Update collapsed properties");
             tester.pump_and_settle();
 
-            let (shape, color, clip_behavior) = tile_material(&tester);
+            let (shape, color, clip_behavior) = tile_material(tester);
 
             // Test updated ExpansionTile properties.
             assert_eq!(shape, some_shape(rounded(16.0)));
@@ -2700,8 +2674,7 @@ pub(crate) mod tests {
     /// "Expanded ExpansionTile properties can be updated with setState".
     #[test]
     fn expanded_expansion_tile_properties_can_be_updated_with_set_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon = probe();
             let text = probe();
             let values = Rc::new(RefCell::new(TileValues {
@@ -2712,7 +2685,7 @@ pub(crate) mod tests {
             }));
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(updatable_tile(
                     values,
@@ -2734,13 +2707,13 @@ pub(crate) mod tests {
             );
 
             // Tap to expand the ExpansionTile.
-            tap_text(&mut tester, "title");
+            tap_text(tester, "title");
             tester.pump_and_settle();
 
             // When a custom shape is provided, ExpansionTile will use the
             // Material widget to draw the shape and background color
             // instead of a Container.
-            let (shape, color, clip_behavior) = tile_material(&tester);
+            let (shape, color, clip_behavior) = tile_material(tester);
 
             // Test initial ExpansionTile properties.
             assert_eq!(shape, some_shape(rounded(12.0)));
@@ -2750,10 +2723,10 @@ pub(crate) mod tests {
             assert_eq!(text.get(), Some(Color::new(0xff00ffff)));
 
             // Tap the button to update the ExpansionTile properties.
-            tap_text(&mut tester, "Update collapsed properties");
+            tap_text(tester, "Update collapsed properties");
             tester.pump_and_settle();
 
-            let (shape, color, clip_behavior) = tile_material(&tester);
+            let (shape, color, clip_behavior) = tile_material(tester);
 
             // Test updated ExpansionTile properties.
             assert_eq!(shape, some_shape(rounded(6.0)));
@@ -2767,43 +2740,43 @@ pub(crate) mod tests {
     /// The steps the "Override ExpansionTile animation" cases share: `pump(style)` pumps the
     /// tile with the animation style, given where each case gives it.
     pub(crate) fn animation_style_case(
+        tester: &mut WidgetTester,
         pump: impl Fn(&mut WidgetTester, &GlobalKey, Option<AnimationStyle>),
         reverse_curve: bool,
     ) {
-        let mut tester = tester();
         let expansion_tile_key = GlobalKey::new();
         let height = |tester: &WidgetTester| height(tester, &expansion_tile_key);
 
-        pump(&mut tester, &expansion_tile_key, None);
+        pump(tester, &expansion_tile_key, None);
 
         // Test initial ExpansionTile height.
-        assert_eq!(height(&tester), 58.0);
+        assert_eq!(height(tester), 58.0);
 
         // Test the default expansion animation.
-        tap_text(&mut tester, "title");
-        tester.pump(Duration::ZERO);
+        tap_text(tester, "title");
+        tester.pump();
         // Advance the animation by 1/4 of its duration.
-        tester.pump(Duration::from_millis(50));
+        tester.pump_by(Duration::from_millis(50));
 
-        assert_close(height(&tester), 67.4, 0.1);
+        assert_close(height(tester), 67.4, 0.1);
 
         // Advance the animation by 2/4 of its duration.
-        tester.pump(Duration::from_millis(50));
+        tester.pump_by(Duration::from_millis(50));
 
-        assert_close(height(&tester), 89.6, 0.1);
+        assert_close(height(tester), 89.6, 0.1);
 
         // Advance the animation to the end.
         tester.pump_and_settle();
 
-        assert_eq!(height(&tester), 158.0);
+        assert_eq!(height(tester), 158.0);
 
         // Tap to collapse the ExpansionTile.
-        tap_text(&mut tester, "title");
+        tap_text(tester, "title");
         tester.pump_and_settle();
 
         // Override the animation duration.
         pump(
-            &mut tester,
+            tester,
             &expansion_tile_key,
             Some(AnimationStyle::new(
                 None,
@@ -2815,30 +2788,30 @@ pub(crate) mod tests {
         tester.pump_and_settle();
 
         // Test the overridden animation duration.
-        tap_text(&mut tester, "title");
-        tester.pump(Duration::ZERO);
+        tap_text(tester, "title");
+        tester.pump();
         // Advance the animation by 1/4 of its duration.
-        tester.pump(Duration::from_millis(200));
+        tester.pump_by(Duration::from_millis(200));
 
-        assert_close(height(&tester), 67.4, 0.1);
+        assert_close(height(tester), 67.4, 0.1);
 
         // Advance the animation by 2/4 of its duration.
-        tester.pump(Duration::from_millis(200));
+        tester.pump_by(Duration::from_millis(200));
 
-        assert_close(height(&tester), 89.6, 0.1);
+        assert_close(height(tester), 89.6, 0.1);
 
         // Advance the animation to the end.
         tester.pump_and_settle();
 
-        assert_eq!(height(&tester), 158.0);
+        assert_eq!(height(tester), 158.0);
 
         // Tap to collapse the ExpansionTile.
-        tap_text(&mut tester, "title");
+        tap_text(tester, "title");
         tester.pump_and_settle();
 
         // Override the animation curve.
         pump(
-            &mut tester,
+            tester,
             &expansion_tile_key,
             Some(AnimationStyle::new(
                 Some(Easing::emphasized_decelerate()),
@@ -2850,65 +2823,66 @@ pub(crate) mod tests {
         tester.pump_and_settle();
 
         // Test the overridden animation curve.
-        tap_text(&mut tester, "title");
-        tester.pump(Duration::ZERO);
+        tap_text(tester, "title");
+        tester.pump();
         // Advance the animation by 1/4 of its duration.
-        tester.pump(Duration::from_millis(50));
+        tester.pump_by(Duration::from_millis(50));
 
-        assert_close(height(&tester), 141.2, 0.1);
+        assert_close(height(tester), 141.2, 0.1);
 
         // Advance the animation by 2/4 of its duration.
-        tester.pump(Duration::from_millis(50));
+        tester.pump_by(Duration::from_millis(50));
 
-        assert_close(height(&tester), 153.0, 0.1);
+        assert_close(height(tester), 153.0, 0.1);
 
         // Advance the animation to the end.
         tester.pump_and_settle();
 
-        assert_eq!(height(&tester), 158.0);
+        assert_eq!(height(tester), 158.0);
 
         if reverse_curve {
             // Test the overridden reverse (collapse) animation curve.
-            tap_text(&mut tester, "title");
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "title");
+            tester.pump();
             // Advance the animation by 1/4 of its duration.
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
 
-            assert_close(height(&tester), 98.6, 0.1);
+            assert_close(height(tester), 98.6, 0.1);
 
             // Advance the animation by 2/4 of its duration.
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
 
-            assert_close(height(&tester), 73.4, 0.1);
+            assert_close(height(tester), 73.4, 0.1);
 
             // Advance the animation to the end.
             tester.pump_and_settle();
 
-            assert_eq!(height(&tester), 58.0);
+            assert_eq!(height(tester), 58.0);
         } else {
             // Tap to collapse the ExpansionTile.
-            tap_text(&mut tester, "title");
+            tap_text(tester, "title");
         }
 
         // Test no animation.
         pump(
-            &mut tester,
+            tester,
             &expansion_tile_key,
             Some(AnimationStyle::NO_ANIMATION),
         );
 
         // Tap to expand the ExpansionTile.
-        tap_text(&mut tester, "title");
-        tester.pump(Duration::ZERO);
+        tap_text(tester, "title");
+        tester.pump();
 
-        assert_eq!(height(&tester), 158.0);
+        assert_eq!(height(tester), 158.0);
     }
 
     /// "Override ExpansionTile animation using AnimationStyle".
     #[test]
     fn override_expansion_tile_animation_using_animation_style() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             animation_style_case(
+                tester,
                 |tester, key, animation_style| {
                     let mut tile = ExpansionTile::new(test_text("title", &probe()))
                         .key(key.clone().into())
@@ -2924,10 +2898,9 @@ pub(crate) mod tests {
     /// "Default clipBehavior when a shape is provided".
     #[test]
     fn default_clip_behavior_when_a_shape_is_provided() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Scaffold::new().body(
                     ExpansionTile::new(Text::new("Title"))
@@ -2937,17 +2910,16 @@ pub(crate) mod tests {
                 ),
             );
 
-            assert_eq!(tile_material(&tester).2, Clip::AntiAlias);
+            assert_eq!(tile_material(tester).2, Clip::AntiAlias);
         });
     }
 
     /// "Can override clipBehavior when a shape is provided".
     #[test]
     fn can_override_clip_behavior_when_a_shape_is_provided() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Scaffold::new().body(
                     ExpansionTile::new(Text::new("Title"))
@@ -2958,20 +2930,19 @@ pub(crate) mod tests {
                 ),
             );
 
-            assert_eq!(tile_material(&tester).2, Clip::None);
+            assert_eq!(tile_material(tester).2, Clip::None);
         });
     }
 
     /// Material 2: "ExpansionTile default iconColor, textColor".
     #[test]
     fn material2_expansion_tile_default_icon_color_text_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_color = probe();
             let text_color = probe();
 
             pump_app(
-                &mut tester,
+                tester,
                 m2,
                 Material::new().child(
                     ExpansionTile::new(test_text("title", &text_color))
@@ -2991,7 +2962,7 @@ pub(crate) mod tests {
                     .and_then(|style| style.color.as_deref().copied())
             );
 
-            tap_text(&mut tester, "title");
+            tap_text(tester, "title");
             tester.pump_and_settle();
 
             assert_eq!(icon_color.get(), Some(theme.color_scheme.primary));
@@ -3002,14 +2973,13 @@ pub(crate) mod tests {
     /// Material 2: "Material2 - ExpansionTile draws inkwell splash on top of background color".
     #[test]
     fn material2_expansion_tile_draws_inkwell_splash_on_top_of_background_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expansion_tile_key = GlobalKey::new();
             let collapsed_background_color = Color::new(0xff00ff00);
             let background_color = Color::new(0xffff0000);
 
             pump_app(
-                &mut tester,
+                tester,
                 m2,
                 Material::new().child(
                     Center::new().child(
@@ -3028,13 +2998,13 @@ pub(crate) mod tests {
             );
 
             // Tap and hold the ExpansionTile to trigger ink splash.
-            let center = key_rect(&tester, &expansion_tile_key).center();
-            let mut gesture = WidgetTester::touch(1);
+            let center = key_rect(tester, &expansion_tile_key).center();
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
             // Start the splash animation.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Splash is underway.
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
             let ink_features = tester.first::<RenderInkFeatures>();
             let drawn = tester.painted(ink_features.as_object());
@@ -3060,12 +3030,11 @@ pub(crate) mod tests {
     /// "ExpansionTileController isExpanded, expand() and collapse()".
     #[test]
     fn expansion_tile_controller_is_expanded_expand_and_collapse() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = ExpansibleController::new(&mut tester.cell.borrow_mut());
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
@@ -3076,14 +3045,14 @@ pub(crate) mod tests {
 
             let is_expanded = |tester: &WidgetTester| controller.is_expanded(&tester.cell.borrow());
             assert!(tester.find_onstage_text("Child 0").is_empty());
-            assert!(!is_expanded(&tester));
+            assert!(!is_expanded(tester));
             controller.expand(&mut tester.cell.borrow_mut());
-            assert!(is_expanded(&tester));
+            assert!(is_expanded(tester));
             tester.pump_and_settle();
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
-            assert!(is_expanded(&tester));
+            assert!(is_expanded(tester));
             controller.collapse(&mut tester.cell.borrow_mut());
-            assert!(!is_expanded(&tester));
+            assert!(!is_expanded(tester));
             tester.pump_and_settle();
             assert!(tester.find_onstage_text("Child 0").is_empty());
 
@@ -3101,12 +3070,11 @@ pub(crate) mod tests {
     #[test]
     fn calling_expansion_tile_controller_expand_collapsed_has_no_effect_if_it_is_already_expanded_collapsed()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = ExpansibleController::new(&mut tester.cell.borrow_mut());
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
@@ -3118,23 +3086,23 @@ pub(crate) mod tests {
 
             let is_expanded = |tester: &WidgetTester| controller.is_expanded(&tester.cell.borrow());
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
-            assert!(is_expanded(&tester));
+            assert!(is_expanded(tester));
             controller.expand(&mut tester.cell.borrow_mut());
-            assert!(is_expanded(&tester));
-            tester.pump(Duration::ZERO);
-            assert!(!has_running_animations(&tester));
+            assert!(is_expanded(tester));
+            tester.pump();
+            assert!(!has_running_animations(tester));
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
             controller.collapse(&mut tester.cell.borrow_mut());
-            assert!(!is_expanded(&tester));
-            tester.pump(Duration::ZERO);
-            assert!(has_running_animations(&tester));
+            assert!(!is_expanded(tester));
+            tester.pump();
+            assert!(has_running_animations(tester));
             tester.pump_and_settle();
-            assert!(!is_expanded(&tester));
+            assert!(!is_expanded(tester));
             assert!(tester.find_onstage_text("Child 0").is_empty());
             controller.collapse(&mut tester.cell.borrow_mut());
-            assert!(!is_expanded(&tester));
-            tester.pump(Duration::ZERO);
-            assert!(!has_running_animations(&tester));
+            assert!(!is_expanded(tester));
+            tester.pump();
+            assert!(!has_running_animations(tester));
 
             controller.dispose(&mut tester.cell.borrow_mut());
         });
@@ -3143,12 +3111,11 @@ pub(crate) mod tests {
     /// "Call to ExpansionTileController.of()".
     #[test]
     fn call_to_expansion_tile_controller_of() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let title_key = GlobalKey::new();
             let child_key = GlobalKey::new();
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title").key(title_key.clone().into()))
@@ -3159,8 +3126,8 @@ pub(crate) mod tests {
                 ),
             );
 
-            let child = element_of(&tester, &child_key);
-            let title = element_of(&tester, &title_key);
+            let child = element_of(tester, &child_key);
+            let title = element_of(tester, &title_key);
             let app = tester.cell.borrow();
             let controller1 = ExpansibleController::of(&app, child);
             assert!(controller1.is_expanded(&app));
@@ -3175,12 +3142,11 @@ pub(crate) mod tests {
     /// "Call to ExpansionTile.maybeOf()".
     #[test]
     fn call_to_expansion_tile_maybe_of() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let title_key = GlobalKey::new();
             let non_descendant_key = GlobalKey::new();
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     Column::new().children([
@@ -3194,8 +3160,8 @@ pub(crate) mod tests {
                 ),
             );
 
-            let title = element_of(&tester, &title_key);
-            let non_descendant = element_of(&tester, &non_descendant_key);
+            let title = element_of(tester, &title_key);
+            let non_descendant = element_of(tester, &non_descendant_key);
             let app = tester.cell.borrow();
             let controller1 = ExpansibleController::maybe_of(&app, title);
             assert!(controller1.is_some());
@@ -3212,15 +3178,14 @@ pub(crate) mod tests {
     /// "Check if dense, splashColor, enableFeedback, visualDensity parameter is working".
     #[test]
     fn check_if_dense_splash_color_enable_feedback_visual_density_parameter_is_working() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dense = true;
             let splash_color = Colors::BLUE.primary();
             let enable_feedback = false;
             let visual_density = VisualDensity::COMPACT;
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     Column::new().children([
@@ -3236,7 +3201,7 @@ pub(crate) mod tests {
                 ),
             );
 
-            the_list_tile(&tester, |tile| {
+            the_list_tile(tester, |tile| {
                 assert_eq!(tile.dense, Some(dense));
                 assert_eq!(tile.splash_color, Some(splash_color));
                 assert_eq!(tile.enable_feedback, Some(enable_feedback));
@@ -3255,12 +3220,11 @@ pub(crate) mod tests {
     /// "ExpansionTileController should not toggle if disabled".
     #[test]
     fn expansion_tile_controller_should_not_toggle_if_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = ExpansibleController::new(&mut tester.cell.borrow_mut());
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
@@ -3272,19 +3236,19 @@ pub(crate) mod tests {
 
             let is_expanded = |tester: &WidgetTester| controller.is_expanded(&tester.cell.borrow());
             assert!(tester.find_onstage_text("Child 0").is_empty());
-            assert!(!is_expanded(&tester));
-            tap_tile(&mut tester);
+            assert!(!is_expanded(tester));
+            tap_tile(tester);
             tester.pump_and_settle();
             assert!(tester.find_onstage_text("Child 0").is_empty());
-            assert!(!is_expanded(&tester));
+            assert!(!is_expanded(tester));
             controller.expand(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
-            assert!(is_expanded(&tester));
-            tap_tile(&mut tester);
+            assert!(is_expanded(tester));
+            tap_tile(tester);
             tester.pump_and_settle();
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
-            assert!(is_expanded(&tester));
+            assert!(is_expanded(tester));
 
             controller.dispose(&mut tester.cell.borrow_mut());
         });
@@ -3303,10 +3267,9 @@ pub(crate) mod tests {
     /// (#145268)".
     #[test]
     fn expansion_tile_does_not_include_the_default_trailing_icon_when_show_trailing_icon_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(
@@ -3318,7 +3281,7 @@ pub(crate) mod tests {
                 ),
             );
 
-            assert_eq!(title_width(&tester), WidgetTester::SIZE.width());
+            assert_eq!(title_width(tester), WidgetTester::SIZE.width());
         });
     }
 
@@ -3326,10 +3289,9 @@ pub(crate) mod tests {
     /// (preserves original behavior) (#145268)".
     #[test]
     fn expansion_tile_with_smaller_trailing_widget_allocates_at_least_32_units_of_space() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(
@@ -3341,47 +3303,45 @@ pub(crate) mod tests {
                 ),
             );
 
-            assert_eq!(title_width(&tester), WidgetTester::SIZE.width() - 32.0);
+            assert_eq!(title_width(tester), WidgetTester::SIZE.width() - 32.0);
         });
     }
 
     /// "ExpansionTile uses ListTileTheme controlAffinity".
     #[test]
     fn expansion_tile_uses_list_tile_theme_control_affinity() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_view = |tester: &mut WidgetTester, control_affinity| {
                 pump_app(
                     tester,
                     m3,
                     ListTileTheme::new(
-                        Material::new().child(ExpansionTile::new(AhemText::new("ExpansionTile"))),
+                        Material::new().child(ExpansionTile::new(Text::new("ExpansionTile"))),
                     )
                     .data(ListTileThemeData::new().control_affinity(control_affinity)),
                 );
             };
             let top_left = |tester: &WidgetTester| {
-                let found = tester.find_ahem_text("ExpansionTile");
+                let found = tester.find_text("ExpansionTile");
                 assert_eq!(found.len(), 1, "one ExpansionTile title");
                 rect_of(tester, found[0]).top_left()
             };
 
-            build_view(&mut tester, ListTileControlAffinity::Leading);
-            assert_eq!(top_left(&tester), Offset::new(56.0, 17.0));
+            build_view(tester, ListTileControlAffinity::Leading);
+            assert_eq!(top_left(tester), Offset::new(56.0, 17.0));
 
-            build_view(&mut tester, ListTileControlAffinity::Trailing);
-            assert_eq!(top_left(&tester), Offset::new(16.0, 17.0));
+            build_view(tester, ListTileControlAffinity::Trailing);
+            assert_eq!(top_left(tester), Offset::new(16.0, 17.0));
 
-            build_view(&mut tester, ListTileControlAffinity::Platform);
-            assert_eq!(top_left(&tester), Offset::new(16.0, 17.0));
+            build_view(tester, ListTileControlAffinity::Platform);
+            assert_eq!(top_left(tester), Offset::new(16.0, 17.0));
         });
     }
 
     /// "ExpansionTile can accept a new controller".
     #[test]
     fn expansion_tile_can_accept_a_new_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller1 = ExpansibleController::new(&mut tester.cell.borrow_mut());
             let controller2 = ExpansibleController::new(&mut tester.cell.borrow_mut());
             let tile = |controller| {
@@ -3393,7 +3353,7 @@ pub(crate) mod tests {
                 )
             };
 
-            pump_app(&mut tester, m3, tile(controller1.clone()));
+            pump_app(tester, m3, tile(controller1.clone()));
 
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
             assert!(controller1.is_expanded(&tester.cell.borrow()));
@@ -3402,7 +3362,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(tester.find_onstage_text("Child 0").is_empty());
 
-            pump_app(&mut tester, m3, tile(controller2.clone()));
+            pump_app(tester, m3, tile(controller2.clone()));
 
             assert!(tester.find_onstage_text("Child 0").is_empty());
             controller2.expand(&mut tester.cell.borrow_mut());
@@ -3418,8 +3378,7 @@ pub(crate) mod tests {
     /// "ExpansionTile can accept a new controller with a different state".
     #[test]
     fn expansion_tile_can_accept_a_new_controller_with_a_different_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller1 = ExpansibleController::new(&mut tester.cell.borrow_mut());
             let controller2 = ExpansibleController::new(&mut tester.cell.borrow_mut());
             let tile = |controller| {
@@ -3430,7 +3389,7 @@ pub(crate) mod tests {
                 )
             };
 
-            pump_app(&mut tester, m3, tile(controller1.clone()));
+            pump_app(tester, m3, tile(controller1.clone()));
 
             assert!(tester.find_onstage_text("Child 0").is_empty());
             assert!(!controller1.is_expanded(&tester.cell.borrow()));
@@ -3439,7 +3398,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
 
-            pump_app(&mut tester, m3, tile(controller2.clone()));
+            pump_app(tester, m3, tile(controller2.clone()));
 
             tester.pump_and_settle();
 
@@ -3460,19 +3419,18 @@ pub(crate) mod tests {
     /// "ExpansionTile forwards statesController to ListTile".
     #[test]
     fn expansion_tile_forwards_states_controller_to_list_tile() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = WidgetStatesController::new(&mut tester.cell.borrow_mut(), None);
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Tile")).states_controller(controller.clone()),
                 ),
             );
 
-            the_list_tile(&tester, |list_tile| {
+            the_list_tile(tester, |list_tile| {
                 assert_eq!(list_tile.states_controller, Some(controller));
             });
         });
@@ -3481,15 +3439,14 @@ pub(crate) mod tests {
     /// "ExpansionTile forwards null statesController to ListTile".
     #[test]
     fn expansion_tile_forwards_null_states_controller_to_list_tile() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(ExpansionTile::new(Text::new("Tile"))),
             );
 
-            the_list_tile(&tester, |list_tile| {
+            the_list_tile(tester, |list_tile| {
                 assert_eq!(list_tile.states_controller, None);
             });
         });
@@ -3499,8 +3456,7 @@ pub(crate) mod tests {
     /// expanding and false when it starts collapsing.
     #[test]
     fn on_expansion_changed_is_called_when_the_tile_starts_expanding_and_collapsing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let changes = Rc::new(RefCell::new(Vec::new()));
             let on_expansion_changed: ValueChanged<bool> = {
                 let changes = Rc::clone(&changes);
@@ -3508,7 +3464,7 @@ pub(crate) mod tests {
             };
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
@@ -3517,10 +3473,10 @@ pub(crate) mod tests {
                 ),
             );
 
-            tap_text(&mut tester, "Title");
+            tap_text(tester, "Title");
             assert_eq!(*changes.borrow(), [true]);
             tester.pump_and_settle();
-            tap_text(&mut tester, "Title");
+            tap_text(tester, "Title");
             assert_eq!(*changes.borrow(), [true, false]);
             tester.pump_and_settle();
         });
@@ -3529,15 +3485,14 @@ pub(crate) mod tests {
     /// "ExpansionTile supports being embedded in a WidgetSpan".
     #[test]
     fn expansion_tile_supports_being_embedded_in_a_widget_span() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_painting::TextSpan;
             use waft_widgets::WidgetSpan;
 
-            let mut tester = tester();
             let tile = ExpansionTile::new(Text::new("Header"))
                 .children([Text::new("Details").into_widget()]);
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Scaffold::new().body(Text::rich(
                     TextSpan::new()
@@ -3553,19 +3508,18 @@ pub(crate) mod tests {
     /// own while the `Expansible` below still compares it with the new one, as Dart's does.
     #[test]
     fn a_tile_without_a_controller_that_is_given_one_follows_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = ExpansibleController::new(&mut tester.cell.borrow_mut());
             let tile = || {
                 ExpansionTile::new(Text::new("Title"))
                     .children([Text::new("Child 0").into_widget()])
             };
 
-            pump_app(&mut tester, m3, Material::new().child(tile()));
+            pump_app(tester, m3, Material::new().child(tile()));
             assert!(tester.find_onstage_text("Child 0").is_empty());
 
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(tile().controller(controller.clone())),
             );
@@ -3580,7 +3534,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(tester.find_onstage_text("Child 0").is_empty());
 
-            pump_app(&mut tester, m3, SizedBox::new());
+            pump_app(tester, m3, SizedBox::new());
             controller.dispose(&mut tester.cell.borrow_mut());
         });
     }
@@ -3607,21 +3561,20 @@ pub(crate) mod tests {
     /// next one, and the last ones after the tile goes.
     #[test]
     fn a_tile_keeps_only_the_animations_of_its_latest_frame() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Material::new().child(
                     ExpansionTile::new(Text::new("Title"))
                         .children([Text::new("Child 0").into_widget()]),
                 ),
             );
-            let first = driven_animations(&tester);
+            let first = driven_animations(tester);
 
-            tap_text(&mut tester, "Title");
-            tester.pump(Duration::from_millis(50));
-            let mid_expansion = driven_animations(&tester);
+            tap_text(tester, "Title");
+            tester.pump_by(Duration::from_millis(50));
+            let mid_expansion = driven_animations(tester);
             {
                 let app = tester.cell.borrow();
                 assert!(first.iter().all(|&animation| !app.contains(animation)));
@@ -3633,8 +3586,8 @@ pub(crate) mod tests {
             }
 
             tester.pump_and_settle();
-            let last = driven_animations(&tester);
-            pump_app(&mut tester, m3, SizedBox::new());
+            let last = driven_animations(tester);
+            pump_app(tester, m3, SizedBox::new());
             let app = tester.cell.borrow();
             assert!(
                 mid_expansion

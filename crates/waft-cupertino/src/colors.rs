@@ -1213,14 +1213,17 @@ mod tests {
 
     use waft_widgets::{Builder, IntoWidget, MediaQuery, MediaQueryData, SizedBox, WidgetRef};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::build;
     use crate::theme::CupertinoThemeData;
 
-    /// `CupertinoDynamicColor::resolve(color)` against a context built under `wrap`.
-    fn resolve_under(wrap: impl FnOnce(WidgetRef) -> WidgetRef, color: AnyColor) -> AnyColor {
-        let cell = crate::test_support::test_cell();
-        let app = cell.borrow();
+    /// `CupertinoDynamicColor::resolve(color)` against a context pumped under `wrap`.
+    fn resolve_under(
+        tester: &mut WidgetTester,
+        wrap: impl FnOnce(WidgetRef) -> WidgetRef,
+        color: AnyColor,
+    ) -> AnyColor {
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -1230,8 +1233,7 @@ mod tests {
             }
         })
         .into_widget();
-        drop(app);
-        build(&cell, wrap(probe));
+        tester.pump_widget(wrap(probe));
         let resolved = seen.borrow_mut().take();
         resolved.expect("the probe built")
     }
@@ -1273,172 +1275,188 @@ mod tests {
 
     #[test]
     fn a_table_color_resolves_to_its_light_variant_by_default() {
-        let resolved = resolve_under(|child| child, CupertinoColors::SYSTEM_BLUE);
-        assert_eq!(resolved.color(), Color::from_argb(255, 0, 122, 255));
-        assert_eq!(resolved, CupertinoColors::SYSTEM_BLUE);
+        test_widgets(|tester| {
+            let resolved = resolve_under(tester, |child| child, CupertinoColors::SYSTEM_BLUE);
+            assert_eq!(resolved.color(), Color::from_argb(255, 0, 122, 255));
+            assert_eq!(resolved, CupertinoColors::SYSTEM_BLUE);
+        });
     }
 
     #[test]
     fn a_table_color_resolves_to_its_dark_variant_under_a_dark_platform_brightness() {
-        let dark = traits(
-            Brightness::Dark,
-            CupertinoUserInterfaceLevelData::Base,
-            false,
-        );
-        let resolved = resolve_under(dark, CupertinoColors::SYSTEM_BLUE);
-        assert_eq!(resolved.color(), Color::from_argb(255, 10, 132, 255));
-        assert_eq!(
-            dynamic(&resolved).effective_color(),
-            dynamic(&CupertinoColors::SYSTEM_BLUE).dark_color
-        );
-        assert_ne!(resolved, CupertinoColors::SYSTEM_BLUE);
+        test_widgets(|tester| {
+            let dark = traits(
+                Brightness::Dark,
+                CupertinoUserInterfaceLevelData::Base,
+                false,
+            );
+            let resolved = resolve_under(tester, dark, CupertinoColors::SYSTEM_BLUE);
+            assert_eq!(resolved.color(), Color::from_argb(255, 10, 132, 255));
+            assert_eq!(
+                dynamic(&resolved).effective_color(),
+                dynamic(&CupertinoColors::SYSTEM_BLUE).dark_color
+            );
+            assert_ne!(resolved, CupertinoColors::SYSTEM_BLUE);
+        });
     }
 
     #[test]
     fn a_table_color_resolves_to_its_dark_variant_under_a_dark_cupertino_theme() {
-        let dark_theme = |child: WidgetRef| {
-            CupertinoTheme::new(
-                CupertinoThemeData::new().with_brightness(Brightness::Dark),
-                child,
-            )
-            .into_widget()
-        };
-        let resolved = resolve_under(dark_theme, CupertinoColors::SYSTEM_BLUE);
-        assert_eq!(resolved.color(), Color::from_argb(255, 10, 132, 255));
-        assert_eq!(
-            dynamic(&resolved).effective_color(),
-            dynamic(&CupertinoColors::SYSTEM_BLUE).dark_color
-        );
+        test_widgets(|tester| {
+            let dark_theme = |child: WidgetRef| {
+                CupertinoTheme::new(
+                    CupertinoThemeData::new().with_brightness(Brightness::Dark),
+                    child,
+                )
+                .into_widget()
+            };
+            let resolved = resolve_under(tester, dark_theme, CupertinoColors::SYSTEM_BLUE);
+            assert_eq!(resolved.color(), Color::from_argb(255, 10, 132, 255));
+            assert_eq!(
+                dynamic(&resolved).effective_color(),
+                dynamic(&CupertinoColors::SYSTEM_BLUE).dark_color
+            );
+        });
     }
 
     #[test]
     fn a_table_color_resolves_to_its_high_contrast_variant_under_a_high_contrast_media_query() {
-        let high_contrast = traits(
-            Brightness::Light,
-            CupertinoUserInterfaceLevelData::Base,
-            true,
-        );
-        let resolved = resolve_under(high_contrast, CupertinoColors::SYSTEM_BLUE);
-        assert_eq!(resolved.color(), Color::from_argb(255, 0, 64, 221));
+        test_widgets(|tester| {
+            let high_contrast = traits(
+                Brightness::Light,
+                CupertinoUserInterfaceLevelData::Base,
+                true,
+            );
+            let resolved = resolve_under(tester, high_contrast, CupertinoColors::SYSTEM_BLUE);
+            assert_eq!(resolved.color(), Color::from_argb(255, 0, 64, 221));
+        });
     }
 
     #[test]
     fn a_table_color_resolves_to_its_elevated_variant_under_an_elevated_interface_level() {
-        let elevated = traits(
-            Brightness::Dark,
-            CupertinoUserInterfaceLevelData::Elevated,
-            false,
-        );
-        let resolved = resolve_under(elevated, CupertinoColors::SYSTEM_BACKGROUND);
-        assert_eq!(resolved.color(), Color::from_argb(255, 28, 28, 30));
+        test_widgets(|tester| {
+            let elevated = traits(
+                Brightness::Dark,
+                CupertinoUserInterfaceLevelData::Elevated,
+                false,
+            );
+            let resolved = resolve_under(tester, elevated, CupertinoColors::SYSTEM_BACKGROUND);
+            assert_eq!(resolved.color(), Color::from_argb(255, 28, 28, 30));
+        });
     }
 
     #[test]
     fn every_trait_combination_picks_its_variant() {
-        let cases = [
-            (
-                Brightness::Light,
-                CupertinoUserInterfaceLevelData::Base,
-                false,
-                EIGHT.color,
-            ),
-            (
-                Brightness::Light,
-                CupertinoUserInterfaceLevelData::Base,
-                true,
-                EIGHT.high_contrast_color,
-            ),
-            (
-                Brightness::Light,
-                CupertinoUserInterfaceLevelData::Elevated,
-                false,
-                EIGHT.elevated_color,
-            ),
-            (
-                Brightness::Light,
-                CupertinoUserInterfaceLevelData::Elevated,
-                true,
-                EIGHT.high_contrast_elevated_color,
-            ),
-            (
-                Brightness::Dark,
-                CupertinoUserInterfaceLevelData::Base,
-                false,
-                EIGHT.dark_color,
-            ),
-            (
-                Brightness::Dark,
-                CupertinoUserInterfaceLevelData::Base,
-                true,
-                EIGHT.dark_high_contrast_color,
-            ),
-            (
-                Brightness::Dark,
-                CupertinoUserInterfaceLevelData::Elevated,
-                false,
-                EIGHT.dark_elevated_color,
-            ),
-            (
-                Brightness::Dark,
-                CupertinoUserInterfaceLevelData::Elevated,
-                true,
-                EIGHT.dark_high_contrast_elevated_color,
-            ),
-        ];
-        for (brightness, level, high_contrast, expected) in cases {
-            let resolved =
-                resolve_under(traits(brightness, level, high_contrast), EIGHT.into_any());
-            assert_eq!(
-                resolved.color(),
-                expected,
-                "{brightness:?}, {level:?}, high contrast {high_contrast}"
-            );
-            assert_eq!(
-                dynamic(&resolved).color,
-                EIGHT.color,
-                "the variants survive"
-            );
-        }
+        test_widgets(|tester| {
+            let cases = [
+                (
+                    Brightness::Light,
+                    CupertinoUserInterfaceLevelData::Base,
+                    false,
+                    EIGHT.color,
+                ),
+                (
+                    Brightness::Light,
+                    CupertinoUserInterfaceLevelData::Base,
+                    true,
+                    EIGHT.high_contrast_color,
+                ),
+                (
+                    Brightness::Light,
+                    CupertinoUserInterfaceLevelData::Elevated,
+                    false,
+                    EIGHT.elevated_color,
+                ),
+                (
+                    Brightness::Light,
+                    CupertinoUserInterfaceLevelData::Elevated,
+                    true,
+                    EIGHT.high_contrast_elevated_color,
+                ),
+                (
+                    Brightness::Dark,
+                    CupertinoUserInterfaceLevelData::Base,
+                    false,
+                    EIGHT.dark_color,
+                ),
+                (
+                    Brightness::Dark,
+                    CupertinoUserInterfaceLevelData::Base,
+                    true,
+                    EIGHT.dark_high_contrast_color,
+                ),
+                (
+                    Brightness::Dark,
+                    CupertinoUserInterfaceLevelData::Elevated,
+                    false,
+                    EIGHT.dark_elevated_color,
+                ),
+                (
+                    Brightness::Dark,
+                    CupertinoUserInterfaceLevelData::Elevated,
+                    true,
+                    EIGHT.dark_high_contrast_elevated_color,
+                ),
+            ];
+            for (brightness, level, high_contrast, expected) in cases {
+                let resolved = resolve_under(
+                    tester,
+                    traits(brightness, level, high_contrast),
+                    EIGHT.into_any(),
+                );
+                assert_eq!(
+                    resolved.color(),
+                    expected,
+                    "{brightness:?}, {level:?}, high contrast {high_contrast}"
+                );
+                assert_eq!(
+                    dynamic(&resolved).color,
+                    EIGHT.color,
+                    "the variants survive"
+                );
+            }
+        });
     }
 
     #[test]
     fn a_plain_color_passes_through_resolve_unchanged() {
-        let plain = AnyColor::new(Color::new(0xFF123456));
-        let dark = traits(
-            Brightness::Dark,
-            CupertinoUserInterfaceLevelData::Elevated,
-            true,
-        );
-        let resolved = resolve_under(dark, plain.clone());
-        assert_eq!(resolved, plain);
-        assert!(!resolved.has_extension());
+        test_widgets(|tester| {
+            let plain = AnyColor::new(Color::new(0xFF123456));
+            let dark = traits(
+                Brightness::Dark,
+                CupertinoUserInterfaceLevelData::Elevated,
+                true,
+            );
+            let resolved = resolve_under(tester, dark, plain.clone());
+            assert_eq!(resolved, plain);
+            assert!(!resolved.has_extension());
+        });
     }
 
     #[test]
     fn maybe_resolve_passes_none_through() {
-        let cell = crate::test_support::test_cell();
-        let app = cell.borrow();
-        let seen = Rc::new(RefCell::new(None));
-        let probe = Builder::new({
-            let seen = Rc::clone(&seen);
-            move |app, context| {
-                *seen.borrow_mut() = Some((
-                    CupertinoDynamicColor::maybe_resolve(None, app, context),
-                    CupertinoDynamicColor::maybe_resolve(
-                        Some(&CupertinoColors::SYSTEM_RED),
-                        app,
-                        context,
-                    ),
-                ));
-                SizedBox::shrink().into_widget()
-            }
-        })
-        .into_widget();
-        drop(app);
-        build(&cell, probe);
-        let (none, red) = seen.borrow_mut().take().expect("the probe built");
-        assert_eq!(none, None);
-        assert_eq!(red, Some(CupertinoColors::SYSTEM_RED));
+        test_widgets(|tester| {
+            let seen = Rc::new(RefCell::new(None));
+            let probe = Builder::new({
+                let seen = Rc::clone(&seen);
+                move |app, context| {
+                    *seen.borrow_mut() = Some((
+                        CupertinoDynamicColor::maybe_resolve(None, app, context),
+                        CupertinoDynamicColor::maybe_resolve(
+                            Some(&CupertinoColors::SYSTEM_RED),
+                            app,
+                            context,
+                        ),
+                    ));
+                    SizedBox::shrink().into_widget()
+                }
+            })
+            .into_widget();
+            tester.pump_widget(probe);
+            let (none, red) = seen.borrow_mut().take().expect("the probe built");
+            assert_eq!(none, None);
+            assert_eq!(red, Some(CupertinoColors::SYSTEM_RED));
+        });
     }
 
     #[test]
@@ -1486,48 +1504,51 @@ mod tests {
 
     #[test]
     fn debug_prints_the_dependent_variants_and_stars_the_effective_one() {
-        let light = Color::from_argb(255, 0, 122, 255);
-        let dark = Color::from_argb(255, 10, 132, 255);
-        let high_contrast = Color::from_argb(255, 0, 64, 221);
-        let dark_high_contrast = Color::from_argb(255, 64, 156, 255);
-        assert_eq!(
-            format!("{:?}", CupertinoColors::SYSTEM_BLUE),
-            format!(
-                "systemBlue(*color = {light:?}*, darkColor = {dark:?}, \
-                 highContrastColor = {high_contrast:?}, \
-                 darkHighContrastColor = {dark_high_contrast:?})"
-            )
-        );
+        test_widgets(|tester| {
+            let light = Color::from_argb(255, 0, 122, 255);
+            let dark = Color::from_argb(255, 10, 132, 255);
+            let high_contrast = Color::from_argb(255, 0, 64, 221);
+            let dark_high_contrast = Color::from_argb(255, 64, 156, 255);
+            assert_eq!(
+                format!("{:?}", CupertinoColors::SYSTEM_BLUE),
+                format!(
+                    "systemBlue(*color = {light:?}*, darkColor = {dark:?}, \
+                     highContrastColor = {high_contrast:?}, \
+                     darkHighContrastColor = {dark_high_contrast:?})"
+                )
+            );
 
-        let resolved = resolve_under(
-            traits(
-                Brightness::Dark,
-                CupertinoUserInterfaceLevelData::Base,
-                false,
-            ),
-            CupertinoColors::SYSTEM_BLUE,
-        );
-        assert_eq!(
-            format!("{resolved:?}"),
-            format!(
-                "systemBlue(color = {light:?}, *darkColor = {dark:?}*, \
-                 highContrastColor = {high_contrast:?}, \
-                 darkHighContrastColor = {dark_high_contrast:?})"
-            )
-        );
+            let resolved = resolve_under(
+                tester,
+                traits(
+                    Brightness::Dark,
+                    CupertinoUserInterfaceLevelData::Base,
+                    false,
+                ),
+                CupertinoColors::SYSTEM_BLUE,
+            );
+            assert_eq!(
+                format!("{resolved:?}"),
+                format!(
+                    "systemBlue(color = {light:?}, *darkColor = {dark:?}*, \
+                     highContrastColor = {high_contrast:?}, \
+                     darkHighContrastColor = {dark_high_contrast:?})"
+                )
+            );
 
-        let white = Color::new(0xFFFFFFFF);
-        let black = Color::new(0xFF000000);
-        let unlabeled = CupertinoDynamicColor::with_brightness(white, black);
-        assert_eq!(
-            format!("{unlabeled:?}"),
-            format!("CupertinoDynamicColor(*color = {white:?}*, darkColor = {black:?})")
-        );
+            let white = Color::new(0xFFFFFFFF);
+            let black = Color::new(0xFF000000);
+            let unlabeled = CupertinoDynamicColor::with_brightness(white, black);
+            assert_eq!(
+                format!("{unlabeled:?}"),
+                format!("CupertinoDynamicColor(*color = {white:?}*, darkColor = {black:?})")
+            );
 
-        let constant = CupertinoDynamicColor::with_brightness(white, white);
-        assert_eq!(
-            format!("{constant:?}"),
-            format!("CupertinoDynamicColor(*color = {white:?}*)")
-        );
+            let constant = CupertinoDynamicColor::with_brightness(white, white);
+            assert_eq!(
+                format!("{constant:?}"),
+                format!("CupertinoDynamicColor(*color = {white:?}*)")
+            );
+        });
     }
 }

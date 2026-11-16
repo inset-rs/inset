@@ -1797,14 +1797,15 @@ pub(crate) mod tests {
     use waft_painting::EdgeInsets;
     use waft_widgets::{AnyElement, Icon, IconData, MediaQueryData, Opacity};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
     use crate::icons::Icons;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// Dart's `Matrix4.diagonal3(Vector3.all(scale))`.
     pub(crate) fn diagonal3(scale: f64) -> Matrix4 {
@@ -1904,16 +1905,15 @@ pub(crate) mod tests {
 
     #[test]
     fn bottom_navigation_bar_callback_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mutated_index = Rc::new(Cell::new(None));
             let seen = Rc::clone(&mutated_index);
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .on_tap(move |_app, index| seen.set(Some(index)))
             });
 
-            let at = tester.global_rect(tester.render_box_of(first_text(&tester, "Alarm")));
+            let at = tester.global_rect(tester.render_box_of(first_text(tester, "Alarm")));
             tester.tap(at.center(), 1);
 
             assert_eq!(mutated_index.get(), Some(1));
@@ -1922,11 +1922,10 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_bottom_navigation_bar_content_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m2, || BottomNavigationBar::new(ac_alarm()));
+        test_widgets(|tester| {
+            pump_bar(tester, m2, || BottomNavigationBar::new(ac_alarm()));
 
-            let size = bar_box(&tester).size(&tester.cell.borrow());
+            let size = bar_box(tester).size(&tester.cell.borrow());
             assert_eq!(size.height(), K_BOTTOM_NAVIGATION_BAR_HEIGHT);
             assert_eq!(tester.find_text("AC").len(), 1);
             assert_eq!(tester.find_text("Alarm").len(), 1);
@@ -1935,11 +1934,10 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_bottom_navigation_bar_content_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, || BottomNavigationBar::new(ac_alarm()));
+        test_widgets(|tester| {
+            pump_bar(tester, m3, || BottomNavigationBar::new(ac_alarm()));
 
-            let size = bar_box(&tester).size(&tester.cell.borrow());
+            let size = bar_box(tester).size(&tester.cell.borrow());
             // kBottomNavigationBarHeight is a minimum dimension.
             assert!(size.height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
             assert_eq!(tester.find_text("AC").len(), 1);
@@ -1948,14 +1946,14 @@ pub(crate) mod tests {
     }
 
     fn fixed_bottom_navigation_bar_defaults(
+        tester: &mut WidgetTester,
         theme: impl FnOnce(&App, ColorScheme, Color) -> ThemeData,
         expected_height: Option<f64>,
     ) {
         let primary_color = Color::new(0xFF000001);
         let unselected_widget_color = Color::new(0xFF000002);
-        let mut tester = tester();
         pump_bar(
-            &mut tester,
+            tester,
             |app| {
                 theme(
                     app,
@@ -1968,10 +1966,10 @@ pub(crate) mod tests {
 
         let selected_font_size = 14.0;
         let unselected_font_size = 12.0;
-        let selected_font_style = paragraph_style(&tester, "AC");
-        let unselected_font_style = paragraph_style(&tester, "Alarm");
-        let selected_icon = icon_style(&tester, Icons::ac_unit());
-        let unselected_icon = icon_style(&tester, Icons::access_alarm());
+        let selected_font_style = paragraph_style(tester, "AC");
+        let unselected_font_style = paragraph_style(tester, "Alarm");
+        let selected_icon = icon_style(tester, Icons::ac_unit());
+        let unselected_icon = icon_style(tester, Icons::access_alarm());
         assert_eq!(color_of(&selected_font_style), Some(primary_color));
         assert_eq!(selected_font_style.font_size, Some(selected_font_size));
         assert_eq!(selected_font_style.font_weight, Some(FontWeight::W400));
@@ -1984,7 +1982,7 @@ pub(crate) mod tests {
         assert_eq!(unselected_font_style.height, expected_height);
         // Unselected label has a font size of 14 but is scaled down to be font size 12.
         assert_eq!(
-            label_transform(&tester, "Alarm"),
+            label_transform(tester, "Alarm"),
             diagonal3_all(unselected_font_size / selected_font_size)
         );
         assert_eq!(color_of(&selected_icon), Some(primary_color));
@@ -1993,15 +1991,16 @@ pub(crate) mod tests {
         assert_eq!(unselected_icon.font_size, Some(24.0));
         // There should not be any [Opacity] or [FadeTransition] widgets
         // since showUnselectedLabels and showSelectedLabels are true.
-        assert_eq!(descendants_of_bar::<Opacity>(&tester), 0);
-        assert_eq!(descendants_of_bar::<FadeTransition>(&tester), 0);
-        assert_eq!(material_of(&tester, |material| material.elevation), 8.0);
+        assert_eq!(descendants_of_bar::<Opacity>(tester), 0);
+        assert_eq!(descendants_of_bar::<FadeTransition>(tester), 0);
+        assert_eq!(material_of(tester, |material| material.elevation), 8.0);
     }
 
     #[test]
     fn material2_fixed_bottom_navigation_bar_defaults() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             fixed_bottom_navigation_bar_defaults(
+                tester,
                 |app, color_scheme, unselected_widget_color| {
                     ThemeData::light(app, Some(false))
                         .copy_with()
@@ -2016,8 +2015,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_fixed_bottom_navigation_bar_defaults() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             fixed_bottom_navigation_bar_defaults(
+                tester,
                 |app, color_scheme, unselected_widget_color| {
                     ThemeData::builder()
                         .color_scheme(color_scheme)
@@ -2031,32 +2031,31 @@ pub(crate) mod tests {
 
     #[test]
     fn custom_selected_and_unselected_font_styles() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let selected_text_style = TextStyle::new()
                 .font_weight(FontWeight::W200)
                 .font_size(18.0);
             let unselected_text_style = TextStyle::new()
                 .font_weight(FontWeight::W600)
                 .font_size(12.0);
-            let mut tester = tester();
             let (selected, unselected) =
                 (selected_text_style.clone(), unselected_text_style.clone());
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .selected_label_style(selected)
                     .unselected_label_style(unselected)
             });
 
-            let selected_font_style = paragraph_style(&tester, "AC");
-            let unselected_font_style = paragraph_style(&tester, "Alarm");
+            let selected_font_style = paragraph_style(tester, "AC");
+            let unselected_font_style = paragraph_style(tester, "Alarm");
             assert_eq!(selected_font_style.font_size, selected_text_style.font_size);
             assert_eq!(
                 selected_font_style.font_weight,
                 selected_text_style.font_weight
             );
             assert_eq!(
-                label_transform(&tester, "Alarm"),
+                label_transform(tester, "Alarm"),
                 diagonal3_all(
                     unselected_text_style.font_size.unwrap()
                         / selected_text_style.font_size.unwrap()
@@ -2071,13 +2070,12 @@ pub(crate) mod tests {
 
     #[test]
     fn font_size_on_text_styles_overrides_font_size_params() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let selected_text_style = TextStyle::new().font_size(18.0);
             let unselected_text_style = TextStyle::new().font_size(12.0);
-            let mut tester = tester();
             let (selected, unselected) =
                 (selected_text_style.clone(), unselected_text_style.clone());
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .selected_label_style(selected)
@@ -2086,10 +2084,10 @@ pub(crate) mod tests {
                     .unselected_font_size(11.0)
             });
 
-            let selected_font_style = paragraph_style(&tester, "AC");
+            let selected_font_style = paragraph_style(tester, "AC");
             assert_eq!(selected_font_style.font_size, selected_text_style.font_size);
             assert_eq!(
-                label_transform(&tester, "Alarm"),
+                label_transform(tester, "Alarm"),
                 diagonal3_all(
                     unselected_text_style.font_size.unwrap()
                         / selected_text_style.font_size.unwrap()
@@ -2100,25 +2098,24 @@ pub(crate) mod tests {
 
     #[test]
     fn custom_selected_and_unselected_icon_themes() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let selected_icon_theme = IconThemeData::new()
                 .size(36.0)
                 .color(Color::new(0x00000001));
             let unselected_icon_theme = IconThemeData::new()
                 .size(18.0)
                 .color(Color::new(0x00000002));
-            let mut tester = tester();
             let (selected, unselected) =
                 (selected_icon_theme.clone(), unselected_icon_theme.clone());
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .selected_icon_theme(selected)
                     .unselected_icon_theme(unselected)
             });
 
-            let selected_icon = icon_style(&tester, Icons::ac_unit());
-            let unselected_icon = icon_style(&tester, Icons::access_alarm());
+            let selected_icon = icon_style(tester, Icons::ac_unit());
+            let unselected_icon = icon_style(tester, Icons::access_alarm());
             assert_eq!(selected_icon.color, selected_icon_theme.color);
             assert_eq!(selected_icon.font_size, selected_icon_theme.size);
             assert_eq!(unselected_icon.color, unselected_icon_theme.color);
@@ -2128,7 +2125,7 @@ pub(crate) mod tests {
 
     #[test]
     fn color_on_icon_theme_overrides_selected_and_unselected_item_colors() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let selected_icon_theme = IconThemeData::new()
                 .size(36.0)
                 .color(Color::new(0x00000001));
@@ -2137,10 +2134,9 @@ pub(crate) mod tests {
                 .color(Color::new(0x00000002));
             let selected_item_color = Color::new(0x00000003);
             let unselected_item_color = Color::new(0x00000004);
-            let mut tester = tester();
             let (selected, unselected) =
                 (selected_icon_theme.clone(), unselected_icon_theme.clone());
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .selected_icon_theme(selected)
@@ -2149,10 +2145,10 @@ pub(crate) mod tests {
                     .unselected_item_color(unselected_item_color)
             });
 
-            let selected_font_style = paragraph_style(&tester, "AC");
-            let unselected_font_style = paragraph_style(&tester, "Alarm");
-            let selected_icon = icon_style(&tester, Icons::ac_unit());
-            let unselected_icon = icon_style(&tester, Icons::access_alarm());
+            let selected_font_style = paragraph_style(tester, "AC");
+            let unselected_font_style = paragraph_style(tester, "Alarm");
+            let selected_icon = icon_style(tester, Icons::ac_unit());
+            let unselected_icon = icon_style(tester, Icons::access_alarm());
             assert_eq!(selected_icon.color, selected_icon_theme.color);
             assert_eq!(unselected_icon.color, unselected_icon_theme.color);
             assert_eq!(color_of(&selected_font_style), Some(selected_item_color));
@@ -2163,9 +2159,12 @@ pub(crate) mod tests {
         });
     }
 
-    fn padded_bar(show_selected_labels: bool, show_unselected_labels: bool) -> WidgetTester {
-        let mut tester = tester();
-        pump_bar(&mut tester, m3, move || {
+    fn padded_bar(
+        tester: &mut WidgetTester,
+        show_selected_labels: bool,
+        show_unselected_labels: bool,
+    ) {
+        pump_bar(tester, m3, move || {
             BottomNavigationBar::new(ac_alarm())
                 .r#type(BottomNavigationBarType::Fixed)
                 .show_selected_labels(show_selected_labels)
@@ -2174,19 +2173,18 @@ pub(crate) mod tests {
                 .selected_icon_theme(IconThemeData::new().size(36.0))
                 .unselected_icon_theme(IconThemeData::new().size(20.0))
         });
-        tester
     }
 
     #[test]
     fn padding_is_calculated_properly_on_items_all_labels() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (selected_font_size, selected_icon_size, unselected_icon_size) = (16.0, 36.0, 20.0);
-            let tester = padded_bar(true, true);
+            padded_bar(tester, true, true);
 
-            let selected_item_padding = item_padding(&tester, Icons::ac_unit());
+            let selected_item_padding = item_padding(tester, Icons::ac_unit());
             assert_eq!(selected_item_padding.top, selected_font_size / 2.0);
             assert_eq!(selected_item_padding.bottom, selected_font_size / 2.0);
-            let unselected_item_padding = item_padding(&tester, Icons::access_alarm());
+            let unselected_item_padding = item_padding(tester, Icons::access_alarm());
             let expected_unselected_padding =
                 (selected_icon_size - unselected_icon_size) / 2.0 + selected_font_size / 2.0;
             assert_eq!(unselected_item_padding.top, expected_unselected_padding);
@@ -2196,14 +2194,14 @@ pub(crate) mod tests {
 
     #[test]
     fn padding_is_calculated_properly_on_items_selected_labels_only() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (selected_font_size, selected_icon_size, unselected_icon_size) = (16.0, 36.0, 20.0);
-            let tester = padded_bar(true, false);
+            padded_bar(tester, true, false);
 
-            let selected_item_padding = item_padding(&tester, Icons::ac_unit());
+            let selected_item_padding = item_padding(tester, Icons::ac_unit());
             assert_eq!(selected_item_padding.top, selected_font_size / 2.0);
             assert_eq!(selected_item_padding.bottom, selected_font_size / 2.0);
-            let unselected_item_padding = item_padding(&tester, Icons::access_alarm());
+            let unselected_item_padding = item_padding(tester, Icons::access_alarm());
             assert_eq!(
                 unselected_item_padding.top,
                 (selected_icon_size - unselected_icon_size) / 2.0 + selected_font_size
@@ -2217,14 +2215,14 @@ pub(crate) mod tests {
 
     #[test]
     fn padding_is_calculated_properly_on_items_no_labels() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (selected_font_size, selected_icon_size, unselected_icon_size) = (16.0, 36.0, 20.0);
-            let tester = padded_bar(false, false);
+            padded_bar(tester, false, false);
 
-            let selected_item_padding = item_padding(&tester, Icons::ac_unit());
+            let selected_item_padding = item_padding(tester, Icons::ac_unit());
             assert_eq!(selected_item_padding.top, selected_font_size);
             assert_eq!(selected_item_padding.bottom, 0.0);
-            let unselected_item_padding = item_padding(&tester, Icons::access_alarm());
+            let unselected_item_padding = item_padding(tester, Icons::access_alarm());
             assert_eq!(
                 unselected_item_padding.top,
                 (selected_icon_size - unselected_icon_size) / 2.0 + selected_font_size
@@ -2238,47 +2236,45 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_shifting_bottom_navigation_bar_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m2, || {
+        test_widgets(|tester| {
+            pump_bar(tester, m2, || {
                 BottomNavigationBar::new(ac_alarm()).r#type(BottomNavigationBarType::Shifting)
             });
 
             let selected_font_size = 14.0;
             assert_eq!(
-                paragraph_style(&tester, "AC").font_size,
+                paragraph_style(tester, "AC").font_size,
                 Some(selected_font_size)
             );
             assert_eq!(
-                color_of(&paragraph_style(&tester, "AC")),
+                color_of(&paragraph_style(tester, "AC")),
                 Some(Colors::WHITE)
             );
-            assert_eq!(opacity_of(&tester, "Alarm"), 0.0);
-            assert_eq!(material_of(&tester, |material| material.elevation), 8.0);
+            assert_eq!(opacity_of(tester, "Alarm"), 0.0);
+            assert_eq!(material_of(tester, |material| material.elevation), 8.0);
         });
     }
 
     #[test]
     fn material3_shifting_bottom_navigation_bar_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, || {
+        test_widgets(|tester| {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(ac_alarm()).r#type(BottomNavigationBarType::Shifting)
             });
 
             let selected_font_size = 14.0;
             assert_eq!(
-                paragraph_style(&tester, "AC").font_size,
+                paragraph_style(tester, "AC").font_size,
                 Some(selected_font_size)
             );
             let surface = {
-                let element = first_text(&tester, "AC");
+                let element = first_text(tester, "AC");
                 let mut app = tester.cell.borrow_mut();
                 Theme::of(&mut app, element).color_scheme.surface
             };
-            assert_eq!(color_of(&paragraph_style(&tester, "AC")), Some(surface));
-            assert_eq!(opacity_of(&tester, "Alarm"), 0.0);
-            assert_eq!(material_of(&tester, |material| material.elevation), 8.0);
+            assert_eq!(color_of(&paragraph_style(tester, "AC")), Some(surface));
+            assert_eq!(opacity_of(tester, "Alarm"), 0.0);
+            assert_eq!(material_of(tester, |material| material.elevation), 8.0);
         });
     }
 
@@ -2299,10 +2295,9 @@ pub(crate) mod tests {
 
     #[test]
     fn fixed_bottom_navigation_bar_custom_font_size_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (selected_font_size, unselected_font_size) = (18.0, 14.0);
-            let mut tester = tester();
-            pump_bar(&mut tester, primary_and_unselected_theme, move || {
+            pump_bar(tester, primary_and_unselected_theme, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .selected_font_size(selected_font_size)
@@ -2311,45 +2306,44 @@ pub(crate) mod tests {
                     .unselected_item_color(UNSELECTED_COLOR)
             });
 
-            let selected_icon = icon_style(&tester, Icons::ac_unit());
-            let unselected_icon = icon_style(&tester, Icons::access_alarm());
+            let selected_icon = icon_style(tester, Icons::ac_unit());
+            let unselected_icon = icon_style(tester, Icons::access_alarm());
 
             assert_eq!(
-                paragraph_style(&tester, "AC").font_size,
+                paragraph_style(tester, "AC").font_size,
                 Some(selected_font_size)
             );
             // Unselected label has a font size of 18 but is scaled down to be font size 14.
             assert_eq!(
-                paragraph_style(&tester, "Alarm").font_size,
+                paragraph_style(tester, "Alarm").font_size,
                 Some(selected_font_size)
             );
             assert_eq!(
-                label_transform(&tester, "Alarm"),
+                label_transform(tester, "Alarm"),
                 diagonal3_all(unselected_font_size / selected_font_size)
             );
             assert_eq!(
-                color_of(&paragraph_style(&tester, "AC")),
+                color_of(&paragraph_style(tester, "AC")),
                 Some(SELECTED_COLOR)
             );
             assert_eq!(
-                color_of(&paragraph_style(&tester, "Alarm")),
+                color_of(&paragraph_style(tester, "Alarm")),
                 Some(UNSELECTED_COLOR)
             );
             assert_eq!(color_of(&selected_icon), Some(SELECTED_COLOR));
             assert_eq!(color_of(&unselected_icon), Some(UNSELECTED_COLOR));
             // There should not be any [Opacity] or [FadeTransition] widgets
             // since showUnselectedLabels and showSelectedLabels are true.
-            assert_eq!(descendants_of_bar::<Opacity>(&tester), 0);
-            assert_eq!(descendants_of_bar::<FadeTransition>(&tester), 0);
+            assert_eq!(descendants_of_bar::<Opacity>(tester), 0);
+            assert_eq!(descendants_of_bar::<FadeTransition>(tester), 0);
         });
     }
 
     #[test]
     fn shifting_bottom_navigation_bar_custom_font_size_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (selected_font_size, unselected_font_size) = (18.0, 14.0);
-            let mut tester = tester();
-            pump_bar(&mut tester, primary_and_unselected_theme, move || {
+            pump_bar(tester, primary_and_unselected_theme, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Shifting)
                     .selected_font_size(selected_font_size)
@@ -2358,27 +2352,29 @@ pub(crate) mod tests {
                     .unselected_item_color(UNSELECTED_COLOR)
             });
 
-            let selected_icon = icon_style(&tester, Icons::ac_unit());
-            let unselected_icon = icon_style(&tester, Icons::access_alarm());
+            let selected_icon = icon_style(tester, Icons::ac_unit());
+            let unselected_icon = icon_style(tester, Icons::access_alarm());
 
             assert_eq!(
-                paragraph_style(&tester, "AC").font_size,
+                paragraph_style(tester, "AC").font_size,
                 Some(selected_font_size)
             );
             assert_eq!(
-                color_of(&paragraph_style(&tester, "AC")),
+                color_of(&paragraph_style(tester, "AC")),
                 Some(SELECTED_COLOR)
             );
-            assert_eq!(opacity_of(&tester, "Alarm"), 0.0);
+            assert_eq!(opacity_of(tester, "Alarm"), 0.0);
 
             assert_eq!(color_of(&selected_icon), Some(SELECTED_COLOR));
             assert_eq!(color_of(&unselected_icon), Some(UNSELECTED_COLOR));
         });
     }
 
-    fn label_style_color_overrides_item_color_only_for_the_label(r#type: BottomNavigationBarType) {
-        let mut tester = tester();
-        pump_bar(&mut tester, primary_and_unselected_theme, move || {
+    fn label_style_color_overrides_item_color_only_for_the_label(
+        tester: &mut WidgetTester,
+        r#type: BottomNavigationBarType,
+    ) {
+        pump_bar(tester, primary_and_unselected_theme, move || {
             BottomNavigationBar::new(ac_alarm())
                 .r#type(r#type)
                 .selected_label_style(TextStyle::new().color(SELECTED_LABEL_COLOR))
@@ -2388,25 +2384,26 @@ pub(crate) mod tests {
                 .use_legacy_color_scheme(false)
         });
 
-        let selected_icon = icon_style(&tester, Icons::ac_unit());
-        let unselected_icon = icon_style(&tester, Icons::access_alarm());
+        let selected_icon = icon_style(tester, Icons::ac_unit());
+        let unselected_icon = icon_style(tester, Icons::access_alarm());
 
         assert_eq!(color_of(&selected_icon), Some(SELECTED_COLOR));
         assert_eq!(color_of(&unselected_icon), Some(UNSELECTED_COLOR));
         assert_eq!(
-            color_of(&paragraph_style(&tester, "AC")),
+            color_of(&paragraph_style(tester, "AC")),
             Some(SELECTED_LABEL_COLOR)
         );
         assert_eq!(
-            color_of(&paragraph_style(&tester, "Alarm")),
+            color_of(&paragraph_style(tester, "Alarm")),
             Some(UNSELECTED_LABEL_COLOR)
         );
     }
 
     #[test]
     fn label_style_color_should_override_item_color_only_for_the_label_for_fixed() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             label_style_color_overrides_item_color_only_for_the_label(
+                tester,
                 BottomNavigationBarType::Fixed,
             );
         });
@@ -2414,20 +2411,21 @@ pub(crate) mod tests {
 
     #[test]
     fn label_style_color_should_override_item_color_only_for_the_label_for_shifting() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             label_style_color_overrides_item_color_only_for_the_label(
+                tester,
                 BottomNavigationBarType::Shifting,
             );
         });
     }
 
     fn icon_theme_color_overrides_item_color(
+        tester: &mut WidgetTester,
         r#type: BottomNavigationBarType,
         label_styles: bool,
         item_colors: bool,
     ) {
-        let mut tester = tester();
-        pump_bar(&mut tester, primary_and_unselected_theme, move || {
+        pump_bar(tester, primary_and_unselected_theme, move || {
             let mut bar = BottomNavigationBar::new(ac_alarm())
                 .r#type(r#type)
                 .selected_icon_theme(
@@ -2460,8 +2458,8 @@ pub(crate) mod tests {
             bar
         });
 
-        let selected_icon = icon_style(&tester, Icons::ac_unit());
-        let unselected_icon = icon_style(&tester, Icons::access_alarm());
+        let selected_icon = icon_style(tester, Icons::ac_unit());
+        let unselected_icon = icon_style(tester, Icons::access_alarm());
 
         assert_eq!(color_of(&selected_icon), Some(SELECTED_ICON_THEME_COLOR));
         assert_eq!(
@@ -2472,69 +2470,86 @@ pub(crate) mod tests {
 
     #[test]
     fn icon_theme_color_should_override_item_color_for_fixed() {
-        with_main_thread_stack(|| {
-            icon_theme_color_overrides_item_color(BottomNavigationBarType::Fixed, true, true);
+        test_widgets(|tester| {
+            icon_theme_color_overrides_item_color(
+                tester,
+                BottomNavigationBarType::Fixed,
+                true,
+                true,
+            );
         });
     }
 
     #[test]
     fn icon_theme_color_should_override_item_color_for_shifted() {
-        with_main_thread_stack(|| {
-            icon_theme_color_overrides_item_color(BottomNavigationBarType::Shifting, true, false);
+        test_widgets(|tester| {
+            icon_theme_color_overrides_item_color(
+                tester,
+                BottomNavigationBarType::Shifting,
+                true,
+                false,
+            );
         });
     }
 
     #[test]
     fn icon_theme_color_should_override_item_color_color_for_fixed() {
-        with_main_thread_stack(|| {
-            icon_theme_color_overrides_item_color(BottomNavigationBarType::Fixed, false, false);
+        test_widgets(|tester| {
+            icon_theme_color_overrides_item_color(
+                tester,
+                BottomNavigationBarType::Fixed,
+                false,
+                false,
+            );
         });
     }
 
     #[test]
     fn icon_theme_color_should_override_item_color_for_shifted_with_item_colors() {
-        with_main_thread_stack(|| {
-            icon_theme_color_overrides_item_color(BottomNavigationBarType::Shifting, false, true);
+        test_widgets(|tester| {
+            icon_theme_color_overrides_item_color(
+                tester,
+                BottomNavigationBarType::Shifting,
+                false,
+                true,
+            );
         });
     }
 
     #[test]
     fn fixed_bottom_navigation_bar_can_hide_unselected_labels() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, || {
+        test_widgets(|tester| {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .show_unselected_labels(false)
             });
 
-            assert_eq!(opacity_of(&tester, "AC"), 1.0);
-            assert_eq!(opacity_of(&tester, "Alarm"), 0.0);
+            assert_eq!(opacity_of(tester, "AC"), 1.0);
+            assert_eq!(opacity_of(tester, "Alarm"), 0.0);
         });
     }
 
     #[test]
     fn fixed_bottom_navigation_bar_can_update_background_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = Colors::YELLOW.primary();
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .background_color(color)
             });
 
-            assert_eq!(material_of(&tester, |material| material.color), Some(color));
+            assert_eq!(material_of(tester, |material| material.color), Some(color));
         });
     }
 
     #[test]
     fn shifting_bottom_navigation_bar_background_color_is_overridden_by_item_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let item_color = Colors::YELLOW.primary();
             let background_color = Colors::BLUE.primary();
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(vec![
                     item(Icons::ac_unit(), "AC").background_color(item_color),
                     item(Icons::access_alarm(), "Alarm"),
@@ -2544,7 +2559,7 @@ pub(crate) mod tests {
             });
 
             assert_eq!(
-                material_of(&tester, |material| material.color),
+                material_of(tester, |material| material.color),
                 Some(item_color)
             );
         });
@@ -2561,32 +2576,30 @@ pub(crate) mod tests {
 
     #[test]
     fn fixed_bottom_navigation_bar_uses_fixed_color_when_selected_item_color_not_provided() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let fixed_color = Colors::BLACK;
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .fixed_color(fixed_color)
             });
 
-            assert_eq!(color_of(&paragraph_style(&tester, "AC")), Some(fixed_color));
+            assert_eq!(color_of(&paragraph_style(tester, "AC")), Some(fixed_color));
         });
     }
 
     #[test]
     fn setting_selected_font_size_to_zero_hides_all_labels() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let custom_elevation = 3.0;
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(ac_alarm())
                     .r#type(BottomNavigationBarType::Fixed)
                     .elevation(custom_elevation)
             });
 
             assert_eq!(
-                material_of(&tester, |material| material.elevation),
+                material_of(tester, |material| material.elevation),
                 custom_elevation
             );
         });
@@ -2610,59 +2623,55 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_bottom_navigation_bar_adds_bottom_padding_to_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_bar_under_media_query(
-                &mut tester,
+                tester,
                 m2,
                 MediaQueryData::new().view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 40.0)),
                 BottomNavigationBar::new(ac_alarm()),
             );
 
             let expected_height = K_BOTTOM_NAVIGATION_BAR_HEIGHT + 40.0;
-            assert_eq!(bar_size(&tester).height(), expected_height);
+            assert_eq!(bar_size(tester).height(), expected_height);
         });
     }
 
     #[test]
     fn material3_bottom_navigation_bar_adds_bottom_padding_to_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_bar_under_media_query(
-                &mut tester,
+                tester,
                 m3,
                 MediaQueryData::new().view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 40.0)),
                 BottomNavigationBar::new(ac_alarm()),
             );
 
             let expected_min_height = K_BOTTOM_NAVIGATION_BAR_HEIGHT + 40.0;
-            assert!(bar_size(&tester).height() >= expected_min_height);
+            assert!(bar_size(tester).height() >= expected_min_height);
         });
     }
 
     #[test]
     fn bottom_navigation_bar_adds_bottom_padding_to_height_with_a_custom_font_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_bar_under_media_query(
-                &mut tester,
+                tester,
                 m3,
                 MediaQueryData::new().view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 40.0)),
                 BottomNavigationBar::new(ac_alarm()).selected_font_size(8.0),
             );
 
             let expected_height = K_BOTTOM_NAVIGATION_BAR_HEIGHT + 40.0;
-            assert_eq!(bar_size(&tester).height(), expected_height);
+            assert_eq!(bar_size(tester).height(), expected_height);
         });
     }
 
     #[test]
     fn bottom_navigation_bar_height_will_not_change_when_toggle_keyboard() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test the bar height is correct when not showing the keyboard.
             pump_bar_under_media_query(
-                &mut tester,
+                tester,
                 m3,
                 MediaQueryData::new()
                     .view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 40.0))
@@ -2672,11 +2681,11 @@ pub(crate) mod tests {
 
             // Expect the height is the correct.
             let expected_height = K_BOTTOM_NAVIGATION_BAR_HEIGHT + 40.0;
-            assert_eq!(bar_size(&tester).height(), expected_height);
+            assert_eq!(bar_size(tester).height(), expected_height);
 
             // Now we show the keyboard.
             pump_bar_under_media_query(
-                &mut tester,
+                tester,
                 m3,
                 MediaQueryData::new()
                     .view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 40.0))
@@ -2685,7 +2694,7 @@ pub(crate) mod tests {
             );
 
             // Expect the height is the same.
-            assert_eq!(bar_size(&tester).height(), expected_height);
+            assert_eq!(bar_size(tester).height(), expected_height);
         });
     }
 
@@ -2710,26 +2719,25 @@ pub(crate) mod tests {
 
     #[test]
     fn bottom_navigation_bar_action_size_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, || {
+        test_widgets(|tester| {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(ac_alarm()).r#type(BottomNavigationBarType::Shifting)
             });
 
-            let found = actions(&tester);
+            let found = actions(tester);
             assert_eq!(found.len(), 2);
             assert_eq!(found[0].size(&tester.cell.borrow()).width(), 480.0);
             assert_eq!(found[1].size(&tester.cell.borrow()).width(), 320.0);
 
-            pump_bar(&mut tester, m3, || {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(ac_alarm())
                     .current_index(1)
                     .r#type(BottomNavigationBarType::Shifting)
             });
 
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
-            let found = actions(&tester);
+            let found = actions(tester);
             assert_eq!(found.len(), 2);
             assert_eq!(found[0].size(&tester.cell.borrow()).width(), 320.0);
             assert_eq!(found[1].size(&tester.cell.borrow()).width(), 480.0);
@@ -2747,9 +2755,8 @@ pub(crate) mod tests {
 
     #[test]
     fn bottom_navigation_bar_multiple_taps_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, || {
+        test_widgets(|tester| {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(four_items()).r#type(BottomNavigationBarType::Shifting)
             });
 
@@ -2757,23 +2764,22 @@ pub(crate) mod tests {
             // irrespective of how many taps happen on the first N - 1 labels and how
             // they grow.
 
-            let original_origin = origin_of(&tester, actions(&tester)[3]);
+            let original_origin = origin_of(tester, actions(tester)[3]);
 
             for (pointer, label) in [(1, "AC"), (2, "Alarm"), (3, "Time")] {
-                let at = text_center(&tester, label);
+                let at = text_center(tester, label);
                 tester.tap(at, pointer);
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(100));
+                tester.pump();
+                tester.pump_by(Duration::from_millis(100));
 
-                assert_eq!(origin_of(&tester, actions(&tester)[3]), original_origin);
+                assert_eq!(origin_of(tester, actions(tester)[3]), original_origin);
             }
         });
     }
 
-    fn inherits_shadowed_app_theme(r#type: BottomNavigationBarType) {
-        let mut tester = tester();
+    fn inherits_shadowed_app_theme(tester: &mut WidgetTester, r#type: BottomNavigationBarType) {
         pump_app(
-            &mut tester,
+            tester,
             |app| {
                 ThemeData::builder()
                     .brightness(Brightness::Light)
@@ -2790,31 +2796,32 @@ pub(crate) mod tests {
             },
         );
 
-        let at = text_center(&tester, "Alarm");
+        let at = text_center(tester, "Alarm");
         tester.tap(at, 1);
-        tester.pump(Duration::from_secs(1));
-        let element = first_text(&tester, "Alarm");
+        tester.pump_by(Duration::from_secs(1));
+        let element = first_text(tester, "Alarm");
         let brightness = Theme::of(&mut tester.cell.borrow_mut(), element).brightness();
         assert_eq!(brightness, Brightness::Dark);
     }
 
     #[test]
     fn bottom_navigation_bar_inherits_shadowed_app_theme_for_shifting_navbar() {
-        with_main_thread_stack(|| inherits_shadowed_app_theme(BottomNavigationBarType::Shifting));
+        test_widgets(|tester| {
+            inherits_shadowed_app_theme(tester, BottomNavigationBarType::Shifting)
+        });
     }
 
     #[test]
     fn bottom_navigation_bar_inherits_shadowed_app_theme_for_fixed_navbar() {
-        with_main_thread_stack(|| inherits_shadowed_app_theme(BottomNavigationBarType::Fixed));
+        test_widgets(|tester| inherits_shadowed_app_theme(tester, BottomNavigationBarType::Fixed));
     }
 
     #[test]
     fn bottom_navigation_bar_icon_size_test() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let builder_icon_size = Rc::new(Cell::new(None));
-            let mut tester = tester();
             let seen = Rc::clone(&builder_icon_size);
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(vec![
                     item(Icons::ac_unit(), "A"),
                     BottomNavigationBarItem::new(waft_widgets::Builder::new(
@@ -2846,19 +2853,18 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_bottom_navigation_bar_responds_to_text_scale_factor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m2, || {
+        test_widgets(|tester| {
+            pump_bar(tester, m2, || {
                 BottomNavigationBar::new(ab_items()).r#type(BottomNavigationBarType::Fixed)
             });
-            assert_eq!(bar_size(&tester).height(), K_BOTTOM_NAVIGATION_BAR_HEIGHT);
+            assert_eq!(bar_size(tester).height(), K_BOTTOM_NAVIGATION_BAR_HEIGHT);
 
-            pump_bar(&mut tester, m3, || {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(ab_items()).r#type(BottomNavigationBarType::Shifting)
             });
-            assert_eq!(bar_size(&tester).height(), K_BOTTOM_NAVIGATION_BAR_HEIGHT);
+            assert_eq!(bar_size(tester).height(), K_BOTTOM_NAVIGATION_BAR_HEIGHT);
 
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 MediaQuery::with_clamped_text_scaling(
                     None,
                     2.0,
@@ -2866,27 +2872,26 @@ pub(crate) mod tests {
                     Scaffold::new().bottom_navigation_bar(BottomNavigationBar::new(ab_items())),
                 )
             });
-            assert_eq!(bar_size(&tester).height(), 56.0);
+            assert_eq!(bar_size(tester).height(), 56.0);
         });
     }
 
     #[test]
     fn material3_bottom_navigation_bar_responds_to_text_scale_factor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, || {
+        test_widgets(|tester| {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(ab_items()).r#type(BottomNavigationBarType::Fixed)
             });
             // kBottomNavigationBarHeight is a minimum dimension.
-            assert!(bar_size(&tester).height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
+            assert!(bar_size(tester).height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
 
-            pump_bar(&mut tester, m3, || {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(ab_items()).r#type(BottomNavigationBarType::Shifting)
             });
             // kBottomNavigationBarHeight is a minimum dimension.
-            assert!(bar_size(&tester).height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
+            assert!(bar_size(tester).height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
 
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 MediaQuery::with_clamped_text_scaling(
                     None,
                     2.0,
@@ -2895,16 +2900,19 @@ pub(crate) mod tests {
                 )
             });
             // kBottomNavigationBarHeight is a minimum dimension.
-            assert!(bar_size(&tester).height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
+            assert!(bar_size(tester).height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
         });
     }
 
-    fn does_not_grow_with_text_scale_factor(theme: fn(&App) -> ThemeData, material3: bool) {
-        let mut tester = tester();
-        pump_bar(&mut tester, theme, || {
+    fn does_not_grow_with_text_scale_factor(
+        tester: &mut WidgetTester,
+        theme: fn(&App) -> ThemeData,
+        material3: bool,
+    ) {
+        pump_bar(tester, theme, || {
             BottomNavigationBar::new(ab_items()).r#type(BottomNavigationBarType::Fixed)
         });
-        let default_height = bar_size(&tester).height();
+        let default_height = bar_size(tester).height();
         if material3 {
             // kBottomNavigationBarHeight is a minimum dimension.
             assert!(default_height >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
@@ -2912,10 +2920,10 @@ pub(crate) mod tests {
             assert_eq!(default_height, K_BOTTOM_NAVIGATION_BAR_HEIGHT);
         }
 
-        pump_bar(&mut tester, m3, || {
+        pump_bar(tester, m3, || {
             BottomNavigationBar::new(ab_items()).r#type(BottomNavigationBarType::Shifting)
         });
-        let shifting_height = bar_size(&tester).height();
+        let shifting_height = bar_size(tester).height();
         if material3 {
             // kBottomNavigationBarHeight is a minimum dimension.
             assert!(shifting_height >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
@@ -2924,12 +2932,12 @@ pub(crate) mod tests {
         }
 
         pump_bar_under_media_query(
-            &mut tester,
+            tester,
             m3,
             MediaQueryData::new().text_scaler(waft_painting::TextScaler::linear(2.0)),
             BottomNavigationBar::new(ab_items()),
         );
-        let height = bar_size(&tester).height();
+        let height = bar_size(tester).height();
         if material3 {
             assert_eq!(height, default_height);
             assert_eq!(height, shifting_height);
@@ -2941,13 +2949,13 @@ pub(crate) mod tests {
     #[test]
     fn material2_bottom_navigation_bar_does_not_grow_with_text_scale_factor_when_labels_are_provided()
      {
-        with_main_thread_stack(|| does_not_grow_with_text_scale_factor(m2, false));
+        test_widgets(|tester| does_not_grow_with_text_scale_factor(tester, m2, false));
     }
 
     #[test]
     fn material3_bottom_navigation_bar_does_not_grow_with_text_scale_factor_when_labels_are_provided()
      {
-        with_main_thread_stack(|| does_not_grow_with_text_scale_factor(m3, true));
+        test_widgets(|tester| does_not_grow_with_text_scale_factor(tester, m3, true));
     }
 
     /// The case's `buildApp`: a `MaterialApp` under a `MediaQuery` whose text scaler is
@@ -2985,44 +2993,42 @@ pub(crate) mod tests {
     #[test]
     fn material2_bottom_navigation_bar_shows_tool_tips_with_text_scaling_on_long_press_when_labels_are_provided()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let label = "Foo";
-            let mut tester = tester();
-            pump_tooltip_app(&mut tester, m2, waft_painting::TextScaler::linear(1.0));
+            pump_tooltip_app(tester, m2, waft_painting::TextScaler::linear(1.0));
             assert_eq!(tester.find_text(label).len(), 1);
-            let at = text_center(&tester, label);
+            let at = text_center(tester, label);
             tester.long_press(at, 1);
             assert_eq!(tester.find_text(label).len(), 2);
-            assert_eq!(last_text_size(&tester, label), Size::new(42.0, 14.0));
+            assert_eq!(last_text_size(tester, label), Size::new(42.0, 14.0));
             tester.pump_and_settle_by(Duration::from_secs(2));
 
-            pump_tooltip_app(&mut tester, m2, waft_painting::TextScaler::linear(4.0));
+            pump_tooltip_app(tester, m2, waft_painting::TextScaler::linear(4.0));
             assert_eq!(tester.find_text(label).len(), 1);
-            let at = text_center(&tester, label);
+            let at = text_center(tester, label);
             tester.long_press(at, 2);
-            assert_eq!(last_text_size(&tester, label), Size::new(168.0, 56.0));
+            assert_eq!(last_text_size(tester, label), Size::new(168.0, 56.0));
         });
     }
 
     #[test]
     fn material3_bottom_navigation_bar_shows_tool_tips_with_text_scaling_on_long_press_when_labels_are_provided()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let label = "Foo";
-            let mut tester = tester();
-            pump_tooltip_app(&mut tester, m3, waft_painting::TextScaler::NO_SCALING);
+            pump_tooltip_app(tester, m3, waft_painting::TextScaler::NO_SCALING);
             assert_eq!(tester.find_text(label).len(), 1);
-            let at = text_center(&tester, label);
+            let at = text_center(tester, label);
             tester.long_press(at, 1);
             assert_eq!(tester.find_text(label).len(), 2);
-            assert_eq!(last_text_size(&tester, label).height(), 20.0);
+            assert_eq!(last_text_size(tester, label).height(), 20.0);
             tester.pump_and_settle_by(Duration::from_secs(2));
 
-            pump_tooltip_app(&mut tester, m3, waft_painting::TextScaler::linear(4.0));
+            pump_tooltip_app(tester, m3, waft_painting::TextScaler::linear(4.0));
             assert_eq!(tester.find_text(label).len(), 1);
-            let at = text_center(&tester, label);
+            let at = text_center(tester, label);
             tester.long_press(at, 2);
-            assert_eq!(last_text_size(&tester, label).height(), 80.0);
+            assert_eq!(last_text_size(tester, label).height(), 80.0);
         });
     }
 
@@ -3041,9 +3047,8 @@ pub(crate) mod tests {
 
     #[test]
     fn different_behaviour_of_tool_tip_in_bottom_navigation_bar_item() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_bar(&mut tester, m3, || {
+        test_widgets(|tester| {
+            pump_bar(tester, m3, || {
                 BottomNavigationBar::new(vec![
                     item(Icons::ac_unit(), "A").tooltip("A tooltip"),
                     item(Icons::battery_alert(), "B"),
@@ -3052,41 +3057,40 @@ pub(crate) mod tests {
             });
 
             assert_eq!(tester.find_text("A").len(), 1);
-            let at = text_center(&tester, "A");
+            let at = text_center(tester, "A");
             tester.long_press(at, 1);
-            assert_eq!(tooltips_with(&tester, "A tooltip"), 1);
+            assert_eq!(tooltips_with(tester, "A tooltip"), 1);
 
             assert_eq!(tester.find_text("B").len(), 1);
-            let at = text_center(&tester, "B");
+            let at = text_center(tester, "B");
             tester.long_press(at, 2);
-            assert_eq!(tooltips_with(&tester, "B"), 0);
+            assert_eq!(tooltips_with(tester, "B"), 0);
 
             assert_eq!(tester.find_text("C").len(), 1);
-            let at = text_center(&tester, "C");
+            let at = text_center(tester, "C");
             tester.long_press(at, 3);
-            assert_eq!(tooltips_with(&tester, "C"), 0);
+            assert_eq!(tooltips_with(tester, "C"), 0);
         });
     }
 
     #[test]
     fn bottom_navigation_bar_limits_width_of_tiles_with_long_labels() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let long_text = |letter: &str| format!("[{}]", vec![letter; 100].join(", "));
             let (long_text_a, long_text_b) = (long_text("A"), long_text("B"));
-            let mut tester = tester();
             let (a, b) = (long_text_a.clone(), long_text_b.clone());
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(vec![
                     item(Icons::ac_unit(), &a),
                     item(Icons::battery_alert(), &b),
                 ])
             });
 
-            assert!(bar_size(&tester).height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
+            assert!(bar_size(tester).height() >= K_BOTTOM_NAVIGATION_BAR_HEIGHT);
 
-            let item_box_a = tester.render_box_of(first_text(&tester, &long_text_a));
+            let item_box_a = tester.render_box_of(first_text(tester, &long_text_a));
             assert_eq!(item_box_a.size(&tester.cell.borrow()).width(), 400.0);
-            let item_box_b = tester.render_box_of(first_text(&tester, &long_text_b));
+            let item_box_b = tester.render_box_of(first_text(tester, &long_text_b));
             assert_eq!(item_box_b.size(&tester.cell.borrow()).width(), 400.0);
         });
     }
@@ -3109,18 +3113,17 @@ pub(crate) mod tests {
 
     #[test]
     fn bottom_navigation_bar_inactive_icon_shown() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let filled: KeyRef = waft_foundation::ValueKey::new("filled".to_owned()).into();
             let stroked: KeyRef = waft_foundation::ValueKey::new("stroked".to_owned()).into();
-            let mut tester = tester();
             let (f, s) = (filled.clone(), stroked.clone());
-            pump_bar(&mut tester, m3, move || favorite_bar(0, &f, &s));
+            pump_bar(tester, m3, move || favorite_bar(0, &f, &s));
 
             assert_eq!(tester.find_onstage_by_key(&filled).len(), 1);
             assert_eq!(tester.find_onstage_by_key(&stroked).len(), 0);
 
             let (f, s) = (filled.clone(), stroked.clone());
-            pump_bar(&mut tester, m3, move || favorite_bar(1, &f, &s));
+            pump_bar(tester, m3, move || favorite_bar(1, &f, &s));
 
             assert_eq!(tester.find_onstage_by_key(&filled).len(), 0);
             assert_eq!(tester.find_onstage_by_key(&stroked).len(), 1);
@@ -3129,7 +3132,7 @@ pub(crate) mod tests {
 
     #[test]
     fn bottom_navigation_bar_handles_items_length_changes() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/10322
             let build_frame = |tester: &mut WidgetTester, item_count: usize| {
                 pump_bar(tester, m3, move || {
@@ -3143,37 +3146,35 @@ pub(crate) mod tests {
             };
             let found = |tester: &WidgetTester, text: &str| tester.find_onstage_text(text).len();
 
-            let mut tester = tester();
-            build_frame(&mut tester, 3);
-            assert_eq!(found(&tester, "item 0"), 1);
-            assert_eq!(found(&tester, "item 1"), 1);
-            assert_eq!(found(&tester, "item 2"), 1);
-            assert_eq!(found(&tester, "item 3"), 0);
+            build_frame(tester, 3);
+            assert_eq!(found(tester, "item 0"), 1);
+            assert_eq!(found(tester, "item 1"), 1);
+            assert_eq!(found(tester, "item 2"), 1);
+            assert_eq!(found(tester, "item 3"), 0);
 
-            build_frame(&mut tester, 4);
-            assert_eq!(found(&tester, "item 0"), 1);
-            assert_eq!(found(&tester, "item 1"), 1);
-            assert_eq!(found(&tester, "item 2"), 1);
-            assert_eq!(found(&tester, "item 3"), 1);
+            build_frame(tester, 4);
+            assert_eq!(found(tester, "item 0"), 1);
+            assert_eq!(found(tester, "item 1"), 1);
+            assert_eq!(found(tester, "item 2"), 1);
+            assert_eq!(found(tester, "item 3"), 1);
 
-            build_frame(&mut tester, 2);
-            assert_eq!(found(&tester, "item 0"), 1);
-            assert_eq!(found(&tester, "item 1"), 1);
-            assert_eq!(found(&tester, "item 2"), 0);
-            assert_eq!(found(&tester, "item 3"), 0);
+            build_frame(tester, 2);
+            assert_eq!(found(tester, "item 0"), 1);
+            assert_eq!(found(tester, "item 1"), 1);
+            assert_eq!(found(tester, "item 2"), 0);
+            assert_eq!(found(tester, "item 3"), 0);
         });
     }
 
     #[test]
     fn bottom_navigation_bar_change_background_color_test() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for: https://github.com/flutter/flutter/issues/19653
             let red = Colors::RED.primary();
             let green = Colors::GREEN.primary();
             let background_color = Rc::new(Cell::new(red));
-            let mut tester = tester();
             let shared = Rc::clone(&background_color);
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 waft_widgets::StatefulBuilder::new(move |_app, _context, set_state| {
                     let background_color = shared.get();
                     let pressed = Rc::clone(&shared);
@@ -3214,12 +3215,12 @@ pub(crate) mod tests {
             };
 
             assert_eq!(background_color.get(), red);
-            assert_eq!(background_material_color(&tester), Some(red));
-            let at = text_center(&tester, "green");
+            assert_eq!(background_material_color(tester), Some(red));
+            let at = text_center(tester, "green");
             tester.tap(at, 1);
             tester.pump_and_settle();
             assert_eq!(background_color.get(), green);
-            assert_eq!(background_material_color(&tester), Some(green));
+            assert_eq!(background_material_color(tester), Some(green));
         });
     }
 
@@ -3234,9 +3235,8 @@ pub(crate) mod tests {
         .into_widget();
     }
 
-    fn no_labels_render_no_text(r#type: BottomNavigationBarType) {
-        let mut tester = tester();
-        pump_bar(&mut tester, m3, move || {
+    fn no_labels_render_no_text(tester: &mut WidgetTester, r#type: BottomNavigationBarType) {
+        pump_bar(tester, m3, move || {
             BottomNavigationBar::new(vec![
                 item(Icons::dashboard(), "Red").background_color(Colors::RED.primary()),
                 item(Icons::menu(), "Green").background_color(Colors::GREEN.primary()),
@@ -3257,20 +3257,19 @@ pub(crate) mod tests {
 
     #[test]
     fn bottom_navigation_bar_show_no_labels_for_shifting_navbar_renders_no_text() {
-        with_main_thread_stack(|| no_labels_render_no_text(BottomNavigationBarType::Shifting));
+        test_widgets(|tester| no_labels_render_no_text(tester, BottomNavigationBarType::Shifting));
     }
 
     #[test]
     fn bottom_navigation_bar_show_no_labels_for_fixed_navbar_renders_no_text() {
-        with_main_thread_stack(|| no_labels_render_no_text(BottomNavigationBarType::Fixed));
+        test_widgets(|tester| no_labels_render_no_text(tester, BottomNavigationBarType::Fixed));
     }
 
     #[test]
     fn bottom_navigation_bar_changes_mouse_cursor_when_the_tile_is_hovered_over() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let text: MouseCursorRef = waft_services::SystemMouseCursors::TEXT.into();
             let click: MouseCursorRef = waft_services::SystemMouseCursors::CLICK.into();
-            let mut tester = tester();
             // Test BottomNavigationBar() constructor
             let pump = |tester: &mut WidgetTester, mouse_cursor: Option<MouseCursorRef>| {
                 pump_app(tester, m3, move |_app| {
@@ -3287,10 +3286,10 @@ pub(crate) mod tests {
                         .into_widget()
                 });
             };
-            pump(&mut tester, Some(text.clone()));
+            pump(tester, Some(text.clone()));
 
-            let mut gesture = WidgetTester::mouse(1, 0);
-            let at = text_center(&tester, "AC");
+            let mut gesture = TestPointer::mouse(1, 0);
+            let at = text_center(tester, "AC");
             tester.add_pointer(&mut gesture, at);
 
             tester.pump_and_settle();
@@ -3298,7 +3297,7 @@ pub(crate) mod tests {
             assert!(*tester.active_cursor(1) == *text);
 
             // Test default cursor
-            pump(&mut tester, None);
+            pump(tester, None);
 
             assert!(*tester.active_cursor(1) == *click);
         });
@@ -3395,17 +3394,16 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_bottom_navigation_bar_default_layout() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let (icon0, icon1) = pump_titled_bar(&mut tester, m2, Size::new(200.0, 10.0), None);
+        test_widgets(|tester| {
+            let (icon0, icon1) = pump_titled_bar(tester, m2, Size::new(200.0, 10.0), None);
 
             // The height of the navigation bar is kBottomNavigationBarHeight = 56
             // The top of the navigation bar is 600 - 56 = 544
             // The top and bottom of the selected item is defined by its centered icon/label column:
             //   top = 544 + ((56 - (10 + 10)) / 2) = 562
             //   bottom = top + 10 + 10 = 582
-            assert_eq!(rect_of_key(&tester, &icon0).top, 560.0);
-            assert_eq!(rect_of_text(&tester, "Title0").bottom, 584.0);
+            assert_eq!(rect_of_key(tester, &icon0).top, 560.0);
+            assert_eq!(rect_of_text(tester, "Title0").bottom, 584.0);
 
             // The items are padded horizontally according to
             // MainAxisAlignment.spaceAround. Left/right padding is:
@@ -3413,15 +3411,15 @@ pub(crate) mod tests {
             // The layout of the unselected item's label is slightly different; not
             // checking that here.
             assert_eq!(
-                rect_of_text(&tester, "Title0"),
+                rect_of_text(tester, "Title0"),
                 Rect::from_ltrb(158.0, 570.0, 242.0, 584.0)
             );
             assert_eq!(
-                rect_of_key(&tester, &icon0),
+                rect_of_key(tester, &icon0),
                 Rect::from_ltrb(100.0, 560.0, 300.0, 570.0)
             );
             assert_eq!(
-                rect_of_key(&tester, &icon1),
+                rect_of_key(tester, &icon1),
                 Rect::from_ltrb(500.0, 560.0, 700.0, 570.0)
             );
         });
@@ -3429,28 +3427,26 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_bottom_navigation_bar_default_layout() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let icon_height = 10.0;
-            let mut tester = tester();
-            let (icon0, icon1) =
-                pump_titled_bar(&mut tester, m3, Size::new(200.0, icon_height), None);
+            let (icon0, icon1) = pump_titled_bar(tester, m3, Size::new(200.0, icon_height), None);
 
             let (icon_top, label_bottom, label_height) =
                 m3_tile_extents(|label_height| icon_height + label_height);
 
-            assert_eq!(rect_of_key(&tester, &icon0).top, icon_top);
-            assert_eq!(rect_of_text(&tester, "Title0").bottom, label_bottom);
+            assert_eq!(rect_of_key(tester, &icon0).top, icon_top);
+            assert_eq!(rect_of_text(tester, "Title0").bottom, label_bottom);
 
             // The items are padded horizontally according to
             // MainAxisAlignment.spaceAround. Left/right padding is:
             // 800 - (200 * 2) / 4 = 100
             // The layout of the unselected item's label is slightly different; not
             // checking that here.
-            let first_label_width = text_size(&tester, "Title0").width();
+            let first_label_width = text_size(tester, "Title0").width();
             let items_width = 800.0 / 2.0; // 2 items.
             let first_label_center = items_width / 2.0;
             assert_eq!(
-                rect_of_text(&tester, "Title0"),
+                rect_of_text(tester, "Title0"),
                 Rect::from_ltrb(
                     first_label_center - first_label_width / 2.0,
                     label_bottom - label_height,
@@ -3459,11 +3455,11 @@ pub(crate) mod tests {
                 )
             );
             assert_eq!(
-                rect_of_key(&tester, &icon0),
+                rect_of_key(tester, &icon0),
                 Rect::from_ltrb(100.0, icon_top, 300.0, icon_top + icon_height)
             );
             assert_eq!(
-                rect_of_key(&tester, &icon1),
+                rect_of_key(tester, &icon1),
                 Rect::from_ltrb(500.0, icon_top, 700.0, icon_top + icon_height)
             );
         });
@@ -3471,10 +3467,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_bottom_navigation_bar_centered_landscape_layout() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (icon0, icon1) = pump_titled_bar(
-                &mut tester,
+                tester,
                 m2,
                 Size::new(200.0, 10.0),
                 Some(BottomNavigationBarLandscapeLayout::Centered),
@@ -3490,15 +3485,15 @@ pub(crate) mod tests {
             // The layout of the unselected item's label is slightly different; not
             // checking that here.
             assert_eq!(
-                rect_of_text(&tester, "Title0"),
+                rect_of_text(tester, "Title0"),
                 Rect::from_ltrb(208.0, 570.0, 292.0, 584.0)
             );
             assert_eq!(
-                rect_of_key(&tester, &icon0),
+                rect_of_key(tester, &icon0),
                 Rect::from_ltrb(150.0, 560.0, 350.0, 570.0)
             );
             assert_eq!(
-                rect_of_key(&tester, &icon1),
+                rect_of_key(tester, &icon1),
                 Rect::from_ltrb(450.0, 560.0, 650.0, 570.0)
             );
         });
@@ -3506,11 +3501,10 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_bottom_navigation_bar_centered_landscape_layout() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (icon_width, icon_height) = (200.0, 10.0);
-            let mut tester = tester();
             let (icon0, icon1) = pump_titled_bar(
-                &mut tester,
+                tester,
                 m3,
                 Size::new(icon_width, icon_height),
                 Some(BottomNavigationBarLandscapeLayout::Centered),
@@ -3528,13 +3522,13 @@ pub(crate) mod tests {
             // 800 - 150 = 650
             // The layout of the unselected item's label is slightly different; not
             // checking that here.
-            let first_label_width = text_size(&tester, "Title0").width();
+            let first_label_width = text_size(tester, "Title0").width();
             let item_width = icon_width; // 200
             let first_item_left = 150.0;
             let first_label_center = first_item_left + item_width / 2.0; // 250
 
             assert_eq!(
-                rect_of_text(&tester, "Title0"),
+                rect_of_text(tester, "Title0"),
                 Rect::from_ltrb(
                     first_label_center - first_label_width / 2.0,
                     label_bottom - label_height,
@@ -3543,11 +3537,11 @@ pub(crate) mod tests {
                 )
             );
             assert_eq!(
-                rect_of_key(&tester, &icon0),
+                rect_of_key(tester, &icon0),
                 Rect::from_ltrb(150.0, icon_top, 350.0, icon_top + icon_height)
             );
             assert_eq!(
-                rect_of_key(&tester, &icon1),
+                rect_of_key(tester, &icon1),
                 Rect::from_ltrb(450.0, icon_top, 650.0, icon_top + icon_height)
             );
         });
@@ -3555,10 +3549,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_bottom_navigation_bar_linear_landscape_layout() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (icon0, icon1) = pump_titled_bar(
-                &mut tester,
+                tester,
                 m2,
                 Size::new(100.0, 20.0),
                 Some(BottomNavigationBarLandscapeLayout::Linear),
@@ -3569,15 +3562,15 @@ pub(crate) mod tests {
             // between the icon and label.  The layout of the unselected
             // item's label is slightly different; not checking that here.
             assert_eq!(
-                rect_of_text(&tester, "Title0"),
+                rect_of_text(tester, "Title0"),
                 Rect::from_ltrb(212.0, 565.0, 296.0, 579.0)
             );
             assert_eq!(
-                rect_of_key(&tester, &icon0),
+                rect_of_key(tester, &icon0),
                 Rect::from_ltrb(104.0, 562.0, 204.0, 582.0)
             );
             assert_eq!(
-                rect_of_key(&tester, &icon1),
+                rect_of_key(tester, &icon1),
                 Rect::from_ltrb(504.0, 562.0, 604.0, 582.0)
             );
         });
@@ -3585,11 +3578,10 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_bottom_navigation_bar_linear_landscape_layout() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (icon_width, icon_height) = (100.0, 20.0);
-            let mut tester = tester();
             let (icon0, icon1) = pump_titled_bar(
-                &mut tester,
+                tester,
                 m3,
                 Size::new(icon_width, icon_height),
                 Some(BottomNavigationBarLandscapeLayout::Linear),
@@ -3605,16 +3597,16 @@ pub(crate) mod tests {
             // item's label is slightly different; not checking that here.
             let item_full_with = 800.0 / 2.0; // Two items in the navigation bar.
             let separator_width = 8.0;
-            let first_label_width = text_size(&tester, "Title0").width();
+            let first_label_width = text_size(tester, "Title0").width();
             let first_item_content_width = icon_width + separator_width + first_label_width;
             let first_item_left = item_full_with / 2.0 - first_item_content_width / 2.0;
-            let second_label_width = text_size(&tester, "Title1").width();
+            let second_label_width = text_size(tester, "Title1").width();
             let second_item_content_width = icon_width + separator_width + second_label_width;
             let second_item_left =
                 item_full_with + item_full_with / 2.0 - second_item_content_width / 2.0;
 
             assert_eq!(
-                rect_of_text(&tester, "Title0"),
+                rect_of_text(tester, "Title0"),
                 Rect::from_ltrb(
                     first_item_left + icon_width + separator_width,
                     label_bottom - label_height,
@@ -3623,7 +3615,7 @@ pub(crate) mod tests {
                 )
             );
             assert_eq!(
-                rect_of_key(&tester, &icon0),
+                rect_of_key(tester, &icon0),
                 Rect::from_ltrb(
                     first_item_left,
                     icon_top,
@@ -3632,7 +3624,7 @@ pub(crate) mod tests {
                 )
             );
             assert_eq!(
-                rect_of_key(&tester, &icon1),
+                rect_of_key(tester, &icon1),
                 Rect::from_ltrb(
                     second_item_left,
                     icon_top,
@@ -3645,12 +3637,11 @@ pub(crate) mod tests {
 
     #[test]
     fn bottom_navigation_bar_keys_passed_through() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key1: KeyRef = waft_foundation::ValueKey::new("key1".to_owned()).into();
             let key2: KeyRef = waft_foundation::ValueKey::new("key2".to_owned()).into();
-            let mut tester = tester();
             let (k1, k2) = (key1.clone(), key2.clone());
-            pump_bar(&mut tester, m3, move || {
+            pump_bar(tester, m3, move || {
                 BottomNavigationBar::new(vec![
                     item(Icons::favorite_border(), "Favorite").key(k1),
                     item(Icons::access_alarm(), "Alarm").key(k2),
@@ -3664,9 +3655,8 @@ pub(crate) mod tests {
 
     #[test]
     fn bottom_navigation_bar_and_bottom_navigation_bar_item_render_at_zero_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 waft_widgets::Center::new()
                     .child(
                         SizedBox::shrink().child(Scaffold::new().bottom_navigation_bar(
@@ -3678,18 +3668,20 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            assert!(rect_of_text(&tester, "X").size().is_empty());
+            assert!(rect_of_text(tester, "X").size().is_empty());
         });
     }
 
     /// The non-golden part of Dart's group 'BottomNavigationBar shifting backgroundColor with
     /// transition': the bar keeps the old item's colour while the new item's circle grows,
     /// then takes the new item's colour once the circle completes.
-    fn shifting_background_color_with_transition(theme: fn(&App) -> ThemeData) {
+    fn shifting_background_color_with_transition(
+        tester: &mut WidgetTester,
+        theme: fn(&App) -> ThemeData,
+    ) {
         let red = Colors::RED.primary();
         let green = Colors::GREEN.primary();
-        let mut tester = tester();
-        pump_app(&mut tester, theme, move |_app| {
+        pump_app(tester, theme, move |_app| {
             let current_index = Rc::new(Cell::new(0));
             waft_widgets::StatefulBuilder::new(move |_app, _context, set_state| {
                 let tapped = Rc::clone(&current_index);
@@ -3712,24 +3704,24 @@ pub(crate) mod tests {
             })
             .into_widget()
         });
-        let at = text_center(&tester, "Green");
+        let at = text_center(tester, "Green");
         tester.tap(at, 1);
 
         for _ in 0..3 {
-            tester.pump(Duration::from_millis(30));
-            assert_eq!(material_of(&tester, |material| material.color), Some(red));
+            tester.pump_by(Duration::from_millis(30));
+            assert_eq!(material_of(tester, |material| material.color), Some(red));
         }
         tester.pump_and_settle();
-        assert_eq!(material_of(&tester, |material| material.color), Some(green));
+        assert_eq!(material_of(tester, |material| material.color), Some(green));
     }
 
     #[test]
     fn material2_bottom_navigation_bar_shifting_background_color_with_transition() {
-        with_main_thread_stack(|| shifting_background_color_with_transition(m2));
+        test_widgets(|tester| shifting_background_color_with_transition(tester, m2));
     }
 
     #[test]
     fn material3_bottom_navigation_bar_shifting_background_color_with_transition() {
-        with_main_thread_stack(|| shifting_background_color_with_transition(m3));
+        test_widgets(|tester| shifting_background_color_with_transition(tester, m3));
     }
 }

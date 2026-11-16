@@ -484,11 +484,12 @@ pub(crate) mod tests {
     use waft_painting::BorderRadius;
     use waft_widgets::{AnyElement, DecoratedBox, Directionality, Row, Text};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::material::Material;
-    use crate::test_support::{Drawn, PaintInspection, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection};
     use crate::theme_data::ThemeData;
-    pub(crate) use crate::tooltip::tests::tester;
     use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// Dart's `tester.widget<Container>(find.byType(Container))`, which expects one `Container`.
@@ -559,66 +560,61 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_divider_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_centered(&mut tester, m3, Divider::new().into_widget());
-            assert_eq!(rect_of::<Divider>(&tester).height(), 16.0);
-            assert_eq!(border(&tester).bottom.width, 1.0);
+        test_widgets(|tester| {
+            pump_centered(tester, m3, Divider::new().into_widget());
+            assert_eq!(rect_of::<Divider>(tester).height(), 16.0);
+            assert_eq!(border(tester).bottom.width, 1.0);
         });
     }
 
     #[test]
     fn material2_divider_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_centered(&mut tester, m2, Divider::new().into_widget());
-            assert_eq!(rect_of::<Divider>(&tester).height(), 16.0);
-            assert_eq!(border(&tester).bottom.width, 0.0);
+        test_widgets(|tester| {
+            pump_centered(tester, m2, Divider::new().into_widget());
+            assert_eq!(rect_of::<Divider>(tester).height(), 16.0);
+            assert_eq!(border(tester).bottom.width, 0.0);
         });
     }
 
     #[test]
     fn divider_custom_thickness() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ltr(Divider::new().thickness(5.0)));
-            assert_eq!(border(&tester).bottom.width, 5.0);
+            assert_eq!(border(tester).bottom.width, 5.0);
         });
     }
 
     #[test]
     fn divider_custom_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ltr(Divider::new().radius(BorderRadius::circular(5.0))));
-            assert_all_corners(border_radius(&tester), 5.0);
+            assert_all_corners(border_radius(tester), 5.0);
         });
     }
 
     #[test]
     fn horizontal_divider_custom_indentation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let custom_indent = 10.0;
-            let mut tester = tester();
 
             tester.pump_widget(ltr(Divider::new().indent(custom_indent)));
             // The divider line is drawn with a DecoratedBox with a border
-            let divider_rect = rect_of::<Divider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<Divider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.left, divider_rect.left + custom_indent);
             assert_eq!(line_rect.right, divider_rect.right);
 
             tester.pump_widget(ltr(Divider::new().end_indent(custom_indent)));
-            let divider_rect = rect_of::<Divider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<Divider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.left, divider_rect.left);
             assert_eq!(line_rect.right, divider_rect.right - custom_indent);
 
             tester.pump_widget(ltr(Divider::new()
                 .indent(custom_indent)
                 .end_indent(custom_indent)));
-            let divider_rect = rect_of::<Divider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<Divider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.left, divider_rect.left + custom_indent);
             assert_eq!(line_rect.right, divider_rect.right - custom_indent);
         });
@@ -626,38 +622,34 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_vertical_divider_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_centered(&mut tester, m3, VerticalDivider::new().into_widget());
-            assert_eq!(rect_of::<VerticalDivider>(&tester).width(), 16.0);
-            assert_eq!(border(&tester).left.width, 1.0);
+        test_widgets(|tester| {
+            pump_centered(tester, m3, VerticalDivider::new().into_widget());
+            assert_eq!(rect_of::<VerticalDivider>(tester).width(), 16.0);
+            assert_eq!(border(tester).left.width, 1.0);
         });
     }
 
     #[test]
     fn material2_vertical_divider_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_centered(&mut tester, m2, VerticalDivider::new().into_widget());
-            assert_eq!(rect_of::<VerticalDivider>(&tester).width(), 16.0);
-            assert_eq!(border(&tester).left.width, 0.0);
+        test_widgets(|tester| {
+            pump_centered(tester, m2, VerticalDivider::new().into_widget());
+            assert_eq!(rect_of::<VerticalDivider>(tester).width(), 16.0);
+            assert_eq!(border(tester).left.width, 0.0);
         });
     }
 
     #[test]
     fn vertical_divider_custom_thickness() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ltr(VerticalDivider::new().thickness(5.0)));
-            assert_eq!(border(&tester).left.width, 5.0);
+            assert_eq!(border(tester).left.width, 5.0);
         });
     }
 
     #[test]
     fn vertical_divider_test_2() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m2, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m2, |_app| {
                 Material::new()
                     .child(SizedBox::new().height(24.0).child(Row::new().children([
                         Text::new("Hey.").into_widget(),
@@ -673,7 +665,7 @@ pub(crate) mod tests {
                 .render_box_of(container_box)
                 .size(&tester.cell.borrow());
 
-            assert_eq!(rect_of::<VerticalDivider>(&tester).width(), 16.0);
+            assert_eq!(rect_of::<VerticalDivider>(tester).width(), 16.0);
             assert_eq!(container_size.height(), 600.0);
             // Dart: `paints..path(strokeWidth: 0.0)`; `Drawn` does not carry the stroke width.
             let divider = *tester
@@ -687,28 +679,27 @@ pub(crate) mod tests {
 
     #[test]
     fn vertical_divider_custom_indentation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let custom_indent = 10.0;
-            let mut tester = tester();
 
             tester.pump_widget(ltr(VerticalDivider::new().indent(custom_indent)));
             // The divider line is drawn with a DecoratedBox with a border
-            let divider_rect = rect_of::<VerticalDivider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<VerticalDivider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.top, divider_rect.top + custom_indent);
             assert_eq!(line_rect.bottom, divider_rect.bottom);
 
             tester.pump_widget(ltr(VerticalDivider::new().end_indent(custom_indent)));
-            let divider_rect = rect_of::<VerticalDivider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<VerticalDivider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.top, divider_rect.top);
             assert_eq!(line_rect.bottom, divider_rect.bottom - custom_indent);
 
             tester.pump_widget(ltr(VerticalDivider::new()
                 .indent(custom_indent)
                 .end_indent(custom_indent)));
-            let divider_rect = rect_of::<VerticalDivider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<VerticalDivider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.top, divider_rect.top + custom_indent);
             assert_eq!(line_rect.bottom, divider_rect.bottom - custom_indent);
         });
@@ -716,12 +707,11 @@ pub(crate) mod tests {
 
     #[test]
     fn vertical_divider_custom_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ltr(
                 VerticalDivider::new().radius(BorderRadius::circular(5.0))
             ));
-            assert_all_corners(border_radius(&tester), 5.0);
+            assert_all_corners(border_radius(tester), 5.0);
         });
     }
 
@@ -741,27 +731,25 @@ pub(crate) mod tests {
 
     #[test]
     fn divider_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(Divider::new()))
                     .into_widget()
             });
-            assert_eq!(rect_of::<Divider>(&tester).size(), Size::ZERO);
+            assert_eq!(rect_of::<Divider>(tester).size(), Size::ZERO);
         });
     }
 
     #[test]
     fn vertical_divider_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(VerticalDivider::new()))
                     .into_widget()
             });
-            assert_eq!(rect_of::<VerticalDivider>(&tester).size(), Size::ZERO);
+            assert_eq!(rect_of::<VerticalDivider>(tester).size(), Size::ZERO);
         });
     }
 }

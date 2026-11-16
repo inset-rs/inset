@@ -15,6 +15,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — each case has its own `App`, which holds its debug flags, clock and singletons, where flutter_test's isolate-global ones are reset and checked between tests.
   Affect: a case that leaves a flag set or a singleton changed cannot affect the next, and is not reported for it.
 
+- Change: a tester whose pump panicked (a case that catches the panic of a build, a layout or a paint) skips the end-of-test disposal and timer check when dropped.
+  Reason: language — a panic unwinds out of the frame and leaves the tree half built, where Dart's framework reports the error through `FlutterError.reportError`, finishes the frame, and the case reads it with `takeException`.
+  Affect: such a case is not checked for a timer left pending; the cases that expect a build to fail pump nothing after it.
+
 ## entry.rs → widget_tester.dart (`testWidgets`, `TargetPlatformVariant`)
 
 - Change: `test_widgets_variant(variant, body)` runs `body` once per platform inside one Rust test, stopping at the first platform that fails and naming it on stderr.
@@ -26,3 +30,4 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - tester.rs: the end-of-test check for an exception the case did not take (`takeException`). Trigger: `FlutterError.reportError`.
 - finders.rs: the lazy `Finder` with `skipOffstage`; the finders are eager `Vec`s, where `find_text` and `find_by_type` keep offstage elements and the `find_onstage_*` ones skip them. Trigger: the harness upgrade's step 5.
 - finders.rs: `Element.debugVisitOnstageChildren`, for which `is_onstage` reads a `ToolbarItemsParentData` that does not paint as offstage only under a parent of more than one child. Trigger: the harness upgrade's step 5.
+- tester.rs, gestures.rs: the helpers a case needs that the one tester lacks, each still a local copy where it is used: `tap_text` (21 waft-material files), `move_by` (waft-material's app_bar.rs and scrollbar.rs, waft-widgets' dismissible.rs, page_view.rs and overscroll_indicator.rs, waft-cupertino's refresh.rs), `fling_with_initial_offset` (dismissible.rs), `pump_frames` (overscroll_indicator.rs), `resize_view` (waft-material's date_picker.rs), and waft-material's `only_onstage_text`, `find_onstage_by_icon`, `text_field_controller_text`, `remove_pointer` and `sharing` (date_picker.rs, date_picker_theme.rs, time_picker.rs). Trigger: harness branches C and D, which add them to the tester.

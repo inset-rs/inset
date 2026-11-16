@@ -5321,9 +5321,6 @@ pub trait RenderPhysicalModelBase<T: Clone + 'static>: RenderCustomClip<T> {
     /// The z-coordinate relative to the parent at which to place this material.
     ///
     /// The value is non-negative.
-    ///
-    /// If `debug_disable_shadows` is set, this value is ignored and no shadow is
-    /// drawn (an outline is rendered instead).
     fn elevation(self: RenderHandle<Self>, app: &App) -> f64 {
         self.physical_model_data(app).elevation
     }

@@ -1698,7 +1698,8 @@ mod tests {
     use waft_rendering::{AnyRenderObject, RenderSliverPadding};
 
     use super::*;
-    use crate::test_harness::{Harness, VIEW_HEIGHT, binding_cell, binding_mount, binding_pump};
+    use crate::test_harness::{Harness, VIEW_HEIGHT};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Directionality, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
@@ -1713,6 +1714,11 @@ mod tests {
             MediaQueryData::new().size(Size::new(300.0, VIEW_HEIGHT)),
             child,
         )
+    }
+
+    /// [`wrap`] for a tree in a [`WidgetTester`]'s view.
+    fn wrap_in_tester_view<K>(child: impl IntoWidget<K>) -> WidgetRef {
+        wrap_with(MediaQueryData::new().size(WidgetTester::SIZE), child)
     }
 
     fn wrap_with<K>(data: MediaQueryData, child: impl IntoWidget<K>) -> WidgetRef {
@@ -1739,17 +1745,20 @@ mod tests {
         total
     }
 
-    /// Whether `object` is the `IndexedSemantics` a delegate wraps each child in, which takes its
-    /// child's size.
-    fn is_semantic_index(app: &App, object: AnyRenderObject) -> bool {
+    /// Whether `object` is the `IndexedSemantics` or the `RepaintBoundary` a delegate wraps each
+    /// child in, which take their child's size.
+    fn is_child_wrapper(app: &App, object: AnyRenderObject) -> bool {
         object
             .downcast::<waft_rendering::RenderIndexedSemantics>(app)
             .is_some()
+            || object
+                .downcast::<waft_rendering::RenderRepaintBoundary>(app)
+                .is_some()
     }
 
     fn item_count(app: &App, harness: &Harness) -> usize {
         count_render_objects(app, harness.render_root(app).as_object(), &|app, object| {
-            !is_semantic_index(app, object)
+            !is_child_wrapper(app, object)
                 && object
                     .as_box()
                     .is_some_and(|render_box| render_box.size(app).height() == ITEM_EXTENT)
@@ -1758,31 +1767,29 @@ mod tests {
 
     #[test]
     fn a_list_view_lays_out_only_the_visible_children_and_scrolls_through_its_controller() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::default(&mut app);
-        let list = ListView::new()
-            .controller(controller.erase())
-            .children(boxes(ITEM_COUNT));
-        drop(app);
-        binding_mount(&cell, wrap(list));
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let controller = tester.update(ScrollController::default);
+            let list = ListView::new()
+                .controller(controller.erase())
+                .children(boxes(ITEM_COUNT));
+            tester.pump_widget(wrap_in_tester_view(list));
 
-        let visible = (VIEW_HEIGHT / ITEM_EXTENT) as usize;
-        let laid_out = item_count_under_view(&mut app);
-        assert!(
-            laid_out >= visible && laid_out < ITEM_COUNT,
-            "only the visible children (plus the cache) are laid out, not all of them: {laid_out}"
-        );
+            let visible = (WidgetTester::SIZE.height() / ITEM_EXTENT) as usize;
+            let laid_out = tester.update(item_count_under_view);
+            assert!(
+                laid_out >= visible && laid_out < ITEM_COUNT,
+                "only the visible children (plus the cache) are laid out, not all of them: {laid_out}"
+            );
 
-        controller.jump_to(&mut app, 500.0);
-        binding_pump(&mut app, std::time::Duration::ZERO);
-        assert_eq!(controller.offset(&app), 500.0);
-        let scrolled = item_count_under_view(&mut app);
-        assert!(
-            scrolled >= visible && scrolled < ITEM_COUNT,
-            "still only the visible children (plus the cache) after scrolling: {scrolled}"
-        );
+            tester.update(|app| controller.jump_to(app, 500.0));
+            tester.pump();
+            assert_eq!(controller.offset(&tester.cell.borrow()), 500.0);
+            let scrolled = tester.update(item_count_under_view);
+            assert!(
+                scrolled >= visible && scrolled < ITEM_COUNT,
+                "still only the visible children (plus the cache) after scrolling: {scrolled}"
+            );
+        });
     }
 
     /// A scrollable built as a list settles at its end and dropped in the same frame has its
@@ -1790,29 +1797,25 @@ mod tests {
     /// as Flutter's does, rather than reaching a destroyed state.
     #[test]
     fn a_nested_scrollable_dropped_in_the_frame_it_was_laid_out_sends_no_metrics_notification() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::default(&mut app);
-        let mut children = boxes(ITEM_COUNT);
-        for _ in 0..4 {
-            children.push(
-                crate::widgets::single_child_scroll_view::SingleChildScrollView::new()
-                    .scroll_direction(waft_painting::Axis::Horizontal)
-                    .child(SizedBox::new().width(1000.0).height(ITEM_EXTENT))
-                    .into_widget(),
-            );
-        }
-        let list = ListView::new()
-            .controller(controller.erase())
-            .children(children);
-        drop(app);
-        binding_mount(&cell, wrap(list));
-        let mut app = cell.borrow_mut();
-        controller.jump_to(&mut app, 100_000.0);
-        binding_pump(&mut app, std::time::Duration::ZERO);
-        app.drain_microtasks();
-        binding_pump(&mut app, std::time::Duration::ZERO);
-        app.drain_microtasks();
+        test_widgets(|tester| {
+            let controller = tester.update(ScrollController::default);
+            let mut children = boxes(ITEM_COUNT);
+            for _ in 0..4 {
+                children.push(
+                    crate::widgets::single_child_scroll_view::SingleChildScrollView::new()
+                        .scroll_direction(waft_painting::Axis::Horizontal)
+                        .child(SizedBox::new().width(1000.0).height(ITEM_EXTENT))
+                        .into_widget(),
+                );
+            }
+            let list = ListView::new()
+                .controller(controller.erase())
+                .children(children);
+            tester.pump_widget(wrap_in_tester_view(list));
+            tester.update(|app| controller.jump_to(app, 100_000.0));
+            tester.pump();
+            tester.pump();
+        });
     }
 
     fn item_count_under_view(app: &mut App) -> usize {
@@ -1822,7 +1825,7 @@ mod tests {
             .find_render_object(app)
             .expect("a mounted view has a render object");
         count_render_objects(app, root, &|app, object| {
-            !is_semantic_index(app, object)
+            !is_child_wrapper(app, object)
                 && object.as_box().is_some_and(|render_box| {
                     render_box.has_size(app) && render_box.size(app).height() == ITEM_EXTENT
                 })
@@ -1941,7 +1944,7 @@ mod tests {
             &app,
             harness.render_root(&app).as_object(),
             &|app, object| {
-                !is_semantic_index(app, object)
+                !is_child_wrapper(app, object)
                     && object
                         .as_box()
                         .is_some_and(|render_box| render_box.size(app) == Size::new(100.0, 100.0))

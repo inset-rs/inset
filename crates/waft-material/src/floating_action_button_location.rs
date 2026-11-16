@@ -1177,11 +1177,12 @@ mod tests {
     //! which is not ported. A case whose asserted values do not depend on it is ported without
     //! it, and says so; a case whose values depend on its height waits for it (listed at the
     //! end of this module).
+    use waft_widgets::Text;
 
     use std::cell::RefCell;
 
     use waft_animation::AlwaysStoppedAnimation;
-    use waft_embedder::{Rect, Size, TargetPlatform};
+    use waft_embedder::{Rect, Size};
     use waft_foundation::Listenable;
     use waft_painting::EdgeInsets;
     use waft_rendering::CustomPainter;
@@ -1192,6 +1193,8 @@ mod tests {
         SizedBox, State, StateData, StatefulWidget, WidgetRef, WidgetsBinding, downcast_widget,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::app_bar::AppBar;
     use crate::floating_action_button::FloatingActionButton;
@@ -1200,18 +1203,12 @@ mod tests {
         Scaffold, ScaffoldGeometry, ScaffoldGeometryNotifier, ScaffoldMessenger,
     };
     use crate::snack_bar::SnackBar;
-    use crate::test_support::{AhemText, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        tester
-    }
 
     /// Dart's `const FloatingActionButton(onPressed: null, child: Text('1'))`.
     fn default_fab() -> FloatingActionButton {
-        FloatingActionButton::new(None).child(AhemText::new("1"))
+        FloatingActionButton::new(None).child(Text::new("1"))
     }
 
     /// Dart's `_buildFrame`.
@@ -1224,7 +1221,7 @@ mod tests {
         bab: Option<WidgetRef>,
     ) -> WidgetRef {
         let mut scaffold = Scaffold::new().app_bar(PreferredSizeWidgetRef::new(
-            AppBar::new().title(AhemText::new("FabLocation Test")),
+            AppBar::new().title(Text::new("FabLocation Test")),
         ));
         if let Some(location) = location {
             scaffold = scaffold.floating_action_button_location(location);
@@ -1391,8 +1388,7 @@ mod tests {
     // 'still animates motion when the floating action button is null'.
     #[test]
     fn a_null_floating_action_button_still_animates_its_motion() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let null_frame = |location| {
                 build_frame(
                     None,
@@ -1406,83 +1402,81 @@ mod tests {
             tester.pump_widget(null_frame(None));
 
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_eq!(transient_callback_count(tester), 0);
 
             tester.pump_widget(null_frame(Some(
                 <dyn FloatingActionButtonLocation>::end_float(),
             )));
 
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
 
             tester.pump_widget(null_frame(Some(
                 <dyn FloatingActionButtonLocation>::center_float(),
             )));
 
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
         });
     }
 
     // 'moves fab from center to end and back'.
     #[test]
     fn the_fab_moves_from_center_to_end_and_back() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(frame(Some(<dyn FloatingActionButtonLocation>::end_float())));
 
-            assert_offset_eq(fab_center(&tester), Offset::new(756.0, 356.0));
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_offset_eq(fab_center(tester), Offset::new(756.0, 356.0));
+            assert_eq!(transient_callback_count(tester), 0);
 
             tester.pump_widget(frame(Some(
                 <dyn FloatingActionButtonLocation>::center_float(),
             )));
 
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
 
             tester.pump_and_settle();
 
-            assert_offset_eq(fab_center(&tester), Offset::new(400.0, 356.0));
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_offset_eq(fab_center(tester), Offset::new(400.0, 356.0));
+            assert_eq!(transient_callback_count(tester), 0);
 
             tester.pump_widget(frame(Some(<dyn FloatingActionButtonLocation>::end_float())));
 
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
 
             tester.pump_and_settle();
 
-            assert_offset_eq(fab_center(&tester), Offset::new(756.0, 356.0));
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_offset_eq(fab_center(tester), Offset::new(756.0, 356.0));
+            assert_eq!(transient_callback_count(tester), 0);
         });
     }
 
     // 'moves to and from custom-defined positions'.
     #[test]
     fn the_fab_moves_to_and_from_a_custom_location() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(frame(Some(Rc::new(StartTopFloatingActionButtonLocation))));
 
-            assert_offset_eq(fab_center(&tester), Offset::new(44.0, 56.0));
+            assert_offset_eq(fab_center(tester), Offset::new(44.0, 56.0));
 
             tester.pump_widget(frame(Some(
                 <dyn FloatingActionButtonLocation>::center_float(),
             )));
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
 
             tester.pump_and_settle();
 
-            assert_offset_eq(fab_center(&tester), Offset::new(400.0, 356.0));
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_offset_eq(fab_center(tester), Offset::new(400.0, 356.0));
+            assert_eq!(transient_callback_count(tester), 0);
 
             tester.pump_widget(frame(Some(Rc::new(StartTopFloatingActionButtonLocation))));
 
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
 
             tester.pump_and_settle();
 
-            assert_offset_eq(fab_center(&tester), Offset::new(44.0, 56.0));
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_offset_eq(fab_center(tester), Offset::new(44.0, 56.0));
+            assert_eq!(transient_callback_count(tester), 0);
         });
     }
 
@@ -1727,8 +1721,7 @@ mod tests {
     // 'moving the fab to centerFloat'.
     #[test]
     fn moving_the_fab_to_center_float_does_not_jump() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let listener = GlobalKey::new();
             // Create a scaffold with the fab at endFloat
             tester.pump_widget(listener_frame(
@@ -1736,7 +1729,7 @@ mod tests {
                 Some(default_fab()),
                 <dyn FloatingActionButtonLocation>::end_float(),
             ));
-            let steps = setup_listener(&tester, &listener);
+            let steps = setup_listener(tester, &listener);
 
             // Move the fab to centerFloat'
             tester.pump_widget(listener_frame(
@@ -1753,15 +1746,14 @@ mod tests {
     // 'interrupting motion towards the StartTop location.'.
     #[test]
     fn interrupting_motion_towards_the_start_top_location_does_not_jump() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let listener = GlobalKey::new();
             tester.pump_widget(listener_frame(
                 &listener,
                 Some(default_fab()),
                 <dyn FloatingActionButtonLocation>::center_float(),
             ));
-            let steps = setup_listener(&tester, &listener);
+            let steps = setup_listener(tester, &listener);
 
             // Move the fab to the top start after creating the fab.
             tester.pump_widget(listener_frame(
@@ -1769,7 +1761,7 @@ mod tests {
                 Some(default_fab()),
                 Rc::new(StartTopFloatingActionButtonLocation),
             ));
-            tester.pump(K_FLOATING_ACTION_BUTTON_SEGUE / 2);
+            tester.pump_by(K_FLOATING_ACTION_BUTTON_SEGUE / 2);
 
             // Interrupt motion to move to the end float
             tester.pump_widget(listener_frame(
@@ -1786,15 +1778,14 @@ mod tests {
     // 'interrupting entrance to remove the fab.'.
     #[test]
     fn interrupting_the_entrance_to_remove_the_fab_does_not_jump() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let listener = GlobalKey::new();
             tester.pump_widget(listener_frame(
                 &listener,
                 None,
                 <dyn FloatingActionButtonLocation>::center_float(),
             ));
-            let steps = setup_listener(&tester, &listener);
+            let steps = setup_listener(tester, &listener);
 
             // Animate the fab in.
             tester.pump_widget(listener_frame(
@@ -1802,7 +1793,7 @@ mod tests {
                 Some(default_fab()),
                 <dyn FloatingActionButtonLocation>::end_float(),
             ));
-            tester.pump(K_FLOATING_ACTION_BUTTON_SEGUE / 2);
+            tester.pump_by(K_FLOATING_ACTION_BUTTON_SEGUE / 2);
 
             // Remove the fab.
             tester.pump_widget(listener_frame(
@@ -1819,15 +1810,14 @@ mod tests {
     // 'interrupting entrance of a new fab.'.
     #[test]
     fn interrupting_the_entrance_of_a_new_fab_does_not_jump() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let listener = GlobalKey::new();
             tester.pump_widget(listener_frame(
                 &listener,
                 None,
                 <dyn FloatingActionButtonLocation>::end_float(),
             ));
-            let steps = setup_listener(&tester, &listener);
+            let steps = setup_listener(tester, &listener);
 
             // Bring in a new fab.
             tester.pump_widget(listener_frame(
@@ -1835,7 +1825,7 @@ mod tests {
                 Some(default_fab()),
                 <dyn FloatingActionButtonLocation>::center_float(),
             ));
-            tester.pump(K_FLOATING_ACTION_BUTTON_SEGUE / 2);
+            tester.pump_by(K_FLOATING_ACTION_BUTTON_SEGUE / 2);
 
             // Interrupt motion to move the fab.
             tester.pump_widget(listener_frame(
@@ -1863,8 +1853,7 @@ mod tests {
     // 'Docked floating action button locations'.
     #[test]
     fn docked_locations_center_the_fab_on_the_top_of_the_bottom_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(bab_frame(
                 <dyn FloatingActionButtonLocation>::end_docked(),
                 Some(100.0),
@@ -1872,48 +1861,46 @@ mod tests {
 
             // Scaffold 800x600, FAB is 56x56, BAB is 800x100, FAB's center is
             // at the top of the BAB.
-            assert_offset_eq(fab_center(&tester), Offset::new(756.0, 500.0));
+            assert_offset_eq(fab_center(tester), Offset::new(756.0, 500.0));
 
             tester.pump_widget(bab_frame(
                 <dyn FloatingActionButtonLocation>::center_docked(),
                 Some(100.0),
             ));
             tester.pump_and_settle();
-            assert_offset_eq(fab_center(&tester), Offset::new(400.0, 500.0));
+            assert_offset_eq(fab_center(tester), Offset::new(400.0, 500.0));
 
             tester.pump_widget(bab_frame(
                 <dyn FloatingActionButtonLocation>::end_docked(),
                 Some(100.0),
             ));
             tester.pump_and_settle();
-            assert_offset_eq(fab_center(&tester), Offset::new(756.0, 500.0));
+            assert_offset_eq(fab_center(tester), Offset::new(756.0, 500.0));
         });
     }
 
     // 'Docked floating action button locations: no BAB, small BAB'.
     #[test]
     fn docked_locations_keep_the_fab_on_screen_without_or_with_a_small_bottom_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(bab_frame(
                 <dyn FloatingActionButtonLocation>::end_docked(),
                 None,
             ));
-            assert_offset_eq(fab_center(&tester), Offset::new(756.0, 572.0));
+            assert_offset_eq(fab_center(tester), Offset::new(756.0, 572.0));
 
             tester.pump_widget(bab_frame(
                 <dyn FloatingActionButtonLocation>::end_docked(),
                 Some(16.0),
             ));
-            assert_offset_eq(fab_center(&tester), Offset::new(756.0, 572.0));
+            assert_offset_eq(fab_center(tester), Offset::new(756.0, 572.0));
         });
     }
 
     // 'Contained floating action button locations'.
     #[test]
     fn contained_locations_center_the_fab_in_the_bottom_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(bab_frame(
                 <dyn FloatingActionButtonLocation>::end_contained(),
                 Some(100.0),
@@ -1922,7 +1909,7 @@ mod tests {
             // Scaffold 800x600, FAB is 56x56, BAB is 800x100, FAB's center is
             // at the top of the BAB.
             // Formula: scaffold height - BAB height + FAB height / 2 + BAB top & bottom margins.
-            assert_offset_eq(fab_center(&tester), Offset::new(756.0, 550.0));
+            assert_offset_eq(fab_center(tester), Offset::new(756.0, 550.0));
         });
     }
 
@@ -1934,11 +1921,11 @@ mod tests {
     ) -> WidgetRef {
         let mut scaffold = Scaffold::new()
             .app_bar(PreferredSizeWidgetRef::new(
-                AppBar::new().title(AhemText::new("FloatingActionButtonLocation Test.")),
+                AppBar::new().title(Text::new("FloatingActionButtonLocation Test.")),
             ))
             .floating_action_button(
                 FloatingActionButton::new(Some(waft_foundation::Listener::new(|_app| {})))
-                    .child(AhemText::new("beach_access")),
+                    .child(Text::new("beach_access")),
             )
             .floating_action_button_location(location);
         if let Some(animator) = animator {
@@ -1955,8 +1942,7 @@ mod tests {
     // horizontal.
     #[test]
     fn the_animator_can_be_updated() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut fab_animator = <dyn FloatingActionButtonAnimator>::scaling();
             let mut fab_location = <dyn FloatingActionButtonLocation>::start_float();
 
@@ -1972,48 +1958,48 @@ mod tests {
                     Some(Rc::clone(animator)),
                 )
             };
-            let root = frame(&tester, &fab_location, &fab_animator);
+            let root = frame(tester, &fab_location, &fab_animator);
             tester.pump_widget(root);
 
             assert_eq!(tester.find_by_type::<FloatingActionButton>().len(), 1);
-            assert_eq!(transient_callback_count(&tester), 0);
-            assert_coordinate_eq(fab_center(&tester).dx(), 44.0);
+            assert_eq!(transient_callback_count(tester), 0);
+            assert_coordinate_eq(fab_center(tester).dx(), 44.0);
 
             fab_location = <dyn FloatingActionButtonLocation>::end_float();
-            let root = frame(&tester, &fab_location, &fab_animator);
+            let root = frame(tester, &fab_location, &fab_animator);
             tester.pump_widget(root);
 
             // Dart's `lessThan(16.0)` holds through the f64 rounding of the FAB's full-turn
             // rotation, which leaves the corner 7e-15 inside; valo's f32 rotation leaves it
             // 6e-6 outside, so the bound is Dart's within POSITION_TOLERANCE.
-            assert!(fab_top_left(&tester).dx() < 16.0 + POSITION_TOLERANCE);
+            assert!(fab_top_left(tester).dx() < 16.0 + POSITION_TOLERANCE);
 
-            tester.pump(quarter);
-            assert!(fab_top_left(&tester).dx() > 16.0);
+            tester.pump_by(quarter);
+            assert!(fab_top_left(tester).dx() > 16.0);
 
-            tester.pump(quarter);
-            assert_coordinate_eq(fab_center(&tester).dx(), 756.0);
-            assert!(fab_top_right(&tester).dx() < 800.0 - 16.0);
+            tester.pump_by(quarter);
+            assert_coordinate_eq(fab_center(tester).dx(), 756.0);
+            assert!(fab_top_right(tester).dx() < 800.0 - 16.0);
 
-            tester.pump(quarter);
-            assert!(fab_top_right(&tester).dx() < 800.0 - 16.0);
+            tester.pump_by(quarter);
+            assert!(fab_top_right(tester).dx() < 800.0 - 16.0);
 
-            tester.pump(quarter);
-            assert_coordinate_eq(fab_top_right(&tester).dx(), 800.0 - 16.0);
+            tester.pump_by(quarter);
+            assert_coordinate_eq(fab_top_right(tester).dx(), 800.0 - 16.0);
 
             fab_location = <dyn FloatingActionButtonLocation>::start_float();
             fab_animator = Rc::new(NoScalingFabAnimator);
-            let root = frame(&tester, &fab_location, &fab_animator);
+            let root = frame(tester, &fab_location, &fab_animator);
             tester.pump_widget(root);
 
-            tester.pump(quarter);
-            assert_coordinate_eq(fab_center(&tester).dx(), 756.0);
-            assert_coordinate_eq(fab_top_right(&tester).dx(), 800.0 - 16.0);
+            tester.pump_by(quarter);
+            assert_coordinate_eq(fab_center(tester).dx(), 756.0);
+            assert_coordinate_eq(fab_top_right(tester).dx(), 800.0 - 16.0);
 
-            tester.pump(quarter);
-            assert_coordinate_eq(fab_center(&tester).dx(), 44.0);
+            tester.pump_by(quarter);
+            assert_coordinate_eq(fab_center(tester).dx(), 44.0);
             // As above: Dart's bound within POSITION_TOLERANCE.
-            assert!(fab_top_left(&tester).dx() < 16.0 + POSITION_TOLERANCE);
+            assert!(fab_top_left(tester).dx() < 16.0 + POSITION_TOLERANCE);
         });
     }
 
@@ -2039,25 +2025,25 @@ mod tests {
                 FloatingActionButton::new(Some(waft_foundation::Listener::new(move |app| {
                     ScaffoldMessenger::of(app, context).show_snack_bar(
                         app,
-                        SnackBar::new(AhemText::new("Snacky!")),
+                        SnackBar::new(Text::new("Snacky!")),
                         None,
                     );
                 })))
                 .mini(mini)
                 .key(key.clone().into())
-                .child(AhemText::new("FAB"))
+                .child(Text::new("FAB"))
                 .into_widget()
             }));
         if bottom_sheet {
             scaffold = scaffold.bottom_sheet(
                 SizedBox::new()
                     .height(100.0)
-                    .child(Center::new().child(AhemText::new("BottomSheet"))),
+                    .child(Center::new().child(Text::new("BottomSheet"))),
             );
         }
         if app_bar {
             scaffold = scaffold.app_bar(PreferredSizeWidgetRef::new(
-                AppBar::new().title(AhemText::new("Demo")),
+                AppBar::new().title(Text::new("Demo")),
             ));
         }
         material_app(
@@ -2150,74 +2136,54 @@ mod tests {
 
     /// Dart's `runFloatTests`, without the `BottomNavigationBar` steps, which wait.
     fn run_float_tests(
+        tester: &mut WidgetTester,
         location: FloatingActionButtonLocationRef,
         default_rect: Rect,
         bottom_sheet_rect: Rect,
         snack_bar_rect: Rect,
         mini: bool,
     ) {
-        let mut tester = tester();
         let mut case = SafeAreaCase::new(location, mini);
         // Default
-        case.pump(&mut tester, view_padding_bottom(), false, true);
-        assert_rect_more_or_less_equals(case.rect(&tester), default_rect);
+        case.pump(tester, view_padding_bottom(), false, true);
+        assert_rect_more_or_less_equals(case.rect(tester), default_rect);
         // Present keyboard and check position, should change
-        case.pump(
-            &mut tester,
-            view_padding_bottom_with_keyboard(),
-            false,
-            true,
-        );
+        case.pump(tester, view_padding_bottom_with_keyboard(), false, true);
         assert_rect_more_or_less_equals(
-            case.rect(&tester),
+            case.rect(tester),
             default_rect.translate(0.0, VIEW_PADDING - KEYBOARD_HEIGHT),
         );
 
         // With resizeToAvoidBottomInset: false
         // With keyboard presented, should maintain default position
-        case.pump(
-            &mut tester,
-            view_padding_bottom_with_keyboard(),
-            false,
-            false,
-        );
-        assert_rect_more_or_less_equals(case.rect(&tester), default_rect);
+        case.pump(tester, view_padding_bottom_with_keyboard(), false, false);
+        assert_rect_more_or_less_equals(case.rect(tester), default_rect);
 
         // BottomSheet default
-        case.pump(&mut tester, view_padding_bottom(), true, true);
-        assert_rect_more_or_less_equals(case.rect(&tester), bottom_sheet_rect);
+        case.pump(tester, view_padding_bottom(), true, true);
+        assert_rect_more_or_less_equals(case.rect(tester), bottom_sheet_rect);
         // Present keyboard and check position, bottomSheet and FAB both resize
-        case.pump(&mut tester, view_padding_bottom_with_keyboard(), true, true);
+        case.pump(tester, view_padding_bottom_with_keyboard(), true, true);
         assert_rect_more_or_less_equals(
-            case.rect(&tester),
+            case.rect(tester),
             bottom_sheet_rect.translate(0.0, -KEYBOARD_HEIGHT),
         );
 
         // bottomSheet with resizeToAvoidBottomInset: false
         // With keyboard presented, should maintain default bottomSheet position
-        case.pump(
-            &mut tester,
-            view_padding_bottom_with_keyboard(),
-            true,
-            false,
-        );
-        assert_rect_more_or_less_equals(case.rect(&tester), bottom_sheet_rect);
+        case.pump(tester, view_padding_bottom_with_keyboard(), true, false);
+        assert_rect_more_or_less_equals(case.rect(tester), bottom_sheet_rect);
 
         // SnackBar default
-        case.pump(&mut tester, view_padding_bottom(), false, true);
-        case.tap_and_settle(&mut tester); // Show SnackBar
-        assert_rect_more_or_less_equals(case.rect(&tester), snack_bar_rect);
+        case.pump(tester, view_padding_bottom(), false, true);
+        case.tap_and_settle(tester); // Show SnackBar
+        assert_rect_more_or_less_equals(case.rect(tester), snack_bar_rect);
 
         // SnackBar when resized for presented keyboard
-        case.pump(
-            &mut tester,
-            view_padding_bottom_with_keyboard(),
-            false,
-            true,
-        );
-        case.tap_and_settle(&mut tester); // Show SnackBar
+        case.pump(tester, view_padding_bottom_with_keyboard(), false, true);
+        case.tap_and_settle(tester); // Show SnackBar
         assert_rect_more_or_less_equals(
-            case.rect(&tester),
+            case.rect(tester),
             snack_bar_rect.translate(
                 0.0,
                 -KEYBOARD_HEIGHT + K_FLOATING_ACTION_BUTTON_MARGIN / 2.0,
@@ -2228,8 +2194,9 @@ mod tests {
     // 'startFloat', without the BottomNavigationBar steps.
     #[test]
     fn start_float_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_float_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::start_float(),
                 Rect::from_ltrb(16.0, 478.0, 72.0, 534.0),
                 Rect::from_ltrb(16.0, 472.0, 72.0, 528.0),
@@ -2242,8 +2209,9 @@ mod tests {
     // 'miniStartFloat', without the BottomNavigationBar steps.
     #[test]
     fn mini_start_float_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_float_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_start_float(),
                 Rect::from_ltrb(12.0, 490.0, 60.0, 538.0),
                 Rect::from_ltrb(12.0, 480.0, 60.0, 528.0),
@@ -2256,8 +2224,9 @@ mod tests {
     // 'centerFloat', without the BottomNavigationBar steps.
     #[test]
     fn center_float_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_float_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::center_float(),
                 Rect::from_ltrb(372.0, 478.0, 428.0, 534.0),
                 Rect::from_ltrb(372.0, 472.0, 428.0, 528.0),
@@ -2270,8 +2239,9 @@ mod tests {
     // 'miniCenterFloat', without the BottomNavigationBar steps.
     #[test]
     fn mini_center_float_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_float_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_center_float(),
                 Rect::from_ltrb(376.0, 490.0, 424.0, 538.0),
                 Rect::from_ltrb(376.0, 480.0, 424.0, 528.0),
@@ -2284,8 +2254,9 @@ mod tests {
     // 'endFloat', without the BottomNavigationBar steps.
     #[test]
     fn end_float_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_float_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::end_float(),
                 Rect::from_ltrb(728.0, 478.0, 784.0, 534.0),
                 Rect::from_ltrb(728.0, 472.0, 784.0, 528.0),
@@ -2298,8 +2269,9 @@ mod tests {
     // 'miniEndFloat', without the BottomNavigationBar steps.
     #[test]
     fn mini_end_float_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_float_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_end_float(),
                 Rect::from_ltrb(740.0, 490.0, 788.0, 538.0),
                 Rect::from_ltrb(740.0, 480.0, 788.0, 528.0),
@@ -2312,70 +2284,56 @@ mod tests {
     /// Dart's `runDockedTests`, without the `BottomNavigationBar` steps (every step that
     /// reads `bottomSheetRect` has one), which wait.
     fn run_docked_tests(
+        tester: &mut WidgetTester,
         location: FloatingActionButtonLocationRef,
         default_rect: Rect,
         snack_bar_rect: Rect,
         mini: bool,
     ) {
         const SCAFFOLD_HEIGHT: f64 = 600.0;
-        let mut tester = tester();
         let mut case = SafeAreaCase::new(location, mini);
         // Default
-        case.pump(&mut tester, view_padding_bottom(), false, true);
-        assert_rect_more_or_less_equals(case.rect(&tester), default_rect);
+        case.pump(tester, view_padding_bottom(), false, true);
+        assert_rect_more_or_less_equals(case.rect(tester), default_rect);
         // Present keyboard and check position, should change
-        case.pump(
-            &mut tester,
-            view_padding_bottom_with_keyboard(),
-            false,
-            true,
-        );
+        case.pump(tester, view_padding_bottom_with_keyboard(), false, true);
         assert_rect_more_or_less_equals(
-            case.rect(&tester),
+            case.rect(tester),
             default_rect.translate(
                 0.0,
                 VIEW_PADDING - KEYBOARD_HEIGHT - K_FLOATING_ACTION_BUTTON_MARGIN,
             ),
         );
         // The FAB should be away from the keyboard
-        assert!(case.rect(&tester).bottom < SCAFFOLD_HEIGHT - KEYBOARD_HEIGHT);
+        assert!(case.rect(tester).bottom < SCAFFOLD_HEIGHT - KEYBOARD_HEIGHT);
 
         // With resizeToAvoidBottomInset: false
         // With keyboard presented, should maintain default position
-        case.pump(
-            &mut tester,
-            view_padding_bottom_with_keyboard(),
-            false,
-            false,
-        );
-        assert_rect_more_or_less_equals(case.rect(&tester), default_rect);
+        case.pump(tester, view_padding_bottom_with_keyboard(), false, false);
+        assert_rect_more_or_less_equals(case.rect(tester), default_rect);
 
         // SnackBar default
-        case.pump(&mut tester, view_padding_bottom(), false, true);
-        case.tap_and_settle(&mut tester); // Show SnackBar
-        assert_rect_more_or_less_equals(case.rect(&tester), snack_bar_rect);
+        case.pump(tester, view_padding_bottom(), false, true);
+        case.tap_and_settle(tester); // Show SnackBar
+        assert_rect_more_or_less_equals(case.rect(tester), snack_bar_rect);
 
         // SnackBar when resized for presented keyboard
-        case.pump(
-            &mut tester,
-            view_padding_bottom_with_keyboard(),
-            false,
-            true,
-        );
-        case.tap_and_settle(&mut tester); // Show SnackBar
+        case.pump(tester, view_padding_bottom_with_keyboard(), false, true);
+        case.tap_and_settle(tester); // Show SnackBar
         assert_rect_more_or_less_equals(
-            case.rect(&tester),
+            case.rect(tester),
             snack_bar_rect.translate(0.0, -KEYBOARD_HEIGHT),
         );
         // The FAB should be away from the keyboard
-        assert!(case.rect(&tester).bottom < SCAFFOLD_HEIGHT - KEYBOARD_HEIGHT);
+        assert!(case.rect(tester).bottom < SCAFFOLD_HEIGHT - KEYBOARD_HEIGHT);
     }
 
     // 'startDocked', without the BottomNavigationBar steps.
     #[test]
     fn start_docked_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_docked_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::start_docked(),
                 Rect::from_ltrb(16.0, 494.0, 72.0, 550.0),
                 Rect::from_ltrb(16.0, 486.0, 72.0, 542.0),
@@ -2387,8 +2345,9 @@ mod tests {
     // 'miniStartDocked', without the BottomNavigationBar steps.
     #[test]
     fn mini_start_docked_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_docked_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_start_docked(),
                 Rect::from_ltrb(12.0, 502.0, 60.0, 550.0),
                 Rect::from_ltrb(12.0, 494.0, 60.0, 542.0),
@@ -2400,8 +2359,9 @@ mod tests {
     // 'centerDocked', without the BottomNavigationBar steps.
     #[test]
     fn center_docked_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_docked_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::center_docked(),
                 Rect::from_ltrb(372.0, 494.0, 428.0, 550.0),
                 Rect::from_ltrb(372.0, 486.0, 428.0, 542.0),
@@ -2413,8 +2373,9 @@ mod tests {
     // 'miniCenterDocked', without the BottomNavigationBar steps.
     #[test]
     fn mini_center_docked_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_docked_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_center_docked(),
                 Rect::from_ltrb(376.0, 502.0, 424.0, 550.0),
                 Rect::from_ltrb(376.0, 494.0, 424.0, 542.0),
@@ -2426,8 +2387,9 @@ mod tests {
     // 'endDocked', without the BottomNavigationBar steps.
     #[test]
     fn end_docked_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_docked_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::end_docked(),
                 Rect::from_ltrb(728.0, 494.0, 784.0, 550.0),
                 Rect::from_ltrb(728.0, 486.0, 784.0, 542.0),
@@ -2439,8 +2401,9 @@ mod tests {
     // 'miniEndDocked', without the BottomNavigationBar steps.
     #[test]
     fn mini_end_docked_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_docked_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_end_docked(),
                 Rect::from_ltrb(740.0, 502.0, 788.0, 550.0),
                 Rect::from_ltrb(740.0, 494.0, 788.0, 542.0),
@@ -2451,38 +2414,39 @@ mod tests {
 
     /// Dart's `runTopTests`.
     fn run_top_tests(
+        tester: &mut WidgetTester,
         location: FloatingActionButtonLocationRef,
         default_rect: Rect,
         app_bar_rect: Rect,
         mini: bool,
     ) {
-        let mut tester = tester();
         let case = SafeAreaCase::new(location, mini);
         // Default
         case.pump(
-            &mut tester,
+            tester,
             MediaQueryData::new().view_padding(EdgeInsets::only(0.0, VIEW_PADDING, 0.0, 0.0)),
             false,
             true,
         );
-        assert_rect_more_or_less_equals(case.rect(&tester), default_rect);
+        assert_rect_more_or_less_equals(case.rect(tester), default_rect);
 
         // AppBar default
         case.pump_with(
-            &mut tester,
+            tester,
             MediaQueryData::new().view_padding(EdgeInsets::only(0.0, VIEW_PADDING, 0.0, 0.0)),
             true,
             false,
             true,
         );
-        assert_rect_more_or_less_equals(case.rect(&tester), app_bar_rect);
+        assert_rect_more_or_less_equals(case.rect(tester), app_bar_rect);
     }
 
     // 'startTop'.
     #[test]
     fn start_top_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_top_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::start_top(),
                 Rect::from_ltrb(16.0, 50.0, 72.0, 106.0),
                 // Positioned relative to AppBar
@@ -2495,8 +2459,9 @@ mod tests {
     // 'miniStartTop'.
     #[test]
     fn mini_start_top_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_top_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_start_top(),
                 Rect::from_ltrb(12.0, 50.0, 60.0, 98.0),
                 // Positioned relative to AppBar
@@ -2509,8 +2474,9 @@ mod tests {
     // 'centerTop'.
     #[test]
     fn center_top_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_top_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::center_top(),
                 Rect::from_ltrb(372.0, 50.0, 428.0, 106.0),
                 // Positioned relative to AppBar
@@ -2523,8 +2489,9 @@ mod tests {
     // 'miniCenterTop'.
     #[test]
     fn mini_center_top_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_top_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_center_top(),
                 Rect::from_ltrb(376.0, 50.0, 424.0, 98.0),
                 // Positioned relative to AppBar
@@ -2537,8 +2504,9 @@ mod tests {
     // 'endTop'.
     #[test]
     fn end_top_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_top_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::end_top(),
                 Rect::from_ltrb(728.0, 50.0, 784.0, 106.0),
                 // Positioned relative to AppBar
@@ -2551,8 +2519,9 @@ mod tests {
     // 'miniEndTop'.
     #[test]
     fn mini_end_top_accounts_for_safe_interactive_areas() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             run_top_tests(
+                tester,
                 <dyn FloatingActionButtonLocation>::mini_end_top(),
                 Rect::from_ltrb(740.0, 50.0, 788.0, 98.0),
                 // Positioned relative to AppBar
@@ -2567,10 +2536,10 @@ mod tests {
     /// floatingActionButtonLocation: location)))`; the LTR cases have no `Directionality` of
     /// their own, and the app's is left to right.
     fn top_location_rect(
+        tester: &mut WidgetTester,
         location: FloatingActionButtonLocationRef,
         text_direction: TextDirection,
     ) -> Rect {
-        let mut tester = tester();
         let theme = ThemeData::new(&tester.cell.borrow());
         let key = GlobalKey::new();
         tester.pump_widget(material_app(
@@ -2584,15 +2553,16 @@ mod tests {
             )
             .into_widget(),
         ));
-        rect_of(&tester, &key)
+        rect_of(tester, &key)
     }
 
     // 'Start-top floating action button location LTR'.
     #[test]
     fn the_start_top_location_left_to_right() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_rect_more_or_less_equals(
                 top_location_rect(
+                    tester,
                     <dyn FloatingActionButtonLocation>::start_top(),
                     TextDirection::Ltr,
                 ),
@@ -2604,9 +2574,10 @@ mod tests {
     // 'End-top floating action button location RTL'.
     #[test]
     fn the_end_top_location_right_to_left() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_rect_more_or_less_equals(
                 top_location_rect(
+                    tester,
                     <dyn FloatingActionButtonLocation>::end_top(),
                     TextDirection::Rtl,
                 ),
@@ -2618,9 +2589,10 @@ mod tests {
     // 'Start-top floating action button location RTL'.
     #[test]
     fn the_start_top_location_right_to_left() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_rect_more_or_less_equals(
                 top_location_rect(
+                    tester,
                     <dyn FloatingActionButtonLocation>::start_top(),
                     TextDirection::Rtl,
                 ),
@@ -2632,9 +2604,10 @@ mod tests {
     // 'End-top floating action button location LTR'.
     #[test]
     fn the_end_top_location_left_to_right() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_rect_more_or_less_equals(
                 top_location_rect(
+                    tester,
                     <dyn FloatingActionButtonLocation>::end_top(),
                     TextDirection::Ltr,
                 ),

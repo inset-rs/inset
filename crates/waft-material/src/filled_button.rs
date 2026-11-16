@@ -724,9 +724,11 @@ impl IntoWidget<StatefulKind> for FilledButtonIcon {
 
 #[cfg(test)]
 mod tests {
+    use crate::drawer_theme::tests::assert_near;
     use std::cell::{Cell, RefCell};
+    use waft_widgets::Text;
 
-    use waft_embedder::{FontWeight, Offset, Rect, TargetPlatform, TextDirection};
+    use waft_embedder::{FontWeight, Offset, Rect, TextDirection};
     use waft_embedder::{PointerChange, RRect, Radius};
     use waft_foundation::{K_IS_WEB, Listenable};
     use waft_painting::{Alignment, StadiumBorder};
@@ -738,6 +740,8 @@ mod tests {
         IconData, IconTheme, MouseRegion, Padding, SizedBox, downcast_widget,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::filled_button_theme::FilledButtonThemeData;
@@ -745,27 +749,16 @@ mod tests {
     use crate::ink_well::InkWell;
     use crate::material::{Material, MaterialType};
     use crate::material_state::MaterialStatesController;
-    use crate::test_support::{
-        Drawn, PaintInspection, WidgetTester, ahem_text, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{Drawn, PaintInspection, material_app};
     use crate::theme_data::ThemeData;
     use waft_widgets::FocusNodeRef;
-
-    /// A tester with the OS fonts, which the debug banner and an `Icon` need to lay out, and
-    /// the Material icons.
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
-        tester
-    }
 
     fn pressed() -> Listener {
         Listener::new(|_app| {})
     }
 
     fn text(text: &str) -> WidgetRef {
-        ahem_text(text).into_widget()
+        Text::new(text).into_widget()
     }
 
     fn icon() -> WidgetRef {
@@ -873,10 +866,9 @@ mod tests {
     // 'FilledButton.tonal, FilledButton.tonalIcon defaults'.
     #[test]
     fn the_defaults_of_a_filled_and_a_tonal_button_and_their_icon_variants() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color_scheme = ColorScheme::light();
             for tonal in [false, true] {
-                let mut tester = tester();
                 let theme = ThemeData::from(color_scheme.clone())
                     .use_material3(tonal)
                     .build(&tester.cell.borrow());
@@ -903,17 +895,17 @@ mod tests {
                         .child(plain(text("button"), Some(pressed())))
                         .into_widget(),
                 ));
-                check_defaults(&tester, color, foreground, 0.0);
-                tester.widget::<Align, _>(in_button::<Align>(&tester), |align| {
+                check_defaults(tester, color, foreground, 0.0);
+                tester.widget::<Align, _>(in_button::<Align>(tester), |align| {
                     assert!(align.alignment == AlignmentGeometry::from(Alignment::CENTER));
                 });
 
-                let center = button_center(&tester);
-                let mut gesture = WidgetTester::touch(1);
+                let center = button_center(tester);
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, center);
-                tester.pump(Duration::ZERO); // start the splash animation
-                tester.pump(Duration::from_millis(100)); // splash is underway
-                check_defaults(&tester, color, foreground, 0.0);
+                tester.pump(); // start the splash animation
+                tester.pump_by(Duration::from_millis(100)); // splash is underway
+                check_defaults(tester, color, foreground, 0.0);
                 tester.up(&gesture);
                 tester.pump_and_settle();
 
@@ -927,7 +919,7 @@ mod tests {
                     theme.clone(),
                     Center::new().child(with_icon).into_widget(),
                 ));
-                check_defaults(&tester, color, foreground, 0.0);
+                check_defaults(tester, color, foreground, 0.0);
 
                 // Disabled FilledButton
                 tester.pump_widget(material_app(
@@ -939,7 +931,7 @@ mod tests {
                 // Finish the elevation animation, final background color change.
                 tester.pump_and_settle();
                 check_defaults(
-                    &tester,
+                    tester,
                     color_scheme.on_surface.with_opacity(0.12),
                     color_scheme.on_surface.with_opacity(0.38),
                     0.0,
@@ -971,8 +963,7 @@ mod tests {
     // appropriate non-null values' and its 'with an icon' twin.
     #[test]
     fn the_default_style_fills_every_property_but_the_overriding_ones() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::from(ColorScheme::light()).build(&tester.cell.borrow());
             for button in [
                 FilledButton::new(Some(pressed()), Some(text("button"))),
@@ -980,7 +971,7 @@ mod tests {
                     .icon(SizedBox::new())
                     .build(),
             ] {
-                let style = captured_default_style(&mut tester, theme.clone(), button);
+                let style = captured_default_style(tester, theme.clone(), button);
                 // Properties that must be non-null.
                 assert!(style.text_style.is_some(), "textStyle style");
                 assert!(style.background_color.is_some(), "backgroundColor style");
@@ -1025,9 +1016,8 @@ mod tests {
     // and 'FilledButton.tonalIcon produces the correct widgets if icon is null'.
     #[test]
     fn an_icon_button_without_an_icon_shows_only_its_label() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for tonal in [false, true] {
-                let mut tester = tester();
                 let theme = ThemeData::from(ColorScheme::light()).build(&tester.cell.borrow());
                 let label_key = GlobalKey::new();
                 let build = |icon: Option<WidgetRef>| {
@@ -1075,10 +1065,9 @@ mod tests {
     // state' and 'FilledButton.tonal default overlayColor and elevation resolve pressed state'.
     #[test]
     fn the_default_overlay_color_and_elevation_follow_hover_press_and_focus() {
-        with_main_thread_stack(|| {
-            for tonal in [false, true] {
-                let mut tester = tester();
-                let focus_node = focus_node(&tester);
+        for tonal in [false, true] {
+            test_widgets(|tester| {
+                let focus_node = focus_node(tester);
                 let theme = ThemeData::new(&tester.cell.borrow());
                 let overlay = if tonal {
                     theme.color_scheme.on_secondary_container()
@@ -1098,23 +1087,23 @@ mod tests {
                 ));
 
                 // Hovered.
-                let center = button_center(&tester);
-                let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+                let center = button_center(tester);
+                let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
-                assert_eq!(physical_elevation(&tester), 1.0);
+                assert_eq!(physical_elevation(tester), 1.0);
                 assert_eq!(
-                    ink_rect_colors(&tester),
+                    ink_rect_colors(tester),
                     vec![overlay.with_opacity(0.08).value()]
                 );
 
                 // Highlighted (pressed).
                 tester.send(&gesture, waft_embedder::PointerChange::Down);
                 tester.pump_and_settle();
-                assert_eq!(physical_elevation(&tester), 0.0);
+                assert_eq!(physical_elevation(tester), 0.0);
                 assert_eq!(
-                    ink_rect_colors(&tester)[1],
+                    ink_rect_colors(tester)[1],
                     overlay.with_opacity(0.1).value()
                 );
                 // Remove pressed and hovered states
@@ -1126,21 +1115,20 @@ mod tests {
                 // Focused.
                 focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
                 tester.pump_and_settle();
-                assert_eq!(physical_elevation(&tester), 0.0);
+                assert_eq!(physical_elevation(tester), 0.0);
                 assert_eq!(
-                    ink_rect_colors(&tester),
+                    ink_rect_colors(tester),
                     vec![overlay.with_opacity(0.1).value()]
                 );
-            }
-        });
+            });
+        }
     }
 
     // filled_button_test.dart 'FilledButton onPressed and onLongPress callbacks are correctly
     // called when non-null'.
     #[test]
     fn either_callback_enables_the_button_and_reaches_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let was_pressed = Rc::new(Cell::new(0));
             let count = || {
                 let was_pressed = Rc::clone(&was_pressed);
@@ -1160,19 +1148,19 @@ mod tests {
 
             // onPressed not null, onLongPress null.
             tester.pump_widget(build_frame(Some(count()), None));
-            assert!(enabled(&tester));
-            tester.tap(button_center(&tester), 1);
+            assert!(enabled(tester));
+            tester.tap(button_center(tester), 1);
             assert_eq!(was_pressed.get(), 1);
 
             // onPressed null, onLongPress not null.
             tester.pump_widget(build_frame(None, Some(count())));
-            assert!(enabled(&tester));
-            tester.long_press(button_center(&tester), 2);
+            assert!(enabled(tester));
+            tester.long_press(button_center(tester), 2);
             assert_eq!(was_pressed.get(), 2);
 
             // onPressed null, onLongPress null.
             tester.pump_widget(build_frame(None, None));
-            assert!(!enabled(&tester));
+            assert!(!enabled(tester));
         });
     }
 
@@ -1180,7 +1168,7 @@ mod tests {
     // textDirection'.
     #[test]
     fn the_material_2_padding_and_icon_gap_scale_with_the_text() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let text_scale_factor_options = [0.5, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0];
             // Expected values for each textScaleFactor.
             let padding_without_icon_start = [16.0, 16.0, 14.0, 12.0, 8.0, 6.0, 4.0, 4.0];
@@ -1191,7 +1179,6 @@ mod tests {
             for (index, text_scale_factor) in text_scale_factor_options.into_iter().enumerate() {
                 for text_direction in [TextDirection::Ltr, TextDirection::Rtl] {
                     for with_icon in [false, true] {
-                        let mut tester = tester();
                         let button_key = GlobalKey::new();
                         let label_key = GlobalKey::new();
                         let icon_key = GlobalKey::new();
@@ -1205,7 +1192,7 @@ mod tests {
                                 ),
                             )
                             .build(&tester.cell.borrow());
-                        let label = ahem_text("button").key(label_key.clone().into());
+                        let label = Text::new("button").key(label_key.clone().into());
                         let button = if with_icon {
                             FilledButton::icon(Some(pressed()), label)
                                 .key(button_key.clone().into())
@@ -1233,7 +1220,7 @@ mod tests {
                             ),
                         ));
 
-                        let padding_element = in_button::<Padding>(&tester);
+                        let padding_element = in_button::<Padding>(tester);
                         assert_eq!(
                             Directionality::of(&mut tester.cell.borrow_mut(), padding_element),
                             text_direction
@@ -1252,7 +1239,7 @@ mod tests {
                             EdgeInsetsGeometry::from_steb(expected_start, 0.0, expected_end, 0.0)
                                 .resolve(Some(text_direction));
                         assert_eq!(
-                            padding(&tester).resolve(Some(text_direction)),
+                            padding(tester).resolve(Some(text_direction)),
                             expected_padding,
                             "text scale {text_scale_factor}, icon {with_icon}, {text_direction:?}"
                         );
@@ -1275,7 +1262,7 @@ mod tests {
                         // because the button has a larger `RenderBox` which accommodates the
                         // minimum tap target with a height of 48.
                         let button_bounds =
-                            tester.global_rect(tester.render_box_of(in_button::<InkWell>(&tester)));
+                            tester.global_rect(tester.render_box_of(in_button::<InkWell>(tester)));
 
                         // Since there is a requirement of a minimum width of 64 and a minimum
                         // height of 36 on material buttons, the visual padding of smaller
@@ -1319,8 +1306,7 @@ mod tests {
     // FilledButton.icon has correct padding'.
     #[test]
     fn the_material_3_padding_follows_the_style_the_font_size_and_the_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::from(ColorScheme::light()).build(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme.clone(),
@@ -1337,9 +1323,9 @@ mod tests {
                     ),
                 ),
             ));
-            assert!(padding(&tester) == EdgeInsetsGeometry::all(22.0));
+            tester.pump_and_settle();
+            assert!(padding(tester) == EdgeInsetsGeometry::all(22.0));
 
-            let mut tester = self::tester();
             let mut text_theme = crate::text_theme::TextTheme::new();
             text_theme.label_large = Some(TextStyle::new().font_size(28.0));
             let large = ThemeData::from(ColorScheme::light())
@@ -1351,9 +1337,9 @@ mod tests {
                     .child(FilledButton::new(Some(pressed()), Some(text("text"))))
                     .into_widget(),
             ));
-            assert!(padding(&tester) == EdgeInsetsGeometry::symmetric(0.0, 12.0));
+            tester.pump_and_settle();
+            assert!(padding(tester) == EdgeInsetsGeometry::symmetric(0.0, 12.0));
 
-            let mut tester = self::tester();
             tester.pump_widget(material_app(
                 theme.clone(),
                 Center::new()
@@ -1363,24 +1349,24 @@ mod tests {
                     ))
                     .into_widget(),
             ));
-            assert!(padding(&tester) == EdgeInsetsGeometry::symmetric(0.0, 24.0));
+            tester.pump_and_settle();
+            assert!(padding(tester) == EdgeInsetsGeometry::symmetric(0.0, 24.0));
 
-            let mut tester = self::tester();
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
                     .child(FilledButton::icon(Some(pressed()), text("FilledButton")).icon(icon()))
                     .into_widget(),
             ));
-            assert!(padding(&tester) == EdgeInsetsGeometry::from_steb(16.0, 0.0, 24.0, 0.0));
+            tester.pump_and_settle();
+            assert!(padding(tester) == EdgeInsetsGeometry::from_steb(16.0, 0.0, 24.0, 0.0));
         });
     }
 
     // filled_button_test.dart 'FilledButton.icon icon,label layout'.
     #[test]
     fn an_icon_button_lays_out_icon_gap_and_label_centred() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let icon_key = GlobalKey::new();
             let label_key = GlobalKey::new();
@@ -1436,7 +1422,7 @@ mod tests {
     // iconAlignment can be customized'.
     #[test]
     fn the_icon_sits_at_the_start_or_end_by_its_alignment_and_the_text_direction() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for tonal in [false, true] {
                 let build = |tester: &mut WidgetTester,
                              text_direction: TextDirection,
@@ -1461,60 +1447,22 @@ mod tests {
                     ));
                 };
                 // 16.0 - padding between icon and button edge at the start, 24.0 at the end.
-                let mut tester = tester();
-                build(&mut tester, TextDirection::Ltr, None, None);
-                assert_eq!(material_rect(&tester).left, icon_rect(&tester).left - 16.0);
-                build(&mut tester, TextDirection::Rtl, None, None);
-                assert_eq!(
-                    material_rect(&tester).right,
-                    icon_rect(&tester).right + 16.0
-                );
+                build(tester, TextDirection::Ltr, None, None);
+                assert_eq!(material_rect(tester).left, icon_rect(tester).left - 16.0);
+                build(tester, TextDirection::Rtl, None, None);
+                assert_near(material_rect(tester).right, icon_rect(tester).right + 16.0);
 
-                build(
-                    &mut tester,
-                    TextDirection::Ltr,
-                    Some(IconAlignment::Start),
-                    None,
-                );
-                assert_eq!(material_rect(&tester).left, icon_rect(&tester).left - 16.0);
-                build(
-                    &mut tester,
-                    TextDirection::Ltr,
-                    Some(IconAlignment::End),
-                    None,
-                );
-                assert_eq!(
-                    material_rect(&tester).right,
-                    icon_rect(&tester).right + 24.0
-                );
-                build(
-                    &mut tester,
-                    TextDirection::Rtl,
-                    Some(IconAlignment::Start),
-                    None,
-                );
-                assert_eq!(
-                    material_rect(&tester).right,
-                    icon_rect(&tester).right + 16.0
-                );
-                build(
-                    &mut tester,
-                    TextDirection::Rtl,
-                    Some(IconAlignment::End),
-                    None,
-                );
-                assert_eq!(material_rect(&tester).left, icon_rect(&tester).left - 24.0);
+                build(tester, TextDirection::Ltr, Some(IconAlignment::Start), None);
+                assert_eq!(material_rect(tester).left, icon_rect(tester).left - 16.0);
+                build(tester, TextDirection::Ltr, Some(IconAlignment::End), None);
+                assert_near(material_rect(tester).right, icon_rect(tester).right + 24.0);
+                build(tester, TextDirection::Rtl, Some(IconAlignment::Start), None);
+                assert_near(material_rect(tester).right, icon_rect(tester).right + 16.0);
+                build(tester, TextDirection::Rtl, Some(IconAlignment::End), None);
+                assert_eq!(material_rect(tester).left, icon_rect(tester).left - 24.0);
 
-                build(
-                    &mut tester,
-                    TextDirection::Ltr,
-                    None,
-                    Some(IconAlignment::End),
-                );
-                assert_eq!(
-                    material_rect(&tester).right,
-                    icon_rect(&tester).right + 24.0
-                );
+                build(tester, TextDirection::Ltr, None, Some(IconAlignment::End));
+                assert_near(material_rect(tester).right, icon_rect(tester).right + 24.0);
             }
         });
     }
@@ -1523,7 +1471,7 @@ mod tests {
     // background colors'.
     #[test]
     fn style_from_turns_each_argument_into_its_property() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let red = Color::new(0xffff0000);
             let blue = Color::new(0xff0000ff);
             let none = WidgetStates::new();
@@ -1551,7 +1499,6 @@ mod tests {
             assert_eq!(style.size_variant, None);
             assert_eq!(style.shape_variant, None);
 
-            let mut tester = tester();
             let icon_seen = Rc::new(Cell::new((None, None)));
             let probe = Builder::new({
                 let icon_seen = Rc::clone(&icon_seen);
@@ -1572,7 +1519,7 @@ mod tests {
                     )
                     .into_widget(),
             ));
-            material(&tester, |material| {
+            material(tester, |material| {
                 assert_eq!(material.color, Some(blue));
                 assert_eq!(text_color(material), Some(red));
             });
@@ -1584,10 +1531,9 @@ mod tests {
     // and 'FilledButton.tonalIcon does not lose focus when icon is nullified'.
     #[test]
     fn an_icon_button_keeps_its_focus_when_its_icon_goes() {
-        with_main_thread_stack(|| {
-            for tonal in [false, true] {
-                let mut tester = tester();
-                let focus_node = focus_node(&tester);
+        for tonal in [false, true] {
+            test_widgets(|tester| {
+                let focus_node = focus_node(tester);
                 let build = |tester: &mut WidgetTester, icon: Option<WidgetRef>| {
                     let button = if tonal {
                         FilledButton::tonal_icon(Some(pressed()), text("button"))
@@ -1606,14 +1552,14 @@ mod tests {
                             .into_widget(),
                     ));
                 };
-                build(&mut tester, Some(self::icon()));
+                build(tester, Some(self::icon()));
                 tester.pump_and_settle();
                 assert!(focus_node.has_focus(&mut tester.cell.borrow_mut()));
-                build(&mut tester, None);
+                build(tester, None);
                 tester.pump_and_settle();
                 assert!(focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            }
-        });
+            });
+        }
     }
 
     // Dart's `super.clipBehavior = Clip.none` on every FilledButton constructor: with a layer
@@ -1650,8 +1596,7 @@ mod tests {
     // filled_button_test.dart 'FilledButton.icon responds to applied padding'.
     #[test]
     fn an_icon_button_puts_its_padding_around_the_icon_and_label() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let label_key = GlobalKey::new();
             tester.pump_widget(
                 // When textDirection is set to TextDirection.ltr, the label appears on the
@@ -1662,8 +1607,8 @@ mod tests {
                     Center::new().child(
                         FilledButton::icon(
                             Some(pressed()),
-                            // Ahem's 'Hello' at the label style's 14 pixels and 1.43 line height,
-                            // whose line Flutter lays out 20 pixels high.
+                            // 'Hello' at the label style's 14 pixels and 1.43 line height, whose line
+                            // is 20 pixels high.
                             SizedBox::new()
                                 .width(70.0)
                                 .height(20.0)
@@ -1681,12 +1626,12 @@ mod tests {
             );
 
             let padding_rect =
-                tester.global_rect(tester.render_box_of(in_button::<Padding>(&tester)));
+                tester.global_rect(tester.render_box_of(in_button::<Padding>(tester)));
             let label = label_key
                 .current_context(&tester.cell.borrow_mut())
                 .expect("mounted");
             let label_rect = tester.global_rect(tester.render_box_of(label));
-            let icon_rect = icon_rect(&tester);
+            let icon_rect = icon_rect(tester);
 
             // The right padding should be applied on the right of the label, whereas the
             // left padding should be applied on the left side of the icon.
@@ -1707,8 +1652,7 @@ mod tests {
     // shape.side'.
     #[test]
     fn by_default_the_shape_side_is_the_outline() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border_color = Color::new(0xff4caf50);
             let theme = ThemeData::builder()
                 .use_material3(false)
@@ -1748,8 +1692,7 @@ mod tests {
     // filled_button_test.dart 'FilledButton changes mouse cursor when hovered'.
     #[test]
     fn style_from_cursors_show_while_hovered_and_the_default_is_basic() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = |on_pressed: Option<Listener>, custom: bool| {
                 let mut button = FilledButton::new(on_pressed, Some(text("button")));
                 if custom {
@@ -1773,19 +1716,19 @@ mod tests {
             };
 
             tester.pump_widget(frame(Some(pressed()), true));
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.pump(Duration::ZERO);
-            assert!(is(&tester, SystemMouseCursors::TEXT));
+            tester.pump();
+            assert!(is(tester, SystemMouseCursors::TEXT));
 
             // Test cursor when disabled
             tester.pump_widget(frame(None, true));
-            assert!(is(&tester, SystemMouseCursors::GRAB));
+            assert!(is(tester, SystemMouseCursors::GRAB));
 
             // Test default cursor
             tester.pump_widget(frame(Some(pressed()), false));
             assert!(is(
-                &tester,
+                tester,
                 if K_IS_WEB {
                     SystemMouseCursors::CLICK
                 } else {
@@ -1795,7 +1738,7 @@ mod tests {
 
             // Test default cursor when disabled
             tester.pump_widget(frame(None, false));
-            assert!(is(&tester, SystemMouseCursors::BASIC));
+            assert!(is(tester, SystemMouseCursors::BASIC));
         });
     }
 
@@ -1803,8 +1746,7 @@ mod tests {
     // button_style_button.rs's.
     #[test]
     fn an_icon_buttons_states_controller_follows_hover_press_and_disable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let count = Rc::new(Cell::new(0));
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             controller.add_listener(&mut tester.cell.borrow_mut(), {
@@ -1820,7 +1762,7 @@ mod tests {
                         .child(
                             FilledButton::icon(
                                 enabled.then(pressed),
-                                ahem_text("button").key(label_key.clone().into()),
+                                Text::new("button").key(label_key.clone().into()),
                             )
                             .states_controller(controller.clone())
                             .icon(icon()),
@@ -1831,68 +1773,68 @@ mod tests {
             let value =
                 |tester: &WidgetTester| tester.cell.borrow().get(&controller).value().clone();
 
-            let first = frame(&tester, true);
+            let first = frame(tester, true);
             tester.pump_widget(first);
-            assert_eq!(value(&tester), states(&[]));
+            assert_eq!(value(tester), states(&[]));
             assert_eq!(count.get(), 0);
 
             let center = tester.center_of(&label_key);
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[WidgetState::Hovered]));
+            assert_eq!(value(tester), states(&[WidgetState::Hovered]));
             assert_eq!(count.get(), 1);
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[]));
+            assert_eq!(value(tester), states(&[]));
             assert_eq!(count.get(), 2);
 
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[WidgetState::Hovered]));
+            assert_eq!(value(tester), states(&[WidgetState::Hovered]));
             assert_eq!(count.get(), 3);
 
             tester.send(&gesture, PointerChange::Down);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester),
+                value(tester),
                 states(&[WidgetState::Hovered, WidgetState::Pressed])
             );
             assert_eq!(count.get(), 4);
 
             tester.up(&gesture);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[WidgetState::Hovered]));
+            assert_eq!(value(tester), states(&[WidgetState::Hovered]));
             assert_eq!(count.get(), 5);
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[]));
+            assert_eq!(value(tester), states(&[]));
             assert_eq!(count.get(), 6);
 
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester),
+                value(tester),
                 states(&[WidgetState::Hovered, WidgetState::Pressed])
             );
             assert_eq!(count.get(), 8); // adds hovered and pressed - two changes
 
             // If the button is rebuilt disabled, then the pressed state is
             // removed.
-            let disabled = frame(&tester, false);
+            let disabled = frame(tester, false);
             tester.pump_widget(disabled);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester),
+                value(tester),
                 states(&[WidgetState::Hovered, WidgetState::Disabled])
             );
             assert_eq!(count.get(), 10); // removes pressed and adds disabled - two changes
             tester.move_to(&mut gesture, Offset::ZERO, true);
             tester.pump_and_settle();
-            assert_eq!(value(&tester), states(&[WidgetState::Disabled]));
+            assert_eq!(value(tester), states(&[WidgetState::Disabled]));
             assert_eq!(count.get(), 11);
         });
     }
@@ -1900,7 +1842,7 @@ mod tests {
     // filled_button_test.dart 'FilledButton.styleFrom can customize the button icon'.
     #[test]
     fn style_from_can_customize_the_button_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let icon_color = Color::new(0xFFF000FF);
             let icon_size = 32.0;
             let disabled_icon_color = Color::new(0xFFFFF000);
@@ -1928,24 +1870,23 @@ mod tests {
             };
 
             // Test enabled button.
-            let mut tester = tester();
-            let enabled = build_button(&tester, true);
+            let enabled = build_button(tester, true);
             tester.pump_widget(enabled);
-            assert_eq!(icon_rect(&tester).size(), Size::new(icon_size, icon_size));
-            assert_eq!(glyph_color(&tester, &Icons::add()), Some(icon_color));
+            assert_eq!(icon_rect(tester).size(), Size::new(icon_size, icon_size));
+            assert_eq!(glyph_color(tester, &Icons::add()), Some(icon_color));
 
             // Test disabled button.
-            let disabled = build_button(&tester, false);
+            let disabled = build_button(tester, false);
             tester.pump_widget(disabled);
             tester.pump_and_settle();
             assert_eq!(
-                glyph_color(&tester, &Icons::add()),
+                glyph_color(tester, &Icons::add()),
                 Some(disabled_icon_color)
             );
 
-            let button_top_right = material_rect(&tester).top_right();
-            let icon_top_right = icon_rect(&tester).top_right();
-            assert_eq!(button_top_right.dx(), icon_top_right.dx() + 24.0);
+            let button_top_right = material_rect(tester).top_right();
+            let icon_top_right = icon_rect(tester).top_right();
+            assert_near(button_top_right.dx(), icon_top_right.dx() + 24.0);
         });
     }
 
@@ -1953,8 +1894,7 @@ mod tests {
     // color'.
     #[test]
     fn an_icon_takes_the_style_foreground_color_over_the_default_icon_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xFFFF1234);
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(material_app(
@@ -1980,8 +1920,8 @@ mod tests {
                         ])))
                     .into_widget(),
             ));
-            assert_eq!(glyph_color(&tester, &Icons::add()), Some(foreground_color));
-            assert_eq!(glyph_color(&tester, &Icons::mail()), Some(foreground_color));
+            assert_eq!(glyph_color(tester, &Icons::add()), Some(foreground_color));
+            assert_eq!(glyph_color(tester, &Icons::mail()), Some(foreground_color));
         });
     }
 }

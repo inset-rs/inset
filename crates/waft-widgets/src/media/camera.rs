@@ -301,8 +301,7 @@ mod tests {
     use waft_test::{MockCameras, MockCompositor, MockVideoFrameReaders, TestPlatform, TestView};
 
     use super::*;
-    use crate::binding::run_app;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::WidgetTester;
 
     fn front_camera() -> Camera {
         Camera {
@@ -327,20 +326,17 @@ mod tests {
     }
 
     fn app_with(cameras: &MockCameras, compositor: &MockCompositor) -> Rc<AppCell> {
-        app_on(cameras, compositor, &Rc::new(TestView::new(400.0, 800.0)))
+        let platform = platform_with(cameras, compositor)
+            .with_view(Rc::new(TestView::new(400.0, 800.0)) as waft_embedder::ViewRef);
+        AppCell::with_platform(Rc::new(platform))
     }
 
-    fn app_on(
-        cameras: &MockCameras,
-        compositor: &MockCompositor,
-        view: &Rc<TestView>,
-    ) -> Rc<AppCell> {
-        let platform = TestPlatform::new()
+    /// An iPhone with `cameras`, compositing through `compositor`.
+    fn platform_with(cameras: &MockCameras, compositor: &MockCompositor) -> TestPlatform {
+        TestPlatform::new()
             .on(TargetPlatform::IOS)
-            .with_view(Rc::clone(view) as waft_embedder::ViewRef)
             .with_cameras(Rc::new(cameras.clone()))
-            .with_compositor(Arc::new(compositor.clone()));
-        AppCell::with_platform(Rc::new(platform))
+            .with_compositor(Arc::new(compositor.clone()))
     }
 
     /// Runs `future` to its end, which the mocks answer without waiting.
@@ -544,54 +540,48 @@ mod tests {
     fn a_camera_preview_places_the_sessions_preview_layer_at_its_formats_size() {
         let cameras = cameras();
         let compositor = MockCompositor::new();
-        let view = Rc::new(TestView::new(400.0, 800.0));
-        let cell = app_on(&cameras, &compositor, &view);
-        let camera = opened(&cell);
-        let layer = cell
-            .borrow()
-            .platform()
-            .compositor()
-            .expect("a platform with a compositor")
-            .make_layer(false);
+        let tester = &mut WidgetTester::with_physical_size(
+            platform_with(&cameras, &compositor),
+            Size::new(1200.0, 2400.0),
+        );
+        let camera = opened(&tester.cell);
+        let layer = tester.update(|app| {
+            app.platform()
+                .compositor()
+                .expect("a platform with a compositor")
+                .make_layer(false)
+        });
         let outputs = CameraOutputs::new().preview(Arc::clone(&layer));
-        let session = start(&cell, &*camera, &camera.formats()[0], outputs).unwrap();
+        let session = start(&tester.cell, &*camera, &camera.formats()[0], outputs).unwrap();
         assert!(Arc::ptr_eq(
             &cameras.sessions()[0].preview_layer().unwrap(),
             &layer
         ));
-        run_app(
-            &mut cell.borrow_mut(),
-            crate::Center::new()
-                .child(CameraPreview::new(session.clone()))
-                .into_widget(),
-        );
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-        let scene = view.last_scene().unwrap();
+        tester.pump_widget(crate::Center::new().child(CameraPreview::new(session.clone())));
+        let scene = tester.view().last_scene().unwrap();
         let slices = waft_embedder::slices(&scene, |_| None);
         let (placed, placement) = slices.composition_layers().next().unwrap();
         assert!(Arc::ptr_eq(placed, &layer));
         assert_eq!(
             placement.bounds().size(),
-            Size::new(400.0, 225.0),
-            "as wide as the view lets it be, at the format's aspect"
+            Size::new(1200.0, 675.0),
+            "as wide as the view lets it be, at the format's aspect, in physical pixels"
         );
 
         cameras.sessions()[0].set_rotation_angles(90, 90);
-        cell.checkpoint();
+        tester.cell.checkpoint();
         assert_eq!(
-            session.video_rotation_angle_for_horizon_level_preview(&cell.borrow()),
+            tester.update(|app| session.video_rotation_angle_for_horizon_level_preview(app)),
             90
         );
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-        let scene = view.last_scene().unwrap();
+        tester.pump_by(Duration::ZERO);
+        let scene = tester.view().last_scene().unwrap();
         let slices = waft_embedder::slices(&scene, |_| None);
         let (_, placement) = slices.composition_layers().next().unwrap();
         let size = placement.bounds().size();
         assert_eq!(
             (size.width(), (size.height() * 10.0).round() / 10.0),
-            (400.0, 711.1),
+            (1200.0, 2133.3),
             "turned a quarter as the device turns: as wide as the view, at the turned aspect"
         );
     }

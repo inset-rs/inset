@@ -135,21 +135,16 @@ impl StatelessWidget for DesktopTextSelectionToolbar {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::TargetPlatform;
+
     use waft_foundation::Listener;
     use waft_widgets::{Center, Text};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::desktop_text_selection_toolbar_button::DesktopTextSelectionToolbarButton;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-
-    /// A tester on Android with flutter_test's fonts, so a `Text` measures as in Flutter's tests.
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
 
     /// `MaterialApp(home: Center(child: child))`.
     fn pump_centered<K>(tester: &mut WidgetTester, child: impl IntoWidget<K>) {
@@ -165,13 +160,12 @@ mod tests {
 
     #[test]
     fn positions_itself_at_the_anchor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // An arbitrary point on the screen to position at.
             let anchor = Offset::new(30.0, 40.0);
 
             pump_centered(
-                &mut tester,
+                tester,
                 DesktopTextSelectionToolbar::new(
                     anchor,
                     [DesktopTextSelectionToolbarButton::new(
@@ -192,10 +186,9 @@ mod tests {
 
     #[test]
     fn desktop_text_selection_toolbar_renders_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_centered(
-                &mut tester,
+                tester,
                 SizedBox::shrink().child(DesktopTextSelectionToolbar::new(
                     Offset::new(10.0, 10.0),
                     [Text::new("X").into_widget()],

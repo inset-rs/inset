@@ -252,7 +252,7 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use waft_embedder::{Color, Offset, Radius, Size, TargetPlatform};
+    use waft_embedder::{Color, Offset, Radius, Size};
     use waft_foundation::{App, Listener, ValueNotifier};
     use waft_painting::{
         Alignment, AlignmentGeometry, BorderRadius, BorderSide, BorderStyle, EdgeInsets,
@@ -266,6 +266,8 @@ mod tests {
         WidgetStateProperty, WidgetStatePropertyAll, WidgetStates,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::button_style::{ButtonShapeVariant, ButtonSizeVariant, IconButtonWidthVariant};
     use crate::color_scheme::ColorScheme;
@@ -274,16 +276,8 @@ mod tests {
     use crate::icons::Icons;
     use crate::ink_well::InkWell;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{
-        Drawn, PaintInspection, WidgetTester, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{Drawn, PaintInspection, material_app};
     use crate::theme_data::{MaterialTapTargetSize, ThemeData};
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        tester
-    }
 
     fn noop() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
@@ -419,8 +413,7 @@ mod tests {
     // nothing the button reads.
     #[test]
     fn a_disabled_button_builds_under_an_expressive_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .use_material3(true)
                 .build(&tester.cell.borrow());
@@ -439,17 +432,16 @@ mod tests {
     // 'Passing no IconButtonTheme returns defaults'
     #[test]
     fn without_a_theme_the_button_has_its_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = material_app(
-                m3_theme(&tester),
+                m3_theme(tester),
                 Center::new()
                     .child(IconButton::new(noop(), Icon::new(Some(Icons::ac_unit()))))
                     .into_widget(),
             );
             tester.pump_widget(widget);
 
-            below_button(&tester, |material: &Material| {
+            below_button(tester, |material: &Material| {
                 assert_eq!(material.animation_duration, Duration::from_millis(200));
                 assert!(material.border_radius.is_none());
                 assert_eq!(material.color, Some(Colors::TRANSPARENT));
@@ -462,7 +454,7 @@ mod tests {
                 assert!(material.text_style.is_none());
                 assert_eq!(material.r#type, MaterialType::Button);
             });
-            assert!(icon_alignment(&tester) == AlignmentGeometry::CENTER);
+            assert!(icon_alignment(tester) == AlignmentGeometry::CENTER);
         });
     }
 
@@ -589,40 +581,41 @@ mod tests {
     }
 
     fn check_override(
+        tester: &mut WidgetTester,
         button_style: Option<ButtonStyle>,
         theme_style: Option<ButtonStyle>,
         overall_style: Option<ButtonStyle>,
     ) {
-        let mut tester = tester();
-        let widget = override_frame(&tester, button_style, theme_style, overall_style);
+        let widget = override_frame(tester, button_style, theme_style, overall_style);
         tester.pump_widget(widget);
         tester.pump_and_settle(); // allow the animations to finish
-        check_button(&tester);
+        check_button(tester);
     }
 
     // '[Theme, IconTheme, IconButton style overrides]': 'Button style overrides defaults'
     #[test]
     fn the_button_style_overrides_the_defaults() {
-        with_main_thread_stack(|| check_override(Some(override_style()), None, None));
+        test_widgets(|tester| check_override(tester, Some(override_style()), None, None));
     }
 
     // 'Button theme style overrides defaults'
     #[test]
     fn the_button_theme_style_overrides_the_defaults() {
-        with_main_thread_stack(|| check_override(None, Some(override_style()), None));
+        test_widgets(|tester| check_override(tester, None, Some(override_style()), None));
     }
 
     // 'Overall Theme button theme style overrides defaults'
     #[test]
     fn the_overall_theme_style_overrides_the_defaults() {
-        with_main_thread_stack(|| check_override(None, None, Some(override_style())));
+        test_widgets(|tester| check_override(tester, None, None, Some(override_style())));
     }
 
     // 'Button style overrides defaults, empty theme and overall styles'
     #[test]
     fn the_button_style_overrides_empty_theme_and_overall_styles() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             check_override(
+                tester,
                 Some(override_style()),
                 Some(ButtonStyle::new()),
                 Some(ButtonStyle::new()),
@@ -633,8 +626,9 @@ mod tests {
     // 'Button theme style overrides defaults, empty button and overall styles'
     #[test]
     fn the_button_theme_style_overrides_empty_button_and_overall_styles() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             check_override(
+                tester,
                 Some(ButtonStyle::new()),
                 Some(override_style()),
                 Some(ButtonStyle::new()),
@@ -646,16 +640,20 @@ mod tests {
     // style'
     #[test]
     fn the_overall_theme_style_overrides_an_empty_button_style() {
-        with_main_thread_stack(|| {
-            check_override(Some(ButtonStyle::new()), None, Some(override_style()))
+        test_widgets(|tester| {
+            check_override(
+                tester,
+                Some(ButtonStyle::new()),
+                None,
+                Some(override_style()),
+            )
         });
     }
 
     // 'Theme shadowColor'
     #[test]
     fn the_shadow_color_comes_from_the_button_then_its_theme_not_the_overall_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let shadow_color = Color::new(0xff000001);
             let overridden_color = Color::new(0xff000002);
             let build = |tester: &mut WidgetTester,
@@ -693,38 +691,25 @@ mod tests {
                 below_button(tester, |material: &Material| material.shadow_color)
             };
 
+            assert_eq!(build(tester, None, None, None), Some(Colors::TRANSPARENT)); //default
             assert_eq!(
-                build(&mut tester, None, None, None),
-                Some(Colors::TRANSPARENT)
-            ); //default
-            assert_eq!(
-                build(&mut tester, Some(shadow_color), None, None),
+                build(tester, Some(shadow_color), None, None),
                 Some(Colors::TRANSPARENT)
             );
             assert_eq!(
-                build(&mut tester, None, Some(shadow_color), None),
+                build(tester, None, Some(shadow_color), None),
                 Some(shadow_color)
             );
             assert_eq!(
-                build(&mut tester, None, None, Some(shadow_color)),
+                build(tester, None, None, Some(shadow_color)),
                 Some(shadow_color)
             );
             assert_eq!(
-                build(
-                    &mut tester,
-                    Some(overridden_color),
-                    Some(shadow_color),
-                    None
-                ),
+                build(tester, Some(overridden_color), Some(shadow_color), None),
                 Some(shadow_color)
             );
             assert_eq!(
-                build(
-                    &mut tester,
-                    None,
-                    Some(overridden_color),
-                    Some(shadow_color)
-                ),
+                build(tester, None, Some(overridden_color), Some(shadow_color)),
                 Some(shadow_color)
             );
         });
@@ -733,8 +718,7 @@ mod tests {
     // 'IconButtonTheme IconButton.styleFrom overlayColor overrides default overlay color'
     #[test]
     fn the_theme_style_from_overlay_color_overrides_the_default_overlay() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let overlay_color = Color::new(0xffff0000);
             let widget = material_app(
                 ThemeData::builder().build(&tester.cell.borrow()),
@@ -762,14 +746,14 @@ mod tests {
             };
 
             // Hovered.
-            let render = tester.render_box_of(icon_button_element(&tester));
+            let render = tester.render_box_of(icon_button_element(tester));
             let center = tester.global_rect(render).center();
-            let mut mouse = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut mouse, Offset::ZERO);
             tester.move_to(&mut mouse, center, false);
             tester.pump_and_settle();
             assert_eq!(
-                rects(&tester),
+                rects(tester),
                 vec![overlay_color.with_opacity(0.08).value()]
             );
 
@@ -777,7 +761,7 @@ mod tests {
             tester.send(&mouse, waft_embedder::PointerChange::Down);
             tester.pump_and_settle();
             assert_eq!(
-                rects(&tester),
+                rects(tester),
                 vec![
                     overlay_color.with_opacity(0.08).value(),
                     overlay_color.with_opacity(0.1).value()
@@ -792,10 +776,7 @@ mod tests {
             // Focused.
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
             tester.pump_and_settle();
-            assert_eq!(
-                rects(&tester),
-                vec![overlay_color.with_opacity(0.1).value()]
-            );
+            assert_eq!(rects(tester), vec![overlay_color.with_opacity(0.1).value()]);
         });
     }
 
@@ -861,8 +842,7 @@ mod tests {
     // 'IconButtonTheme.variantOf': 'returns material3 when no theme specifies a variant'
     #[test]
     fn variant_of_is_material3_when_no_theme_specifies_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(std::cell::Cell::new(None));
             let widget = material_app(
                 ThemeData::builder().build(&tester.cell.borrow()),
@@ -875,33 +855,31 @@ mod tests {
             );
             tester.pump_widget(widget);
             assert_eq!(variant.get(), Some(StyleVariant::Material3));
-            assert!(is_stadium(&tester));
+            assert!(is_stadium(tester));
         });
     }
 
     // 'returns the variant of ThemeData.iconButtonTheme'
     #[test]
     fn variant_of_reads_the_theme_data_icon_button_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(std::cell::Cell::new(None));
             let widget = material_app(
-                expressive_theme(&tester),
+                expressive_theme(tester),
                 Center::new()
                     .child(button_with_variant(&key(), &variant))
                     .into_widget(),
             );
             tester.pump_widget(widget);
             assert_eq!(variant.get(), Some(StyleVariant::Material3Expressive));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
         });
     }
 
     // 'a nested IconButtonTheme without a variant inherits it from an IconButtonTheme'
     #[test]
     fn a_nested_theme_without_a_variant_inherits_the_outer_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(std::cell::Cell::new(None));
             let widget = material_app(
                 ThemeData::builder().build(&tester.cell.borrow()),
@@ -917,18 +895,17 @@ mod tests {
             );
             tester.pump_widget(widget);
             assert_eq!(variant.get(), Some(StyleVariant::Material3Expressive));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
         });
     }
 
     // 'an IconButtonTheme without a variant inherits it from ThemeData.iconButtonTheme'
     #[test]
     fn a_theme_without_a_variant_inherits_the_theme_data_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(std::cell::Cell::new(None));
             let widget = material_app(
-                expressive_theme(&tester),
+                expressive_theme(tester),
                 Center::new()
                     .child(IconButtonTheme::new(
                         IconButtonThemeData::new().style(custom_style()),
@@ -938,15 +915,14 @@ mod tests {
             );
             tester.pump_widget(widget);
             assert_eq!(variant.get(), Some(StyleVariant::Material3Expressive));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
         });
     }
 
     // 'an explicit variant overrides the variant of the ancestors'
     #[test]
     fn an_explicit_variant_overrides_the_ancestors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(std::cell::Cell::new(None));
             let widget = material_app(
                 ThemeData::builder().build(&tester.cell.borrow()),
@@ -964,15 +940,14 @@ mod tests {
             );
             tester.pump_widget(widget);
             assert_eq!(variant.get(), Some(StyleVariant::Material3));
-            assert!(is_stadium(&tester));
+            assert!(is_stadium(tester));
         });
     }
 
     // 'an enclosing IconButtonTheme takes precedence over a closer Theme'
     #[test]
     fn an_enclosing_icon_button_theme_precedes_a_closer_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(std::cell::Cell::new(None));
             let closer = ThemeData::builder()
                 .icon_button_theme(IconButtonThemeData::new().variant(StyleVariant::Material3))
@@ -988,15 +963,14 @@ mod tests {
             );
             tester.pump_widget(widget);
             assert_eq!(variant.get(), Some(StyleVariant::Material3Expressive));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
         });
     }
 
     // 'IconButton is rebuilt when an IconButtonTheme above the closest one changes'
     #[test]
     fn the_button_rebuilds_when_a_farther_theme_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = tester
                 .cell
                 .borrow_mut()
@@ -1026,21 +1000,20 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
 
             variant.set_value(&mut tester.cell.borrow_mut(), Some(StyleVariant::Material3));
             tester.pump_and_settle();
-            assert!(is_stadium(&tester));
+            assert!(is_stadium(tester));
         });
     }
 
     // 'IconButton in a ListTile uses the inherited variant'
     #[test]
     fn an_icon_button_in_a_list_tile_uses_the_inherited_variant() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = material_app(
-                expressive_theme(&tester),
+                expressive_theme(tester),
                 Material::new()
                     .child(
                         crate::list_tile::ListTile::new()
@@ -1050,17 +1023,16 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
         });
     }
 
     // 'IconButton in an AppBar with a custom foregroundColor uses the inherited variant'
     #[test]
     fn an_icon_button_in_an_app_bar_with_a_foreground_color_uses_the_inherited_variant() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = material_app(
-                expressive_theme(&tester),
+                expressive_theme(tester),
                 crate::scaffold::Scaffold::new()
                     .app_bar(waft_widgets::PreferredSizeWidgetRef::new(
                         crate::app_bar::AppBar::new()
@@ -1070,7 +1042,7 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
         });
     }
 }

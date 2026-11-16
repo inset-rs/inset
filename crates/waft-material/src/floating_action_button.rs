@@ -1298,21 +1298,15 @@ mod tests {
         Align, AnyElement, Center, FocusNode, GlobalKey, Icon, IconData, PhysicalShape, Text,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::icons::Icons;
     use crate::ink_well::InkWell;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{
-        PaintInspection, TestPointer, WidgetTester, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        tester
-    }
 
     fn noop() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
@@ -1390,7 +1384,7 @@ mod tests {
     /// Dart's `tester.press(find.byType(PhysicalShape))`.
     fn press_physical_shape(tester: &mut WidgetTester) -> TestPointer {
         let center = rect_of(tester, only(tester.find_by_type::<PhysicalShape>())).center();
-        let mut touch = WidgetTester::touch(1);
+        let mut touch = TestPointer::touch(1);
         tester.down(&mut touch, center);
         touch
     }
@@ -1436,8 +1430,7 @@ mod tests {
 
     #[test]
     fn floating_action_button_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let did_press_button = Rc::new(Cell::new(false));
             tester.pump_widget(ltr(Center::new().child(
                 FloatingActionButton::new(Some(Listener::new({
@@ -1448,7 +1441,7 @@ mod tests {
             )));
 
             assert!(!did_press_button.get());
-            let at = icon_rect(&tester).center();
+            let at = icon_rect(tester).center();
             tester.tap(at, 1);
             assert!(did_press_button.get());
         });
@@ -1456,9 +1449,8 @@ mod tests {
 
     #[test]
     fn floating_action_button_tooltip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             tester.pump_widget(app_with(
                 theme,
                 FloatingActionButton::new(noop())
@@ -1466,7 +1458,7 @@ mod tests {
                     .child(icon(Icons::add())),
             ));
 
-            let at = icon_rect(&tester).center();
+            let at = icon_rect(tester).center();
             tester.tap(at, 1);
             let tooltips = tester.find_by_type::<Tooltip>();
             let found = tooltips
@@ -1486,13 +1478,15 @@ mod tests {
         fab_rect(tester).center_right() - Offset::new(1.0, 0.0)
     }
 
-    fn long_press_at_right_edge_shows_tooltip(fab: FloatingActionButton) {
-        let mut tester = tester();
-        let theme = m3(&tester);
+    fn long_press_at_right_edge_shows_tooltip(
+        tester: &mut WidgetTester,
+        fab: FloatingActionButton,
+    ) {
+        let theme = m3(tester);
         tester.pump_widget(app_with(theme, fab));
 
         assert!(tester.find_text("Add").is_empty());
-        let at = right_edge_of_fab(&tester);
+        let at = right_edge_of_fab(tester);
         tester.long_press(at, 1);
         tester.pump_and_settle();
 
@@ -1502,8 +1496,9 @@ mod tests {
     // Regression test for: https://github.com/flutter/flutter/pull/21084
     #[test]
     fn floating_action_button_tooltip_long_press_button_edge() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             long_press_at_right_edge_shows_tooltip(
+                tester,
                 FloatingActionButton::new(noop())
                     .tooltip("Add")
                     .child(icon(Icons::add())),
@@ -1514,16 +1509,16 @@ mod tests {
     // Regression test for: https://github.com/flutter/flutter/pull/21084
     #[test]
     fn floating_action_button_tooltip_long_press_button_edge_no_child() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             long_press_at_right_edge_shows_tooltip(
+                tester,
                 FloatingActionButton::new(noop()).tooltip("Add"),
             );
         });
     }
 
-    fn hover_and_long_press_show_tooltip(on_pressed: Option<Listener>) {
-        let mut tester = tester();
-        let theme = m3(&tester);
+    fn hover_and_long_press_show_tooltip(tester: &mut WidgetTester, on_pressed: Option<Listener>) {
+        let theme = m3(tester);
         tester.pump_widget(app_with(
             theme,
             FloatingActionButton::new(on_pressed).tooltip("Add"),
@@ -1532,10 +1527,10 @@ mod tests {
         assert!(tester.find_text("Add").is_empty());
 
         // Test hover for tooltip.
-        let mut mouse = WidgetTester::mouse(1, 0);
+        let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.pump_and_settle();
-        let center = fab_rect(&tester).center();
+        let center = fab_rect(tester).center();
         tester.move_to(&mut mouse, center, false);
         tester.pump_and_settle();
 
@@ -1547,7 +1542,7 @@ mod tests {
         assert!(tester.find_text("Add").is_empty());
 
         // Test long press for tooltip.
-        let center = fab_rect(&tester).center();
+        let center = fab_rect(tester).center();
         tester.long_press(center, 2);
         tester.pump_and_settle();
 
@@ -1556,142 +1551,145 @@ mod tests {
 
     #[test]
     fn floating_action_button_tooltip_no_child() {
-        with_main_thread_stack(|| hover_and_long_press_show_tooltip(noop()));
+        test_widgets(|tester| hover_and_long_press_show_tooltip(tester, noop()));
     }
 
     #[test]
     fn floating_action_button_tooltip_reacts_when_disabled() {
-        with_main_thread_stack(|| hover_and_long_press_show_tooltip(None));
+        test_widgets(|tester| hover_and_long_press_show_tooltip(tester, None));
     }
 
     /// Dart's 'Floating Action Button elevation when highlighted - effect', for Material 3
     /// (`highlight` 6) and in its Material 2 group (12).
-    fn elevation_when_highlighted(theme: fn(&WidgetTester) -> ThemeData, highlight: f64) {
-        let mut tester = tester();
-        tester.pump_widget(app_with(theme(&tester), FloatingActionButton::new(noop())));
-        assert_eq!(elevation(&tester), 6.0);
-        let gesture = press_physical_shape(&mut tester);
-        tester.pump(Duration::ZERO);
-        assert_eq!(elevation(&tester), 6.0);
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(elevation(&tester), highlight);
+    fn elevation_when_highlighted(
+        tester: &mut WidgetTester,
+        theme: fn(&WidgetTester) -> ThemeData,
+        highlight: f64,
+    ) {
+        tester.pump_widget(app_with(theme(tester), FloatingActionButton::new(noop())));
+        assert_eq!(elevation(tester), 6.0);
+        let gesture = press_physical_shape(tester);
+        tester.pump();
+        assert_eq!(elevation(tester), 6.0);
+        tester.pump_by(Duration::from_secs(1));
+        assert_eq!(elevation(tester), highlight);
         tester.pump_widget(app_with(
-            theme(&tester),
+            theme(tester),
             FloatingActionButton::new(noop()).highlight_elevation(20.0),
         ));
-        tester.pump(Duration::ZERO);
-        assert_eq!(elevation(&tester), highlight);
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(elevation(&tester), 20.0);
+        tester.pump();
+        assert_eq!(elevation(tester), highlight);
+        tester.pump_by(Duration::from_secs(1));
+        assert_eq!(elevation(tester), 20.0);
         tester.up(&gesture);
-        tester.pump(Duration::ZERO);
-        assert_eq!(elevation(&tester), 20.0);
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(elevation(&tester), 6.0);
+        tester.pump();
+        assert_eq!(elevation(tester), 20.0);
+        tester.pump_by(Duration::from_secs(1));
+        assert_eq!(elevation(tester), 6.0);
     }
 
     #[test]
     fn floating_action_button_elevation_when_highlighted_effect() {
-        with_main_thread_stack(|| elevation_when_highlighted(m3, 6.0));
+        test_widgets(|tester| elevation_when_highlighted(tester, m3, 6.0));
     }
 
     #[test]
     fn material2_floating_action_button_elevation_when_highlighted_effect() {
-        with_main_thread_stack(|| elevation_when_highlighted(m2, 12.0));
+        test_widgets(|tester| elevation_when_highlighted(tester, m2, 12.0));
     }
 
     #[test]
     fn floating_action_button_elevation_when_disabled_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             tester.pump_widget(app_with(theme, FloatingActionButton::new(None)));
 
             // Disabled elevation defaults to regular default elevation.
-            assert_eq!(elevation(&tester), 6.0);
+            assert_eq!(elevation(tester), 6.0);
         });
     }
 
     #[test]
     fn floating_action_button_elevation_when_disabled_override() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             tester.pump_widget(app_with(
                 theme,
                 FloatingActionButton::new(None).disabled_elevation(0.0),
             ));
 
-            assert_eq!(elevation(&tester), 0.0);
+            assert_eq!(elevation(tester), 0.0);
         });
     }
 
     #[test]
     fn floating_action_button_elevation_when_disabled_effect() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            tester.pump_widget(app_with(m3(&tester), FloatingActionButton::new(None)));
-            assert_eq!(elevation(&tester), 6.0);
+        test_widgets(|tester| {
+            tester.pump_widget(app_with(m3(tester), FloatingActionButton::new(None)));
+            assert_eq!(elevation(tester), 6.0);
             tester.pump_widget(app_with(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::new(None).disabled_elevation(3.0),
             ));
-            assert_eq!(elevation(&tester), 6.0);
-            tester.pump(Duration::from_secs(1));
-            assert_eq!(elevation(&tester), 3.0);
+            assert_eq!(elevation(tester), 6.0);
+            tester.pump_by(Duration::from_secs(1));
+            assert_eq!(elevation(tester), 3.0);
             tester.pump_widget(app_with(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::new(noop()).disabled_elevation(3.0),
             ));
-            assert_eq!(elevation(&tester), 3.0);
-            tester.pump(Duration::from_secs(1));
-            assert_eq!(elevation(&tester), 6.0);
+            assert_eq!(elevation(tester), 3.0);
+            tester.pump_by(Duration::from_secs(1));
+            assert_eq!(elevation(tester), 6.0);
         });
     }
 
     /// Dart's 'Floating Action Button elevation when disabled while highlighted - effect', for
     /// Material 3 (`highlight` 6) and in its Material 2 group (12).
     fn elevation_when_disabled_while_highlighted(
+        tester: &mut WidgetTester,
         theme: fn(&WidgetTester) -> ThemeData,
         highlight: f64,
     ) {
-        let mut tester = tester();
-        tester.pump_widget(app_with(theme(&tester), FloatingActionButton::new(noop())));
-        assert_eq!(elevation(&tester), 6.0);
-        let _gesture = press_physical_shape(&mut tester);
-        tester.pump(Duration::ZERO);
-        assert_eq!(elevation(&tester), 6.0);
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(elevation(&tester), highlight);
-        tester.pump_widget(app_with(theme(&tester), FloatingActionButton::new(None)));
-        tester.pump(Duration::ZERO);
-        assert_eq!(elevation(&tester), highlight);
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(elevation(&tester), 6.0);
-        tester.pump_widget(app_with(theme(&tester), FloatingActionButton::new(noop())));
-        tester.pump(Duration::ZERO);
-        assert_eq!(elevation(&tester), 6.0);
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(elevation(&tester), 6.0);
+        tester.pump_widget(app_with(theme(tester), FloatingActionButton::new(noop())));
+        assert_eq!(elevation(tester), 6.0);
+        let _gesture = press_physical_shape(tester);
+        tester.pump();
+        assert_eq!(elevation(tester), 6.0);
+        tester.pump_by(Duration::from_secs(1));
+        assert_eq!(elevation(tester), highlight);
+        tester.pump_widget(app_with(theme(tester), FloatingActionButton::new(None)));
+        tester.pump();
+        assert_eq!(elevation(tester), highlight);
+        tester.pump_by(Duration::from_secs(1));
+        assert_eq!(elevation(tester), 6.0);
+        tester.pump_widget(app_with(theme(tester), FloatingActionButton::new(noop())));
+        tester.pump();
+        assert_eq!(elevation(tester), 6.0);
+        tester.pump_by(Duration::from_secs(1));
+        assert_eq!(elevation(tester), 6.0);
     }
 
     #[test]
     fn floating_action_button_elevation_when_disabled_while_highlighted_effect() {
-        with_main_thread_stack(|| elevation_when_disabled_while_highlighted(m3, 6.0));
+        test_widgets(|tester| elevation_when_disabled_while_highlighted(tester, m3, 6.0));
     }
 
     #[test]
     fn material2_floating_action_button_elevation_when_disabled_while_highlighted_effect() {
-        with_main_thread_stack(|| elevation_when_disabled_while_highlighted(m2, 12.0));
+        test_widgets(|tester| elevation_when_disabled_while_highlighted(tester, m2, 12.0));
     }
 
     /// Dart's 'Floating Action Button states elevation', for Material 3 (`highlight` 6) and
     /// in its Material 2 group (12).
-    fn states_elevation(theme: fn(&WidgetTester) -> ThemeData, highlight: f64) {
-        let mut tester = tester();
-        let focus_node = focus_node(&tester);
+    fn states_elevation(
+        tester: &mut WidgetTester,
+        theme: fn(&WidgetTester) -> ThemeData,
+        highlight: f64,
+    ) {
+        let focus_node = focus_node(tester);
         tester.pump_widget(material_app(
-            theme(&tester),
+            theme(tester),
             Scaffold::new()
                 .body(
                     FloatingActionButton::extended(noop(), Text::new("tooltip"))
@@ -1701,42 +1699,41 @@ mod tests {
         ));
 
         // Default, not disabled.
-        assert_eq!(elevation(&tester), 6.0);
+        assert_eq!(elevation(tester), 6.0);
 
         // Focused.
         focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
         tester.pump_and_settle();
-        assert_eq!(elevation(&tester), 6.0);
+        assert_eq!(elevation(tester), 6.0);
 
         // Hovered.
-        let center = rect_of(&tester, only(tester.find_by_type::<PhysicalShape>())).center();
-        let mut mouse = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+        let center = rect_of(tester, only(tester.find_by_type::<PhysicalShape>())).center();
+        let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, center, false);
         tester.pump_and_settle();
-        assert_eq!(elevation(&tester), 8.0);
+        assert_eq!(elevation(tester), 8.0);
 
         // Highlighted (pressed).
         tester.down(&mut mouse, center);
-        tester.pump(Duration::ZERO); // Start the splash and highlight animations.
-        tester.pump(Duration::from_millis(800)); // Wait for splash and highlight to be well under way.
-        assert_eq!(elevation(&tester), highlight);
+        tester.pump(); // Start the splash and highlight animations.
+        tester.pump_by(Duration::from_millis(800)); // Wait for splash and highlight to be well under way.
+        assert_eq!(elevation(tester), highlight);
     }
 
     #[test]
     fn floating_action_button_states_elevation() {
-        with_main_thread_stack(|| states_elevation(m3, 6.0));
+        test_widgets(|tester| states_elevation(tester, m3, 6.0));
     }
 
     #[test]
     fn material2_floating_action_button_states_elevation() {
-        with_main_thread_stack(|| states_elevation(m2, 12.0));
+        test_widgets(|tester| states_elevation(tester, m2, 12.0));
     }
 
     #[test]
     fn flat_action_button_mini_size_is_configurable_by_theme_data_material_tap_target_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mini_size = |tester: &mut WidgetTester, size: MaterialTapTargetSize| {
                 let theme = ThemeData::builder()
                     .material_tap_target_size(size)
@@ -1758,11 +1755,11 @@ mod tests {
             };
 
             assert_eq!(
-                mini_size(&mut tester, MaterialTapTargetSize::Padded),
+                mini_size(tester, MaterialTapTargetSize::Padded),
                 Size::new(48.0, 48.0)
             );
             assert_eq!(
-                mini_size(&mut tester, MaterialTapTargetSize::ShrinkWrap),
+                mini_size(tester, MaterialTapTargetSize::ShrinkWrap),
                 Size::new(40.0, 40.0)
             );
         });
@@ -1819,67 +1816,63 @@ mod tests {
 
     #[test]
     fn floating_action_button_is_extended() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            tester.pump_widget(app_with(m3(&tester), FloatingActionButton::new(None)));
+        test_widgets(|tester| {
+            tester.pump_widget(app_with(m3(tester), FloatingActionButton::new(None)));
 
-            assert!(!tester.widget(fab(&tester), |fab: &FloatingActionButton| fab.is_extended));
-            assert_shape(&tester, &rounded(16.0));
+            assert!(!tester.widget(fab(tester), |fab: &FloatingActionButton| fab.is_extended));
+            assert_shape(tester, &rounded(16.0));
 
             tester.pump_widget(app_with(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::extended(None, sized_label()).icon(icon(Icons::android())),
             ));
 
-            assert_shape(&tester, &rounded(16.0));
-            assert_extended_with_icon_layout(&tester, 56.0);
+            assert_shape(tester, &rounded(16.0));
+            assert_extended_with_icon_layout(tester, 56.0);
         });
     }
 
     #[test]
     fn floating_action_button_is_extended_without_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(app_with(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::extended(None, sized_label()),
             ));
 
-            assert_shape(&tester, &rounded(16.0));
-            assert_extended_without_icon_layout(&tester, 56.0);
+            assert_shape(tester, &rounded(16.0));
+            assert_extended_without_icon_layout(tester, 56.0);
         });
     }
 
     #[test]
     fn material2_floating_action_button_is_extended() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            tester.pump_widget(app_with(m2(&tester), FloatingActionButton::new(None)));
+        test_widgets(|tester| {
+            tester.pump_widget(app_with(m2(tester), FloatingActionButton::new(None)));
 
-            assert!(!tester.widget(fab(&tester), |fab: &FloatingActionButton| fab.is_extended));
-            assert_shape(&tester, &CircleBorder::default());
+            assert!(!tester.widget(fab(tester), |fab: &FloatingActionButton| fab.is_extended));
+            assert_shape(tester, &CircleBorder::default());
 
             tester.pump_widget(app_with(
-                m2(&tester),
+                m2(tester),
                 FloatingActionButton::extended(None, sized_label()).icon(icon(Icons::android())),
             ));
 
-            assert_shape(&tester, &StadiumBorder::default());
-            assert_extended_with_icon_layout(&tester, 48.0);
+            assert_shape(tester, &StadiumBorder::default());
+            assert_extended_with_icon_layout(tester, 48.0);
         });
     }
 
     #[test]
     fn material2_floating_action_button_is_extended_without_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(app_with(
-                m2(&tester),
+                m2(tester),
                 FloatingActionButton::extended(None, sized_label()),
             ));
 
-            assert_shape(&tester, &StadiumBorder::default());
-            assert_extended_without_icon_layout(&tester, 48.0);
+            assert_shape(tester, &StadiumBorder::default());
+            assert_extended_without_icon_layout(tester, 48.0);
         });
     }
 
@@ -1931,16 +1924,15 @@ mod tests {
 
     #[test]
     fn floating_action_button_hero_tag() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let context = two_fabs(
-                &mut tester,
+                tester,
                 FloatingActionButton::new(None).hero_tag(Some(Rc::new(1))),
                 FloatingActionButton::new(None).hero_tag(Some(Rc::new(2))),
             );
-            push_page(&tester, context);
+            push_page(tester, context);
             // this would fail if heroTag was the same on both FloatingActionButtons (see below).
-            tester.pump(Duration::ZERO);
+            tester.pump();
         });
     }
 
@@ -1949,9 +1941,8 @@ mod tests {
     #[test]
     fn extended_fab_hero_transitions_succeed() {
         // Regression test for https://github.com/flutter/flutter/issues/18782
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let controller = waft_widgets::HeroController::new(&mut tester.cell.borrow_mut());
             let second_page: waft_widgets::RoutePageBuilder = Rc::new(|_app, context, _, _| {
                 Scaffold::new()
@@ -2001,7 +1992,7 @@ mod tests {
             assert!(tester.find_onstage_text(short_fab).is_empty());
             assert_eq!(tester.find_onstage_text(hello_world).len(), 1);
 
-            let at = text_rect(&tester, long_fab).center();
+            let at = text_rect(tester, long_fab).center();
             tester.tap(at, 1);
             tester.pump_and_settle();
 
@@ -2009,7 +2000,7 @@ mod tests {
             assert!(tester.find_onstage_text(long_fab).is_empty());
 
             // Trigger a hero transition from shortFAB to longFAB.
-            let at = text_rect(&tester, "POP").center();
+            let at = text_rect(tester, "POP").center();
             tester.tap(at, 2);
             tester.pump_and_settle();
 
@@ -2041,8 +2032,7 @@ mod tests {
 
     #[test]
     fn floating_action_button_changes_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let top_left = |fab: FloatingActionButton| {
                 Scaffold::new()
                     .body(
@@ -2053,7 +2043,7 @@ mod tests {
                     .into_widget()
             };
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 top_left(
                     FloatingActionButton::extended(noop(), Text::new("label"))
                         .mouse_cursor(SystemMouseCursors::TEXT)
@@ -2061,17 +2051,17 @@ mod tests {
                 ),
             ));
 
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let center = fab_rect(&tester).center();
+            let mut mouse = TestPointer::mouse(1, 0);
+            let center = fab_rect(tester).center();
             tester.add_pointer(&mut mouse, center);
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let text: MouseCursorRef = SystemMouseCursors::TEXT.into();
             assert!(*tester.active_cursor(1) == *text);
 
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 top_left(
                     FloatingActionButton::new(noop())
                         .mouse_cursor(SystemMouseCursors::TEXT)
@@ -2079,13 +2069,13 @@ mod tests {
                 ),
             ));
 
-            let center = fab_rect(&tester).center();
+            let center = fab_rect(tester).center();
             tester.move_to(&mut mouse, center, false);
             assert!(*tester.active_cursor(1) == *text);
 
             // Test default cursor
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 top_left(FloatingActionButton::new(noop()).child(icon(Icons::add()))),
             ));
 
@@ -2094,7 +2084,7 @@ mod tests {
 
             // Test default cursor when disabled
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 top_left(FloatingActionButton::new(None).child(icon(Icons::add()))),
             ));
 
@@ -2104,9 +2094,8 @@ mod tests {
 
     #[test]
     fn floating_action_button_has_no_clip_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             tester.pump_widget(ltr(FloatingActionButton::new(Some(Listener::new(
                 |_app| {
                     // to make sure the button is enabled
@@ -2115,9 +2104,9 @@ mod tests {
             .focus_node(focus_node.clone())));
 
             focus_node.unfocus(&mut tester.cell.borrow_mut(), Default::default());
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            let render = tester.render_box_of(fab(&tester)).as_object();
+            let render = tester.render_box_of(fab(tester)).as_object();
             let clips = tester
                 .painted(render)
                 .into_iter()
@@ -2129,38 +2118,36 @@ mod tests {
 
     #[test]
     fn foreground_color_applies_to_icon_on_fab() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xcafefeed);
 
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::new(noop())
                     .foreground_color(foreground_color)
                     .child(icon(Icons::access_alarm()))
                     .into_widget(),
             ));
 
-            assert_eq!(icon_color(&tester), Some(foreground_color));
+            assert_eq!(icon_color(tester), Some(foreground_color));
         });
     }
 
     #[test]
     fn floating_action_button_uses_custom_splash_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let splash_color = Color::new(0xcafefeed);
 
             tester.pump_widget(material_app(
-                m2(&tester),
+                m2(tester),
                 FloatingActionButton::new(noop())
                     .splash_color(splash_color)
                     .child(icon(Icons::access_alarm()))
                     .into_widget(),
             ));
 
-            let center = fab_rect(&tester).center();
-            let mut touch = WidgetTester::touch(1);
+            let center = fab_rect(tester).center();
+            let mut touch = TestPointer::touch(1);
             tester.down(&mut touch, center);
             tester.pump_and_settle();
 
@@ -2181,8 +2168,7 @@ mod tests {
 
     #[test]
     fn extended_fab_does_not_show_label_when_is_extended_is_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_key = GlobalKey::new();
             let label_key = GlobalKey::new();
 
@@ -2202,31 +2188,29 @@ mod tests {
 
     #[test]
     fn floating_action_button_small_configures_correct_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(app_with(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::small(None)
                     .key(key.clone().into())
                     .material_tap_target_size(MaterialTapTargetSize::ShrinkWrap),
             ));
 
-            assert_eq!(key_rect(&tester, &key).size(), Size::new(40.0, 40.0));
+            assert_eq!(key_rect(tester, &key).size(), Size::new(40.0, 40.0));
         });
     }
 
     #[test]
     fn floating_action_button_large_configures_correct_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(app_with(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::large(None).key(key.clone().into()),
             ));
 
-            assert_eq!(key_rect(&tester, &key).size(), Size::new(96.0, 96.0));
+            assert_eq!(key_rect(tester, &key).size(), Size::new(96.0, 96.0));
         });
     }
 
@@ -2249,15 +2233,14 @@ mod tests {
 
     #[test]
     fn floating_action_button_extended_can_customize_spacing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_key = GlobalKey::new();
             let label_key = GlobalKey::new();
             let spacing = 33.0;
             let padding = EdgeInsetsDirectional::only(5.0, 0.0, 6.0, 0.0);
 
             tester.pump_widget(app_with(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::extended(noop(), Text::new("").key(label_key.clone().into()))
                     .icon(icon(Icons::add()).key(icon_key.clone().into()))
                     .extended_icon_label_spacing(spacing)
@@ -2265,7 +2248,7 @@ mod tests {
             ));
 
             assert_eq!(
-                extended_gaps(&tester, &icon_key, &label_key),
+                extended_gaps(tester, &icon_key, &label_key),
                 [spacing, padding.start, padding.end]
             );
         });
@@ -2273,19 +2256,18 @@ mod tests {
 
     #[test]
     fn floating_action_button_extended_can_customize_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let style = TextStyle::new().letter_spacing(2.0);
 
             tester.pump_widget(app_with(
-                m2(&tester),
+                m2(tester),
                 FloatingActionButton::extended(noop(), Text::new(""))
                     .icon(icon(Icons::add()))
                     .extended_text_style(style.clone()),
             ));
 
             // The color comes from the default color scheme's onSecondary value.
-            raw_button(&tester, |button| {
+            raw_button(tester, |button| {
                 assert_eq!(
                     button.text_style,
                     Some(style.copy_with().color(Color::new(0xffffffff)))
@@ -2318,7 +2300,7 @@ mod tests {
             .on(TargetPlatform::Android)
             .with_haptics(Rc::clone(&feedback) as Rc<dyn waft_embedder::Haptics>);
         let mut tester = WidgetTester::with_platform(platform);
-        tester.install_fonts();
+        let tester = &mut tester;
         let fab = fab.child(icon(Icons::access_alarm()));
         let home = match theme {
             Some(fab_theme) => {
@@ -2329,11 +2311,11 @@ mod tests {
             }
             None => fab.into_widget(),
         };
-        tester.pump_widget(material_app(m3(&tester), home));
+        tester.pump_widget(material_app(m3(tester), home));
 
-        let at = rect_of(&tester, only(tester.find_by_type::<RawMaterialButton>())).center();
+        let at = rect_of(tester, only(tester.find_by_type::<RawMaterialButton>())).center();
         tester.tap(at, 1);
-        tester.pump(Duration::from_secs(1));
+        tester.pump_by(Duration::from_secs(1));
         assert!(feedback.haptics.borrow().is_empty());
         tester.widget(
             only(tester.find_by_type::<InkWell>()),
@@ -2343,7 +2325,7 @@ mod tests {
 
     #[test]
     fn floating_action_button_with_enabled_feedback() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(tap_feedback(
                 None,
                 FloatingActionButton::new(noop()).enable_feedback(true)
@@ -2353,7 +2335,7 @@ mod tests {
 
     #[test]
     fn floating_action_button_with_disabled_feedback() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(!tap_feedback(
                 None,
                 FloatingActionButton::new(noop()).enable_feedback(false)
@@ -2363,14 +2345,14 @@ mod tests {
 
     #[test]
     fn floating_action_button_with_enabled_feedback_by_default() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(tap_feedback(None, FloatingActionButton::new(noop())));
         });
     }
 
     #[test]
     fn floating_action_button_with_disabled_feedback_using_floating_action_button_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(!tap_feedback(
                 Some(FloatingActionButtonThemeData::new().enable_feedback(false)),
                 FloatingActionButton::new(noop()),
@@ -2381,7 +2363,7 @@ mod tests {
     #[test]
     fn floating_action_button_enable_feedback_is_overridden_by_floating_action_button_theme_data_enable_feedback()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(tap_feedback(
                 Some(FloatingActionButtonThemeData::new().enable_feedback(false)),
                 FloatingActionButton::new(noop()).enable_feedback(true),
@@ -2391,10 +2373,9 @@ mod tests {
 
     #[test]
     fn floating_action_button_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Scaffold::new()
                     .floating_action_button(
                         Center::new()
@@ -2402,7 +2383,7 @@ mod tests {
                     )
                     .into_widget(),
             ));
-            assert_eq!(fab_rect(&tester).size(), Size::ZERO);
+            assert_eq!(fab_rect(tester).size(), Size::ZERO);
         });
     }
 
@@ -2424,8 +2405,7 @@ mod tests {
     #[test]
     fn material3_default_values_are_used_when_no_floating_action_button_or_floating_action_button_theme_data_properties_are_specified()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color_scheme = ColorScheme::light();
             let theme = ThemeData::from(color_scheme.clone()).build(&tester.cell.borrow());
             tester.pump_widget(app_with(
@@ -2433,16 +2413,16 @@ mod tests {
                 FloatingActionButton::new(noop()).child(icon(Icons::add())),
             ));
 
-            raw_button(&tester, |button| {
+            raw_button(tester, |button| {
                 assert_eq!(button.fill_color, Some(color_scheme.primary_container()));
             });
             assert_eq!(
-                icon_color(&tester),
+                icon_color(tester),
                 Some(color_scheme.on_primary_container())
             );
 
             // These defaults come directly from the [FloatingActionButton].
-            raw_button(&tester, |button| {
+            raw_button(tester, |button| {
                 assert_eq!(button.elevation, 6.0);
                 assert_eq!(button.highlight_elevation, 6.0);
                 assert!(button.shape.eq_shape(&rounded(16.0)));
@@ -2454,32 +2434,31 @@ mod tests {
                     BoxConstraints::tight_for(Some(56.0), Some(56.0))
                 );
             });
-            assert_eq!(icon_size(&tester), (Some(24.0), Some(24.0)));
+            assert_eq!(icon_size(tester), (Some(24.0), Some(24.0)));
         });
     }
 
     #[test]
     fn material2_default_values_are_used_when_no_floating_action_button_or_floating_action_button_theme_data_properties_are_specified()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color_scheme = ColorScheme::light();
             let theme = ThemeData::from(color_scheme.clone())
                 .use_material3(false)
                 .build(&tester.cell.borrow());
-            let default_splash_color = m3(&tester).splash_color;
+            let default_splash_color = m3(tester).splash_color;
             tester.pump_widget(app_with(
                 theme,
                 FloatingActionButton::new(noop()).child(icon(Icons::add())),
             ));
 
-            raw_button(&tester, |button| {
+            raw_button(tester, |button| {
                 assert_eq!(button.fill_color, Some(color_scheme.secondary));
             });
-            assert_eq!(icon_color(&tester), Some(color_scheme.on_secondary));
+            assert_eq!(icon_color(tester), Some(color_scheme.on_secondary));
 
             // These defaults come directly from the [FloatingActionButton].
-            raw_button(&tester, |button| {
+            raw_button(tester, |button| {
                 assert_eq!(button.elevation, 6.0);
                 assert_eq!(button.highlight_elevation, 12.0);
                 assert!(button.shape.eq_shape(&CircleBorder::default()));
@@ -2489,7 +2468,7 @@ mod tests {
                     BoxConstraints::tight_for(Some(56.0), Some(56.0))
                 );
             });
-            assert_eq!(icon_size(&tester), (Some(24.0), Some(24.0)));
+            assert_eq!(icon_size(tester), (Some(24.0), Some(24.0)));
         });
     }
 
@@ -2562,8 +2541,7 @@ mod tests {
     #[test]
     fn floating_action_button_theme_data_values_are_used_when_no_floating_action_button_properties_are_specified()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let resolved = Resolved {
                 background_color: Color::new(0xBEEFBEEF),
                 foreground_color: Color::new(0xFACEFACE),
@@ -2573,26 +2551,23 @@ mod tests {
             let constraints = BoxConstraints::tight_for(Some(100.0), Some(100.0));
 
             app_with_fab_theme(
-                &mut tester,
+                tester,
                 resolved.theme_data().size_constraints(constraints),
                 add_button(),
             );
 
-            resolved.assert_shown(&tester);
-            raw_button(&tester, |button| {
-                assert_eq!(button.constraints, constraints)
-            });
+            resolved.assert_shown(tester);
+            raw_button(tester, |button| assert_eq!(button.constraints, constraints));
         });
     }
 
     #[test]
     fn floating_action_button_values_take_priority_over_floating_action_button_theme_data_values_when_both_properties_are_specified()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let resolved = Resolved::local();
             app_with_fab_theme(
-                &mut tester,
+                tester,
                 Resolved::overridden(),
                 add_button()
                     .background_color(resolved.background_color)
@@ -2604,17 +2579,16 @@ mod tests {
                     .shape(resolved.shape.clone()),
             );
 
-            resolved.assert_shown(&tester);
+            resolved.assert_shown(tester);
         });
     }
 
     #[test]
     fn local_floating_action_button_theme_properties_are_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let resolved = Resolved::local();
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButtonTheme::new(
                     resolved.theme_data(),
                     Scaffold::new().floating_action_button(add_button()),
@@ -2622,15 +2596,14 @@ mod tests {
                 .into_widget(),
             ));
 
-            resolved.assert_shown(&tester);
+            resolved.assert_shown(tester);
         });
     }
 
     #[test]
     fn local_floating_action_button_theme_takes_priority_over_theme_data_floating_action_button_theme()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let resolved = Resolved::local();
             let theme = ThemeData::builder()
                 .floating_action_button_theme(Resolved::overridden())
@@ -2644,43 +2617,39 @@ mod tests {
                 .into_widget(),
             ));
 
-            resolved.assert_shown(&tester);
+            resolved.assert_shown(tester);
         });
     }
 
     #[test]
     fn floating_action_button_uses_a_custom_shape_when_specified_in_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_shape = BeveledRectangleBorder::default();
 
             tester.pump_widget(app_with(
-                m3(&tester),
+                m3(tester),
                 FloatingActionButton::new(noop()).shape(custom_shape),
             ));
 
-            assert_shape(&tester, &custom_shape);
+            assert_shape(tester, &custom_shape);
         });
     }
 
     #[test]
     fn floating_action_button_small_uses_custom_constraints_when_specified_in_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let constraints = BoxConstraints::tight_for(Some(100.0), Some(100.0));
             let icon_size_value = 24.0;
 
             app_with_fab_theme(
-                &mut tester,
+                tester,
                 FloatingActionButtonThemeData::new().small_size_constraints(constraints),
                 FloatingActionButton::small(noop()).child(icon(Icons::add())),
             );
 
-            raw_button(&tester, |button| {
-                assert_eq!(button.constraints, constraints)
-            });
+            raw_button(tester, |button| assert_eq!(button.constraints, constraints));
             assert_eq!(
-                icon_size(&tester),
+                icon_size(tester),
                 (Some(icon_size_value), Some(icon_size_value))
             );
         });
@@ -2688,22 +2657,19 @@ mod tests {
 
     #[test]
     fn floating_action_button_large_uses_custom_constraints_when_specified_in_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let constraints = BoxConstraints::tight_for(Some(100.0), Some(100.0));
             let icon_size_value = 36.0;
 
             app_with_fab_theme(
-                &mut tester,
+                tester,
                 FloatingActionButtonThemeData::new().large_size_constraints(constraints),
                 FloatingActionButton::large(noop()).child(icon(Icons::add())),
             );
 
-            raw_button(&tester, |button| {
-                assert_eq!(button.constraints, constraints)
-            });
+            raw_button(tester, |button| assert_eq!(button.constraints, constraints));
             assert_eq!(
-                icon_size(&tester),
+                icon_size(tester),
                 (Some(icon_size_value), Some(icon_size_value))
             );
         });
@@ -2752,15 +2718,17 @@ mod tests {
         }
     }
 
-    fn extended_uses_custom_properties_when_specified_in_the_theme(use_material3: bool) {
-        let mut tester = tester();
+    fn extended_uses_custom_properties_when_specified_in_the_theme(
+        tester: &mut WidgetTester,
+        use_material3: bool,
+    ) {
         let constraints = BoxConstraints::tight_for(None, Some(100.0));
         let icon_label_spacing = 33.0;
         let padding = EdgeInsetsDirectional::only(5.0, 0.0, 6.0, 0.0);
         let text_style = TextStyle::new().letter_spacing(2.0);
 
         let gaps = extended_case(
-            &mut tester,
+            tester,
             use_material3,
             FloatingActionButtonThemeData::new()
                 .extended_size_constraints(constraints)
@@ -2770,11 +2738,9 @@ mod tests {
             |fab| fab,
         );
 
-        raw_button(&tester, |button| {
-            assert_eq!(button.constraints, constraints)
-        });
+        raw_button(tester, |button| assert_eq!(button.constraints, constraints));
         assert_eq!(gaps, [icon_label_spacing, padding.start, padding.end]);
-        raw_button(&tester, |button| {
+        raw_button(tester, |button| {
             assert_eq!(
                 button.text_style,
                 Some(
@@ -2789,27 +2755,29 @@ mod tests {
     #[test]
     fn material3_floating_action_button_extended_uses_custom_properties_when_specified_in_the_theme()
      {
-        with_main_thread_stack(|| {
-            extended_uses_custom_properties_when_specified_in_the_theme(true)
+        test_widgets(|tester| {
+            extended_uses_custom_properties_when_specified_in_the_theme(tester, true)
         });
     }
 
     #[test]
     fn material2_floating_action_button_extended_uses_custom_properties_when_specified_in_the_theme()
      {
-        with_main_thread_stack(|| {
-            extended_uses_custom_properties_when_specified_in_the_theme(false);
+        test_widgets(|tester| {
+            extended_uses_custom_properties_when_specified_in_the_theme(tester, false);
         });
     }
 
-    fn extended_custom_properties_take_priority_over_theme(use_material3: bool) {
-        let mut tester = tester();
+    fn extended_custom_properties_take_priority_over_theme(
+        tester: &mut WidgetTester,
+        use_material3: bool,
+    ) {
         let icon_label_spacing = 33.0;
         let padding = EdgeInsetsDirectional::only(5.0, 0.0, 6.0, 0.0);
         let text_style = TextStyle::new().letter_spacing(2.0);
 
         let gaps = extended_case(
-            &mut tester,
+            tester,
             use_material3,
             FloatingActionButtonThemeData::new()
                 .extended_icon_label_spacing(25.0)
@@ -2823,7 +2791,7 @@ mod tests {
         );
 
         assert_eq!(gaps, [icon_label_spacing, padding.start, padding.end]);
-        raw_button(&tester, |button| {
+        raw_button(tester, |button| {
             assert_eq!(
                 button.text_style,
                 Some(
@@ -2838,23 +2806,22 @@ mod tests {
     #[test]
     fn material3_floating_action_button_extended_custom_properties_takes_priority_over_floating_action_button_theme_data_spacing()
      {
-        with_main_thread_stack(|| extended_custom_properties_take_priority_over_theme(true));
+        test_widgets(|tester| extended_custom_properties_take_priority_over_theme(tester, true));
     }
 
     #[test]
     fn material2_floating_action_button_extended_custom_properties_takes_priority_over_floating_action_button_theme_data_spacing()
      {
-        with_main_thread_stack(|| extended_custom_properties_take_priority_over_theme(false));
+        test_widgets(|tester| extended_custom_properties_take_priority_over_theme(tester, false));
     }
 
     #[test]
     fn floating_action_button_mouse_cursor_uses_floating_action_button_theme_data_mouse_cursor_when_specified()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let text: MouseCursorRef = SystemMouseCursors::TEXT.into();
             app_with_fab_theme(
-                &mut tester,
+                tester,
                 FloatingActionButtonThemeData::new().mouse_cursor(<dyn WidgetStateProperty<
                     Option<MouseCursorRef>,
                 >>::all(Some(
@@ -2864,9 +2831,9 @@ mod tests {
             );
 
             tester.pump_and_settle();
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
-            let center = fab_rect(&tester).center();
+            let center = fab_rect(tester).center();
             tester.move_to(&mut mouse, center, false);
             tester.pump_and_settle();
             assert!(*tester.active_cursor(1) == *text);

@@ -5140,13 +5140,13 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
 pub(crate) mod tests {
     //! time_picker_test.dart.
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::chip::tests::{center_of, size_of};
     use crate::dialog::Dialog;
     use crate::material::Material;
-    use crate::test_support::{
-        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintInspection, material_app};
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
     use crate::time::TimeOfDay;
@@ -5212,14 +5212,12 @@ pub(crate) mod tests {
         }
     }
 
-    /// A tester whose view is `size` logical pixels: the tester's views are at 2x.
+    /// Dart's `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1`.
     fn tester_of_size(size: Size) -> WidgetTester {
-        let tester = WidgetTester::with_physical_size(
+        WidgetTester::with_view(
             waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            Size::new(size.width() * 2.0, size.height() * 2.0),
-        );
-        tester.install_platform_fonts();
-        tester
+            waft_test::TestView::with_pixel_ratio(size.width(), size.height(), 1.0),
+        )
     }
 
     fn theme_of(tester: &WidgetTester, material_type: MaterialType) -> ThemeData {
@@ -5284,7 +5282,7 @@ pub(crate) mod tests {
         let root = IntoWidget::into_widget(root);
         tester.pump_widget(root);
         if boilerplate.tap_button {
-            tester.tap_text("X");
+            tap_text(tester, "X");
         }
         tester.pump_and_settle();
     }
@@ -5295,9 +5293,18 @@ pub(crate) mod tests {
         size_of(tester, material)
     }
 
+    /// Dart's `tester.tap(find.text(text))`: a tap at the center of the one onstage `Text`
+    /// showing `text`.
+    fn tap_text(tester: &mut WidgetTester, text: &str) {
+        let found = tester.find_onstage_text(text);
+        assert_eq!(found.len(), 1, "tap needs a single Text showing {text:?}");
+        let center = tester.get_rect(tester.render_box_of(found[0])).center();
+        tester.tap(center, 1);
+    }
+
     #[test]
     fn material2_dialog_size_dial_mode() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             const TIME_PICKER_PORTRAIT_SIZE: Size = Size::new(310.0, 468.0);
             const TIME_PICKER_LANDSCAPE_SIZE: Size = Size::new(524.0, 342.0);
             const TIME_PICKER_LANDSCAPE_SIZE_M2: Size = Size::new(508.0, 300.0);
@@ -5306,25 +5313,27 @@ pub(crate) mod tests {
             // portrait
             let size = Size::new(800.0, 800.5);
             let mut tester = tester_of_size(size);
-            media_query_boilerplate(&mut tester, size, Boilerplate::new(MaterialType::Material2));
+            let tester = &mut tester;
+            media_query_boilerplate(tester, size, Boilerplate::new(MaterialType::Material2));
 
             let width = TIME_PICKER_PORTRAIT_SIZE.width() + padding.horizontal();
             let height = TIME_PICKER_PORTRAIT_SIZE.height() + padding.vertical();
-            assert_eq!(dialog_material_size(&tester), Size::new(width, height));
+            assert_eq!(dialog_material_size(tester), Size::new(width, height));
 
-            tester.tap_text(OK_STRING); // dismiss the dialog
+            tap_text(tester, OK_STRING); // dismiss the dialog
             tester.pump_and_settle();
 
             // landscape
             let size = Size::new(800.5, 800.0);
             let mut tester = tester_of_size(size);
+            let tester = &mut tester;
             let mut boilerplate = Boilerplate::new(MaterialType::Material2);
             boilerplate.always_use_24_hour_format = true;
-            media_query_boilerplate(&mut tester, size, boilerplate);
+            media_query_boilerplate(tester, size, boilerplate);
 
             let width = TIME_PICKER_LANDSCAPE_SIZE.width() + padding.horizontal();
             let height = TIME_PICKER_LANDSCAPE_SIZE_M2.height() + padding.vertical();
-            assert_eq!(dialog_material_size(&tester), Size::new(width, height));
+            assert_eq!(dialog_material_size(tester), Size::new(width, height));
         });
     }
 
@@ -5433,7 +5442,7 @@ pub(crate) mod tests {
             });
         }
         tester.pump_widget(IntoWidget::into_widget(app));
-        tester.tap_text("X");
+        tap_text(tester, "X");
         tester.pump_and_settle_by(Duration::from_secs(1));
         (parameters.entry_mode == TimePickerEntryMode::Dial).then(|| {
             let dial = tester.find_by_type::<Dial>()[0];
@@ -5443,7 +5452,7 @@ pub(crate) mod tests {
 
     /// Dart's `finishPicker`.
     fn finish_picker(tester: &mut WidgetTester) {
-        tester.tap_text(OK_STRING);
+        tap_text(tester, OK_STRING);
         tester.pump_and_settle_by(Duration::from_secs(1));
     }
 
@@ -5489,7 +5498,7 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_dialog_size_dial_mode() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             const TIME_PICKER_PORTRAIT_SIZE: Size = Size::new(310.0, 468.0);
             const TIME_PICKER_LANDSCAPE_SIZE: Size = Size::new(524.0, 342.0);
             let padding = EdgeInsets::all(24.0);
@@ -5497,56 +5506,57 @@ pub(crate) mod tests {
             // portrait
             let size = Size::new(800.0, 800.5);
             let mut tester = tester_of_size(size);
-            media_query_boilerplate(&mut tester, size, Boilerplate::new(MaterialType::Material3));
+            let tester = &mut tester;
+            media_query_boilerplate(tester, size, Boilerplate::new(MaterialType::Material3));
 
             let width = TIME_PICKER_PORTRAIT_SIZE.width() + padding.horizontal();
             let height = TIME_PICKER_PORTRAIT_SIZE.height() + padding.vertical();
-            assert_eq!(dialog_material_size(&tester), Size::new(width, height));
+            assert_eq!(dialog_material_size(tester), Size::new(width, height));
 
-            tester.tap_text(OK_STRING); // dismiss the dialog
+            tap_text(tester, OK_STRING); // dismiss the dialog
             tester.pump_and_settle();
 
             // landscape
             let size = Size::new(800.5, 800.0);
             let mut tester = tester_of_size(size);
+            let tester = &mut tester;
             let mut boilerplate = Boilerplate::new(MaterialType::Material3);
             boilerplate.always_use_24_hour_format = true;
-            media_query_boilerplate(&mut tester, size, boilerplate);
+            media_query_boilerplate(tester, size, boilerplate);
 
             let width = TIME_PICKER_LANDSCAPE_SIZE.width() + padding.horizontal();
             let height = TIME_PICKER_LANDSCAPE_SIZE.height() + padding.vertical();
-            assert_eq!(dialog_material_size(&tester), Size::new(width, height));
+            assert_eq!(dialog_material_size(tester), Size::new(width, height));
         });
     }
 
     #[test]
     fn material2_dialog_size_input_mode() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const TIME_PICKER_INPUT_SIZE: Size = Size::new(312.0, 252.0);
             const DAY_PERIOD_PORTRAIT_SIZE: Size = Size::new(52.0, 80.0);
             let padding = EdgeInsets::from_ltrb(8.0, 18.0, 8.0, 8.0);
             let height = TIME_PICKER_INPUT_SIZE.height() + padding.vertical();
 
             let size = material_dialog_default_size();
-            let mut tester = tester_of_size(size);
             let mut boilerplate = Boilerplate::new(MaterialType::Material2);
             boilerplate.entry_mode = TimePickerEntryMode::Input;
-            media_query_boilerplate(&mut tester, size, boilerplate.clone());
+            media_query_boilerplate(tester, size, boilerplate.clone());
 
             let width = TIME_PICKER_INPUT_SIZE.width() + padding.horizontal();
-            let dialog_size = dialog_material_size(&tester);
+            let dialog_size = dialog_material_size(tester);
             assert_eq!(dialog_size.width(), width);
             assert!(dialog_size.height() < height);
 
-            tester.tap_text(OK_STRING); // dismiss the dialog
+            tap_text(tester, OK_STRING); // dismiss the dialog
             tester.pump_and_settle();
 
             boilerplate.always_use_24_hour_format = true;
-            media_query_boilerplate(&mut tester, size, boilerplate);
+            media_query_boilerplate(tester, size, boilerplate);
             let width = TIME_PICKER_INPUT_SIZE.width() - DAY_PERIOD_PORTRAIT_SIZE.width() - 12.0
                 + padding.horizontal()
                 + 16.0;
-            let dialog_size = dialog_material_size(&tester);
+            let dialog_size = dialog_material_size(tester);
             assert_eq!(dialog_size.width(), width);
             assert!(dialog_size.height() < height);
         });
@@ -5554,7 +5564,7 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_dialog_size_input_mode() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const TIME_PICKER_MIN_INPUT_SIZE: Size = Size::new(312.0, 252.0);
             const DAY_PERIOD_PORTRAIT_SIZE: Size = Size::new(52.0, 80.0);
             let padding = EdgeInsets::all(24.0);
@@ -5563,25 +5573,24 @@ pub(crate) mod tests {
                 TIME_PICKER_MIN_INPUT_SIZE.height() * text_scale_factor + padding.vertical();
 
             let size = material_dialog_default_size();
-            let mut tester = tester_of_size(size);
             let mut boilerplate = Boilerplate::new(MaterialType::Material3);
             boilerplate.entry_mode = TimePickerEntryMode::Input;
-            media_query_boilerplate(&mut tester, size, boilerplate.clone());
+            media_query_boilerplate(tester, size, boilerplate.clone());
 
             let width = TIME_PICKER_MIN_INPUT_SIZE.width() - 32.0 + padding.horizontal();
-            let dialog_size = dialog_material_size(&tester);
+            let dialog_size = dialog_material_size(tester);
             assert_eq!(dialog_size.width(), width);
             assert!(dialog_size.height() < height);
 
-            tester.tap_text(OK_STRING); // dismiss the dialog
+            tap_text(tester, OK_STRING); // dismiss the dialog
             tester.pump_and_settle();
 
             boilerplate.always_use_24_hour_format = true;
-            media_query_boilerplate(&mut tester, size, boilerplate);
+            media_query_boilerplate(tester, size, boilerplate);
             let width =
                 TIME_PICKER_MIN_INPUT_SIZE.width() - DAY_PERIOD_PORTRAIT_SIZE.width() - 12.0
                     + padding.horizontal();
-            let dialog_size = dialog_material_size(&tester);
+            let dialog_size = dialog_material_size(tester);
             assert_eq!(dialog_size.width(), width);
             assert!(dialog_size.height() < height);
         });
@@ -5589,16 +5598,15 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_respects_media_query_data_always_use_24_hour_format_true() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let size = material_dialog_default_size();
-            let mut tester = tester_of_size(size);
             let mut boilerplate = Boilerplate::new(MaterialType::Material2);
             boilerplate.always_use_24_hour_format = true;
-            media_query_boilerplate(&mut tester, size, boilerplate);
+            media_query_boilerplate(tester, size, boilerplate);
 
             let labels_00_to_22: Vec<String> =
                 (0..12).map(|index| format!("{:02}", index * 2)).collect();
-            let painter = dial_painter(&tester);
+            let painter = dial_painter(tester);
             assert_eq!(painter.borrow().primary_label_texts(), labels_00_to_22);
             assert_eq!(painter.borrow().selected_label_texts(), labels_00_to_22);
         });
@@ -5606,12 +5614,11 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_respects_media_query_data_always_use_24_hour_format_true() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let size = material_dialog_default_size();
-            let mut tester = tester_of_size(size);
             let mut boilerplate = Boilerplate::new(MaterialType::Material3);
             boilerplate.always_use_24_hour_format = true;
-            media_query_boilerplate(&mut tester, size, boilerplate);
+            media_query_boilerplate(tester, size, boilerplate);
 
             let labels_00_to_23: Vec<String> = (0..24)
                 .map(|index| {
@@ -5624,7 +5631,7 @@ pub(crate) mod tests {
                 .collect();
             let inner_0_to_23: Vec<bool> = (0..24).map(|index| index >= 12).collect();
 
-            let painter = dial_painter(&tester);
+            let painter = dial_painter(tester);
             assert_eq!(painter.borrow().primary_label_texts(), labels_00_to_23);
             assert_eq!(painter.borrow().primary_label_inner(), inner_0_to_23);
             assert_eq!(painter.borrow().selected_label_texts(), labels_00_to_23);
@@ -5634,41 +5641,39 @@ pub(crate) mod tests {
 
     #[test]
     fn dial_tap_select_an_hour() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut center =
-                    start_picker(&mut tester, &result, StartPicker::new(material_type))
-                        .expect("a dial");
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1); // 12:00 AM
-                finish_picker(&mut tester);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(0, 0)));
 
-                center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                    .expect("a dial");
+                center =
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 tester.tap(Offset::new(center.dx() + 50.0, center.dy()), 1);
-                finish_picker(&mut tester);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(3, 0)));
 
-                center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                    .expect("a dial");
+                center =
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 tester.tap(Offset::new(center.dx(), center.dy() + 50.0), 1);
-                finish_picker(&mut tester);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(6, 0)));
 
-                center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                    .expect("a dial");
+                center =
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 tester.tap(Offset::new(center.dx(), center.dy() + 50.0), 1);
                 tester.tap(Offset::new(center.dx() - 50.0, center.dy()), 1);
-                finish_picker(&mut tester);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(9, 0)));
-            }
-        });
+            });
+        }
     }
 
     fn drag(tester: &mut WidgetTester, from: Offset, to: Offset) {
-        let mut gesture = WidgetTester::touch(1);
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, from);
         tester.move_to(&mut gesture, to, true);
         tester.up(&gesture);
@@ -5676,127 +5681,122 @@ pub(crate) mod tests {
 
     #[test]
     fn dial_drag_select_an_hour() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
-                let center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                    .expect("a dial");
+                let center =
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 let hour0 = Offset::new(center.dx(), center.dy() - 50.0); // 12:00 AM
                 let hour3 = Offset::new(center.dx() + 50.0, center.dy());
                 let hour6 = Offset::new(center.dx(), center.dy() + 50.0);
                 let hour9 = Offset::new(center.dx() - 50.0, center.dy());
 
-                drag(&mut tester, hour3, hour0);
-                finish_picker(&mut tester);
+                drag(tester, hour3, hour0);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result).map(|time| time.hour), Some(0));
 
                 assert_eq!(
-                    start_picker(&mut tester, &result, StartPicker::new(material_type)),
+                    start_picker(tester, &result, StartPicker::new(material_type)),
                     Some(center)
                 );
-                drag(&mut tester, hour0, hour3);
-                finish_picker(&mut tester);
+                drag(tester, hour0, hour3);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result).map(|time| time.hour), Some(3));
 
                 assert_eq!(
-                    start_picker(&mut tester, &result, StartPicker::new(material_type)),
+                    start_picker(tester, &result, StartPicker::new(material_type)),
                     Some(center)
                 );
-                drag(&mut tester, hour3, hour6);
-                finish_picker(&mut tester);
+                drag(tester, hour3, hour6);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result).map(|time| time.hour), Some(6));
 
                 assert_eq!(
-                    start_picker(&mut tester, &result, StartPicker::new(material_type)),
+                    start_picker(tester, &result, StartPicker::new(material_type)),
                     Some(center)
                 );
-                drag(&mut tester, hour6, hour9);
-                finish_picker(&mut tester);
+                drag(tester, hour6, hour9);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result).map(|time| time.hour), Some(9));
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn dial_tap_select_switches_from_hour_to_minute() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
-                let center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                    .expect("a dial");
+                let center =
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 let hour6 = Offset::new(center.dx(), center.dy() + 50.0); // 6:00
                 let min45 = Offset::new(center.dx() - 50.0, center.dy()); // 45 mins (or 9:00 hours)
 
                 tester.tap(hour6, 1);
-                tester.pump(Duration::from_millis(50));
+                tester.pump_by(Duration::from_millis(50));
                 tester.tap(min45, 1);
-                finish_picker(&mut tester);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(6, 45)));
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn dial_drag_select_switches_from_hour_to_minute() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
-                let center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                    .expect("a dial");
+                let center =
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 let hour3 = Offset::new(center.dx() + 50.0, center.dy());
                 let hour6 = Offset::new(center.dx(), center.dy() + 50.0);
                 let hour9 = Offset::new(center.dx() - 50.0, center.dy());
 
-                drag(&mut tester, hour6, hour9);
-                tester.pump(Duration::from_millis(50));
-                drag(&mut tester, hour6, hour3);
-                finish_picker(&mut tester);
+                drag(tester, hour6, hour9);
+                tester.pump_by(Duration::from_millis(50));
+                drag(tester, hour6, hour3);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(9, 15)));
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn dial_tap_select_rounds_down_to_nearest_5_minute_increment() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
-                let center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                    .expect("a dial");
+                let center =
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 let hour6 = Offset::new(center.dx(), center.dy() + 50.0); // 6:00
                 let min46 = Offset::new(center.dx() - 50.0, center.dy() - 5.0); // 46 mins
 
                 tester.tap(hour6, 1);
-                tester.pump(Duration::from_millis(50));
+                tester.pump_by(Duration::from_millis(50));
                 tester.tap(min46, 1);
-                finish_picker(&mut tester);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(6, 45)));
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn dial_tap_select_rounds_up_to_nearest_5_minute_increment() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
-                let center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                    .expect("a dial");
+                let center =
+                    start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
                 let hour6 = Offset::new(center.dx(), center.dy() + 50.0); // 6:00
                 let min48 = Offset::new(center.dx() - 50.0, center.dy() - 15.0); // 48 mins
 
                 tester.tap(hour6, 1);
-                tester.pump(Duration::from_millis(50));
+                tester.pump_by(Duration::from_millis(50));
                 tester.tap(min48, 1);
-                finish_picker(&mut tester);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(6, 50)));
-            }
-        });
+            });
+        }
     }
 
     fn only_text(tester: &WidgetTester, text: &str) -> AnyElement {
@@ -5807,67 +5807,54 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_widgets_have_correct_label_capitalization() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let result: PickerResult = Rc::default();
-            start_picker(
-                &mut tester,
-                &result,
-                StartPicker::new(MaterialType::Material2),
-            );
-            only_text(&tester, "SELECT TIME");
-            only_text(&tester, "CANCEL");
+            start_picker(tester, &result, StartPicker::new(MaterialType::Material2));
+            only_text(tester, "SELECT TIME");
+            only_text(tester, "CANCEL");
         });
     }
 
     #[test]
     fn material3_widgets_have_correct_label_capitalization() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let result: PickerResult = Rc::default();
-            start_picker(
-                &mut tester,
-                &result,
-                StartPicker::new(MaterialType::Material3),
-            );
-            only_text(&tester, "Select time");
-            only_text(&tester, "Cancel");
+            start_picker(tester, &result, StartPicker::new(MaterialType::Material3));
+            only_text(tester, "Select time");
+            only_text(tester, "Cancel");
         });
     }
 
     #[test]
     fn material2_widgets_have_correct_label_capitalization_in_input_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let result: PickerResult = Rc::default();
             let mut parameters = StartPicker::new(MaterialType::Material2);
             parameters.entry_mode = TimePickerEntryMode::Input;
-            start_picker(&mut tester, &result, parameters);
-            only_text(&tester, "ENTER TIME");
-            only_text(&tester, "CANCEL");
+            start_picker(tester, &result, parameters);
+            only_text(tester, "ENTER TIME");
+            only_text(tester, "CANCEL");
         });
     }
 
     #[test]
     fn material3_widgets_have_correct_label_capitalization_in_input_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let result: PickerResult = Rc::default();
             let mut parameters = StartPicker::new(MaterialType::Material3);
             parameters.entry_mode = TimePickerEntryMode::Input;
-            start_picker(&mut tester, &result, parameters);
-            only_text(&tester, "Enter time");
-            only_text(&tester, "Cancel");
+            start_picker(tester, &result, parameters);
+            only_text(tester, "Enter time");
+            only_text(tester, "Cancel");
         });
     }
 
     #[test]
     fn respects_media_query_data_always_use_24_hour_format_false() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
-                media_query_boilerplate(&mut tester, size, Boilerplate::new(material_type));
+                media_query_boilerplate(tester, size, Boilerplate::new(material_type));
                 let labels_12_to_11: Vec<String> = [
                     "12", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
                 ]
@@ -5875,11 +5862,11 @@ pub(crate) mod tests {
                 .map(ToString::to_string)
                 .collect();
 
-                let painter = dial_painter(&tester);
+                let painter = dial_painter(tester);
                 assert_eq!(painter.borrow().primary_label_texts(), labels_12_to_11);
                 assert_eq!(painter.borrow().selected_label_texts(), labels_12_to_11);
-            }
-        });
+            });
+        }
     }
 
     fn day_period_input_padding_orientation(tester: &WidgetTester) -> Orientation {
@@ -5891,45 +5878,48 @@ pub(crate) mod tests {
 
     #[test]
     fn when_change_orientation_should_reflect_in_render_objects() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|_| {
                 // portrait
                 let size = Size::new(800.0, 800.5);
                 let mut tester = tester_of_size(size);
-                media_query_boilerplate(&mut tester, size, Boilerplate::new(material_type));
+                let tester = &mut tester;
+                media_query_boilerplate(tester, size, Boilerplate::new(material_type));
                 assert_eq!(
-                    day_period_input_padding_orientation(&tester),
+                    day_period_input_padding_orientation(tester),
                     Orientation::Portrait
                 );
 
                 // landscape
                 let size = Size::new(800.5, 800.0);
                 let mut tester = tester_of_size(size);
-                media_query_boilerplate(&mut tester, size, Boilerplate::new(material_type));
+                let tester = &mut tester;
+                media_query_boilerplate(tester, size, Boilerplate::new(material_type));
                 assert_eq!(
-                    day_period_input_padding_orientation(&tester),
+                    day_period_input_padding_orientation(tester),
                     Orientation::Landscape
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn setting_orientation_should_override_media_query_orientation() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|_| {
                 // portrait media query
                 let size = Size::new(800.0, 800.5);
                 let mut tester = tester_of_size(size);
+                let tester = &mut tester;
                 let mut boilerplate = Boilerplate::new(material_type);
                 boilerplate.orientation = Some(Orientation::Landscape);
-                media_query_boilerplate(&mut tester, size, boilerplate);
+                media_query_boilerplate(tester, size, boilerplate);
                 assert_eq!(
-                    day_period_input_padding_orientation(&tester),
+                    day_period_input_padding_orientation(tester),
                     Orientation::Landscape
                 );
-            }
-        });
+            });
+        }
     }
 
     /// Dart's `PickerObserver.pickerCount`: how many time pickers the navigator shows.
@@ -5990,27 +5980,25 @@ pub(crate) mod tests {
 
     #[test]
     fn barrier_is_dismissible_with_default_parameter() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
-            open_picker_app(&mut tester, |app, context| drop(show_default(app, context)));
+        test_widgets(|tester| {
+            open_picker_app(tester, |app, context| drop(show_default(app, context)));
 
             // Open the dialog.
-            tester.tap_text("X");
+            tap_text(tester, "X");
             tester.pump_and_settle();
-            assert_eq!(picker_count(&tester), 1);
+            assert_eq!(picker_count(tester), 1);
 
             // Tap on the barrier.
             tester.tap(Offset::new(10.0, 10.0), 1);
             tester.pump_and_settle();
-            assert_eq!(picker_count(&tester), 0);
+            assert_eq!(picker_count(tester), 0);
         });
     }
 
     #[test]
     fn barrier_is_not_dismissible_with_barrier_dismissible_is_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
-            open_picker_app(&mut tester, |app, context| {
+        test_widgets(|tester| {
+            open_picker_app(tester, |app, context| {
                 drop(show_time_picker(
                     app,
                     context,
@@ -6037,14 +6025,14 @@ pub(crate) mod tests {
             });
 
             // Open the dialog.
-            tester.tap_text("X");
+            tap_text(tester, "X");
             tester.pump_and_settle();
-            assert_eq!(picker_count(&tester), 1);
+            assert_eq!(picker_count(tester), 1);
 
             // Tap on the barrier, which shouldn't do anything this time.
             tester.tap(Offset::new(10.0, 10.0), 1);
             tester.pump_and_settle();
-            assert_eq!(picker_count(&tester), 1);
+            assert_eq!(picker_count(tester), 1);
         });
     }
 
@@ -6061,22 +6049,21 @@ pub(crate) mod tests {
 
     #[test]
     fn barrier_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
-            open_picker_app(&mut tester, |app, context| drop(show_default(app, context)));
+        test_widgets(|tester| {
+            open_picker_app(tester, |app, context| drop(show_default(app, context)));
 
             // Open the dialog.
-            tester.tap_text("X");
+            tap_text(tester, "X");
             tester.pump_and_settle();
             assert_eq!(
-                last_modal_barrier(&tester, |barrier| barrier.color),
+                last_modal_barrier(tester, |barrier| barrier.color),
                 Some(crate::colors::Colors::BLACK54)
             );
 
             // Dismiss the dialog.
             tester.tap(Offset::new(10.0, 10.0), 1);
 
-            open_picker_app(&mut tester, |app, context| {
+            open_picker_app(tester, |app, context| {
                 drop(show_time_picker(
                     app,
                     context,
@@ -6103,10 +6090,10 @@ pub(crate) mod tests {
             });
 
             // Open the dialog.
-            tester.tap_text("X");
+            tap_text(tester, "X");
             tester.pump_and_settle();
             assert_eq!(
-                last_modal_barrier(&tester, |barrier| barrier.color),
+                last_modal_barrier(tester, |barrier| barrier.color),
                 Some(crate::colors::Colors::PINK.primary())
             );
         });
@@ -6114,9 +6101,8 @@ pub(crate) mod tests {
 
     #[test]
     fn barrier_label() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
-            open_picker_app(&mut tester, |app, context| {
+        test_widgets(|tester| {
+            open_picker_app(tester, |app, context| {
                 drop(show_time_picker(
                     app,
                     context,
@@ -6143,10 +6129,10 @@ pub(crate) mod tests {
             });
 
             // Open the dialog.
-            tester.tap_text("X");
+            tap_text(tester, "X");
             tester.pump_and_settle();
             assert_eq!(
-                last_modal_barrier(&tester, |barrier| barrier.semantics_label.clone()),
+                last_modal_barrier(tester, |barrier| barrier.semantics_label.clone()),
                 Some("Custom Label".to_string())
             );
         });
@@ -6154,8 +6140,7 @@ pub(crate) mod tests {
 
     #[test]
     fn builder_parameter() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let build_frame =
                 |tester: &mut WidgetTester, text_direction: waft_painting::TextDirection| {
                     open_picker_app(tester, move |app, context| {
@@ -6193,24 +6178,24 @@ pub(crate) mod tests {
                     });
                 };
 
-            build_frame(&mut tester, waft_painting::TextDirection::Ltr);
-            tester.tap_text("X");
+            build_frame(tester, waft_painting::TextDirection::Ltr);
+            tap_text(tester, "X");
             tester.pump_and_settle();
-            let ok = only_text(&tester, OK_STRING);
+            let ok = only_text(tester, OK_STRING);
             let ltr_ok_right = tester.get_rect(tester.render_box_of(ok)).right;
 
-            tester.tap_text(OK_STRING); // dismiss the dialog
+            tap_text(tester, OK_STRING); // dismiss the dialog
             tester.pump_and_settle();
 
-            build_frame(&mut tester, waft_painting::TextDirection::Rtl);
-            tester.tap_text("X");
+            build_frame(tester, waft_painting::TextDirection::Rtl);
+            tap_text(tester, "X");
             tester.pump_and_settle();
 
             // Verify that the time picker is being laid out RTL.
             // We expect the left edge of the 'OK' button in the RTL
             // layout to match the gap between right edge of the 'OK'
             // button and the right edge of the 800 wide view.
-            let ok = only_text(&tester, OK_STRING);
+            let ok = only_text(tester, OK_STRING);
             let rtl_ok_left = tester.get_rect(tester.render_box_of(ok)).left;
             // Dart's `rtlOkLeft == 800 - ltrOkRight`, compared at the f32 rounding of the 800
             // wide view the two edges add up to.
@@ -6220,9 +6205,8 @@ pub(crate) mod tests {
 
     #[test]
     fn optional_text_parameters_are_utilized() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
-            open_picker_app(&mut tester, |app, context| {
+        test_widgets(|tester| {
+            open_picker_app(tester, |app, context| {
                 drop(show_time_picker(
                     app,
                     context,
@@ -6249,12 +6233,12 @@ pub(crate) mod tests {
             });
 
             // Open the picker.
-            tester.tap_text("X");
+            tap_text(tester, "X");
             tester.pump_and_settle_by(Duration::from_secs(1));
 
-            only_text(&tester, "Custom Cancel");
-            only_text(&tester, "Custom OK");
-            only_text(&tester, "Custom Help");
+            only_text(tester, "Custom Cancel");
+            only_text(tester, "Custom OK");
+            only_text(tester, "Custom Help");
         });
     }
 
@@ -6318,10 +6302,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_ok_cancel_button_and_help_text_layout() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SELECT_TIME_STRING: &str = "SELECT TIME";
             const CANCEL_STRING: &str = "CANCEL";
-            let mut tester = tester_of_size(material_dialog_default_size());
             let m2_app = |tester: &mut WidgetTester,
                           text_direction: waft_painting::TextDirection| {
                 let theme = m2(&tester.cell.borrow());
@@ -6371,110 +6354,108 @@ pub(crate) mod tests {
                 tester.pump_widget(material_app(theme, home));
             };
 
-            m2_app(&mut tester, waft_painting::TextDirection::Ltr);
-            tester.tap_text("X");
+            m2_app(tester, waft_painting::TextDirection::Ltr);
+            tap_text(tester, "X");
             tester.pump_and_settle();
 
-            let select_time = text_rect(&tester, SELECT_TIME_STRING);
+            let select_time = text_rect(tester, SELECT_TIME_STRING);
             assert_eq!(select_time.top_left(), Offset::new(154.0, 155.0));
             assert_eq!(select_time.bottom_right(), Offset::new(280.5, 165.0));
-            assert_eq!(text_rect(&tester, OK_STRING).right, 644.0);
-            assert_eq!(text_rect(&tester, OK_STRING).left, 616.0);
-            assert_eq!(text_rect(&tester, CANCEL_STRING).right, 582.0);
+            assert_eq!(text_rect(tester, OK_STRING).right, 644.0);
+            assert_eq!(text_rect(tester, OK_STRING).left, 616.0);
+            assert_eq!(text_rect(tester, CANCEL_STRING).right, 582.0);
 
-            tester.tap_text(OK_STRING);
+            tap_text(tester, OK_STRING);
             tester.pump_and_settle();
 
-            m2_app(&mut tester, waft_painting::TextDirection::Rtl);
-            tester.tap_text("X");
+            m2_app(tester, waft_painting::TextDirection::Rtl);
+            tap_text(tester, "X");
             tester.pump_and_settle();
 
-            let select_time = text_rect(&tester, SELECT_TIME_STRING);
+            let select_time = text_rect(tester, SELECT_TIME_STRING);
             assert_eq!(select_time.top_left(), Offset::new(519.5, 155.0));
             assert_eq!(select_time.bottom_right(), Offset::new(646.0, 165.0));
-            assert_eq!(text_rect(&tester, OK_STRING).left, 156.0);
-            assert_eq!(text_rect(&tester, OK_STRING).right, 184.0);
-            assert_eq!(text_rect(&tester, CANCEL_STRING).left, 218.0);
+            assert_eq!(text_rect(tester, OK_STRING).left, 156.0);
+            assert_eq!(text_rect(tester, OK_STRING).right, 184.0);
+            assert_eq!(text_rect(tester, CANCEL_STRING).left, 218.0);
 
-            tester.tap_text(OK_STRING);
+            tap_text(tester, OK_STRING);
             tester.pump_and_settle();
         });
     }
 
     #[test]
     fn material3_ok_cancel_button_and_help_text_layout() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SELECT_TIME_STRING: &str = "Select time";
             const CANCEL_STRING: &str = "Cancel";
-            let mut tester = tester_of_size(material_dialog_default_size());
 
-            open_directional_picker(&mut tester, waft_painting::TextDirection::Ltr);
-            tester.tap_text("X");
+            open_directional_picker(tester, waft_painting::TextDirection::Ltr);
+            tap_text(tester, "X");
             tester.pump_and_settle();
 
-            let select_time = text_rect(&tester, SELECT_TIME_STRING);
+            let select_time = text_rect(tester, SELECT_TIME_STRING);
             assert_eq!(select_time.top_left(), Offset::new(138.0, 129.0));
             assert_eq!(select_time.bottom_right(), Offset::new(294.75, 149.0));
-            close(text_rect(&tester, OK_STRING).left, 615.9, 0.001);
-            assert_f32_eq(text_rect(&tester, CANCEL_STRING).right, 578.0);
+            close(text_rect(tester, OK_STRING).left, 615.9, 0.001);
+            assert_f32_eq(text_rect(tester, CANCEL_STRING).right, 578.0);
 
-            tester.tap_text(OK_STRING);
+            tap_text(tester, OK_STRING);
             tester.pump_and_settle();
 
-            open_directional_picker(&mut tester, waft_painting::TextDirection::Rtl);
-            tester.tap_text("X");
+            open_directional_picker(tester, waft_painting::TextDirection::Rtl);
+            tap_text(tester, "X");
             tester.pump_and_settle();
 
-            let select_time = text_rect(&tester, SELECT_TIME_STRING);
+            let select_time = text_rect(tester, SELECT_TIME_STRING);
             assert_eq!(select_time.top_left(), Offset::new(505.25, 129.0));
             assert_eq!(select_time.bottom_right(), Offset::new(662.0, 149.0));
-            close(text_rect(&tester, OK_STRING).left, 155.9, 0.001);
-            close(text_rect(&tester, OK_STRING).right, 184.1, 0.001);
-            assert_f32_eq(text_rect(&tester, CANCEL_STRING).left, 222.0);
+            close(text_rect(tester, OK_STRING).left, 155.9, 0.001);
+            close(text_rect(tester, OK_STRING).right, 184.1, 0.001);
+            assert_f32_eq(text_rect(tester, CANCEL_STRING).left, 222.0);
 
-            tester.tap_text(OK_STRING);
+            tap_text(tester, OK_STRING);
             tester.pump_and_settle();
         });
     }
 
     #[test]
     fn text_scale_affects_certain_elements_and_not_others() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = Boilerplate::new(material_type);
                 boilerplate.initial_time = TimeOfDay::new(7, 41);
-                media_query_boilerplate(&mut tester, size, boilerplate.clone());
+                media_query_boilerplate(tester, size, boilerplate.clone());
 
-                let minutes_display_height = text_rect(&tester, "41").height();
-                let am_height = text_rect(&tester, AM_STRING).height();
+                let minutes_display_height = text_rect(tester, "41").height();
+                let am_height = text_rect(tester, AM_STRING).height();
 
-                tester.tap_text(OK_STRING); // dismiss the dialog
+                tap_text(tester, OK_STRING); // dismiss the dialog
                 tester.pump_and_settle();
 
                 // Verify that the time display is not affected by text scale.
                 boilerplate.text_scaler = TextScaler::linear(2.0);
-                media_query_boilerplate(&mut tester, size, boilerplate.clone());
+                media_query_boilerplate(tester, size, boilerplate.clone());
 
-                let am_height_2x = text_rect(&tester, AM_STRING).height();
-                assert_eq!(text_rect(&tester, "41").height(), minutes_display_height);
+                let am_height_2x = text_rect(tester, AM_STRING).height();
+                assert_eq!(text_rect(tester, "41").height(), minutes_display_height);
                 assert_eq!(am_height_2x, f64::min(38.0, am_height * 2.0));
 
-                tester.tap_text(OK_STRING); // dismiss the dialog
+                tap_text(tester, OK_STRING); // dismiss the dialog
                 tester.pump_and_settle();
 
                 // Verify that text scale for AM/PM is at most 2x.
                 boilerplate.text_scaler = TextScaler::linear(3.0);
-                media_query_boilerplate(&mut tester, size, boilerplate);
+                media_query_boilerplate(tester, size, boilerplate);
 
-                assert_eq!(text_rect(&tester, "41").height(), minutes_display_height);
+                assert_eq!(text_rect(tester, "41").height(), minutes_display_height);
                 assert_eq!(
-                    text_rect(&tester, AM_STRING).height(),
+                    text_rect(tester, AM_STRING).height(),
                     f64::min(38.0, am_height * 2.0)
                 );
-            }
-        });
+            });
+        }
     }
 
     /// Records the haptic feedback the platform is asked for: Dart's `FeedbackTester`.
@@ -6495,17 +6476,12 @@ pub(crate) mod tests {
         }
     }
 
-    fn feedback_tester(size: Size) -> (WidgetTester, Rc<FeedbackTester>) {
+    fn feedback_tester() -> (WidgetTester, Rc<FeedbackTester>) {
         let feedback = Rc::new(FeedbackTester::default());
         let platform = waft_test::TestPlatform::new()
             .on(TargetPlatform::Android)
             .with_haptics(Rc::clone(&feedback) as Rc<dyn waft_embedder::Haptics>);
-        let tester = WidgetTester::with_physical_size(
-            platform,
-            Size::new(size.width() * 2.0, size.height() * 2.0),
-        );
-        tester.install_platform_fonts();
-        (tester, feedback)
+        (WidgetTester::with_platform(platform), feedback)
     }
 
     const FAST_FEEDBACK_INTERVAL: Duration = Duration::from_millis(10);
@@ -6513,17 +6489,18 @@ pub(crate) mod tests {
 
     fn haptic_case(case: impl Fn(&mut WidgetTester, Offset, &FeedbackTester)) {
         for material_type in pickers() {
-            let (mut tester, feedback) = feedback_tester(material_dialog_default_size());
+            let (mut tester, feedback) = feedback_tester();
+            let tester = &mut tester;
             let result: PickerResult = Rc::default();
-            let center = start_picker(&mut tester, &result, StartPicker::new(material_type))
-                .expect("a dial");
-            case(&mut tester, center, &feedback);
+            let center =
+                start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
+            case(tester, center, &feedback);
         }
     }
 
     #[test]
     fn dial_haptic_feedback_tap_select_vibrates_once() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
                 tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1);
                 finish_picker(tester);
@@ -6534,10 +6511,10 @@ pub(crate) mod tests {
 
     #[test]
     fn dial_haptic_feedback_quick_successive_tap_selects_vibrate_once() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
                 tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1);
-                tester.pump(FAST_FEEDBACK_INTERVAL);
+                tester.pump_by(FAST_FEEDBACK_INTERVAL);
                 tester.tap(Offset::new(center.dx(), center.dy() + 50.0), 1);
                 finish_picker(tester);
                 assert_eq!(feedback.haptic_count(), 1);
@@ -6547,12 +6524,12 @@ pub(crate) mod tests {
 
     #[test]
     fn dial_haptic_feedback_slow_successive_tap_selects_vibrate_once_per_tap() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
                 tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1);
-                tester.pump(SLOW_FEEDBACK_INTERVAL);
+                tester.pump_by(SLOW_FEEDBACK_INTERVAL);
                 tester.tap(Offset::new(center.dx(), center.dy() + 50.0), 1);
-                tester.pump(SLOW_FEEDBACK_INTERVAL);
+                tester.pump_by(SLOW_FEEDBACK_INTERVAL);
                 tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1);
                 finish_picker(tester);
                 assert_eq!(feedback.haptic_count(), 3);
@@ -6562,7 +6539,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dial_haptic_feedback_drag_select_vibrates_once() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
                 let hour0 = Offset::new(center.dx(), center.dy() - 50.0);
                 let hour3 = Offset::new(center.dx() + 50.0, center.dy());
@@ -6575,16 +6552,16 @@ pub(crate) mod tests {
 
     #[test]
     fn dial_haptic_feedback_quick_drag_select_vibrates_once() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
                 let hour0 = Offset::new(center.dx(), center.dy() - 50.0);
                 let hour3 = Offset::new(center.dx() + 50.0, center.dy());
-                let mut gesture = WidgetTester::touch(1);
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, hour3);
                 tester.move_to(&mut gesture, hour0, true);
-                tester.pump(FAST_FEEDBACK_INTERVAL);
+                tester.pump_by(FAST_FEEDBACK_INTERVAL);
                 tester.move_to(&mut gesture, hour3, true);
-                tester.pump(FAST_FEEDBACK_INTERVAL);
+                tester.pump_by(FAST_FEEDBACK_INTERVAL);
                 tester.move_to(&mut gesture, hour0, true);
                 tester.up(&gesture);
                 finish_picker(tester);
@@ -6595,16 +6572,16 @@ pub(crate) mod tests {
 
     #[test]
     fn dial_haptic_feedback_slow_drag_select_vibrates_once() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
                 let hour0 = Offset::new(center.dx(), center.dy() - 50.0);
                 let hour3 = Offset::new(center.dx() + 50.0, center.dy());
-                let mut gesture = WidgetTester::touch(1);
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, hour3);
                 tester.move_to(&mut gesture, hour0, true);
-                tester.pump(SLOW_FEEDBACK_INTERVAL);
+                tester.pump_by(SLOW_FEEDBACK_INTERVAL);
                 tester.move_to(&mut gesture, hour3, true);
-                tester.pump(SLOW_FEEDBACK_INTERVAL);
+                tester.pump_by(SLOW_FEEDBACK_INTERVAL);
                 tester.move_to(&mut gesture, hour0, true);
                 tester.up(&gesture);
                 finish_picker(tester);
@@ -6620,7 +6597,7 @@ pub(crate) mod tests {
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");
         state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump(Duration::ZERO);
+        tester.pump();
         let length = text.encode_utf16().count() as i32;
         TextInputClient::update_editing_value(
             state,
@@ -6662,96 +6639,89 @@ pub(crate) mod tests {
 
     #[test]
     fn input_initial_entry_mode_is_used() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
-                media_query_boilerplate(&mut tester, size, input_boilerplate(material_type));
-                assert_eq!(text_field_count(&tester), 2);
-            }
-        });
+                media_query_boilerplate(tester, size, input_boilerplate(material_type));
+                assert_eq!(text_field_count(tester), 2);
+            });
+        }
     }
 
     #[test]
     fn input_initial_time_is_the_default() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
-                start_picker(&mut tester, &result, parameters);
-                finish_picker(&mut tester);
+                start_picker(tester, &result, parameters);
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(7, 0)));
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn input_help_text_is_used() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = input_boilerplate(material_type);
                 boilerplate.help_text = Some("help".to_string());
-                media_query_boilerplate(&mut tester, size, boilerplate);
-                only_text(&tester, "help");
-            }
-        });
+                media_query_boilerplate(tester, size, boilerplate);
+                only_text(tester, "help");
+            });
+        }
     }
 
     #[test]
     fn input_hour_label_text_is_used() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = input_boilerplate(material_type);
                 boilerplate.hour_label_text = Some("Custom hour label".to_string());
-                media_query_boilerplate(&mut tester, size, boilerplate);
-                only_text(&tester, "Custom hour label");
-            }
-        });
+                media_query_boilerplate(tester, size, boilerplate);
+                only_text(tester, "Custom hour label");
+            });
+        }
     }
 
     #[test]
     fn input_minute_label_text_is_used() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = input_boilerplate(material_type);
                 boilerplate.minute_label_text = Some("Custom minute label".to_string());
-                media_query_boilerplate(&mut tester, size, boilerplate);
-                only_text(&tester, "Custom minute label");
-            }
-        });
+                media_query_boilerplate(tester, size, boilerplate);
+                only_text(tester, "Custom minute label");
+            });
+        }
     }
 
     #[test]
     fn input_invalid_error_text_is_used() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = input_boilerplate(material_type);
                 boilerplate.error_invalid_text = Some("Custom validation error".to_string());
-                media_query_boilerplate(&mut tester, size, boilerplate);
+                media_query_boilerplate(tester, size, boilerplate);
                 // Input invalid time (hour) to force validation error
-                enter_text_at(&mut tester, 0, "88");
+                enter_text_at(tester, 0, "88");
                 // Tap the ok button to trigger the validation error with custom translation
-                tester.tap_text(OK_STRING);
+                tap_text(tester, OK_STRING);
                 tester.pump_and_settle_by(Duration::from_secs(1));
-                only_text(&tester, "Custom validation error");
-            }
-        });
+                only_text(tester, "Custom validation error");
+            });
+        }
     }
 
     #[test]
     fn time_picker_default_entry_icons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,
@@ -6759,24 +6729,20 @@ pub(crate) mod tests {
             ));
 
             // Check that the default icon for the dial mode is displayed.
-            assert!(has_icon(&tester, &crate::icons::Icons::keyboard_outlined()));
-            assert!(!has_icon(&tester, &crate::icons::Icons::access_time()));
+            assert!(has_icon(tester, &crate::icons::Icons::keyboard_outlined()));
+            assert!(!has_icon(tester, &crate::icons::Icons::access_time()));
             // Tap the icon to switch to input mode.
-            tap_icon(&mut tester, &crate::icons::Icons::keyboard_outlined());
+            tap_icon(tester, &crate::icons::Icons::keyboard_outlined());
             tester.pump_and_settle();
             // Check that the icon for the input mode is displayed.
-            assert!(has_icon(&tester, &crate::icons::Icons::access_time()));
-            assert!(!has_icon(
-                &tester,
-                &crate::icons::Icons::keyboard_outlined()
-            ));
+            assert!(has_icon(tester, &crate::icons::Icons::access_time()));
+            assert!(!has_icon(tester, &crate::icons::Icons::keyboard_outlined()));
         });
     }
 
     #[test]
     fn can_override_time_picker_entry_icons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let custom_input_icon = crate::icons::Icons::text_fields();
             let custom_timer_icon = crate::icons::Icons::watch();
@@ -6789,88 +6755,80 @@ pub(crate) mod tests {
             ));
 
             // Check that the custom icons are displayed.
-            assert!(has_icon(&tester, &custom_input_icon));
-            assert!(!has_icon(&tester, &custom_timer_icon));
+            assert!(has_icon(tester, &custom_input_icon));
+            assert!(!has_icon(tester, &custom_timer_icon));
             // Tap the custom icon to switch to input mode.
-            tap_icon(&mut tester, &custom_input_icon);
+            tap_icon(tester, &custom_input_icon);
             tester.pump_and_settle();
             // Check that the custom icon for the input mode is displayed.
-            assert!(!has_icon(&tester, &custom_input_icon));
-            assert!(has_icon(&tester, &custom_timer_icon));
+            assert!(!has_icon(tester, &custom_input_icon));
+            assert!(has_icon(tester, &custom_timer_icon));
         });
     }
 
     #[test]
     fn can_switch_from_input_to_dial_entry_mode() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
-                media_query_boilerplate(&mut tester, size, input_boilerplate(material_type));
-                tap_icon(&mut tester, &crate::icons::Icons::access_time());
+                media_query_boilerplate(tester, size, input_boilerplate(material_type));
+                tap_icon(tester, &crate::icons::Icons::access_time());
                 tester.pump_and_settle();
-                assert_eq!(text_field_count(&tester), 0);
-            }
-        });
+                assert_eq!(text_field_count(tester), 0);
+            });
+        }
     }
 
     #[test]
     fn can_switch_from_dial_to_input_entry_mode() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = Boilerplate::new(material_type);
                 boilerplate.always_use_24_hour_format = true;
-                media_query_boilerplate(&mut tester, size, boilerplate);
-                tap_icon(&mut tester, &crate::icons::Icons::keyboard_outlined());
+                media_query_boilerplate(tester, size, boilerplate);
+                tap_icon(tester, &crate::icons::Icons::keyboard_outlined());
                 tester.pump_and_settle();
-                assert!(text_field_count(&tester) > 0);
-            }
-        });
+                assert!(text_field_count(tester) > 0);
+            });
+        }
     }
 
     #[test]
     fn can_not_switch_out_of_input_only_mode() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = input_boilerplate(material_type);
                 boilerplate.entry_mode = TimePickerEntryMode::InputOnly;
-                media_query_boilerplate(&mut tester, size, boilerplate);
-                assert!(text_field_count(&tester) > 0);
-                assert!(!has_icon(&tester, &crate::icons::Icons::access_time()));
-            }
-        });
+                media_query_boilerplate(tester, size, boilerplate);
+                assert!(text_field_count(tester) > 0);
+                assert!(!has_icon(tester, &crate::icons::Icons::access_time()));
+            });
+        }
     }
 
     #[test]
     fn can_not_switch_out_of_dial_only_mode() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = Boilerplate::new(material_type);
                 boilerplate.always_use_24_hour_format = true;
                 boilerplate.entry_mode = TimePickerEntryMode::DialOnly;
-                media_query_boilerplate(&mut tester, size, boilerplate);
-                assert_eq!(text_field_count(&tester), 0);
-                assert!(!has_icon(
-                    &tester,
-                    &crate::icons::Icons::keyboard_outlined()
-                ));
-            }
-        });
+                media_query_boilerplate(tester, size, boilerplate);
+                assert_eq!(text_field_count(tester), 0);
+                assert!(!has_icon(tester, &crate::icons::Icons::keyboard_outlined()));
+            });
+        }
     }
 
     #[test]
     fn switching_to_dial_entry_mode_triggers_entry_callback() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let triggered_callback = Rc::new(Cell::new(false));
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = input_boilerplate(material_type);
                 boilerplate.on_entry_mode_change = Some({
                     let triggered_callback = Rc::clone(&triggered_callback);
@@ -6880,22 +6838,21 @@ pub(crate) mod tests {
                         }
                     })
                 });
-                media_query_boilerplate(&mut tester, size, boilerplate);
+                media_query_boilerplate(tester, size, boilerplate);
 
-                tap_icon(&mut tester, &crate::icons::Icons::access_time());
+                tap_icon(tester, &crate::icons::Icons::access_time());
                 tester.pump_and_settle();
                 assert!(triggered_callback.get());
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn switching_to_input_entry_mode_triggers_entry_callback() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let triggered_callback = Rc::new(Cell::new(false));
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
                 let mut boilerplate = Boilerplate::new(material_type);
                 boilerplate.always_use_24_hour_format = true;
                 boilerplate.on_entry_mode_change = Some({
@@ -6906,13 +6863,13 @@ pub(crate) mod tests {
                         }
                     })
                 });
-                media_query_boilerplate(&mut tester, size, boilerplate);
+                media_query_boilerplate(tester, size, boilerplate);
 
-                tap_icon(&mut tester, &crate::icons::Icons::keyboard_outlined());
+                tap_icon(tester, &crate::icons::Icons::keyboard_outlined());
                 tester.pump_and_settle();
                 assert!(triggered_callback.get());
-            }
-        });
+            });
+        }
     }
 
     /// Dart's `find.ancestor(of: find.text(text), matching: find.byType(InkWell))`.
@@ -6927,116 +6884,111 @@ pub(crate) mod tests {
 
     #[test]
     fn can_not_double_tap_hours_when_not_selected_to_enter_input_mode() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
-                media_query_boilerplate(&mut tester, size, Boilerplate::new(material_type));
-                let hour_finder = ink_well_of_text(&tester, "7");
-                let minute_finder = ink_well_of_text(&tester, "00");
+                media_query_boilerplate(tester, size, Boilerplate::new(material_type));
+                let hour_finder = ink_well_of_text(tester, "7");
+                let minute_finder = ink_well_of_text(tester, "00");
 
-                assert_eq!(text_field_count(&tester), 0);
+                assert_eq!(text_field_count(tester), 0);
 
                 // Switch to minutes mode.
-                tap_element(&mut tester, minute_finder);
+                tap_element(tester, minute_finder);
                 tester.pump_and_settle();
 
                 // Double tap the hour.
-                tap_element(&mut tester, hour_finder);
-                tester.pump(Duration::from_millis(100));
-                tap_element(&mut tester, hour_finder);
+                tap_element(tester, hour_finder);
+                tester.pump_by(Duration::from_millis(100));
+                tap_element(tester, hour_finder);
                 tester.pump_and_settle();
 
-                assert_eq!(text_field_count(&tester), 0);
-            }
-        });
+                assert_eq!(text_field_count(tester), 0);
+            });
+        }
     }
 
     #[test]
     fn can_not_double_tap_minutes_when_not_selected_to_enter_input_mode() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let size = material_dialog_default_size();
-                let mut tester = tester_of_size(size);
-                media_query_boilerplate(&mut tester, size, Boilerplate::new(material_type));
-                let minute_finder = ink_well_of_text(&tester, "00");
+                media_query_boilerplate(tester, size, Boilerplate::new(material_type));
+                let minute_finder = ink_well_of_text(tester, "00");
 
-                assert_eq!(text_field_count(&tester), 0);
+                assert_eq!(text_field_count(tester), 0);
 
                 // Double tap the minutes.
-                tap_element(&mut tester, minute_finder);
-                tester.pump(Duration::from_millis(100));
-                tap_element(&mut tester, minute_finder);
+                tap_element(tester, minute_finder);
+                tester.pump_by(Duration::from_millis(100));
+                tap_element(tester, minute_finder);
                 tester.pump_and_settle();
 
-                assert_eq!(text_field_count(&tester), 0);
-            }
-        });
+                assert_eq!(text_field_count(tester), 0);
+            });
+        }
     }
 
     #[test]
     fn input_entered_text_returns_time() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
-                start_picker(&mut tester, &result, parameters);
-                enter_text_at(&mut tester, 0, "9");
-                enter_text_at(&mut tester, 1, "12");
-                finish_picker(&mut tester);
+                start_picker(tester, &result, parameters);
+                enter_text_at(tester, 0, "9");
+                enter_text_at(tester, 1, "12");
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(9, 12)));
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn input_toggle_to_dial_mode_keeps_selected_time() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
-                start_picker(&mut tester, &result, parameters);
-                enter_text_at(&mut tester, 0, "8");
-                enter_text_at(&mut tester, 1, "15");
-                tap_icon(&mut tester, &crate::icons::Icons::access_time());
-                finish_picker(&mut tester);
+                start_picker(tester, &result, parameters);
+                enter_text_at(tester, 0, "8");
+                enter_text_at(tester, 1, "15");
+                tap_icon(tester, &crate::icons::Icons::access_time());
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(8, 15)));
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn input_invalid_text_prevents_dismissing() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
-                start_picker(&mut tester, &result, parameters);
+                start_picker(tester, &result, parameters);
 
                 // Invalid hour.
-                enter_text_at(&mut tester, 0, "88");
-                enter_text_at(&mut tester, 1, "15");
-                finish_picker(&mut tester);
+                enter_text_at(tester, 0, "88");
+                enter_text_at(tester, 1, "15");
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), None);
 
                 // Invalid minute.
-                enter_text_at(&mut tester, 0, "8");
-                enter_text_at(&mut tester, 1, "95");
-                finish_picker(&mut tester);
+                enter_text_at(tester, 0, "8");
+                enter_text_at(tester, 1, "95");
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), None);
 
-                enter_text_at(&mut tester, 0, "8");
-                enter_text_at(&mut tester, 1, "15");
-                finish_picker(&mut tester);
+                enter_text_at(tester, 0, "8");
+                enter_text_at(tester, 1, "15");
+                finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(8, 15)));
-            }
-        });
+            });
+        }
     }
 
     fn text_field_texts(tester: &WidgetTester) -> Vec<(String, Option<String>)> {
@@ -7063,70 +7015,67 @@ pub(crate) mod tests {
 
     #[test]
     fn empty_initial_input_fields_are_empty_and_show_correct_hints_when_true() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
                 parameters.empty_initial_input = true;
-                start_picker(&mut tester, &result, parameters);
-                tester.pump(Duration::ZERO);
+                start_picker(tester, &result, parameters);
+                tester.pump();
 
-                let fields = text_field_texts(&tester);
+                let fields = text_field_texts(tester);
                 assert_eq!(fields[0], (String::new(), None)); // hour
                 assert_eq!(fields[1], (String::new(), None)); // minute
-                finish_picker(&mut tester);
-            }
-        });
+                finish_picker(tester);
+            });
+        }
     }
 
     #[test]
     fn empty_initial_input_user_sets_hour_minute_after_initially_empty_fields() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
                 parameters.empty_initial_input = true;
-                start_picker(&mut tester, &result, parameters);
+                start_picker(tester, &result, parameters);
 
-                let fields = text_field_texts(&tester);
+                let fields = text_field_texts(tester);
                 assert_eq!(fields[0], (String::new(), None)); // hour
                 assert_eq!(fields[1], (String::new(), None)); // minute
 
-                enter_text_at(&mut tester, 0, "11");
-                enter_text_at(&mut tester, 1, "30");
-                finish_picker(&mut tester);
+                enter_text_at(tester, 0, "11");
+                enter_text_at(tester, 1, "30");
+                finish_picker(tester);
 
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(11, 30)));
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn empty_initial_input_user_overrides_default_values_when_false() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
-                start_picker(&mut tester, &result, parameters);
+                start_picker(tester, &result, parameters);
 
-                let fields = text_field_texts(&tester);
+                let fields = text_field_texts(tester);
                 assert_eq!(fields[0].0, "7"); // hour
                 assert_eq!(fields[1].0, "00"); // minute
 
-                enter_text_at(&mut tester, 0, "8");
-                enter_text_at(&mut tester, 1, "15");
-                tester.pump(Duration::ZERO);
-                finish_picker(&mut tester);
+                enter_text_at(tester, 0, "8");
+                enter_text_at(tester, 1, "15");
+                tester.pump();
+                finish_picker(tester);
 
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(8, 15)));
-            }
-        });
+            });
+        }
     }
 
     fn separator_style(tester: &WidgetTester) -> TextStyle {
@@ -7138,17 +7087,12 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_time_selector_separator_default_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             let result: PickerResult = Rc::default();
-            start_picker(
-                &mut tester,
-                &result,
-                StartPicker::new(MaterialType::Material3),
-            );
+            start_picker(tester, &result, StartPicker::new(MaterialType::Material3));
 
-            let style = separator_style(&tester);
+            let style = separator_style(tester);
             assert_eq!(
                 style.color.map(|color| color.color()),
                 Some(theme.color_scheme.on_surface)
@@ -7159,17 +7103,12 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_time_selector_separator_default_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let theme = m2(&tester.cell.borrow());
             let result: PickerResult = Rc::default();
-            start_picker(
-                &mut tester,
-                &result,
-                StartPicker::new(MaterialType::Material2),
-            );
+            start_picker(tester, &result, StartPicker::new(MaterialType::Material2));
 
-            let style = separator_style(&tester);
+            let style = separator_style(tester);
             assert_eq!(
                 style.color.map(|color| color.color()),
                 Some(theme.color_scheme.on_surface)
@@ -7186,32 +7125,30 @@ pub(crate) mod tests {
 
     #[test]
     fn time_picker_hour_minute_does_not_resize_on_error() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Dart's cases give no `materialType`, which `startPicker` takes as Material 2, and
             // the explicit Material 2 one.
             {
                 let material_type = MaterialType::Material2;
-                let mut tester = tester_of_size(material_dialog_default_size());
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
-                start_picker(&mut tester, &result, parameters);
+                start_picker(tester, &result, parameters);
 
-                assert_eq!(border_painter_size(&tester), Size::new(96.0, 70.0));
+                assert_eq!(border_painter_size(tester), Size::new(96.0, 70.0));
 
                 // Enter invalid hour.
-                enter_text_at(&mut tester, 0, "AB");
-                tester.tap_text(OK_STRING);
+                enter_text_at(tester, 0, "AB");
+                tap_text(tester, OK_STRING);
 
-                assert_eq!(border_painter_size(&tester), Size::new(96.0, 70.0));
+                assert_eq!(border_painter_size(tester), Size::new(96.0, 70.0));
             }
         });
     }
 
     #[test]
     fn time_picker_dialog_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,
@@ -7225,7 +7162,7 @@ pub(crate) mod tests {
                     .into_widget(),
             ));
             let dialog = tester.find_by_type::<TimePickerDialog>()[0];
-            assert_eq!(size_of(&tester, dialog), Size::ZERO);
+            assert_eq!(size_of(tester, dialog), Size::ZERO);
         });
     }
 
@@ -7256,28 +7193,27 @@ pub(crate) mod tests {
             )
             .into_widget();
         tester.pump_widget(material_app(theme, home));
-        tester.tap_text("X");
+        tap_text(tester, "X");
         tester.pump_and_settle();
     }
 
     #[test]
     #[allow(deprecated)]
     fn material3_dial_background_uses_correct_default_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(material_dialog_default_size());
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
 
-            open_default_picker(&mut tester, theme.clone());
+            open_default_picker(tester, theme.clone());
             // Test default dial background color.
             assert!(dial_paints_circles(
-                &tester,
+                tester,
                 &[
                     theme.color_scheme.surface_container_highest(),
                     theme.color_scheme.primary
                 ]
             ));
 
-            tester.tap_text(OK_STRING); // dismiss the dialog
+            tap_text(tester, OK_STRING); // dismiss the dialog
             tester.pump_and_settle();
 
             // Test dial background color when theme color scheme is changed.
@@ -7290,9 +7226,9 @@ pub(crate) mod tests {
                         .with_surface_variant(waft_embedder::Color::new(0xffff0000)),
                 )
                 .build();
-            open_default_picker(&mut tester, theme.clone());
+            open_default_picker(tester, theme.clone());
             assert!(dial_paints_circles(
-                &tester,
+                tester,
                 &[
                     theme.color_scheme.surface_container_highest(),
                     theme.color_scheme.primary
@@ -7325,8 +7261,10 @@ pub(crate) mod tests {
     }
 
     /// The pickers the root and the nested navigator's observers saw.
-    fn pickers_seen_by_root_and_nested(use_root_navigator: bool) -> (u32, u32) {
-        let mut tester = tester_of_size(material_dialog_default_size());
+    fn pickers_seen_by_root_and_nested(
+        tester: &mut WidgetTester,
+        use_root_navigator: bool,
+    ) -> (u32, u32) {
         let (root_observer, nested_observer) = {
             let mut app = tester.cell.borrow_mut();
             (
@@ -7386,7 +7324,7 @@ pub(crate) mod tests {
 
         // Open the dialog.
         let button = tester.find_by_type::<crate::elevated_button::ElevatedButton>()[0];
-        let center = center_of(&tester, button);
+        let center = center_of(tester, button);
         tester.tap(center, 1);
 
         let app = tester.cell.borrow();
@@ -7398,15 +7336,15 @@ pub(crate) mod tests {
 
     #[test]
     fn time_picker_uses_root_navigator_by_default() {
-        with_main_thread_stack(|| {
-            assert_eq!(pickers_seen_by_root_and_nested(true), (1, 0));
+        test_widgets(|tester| {
+            assert_eq!(pickers_seen_by_root_and_nested(tester, true), (1, 0));
         });
     }
 
     #[test]
     fn time_picker_uses_nested_navigator_if_use_root_navigator_is_false() {
-        with_main_thread_stack(|| {
-            assert_eq!(pickers_seen_by_root_and_nested(false), (0, 1));
+        test_widgets(|tester| {
+            assert_eq!(pickers_seen_by_root_and_nested(tester, false), (0, 1));
         });
     }
 
@@ -7434,36 +7372,37 @@ pub(crate) mod tests {
     // 'header touch regions are large enough'.
     #[test]
     fn header_touch_regions_are_large_enough() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|_| {
                 // Ensure picker is displayed in portrait mode.
                 let size = Size::new(400.0, 800.0);
                 let mut tester = tester_of_size(size);
-                media_query_boilerplate(&mut tester, size, Boilerplate::new(material_type));
+                let tester = &mut tester;
+                media_query_boilerplate(tester, size, Boilerplate::new(material_type));
 
                 let day_period_control_size =
-                    size_of(&tester, tester.find_by_type::<DayPeriodControl>()[0]);
+                    size_of(tester, tester.find_by_type::<DayPeriodControl>()[0]);
                 assert!(day_period_control_size.width() >= 48.0, "{material_type:?}");
                 assert!(
                     day_period_control_size.height() >= 80.0,
                     "{material_type:?}"
                 );
 
-                let hour_size = size_of(&tester, ink_well_above_text(&tester, "7"));
+                let hour_size = size_of(tester, ink_well_above_text(tester, "7"));
                 assert!(hour_size.width() >= 48.0, "{material_type:?}");
                 assert!(hour_size.height() >= 48.0, "{material_type:?}");
 
-                let minute_size = size_of(&tester, ink_well_above_text(&tester, "00"));
+                let minute_size = size_of(tester, ink_well_above_text(tester, "00"));
                 assert!(minute_size.width() >= 48.0, "{material_type:?}");
                 assert!(minute_size.height() >= 48.0, "{material_type:?}");
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn time_picker_draws_without_overflows_at_various_view_sizes() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
+        for material_type in pickers() {
+            test_widgets(|_| {
                 for size in [
                     Size::new(100.0, 100.0),
                     Size::new(300.0, 300.0),
@@ -7476,10 +7415,15 @@ pub(crate) mod tests {
                         if entry_mode == TimePickerEntryMode::Input && size.height() < 216.0 {
                             continue;
                         }
+                        // Dart sets `physicalSize = size` at flutter_test's device pixel ratio,
+                        // a view of size / 3 logical pixels, whose layout asserts (hidden by
+                        // `isNot(throwsAssertionError)`, which always holds) panic here: the
+                        // sizes are the logical ones.
                         let mut tester = tester_of_size(size);
+                        let tester = &mut tester;
                         let mut boilerplate = Boilerplate::new(material_type);
                         boilerplate.entry_mode = entry_mode;
-                        media_query_boilerplate(&mut tester, size, boilerplate);
+                        media_query_boilerplate(tester, size, boilerplate);
                         tester.pump_and_settle();
                         assert_eq!(
                             tester.find_by_type::<TimePickerDialog>().len(),
@@ -7488,43 +7432,39 @@ pub(crate) mod tests {
                         );
                     }
                 }
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn hour_and_minute_fields_are_top_aligned_with_the_separator() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
-                start_picker(&mut tester, &result, parameters);
+                start_picker(tester, &result, parameters);
 
                 let top = |element: AnyElement| {
-                    crate::chip::tests::rect_of(&tester, element)
-                        .top_left()
-                        .dy()
+                    crate::chip::tests::rect_of(tester, element).top_left().dy()
                 };
                 let hour_field_top = top(tester.find_by_type::<HourTextField>()[0]);
                 let minute_field_top = top(tester.find_by_type::<MinuteTextField>()[0]);
                 let separator_top = top(tester.find_by_type::<TimeSelectorSeparator>()[0]);
                 assert_eq!(hour_field_top, separator_top, "{material_type:?}");
                 assert_eq!(minute_field_top, separator_top, "{material_type:?}");
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn can_switch_between_hour_minute_fields_using_keyboard_input_action() {
-        with_main_thread_stack(|| {
-            for material_type in pickers() {
-                let mut tester = tester_of_size(material_dialog_default_size());
+        for material_type in pickers() {
+            test_widgets(|tester| {
                 let result: PickerResult = Rc::default();
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
-                start_picker(&mut tester, &result, parameters);
+                start_picker(tester, &result, parameters);
 
                 let field = |tester: &WidgetTester, index: usize| {
                     tester.widget(
@@ -7536,19 +7476,19 @@ pub(crate) mod tests {
                     let node = field(tester, index).focus_node.expect("a focus node");
                     node.has_focus(&mut tester.cell.borrow_mut())
                 };
-                let last = text_field_count(&tester) - 1;
+                let last = text_field_count(tester) - 1;
 
                 let hour = tester.find_by_type::<crate::text_field::TextField>()[0];
-                let center = center_of(&tester, hour);
+                let center = center_of(tester, hour);
                 tester.tap(center, 1);
-                assert!(has_focus(&tester, 0), "{material_type:?}");
+                assert!(has_focus(tester, 0), "{material_type:?}");
 
-                enter_text_at(&mut tester, 0, "08");
-                assert!(!has_focus(&tester, 0), "{material_type:?}");
-                assert!(has_focus(&tester, last), "{material_type:?}");
+                enter_text_at(tester, 0, "08");
+                assert!(!has_focus(tester, 0), "{material_type:?}");
+                assert!(has_focus(tester, last), "{material_type:?}");
 
                 assert_eq!(
-                    field(&tester, last).text_input_action,
+                    field(tester, last).text_input_action,
                     Some(waft_services::TextInputAction::Done)
                 );
                 let minute_editable = tester.find_by_type::<EditableText>()[last];
@@ -7561,9 +7501,9 @@ pub(crate) mod tests {
                     waft_services::TextInputAction::Done,
                 );
                 tester.cell.checkpoint();
-                assert!(!has_focus(&tester, 0), "{material_type:?}");
-                assert!(!has_focus(&tester, last), "{material_type:?}");
-            }
-        });
+                assert!(!has_focus(tester, 0), "{material_type:?}");
+                assert!(!has_focus(tester, last), "{material_type:?}");
+            });
+        }
     }
 }

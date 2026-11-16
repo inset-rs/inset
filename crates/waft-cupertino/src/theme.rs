@@ -754,16 +754,16 @@ mod tests {
     use waft_embedder::Color;
     use waft_widgets::{Builder, SizedBox};
 
-    use super::*;
-    use crate::test_support::build;
+    use waft_widgets::testing::{WidgetTester, test_widgets};
 
-    /// Builds `wrap(probe)` and returns what `read` saw at the probe's context.
+    use super::*;
+
+    /// Pumps `wrap(probe)` and returns what `read` saw at the probe's context.
     fn probe<T: 'static>(
+        tester: &mut WidgetTester,
         wrap: impl FnOnce(WidgetRef) -> WidgetRef,
         read: impl Fn(&mut App, BuildContext) -> T + 'static,
     ) -> T {
-        let cell = crate::test_support::test_cell();
-        let app = cell.borrow();
         let seen = Rc::new(RefCell::new(None));
         let probe = Builder::new({
             let seen = Rc::clone(&seen);
@@ -773,8 +773,7 @@ mod tests {
             }
         })
         .into_widget();
-        drop(app);
-        build(&cell, wrap(probe));
+        tester.pump_widget(wrap(probe));
         let value = seen.borrow_mut().take();
         value.expect("the probe built")
     }
@@ -791,79 +790,87 @@ mod tests {
 
     #[test]
     fn without_a_theme_of_returns_the_resolved_defaults() {
-        let data = probe(|child| child, CupertinoTheme::of);
-        assert_eq!(data.primary_color(), CupertinoColors::SYSTEM_BLUE);
-        assert_eq!(
-            data.primary_color().color(),
-            dynamic(&CupertinoColors::SYSTEM_BLUE).color
-        );
-        assert_eq!(data.brightness(), None);
-        assert!(!data.apply_theme_to_all());
-        assert_eq!(
-            data.text_theme().action_text_style().color,
-            Some(data.primary_color())
-        );
+        test_widgets(|tester| {
+            let data = probe(tester, |child| child, CupertinoTheme::of);
+            assert_eq!(data.primary_color(), CupertinoColors::SYSTEM_BLUE);
+            assert_eq!(
+                data.primary_color().color(),
+                dynamic(&CupertinoColors::SYSTEM_BLUE).color
+            );
+            assert_eq!(data.brightness(), None);
+            assert!(!data.apply_theme_to_all());
+            assert_eq!(
+                data.text_theme().action_text_style().color,
+                Some(data.primary_color())
+            );
+        });
     }
 
     #[test]
     fn a_dark_theme_resolves_its_colors_to_the_dark_variants() {
-        let dark = CupertinoThemeData::new().with_brightness(Brightness::Dark);
-        let (brightness, data) = probe(themed(dark), |app, context| {
-            (
-                CupertinoTheme::brightness_of(app, context),
-                CupertinoTheme::of(app, context),
-            )
+        test_widgets(|tester| {
+            let dark = CupertinoThemeData::new().with_brightness(Brightness::Dark);
+            let (brightness, data) = probe(tester, themed(dark), |app, context| {
+                (
+                    CupertinoTheme::brightness_of(app, context),
+                    CupertinoTheme::of(app, context),
+                )
+            });
+            assert_eq!(brightness, Brightness::Dark);
+            assert_eq!(
+                data.primary_color().color(),
+                dynamic(&CupertinoColors::SYSTEM_BLUE).dark_color
+            );
+            assert_eq!(
+                data.scaffold_background_color().color(),
+                dynamic(&CupertinoColors::SYSTEM_BACKGROUND).dark_color
+            );
+            assert_eq!(
+                data.text_theme()
+                    .text_style()
+                    .color
+                    .map(|color| color.color()),
+                Some(dynamic(&CupertinoColors::LABEL).dark_color)
+            );
         });
-        assert_eq!(brightness, Brightness::Dark);
-        assert_eq!(
-            data.primary_color().color(),
-            dynamic(&CupertinoColors::SYSTEM_BLUE).dark_color
-        );
-        assert_eq!(
-            data.scaffold_background_color().color(),
-            dynamic(&CupertinoColors::SYSTEM_BACKGROUND).dark_color
-        );
-        assert_eq!(
-            data.text_theme()
-                .text_style()
-                .color
-                .map(|color| color.color()),
-            Some(dynamic(&CupertinoColors::LABEL).dark_color)
-        );
     }
 
     #[test]
     fn a_primary_color_cascades_into_the_text_theme_and_the_icon_theme() {
-        let red = Color::from_argb(255, 255, 0, 0);
-        let themed = themed(CupertinoThemeData::new().with_primary_color(red));
-        let (data, icon_color) = probe(themed, |app, context| {
-            (
-                CupertinoTheme::of(app, context),
-                waft_widgets::IconTheme::of(app, context).color,
-            )
+        test_widgets(|tester| {
+            let red = Color::from_argb(255, 255, 0, 0);
+            let themed = themed(CupertinoThemeData::new().with_primary_color(red));
+            let (data, icon_color) = probe(tester, themed, |app, context| {
+                (
+                    CupertinoTheme::of(app, context),
+                    waft_widgets::IconTheme::of(app, context).color,
+                )
+            });
+            assert_eq!(data.primary_color(), AnyColor::new(red));
+            assert_eq!(
+                data.text_theme().action_text_style().color,
+                Some(AnyColor::new(red))
+            );
+            assert_eq!(
+                data.text_theme().nav_action_text_style().color,
+                Some(AnyColor::new(red))
+            );
+            assert_eq!(icon_color, Some(AnyColor::new(red)));
         });
-        assert_eq!(data.primary_color(), AnyColor::new(red));
-        assert_eq!(
-            data.text_theme().action_text_style().color,
-            Some(AnyColor::new(red))
-        );
-        assert_eq!(
-            data.text_theme().nav_action_text_style().color,
-            Some(AnyColor::new(red))
-        );
-        assert_eq!(icon_color, Some(AnyColor::new(red)));
     }
 
     #[test]
     fn the_implied_icon_theme_resolves_a_dynamic_primary_color() {
-        let dark = CupertinoThemeData::new().with_brightness(Brightness::Dark);
-        let icon_color = probe(themed(dark), |app, context| {
-            waft_widgets::IconTheme::of(app, context).color
+        test_widgets(|tester| {
+            let dark = CupertinoThemeData::new().with_brightness(Brightness::Dark);
+            let icon_color = probe(tester, themed(dark), |app, context| {
+                waft_widgets::IconTheme::of(app, context).color
+            });
+            assert_eq!(
+                icon_color.map(|color| color.color()),
+                Some(dynamic(&CupertinoColors::SYSTEM_BLUE).dark_color)
+            );
         });
-        assert_eq!(
-            icon_color.map(|color| color.color()),
-            Some(dynamic(&CupertinoColors::SYSTEM_BLUE).dark_color)
-        );
     }
 
     #[test]
@@ -977,16 +984,18 @@ mod tests {
 
     #[test]
     fn of_resolves_a_subclass_through_its_resolve_from() {
-        let data = RedPrimaryCupertinoThemeData::new(NoDefaultCupertinoThemeData::new());
-        let dark = data.copy_with().with_brightness(Brightness::Dark);
-        let resolved = probe(themed(dark.clone()), CupertinoTheme::of);
-        assert_eq!(resolved.primary_color(), CupertinoColors::SYSTEM_RED);
-        // The subclass's `resolve_from` resolves only what was specified, not the defaults.
-        assert_eq!(
-            resolved.bar_background_color(),
-            CupertinoThemeData::new().bar_background_color()
-        );
-        assert_eq!(resolved, dark);
+        test_widgets(|tester| {
+            let data = RedPrimaryCupertinoThemeData::new(NoDefaultCupertinoThemeData::new());
+            let dark = data.copy_with().with_brightness(Brightness::Dark);
+            let resolved = probe(tester, themed(dark.clone()), CupertinoTheme::of);
+            assert_eq!(resolved.primary_color(), CupertinoColors::SYSTEM_RED);
+            // The subclass's `resolve_from` resolves only what was specified, not the defaults.
+            assert_eq!(
+                resolved.bar_background_color(),
+                CupertinoThemeData::new().bar_background_color()
+            );
+            assert_eq!(resolved, dark);
+        });
     }
 
     #[test]

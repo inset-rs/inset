@@ -228,12 +228,13 @@ mod tests {
     use waft_painting::{BorderRadius, BorderRadiusGeometry};
     use waft_widgets::DecoratedBox;
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
-    use crate::divider::tests::{assert_all_corners, border, border_radius, rect_of, tester};
+    use crate::divider::tests::{assert_all_corners, border, border_radius, rect_of};
     use crate::divider::{Divider, VerticalDivider};
     use crate::scaffold::Scaffold;
-    use crate::test_support::with_main_thread_stack;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3, pump_app};
 
@@ -266,7 +267,7 @@ mod tests {
     }
 
     fn pump_with_theme<K>(
-        tester: &mut crate::test_support::WidgetTester,
+        tester: &mut WidgetTester,
         theme: impl FnOnce(&App) -> ThemeData,
         child: impl IntoWidget<K>,
     ) {
@@ -298,18 +299,17 @@ mod tests {
 
     #[test]
     fn material3_horizontal_divider_passing_no_divider_theme_data_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
-            pump_app(&mut tester, m3, |_app| body(Divider::new()));
+            pump_app(tester, m3, |_app| body(Divider::new()));
 
-            assert_eq!(rect_of::<Divider>(&tester).height(), 16.0);
-            let border = border(&tester);
+            assert_eq!(rect_of::<Divider>(tester).height(), 16.0);
+            let border = border(tester);
             assert_eq!(border.bottom.width, 1.0);
             assert_eq!(border.bottom.color, theme.color_scheme.outline_variant());
 
-            let divider_rect = rect_of::<Divider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<Divider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.left, divider_rect.left);
             assert_eq!(line_rect.right, divider_rect.right);
         });
@@ -317,24 +317,23 @@ mod tests {
 
     #[test]
     fn material3_horizontal_divider_uses_values_from_divider_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let divider_theme = divider_theme();
-            pump_with_theme(&mut tester, themed(divider_theme.clone()), Divider::new());
+            pump_with_theme(tester, themed(divider_theme.clone()), Divider::new());
 
             assert_eq!(
-                rect_of::<Divider>(&tester).height(),
+                rect_of::<Divider>(tester).height(),
                 divider_theme.space.expect("a space")
             );
-            let border = border(&tester);
+            let border = border(tester);
             assert_eq!(
                 border.bottom.width,
                 divider_theme.thickness.expect("a thickness")
             );
             assert_eq!(border.bottom.color, divider_theme.color.expect("a color"));
 
-            let divider_rect = rect_of::<Divider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<Divider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(
                 line_rect.left,
                 divider_rect.left + divider_theme.indent.expect("an indent")
@@ -343,20 +342,19 @@ mod tests {
                 line_rect.right,
                 divider_rect.right - divider_theme.end_indent.expect("an end indent")
             );
-            assert_theme_radii(border_radius(&tester));
+            assert_theme_radii(border_radius(tester));
         });
     }
 
     #[test]
     fn material3_horizontal_divider_divider_theme_overrides_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let divider_theme = divider_theme();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 body(DividerTheme::new(divider_theme.clone(), Divider::new()))
             });
 
-            let border = border(&tester);
+            let border = border(tester);
             assert_eq!(
                 border.bottom.width,
                 divider_theme.thickness.expect("a thickness")
@@ -367,12 +365,11 @@ mod tests {
 
     #[test]
     fn material3_horizontal_divider_widget_properties_take_priority_over_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = Colors::PURPLE.primary();
             let (height, thickness, indent, end_indent) = (10.0, 5.0, 8.0, 9.0);
-            let mut tester = tester();
             pump_with_theme(
-                &mut tester,
+                tester,
                 themed(divider_theme()),
                 Divider::new()
                     .color(color)
@@ -383,33 +380,32 @@ mod tests {
                     .radius(BorderRadiusGeometry::all(Radius::circular(5.0))),
             );
 
-            assert_eq!(rect_of::<Divider>(&tester).height(), height);
-            let border = border(&tester);
+            assert_eq!(rect_of::<Divider>(tester).height(), height);
+            let border = border(tester);
             assert_eq!(border.bottom.width, thickness);
             assert_eq!(border.bottom.color, color);
 
-            let divider_rect = rect_of::<Divider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<Divider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.left, divider_rect.left + indent);
             assert_eq!(line_rect.right, divider_rect.right - end_indent);
-            assert_all_corners(border_radius(&tester), 5.0);
+            assert_all_corners(border_radius(tester), 5.0);
         });
     }
 
     #[test]
     fn material3_vertical_divider_passing_no_divider_theme_data_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
-            pump_app(&mut tester, m3, |_app| body(VerticalDivider::new()));
+            pump_app(tester, m3, |_app| body(VerticalDivider::new()));
 
-            assert_eq!(rect_of::<VerticalDivider>(&tester).width(), 16.0);
-            let border = border(&tester);
+            assert_eq!(rect_of::<VerticalDivider>(tester).width(), 16.0);
+            let border = border(tester);
             assert_eq!(border.left.width, 1.0);
             assert_eq!(border.left.color, theme.color_scheme.outline_variant());
 
-            let divider_rect = rect_of::<VerticalDivider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<VerticalDivider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.top, divider_rect.top);
             assert_eq!(line_rect.bottom, divider_rect.bottom);
         });
@@ -417,28 +413,27 @@ mod tests {
 
     #[test]
     fn material3_vertical_divider_uses_values_from_divider_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let divider_theme = divider_theme();
             pump_with_theme(
-                &mut tester,
+                tester,
                 themed(divider_theme.clone()),
                 VerticalDivider::new(),
             );
 
             assert_eq!(
-                rect_of::<VerticalDivider>(&tester).width(),
+                rect_of::<VerticalDivider>(tester).width(),
                 divider_theme.space.expect("a space")
             );
-            let border = border(&tester);
+            let border = border(tester);
             assert_eq!(
                 border.left.width,
                 divider_theme.thickness.expect("a thickness")
             );
             assert_eq!(border.left.color, divider_theme.color.expect("a color"));
 
-            let divider_rect = rect_of::<VerticalDivider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<VerticalDivider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(
                 line_rect.top,
                 divider_rect.top + divider_theme.indent.expect("an indent")
@@ -447,23 +442,22 @@ mod tests {
                 line_rect.bottom,
                 divider_rect.bottom - divider_theme.end_indent.expect("an end indent")
             );
-            assert_theme_radii(border_radius(&tester));
+            assert_theme_radii(border_radius(tester));
         });
     }
 
     #[test]
     fn material3_vertical_divider_divider_theme_overrides_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let divider_theme = divider_theme();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 body(DividerTheme::new(
                     divider_theme.clone(),
                     VerticalDivider::new(),
                 ))
             });
 
-            let border = border(&tester);
+            let border = border(tester);
             assert_eq!(
                 border.left.width,
                 divider_theme.thickness.expect("a thickness")
@@ -474,12 +468,11 @@ mod tests {
 
     #[test]
     fn material3_vertical_divider_widget_properties_take_priority_over_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = Colors::PURPLE.primary();
             let (width, thickness, indent, end_indent) = (10.0, 5.0, 8.0, 9.0);
-            let mut tester = tester();
             pump_with_theme(
-                &mut tester,
+                tester,
                 themed(divider_theme()),
                 VerticalDivider::new()
                     .color(color)
@@ -490,35 +483,34 @@ mod tests {
                     .radius(BorderRadiusGeometry::all(Radius::circular(5.0))),
             );
 
-            assert_eq!(rect_of::<VerticalDivider>(&tester).width(), width);
-            let border = border(&tester);
+            assert_eq!(rect_of::<VerticalDivider>(tester).width(), width);
+            let border = border(tester);
             assert_eq!(border.left.width, thickness);
             assert_eq!(border.left.color, color);
 
-            let divider_rect = rect_of::<VerticalDivider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<VerticalDivider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.top, divider_rect.top + indent);
             assert_eq!(line_rect.bottom, divider_rect.bottom - end_indent);
-            assert_all_corners(border_radius(&tester), 5.0);
+            assert_all_corners(border_radius(tester), 5.0);
         });
     }
 
     #[test]
     fn material2_horizontal_divider_passing_no_divider_theme_data_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .build(&tester.cell.borrow());
-            pump_app(&mut tester, m2, |_app| body(Divider::new()));
+            pump_app(tester, m2, |_app| body(Divider::new()));
 
-            assert_eq!(rect_of::<Divider>(&tester).height(), 16.0);
-            let border = border(&tester);
+            assert_eq!(rect_of::<Divider>(tester).height(), 16.0);
+            let border = border(tester);
             assert_eq!(border.bottom.width, 0.0);
             assert_eq!(border.bottom.color, theme.divider_color);
 
-            let divider_rect = rect_of::<Divider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<Divider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.left, divider_rect.left);
             assert_eq!(line_rect.right, divider_rect.right);
         });
@@ -526,36 +518,34 @@ mod tests {
 
     #[test]
     fn material2_horizontal_divider_divider_theme_overrides_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = divider_theme();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 body(DividerTheme::new(theme.clone(), Divider::new()))
             });
 
-            let border = border(&tester);
+            let border = border(tester);
             assert_eq!(border.bottom.width, theme.thickness.expect("a thickness"));
             assert_eq!(border.bottom.color, theme.color.expect("a color"));
-            assert_theme_radii(border_radius(&tester));
+            assert_theme_radii(border_radius(tester));
         });
     }
 
     #[test]
     fn material2_vertical_divider_passing_no_divider_theme_data_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .build(&tester.cell.borrow());
-            pump_app(&mut tester, m2, |_app| body(VerticalDivider::new()));
+            pump_app(tester, m2, |_app| body(VerticalDivider::new()));
 
-            assert_eq!(rect_of::<VerticalDivider>(&tester).width(), 16.0);
-            let border = border(&tester);
+            assert_eq!(rect_of::<VerticalDivider>(tester).width(), 16.0);
+            let border = border(tester);
             assert_eq!(border.left.width, 0.0);
             assert_eq!(border.left.color, theme.divider_color);
 
-            let divider_rect = rect_of::<VerticalDivider>(&tester);
-            let line_rect = rect_of::<DecoratedBox>(&tester);
+            let divider_rect = rect_of::<VerticalDivider>(tester);
+            let line_rect = rect_of::<DecoratedBox>(tester);
             assert_eq!(line_rect.top, divider_rect.top);
             assert_eq!(line_rect.bottom, divider_rect.bottom);
         });

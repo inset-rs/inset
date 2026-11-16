@@ -572,15 +572,14 @@ mod tests {
     use waft_services::TextInputClient;
     use waft_widgets::{EditableText, EditableTextState, FocusNode, Form, FormState, GlobalKey};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::chip::tests::tester;
     use crate::date::{CalendarDelegate, GregorianCalendarDelegate};
     use crate::input_decorator::InputDecorationThemeData;
     use crate::material::Material;
     use crate::material_localizations::MaterialLocalizations;
-    use crate::test_support::{
-        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintInspection, material_app};
     use crate::text_field::TextField;
     use crate::theme_data::ThemeData;
 
@@ -673,7 +672,7 @@ mod tests {
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");
         state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump(std::time::Duration::ZERO);
+        tester.pump();
         let length = text.encode_utf16().count() as i32;
         TextInputClient::update_editing_value(
             state,
@@ -716,13 +715,12 @@ mod tests {
 
     #[test]
     fn initial_date_is_the_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let initial_date = DateTime::utc(2016, 2, 21);
             let (input_date, on_date_saved) = saved();
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     initial_date: Some(initial_date),
                     on_date_saved: Some(on_date_saved),
@@ -730,45 +728,43 @@ mod tests {
                     ..FieldOptions::default()
                 },
             );
-            assert_eq!(controller_text(&tester), "02/21/2016");
-            form_save(&mut tester, &form_key);
+            assert_eq!(controller_text(tester), "02/21/2016");
+            form_save(tester, &form_key);
             assert_eq!(input_date.get(), Some(initial_date));
         });
     }
 
     #[test]
     fn changing_initial_date_is_reflected_in_text_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     initial_date: Some(DateTime::utc(2016, 2, 21)),
                     ..FieldOptions::default()
                 },
             );
-            assert_eq!(controller_text(&tester), "02/21/2016");
+            assert_eq!(controller_text(tester), "02/21/2016");
 
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     initial_date: Some(DateTime::utc(2016, 2, 23)),
                     ..FieldOptions::default()
                 },
             );
             tester.pump_and_settle();
-            assert_eq!(controller_text(&tester), "02/23/2016");
+            assert_eq!(controller_text(tester), "02/23/2016");
         });
     }
 
     #[test]
     fn valid_date_entry() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let (input_date, on_date_saved) = saved();
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     on_date_saved: Some(on_date_saved),
                     form_key: Some(form_key.clone()),
@@ -776,20 +772,19 @@ mod tests {
                 },
             );
 
-            set_controller_text(&mut tester, "02/21/2016");
-            form_save(&mut tester, &form_key);
+            set_controller_text(tester, "02/21/2016");
+            form_save(tester, &form_key);
             assert_eq!(input_date.get(), Some(DateTime::utc(2016, 2, 21)));
         });
     }
 
     #[test]
     fn invalid_text_entry_shows_error_format_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let (input_date, on_date_saved) = saved();
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     on_date_saved: Some(Rc::clone(&on_date_saved)),
                     form_key: Some(form_key.clone()),
@@ -797,16 +792,16 @@ mod tests {
                 },
             );
             // Default errorFormat text
-            assert!(!has_text(&tester, "Invalid format."));
-            enter_text(&mut tester, "foobar");
-            assert!(!form_validate(&mut tester, &form_key));
+            assert!(!has_text(tester, "Invalid format."));
+            enter_text(tester, "foobar");
+            assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
             assert_eq!(tester.find_text("Invalid format.").len(), 1);
 
             // Change to a custom errorFormat text
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     on_date_saved: Some(on_date_saved),
                     error_format_text: Some("That is not a date.".to_owned()),
@@ -814,21 +809,20 @@ mod tests {
                     ..FieldOptions::default()
                 },
             );
-            assert!(!form_validate(&mut tester, &form_key));
+            assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
-            assert!(!has_text(&tester, "Invalid format."));
+            assert!(!has_text(tester, "Invalid format."));
             assert_eq!(tester.find_text("That is not a date.").len(), 1);
         });
     }
 
     #[test]
     fn valid_text_entry_but_date_outside_first_or_last_date_shows_error_invalid_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let (input_date, on_date_saved) = saved();
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     first_date: Some(DateTime::utc(1966, 2, 21)),
                     last_date: Some(DateTime::utc(2040, 2, 23)),
@@ -838,22 +832,22 @@ mod tests {
                 },
             );
             // Default errorInvalid text
-            assert!(!has_text(&tester, "Out of range."));
+            assert!(!has_text(tester, "Out of range."));
             // Before first date
-            enter_text(&mut tester, "02/21/1950");
-            assert!(!form_validate(&mut tester, &form_key));
+            enter_text(tester, "02/21/1950");
+            assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
             assert_eq!(tester.find_text("Out of range.").len(), 1);
             // After last date
-            enter_text(&mut tester, "02/23/2050");
-            assert!(!form_validate(&mut tester, &form_key));
+            enter_text(tester, "02/23/2050");
+            assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
             assert_eq!(tester.find_text("Out of range.").len(), 1);
 
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     on_date_saved: Some(on_date_saved),
                     error_invalid_text: Some("Not in given range.".to_owned()),
@@ -861,21 +855,20 @@ mod tests {
                     ..FieldOptions::default()
                 },
             );
-            assert!(!form_validate(&mut tester, &form_key));
+            assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
-            assert!(!has_text(&tester, "Out of range."));
+            assert!(!has_text(tester, "Out of range."));
             assert_eq!(tester.find_text("Not in given range.").len(), 1);
         });
     }
 
     #[test]
     fn selectable_day_predicate_will_be_used_to_show_error_invalid_if_date_is_not_selectable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let (input_date, on_date_saved) = saved();
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 16)),
                     on_date_saved: Some(on_date_saved),
@@ -885,31 +878,30 @@ mod tests {
                 },
             );
             // Default errorInvalid text
-            assert!(!has_text(&tester, "Out of range."));
+            assert!(!has_text(tester, "Out of range."));
             // Odd day shouldn't be valid
-            enter_text(&mut tester, "02/21/1966");
-            assert!(!form_validate(&mut tester, &form_key));
+            enter_text(tester, "02/21/1966");
+            assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
             assert_eq!(tester.find_text("Out of range.").len(), 1);
             // Even day is valid
-            enter_text(&mut tester, "02/24/2030");
-            assert!(form_validate(&mut tester, &form_key));
-            form_save(&mut tester, &form_key);
+            enter_text(tester, "02/24/2030");
+            assert!(form_validate(tester, &form_key));
+            form_save(tester, &form_key);
             tester.pump_and_settle();
             assert_eq!(input_date.get(), Some(DateTime::utc(2030, 2, 24)));
-            assert!(!has_text(&tester, "Out of range."));
+            assert!(!has_text(tester, "Out of range."));
         });
     }
 
     #[test]
     fn when_an_empty_date_is_entered_and_accept_empty_date_is_true_error_format_text_is_not_shown()
     {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     error_format_text: Some("That is not a date.".to_owned()),
                     form_key: Some(form_key.clone()),
@@ -917,30 +909,29 @@ mod tests {
                     ..FieldOptions::default()
                 },
             );
-            enter_text(&mut tester, "");
+            enter_text(tester, "");
             tester.pump_and_settle();
-            form_validate(&mut tester, &form_key);
+            form_validate(tester, &form_key);
             tester.pump_and_settle();
-            assert!(!has_text(&tester, "That is not a date."));
+            assert!(!has_text(tester, "That is not a date."));
         });
     }
 
     #[test]
     fn when_an_empty_date_is_entered_and_accept_empty_date_is_false_error_format_text_is_shown() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     error_format_text: Some("That is not a date.".to_owned()),
                     form_key: Some(form_key.clone()),
                     ..FieldOptions::default()
                 },
             );
-            enter_text(&mut tester, "");
+            enter_text(tester, "");
             tester.pump_and_settle();
-            form_validate(&mut tester, &form_key);
+            form_validate(tester, &form_key);
             tester.pump_and_settle();
             assert_eq!(tester.find_text("That is not a date.").len(), 1);
         });
@@ -948,11 +939,10 @@ mod tests {
 
     #[test]
     fn focus_node_can_request_focus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     focus_node: Some(focus_node.clone().into_erased()),
                     ..FieldOptions::default()
@@ -962,7 +952,7 @@ mod tests {
                 use waft_widgets::FocusNodeLeaf;
                 focus_node.handle().has_focus(&mut tester.cell.borrow_mut())
             };
-            assert!(!has_focus(&tester));
+            assert!(!has_focus(tester));
             {
                 use waft_widgets::FocusNodeLeaf;
                 focus_node
@@ -970,7 +960,7 @@ mod tests {
                     .request_focus(&mut tester.cell.borrow_mut(), None);
             }
             tester.pump_and_settle();
-            assert!(has_focus(&tester));
+            assert!(has_focus(tester));
             {
                 use waft_widgets::FocusNodeLeaf;
                 focus_node
@@ -979,14 +969,13 @@ mod tests {
                     .unfocus(&mut tester.cell.borrow_mut(), Default::default());
             }
             tester.pump_and_settle();
-            assert!(!has_focus(&tester));
+            assert!(!has_focus(tester));
         });
     }
 
     #[test]
     fn input_date_picker_form_field_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field = InputDatePickerFormField::new(
                 DateTime::utc(2001, 1, 1),
                 DateTime::utc(2031, 12, 31),
@@ -1028,54 +1017,52 @@ mod tests {
 
     #[test]
     fn empty_field_shows_hint_text_when_focused() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump(&mut tester, FieldOptions::default());
+        test_widgets(|tester| {
+            pump(tester, FieldOptions::default());
             // Focus on it
-            let at = crate::chip::tests::center_of(&tester, text_field_element(&tester));
+            let at = crate::chip::tests::center_of(tester, text_field_element(tester));
             tester.tap(at, 1);
             tester.pump_and_settle();
 
             // Hint text should be invisible
-            assert_eq!(text_opacity(&tester, "mm/dd/yyyy"), 0.0);
-            set_controller_text(&mut tester, "");
+            assert_eq!(text_opacity(tester, "mm/dd/yyyy"), 0.0);
+            set_controller_text(tester, "");
             tester.pump_and_settle();
             // Hint text should be visible
-            assert_eq!(text_opacity(&tester, "mm/dd/yyyy"), 1.0);
+            assert_eq!(text_opacity(tester, "mm/dd/yyyy"), 1.0);
 
             // Change to a different hint text
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     field_hint_text: Some("Enter some date".to_owned()),
                     ..FieldOptions::default()
                 },
             );
             tester.pump_and_settle();
-            assert!(!has_text(&tester, "mm/dd/yyyy"));
-            assert_eq!(text_opacity(&tester, "Enter some date"), 1.0);
-            enter_text(&mut tester, "foobar");
+            assert!(!has_text(tester, "mm/dd/yyyy"));
+            assert_eq!(text_opacity(tester, "Enter some date"), 1.0);
+            enter_text(tester, "foobar");
             tester.pump_and_settle();
-            assert_eq!(text_opacity(&tester, "Enter some date"), 0.0);
+            assert_eq!(text_opacity(tester, "Enter some date"), 0.0);
         });
     }
 
     #[test]
     fn label_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump(&mut tester, FieldOptions::default());
+        test_widgets(|tester| {
+            pump(tester, FieldOptions::default());
             // Default label
             assert_eq!(tester.find_text("Enter Date").len(), 1);
 
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     field_label_text: Some("Give me a date!".to_owned()),
                     ..FieldOptions::default()
                 },
             );
-            assert!(!has_text(&tester, "Enter Date"));
+            assert!(!has_text(tester, "Enter Date"));
             assert_eq!(tester.find_text("Give me a date!").len(), 1);
         });
     }
@@ -1098,12 +1085,11 @@ mod tests {
 
     #[test]
     fn theme_data_input_decoration_theme_is_honored() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // The default theme draws the text field's outline.
-            pump(&mut tester, FieldOptions::default());
+            pump(tester, FieldOptions::default());
             tester.pump_and_settle();
-            assert!(paints_a_border(&tester));
+            assert!(paints_a_border(tester));
 
             let theme = ThemeData::builder()
                 .input_decoration_theme(
@@ -1111,7 +1097,7 @@ mod tests {
                 )
                 .build(&tester.cell.borrow());
             pump(
-                &mut tester,
+                tester,
                 FieldOptions {
                     theme: Some(theme),
                     ..FieldOptions::default()
@@ -1119,14 +1105,13 @@ mod tests {
             );
             tester.pump_and_settle();
             // Border should match: none is drawn.
-            assert!(!paints_a_border(&tester));
+            assert!(!paints_a_border(tester));
         });
     }
 
     #[test]
     fn local_input_decoration_theme_is_honored() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field =
                 InputDatePickerFormField::new(DateTime::utc(2025, 2, 1), DateTime::utc(2026, 5, 1));
             let theme = crate::tooltip::tests::m3(&tester.cell.borrow());
@@ -1143,7 +1128,7 @@ mod tests {
                     .into_widget(),
             ));
 
-            let decoration = tester.widget(text_field_element(&tester), |field: &TextField| {
+            let decoration = tester.widget(text_field_element(tester), |field: &TextField| {
                 field.decoration.clone().expect("a decoration")
             });
             assert_eq!(decoration.filled, Some(true));
@@ -1253,8 +1238,7 @@ mod tests {
 
     #[test]
     fn displays_calendar_based_on_the_calendar_delegate() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_date = Rc::new(Cell::new(None));
             let field =
                 InputDatePickerFormField::new(DateTime::utc(2025, 2, 1), DateTime::utc(2026, 5, 1))
@@ -1270,15 +1254,15 @@ mod tests {
                 Material::new().child(field).into_widget(),
             ));
 
-            assert_eq!(controller_text(&tester), "2025..2..26");
-            enter_text(&mut tester, "2025..3..10");
-            receive_done(&mut tester);
+            assert_eq!(controller_text(tester), "2025..2..26");
+            enter_text(tester, "2025..3..10");
+            receive_done(tester);
             tester.pump_and_settle();
             assert_eq!(selected_date.get(), Some(DateTime::utc(2025, 3, 10)));
-            assert_eq!(controller_text(&tester), "2025..3..10");
+            assert_eq!(controller_text(tester), "2025..3..10");
 
-            enter_text(&mut tester, "2025..4..21");
-            receive_done(&mut tester);
+            enter_text(tester, "2025..4..21");
+            receive_done(tester);
             tester.pump_and_settle();
             assert_eq!(selected_date.get(), Some(DateTime::utc(2025, 4, 21)));
         });

@@ -5939,10 +5939,14 @@ mod tests {
     use waft_services::PhysicalKeyboardKey;
     use waft_widgets::{AnyElement, Column, Container, Icon, primary_focus};
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
-    use crate::test_support::{TestPointer, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m3, tester};
+    use crate::tooltip::tests::m3;
 
     // ---- Dart's `TestMenu` and `createTestMenus` ----
 
@@ -6239,10 +6243,10 @@ mod tests {
     fn hover_over(tester: &mut WidgetTester, at: Offset) -> TestPointer {
         use std::sync::atomic::{AtomicI64, Ordering};
         static NEXT_DEVICE: AtomicI64 = AtomicI64::new(1);
-        let mut mouse = WidgetTester::mouse(NEXT_DEVICE.fetch_add(1, Ordering::Relaxed), 0);
+        let mut mouse = TestPointer::mouse(NEXT_DEVICE.fetch_add(1, Ordering::Relaxed), 0);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, at, false);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         mouse
     }
 
@@ -6322,7 +6326,7 @@ mod tests {
     }
 
     fn pump(tester: &mut WidgetTester) {
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     /// The debug label a button gives its own focus node: Dart's `'$Type(${widget.child})'`
@@ -6340,52 +6344,51 @@ mod tests {
 
     #[test]
     fn a_menu_bar_opens_its_submenus_level_by_level() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log = Log::default();
             let controller = MenuController::new(&mut tester.cell.borrow_mut())
                 .into_erased::<AnyMenuController>();
             let menus = TestMenus::all(&log);
-            pump_material(&mut tester, m3, |_app| {
+            pump_material(tester, m3, |_app| {
                 MenuBar::new(menus.build())
                     .controller(controller.clone())
                     .into_widget()
             });
 
-            assert!(shows(&tester, &TestMenu::MainMenu0.label()));
-            assert!(shows(&tester, &TestMenu::MainMenu1.label()));
-            assert!(shows(&tester, &TestMenu::MainMenu2.label()));
-            assert!(!shows(&tester, &TestMenu::SubMenu10.label()));
-            assert!(!shows(&tester, &TestMenu::SubSubMenu110.label()));
+            assert!(shows(tester, &TestMenu::MainMenu0.label()));
+            assert!(shows(tester, &TestMenu::MainMenu1.label()));
+            assert!(shows(tester, &TestMenu::MainMenu2.label()));
+            assert!(!shows(tester, &TestMenu::SubMenu10.label()));
+            assert!(!shows(tester, &TestMenu::SubSubMenu110.label()));
             assert!(log.opened().is_empty());
 
-            tap_text(&mut tester, &TestMenu::MainMenu1.label());
-            pump(&mut tester);
+            tap_text(tester, &TestMenu::MainMenu1.label());
+            pump(tester);
 
-            assert!(shows(&tester, &TestMenu::MainMenu0.label()));
-            assert!(shows(&tester, &TestMenu::MainMenu1.label()));
-            assert!(shows(&tester, &TestMenu::MainMenu2.label()));
-            assert!(shows(&tester, &TestMenu::SubMenu10.label()));
-            assert!(shows(&tester, &TestMenu::SubMenu11.label()));
-            assert!(shows(&tester, &TestMenu::SubMenu12.label()));
-            assert!(!shows(&tester, &TestMenu::SubSubMenu110.label()));
-            assert!(!shows(&tester, &TestMenu::SubSubMenu111.label()));
-            assert!(!shows(&tester, &TestMenu::SubSubMenu112.label()));
+            assert!(shows(tester, &TestMenu::MainMenu0.label()));
+            assert!(shows(tester, &TestMenu::MainMenu1.label()));
+            assert!(shows(tester, &TestMenu::MainMenu2.label()));
+            assert!(shows(tester, &TestMenu::SubMenu10.label()));
+            assert!(shows(tester, &TestMenu::SubMenu11.label()));
+            assert!(shows(tester, &TestMenu::SubMenu12.label()));
+            assert!(!shows(tester, &TestMenu::SubSubMenu110.label()));
+            assert!(!shows(tester, &TestMenu::SubSubMenu111.label()));
+            assert!(!shows(tester, &TestMenu::SubSubMenu112.label()));
             assert_eq!(log.opened().last(), Some(&TestMenu::MainMenu1));
             log.clear();
 
-            tap_text(&mut tester, &TestMenu::SubMenu11.label());
-            pump(&mut tester);
+            tap_text(tester, &TestMenu::SubMenu11.label());
+            pump(tester);
 
-            assert!(shows(&tester, &TestMenu::MainMenu0.label()));
-            assert!(shows(&tester, &TestMenu::MainMenu1.label()));
-            assert!(shows(&tester, &TestMenu::MainMenu2.label()));
-            assert!(shows(&tester, &TestMenu::SubMenu10.label()));
-            assert!(shows(&tester, &TestMenu::SubMenu11.label()));
-            assert!(shows(&tester, &TestMenu::SubMenu12.label()));
-            assert!(shows(&tester, &TestMenu::SubSubMenu110.label()));
-            assert!(shows(&tester, &TestMenu::SubSubMenu111.label()));
-            assert!(shows(&tester, &TestMenu::SubSubMenu112.label()));
+            assert!(shows(tester, &TestMenu::MainMenu0.label()));
+            assert!(shows(tester, &TestMenu::MainMenu1.label()));
+            assert!(shows(tester, &TestMenu::MainMenu2.label()));
+            assert!(shows(tester, &TestMenu::SubMenu10.label()));
+            assert!(shows(tester, &TestMenu::SubMenu11.label()));
+            assert!(shows(tester, &TestMenu::SubMenu12.label()));
+            assert!(shows(tester, &TestMenu::SubSubMenu110.label()));
+            assert!(shows(tester, &TestMenu::SubSubMenu111.label()));
+            assert!(shows(tester, &TestMenu::SubSubMenu112.label()));
             assert_eq!(log.opened().last(), Some(&TestMenu::SubMenu11));
         });
     }
@@ -6599,15 +6602,14 @@ mod tests {
         // menu_anchor_test.dart 'Menu defaults'.
         #[test]
         fn menus_take_their_default_colors_shapes_and_text_styles_from_the_theme() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
                 let theme = ThemeData::new(&tester.cell.borrow());
                 let theme_for_app = theme.clone();
                 pump_material(
-                    &mut tester,
+                    tester,
                     move |_app| theme_for_app,
                     |_app| {
                         MenuBar::new(menus.build())
@@ -6624,7 +6626,7 @@ mod tests {
                     assert_menu_material_defaults(material, &theme);
                 });
 
-                first_material_under(&tester, text_button, |material| {
+                first_material_under(tester, text_button, |material| {
                     assert_eq!(material.color, Some(Colors::TRANSPARENT));
                     assert_eq!(material.elevation, 0.0);
                     assert!(shape_is(
@@ -6638,17 +6640,17 @@ mod tests {
                 });
 
                 // Vertical menu.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
-                let item = widget_with_text::<TextButton>(&tester, &TestMenu::SubMenu10.label());
+                let item = widget_with_text::<TextButton>(tester, &TestMenu::SubMenu10.label());
                 let menu_material = tester.ancestor_of_type::<Material>(item);
                 assert_eq!(log.opened().last(), Some(&TestMenu::MainMenu1));
                 tester.widget::<Material, _>(menu_material, |material| {
                     assert_menu_material_defaults(material, &theme);
                 });
 
-                first_material_under(&tester, item, |material| {
+                first_material_under(tester, item, |material| {
                     assert_eq!(material.color, Some(Colors::TRANSPARENT));
                     assert_eq!(material.elevation, 0.0);
                     assert!(shape_is(
@@ -6661,8 +6663,8 @@ mod tests {
                     assert_eq!(text_style.height, Some(1.43));
                 });
 
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
                 let icon = tester.find_by_icon(&Icons::add());
                 let glyph = tester.glyph_style(icon);
                 assert_eq!(
@@ -6675,15 +6677,14 @@ mod tests {
         // menu_anchor_test.dart 'Menu defaults - disabled'.
         #[test]
         fn disabled_menu_items_take_the_disabled_default_colors() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
                 let theme = ThemeData::new(&tester.cell.borrow());
                 let theme_for_app = theme.clone();
                 pump_material(
-                    &mut tester,
+                    tester,
                     move |_app| theme_for_app,
                     |_app| {
                         MenuBar::new(menus.build())
@@ -6694,13 +6695,13 @@ mod tests {
                 let disabled = theme.color_scheme.on_surface.with_opacity(0.38);
 
                 // Menu bar (horizontal menu).
-                let button = widget_with_text::<TextButton>(&tester, &TestMenu::MainMenu5.label());
+                let button = widget_with_text::<TextButton>(tester, &TestMenu::MainMenu5.label());
                 let menu_material = tester.ancestor_of_type::<Material>(button);
                 assert!(log.opened().is_empty());
                 tester.widget::<Material, _>(menu_material, |material| {
                     assert_menu_material_defaults(material, &theme);
                 });
-                first_material_under(&tester, button, |material| {
+                first_material_under(tester, button, |material| {
                     assert_eq!(material.color, Some(Colors::TRANSPARENT));
                     assert_eq!(material.elevation, 0.0);
                     assert!(shape_is(
@@ -6712,15 +6713,15 @@ mod tests {
                 });
 
                 // Vertical menu.
-                tap_text(&mut tester, &TestMenu::MainMenu2.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu2.label());
+                pump(tester);
 
-                let item = widget_with_text::<TextButton>(&tester, &TestMenu::SubMenu20.label());
+                let item = widget_with_text::<TextButton>(tester, &TestMenu::SubMenu20.label());
                 let menu_material = tester.ancestor_of_type::<Material>(item);
                 tester.widget::<Material, _>(menu_material, |material| {
                     assert_menu_material_defaults(material, &theme);
                 });
-                first_material_under(&tester, item, |material| {
+                first_material_under(tester, item, |material| {
                     assert_eq!(material.color, Some(Colors::TRANSPARENT));
                     assert_eq!(material.elevation, 0.0);
                     assert!(shape_is(
@@ -6740,9 +6741,8 @@ mod tests {
         // menu_anchor_test.dart 'Focus is returned to previous focus before invoking onPressed'.
         #[test]
         fn focus_returns_to_where_it_was_before_an_item_is_invoked() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester);
+            test_widgets(|tester| {
+                let controller = controller(tester);
                 let button_focus = {
                     let mut app = tester.cell.borrow_mut();
                     let node = FocusNode::new(&mut app).into_erased::<AnyFocusNode>();
@@ -6753,7 +6753,7 @@ mod tests {
                 let sink = Rc::clone(&focus_in_on_pressed);
                 let on_menu_selected: MenuCallback =
                     Rc::new(move |app: &mut App, _item| sink.set(primary_focus(app)));
-                pump_material(&mut tester, m3, {
+                pump_material(tester, m3, {
                     let button_focus = button_focus.clone();
                     move |_app| {
                         Column::new()
@@ -6773,20 +6773,20 @@ mod tests {
                     }
                 });
 
-                pump(&mut tester);
+                pump(tester);
                 assert_eq!(
                     primary_focus(&mut tester.cell.borrow_mut()),
                     Some(button_focus.handle())
                 );
 
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
-                tap_text(&mut tester, &TestMenu::SubMenu11.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
 
-                tap_text(&mut tester, &TestMenu::SubSubMenu110.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::SubSubMenu110.label());
+                pump(tester);
 
                 assert_eq!(focus_in_on_pressed.get(), Some(button_focus.handle()));
                 assert_eq!(
@@ -6858,34 +6858,32 @@ mod tests {
         // menu_anchor_test.dart 'geometry'.
         #[test]
         fn a_menu_bar_and_its_menus_have_flutters_geometry() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
                 let menus = TestMenus::pressed(&log);
-                pump_material(&mut tester, m2, |_app| expanded_bar(&menus));
-                pump(&mut tester);
+                pump_material(tester, m2, |_app| expanded_bar(&menus));
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(0.0, 0.0, 800.0, 48.0)
                 );
 
                 // Open and make sure things are the right size.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(0.0, 0.0, 800.0, 48.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, &TestMenu::SubMenu10.label()),
+                    text_rect(tester, &TestMenu::SubMenu10.label()),
                     Rect::from_ltrb(124.0, 73.0, 314.0, 87.0)
                 );
-                let materials =
-                    ancestors_of_type::<Material>(&tester, &TestMenu::SubMenu10.label());
+                let materials = ancestors_of_type::<Material>(tester, &TestMenu::SubMenu10.label());
                 assert_eq!(
-                    rect_of_element(&tester, materials[1]),
+                    rect_of_element(tester, materials[1]),
                     Rect::from_ltrb(112.0, 48.0, 326.0, 208.0)
                 );
             });
@@ -6894,45 +6892,43 @@ mod tests {
         // menu_anchor_test.dart 'geometry with RTL direction'.
         #[test]
         fn a_right_to_left_menu_bar_and_its_menus_have_flutters_geometry() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
                 let menus = TestMenus::pressed(&log);
-                pump_material(&mut tester, m2, |_app| {
+                pump_material(tester, m2, |_app| {
                     Directionality::new(TextDirection::Rtl, expanded_bar(&menus)).into_widget()
                 });
-                pump(&mut tester);
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(0.0, 0.0, 800.0, 48.0)
                 );
 
                 // Open and make sure things are the right size.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(0.0, 0.0, 800.0, 48.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, &TestMenu::SubMenu10.label()),
+                    text_rect(tester, &TestMenu::SubMenu10.label()),
                     Rect::from_ltrb(486.0, 73.0, 676.0, 87.0)
                 );
-                let materials =
-                    ancestors_of_type::<Material>(&tester, &TestMenu::SubMenu10.label());
+                let materials = ancestors_of_type::<Material>(tester, &TestMenu::SubMenu10.label());
                 assert_eq!(
-                    rect_of_element(&tester, materials[1]),
+                    rect_of_element(tester, materials[1]),
                     Rect::from_ltrb(474.0, 48.0, 688.0, 208.0)
                 );
 
                 // Close and make sure it goes back where it was.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(0.0, 0.0, 800.0, 48.0)
                 );
             });
@@ -6941,22 +6937,21 @@ mod tests {
         // menu_anchor_test.dart 'menu alignment and offset in LTR'.
         #[test]
         fn a_menu_follows_its_alignment_and_offset_left_to_right() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester);
+            test_widgets(|tester| {
+                let controller = controller(tester);
                 let key = GlobalKey::new();
-                build_test_app(&mut tester, TestApp::default(), controller.clone(), &key);
+                build_test_app(tester, TestApp::default(), controller.clone(), &key);
 
                 assert_eq!(
-                    rect_of::<ElevatedButton>(&tester),
+                    rect_of::<ElevatedButton>(tester),
                     Rect::from_ltrb(328.0, 14.0, 472.0, 62.0)
                 );
 
                 // Open the menu and make sure things are the right size, in the right place.
-                tap_text(&mut tester, "Press Me");
-                pump(&mut tester);
+                tap_text(tester, "Press Me");
+                pump(tester);
                 assert_eq!(
-                    menu_scope_rect_of_key(&tester, &key),
+                    menu_scope_rect_of_key(tester, &key),
                     Rect::from_ltrb(328.0, 62.0, 602.0, 174.0)
                 );
 
@@ -6970,30 +6965,30 @@ mod tests {
                     menu_scope_rect_of_key(tester, &key)
                 };
                 assert_eq!(
-                    with_alignment(&mut tester, AlignmentGeometry::TOP_START),
+                    with_alignment(tester, AlignmentGeometry::TOP_START),
                     Rect::from_ltrb(328.0, 14.0, 602.0, 126.0)
                 );
                 assert_eq!(
                     with_alignment(
-                        &mut tester,
+                        tester,
                         AlignmentGeometry::Directional(waft_painting::AlignmentDirectional::CENTER)
                     ),
                     Rect::from_ltrb(400.0, 38.0, 674.0, 150.0)
                 );
                 assert_eq!(
-                    with_alignment(&mut tester, AlignmentGeometry::BOTTOM_END),
+                    with_alignment(tester, AlignmentGeometry::BOTTOM_END),
                     Rect::from_ltrb(472.0, 62.0, 746.0, 174.0)
                 );
 
-                let menu_rect = with_alignment(&mut tester, AlignmentGeometry::TOP_START);
+                let menu_rect = with_alignment(tester, AlignmentGeometry::TOP_START);
                 let options = TestApp {
                     alignment: Some(AlignmentGeometry::TOP_START),
                     alignment_offset: Offset::new(10.0, 20.0),
                     ..TestApp::default()
                 };
-                build_test_app(&mut tester, options, controller.clone(), &key);
-                pump(&mut tester);
-                let offset_menu_rect = menu_scope_rect_of_key(&tester, &key);
+                build_test_app(tester, options, controller.clone(), &key);
+                pump(tester);
+                let offset_menu_rect = menu_scope_rect_of_key(tester, &key);
                 assert_eq!(
                     offset_menu_rect.top_left() - menu_rect.top_left(),
                     Offset::new(10.0, 20.0)
@@ -7004,27 +6999,26 @@ mod tests {
         // menu_anchor_test.dart 'menu alignment and offset in RTL'.
         #[test]
         fn a_menu_follows_its_alignment_and_offset_right_to_left() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester);
+            test_widgets(|tester| {
+                let controller = controller(tester);
                 let key = GlobalKey::new();
                 let rtl = TestApp {
                     text_direction: TextDirection::Rtl,
                     ..TestApp::default()
                 };
-                build_test_app(&mut tester, rtl.clone(), controller.clone(), &key);
+                build_test_app(tester, rtl.clone(), controller.clone(), &key);
 
                 assert_eq!(
-                    rect_of::<ElevatedButton>(&tester),
+                    rect_of::<ElevatedButton>(tester),
                     Rect::from_ltrb(328.0, 14.0, 472.0, 62.0)
                 );
 
                 let label = TestMenu::SubMenu00.label();
                 // Open the menu and make sure things are the right size, in the right place.
-                tap_text(&mut tester, "Press Me");
-                pump(&mut tester);
+                tap_text(tester, "Press Me");
+                pump(tester);
                 assert_eq!(
-                    menu_scope_rect(&tester, &label),
+                    menu_scope_rect(tester, &label),
                     Rect::from_ltrb(198.0, 62.0, 472.0, 174.0)
                 );
 
@@ -7038,31 +7032,31 @@ mod tests {
                     menu_scope_rect(tester, &label)
                 };
                 assert_eq!(
-                    with_alignment(&mut tester, AlignmentGeometry::TOP_START),
+                    with_alignment(tester, AlignmentGeometry::TOP_START),
                     Rect::from_ltrb(198.0, 14.0, 472.0, 126.0)
                 );
                 assert_eq!(
                     with_alignment(
-                        &mut tester,
+                        tester,
                         AlignmentGeometry::Directional(waft_painting::AlignmentDirectional::CENTER)
                     ),
                     Rect::from_ltrb(126.0, 38.0, 400.0, 150.0)
                 );
                 assert_eq!(
-                    with_alignment(&mut tester, AlignmentGeometry::BOTTOM_END),
+                    with_alignment(tester, AlignmentGeometry::BOTTOM_END),
                     Rect::from_ltrb(54.0, 62.0, 328.0, 174.0)
                 );
 
-                let menu_rect = with_alignment(&mut tester, AlignmentGeometry::TOP_START);
+                let menu_rect = with_alignment(tester, AlignmentGeometry::TOP_START);
                 let options = TestApp {
                     alignment: Some(AlignmentGeometry::TOP_START),
                     alignment_offset: Offset::new(10.0, 20.0),
                     ..rtl.clone()
                 };
-                build_test_app(&mut tester, options, controller.clone(), &key);
-                pump(&mut tester);
+                build_test_app(tester, options, controller.clone(), &key);
+                pump(tester);
                 assert_eq!(
-                    menu_scope_rect(&tester, &label).top_left() - menu_rect.top_left(),
+                    menu_scope_rect(tester, &label).top_left() - menu_rect.top_left(),
                     Offset::new(-10.0, 20.0)
                 );
             });
@@ -7071,27 +7065,26 @@ mod tests {
         // menu_anchor_test.dart 'menu position in LTR'.
         #[test]
         fn a_menu_opens_at_the_position_given_left_to_right() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester);
+            test_widgets(|tester| {
+                let controller = controller(tester);
                 let key = GlobalKey::new();
                 let options = TestApp {
                     alignment_offset: Offset::new(100.0, 50.0),
                     ..TestApp::default()
                 };
-                build_test_app(&mut tester, options, controller.clone(), &key);
+                build_test_app(tester, options, controller.clone(), &key);
 
                 assert_eq!(
-                    rect_of::<ElevatedButton>(&tester),
+                    rect_of::<ElevatedButton>(tester),
                     Rect::from_ltrb(328.0, 14.0, 472.0, 62.0)
                 );
 
                 let label = TestMenu::SubMenu00.label();
                 // Open the menu and make sure things are the right size, in the right place.
-                tap_text(&mut tester, "Press Me");
-                pump(&mut tester);
+                tap_text(tester, "Press Me");
+                pump(tester);
                 assert_eq!(
-                    menu_scope_rect(&tester, &label),
+                    menu_scope_rect(tester, &label),
                     Rect::from_ltrb(428.0, 112.0, 702.0, 224.0)
                 );
 
@@ -7101,9 +7094,9 @@ mod tests {
                     &mut tester.cell.borrow_mut(),
                     Some(Offset::new(200.0, 200.0)),
                 );
-                pump(&mut tester);
+                pump(tester);
                 assert_eq!(
-                    menu_scope_rect(&tester, &label),
+                    menu_scope_rect(tester, &label),
                     Rect::from_ltrb(526.0, 214.0, 800.0, 326.0)
                 );
             });
@@ -7112,28 +7105,27 @@ mod tests {
         // menu_anchor_test.dart 'menu position in RTL'.
         #[test]
         fn a_menu_opens_at_the_position_given_right_to_left() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester);
+            test_widgets(|tester| {
+                let controller = controller(tester);
                 let key = GlobalKey::new();
                 let options = TestApp {
                     alignment_offset: Offset::new(100.0, 50.0),
                     text_direction: TextDirection::Rtl,
                     ..TestApp::default()
                 };
-                build_test_app(&mut tester, options, controller.clone(), &key);
+                build_test_app(tester, options, controller.clone(), &key);
 
                 assert_eq!(
-                    rect_of::<ElevatedButton>(&tester),
+                    rect_of::<ElevatedButton>(tester),
                     Rect::from_ltrb(328.0, 14.0, 472.0, 62.0)
                 );
 
                 let label = TestMenu::SubMenu00.label();
                 // Open the menu and make sure things are the right size, in the right place.
-                tap_text(&mut tester, "Press Me");
-                pump(&mut tester);
+                tap_text(tester, "Press Me");
+                pump(tester);
                 assert_eq!(
-                    menu_scope_rect(&tester, &label),
+                    menu_scope_rect(tester, &label),
                     Rect::from_ltrb(98.0, 112.0, 372.0, 224.0)
                 );
 
@@ -7143,9 +7135,9 @@ mod tests {
                     &mut tester.cell.borrow_mut(),
                     Some(Offset::new(400.0, 200.0)),
                 );
-                pump(&mut tester);
+                pump(tester);
                 assert_eq!(
-                    menu_scope_rect(&tester, &label),
+                    menu_scope_rect(tester, &label),
                     Rect::from_ltrb(526.0, 214.0, 800.0, 326.0)
                 );
             });
@@ -7181,43 +7173,41 @@ mod tests {
         // menu_anchor_test.dart 'works with Padding around menu and overlay'.
         #[test]
         fn menus_place_themselves_with_padding_around_the_bar_and_the_overlay() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
                 let menus = TestMenus::pressed(&log);
-                pump_padded_bar(&mut tester, &menus, TextDirection::Ltr);
-                pump(&mut tester);
+                pump_padded_bar(tester, &menus, TextDirection::Ltr);
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(22.0, 22.0, 778.0, 70.0)
                 );
 
                 // Open and make sure things are the right size.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(22.0, 22.0, 778.0, 70.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, &TestMenu::SubMenu10.label()),
+                    text_rect(tester, &TestMenu::SubMenu10.label()),
                     Rect::from_ltrb(146.0, 95.0, 336.0, 109.0)
                 );
-                let materials =
-                    ancestors_of_type::<Material>(&tester, &TestMenu::SubMenu10.label());
+                let materials = ancestors_of_type::<Material>(tester, &TestMenu::SubMenu10.label());
                 assert_eq!(
-                    rect_of_element(&tester, materials[1]),
+                    rect_of_element(tester, materials[1]),
                     Rect::from_ltrb(134.0, 70.0, 348.0, 230.0)
                 );
 
                 // Close and make sure it goes back where it was.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(22.0, 22.0, 778.0, 70.0)
                 );
             });
@@ -7226,43 +7216,41 @@ mod tests {
         // menu_anchor_test.dart 'works with Padding around menu and overlay with RTL direction'.
         #[test]
         fn right_to_left_menus_place_themselves_with_padding_around_the_bar_and_the_overlay() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
                 let menus = TestMenus::pressed(&log);
-                pump_padded_bar(&mut tester, &menus, TextDirection::Rtl);
-                pump(&mut tester);
+                pump_padded_bar(tester, &menus, TextDirection::Rtl);
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(22.0, 22.0, 778.0, 70.0)
                 );
 
                 // Open and make sure things are the right size.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(22.0, 22.0, 778.0, 70.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, &TestMenu::SubMenu10.label()),
+                    text_rect(tester, &TestMenu::SubMenu10.label()),
                     Rect::from_ltrb(464.0, 95.0, 654.0, 109.0)
                 );
-                let materials =
-                    ancestors_of_type::<Material>(&tester, &TestMenu::SubMenu10.label());
+                let materials = ancestors_of_type::<Material>(tester, &TestMenu::SubMenu10.label());
                 assert_eq!(
-                    rect_of_element(&tester, materials[1]),
+                    rect_of_element(tester, materials[1]),
                     Rect::from_ltrb(452.0, 70.0, 666.0, 230.0)
                 );
 
                 // Close and make sure it goes back where it was.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
                 assert_eq!(
-                    rect_of::<MenuBar>(&tester),
+                    rect_of::<MenuBar>(tester),
                     Rect::from_ltrb(22.0, 22.0, 778.0, 70.0)
                 );
             });
@@ -7271,11 +7259,10 @@ mod tests {
         // menu_anchor_test.dart 'visual attributes can be set'.
         #[test]
         fn a_menu_bar_takes_the_elevation_and_background_color_of_its_style() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
                 let menus = TestMenus::pressed(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     Column::new()
                         .children(vec![
                             Row::new()
@@ -7303,10 +7290,10 @@ mod tests {
                         .into_widget()
                 });
                 assert_eq!(
-                    rect_of_element(&tester, only(menu_panels(&tester))),
+                    rect_of_element(tester, only(menu_panels(tester))),
                     Rect::from_ltrb(0.0, 0.0, 800.0, 48.0)
                 );
-                menu_bar_material(&tester, |material| {
+                menu_bar_material(tester, |material| {
                     assert_eq!(material.elevation, 10.0);
                     assert_eq!(material.color, Some(Colors::RED.primary()));
                 });
@@ -7337,30 +7324,29 @@ mod tests {
         // menu_anchor_test.dart 'MenuAnchor clip behavior'.
         #[test]
         fn a_menu_anchor_clips_its_menu_hard_edged_unless_told_otherwise() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| clip_behavior_anchor(None));
-                tap_text(&mut tester, "Tap me");
-                pump(&mut tester);
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| clip_behavior_anchor(None));
+                tap_text(tester, "Tap me");
+                pump(tester);
 
                 // Test default clip behavior.
                 assert_eq!(
-                    menu_bar_material(&tester, |material| material.clip_behavior),
+                    menu_bar_material(tester, |material| material.clip_behavior),
                     Clip::HardEdge
                 );
 
                 // Close the menu.
                 tester.tap(Offset::new(10.0, 10.0), 1);
                 tester.pump_and_settle();
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     clip_behavior_anchor(Some(Clip::AntiAlias))
                 });
-                tap_text(&mut tester, "Tap me");
-                pump(&mut tester);
+                tap_text(tester, "Tap me");
+                pump(tester);
 
                 // Test custom clip behavior.
                 assert_eq!(
-                    menu_bar_material(&tester, |material| material.clip_behavior),
+                    menu_bar_material(tester, |material| material.clip_behavior),
                     Clip::AntiAlias
                 );
             });
@@ -7369,12 +7355,11 @@ mod tests {
         // menu_anchor_test.dart 'open and close works'.
         #[test]
         fn submenus_open_and_close_with_taps_on_their_buttons() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(menus.build())
                         .controller(controller)
                         .into_widget()
@@ -7383,28 +7368,28 @@ mod tests {
                 assert!(log.opened().is_empty());
                 assert!(log.closed().is_empty());
 
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
                 assert_eq!(log.opened(), [TestMenu::MainMenu1]);
                 assert!(log.closed().is_empty());
                 log.clear();
 
-                tap_text(&mut tester, &TestMenu::SubMenu11.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
 
                 assert_eq!(log.opened(), [TestMenu::SubMenu11]);
                 assert!(log.closed().is_empty());
                 log.clear();
 
-                tap_text(&mut tester, &TestMenu::SubMenu11.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
 
                 assert!(log.opened().is_empty());
                 assert_eq!(log.closed(), [TestMenu::SubMenu11]);
                 log.clear();
 
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
 
                 assert_eq!(log.opened(), [TestMenu::MainMenu0]);
                 assert_eq!(log.closed(), [TestMenu::MainMenu1]);
@@ -7428,9 +7413,8 @@ mod tests {
         // menu_anchor_test.dart 'Menus close and consume tap when open and tapped outside'.
         #[test]
         fn an_open_menu_closes_and_consumes_a_tap_outside_when_told_to() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester);
+            test_widgets(|tester| {
+                let controller = controller(tester);
                 let key = GlobalKey::new();
                 let log = Log::default();
                 let options = TestApp {
@@ -7438,26 +7422,26 @@ mod tests {
                     log: Some(log.clone()),
                     ..TestApp::default()
                 };
-                build_test_app(&mut tester, options, controller.clone(), &key);
+                build_test_app(tester, options, controller.clone(), &key);
 
                 assert!(log.opened().is_empty());
                 assert!(log.closed().is_empty());
 
                 // Doesn't consume tap when the menu is closed.
-                tap_text(&mut tester, &TestMenu::OutsideButton.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::OutsideButton.label());
+                pump(tester);
                 assert_eq!(log.selected(), [TestMenu::OutsideButton]);
                 log.clear();
 
-                tap_text(&mut tester, &TestMenu::AnchorButton.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::AnchorButton.label());
+                pump(tester);
                 assert_eq!(log.opened(), [TestMenu::AnchorButton]);
                 assert!(log.closed().is_empty());
                 assert_eq!(log.selected(), [TestMenu::AnchorButton]);
                 log.clear();
 
-                tap_text(&mut tester, &TestMenu::OutsideButton.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::OutsideButton.label());
+                pump(tester);
 
                 assert!(log.opened().is_empty());
                 assert_eq!(log.closed(), [TestMenu::AnchorButton]);
@@ -7470,35 +7454,34 @@ mod tests {
         // menu_anchor_test.dart "Menus close and don't consume tap when open and tapped outside".
         #[test]
         fn an_open_menu_closes_and_passes_on_a_tap_outside_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester);
+            test_widgets(|tester| {
+                let controller = controller(tester);
                 let key = GlobalKey::new();
                 let log = Log::default();
                 let options = TestApp {
                     log: Some(log.clone()),
                     ..TestApp::default()
                 };
-                build_test_app(&mut tester, options, controller.clone(), &key);
+                build_test_app(tester, options, controller.clone(), &key);
 
                 assert!(log.opened().is_empty());
                 assert!(log.closed().is_empty());
 
                 // Doesn't consume tap when the menu is closed.
-                tap_text(&mut tester, &TestMenu::OutsideButton.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::OutsideButton.label());
+                pump(tester);
                 assert_eq!(log.selected(), [TestMenu::OutsideButton]);
                 log.clear();
 
-                tap_text(&mut tester, &TestMenu::AnchorButton.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::AnchorButton.label());
+                pump(tester);
                 assert_eq!(log.opened(), [TestMenu::AnchorButton]);
                 assert!(log.closed().is_empty());
                 assert_eq!(log.selected(), [TestMenu::AnchorButton]);
                 log.clear();
 
-                tap_text(&mut tester, &TestMenu::OutsideButton.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::OutsideButton.label());
+                pump(tester);
 
                 assert!(log.opened().is_empty());
                 assert_eq!(log.closed(), [TestMenu::AnchorButton]);
@@ -7511,46 +7494,44 @@ mod tests {
         // menu_anchor_test.dart 'select works'.
         #[test]
         fn selecting_an_item_closes_every_menu() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(menus.build())
                         .controller(controller)
                         .into_widget()
                 });
 
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
-                tap_text(&mut tester, &TestMenu::SubMenu11.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
 
                 assert_eq!(log.opened(), [TestMenu::MainMenu1, TestMenu::SubMenu11]);
                 log.opened.borrow_mut().clear();
-                tap_text(&mut tester, &TestMenu::SubSubMenu110.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::SubSubMenu110.label());
+                pump(tester);
 
                 assert_eq!(log.selected(), [TestMenu::SubSubMenu110]);
 
                 // Selecting a non-submenu item should close all the menus.
                 assert!(log.opened().is_empty());
-                assert!(!shows(&tester, &TestMenu::SubSubMenu110.label()));
-                assert!(!shows(&tester, &TestMenu::SubMenu11.label()));
+                assert!(!shows(tester, &TestMenu::SubSubMenu110.label()));
+                assert!(!shows(tester, &TestMenu::SubMenu11.label()));
             });
         }
 
         // menu_anchor_test.dart 'menus can be traversed multiple times'.
         #[test]
         fn menus_can_be_traversed_again_after_escape_closes_them() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     Column::new()
                         .children(vec![
                             MenuItemButton::new()
@@ -7566,41 +7547,40 @@ mod tests {
                 });
 
                 // Have to open a menu initially to start things going.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
+                submenu(tester, "Menu 1");
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                item(&tester, "Sub Menu 10");
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                item(tester, "Sub Menu 10");
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                submenu(&tester, "Sub Menu 11");
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                submenu(tester, "Sub Menu 11");
 
-                send_key(&mut tester, LogicalKeyboardKey::ESCAPE);
-                pump(&mut tester);
-                item(&tester, "External Focus");
+                send_key(tester, LogicalKeyboardKey::ESCAPE);
+                pump(tester);
+                item(tester, "External Focus");
 
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
+                submenu(tester, "Menu 1");
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                item(&tester, "Sub Menu 10");
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                item(tester, "Sub Menu 10");
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                submenu(&tester, "Sub Menu 11");
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                submenu(tester, "Sub Menu 11");
             });
         }
 
         // menu_anchor_test.dart 'keyboard tab traversal works'.
         #[test]
         fn tab_and_shift_tab_move_between_the_menu_bar_buttons() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     Column::new()
                         .children(vec![
                             MenuBar::new(menus.build())
@@ -7612,37 +7592,37 @@ mod tests {
                 });
 
                 // Have to open a menu initially to start things going.
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
+                tap_text(tester, &TestMenu::MainMenu0.label());
                 tester.pump_and_settle();
 
-                submenu(&tester, "Menu 0");
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 2");
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 0");
+                submenu(tester, "Menu 0");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 1");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 2");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 0");
 
                 send_key_change(
-                    &mut tester,
+                    tester,
                     waft_embedder::KeyEventType::Down,
                     LogicalKeyboardKey::SHIFT_LEFT,
                     None,
                 );
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 2");
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 0");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 2");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 1");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 0");
                 send_key_change(
-                    &mut tester,
+                    tester,
                     waft_embedder::KeyEventType::Up,
                     LogicalKeyboardKey::SHIFT_LEFT,
                     None,
@@ -7650,8 +7630,8 @@ mod tests {
                 log.clear();
 
                 // Test closing a menu with enter.
-                send_key(&mut tester, LogicalKeyboardKey::ENTER);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ENTER);
+                pump(tester);
                 assert!(log.opened().is_empty());
                 assert_eq!(log.closed(), [TestMenu::MainMenu0]);
             });
@@ -7660,12 +7640,11 @@ mod tests {
         // menu_anchor_test.dart 'keyboard directional traversal works'.
         #[test]
         fn arrow_keys_move_through_a_menu_bar_and_its_menus() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(menus.build())
                         .controller(controller)
                         .into_widget()
@@ -7674,108 +7653,107 @@ mod tests {
                 use LogicalKeyboardKey as K;
 
                 // Have to open a menu initially to start things going.
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
+                tap_text(tester, &TestMenu::MainMenu0.label());
                 tester.pump_and_settle();
 
-                key(&mut tester, K::ARROW_RIGHT);
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                key(tester, K::ARROW_RIGHT);
+                pump(tester);
+                submenu(tester, "Menu 1");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Menu 10");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Menu 10");
 
-                key(&mut tester, K::ARROW_DOWN);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_DOWN);
+                submenu(tester, "Sub Menu 11");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Menu 12");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Menu 12");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Menu 12");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Menu 12");
 
-                key(&mut tester, K::ARROW_UP);
-                pump(&mut tester);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_UP);
+                pump(tester);
+                submenu(tester, "Sub Menu 11");
 
                 // Open the next submenu.
-                key(&mut tester, K::ARROW_RIGHT);
-                pump(&mut tester);
-                item(&tester, "Sub Sub Menu 110");
+                key(tester, K::ARROW_RIGHT);
+                pump(tester);
+                item(tester, "Sub Sub Menu 110");
 
                 // Go back, close the submenu.
-                key(&mut tester, K::ARROW_LEFT);
-                pump(&mut tester);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_LEFT);
+                pump(tester);
+                submenu(tester, "Sub Menu 11");
 
                 // Move up, should close the submenu.
-                key(&mut tester, K::ARROW_UP);
-                pump(&mut tester);
-                item(&tester, "Sub Menu 10");
+                key(tester, K::ARROW_UP);
+                pump(tester);
+                item(tester, "Sub Menu 10");
 
                 // Move down, should reopen the submenu.
-                key(&mut tester, K::ARROW_DOWN);
-                pump(&mut tester);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_DOWN);
+                pump(tester);
+                submenu(tester, "Sub Menu 11");
 
                 // Open the next submenu again.
-                key(&mut tester, K::ARROW_RIGHT);
-                pump(&mut tester);
-                item(&tester, "Sub Sub Menu 110");
+                key(tester, K::ARROW_RIGHT);
+                pump(tester);
+                item(tester, "Sub Sub Menu 110");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Sub Menu 111");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Sub Menu 111");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Sub Menu 112");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Sub Menu 112");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Sub Menu 113");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Sub Menu 113");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Sub Menu 113");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Sub Menu 113");
 
                 // Since this is a leaf off of a vertical menu, moving left should
                 // return to this menu's parent button.
-                key(&mut tester, K::ARROW_LEFT);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_LEFT);
+                submenu(tester, "Sub Menu 11");
 
                 // Moving left while in a first-level submenu should focus the
                 // previous top-level menubar anchor.
-                key(&mut tester, K::ARROW_LEFT);
-                pump(&mut tester);
-                submenu(&tester, "Menu 0");
+                key(tester, K::ARROW_LEFT);
+                pump(tester);
+                submenu(tester, "Menu 0");
 
-                key(&mut tester, K::ARROW_RIGHT);
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                key(tester, K::ARROW_RIGHT);
+                pump(tester);
+                submenu(tester, "Menu 1");
 
                 // Pressing arrowup from a top-level menubar anchor should focus the last
                 // item in that anchor's submenu.
-                key(&mut tester, K::ARROW_UP);
-                item(&tester, "Sub Menu 12");
+                key(tester, K::ARROW_UP);
+                item(tester, "Sub Menu 12");
 
-                key(&mut tester, K::ARROW_UP);
-                submenu(&tester, "Sub Menu 11");
-                pump(&mut tester);
+                key(tester, K::ARROW_UP);
+                submenu(tester, "Sub Menu 11");
+                pump(tester);
 
                 // Enter the submenu.
-                key(&mut tester, K::ARROW_RIGHT);
-                item(&tester, "Sub Sub Menu 110");
+                key(tester, K::ARROW_RIGHT);
+                item(tester, "Sub Sub Menu 110");
 
                 // Move to next top-level menu button.
-                key(&mut tester, K::ARROW_RIGHT);
-                pump(&mut tester);
-                submenu(&tester, "Menu 2");
+                key(tester, K::ARROW_RIGHT);
+                pump(tester);
+                submenu(tester, "Menu 2");
             });
         }
 
         // menu_anchor_test.dart 'keyboard directional traversal works in RTL mode'.
         #[test]
         fn arrow_keys_move_through_a_right_to_left_menu_bar_and_its_menus() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
                 let root = {
                     let app = tester.cell.borrow();
@@ -7794,101 +7772,101 @@ mod tests {
                 use LogicalKeyboardKey as K;
 
                 // Have to open a menu initially to start things going.
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
 
-                key(&mut tester, K::ARROW_LEFT);
-                submenu(&tester, "Menu 1");
+                key(tester, K::ARROW_LEFT);
+                submenu(tester, "Menu 1");
 
-                key(&mut tester, K::ARROW_DOWN);
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                key(tester, K::ARROW_DOWN);
+                pump(tester);
+                submenu(tester, "Menu 1");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Menu 10");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Menu 10");
 
-                key(&mut tester, K::ARROW_DOWN);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_DOWN);
+                submenu(tester, "Sub Menu 11");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Menu 12");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Menu 12");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Menu 12");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Menu 12");
 
-                key(&mut tester, K::ARROW_UP);
-                pump(&mut tester);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_UP);
+                pump(tester);
+                submenu(tester, "Sub Menu 11");
 
                 // Open the next submenu.
-                key(&mut tester, K::ARROW_LEFT);
-                pump(&mut tester);
-                item(&tester, "Sub Sub Menu 110");
+                key(tester, K::ARROW_LEFT);
+                pump(tester);
+                item(tester, "Sub Sub Menu 110");
 
                 // Go back, close the submenu.
-                key(&mut tester, K::ARROW_RIGHT);
-                pump(&mut tester);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_RIGHT);
+                pump(tester);
+                submenu(tester, "Sub Menu 11");
 
                 // Move up, should close the submenu.
-                key(&mut tester, K::ARROW_UP);
-                pump(&mut tester);
-                item(&tester, "Sub Menu 10");
+                key(tester, K::ARROW_UP);
+                pump(tester);
+                item(tester, "Sub Menu 10");
 
                 // Move down, should reopen the submenu.
-                key(&mut tester, K::ARROW_DOWN);
-                pump(&mut tester);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_DOWN);
+                pump(tester);
+                submenu(tester, "Sub Menu 11");
 
                 // Open the next submenu again.
-                key(&mut tester, K::ARROW_LEFT);
-                pump(&mut tester);
-                item(&tester, "Sub Sub Menu 110");
+                key(tester, K::ARROW_LEFT);
+                pump(tester);
+                item(tester, "Sub Sub Menu 110");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Sub Menu 111");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Sub Menu 111");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Sub Menu 112");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Sub Menu 112");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Sub Menu 113");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Sub Menu 113");
 
-                key(&mut tester, K::ARROW_DOWN);
-                item(&tester, "Sub Sub Menu 113");
+                key(tester, K::ARROW_DOWN);
+                item(tester, "Sub Sub Menu 113");
 
                 // Since this is a leaf off of a vertical menu, moving right should
                 // return to this menu's parent button.
-                key(&mut tester, K::ARROW_RIGHT);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_RIGHT);
+                submenu(tester, "Sub Menu 11");
 
                 // Moving left while in a first-level submenu should focus the
                 // previous top-level menubar anchor.
-                key(&mut tester, K::ARROW_RIGHT);
-                pump(&mut tester);
-                submenu(&tester, "Menu 0");
+                key(tester, K::ARROW_RIGHT);
+                pump(tester);
+                submenu(tester, "Menu 0");
 
-                key(&mut tester, K::ARROW_LEFT);
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                key(tester, K::ARROW_LEFT);
+                pump(tester);
+                submenu(tester, "Menu 1");
 
                 // Pressing arrowup from a top-level menubar anchor should focus the last
                 // item in that anchor's submenu.
-                key(&mut tester, K::ARROW_UP);
-                item(&tester, "Sub Menu 12");
+                key(tester, K::ARROW_UP);
+                item(tester, "Sub Menu 12");
 
-                key(&mut tester, K::ARROW_UP);
-                pump(&mut tester);
-                submenu(&tester, "Sub Menu 11");
+                key(tester, K::ARROW_UP);
+                pump(tester);
+                submenu(tester, "Sub Menu 11");
 
                 // Enter the submenu.
-                key(&mut tester, K::ARROW_LEFT);
-                item(&tester, "Sub Sub Menu 110");
+                key(tester, K::ARROW_LEFT);
+                item(tester, "Sub Sub Menu 110");
 
                 // Move to next top-level menu button.
-                key(&mut tester, K::ARROW_LEFT);
-                pump(&mut tester);
-                submenu(&tester, "Menu 2");
+                key(tester, K::ARROW_LEFT);
+                pump(tester);
+                submenu(tester, "Menu 2");
             });
         }
 
@@ -7956,62 +7934,61 @@ mod tests {
         // menu_anchor_test.dart 'MenuAnchor tab traversal works'.
         #[test]
         fn tab_and_shift_tab_move_between_the_items_of_a_menu_anchor() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                pump_anchor_with_test_menus(&mut tester, &log, "Press Me", TextDirection::Ltr);
+                pump_anchor_with_test_menus(tester, &log, "Press Me", TextDirection::Ltr);
 
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                assert!(focused_is_anchor_button(&tester));
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                assert!(focused_is_anchor_button(tester));
 
-                send_key(&mut tester, LogicalKeyboardKey::ENTER);
-                pump(&mut tester);
-                assert!(focused_is_anchor_button(&tester));
+                send_key(tester, LogicalKeyboardKey::ENTER);
+                pump(tester);
+                assert!(focused_is_anchor_button(tester));
 
                 // Directional traversal doesn't work until a menu item is focused.
                 // To start focusing, hover over the first menu item.
-                let start = text_rect(&tester, "start").center();
-                hover_over(&mut tester, start);
-                pump(&mut tester);
-                item(&tester, "start");
+                let start = text_rect(tester, "start").center();
+                hover_over(tester, start);
+                pump(tester);
+                item(tester, "start");
 
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 0");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 0");
 
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 1");
 
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 2");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 2");
 
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                item(&tester, "start");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                item(tester, "start");
 
                 send_key_change(
-                    &mut tester,
+                    tester,
                     waft_embedder::KeyEventType::Down,
                     LogicalKeyboardKey::SHIFT_LEFT,
                     None,
                 );
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 2");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 2");
 
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 1");
 
-                send_key(&mut tester, LogicalKeyboardKey::TAB);
-                pump(&mut tester);
-                submenu(&tester, "Menu 0");
+                send_key(tester, LogicalKeyboardKey::TAB);
+                pump(tester);
+                submenu(tester, "Menu 0");
 
                 send_key_change(
-                    &mut tester,
+                    tester,
                     waft_embedder::KeyEventType::Up,
                     LogicalKeyboardKey::SHIFT_LEFT,
                     None,
@@ -8019,8 +7996,8 @@ mod tests {
                 log.clear();
 
                 // Test closing a menu with enter.
-                send_key(&mut tester, LogicalKeyboardKey::ENTER);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ENTER);
+                pump(tester);
                 assert!(log.opened().is_empty());
                 assert_eq!(log.closed(), [TestMenu::MainMenu0]);
             });
@@ -8028,89 +8005,88 @@ mod tests {
 
         /// The steps the two 'MenuAnchor * directional traversal works' cases share, with `into`
         /// the arrow that enters a submenu and `out` the one that leaves it.
-        fn anchor_directional_traversal(direction: TextDirection) {
+        fn anchor_directional_traversal(tester: &mut WidgetTester, direction: TextDirection) {
             use LogicalKeyboardKey as K;
             let (into, out) = match direction {
                 TextDirection::Ltr => (K::ARROW_RIGHT, K::ARROW_LEFT),
                 TextDirection::Rtl => (K::ARROW_LEFT, K::ARROW_RIGHT),
             };
-            let mut tester = tester();
             let log = Log::default();
-            pump_anchor_with_test_menus(&mut tester, &log, "Open", direction);
+            pump_anchor_with_test_menus(tester, &log, "Open", direction);
 
-            send_key(&mut tester, K::TAB);
-            assert!(focused_is_anchor_button(&tester));
+            send_key(tester, K::TAB);
+            assert!(focused_is_anchor_button(tester));
 
-            send_key(&mut tester, K::ENTER);
-            pump(&mut tester);
-            assert!(focused_is_anchor_button(&tester));
-            assert!(shows(&tester, "start"));
+            send_key(tester, K::ENTER);
+            pump(tester);
+            assert!(focused_is_anchor_button(tester));
+            assert!(shows(tester, "start"));
 
             // Directional traversal doesn't work until a menu item is focused.
             // To start focusing, hover over the first menu item.
-            let start = text_rect(&tester, "start").center();
-            hover_over(&mut tester, start);
-            pump(&mut tester);
-            item(&tester, "start");
+            let start = text_rect(tester, "start").center();
+            hover_over(tester, start);
+            pump(tester);
+            item(tester, "start");
 
-            send_key(&mut tester, K::ARROW_DOWN);
-            pump(&mut tester);
-            submenu(&tester, "Menu 0");
-            assert!(shows(&tester, "Sub Menu 00"));
+            send_key(tester, K::ARROW_DOWN);
+            pump(tester);
+            submenu(tester, "Menu 0");
+            assert!(shows(tester, "Sub Menu 00"));
 
-            send_key(&mut tester, out);
-            pump(&mut tester);
-            submenu(&tester, "Menu 0");
+            send_key(tester, out);
+            pump(tester);
+            submenu(tester, "Menu 0");
 
-            send_key(&mut tester, into);
-            pump(&mut tester);
-            item(&tester, "Sub Menu 00");
+            send_key(tester, into);
+            pump(tester);
+            item(tester, "Sub Menu 00");
 
-            send_key(&mut tester, K::ARROW_DOWN);
-            item(&tester, "Sub Menu 01");
+            send_key(tester, K::ARROW_DOWN);
+            item(tester, "Sub Menu 01");
 
-            send_key(&mut tester, K::ARROW_DOWN);
-            item(&tester, "Sub Menu 02");
+            send_key(tester, K::ARROW_DOWN);
+            item(tester, "Sub Menu 02");
 
             // We're at the deepest menu, so the arrow into a submenu should not change focus.
-            send_key(&mut tester, into);
-            item(&tester, "Sub Menu 02");
+            send_key(tester, into);
+            item(tester, "Sub Menu 02");
 
             // The arrow out of a submenu should move focus to the parent anchor.
-            send_key(&mut tester, out);
-            pump(&mut tester);
-            submenu(&tester, "Menu 0");
-            assert!(!shows(&tester, "Sub Menu 00"));
+            send_key(tester, out);
+            pump(tester);
+            submenu(tester, "Menu 0");
+            assert!(!shows(tester, "Sub Menu 00"));
 
             // We're at the root menu, so the arrow out should not change focus and
             // should not open the submenu.
-            send_key(&mut tester, out);
-            submenu(&tester, "Menu 0");
-            assert!(!shows(&tester, "Sub Menu 00"));
+            send_key(tester, out);
+            submenu(tester, "Menu 0");
+            assert!(!shows(tester, "Sub Menu 00"));
 
             // Open the submenu again.
-            send_key(&mut tester, K::SPACE);
-            pump(&mut tester);
-            submenu(&tester, "Menu 0");
-            assert!(shows(&tester, "Sub Menu 00"));
+            send_key(tester, K::SPACE);
+            pump(tester);
+            submenu(tester, "Menu 0");
+            assert!(shows(tester, "Sub Menu 00"));
 
             // Close all menus.
-            send_key(&mut tester, K::ESCAPE);
-            pump(&mut tester);
-            assert!(focused_is_anchor_button(&tester));
+            send_key(tester, K::ESCAPE);
+            pump(tester);
+            assert!(focused_is_anchor_button(tester));
             assert!(tester.find_by_type::<MenuItemButton>().is_empty());
         }
 
         // menu_anchor_test.dart 'MenuAnchor LTR directional traversal works'.
         #[test]
         fn arrow_keys_move_through_a_menu_anchor_left_to_right() {
-            with_main_thread_stack(|| anchor_directional_traversal(TextDirection::Ltr));
+            test_widgets(|tester| anchor_directional_traversal(tester, TextDirection::Ltr));
         }
 
         // menu_anchor_test.dart 'MenuAnchor RTL directional traversal works'.
         #[test]
         fn arrow_keys_move_through_a_menu_anchor_right_to_left() {
-            with_main_thread_stack(|| anchor_directional_traversal(TextDirection::Rtl));
+            test_widgets(|tester| anchor_directional_traversal(tester, TextDirection::Rtl));
         }
 
         /// Dart's `listenForFocusChanges()`: the `focusedMenu` a `FocusManager` listener keeps,
@@ -8137,7 +8113,7 @@ mod tests {
 
         impl Mouse {
             fn new(tester: &mut WidgetTester) -> Mouse {
-                let mut mouse = WidgetTester::mouse(1, 0);
+                let mut mouse = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut mouse, Offset::ZERO);
                 Mouse(mouse)
             }
@@ -8179,58 +8155,57 @@ mod tests {
         // menu_anchor_test.dart 'hover traversal works'.
         #[test]
         fn hovering_opens_and_focuses_menus_once_one_is_open() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(menus.build())
                         .controller(controller)
                         .into_widget()
                 });
 
-                let focused_menu = listen_for_focus_changes(&tester);
+                let focused_menu = listen_for_focus_changes(tester);
                 let focused = |text: &str, type_name: &str| {
                     assert_eq!(*focused_menu.borrow(), Some(button_label(type_name, text)));
                 };
-                let mut mouse = Mouse::new(&mut tester);
+                let mut mouse = Mouse::new(tester);
 
                 // Hovering when the menu is not yet open does nothing.
-                mouse.hover_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                mouse.hover_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
                 assert_eq!(*focused_menu.borrow(), None);
 
                 // Have to open a menu initially to start things going.
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
                 focused("Menu 0", "SubmenuButton");
 
                 // Hovering when the menu is already  open does nothing.
-                mouse.hover_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                mouse.hover_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
                 focused("Menu 0", "SubmenuButton");
 
                 // Hovering over the other main menu items opens them now.
-                mouse.hover_text(&mut tester, &TestMenu::MainMenu2.label());
-                pump(&mut tester);
+                mouse.hover_text(tester, &TestMenu::MainMenu2.label());
+                pump(tester);
                 focused("Menu 2", "SubmenuButton");
 
-                mouse.hover_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                mouse.hover_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
                 focused("Menu 1", "SubmenuButton");
 
                 // Hovering over the menu items focuses them.
-                mouse.hover_text(&mut tester, &TestMenu::SubMenu10.label());
-                pump(&mut tester);
+                mouse.hover_text(tester, &TestMenu::SubMenu10.label());
+                pump(tester);
                 focused("Sub Menu 10", "MenuItemButton");
 
-                mouse.hover_text(&mut tester, &TestMenu::SubMenu11.label());
-                pump(&mut tester);
+                mouse.hover_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
                 focused("Sub Menu 11", "SubmenuButton");
 
-                mouse.hover_text(&mut tester, &TestMenu::SubSubMenu110.label());
-                pump(&mut tester);
+                mouse.hover_text(tester, &TestMenu::SubSubMenu110.label());
+                pump(tester);
                 focused("Sub Sub Menu 110", "MenuItemButton");
             });
         }
@@ -8238,45 +8213,44 @@ mod tests {
         // menu_anchor_test.dart 'hover traversal invalidates directional focus scope data'.
         #[test]
         fn hovering_resets_where_directional_traversal_starts() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let menus = TestMenus::all(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(menus.build())
                         .controller(controller)
                         .into_widget()
                 });
-                let mut mouse = Mouse::new(&mut tester);
+                let mut mouse = Mouse::new(tester);
 
                 // Have to open a menu initially to start things going.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
-                submenu(&tester, "Menu 1");
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
+                submenu(tester, "Menu 1");
 
-                mouse.hover_text(&mut tester, &TestMenu::SubMenu12.label());
-                pump(&mut tester);
-                item(&tester, "Sub Menu 12");
+                mouse.hover_text(tester, &TestMenu::SubMenu12.label());
+                pump(tester);
+                item(tester, "Sub Menu 12");
 
                 // Move pointer to disabled menu.
-                mouse.hover_text(&mut tester, &TestMenu::MainMenu5.label());
-                pump(&mut tester);
-                item(&tester, "Sub Menu 12");
+                mouse.hover_text(tester, &TestMenu::MainMenu5.label());
+                pump(tester);
+                item(tester, "Sub Menu 12");
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_UP);
-                pump(&mut tester);
-                submenu(&tester, "Sub Menu 11");
+                send_key(tester, LogicalKeyboardKey::ARROW_UP);
+                pump(tester);
+                submenu(tester, "Sub Menu 11");
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_UP);
-                item(&tester, "Sub Menu 10");
+                send_key(tester, LogicalKeyboardKey::ARROW_UP);
+                item(tester, "Sub Menu 10");
 
-                mouse.hover_text(&mut tester, &TestMenu::SubMenu12.label());
-                pump(&mut tester);
-                item(&tester, "Sub Menu 12");
+                mouse.hover_text(tester, &TestMenu::SubMenu12.label());
+                pump(tester);
+                item(tester, "Sub Menu 12");
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                item(&tester, "Sub Menu 12");
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                item(tester, "Sub Menu 12");
             });
         }
 
@@ -8308,68 +8282,65 @@ mod tests {
         // menu_anchor_test.dart 'hoverOpenDelay delays when a SubmenuButton opens'.
         #[test]
         fn a_hover_open_delay_holds_back_the_submenu() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_delayed_submenu(&mut tester, false);
-                let mut mouse = Mouse::new(&mut tester);
+            test_widgets(|tester| {
+                pump_delayed_submenu(tester, false);
+                let mut mouse = Mouse::new(tester);
 
                 // Hover over the submenu button
-                mouse.hover_text(&mut tester, "Submenu");
-                tester.pump(Duration::from_millis(499));
+                mouse.hover_text(tester, "Submenu");
+                tester.pump_by(Duration::from_millis(499));
 
-                assert!(!shows(&tester, "Item 0"));
+                assert!(!shows(tester, "Item 0"));
 
-                tester.pump(Duration::from_millis(1));
+                tester.pump_by(Duration::from_millis(1));
 
                 // Menu should now be open
-                assert!(shows(&tester, "Item 0"));
+                assert!(shows(tester, "Item 0"));
             });
         }
 
         // menu_anchor_test.dart 'hoverOpenDelay can be cancelled'.
         #[test]
         fn leaving_the_button_cancels_a_hover_open_delay() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_delayed_submenu(&mut tester, true);
-                let mut mouse = Mouse::new(&mut tester);
+            test_widgets(|tester| {
+                pump_delayed_submenu(tester, true);
+                let mut mouse = Mouse::new(tester);
 
                 // Hover over the submenu button
-                mouse.hover_text(&mut tester, "Submenu");
-                tester.pump(Duration::from_millis(499));
+                mouse.hover_text(tester, "Submenu");
+                tester.pump_by(Duration::from_millis(499));
 
-                assert!(!shows(&tester, "Item 0"));
+                assert!(!shows(tester, "Item 0"));
 
                 // Move hover away before the delay completes
-                mouse.hover_text(&mut tester, "Outside");
-                tester.pump(Duration::from_millis(1));
+                mouse.hover_text(tester, "Outside");
+                tester.pump_by(Duration::from_millis(1));
 
-                assert!(!shows(&tester, "Item 0"));
+                assert!(!shows(tester, "Item 0"));
             });
         }
 
         // menu_anchor_test.dart 'hoverOpenDelay restarts after cancellation'.
         #[test]
         fn a_hover_open_delay_starts_over_after_it_is_cancelled() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_delayed_submenu(&mut tester, true);
-                let mut mouse = Mouse::new(&mut tester);
+            test_widgets(|tester| {
+                pump_delayed_submenu(tester, true);
+                let mut mouse = Mouse::new(tester);
 
-                mouse.hover_text(&mut tester, "Submenu");
-                tester.pump(Duration::from_millis(499));
+                mouse.hover_text(tester, "Submenu");
+                tester.pump_by(Duration::from_millis(499));
 
-                assert!(!shows(&tester, "Item 0"));
+                assert!(!shows(tester, "Item 0"));
 
-                mouse.hover_text(&mut tester, "Outside");
-                tester.pump(Duration::from_millis(1));
+                mouse.hover_text(tester, "Outside");
+                tester.pump_by(Duration::from_millis(1));
 
-                assert!(!shows(&tester, "Item 0"));
+                assert!(!shows(tester, "Item 0"));
 
-                mouse.hover_text(&mut tester, "Submenu");
-                tester.pump(Duration::from_millis(500));
+                mouse.hover_text(tester, "Submenu");
+                tester.pump_by(Duration::from_millis(500));
 
-                assert!(shows(&tester, "Item 0"));
+                assert!(shows(tester, "Item 0"));
             });
         }
 
@@ -8379,9 +8350,8 @@ mod tests {
             expected = "A non-zero hoverOpenDelay was used in a top-level SubmenuButton situated in a MenuBar"
         )]
         fn a_hover_open_delay_on_a_menu_bar_button_panics_in_a_debug_build() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(vec![
                         SubmenuButton::new(
                             vec![
@@ -8403,12 +8373,11 @@ mod tests {
         // menu_anchor_test.dart 'scrolling does not trigger hover traversal'.
         #[test]
         fn scrolling_a_menu_under_the_pointer_does_not_move_focus() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = controller(&tester);
+            test_widgets(|tester| {
+                let controller = controller(tester);
                 let scrolled_menu_item_key = GlobalKey::new();
                 let key = scrolled_menu_item_key.clone();
-                pump_material(&mut tester, m3, {
+                pump_material(tester, m3, {
                     let controller = controller.clone();
                     move |_app| {
                         let menu_children = (0..20)
@@ -8433,7 +8402,7 @@ mod tests {
                     }
                 });
 
-                let focused_menu = listen_for_focus_changes(&tester);
+                let focused_menu = listen_for_focus_changes(tester);
                 let focused = |text: &str| {
                     assert_eq!(
                         *focused_menu.borrow(),
@@ -8444,9 +8413,9 @@ mod tests {
                 controller.open(&mut tester.cell.borrow_mut(), None);
                 tester.pump_and_settle();
 
-                let mut mouse = Mouse::new(&mut tester);
-                mouse.hover_text(&mut tester, "Item 1");
-                pump(&mut tester);
+                let mut mouse = Mouse::new(tester);
+                mouse.hover_text(tester, "Item 1");
+                pump(tester);
                 focused("Item 1");
 
                 // Scroll the menu while the pointer is over a menu item. The focus should
@@ -8469,8 +8438,8 @@ mod tests {
                 // Traverse with the keyboard to test that the menu scrolls without hover
                 // focus affecting the focused menu.
                 for i in 2..20 {
-                    send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                    pump(&mut tester);
+                    send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                    pump(tester);
                     focused(&format!("Item {i}"));
                 }
             });
@@ -8497,14 +8466,13 @@ mod tests {
         // menu_anchor_test.dart 'menus close on ancestor scroll'.
         #[test]
         fn menus_close_when_an_ancestor_scrolls() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let scroll_controller = ScrollController::default(&mut tester.cell.borrow_mut())
                     .into_erased::<waft_widgets::AnyScrollController>();
                 let menus = TestMenus::all(&log);
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     tall_scroll_view(
                         scroll_controller.clone(),
                         AlignmentGeometry::CENTER,
@@ -8514,15 +8482,15 @@ mod tests {
                     )
                 });
 
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
 
                 assert!(!log.opened().is_empty());
                 assert!(log.closed().is_empty());
                 log.opened.borrow_mut().clear();
 
                 scroll_controller.jump_to(&mut tester.cell.borrow_mut(), 1000.0);
-                pump(&mut tester);
+                pump(tester);
 
                 assert!(log.opened().is_empty());
                 assert!(!log.closed().is_empty());
@@ -8532,10 +8500,9 @@ mod tests {
         // menu_anchor_test.dart 'menus do not close on root menu internal scroll'.
         #[test]
         fn menus_stay_open_when_the_root_menu_scrolls_itself() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let scroll_controller = ScrollController::default(&mut tester.cell.borrow_mut())
                     .into_erased::<waft_widgets::AnyScrollController>();
                 let root_opened = Rc::new(Cell::new(false));
@@ -8587,24 +8554,24 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                tap_text(&mut tester, "Show menu");
-                pump(&mut tester);
+                tap_text(tester, "Show menu");
+                pump(tester);
                 assert!(root_opened.get());
 
                 // Hover the first item.
-                let mut mouse = Mouse::new(&mut tester);
-                mouse.hover_text(&mut tester, &TestMenu::MainMenu0.label());
+                let mut mouse = Mouse::new(tester);
+                mouse.hover_text(tester, &TestMenu::MainMenu0.label());
                 assert!(!log.opened().is_empty());
 
                 // Menus do not close on internal scroll.
-                mouse.scroll(&mut tester, Offset::new(0.0, 30.0));
-                pump(&mut tester);
+                mouse.scroll(tester, Offset::new(0.0, 30.0));
+                pump(tester);
                 assert!(root_opened.get());
                 assert!(log.closed().is_empty());
 
                 // Menus close on external scroll.
                 scroll_controller.jump_to(&mut tester.cell.borrow_mut(), 1000.0);
-                pump(&mut tester);
+                pump(tester);
                 assert!(!root_opened.get());
                 assert!(!log.closed().is_empty());
             });
@@ -8613,10 +8580,9 @@ mod tests {
         // menu_anchor_test.dart 'menus close on view size change'.
         #[test]
         fn menus_close_when_the_view_size_changes() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = controller(&tester);
+                let controller = controller(tester);
                 let scroll_controller = ScrollController::default(&mut tester.cell.borrow_mut())
                     .into_erased::<waft_widgets::AnyScrollController>();
                 let build = |tester: &mut WidgetTester, size: Option<Size>| {
@@ -8646,18 +8612,18 @@ mod tests {
                     });
                 };
 
-                build(&mut tester, None);
+                build(tester, None);
 
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
 
                 assert!(!log.opened().is_empty());
                 assert!(log.closed().is_empty());
                 log.opened.borrow_mut().clear();
 
                 let small_size = Size::new(200.0, 200.0);
-                build(&mut tester, Some(small_size));
-                pump(&mut tester);
+                build(tester, Some(small_size));
+                pump(tester);
 
                 assert!(log.opened().is_empty());
                 assert!(!log.closed().is_empty());
@@ -8667,8 +8633,7 @@ mod tests {
         // menu_anchor_test.dart 'Shortcuts of MenuAnchor do not rely on WidgetsApp.shortcuts'.
         #[test]
         fn a_menu_anchor_traverses_with_arrow_keys_without_the_apps_shortcuts() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let child_node = {
                     let mut app = tester.cell.borrow_mut();
                     let node = FocusNode::new(&mut app).into_erased::<AnyFocusNode>();
@@ -8705,20 +8670,20 @@ mod tests {
                 tester.pump_widget(root);
 
                 // Open the drop down menu and focus on the MenuAnchor.
-                tap_text(&mut tester, "Main button");
+                tap_text(tester, "Main button");
                 tester.pump_and_settle();
-                assert!(shows(&tester, "Submenu item 0"));
+                assert!(shows(tester, "Submenu item 0"));
 
                 // Press arrowDown, and the first submenu button should be focused.
                 // This is the critical part. It used to not work on Web.
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                pump(&mut tester);
-                item(&tester, "Submenu item 0");
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                pump(tester);
+                item(tester, "Submenu item 0");
 
                 // Press arrowDown, and the second submenu button should be focused.
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                pump(&mut tester);
-                item(&tester, "Submenu item 1");
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                pump(tester);
+                item(tester, "Submenu item 1");
             });
         }
 
@@ -8807,8 +8772,9 @@ mod tests {
                 TargetPlatform::MacOS,
                 TargetPlatform::Windows,
             ] {
-                with_main_thread_stack(|| {
-                    let mut tester = crate::tooltip::tests::tester_on(platform);
+                test_widgets(|_| {
+                    let mut tester = WidgetTester::on(platform);
+                    let tester = &mut tester;
                     let scrollbar_theme = crate::scrollbar_theme::ScrollbarThemeData::new()
                         .thumb_color(Rc::new(waft_widgets::WidgetStatePropertyAll::new(Some(
                             Color::new(0xffff0000),
@@ -8816,13 +8782,13 @@ mod tests {
                         .thumb_visibility(Rc::new(waft_widgets::WidgetStatePropertyAll::new(
                             Some(true),
                         )));
-                    pump_tall_menu(&mut tester, scrollbar_theme.clone(), None);
+                    pump_tall_menu(tester, scrollbar_theme.clone(), None);
 
-                    tap_text(&mut tester, "Main Menu");
+                    tap_text(tester, "Main Menu");
                     tester.pump_and_settle();
 
                     // Test Scrollbar thumb color.
-                    assert!(last_scrollbar_paints_a_path_in(&tester, 0xffff0000));
+                    assert!(last_scrollbar_paints_a_path_in(tester, 0xffff0000));
 
                     // Close the menu.
                     tester.tap(Offset::new(10.0, 10.0), 1);
@@ -8831,13 +8797,13 @@ mod tests {
                     let local_theme = scrollbar_theme.copy_with().thumb_color(Rc::new(
                         waft_widgets::WidgetStatePropertyAll::new(Some(Color::new(0xff00ff00))),
                     ));
-                    pump_tall_menu(&mut tester, scrollbar_theme, Some(local_theme));
+                    pump_tall_menu(tester, scrollbar_theme, Some(local_theme));
 
-                    tap_text(&mut tester, "Main Menu");
+                    tap_text(tester, "Main Menu");
                     tester.pump_and_settle();
 
                     // Scrollbar thumb color should be updated.
-                    assert!(last_scrollbar_paints_a_path_in(&tester, 0xff00ff00));
+                    assert!(last_scrollbar_paints_a_path_in(tester, 0xff00ff00));
                 });
             }
         }
@@ -8857,7 +8823,6 @@ mod tests {
         use crate::material::RenderInkFeatures;
         use crate::scaffold::Scaffold;
         use crate::test_support::Drawn;
-        use crate::tooltip::tests::tester_on;
 
         const ALL_PLATFORMS: [TargetPlatform; 6] = [
             TargetPlatform::Android,
@@ -9030,296 +8995,253 @@ mod tests {
         // menu_anchor_test.dart 'can invoke menu items'.
         #[test]
         fn accelerators_invoke_menu_items_off_apple_platforms() {
-            with_main_thread_stack(|| {
-                for platform in NON_APPLE_PLATFORMS {
-                    let mut tester = tester_on(platform);
-                    let log = Log::default();
-                    let controller = new_controller(&tester);
-                    pump_menu_bar(
-                        &mut tester,
-                        controller.clone(),
-                        TestMenus {
-                            accelerators: true,
-                            ..TestMenus::all(&log)
-                        },
-                    );
+            test_widgets_variant(TargetPlatformVariant::new(NON_APPLE_PLATFORMS), |tester| {
+                let platform = tester.target_platform();
 
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Down,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "m");
-                    pump(&mut tester);
-                    // Makes sure that identical accelerators in parent menu items don't
-                    // shadow the ones in the children.
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "m");
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Up,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
+                let log = Log::default();
+                let controller = new_controller(tester);
+                pump_menu_bar(
+                    tester,
+                    controller.clone(),
+                    TestMenus {
+                        accelerators: true,
+                        ..TestMenus::all(&log)
+                    },
+                );
 
-                    assert_eq!(log.opened(), [TestMenu::MainMenu0], "{platform:?}");
-                    assert_eq!(log.closed(), [TestMenu::MainMenu0], "{platform:?}");
-                    assert_eq!(log.selected(), [TestMenu::SubMenu00], "{platform:?}");
-                    // Selecting a non-submenu item should close all the menus.
-                    assert!(!shows(&tester, &TestMenu::SubMenu00.label()));
-                    log.clear();
+                send_key_change(
+                    tester,
+                    KeyEventType::Down,
+                    LogicalKeyboardKey::ALT_LEFT,
+                    None,
+                );
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "m");
+                pump(tester);
+                // Makes sure that identical accelerators in parent menu items don't
+                // shadow the ones in the children.
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "m");
+                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                pump(tester);
 
-                    // Invoking several levels deep.
-                    send_key_change_of(
-                        &mut tester,
-                        KeyEventType::Down,
-                        LogicalKeyboardKey::ALT_RIGHT,
-                    );
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "e");
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "1");
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "1");
-                    send_key_change_of(
-                        &mut tester,
-                        KeyEventType::Up,
-                        LogicalKeyboardKey::ALT_RIGHT,
-                    );
-                    pump(&mut tester);
+                assert_eq!(log.opened(), [TestMenu::MainMenu0], "{platform:?}");
+                assert_eq!(log.closed(), [TestMenu::MainMenu0], "{platform:?}");
+                assert_eq!(log.selected(), [TestMenu::SubMenu00], "{platform:?}");
+                // Selecting a non-submenu item should close all the menus.
+                assert!(!shows(tester, &TestMenu::SubMenu00.label()));
+                log.clear();
 
-                    assert_eq!(
-                        log.opened(),
-                        [TestMenu::MainMenu1, TestMenu::SubMenu11],
-                        "{platform:?}"
-                    );
-                    assert_eq!(
-                        log.closed(),
-                        [TestMenu::SubMenu11, TestMenu::MainMenu1],
-                        "{platform:?}"
-                    );
-                    assert_eq!(log.selected(), [TestMenu::SubSubMenu111], "{platform:?}");
-                }
+                // Invoking several levels deep.
+                send_key_change_of(tester, KeyEventType::Down, LogicalKeyboardKey::ALT_RIGHT);
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "e");
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "1");
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "1");
+                send_key_change_of(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_RIGHT);
+                pump(tester);
+
+                assert_eq!(
+                    log.opened(),
+                    [TestMenu::MainMenu1, TestMenu::SubMenu11],
+                    "{platform:?}"
+                );
+                assert_eq!(
+                    log.closed(),
+                    [TestMenu::SubMenu11, TestMenu::MainMenu1],
+                    "{platform:?}"
+                );
+                assert_eq!(log.selected(), [TestMenu::SubSubMenu111], "{platform:?}");
             });
         }
 
         // menu_anchor_test.dart 'can combine with regular keyboard navigation'.
         #[test]
         fn accelerators_combine_with_regular_keyboard_navigation() {
-            with_main_thread_stack(|| {
-                for platform in NON_APPLE_PLATFORMS {
-                    let mut tester = tester_on(platform);
-                    let log = Log::default();
-                    let controller = new_controller(&tester);
-                    pump_menu_bar(
-                        &mut tester,
-                        controller.clone(),
-                        TestMenus {
-                            accelerators: true,
-                            ..TestMenus::all(&log)
-                        },
-                    );
+            test_widgets_variant(TargetPlatformVariant::new(NON_APPLE_PLATFORMS), |tester| {
+                let platform = tester.target_platform();
 
-                    // Combining accelerators and regular keyboard navigation works.
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Down,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "e");
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "1");
-                    pump(&mut tester);
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Up,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
-                    send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
-                    pump(&mut tester);
-                    send_key(&mut tester, LogicalKeyboardKey::ENTER);
-                    pump(&mut tester);
+                let log = Log::default();
+                let controller = new_controller(tester);
+                pump_menu_bar(
+                    tester,
+                    controller.clone(),
+                    TestMenus {
+                        accelerators: true,
+                        ..TestMenus::all(&log)
+                    },
+                );
 
-                    assert_eq!(
-                        log.opened(),
-                        [TestMenu::MainMenu1, TestMenu::SubMenu11],
-                        "{platform:?}"
-                    );
-                    assert_eq!(
-                        log.closed(),
-                        [TestMenu::SubMenu11, TestMenu::MainMenu1],
-                        "{platform:?}"
-                    );
-                    assert_eq!(log.selected(), [TestMenu::SubSubMenu110], "{platform:?}");
-                }
+                // Combining accelerators and regular keyboard navigation works.
+                send_key_change(
+                    tester,
+                    KeyEventType::Down,
+                    LogicalKeyboardKey::ALT_LEFT,
+                    None,
+                );
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "e");
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "1");
+                pump(tester);
+                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                pump(tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
+                pump(tester);
+                send_key(tester, LogicalKeyboardKey::ENTER);
+                pump(tester);
+
+                assert_eq!(
+                    log.opened(),
+                    [TestMenu::MainMenu1, TestMenu::SubMenu11],
+                    "{platform:?}"
+                );
+                assert_eq!(
+                    log.closed(),
+                    [TestMenu::SubMenu11, TestMenu::MainMenu1],
+                    "{platform:?}"
+                );
+                assert_eq!(log.selected(), [TestMenu::SubSubMenu110], "{platform:?}");
             });
         }
 
         // menu_anchor_test.dart 'can combine with mouse'.
         #[test]
         fn accelerators_combine_with_the_mouse() {
-            with_main_thread_stack(|| {
-                for platform in NON_APPLE_PLATFORMS {
-                    let mut tester = tester_on(platform);
-                    let log = Log::default();
-                    let controller = new_controller(&tester);
-                    pump_menu_bar(
-                        &mut tester,
-                        controller.clone(),
-                        TestMenus {
-                            accelerators: true,
-                            ..TestMenus::all(&log)
-                        },
-                    );
+            test_widgets_variant(TargetPlatformVariant::new(NON_APPLE_PLATFORMS), |tester| {
+                let platform = tester.target_platform();
 
-                    // Combining accelerators and regular keyboard navigation works.
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Down,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "e");
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "1");
-                    pump(&mut tester);
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Up,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
-                    tap_text(&mut tester, &TestMenu::SubSubMenu112.label());
-                    pump(&mut tester);
+                let log = Log::default();
+                let controller = new_controller(tester);
+                pump_menu_bar(
+                    tester,
+                    controller.clone(),
+                    TestMenus {
+                        accelerators: true,
+                        ..TestMenus::all(&log)
+                    },
+                );
 
-                    assert_eq!(
-                        log.opened(),
-                        [TestMenu::MainMenu1, TestMenu::SubMenu11],
-                        "{platform:?}"
-                    );
-                    assert_eq!(
-                        log.closed(),
-                        [TestMenu::SubMenu11, TestMenu::MainMenu1],
-                        "{platform:?}"
-                    );
-                    assert_eq!(log.selected(), [TestMenu::SubSubMenu112], "{platform:?}");
-                }
+                // Combining accelerators and regular keyboard navigation works.
+                send_key_change(
+                    tester,
+                    KeyEventType::Down,
+                    LogicalKeyboardKey::ALT_LEFT,
+                    None,
+                );
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "e");
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "1");
+                pump(tester);
+                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                pump(tester);
+                tap_text(tester, &TestMenu::SubSubMenu112.label());
+                pump(tester);
+
+                assert_eq!(
+                    log.opened(),
+                    [TestMenu::MainMenu1, TestMenu::SubMenu11],
+                    "{platform:?}"
+                );
+                assert_eq!(
+                    log.closed(),
+                    [TestMenu::SubMenu11, TestMenu::MainMenu1],
+                    "{platform:?}"
+                );
+                assert_eq!(log.selected(), [TestMenu::SubSubMenu112], "{platform:?}");
             });
         }
 
         // menu_anchor_test.dart "disabled items don't respond to accelerators".
         #[test]
         fn disabled_items_do_not_respond_to_accelerators() {
-            with_main_thread_stack(|| {
-                for platform in NON_APPLE_PLATFORMS {
-                    let mut tester = tester_on(platform);
-                    let log = Log::default();
-                    let controller = new_controller(&tester);
-                    pump_menu_bar(
-                        &mut tester,
-                        controller.clone(),
-                        TestMenus {
-                            accelerators: true,
-                            ..TestMenus::all(&log)
-                        },
-                    );
+            test_widgets_variant(TargetPlatformVariant::new(NON_APPLE_PLATFORMS), |tester| {
+                let platform = tester.target_platform();
 
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Down,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "5");
-                    pump(&mut tester);
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Up,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
+                let log = Log::default();
+                let controller = new_controller(tester);
+                pump_menu_bar(
+                    tester,
+                    controller.clone(),
+                    TestMenus {
+                        accelerators: true,
+                        ..TestMenus::all(&log)
+                    },
+                );
 
-                    assert!(log.opened().is_empty(), "{platform:?}");
-                    assert!(log.closed().is_empty(), "{platform:?}");
-                    assert!(log.selected().is_empty(), "{platform:?}");
-                    // Selecting a non-submenu item should close all the menus.
-                    assert!(!shows(&tester, &TestMenu::SubMenu00.label()));
-                }
+                send_key_change(
+                    tester,
+                    KeyEventType::Down,
+                    LogicalKeyboardKey::ALT_LEFT,
+                    None,
+                );
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "5");
+                pump(tester);
+                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                pump(tester);
+
+                assert!(log.opened().is_empty(), "{platform:?}");
+                assert!(log.closed().is_empty(), "{platform:?}");
+                assert!(log.selected().is_empty(), "{platform:?}");
+                // Selecting a non-submenu item should close all the menus.
+                assert!(!shows(tester, &TestMenu::SubMenu00.label()));
             });
         }
 
         // menu_anchor_test.dart "Apple platforms don't react to accelerators".
         #[test]
         fn apple_platforms_do_not_react_to_accelerators() {
-            with_main_thread_stack(|| {
-                for platform in APPLE_PLATFORMS {
-                    let mut tester = tester_on(platform);
-                    let log = Log::default();
-                    let controller = new_controller(&tester);
-                    pump_menu_bar(
-                        &mut tester,
-                        controller.clone(),
-                        TestMenus {
-                            accelerators: true,
-                            ..TestMenus::all(&log)
-                        },
-                    );
+            test_widgets_variant(TargetPlatformVariant::new(APPLE_PLATFORMS), |tester| {
+                let platform = tester.target_platform();
 
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Down,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "m");
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "m");
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Up,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
+                let log = Log::default();
+                let controller = new_controller(tester);
+                pump_menu_bar(
+                    tester,
+                    controller.clone(),
+                    TestMenus {
+                        accelerators: true,
+                        ..TestMenus::all(&log)
+                    },
+                );
 
-                    assert!(log.opened().is_empty(), "{platform:?}");
-                    assert!(log.closed().is_empty(), "{platform:?}");
-                    assert!(log.selected().is_empty(), "{platform:?}");
+                send_key_change(
+                    tester,
+                    KeyEventType::Down,
+                    LogicalKeyboardKey::ALT_LEFT,
+                    None,
+                );
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "m");
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "m");
+                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                pump(tester);
 
-                    // Or with the option key equivalents.
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Down,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "µ");
-                    pump(&mut tester);
-                    send_key_with_character(&mut tester, LogicalKeyboardKey::KEY_M, "µ");
-                    send_key_change(
-                        &mut tester,
-                        KeyEventType::Up,
-                        LogicalKeyboardKey::ALT_LEFT,
-                        None,
-                    );
-                    pump(&mut tester);
+                assert!(log.opened().is_empty(), "{platform:?}");
+                assert!(log.closed().is_empty(), "{platform:?}");
+                assert!(log.selected().is_empty(), "{platform:?}");
 
-                    assert!(log.opened().is_empty(), "{platform:?}");
-                    assert!(log.closed().is_empty(), "{platform:?}");
-                    assert!(log.selected().is_empty(), "{platform:?}");
-                }
+                // Or with the option key equivalents.
+                send_key_change(
+                    tester,
+                    KeyEventType::Down,
+                    LogicalKeyboardKey::ALT_LEFT,
+                    None,
+                );
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "µ");
+                pump(tester);
+                send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "µ");
+                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                pump(tester);
+
+                assert!(log.opened().is_empty(), "{platform:?}");
+                assert!(log.closed().is_empty(), "{platform:?}");
+                assert!(log.selected().is_empty(), "{platform:?}");
             });
         }
 
@@ -9328,22 +9250,21 @@ mod tests {
         // menu_anchor_test.dart 'Moving a controller to a new instance works'.
         #[test]
         fn a_controller_moves_to_a_new_menu_bar() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_menu_bar(&mut tester, controller.clone(), TestMenus::default());
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_menu_bar(tester, controller.clone(), TestMenus::default());
 
                 // Open a menu initially.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
-                tap_text(&mut tester, &TestMenu::SubMenu11.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
 
                 // Now pump a new menu with a different UniqueKey to dispose of the opened
                 // menu's node, but keep the existing controller.
                 pump_menu_bar(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     TestMenus {
                         include_extra_groups: true,
@@ -9357,10 +9278,9 @@ mod tests {
         // menu_anchor_test.dart 'closing via controller works'.
         #[test]
         fn closing_through_the_controller_closes_every_open_menu() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = new_controller(&tester);
+                let controller = new_controller(tester);
                 let menus = TestMenus {
                     shortcuts: vec![(
                         TestMenu::SubSubMenu110,
@@ -9368,18 +9288,18 @@ mod tests {
                     )],
                     ..TestMenus::all(&log)
                 };
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(menus.build())
                         .controller(controller.clone())
                         .into_widget()
                 });
 
                 // Open a menu initially.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
-                tap_text(&mut tester, &TestMenu::SubMenu11.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
                 let mut opened = log.opened();
                 opened.sort_by_key(|menu| *menu as u32);
                 assert_eq!(opened, [TestMenu::MainMenu1, TestMenu::SubMenu11]);
@@ -9387,7 +9307,7 @@ mod tests {
 
                 // Close menus using the controller.
                 controller.close(&mut tester.cell.borrow_mut());
-                pump(&mut tester);
+                pump(tester);
 
                 // The menu should go away,
                 let mut closed = log.closed();
@@ -9400,9 +9320,8 @@ mod tests {
         // menu_anchor_test.dart 'internal controller is created when the controller is null'.
         #[test]
         fn an_anchor_without_a_controller_makes_its_own() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let test_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
 
                 let anchor = |controller: Option<MenuControllerRef>| {
@@ -9440,217 +9359,209 @@ mod tests {
         // menu_anchor_test.dart 'Shortcut mnemonics are displayed'.
         #[test]
         fn shortcut_mnemonics_are_displayed_for_each_platform() {
-            with_main_thread_stack(|| {
-                for platform in ALL_PLATFORMS {
-                    let mut tester = tester_on(platform);
-                    let controller = new_controller(&tester);
-                    let menus = TestMenus {
-                        shortcuts: vec![
-                            (
-                                TestMenu::SubSubMenu110,
-                                shortcut(
-                                    SingleActivator::new(LogicalKeyboardKey::KEY_A).control(true),
-                                ),
-                            ),
-                            (
-                                TestMenu::SubSubMenu111,
-                                shortcut(
-                                    SingleActivator::new(LogicalKeyboardKey::KEY_B).shift(true),
-                                ),
-                            ),
-                            (
-                                TestMenu::SubSubMenu112,
-                                shortcut(SingleActivator::new(LogicalKeyboardKey::KEY_C).alt(true)),
-                            ),
-                            (
-                                TestMenu::SubSubMenu113,
-                                shortcut(
-                                    SingleActivator::new(LogicalKeyboardKey::KEY_D).meta(true),
-                                ),
-                            ),
-                        ],
-                        ..TestMenus::default()
-                    };
-                    pump_material(&mut tester, m3, |_app| {
-                        MenuBar::new(menus.build())
-                            .controller(controller.clone())
-                            .into_widget()
-                    });
+            test_widgets_variant(TargetPlatformVariant::new(ALL_PLATFORMS), |tester| {
+                let platform = tester.target_platform();
 
-                    // Open a menu initially.
-                    tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                    pump(&mut tester);
+                let controller = new_controller(tester);
+                let menus = TestMenus {
+                    shortcuts: vec![
+                        (
+                            TestMenu::SubSubMenu110,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::KEY_A).control(true)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu111,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::KEY_B).shift(true)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu112,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::KEY_C).alt(true)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu113,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::KEY_D).meta(true)),
+                        ),
+                    ],
+                    ..TestMenus::default()
+                };
+                pump_material(tester, m3, |_app| {
+                    MenuBar::new(menus.build())
+                        .controller(controller.clone())
+                        .into_widget()
+                });
 
-                    tap_text(&mut tester, &TestMenu::SubMenu11.label());
-                    pump(&mut tester);
+                // Open a menu initially.
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
-                    let labels: Vec<Option<String>> = [
-                        TestMenu::SubSubMenu110,
-                        TestMenu::SubSubMenu111,
-                        TestMenu::SubSubMenu112,
-                        TestMenu::SubSubMenu113,
-                    ]
-                    .into_iter()
-                    .map(|menu| mnemonic(&tester, &menu.label()))
-                    .collect();
-                    let expected = match platform {
-                        TargetPlatform::Android
-                        | TargetPlatform::Fuchsia
-                        | TargetPlatform::Linux => ["Ctrl+A", "Shift+B", "Alt+C", "Meta+D"],
-                        TargetPlatform::Windows => ["Ctrl+A", "Shift+B", "Alt+C", "Win+D"],
-                        TargetPlatform::IOS | TargetPlatform::MacOS => ["⌃ A", "⇧ B", "⌥ C", "⌘ D"],
-                    };
-                    assert_eq!(
-                        labels,
-                        expected.map(|label| Some(label.to_string())),
-                        "{platform:?}"
-                    );
+                tap_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
 
-                    let menus = TestMenus {
-                        include_extra_groups: true,
-                        shortcuts: vec![
-                            (
-                                TestMenu::SubSubMenu110,
-                                shortcut(SingleActivator::new(LogicalKeyboardKey::ARROW_RIGHT)),
-                            ),
-                            (
-                                TestMenu::SubSubMenu111,
-                                shortcut(SingleActivator::new(LogicalKeyboardKey::ARROW_LEFT)),
-                            ),
-                            (
-                                TestMenu::SubSubMenu112,
-                                shortcut(SingleActivator::new(LogicalKeyboardKey::ARROW_UP)),
-                            ),
-                            (
-                                TestMenu::SubSubMenu113,
-                                shortcut(SingleActivator::new(LogicalKeyboardKey::ARROW_DOWN)),
-                            ),
-                        ],
-                        ..TestMenus::default()
-                    };
-                    pump_material(&mut tester, m3, |_app| {
-                        MenuBar::new(menus.build())
-                            .controller(controller.clone())
-                            .into_widget()
-                    });
-                    tester.pump_and_settle();
+                let labels: Vec<Option<String>> = [
+                    TestMenu::SubSubMenu110,
+                    TestMenu::SubSubMenu111,
+                    TestMenu::SubSubMenu112,
+                    TestMenu::SubSubMenu113,
+                ]
+                .into_iter()
+                .map(|menu| mnemonic(tester, &menu.label()))
+                .collect();
+                let expected = match platform {
+                    TargetPlatform::Android | TargetPlatform::Fuchsia | TargetPlatform::Linux => {
+                        ["Ctrl+A", "Shift+B", "Alt+C", "Meta+D"]
+                    }
+                    TargetPlatform::Windows => ["Ctrl+A", "Shift+B", "Alt+C", "Win+D"],
+                    TargetPlatform::IOS | TargetPlatform::MacOS => ["⌃ A", "⇧ B", "⌥ C", "⌘ D"],
+                };
+                assert_eq!(
+                    labels,
+                    expected.map(|label| Some(label.to_string())),
+                    "{platform:?}"
+                );
 
-                    assert_eq!(
-                        mnemonic(&tester, &TestMenu::SubSubMenu110.label()).as_deref(),
-                        Some("→")
-                    );
-                    assert_eq!(
-                        mnemonic(&tester, &TestMenu::SubSubMenu111.label()).as_deref(),
-                        Some("←")
-                    );
-                    assert_eq!(
-                        mnemonic(&tester, &TestMenu::SubSubMenu112.label()).as_deref(),
-                        Some("↑")
-                    );
-                    assert_eq!(
-                        mnemonic(&tester, &TestMenu::SubSubMenu113.label()).as_deref(),
-                        Some("↓")
-                    );
+                let menus = TestMenus {
+                    include_extra_groups: true,
+                    shortcuts: vec![
+                        (
+                            TestMenu::SubSubMenu110,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::ARROW_RIGHT)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu111,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::ARROW_LEFT)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu112,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::ARROW_UP)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu113,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::ARROW_DOWN)),
+                        ),
+                    ],
+                    ..TestMenus::default()
+                };
+                pump_material(tester, m3, |_app| {
+                    MenuBar::new(menus.build())
+                        .controller(controller.clone())
+                        .into_widget()
+                });
+                tester.pump_and_settle();
 
-                    // Try some weirder ones.
-                    let menus = TestMenus {
-                        shortcuts: vec![
-                            (
-                                TestMenu::SubSubMenu110,
-                                shortcut(SingleActivator::new(LogicalKeyboardKey::ESCAPE)),
-                            ),
-                            (
-                                TestMenu::SubSubMenu111,
-                                shortcut(SingleActivator::new(LogicalKeyboardKey::FN)),
-                            ),
-                            (
-                                TestMenu::SubSubMenu112,
-                                shortcut(SingleActivator::new(LogicalKeyboardKey::ENTER)),
-                            ),
-                        ],
-                        ..TestMenus::default()
-                    };
-                    pump_material(&mut tester, m3, |_app| {
-                        MenuBar::new(menus.build())
-                            .controller(controller)
-                            .into_widget()
-                    });
-                    tester.pump_and_settle();
+                assert_eq!(
+                    mnemonic(tester, &TestMenu::SubSubMenu110.label()).as_deref(),
+                    Some("→")
+                );
+                assert_eq!(
+                    mnemonic(tester, &TestMenu::SubSubMenu111.label()).as_deref(),
+                    Some("←")
+                );
+                assert_eq!(
+                    mnemonic(tester, &TestMenu::SubSubMenu112.label()).as_deref(),
+                    Some("↑")
+                );
+                assert_eq!(
+                    mnemonic(tester, &TestMenu::SubSubMenu113.label()).as_deref(),
+                    Some("↓")
+                );
 
-                    assert_eq!(
-                        mnemonic(&tester, &TestMenu::SubSubMenu110.label()).as_deref(),
-                        Some("Esc")
-                    );
-                    assert_eq!(
-                        mnemonic(&tester, &TestMenu::SubSubMenu111.label()).as_deref(),
-                        Some("Fn")
-                    );
-                    assert_eq!(
-                        mnemonic(&tester, &TestMenu::SubSubMenu112.label()).as_deref(),
-                        Some("↵")
-                    );
-                }
+                // Try some weirder ones.
+                let menus = TestMenus {
+                    shortcuts: vec![
+                        (
+                            TestMenu::SubSubMenu110,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::ESCAPE)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu111,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::FN)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu112,
+                            shortcut(SingleActivator::new(LogicalKeyboardKey::ENTER)),
+                        ),
+                    ],
+                    ..TestMenus::default()
+                };
+                pump_material(tester, m3, |_app| {
+                    MenuBar::new(menus.build())
+                        .controller(controller)
+                        .into_widget()
+                });
+                tester.pump_and_settle();
+
+                assert_eq!(
+                    mnemonic(tester, &TestMenu::SubSubMenu110.label()).as_deref(),
+                    Some("Esc")
+                );
+                assert_eq!(
+                    mnemonic(tester, &TestMenu::SubSubMenu111.label()).as_deref(),
+                    Some("Fn")
+                );
+                assert_eq!(
+                    mnemonic(tester, &TestMenu::SubSubMenu112.label()).as_deref(),
+                    Some("↵")
+                );
             });
         }
 
         // menu_anchor_test.dart 'CharacterActivator shortcut mnemonics include modifiers'.
         #[test]
         fn character_activator_mnemonics_include_their_modifiers() {
-            with_main_thread_stack(|| {
-                for platform in ALL_PLATFORMS {
-                    let mut tester = tester_on(platform);
-                    let controller = new_controller(&tester);
-                    let menus = TestMenus {
-                        shortcuts: vec![
-                            (
-                                TestMenu::SubSubMenu110,
-                                character_shortcut(CharacterActivator::new("A").control(true)),
-                            ),
-                            (
-                                TestMenu::SubSubMenu111,
-                                character_shortcut(CharacterActivator::new("B").alt(true)),
-                            ),
-                            (
-                                TestMenu::SubSubMenu112,
-                                character_shortcut(CharacterActivator::new("C").meta(true)),
-                            ),
-                        ],
-                        ..TestMenus::default()
-                    };
-                    pump_material(&mut tester, m3, |_app| {
-                        MenuBar::new(menus.build())
-                            .controller(controller)
-                            .into_widget()
-                    });
+            test_widgets_variant(TargetPlatformVariant::new(ALL_PLATFORMS), |tester| {
+                let platform = tester.target_platform();
 
-                    // Open a menu initially.
-                    tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                    pump(&mut tester);
+                let controller = new_controller(tester);
+                let menus = TestMenus {
+                    shortcuts: vec![
+                        (
+                            TestMenu::SubSubMenu110,
+                            character_shortcut(CharacterActivator::new("A").control(true)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu111,
+                            character_shortcut(CharacterActivator::new("B").alt(true)),
+                        ),
+                        (
+                            TestMenu::SubSubMenu112,
+                            character_shortcut(CharacterActivator::new("C").meta(true)),
+                        ),
+                    ],
+                    ..TestMenus::default()
+                };
+                pump_material(tester, m3, |_app| {
+                    MenuBar::new(menus.build())
+                        .controller(controller)
+                        .into_widget()
+                });
 
-                    tap_text(&mut tester, &TestMenu::SubMenu11.label());
-                    pump(&mut tester);
+                // Open a menu initially.
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
-                    let labels: Vec<Option<String>> = [
-                        TestMenu::SubSubMenu110,
-                        TestMenu::SubSubMenu111,
-                        TestMenu::SubSubMenu112,
-                    ]
-                    .into_iter()
-                    .map(|menu| mnemonic(&tester, &menu.label()))
-                    .collect();
-                    let expected = match platform {
-                        TargetPlatform::Android
-                        | TargetPlatform::Fuchsia
-                        | TargetPlatform::Linux => ["Ctrl+A", "Alt+B", "Meta+C"],
-                        TargetPlatform::Windows => ["Ctrl+A", "Alt+B", "Win+C"],
-                        TargetPlatform::IOS | TargetPlatform::MacOS => ["⌃ A", "⌥ B", "⌘ C"],
-                    };
-                    assert_eq!(
-                        labels,
-                        expected.map(|label| Some(label.to_string())),
-                        "{platform:?}"
-                    );
-                }
+                tap_text(tester, &TestMenu::SubMenu11.label());
+                pump(tester);
+
+                let labels: Vec<Option<String>> = [
+                    TestMenu::SubSubMenu110,
+                    TestMenu::SubSubMenu111,
+                    TestMenu::SubSubMenu112,
+                ]
+                .into_iter()
+                .map(|menu| mnemonic(tester, &menu.label()))
+                .collect();
+                let expected = match platform {
+                    TargetPlatform::Android | TargetPlatform::Fuchsia | TargetPlatform::Linux => {
+                        ["Ctrl+A", "Alt+B", "Meta+C"]
+                    }
+                    TargetPlatform::Windows => ["Ctrl+A", "Alt+B", "Win+C"],
+                    TargetPlatform::IOS | TargetPlatform::MacOS => ["⌃ A", "⌥ B", "⌘ C"],
+                };
+                assert_eq!(
+                    labels,
+                    expected.map(|label| Some(label.to_string())),
+                    "{platform:?}"
+                );
             });
         }
 
@@ -9677,31 +9588,29 @@ mod tests {
         // menu_anchor_test.dart 'leadingIcon is used when set'.
         #[test]
         fn a_leading_icon_is_shown_when_set() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 pump_one_submenu(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     MenuItemButton::new()
                         .leading_icon(Text::new("leadingIcon"))
                         .child(Text::new(TestMenu::SubMenu00.label())),
                 );
 
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
 
-                assert!(shows(&tester, "leadingIcon"));
+                assert!(shows(tester, "leadingIcon"));
             });
         }
 
         // menu_anchor_test.dart 'autofocus is used when set and widget is enabled'.
         #[test]
         fn an_enabled_autofocus_item_takes_focus_when_the_menu_opens() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_material(tester, m3, |_app| {
                     Column::new()
                         .children(vec![
                             MenuAnchor::new(vec![
@@ -9724,11 +9633,11 @@ mod tests {
                 });
 
                 controller.open(&mut tester.cell.borrow_mut(), None);
-                pump(&mut tester);
+                pump(tester);
 
                 assert!(controller.is_open(&tester.cell.borrow()));
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("MenuItemButton", &TestMenu::MainMenu0.label()))
                 );
             });
@@ -9737,31 +9646,29 @@ mod tests {
         // menu_anchor_test.dart 'trailingIcon is used when set'.
         #[test]
         fn a_trailing_icon_is_shown_when_set() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 pump_one_submenu(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     MenuItemButton::new()
                         .trailing_icon(Text::new("trailingIcon"))
                         .child(Text::new(TestMenu::SubMenu00.label())),
                 );
 
-                tap_text(&mut tester, &TestMenu::MainMenu0.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu0.label());
+                pump(tester);
 
-                assert!(shows(&tester, "trailingIcon"));
+                assert!(shows(tester, "trailingIcon"));
             });
         }
 
         // menu_anchor_test.dart 'SubmenuButton uses supplied controller'.
         #[test]
         fn a_submenu_button_uses_the_controller_it_is_given() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                let submenu_controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                let submenu_controller = new_controller(tester);
                 let menu_bar = |submenu_controller: Option<MenuControllerRef>| {
                     let mut submenu = SubmenuButton::new(
                         vec![
@@ -9776,20 +9683,20 @@ mod tests {
                         .controller(controller.clone())
                         .into_widget()
                 };
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     menu_bar(Some(submenu_controller.clone()))
                 });
 
                 submenu_controller.open(&mut tester.cell.borrow_mut(), None);
-                pump(&mut tester);
-                assert!(shows(&tester, &TestMenu::SubMenu00.label()));
+                pump(tester);
+                assert!(shows(tester, &TestMenu::SubMenu00.label()));
 
                 submenu_controller.close(&mut tester.cell.borrow_mut());
-                pump(&mut tester);
-                assert!(!shows(&tester, &TestMenu::SubMenu00.label()));
+                pump(tester);
+                assert!(!shows(tester, &TestMenu::SubMenu00.label()));
 
                 // Now remove the controller and try to control it.
-                pump_material(&mut tester, m3, |_app| menu_bar(None));
+                pump_material(tester, m3, |_app| menu_bar(None));
 
                 let opened = catch_unwind(AssertUnwindSafe(|| {
                     submenu_controller.open(&mut tester.cell.borrow_mut(), None);
@@ -9798,8 +9705,8 @@ mod tests {
                     opened.is_err(),
                     "opening a detached controller fails an assert"
                 );
-                pump(&mut tester);
-                assert!(!shows(&tester, &TestMenu::SubMenu00.label()));
+                pump(tester);
+                assert!(!shows(tester, &TestMenu::SubMenu00.label()));
             });
         }
 
@@ -9837,31 +9744,30 @@ mod tests {
         // menu_anchor_test.dart 'MenuItemButton respects closeOnActivate property'.
         #[test]
         fn close_on_activate_decides_whether_pressing_an_item_closes_the_menu() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_tap_me_anchor(&mut tester, controller.clone(), true);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_tap_me_anchor(tester, controller.clone(), true);
 
-                tap_text(&mut tester, "Tap me");
-                pump(&mut tester);
+                tap_text(tester, "Tap me");
+                pump(tester);
                 assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 1);
 
                 // Taps the MenuItemButton which should close the menu.
-                tap_text(&mut tester, "Button 1");
-                pump(&mut tester);
+                tap_text(tester, "Button 1");
+                pump(tester);
                 assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 0);
 
                 tester.pump_and_settle();
 
-                pump_tap_me_anchor(&mut tester, controller.clone(), false);
+                pump_tap_me_anchor(tester, controller.clone(), false);
 
-                tap_text(&mut tester, "Tap me");
-                pump(&mut tester);
+                tap_text(tester, "Tap me");
+                pump(tester);
                 assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 1);
 
                 // Taps the MenuItemButton which shouldn't close the menu.
-                tap_text(&mut tester, "Button 1");
-                pump(&mut tester);
+                tap_text(tester, "Button 1");
+                pump(tester);
                 assert_eq!(tester.find_by_type::<MenuItemButton>().len(), 1);
             });
         }
@@ -9882,10 +9788,9 @@ mod tests {
         // menu_anchor_test.dart 'MenuItemButton does not overflow when child is long'.
         #[test]
         fn a_vertical_overflow_item_with_a_long_child_builds() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 pump_in_scaffold(
-                    &mut tester,
+                    tester,
                     Some(200.0),
                     MenuItemButton::new()
                         .overflow_axis(Axis::Vertical)
@@ -9902,8 +9807,7 @@ mod tests {
         // with the overflow indicator in waft-rendering).
         #[test]
         fn an_item_lays_out_by_its_overflow_axis() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build_menu_button =
                     |tester: &mut WidgetTester, overflow_axis: Axis, constrained_layout: bool| {
                         pump_in_scaffold(
@@ -9919,30 +9823,30 @@ mod tests {
                     };
 
                 // Test a long MenuItemButton in an unconstrained layout with vertical overflow axis.
-                build_menu_button(&mut tester, Axis::Vertical, false);
+                build_menu_button(tester, Axis::Vertical, false);
                 assert_eq!(
-                    rect_of::<MenuItemButton>(&tester).size(),
+                    rect_of::<MenuItemButton>(tester).size(),
                     Size::new(800.0, 48.0)
                 );
 
                 // Test a long MenuItemButton in an unconstrained layout with horizontal overflow axis.
-                build_menu_button(&mut tester, Axis::Horizontal, false);
+                build_menu_button(tester, Axis::Horizontal, false);
                 assert_eq!(
-                    rect_of::<MenuItemButton>(&tester).size(),
+                    rect_of::<MenuItemButton>(tester).size(),
                     Size::new(800.0, 48.0)
                 );
 
                 // Test a long MenuItemButton in a constrained layout with vertical overflow axis.
-                build_menu_button(&mut tester, Axis::Vertical, true);
+                build_menu_button(tester, Axis::Vertical, true);
                 assert_eq!(
-                    rect_of::<MenuItemButton>(&tester).size(),
+                    rect_of::<MenuItemButton>(tester).size(),
                     Size::new(200.0, 120.0)
                 );
 
                 // Test a long MenuItemButton in a constrained layout with horizontal overflow axis.
-                build_menu_button(&mut tester, Axis::Horizontal, true);
+                build_menu_button(tester, Axis::Horizontal, true);
                 assert_eq!(
-                    rect_of::<MenuItemButton>(&tester).size(),
+                    rect_of::<MenuItemButton>(tester).size(),
                     Size::new(200.0, 48.0)
                 );
             });
@@ -9951,8 +9855,7 @@ mod tests {
         // menu_anchor_test.dart 'MenuItemButton does not clip leadingIcon'.
         #[test]
         fn an_item_clips_its_label_but_not_its_leading_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let label = "This is a very long menu item label that must be clipped";
                 let leading = GlobalKey::new();
                 let leading_key = leading.clone();
@@ -9995,7 +9898,7 @@ mod tests {
                 };
                 tester.pump_widget(root);
 
-                tap_text(&mut tester, "Open");
+                tap_text(tester, "Open");
                 tester.pump_and_settle();
 
                 // Decorations that paint outside the leading icon's bounds stay visible.
@@ -10013,11 +9916,11 @@ mod tests {
                         })
                         .count()
                 };
-                assert_eq!(clips_above(&tester, leading_element), 0);
+                assert_eq!(clips_above(tester, leading_element), 0);
 
                 // The label itself is still clipped so that long labels truncate.
                 let label_element = tester.find_text(label)[0];
-                assert_eq!(clips_above(&tester, label_element), 1);
+                assert_eq!(clips_above(tester, label_element), 1);
                 let app = tester.cell.borrow();
                 let paragraph = label_element
                     .find_render_object(&app)
@@ -10031,11 +9934,10 @@ mod tests {
         // color'.
         #[test]
         fn style_from_overlay_color_overrides_the_default_overlay_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let overlay_color = Color::new(0xffff0000);
                 pump_in_scaffold(
-                    &mut tester,
+                    tester,
                     None,
                     MenuItemButton::new()
                         .style(
@@ -10048,13 +9950,13 @@ mod tests {
                 );
 
                 // Hovered.
-                let center = rect_of::<MenuItemButton>(&tester).center();
-                let mut gesture = WidgetTester::mouse(1, 0);
+                let center = rect_of::<MenuItemButton>(tester).center();
+                let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
                 assert!(paints_rects_in_order(
-                    &ink_rect_colors(&tester),
+                    &ink_rect_colors(tester),
                     &[overlay_color.with_opacity(0.08)]
                 ));
 
@@ -10063,7 +9965,7 @@ mod tests {
                 tester.down(&mut gesture, center);
                 tester.pump_and_settle();
                 assert!(paints_rects_in_order(
-                    &ink_rect_colors(&tester),
+                    &ink_rect_colors(tester),
                     &[
                         overlay_color.with_opacity(0.08),
                         overlay_color.with_opacity(0.08),
@@ -10076,9 +9978,8 @@ mod tests {
         // menu_anchor_test.dart 'MenuItemButton can build when its child is null'.
         #[test]
         fn an_item_with_no_child_builds() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_in_scaffold(&mut tester, Some(200.0), MenuItemButton::new());
+            test_widgets(|tester| {
+                pump_in_scaffold(tester, Some(200.0), MenuItemButton::new());
             });
         }
     }
@@ -10107,7 +10008,7 @@ mod tests {
         use crate::scaffold::Scaffold;
         use crate::test_support::{Drawn, PaintInspection};
         use crate::text_theme::TextTheme;
-        use crate::tooltip::tests::{m2, tester_on};
+        use crate::tooltip::tests::m2;
 
         /// `tester.pumpWidget(MaterialApp(theme: theme(app), home: home(app)))`.
         fn pump_app(
@@ -10180,14 +10081,13 @@ mod tests {
         // menu_anchor_test.dart 'tapping MenuItemButton with null focus node'.
         #[test]
         fn tapping_a_menu_item_button_that_drops_its_focus_node_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let button_focus_node: Rc<RefCell<Option<FocusNodeRef>>> =
                     Rc::new(RefCell::new(Some(
                         FocusNode::new(&mut tester.cell.borrow_mut()).into_erased::<AnyFocusNode>(),
                     )));
                 let focus_node = Rc::clone(&button_focus_node);
-                pump_app(&mut tester, m3, move |_app| {
+                pump_app(tester, m3, move |_app| {
                     StatefulBuilder::new(move |_app, _context, set_state| {
                         let mut item = MenuItemButton::new()
                             .close_on_activate(false)
@@ -10221,12 +10121,12 @@ mod tests {
                     .into_widget()
                 });
 
-                tap_text(&mut tester, "OPEN MENU");
-                pump(&mut tester);
+                tap_text(tester, "OPEN MENU");
+                pump(tester);
 
-                assert!(shows(&tester, "Set focus to null"));
+                assert!(shows(tester, "Set focus to null"));
 
-                tap_text(&mut tester, "Set focus to null");
+                tap_text(tester, "Set focus to null");
                 tester.pump_and_settle();
                 assert!(button_focus_node.take().is_none());
             });
@@ -10281,13 +10181,12 @@ mod tests {
         // menu_anchor_test.dart 'constrained menus show up in the right place with offset in LTR'.
         #[test]
         fn constrained_menus_show_up_in_the_right_place_with_offset_in_ltr() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                nested_offset_menus(&mut tester, TextDirection::Ltr);
+            test_widgets(|tester| {
+                nested_offset_menus(tester, TextDirection::Ltr);
 
-                assert_eq!(count_of::<SubmenuButton>(&tester), 4);
+                assert_eq!(count_of::<SubmenuButton>(tester), 4);
                 assert_eq!(
-                    submenu_rects(&tester),
+                    submenu_rects(tester),
                     [
                         Rect::from_ltrb(0.0, 48.0, 256.0, 112.0),
                         Rect::from_ltrb(266.0, 48.0, 522.0, 112.0),
@@ -10301,13 +10200,12 @@ mod tests {
         // menu_anchor_test.dart 'constrained menus show up in the right place with offset in RTL'.
         #[test]
         fn constrained_menus_show_up_in_the_right_place_with_offset_in_rtl() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                nested_offset_menus(&mut tester, TextDirection::Rtl);
+            test_widgets(|tester| {
+                nested_offset_menus(tester, TextDirection::Rtl);
 
-                assert_eq!(count_of::<SubmenuButton>(&tester), 4);
+                assert_eq!(count_of::<SubmenuButton>(tester), 4);
                 assert_eq!(
-                    submenu_rects(&tester),
+                    submenu_rects(tester),
                     [
                         Rect::from_ltrb(544.0, 48.0, 800.0, 112.0),
                         Rect::from_ltrb(278.0, 48.0, 534.0, 112.0),
@@ -10349,14 +10247,13 @@ mod tests {
         // default'.
         #[test]
         fn vertically_constrained_menus_are_positioned_above_the_anchor_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                bottom_anchored_menu(&mut tester, None);
+            test_widgets(|tester| {
+                bottom_anchored_menu(tester, None);
 
-                assert_eq!(count_of::<MenuItemButton>(&tester), 1);
+                assert_eq!(count_of::<MenuItemButton>(tester), 1);
                 // Test the default offset (0, 0) vertical position.
                 assert_eq!(
-                    submenu_rects(&tester),
+                    submenu_rects(tester),
                     [Rect::from_ltrb(0.0, 488.0, 122.0, 552.0)]
                 );
             });
@@ -10366,14 +10263,13 @@ mod tests {
         // the provided offset'.
         #[test]
         fn vertically_constrained_menus_are_positioned_above_the_anchor_with_the_provided_offset() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                bottom_anchored_menu(&mut tester, Some(Offset::new(0.0, 50.0)));
+            test_widgets(|tester| {
+                bottom_anchored_menu(tester, Some(Offset::new(0.0, 50.0)));
 
-                assert_eq!(count_of::<MenuItemButton>(&tester), 1);
+                assert_eq!(count_of::<MenuItemButton>(tester), 1);
                 // Test the offset (0, 50) vertical position.
                 assert_eq!(
-                    submenu_rects(&tester),
+                    submenu_rects(tester),
                     [Rect::from_ltrb(0.0, 438.0, 122.0, 502.0)]
                 );
             });
@@ -10392,9 +10288,8 @@ mod tests {
         // menu_anchor_test.dart 'Menu follows content position when a LayerLink is provided'.
         #[test]
         fn a_menu_follows_its_content_when_given_a_layer_link() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let content_key = GlobalKey::new();
 
                 let boilerplate = |tester: &mut WidgetTester, bottom_insets: f64| {
@@ -10438,24 +10333,24 @@ mod tests {
                 };
 
                 // Build once without bottom insets and open the menu.
-                boilerplate(&mut tester, 0.0);
+                boilerplate(tester, 0.0);
                 controller.open(&mut tester.cell.borrow_mut(), None);
-                pump(&mut tester);
+                pump(tester);
 
                 // Menu vertical position is just under the content.
                 assert_eq!(
-                    menu_panel_rect(&tester).top,
-                    rect_of_key(&tester, &content_key).bottom
+                    menu_panel_rect(tester).top,
+                    rect_of_key(tester, &content_key).bottom
                 );
 
                 // Simulate the keyboard opening resizing the view.
-                boilerplate(&mut tester, 100.0);
-                pump(&mut tester);
+                boilerplate(tester, 100.0);
+                pump(tester);
 
                 // Menu vertical position is just under the content.
                 assert_eq!(
-                    menu_panel_rect(&tester).top,
-                    rect_of_key(&tester, &content_key).bottom
+                    menu_panel_rect(tester).top,
+                    rect_of_key(tester, &content_key).bottom
                 );
             });
         }
@@ -10463,17 +10358,19 @@ mod tests {
         // menu_anchor_test.dart 'menu is positioned to avoid the software keyboard'.
         #[test]
         fn a_menu_is_positioned_to_avoid_the_software_keyboard() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 // Regression test for https://github.com/flutter/flutter/issues/142921
                 // The menu should not extend into the area occupied by the software keyboard.
                 let screen_size = Size::new(600.0, 800.0);
+                // Dart's `changeSurfaceSize(tester, screenSize)`: the view's logical size, at the
+                // test view's device pixel ratio of 3.
                 let mut tester = WidgetTester::with_physical_size(
                     TestPlatform::new().on(TargetPlatform::Android),
-                    Size::new(screen_size.width() * 2.0, screen_size.height() * 2.0),
+                    Size::new(screen_size.width() * 3.0, screen_size.height() * 3.0),
                 );
-                tester.install_platform_fonts();
+                let tester = &mut tester;
                 const KEYBOARD_HEIGHT: f64 = 200.0;
-                let controller = new_controller(&tester);
+                let controller = new_controller(tester);
 
                 let root = {
                     let app = tester.cell.borrow();
@@ -10527,7 +10424,7 @@ mod tests {
                 controller.open(&mut tester.cell.borrow_mut(), None);
                 tester.pump_and_settle();
 
-                let menu_rect = menu_panel_rect(&tester);
+                let menu_rect = menu_panel_rect(tester);
                 // Menu should not extend into the keyboard area (bottom 200px of screen).
                 assert!(
                     menu_rect.bottom <= screen_size.height() - KEYBOARD_HEIGHT,
@@ -10542,15 +10439,14 @@ mod tests {
         // alignmentOffset is set'.
         #[test]
         fn a_menu_with_a_layer_link_is_offset_by_its_alignment_offset() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let content_key = GlobalKey::new();
                 const HORIZONTAL_OFFSET: f64 = 16.0;
                 const VERTICAL_OFFSET: f64 = 20.0;
 
                 let key = content_key.clone();
-                pump_app(&mut tester, m3, {
+                pump_app(tester, m3, {
                     let controller = controller.clone();
                     move |app| {
                         let layer_link = LayerLink::new(app);
@@ -10585,15 +10481,15 @@ mod tests {
                 });
 
                 controller.open(&mut tester.cell.borrow_mut(), None);
-                pump(&mut tester);
+                pump(tester);
 
                 assert_eq!(
-                    menu_panel_rect(&tester).top,
-                    rect_of_key(&tester, &content_key).bottom + VERTICAL_OFFSET
+                    menu_panel_rect(tester).top,
+                    rect_of_key(tester, &content_key).bottom + VERTICAL_OFFSET
                 );
                 assert_eq!(
-                    menu_panel_rect(&tester).left,
-                    rect_of_key(&tester, &content_key).left + HORIZONTAL_OFFSET
+                    menu_panel_rect(tester).left,
+                    rect_of_key(tester, &content_key).left + HORIZONTAL_OFFSET
                 );
             });
         }
@@ -10602,9 +10498,7 @@ mod tests {
         // density'.
         #[test]
         fn compact_visual_density_does_not_reduce_a_menus_vertical_padding() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-
+            test_widgets(|tester| {
                 // Helper function to get menu padding by measuring first/last items.
                 let menu_padding = |tester: &WidgetTester| -> (f64, f64) {
                     // Find any menu items that are available.
@@ -10674,14 +10568,14 @@ mod tests {
                     };
 
                 // Pump widget with standard visual density.
-                build_simple_menu_anchor(&mut tester, VisualDensity::STANDARD);
+                build_simple_menu_anchor(tester, VisualDensity::STANDARD);
 
-                let (top_standard, bottom_standard) = menu_padding(&tester);
+                let (top_standard, bottom_standard) = menu_padding(tester);
 
                 // Pump widget with compact visual density.
-                build_simple_menu_anchor(&mut tester, VisualDensity::COMPACT);
+                build_simple_menu_anchor(tester, VisualDensity::COMPACT);
 
-                let (top_compact, bottom_compact) = menu_padding(&tester);
+                let (top_compact, bottom_compact) = menu_padding(tester);
 
                 // Compare standard vs compact padding.
                 assert_eq!(
@@ -10739,8 +10633,7 @@ mod tests {
         #[test]
         fn shortcut_labels_name_the_modifiers_of_each_platform() {
             for platform in ALL_PLATFORMS {
-                with_main_thread_stack(move || {
-                    let mut tester = tester_on(platform);
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                     let (
                         expected_meta,
                         expected_ctrl,
@@ -10797,15 +10690,15 @@ mod tests {
                         Rc::new(CharacterActivator::new("ñ"));
                     let char_expected = "ñ";
                     open_shortcut_menu(
-                        &mut tester,
+                        tester,
                         [
                             (all_modifiers, TestMenu::SubMenu10),
                             (char_shortcuts, TestMenu::SubMenu11),
                         ],
                     );
 
-                    assert!(shows(&tester, &all_expected), "{platform:?}");
-                    assert!(shows(&tester, char_expected), "{platform:?}");
+                    assert!(shows(tester, &all_expected), "{platform:?}");
+                    assert!(shows(tester, char_expected), "{platform:?}");
                 });
             }
         }
@@ -10814,8 +10707,7 @@ mod tests {
         #[test]
         fn shortcut_labels_fall_back_to_the_key_label_of_unlocalized_keys() {
             for platform in ALL_PLATFORMS {
-                with_main_thread_stack(move || {
-                    let mut tester = tester_on(platform);
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                     let (expected_ctrl, expected_separator) = match platform {
                         TargetPlatform::Android
                         | TargetPlatform::Fuchsia
@@ -10825,7 +10717,7 @@ mod tests {
                     };
 
                     open_shortcut_menu(
-                        &mut tester,
+                        tester,
                         [
                             (
                                 Rc::new(
@@ -10841,11 +10733,11 @@ mod tests {
                     );
 
                     assert!(
-                        shows(&tester, &format!("{expected_ctrl}{expected_separator}Tab")),
+                        shows(tester, &format!("{expected_ctrl}{expected_separator}Tab")),
                         "{platform:?}"
                     );
                     assert!(
-                        shows(&tester, &format!("{expected_ctrl}{expected_separator}F1")),
+                        shows(tester, &format!("{expected_ctrl}{expected_separator}F1")),
                         "{platform:?}"
                     );
                 });
@@ -10857,11 +10749,10 @@ mod tests {
         // menu_anchor_test.dart 'tapping toggles checkbox'.
         #[test]
         fn tapping_a_checkbox_menu_button_cycles_its_tristate_value() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let check_box_value: Rc<Cell<Option<bool>>> = Rc::new(Cell::new(None));
                 let value = Rc::clone(&check_box_value);
-                pump_app(&mut tester, m3, move |_app| {
+                pump_app(tester, m3, move |_app| {
                     StatefulBuilder::new(move |_app, _context, set_state| {
                         let changed = Rc::clone(&value);
                         MenuBar::new(vec![
@@ -10889,9 +10780,9 @@ mod tests {
                     .into_widget()
                 });
 
-                let submenu = center_of_first::<SubmenuButton>(&tester);
+                let submenu = center_of_first::<SubmenuButton>(tester);
                 tester.tap(submenu, 1);
-                pump(&mut tester);
+                pump(tester);
 
                 let checkbox = only(tester.find_by_type::<CheckboxMenuButton>());
                 assert_eq!(
@@ -10901,11 +10792,11 @@ mod tests {
 
                 for expected in [Some(false), Some(true), None] {
                     if expected != Some(false) {
-                        let submenu = center_of_first::<SubmenuButton>(&tester);
+                        let submenu = center_of_first::<SubmenuButton>(tester);
                         tester.tap(submenu, 1);
-                        pump(&mut tester);
+                        pump(tester);
                     }
-                    let checkbox = center_of_first::<CheckboxMenuButton>(&tester);
+                    let checkbox = center_of_first::<CheckboxMenuButton>(tester);
                     tester.tap(checkbox, 1);
                     tester.pump_and_settle();
                     assert_eq!(check_box_value.get(), expected);
@@ -10918,11 +10809,10 @@ mod tests {
         // menu_anchor_test.dart 'tapping toggles radio button'.
         #[test]
         fn tapping_a_toggleable_radio_menu_button_selects_and_clears_it() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let radio_value: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
                 let value = Rc::clone(&radio_value);
-                pump_app(&mut tester, m3, move |_app| {
+                pump_app(tester, m3, move |_app| {
                     StatefulBuilder::new(move |_app, _context, set_state| {
                         let radio = |radio: i32| {
                             let changed = Rc::clone(&value);
@@ -10951,9 +10841,9 @@ mod tests {
                     .into_widget()
                 });
 
-                let submenu = center_of_first::<SubmenuButton>(&tester);
+                let submenu = center_of_first::<SubmenuButton>(tester);
                 tester.tap(submenu, 1);
-                pump(&mut tester);
+                pump(tester);
 
                 let first = tester.find_by_type::<RadioMenuButton<i32>>()[0];
                 assert_eq!(
@@ -10961,23 +10851,23 @@ mod tests {
                     None
                 );
 
-                let first = center_of_first::<RadioMenuButton<i32>>(&tester);
+                let first = center_of_first::<RadioMenuButton<i32>>(tester);
                 tester.tap(first, 1);
                 tester.pump_and_settle();
                 assert_eq!(radio_value.get(), Some(0));
 
-                let submenu = center_of_first::<SubmenuButton>(&tester);
+                let submenu = center_of_first::<SubmenuButton>(tester);
                 tester.tap(submenu, 1);
-                pump(&mut tester);
-                let first = center_of_first::<RadioMenuButton<i32>>(&tester);
+                pump(tester);
+                let first = center_of_first::<RadioMenuButton<i32>>(tester);
                 tester.tap(first, 1);
                 tester.pump_and_settle();
                 assert_eq!(radio_value.get(), None);
 
-                let submenu = center_of_first::<SubmenuButton>(&tester);
+                let submenu = center_of_first::<SubmenuButton>(tester);
                 tester.tap(submenu, 1);
-                pump(&mut tester);
-                let last = center_of_last::<RadioMenuButton<i32>>(&tester);
+                pump(tester);
+                let last = center_of_last::<RadioMenuButton<i32>>(tester);
                 tester.tap(last, 1);
                 tester.pump_and_settle();
                 assert_eq!(radio_value.get(), Some(1));
@@ -11000,10 +10890,9 @@ mod tests {
         // menu_anchor_test.dart 'Material3 - Menu uses correct text styles'.
         #[test]
         fn material3_menu_buttons_use_the_label_large_text_style() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let log = Log::default();
-                let controller = new_controller(&tester);
+                let controller = new_controller(tester);
                 let menu_text_style = TextStyle::new()
                     .font_size(18.5)
                     .font_style(FontStyle::Italic)
@@ -11012,7 +10901,7 @@ mod tests {
                 let style = menu_text_style.clone();
                 let menus = TestMenus::all(&log);
                 pump_material(
-                    &mut tester,
+                    tester,
                     move |app| {
                         ThemeData::builder()
                             .text_theme(TextTheme::new().label_large(style))
@@ -11037,16 +10926,16 @@ mod tests {
                 };
 
                 // Test menu button text style uses the TextTheme.labelLarge.
-                check(&tester, tester.find_by_type::<TextButton>()[0]);
+                check(tester, tester.find_by_type::<TextButton>()[0]);
 
                 // Open the menu.
-                tap_text(&mut tester, &TestMenu::MainMenu1.label());
-                pump(&mut tester);
+                tap_text(tester, &TestMenu::MainMenu1.label());
+                pump(tester);
 
                 // Test menu item text style uses the TextTheme.labelLarge.
                 check(
-                    &tester,
-                    text_button_with_text(&tester, &TestMenu::SubMenu10.label()),
+                    tester,
+                    text_button_with_text(tester, &TestMenu::SubMenu10.label()),
                 );
             });
         }
@@ -11054,13 +10943,12 @@ mod tests {
         // menu_anchor_test.dart 'SubmenuButton.onFocusChange is respected'.
         #[test]
         fn a_submenu_button_reports_its_focus_changes() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let focus_node =
                     FocusNode::new(&mut tester.cell.borrow_mut()).into_erased::<AnyFocusNode>();
                 let on_focus_change_called = Rc::new(Cell::new(0));
                 let called = Rc::clone(&on_focus_change_called);
-                pump_material(&mut tester, m3, {
+                pump_material(tester, m3, {
                     let focus_node = focus_node.clone();
                     move |_app| {
                         StatefulBuilder::new(move |_app, _context, set_state| {
@@ -11085,12 +10973,12 @@ mod tests {
                 });
 
                 focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-                pump(&mut tester);
+                pump(tester);
                 assert!(focus_node.has_focus(&mut tester.cell.borrow_mut()));
                 assert_eq!(on_focus_change_called.get(), 1);
 
                 focus_node.unfocus(&mut tester.cell.borrow_mut(), UnfocusDisposition::Scope);
-                pump(&mut tester);
+                pump(tester);
                 assert!(!focus_node.has_focus(&mut tester.cell.borrow_mut()));
                 assert_eq!(on_focus_change_called.get(), 2);
             });
@@ -11099,9 +10987,8 @@ mod tests {
         // menu_anchor_test.dart 'Horizontal _MenuPanel wraps children with IntrinsicWidth'.
         #[test]
         fn a_horizontal_menu_panel_wraps_its_children_in_intrinsic_widths() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(vec![
                         MenuItemButton::new()
                             .on_pressed(Listener::new(|_app| {}))
@@ -11155,10 +11042,9 @@ mod tests {
         // color'.
         #[test]
         fn submenu_button_style_from_overlay_color_overrides_the_default_overlay_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let overlay_color = Color::new(0xffff00ff);
-                pump_app(&mut tester, m3, move |_app| {
+                pump_app(tester, m3, move |_app| {
                     Scaffold::new()
                         .body(
                             SubmenuButton::new(
@@ -11180,13 +11066,13 @@ mod tests {
                 });
 
                 // Hovered.
-                let center = center_of_first::<SubmenuButton>(&tester);
-                let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+                let center = center_of_first::<SubmenuButton>(tester);
+                let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
                 assert!(paints_in_order(
-                    &overlay_rect_colors(&tester),
+                    &overlay_rect_colors(tester),
                     &[overlay_color.with_opacity(0.08)]
                 ));
 
@@ -11194,7 +11080,7 @@ mod tests {
                 tester.down(&mut gesture, center);
                 tester.pump_and_settle();
                 assert!(paints_in_order(
-                    &overlay_rect_colors(&tester),
+                    &overlay_rect_colors(tester),
                     &[
                         overlay_color.with_opacity(0.08),
                         overlay_color.with_opacity(0.08),
@@ -11213,8 +11099,7 @@ mod tests {
         // menu_anchor_test.dart 'MenuItemButton.styleFrom can customize the button icon'.
         #[test]
         fn menu_item_button_style_from_customizes_the_button_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let icon_color_value = Color::new(0xFFF000FF);
                 const ICON_SIZE: f64 = 32.0;
                 let disabled_icon_color = Color::new(0xFFFFF000);
@@ -11238,28 +11123,24 @@ mod tests {
                 };
 
                 // Test enabled button.
-                build_button(&mut tester, true);
+                build_button(tester, true);
                 let icon = tester.find_by_icon(&Icons::add());
                 assert_eq!(
-                    rect_of_element(&tester, icon).size(),
+                    rect_of_element(tester, icon).size(),
                     Size::new(ICON_SIZE, ICON_SIZE)
                 );
-                assert_eq!(icon_color(&tester, &Icons::add()), Some(icon_color_value));
+                assert_eq!(icon_color(tester, &Icons::add()), Some(icon_color_value));
 
                 // Test disabled button.
-                build_button(&mut tester, false);
-                assert_eq!(
-                    icon_color(&tester, &Icons::add()),
-                    Some(disabled_icon_color)
-                );
+                build_button(tester, false);
+                assert_eq!(icon_color(tester, &Icons::add()), Some(disabled_icon_color));
             });
         }
 
         // menu_anchor_test.dart 'SubmenuButton.styleFrom can customize the button icon'.
         #[test]
         fn submenu_button_style_from_customizes_the_button_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let icon_color_value = Color::new(0xFFF000FF);
                 const ICON_SIZE: f64 = 32.0;
                 let disabled_icon_color = Color::new(0xFFFFF000);
@@ -11287,20 +11168,17 @@ mod tests {
                 };
 
                 // Test enabled button.
-                build_button(&mut tester, true);
+                build_button(tester, true);
                 let icon = tester.find_by_icon(&Icons::add());
                 assert_eq!(
-                    rect_of_element(&tester, icon).size(),
+                    rect_of_element(tester, icon).size(),
                     Size::new(ICON_SIZE, ICON_SIZE)
                 );
-                assert_eq!(icon_color(&tester, &Icons::add()), Some(icon_color_value));
+                assert_eq!(icon_color(tester, &Icons::add()), Some(icon_color_value));
 
                 // Test disabled button.
-                build_button(&mut tester, false);
-                assert_eq!(
-                    icon_color(&tester, &Icons::add()),
-                    Some(disabled_icon_color)
-                );
+                build_button(tester, false);
+                assert_eq!(icon_color(tester, &Icons::add()), Some(disabled_icon_color));
             });
         }
 
@@ -11374,13 +11252,12 @@ mod tests {
         // true'.
         #[test]
         fn a_menu_using_the_root_overlay_shows_in_the_root_overlay() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let overlay_key = GlobalKey::new();
                 let menu_item_key = GlobalKey::new();
                 nested_overlay_menu(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     true,
                     &overlay_key,
@@ -11394,7 +11271,7 @@ mod tests {
 
                 // Open the menu.
                 controller.open(&mut tester.cell.borrow_mut(), None);
-                pump(&mut tester);
+                pump(tester);
                 assert!(
                     menu_item_key
                         .current_context(&tester.cell.borrow())
@@ -11403,7 +11280,7 @@ mod tests {
 
                 // Expect two overlays: the root overlay created by MaterialApp and the
                 // overlay created by the boilerplate code.
-                let overlays = overlay_render_objects(&tester);
+                let overlays = overlay_render_objects(tester);
                 assert_eq!(overlays.len(), 2);
                 let non_root_overlay = tester.render_object(&overlay_key);
                 let root_overlay = *overlays
@@ -11414,7 +11291,7 @@ mod tests {
                 // Check that the ancestor _RenderTheater for the menu item is the one
                 // from the root overlay.
                 let theaters =
-                    ancestor_render_theaters(&tester, tester.render_object(&menu_item_key));
+                    ancestor_render_theaters(tester, tester.render_object(&menu_item_key));
                 assert_eq!(theaters, [root_overlay]);
             });
         }
@@ -11423,13 +11300,12 @@ mod tests {
         // useRootOverlay is false'.
         #[test]
         fn a_menu_not_using_the_root_overlay_shows_in_the_nearest_overlay() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let overlay_key = GlobalKey::new();
                 let menu_item_key = GlobalKey::new();
                 nested_overlay_menu(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     false,
                     &overlay_key,
@@ -11443,7 +11319,7 @@ mod tests {
 
                 // Open the menu.
                 controller.open(&mut tester.cell.borrow_mut(), None);
-                pump(&mut tester);
+                pump(tester);
                 assert!(
                     menu_item_key
                         .current_context(&tester.cell.borrow())
@@ -11452,13 +11328,13 @@ mod tests {
 
                 // Expect two overlays: the root overlay created by MaterialApp and the
                 // overlay created by the boilerplate code.
-                assert_eq!(overlay_render_objects(&tester).len(), 2);
+                assert_eq!(overlay_render_objects(tester).len(), 2);
                 let non_root_overlay = tester.render_object(&overlay_key);
 
                 // Check that the ancestor _RenderTheater for the menu item is the one
                 // from the root overlay.
                 let theaters =
-                    ancestor_render_theaters(&tester, tester.render_object(&menu_item_key));
+                    ancestor_render_theaters(tester, tester.render_object(&menu_item_key));
                 assert_eq!(theaters.first(), Some(&non_root_overlay));
             });
         }
@@ -11466,20 +11342,18 @@ mod tests {
         // menu_anchor_test.dart 'Unattached MenuController does not throw when calling close'.
         #[test]
         fn closing_an_unattached_menu_controller_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 controller.close(&mut tester.cell.borrow_mut());
-                pump(&mut tester);
+                pump(tester);
             });
         }
 
         // menu_anchor_test.dart 'Unattached MenuController returns false when calling isOpen'.
         #[test]
         fn an_unattached_menu_controller_is_not_open() {
-            with_main_thread_stack(|| {
-                let tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 assert!(!controller.is_open(&tester.cell.borrow()));
             });
         }
@@ -11487,8 +11361,7 @@ mod tests {
         // menu_anchor_test.dart 'MenuAnchor updates isOpen state correctly'.
         #[test]
         fn a_menu_anchor_rebuilds_its_button_with_the_controllers_is_open() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let is_open = Rc::new(Cell::new(false));
                 let open_count = Rc::new(Cell::new(0));
                 let close_count = Rc::new(Cell::new(0));
@@ -11497,7 +11370,7 @@ mod tests {
                     Rc::clone(&open_count),
                     Rc::clone(&close_count),
                 );
-                pump_app(&mut tester, m3, move |_app| {
+                pump_app(tester, m3, move |_app| {
                     Scaffold::new()
                         .body(
                             Center::new().child(
@@ -11520,25 +11393,25 @@ mod tests {
                         .into_widget()
                 });
 
-                assert!(shows(&tester, "open"));
+                assert!(shows(tester, "open"));
                 assert!(!is_open.get());
                 assert_eq!(open_count.get(), 0);
                 assert_eq!(close_count.get(), 0);
 
-                let button = center_of_first::<FilledButton>(&tester);
+                let button = center_of_first::<FilledButton>(tester);
                 tester.tap(button, 1);
-                pump(&mut tester);
+                pump(tester);
 
-                assert!(shows(&tester, "close"));
+                assert!(shows(tester, "close"));
                 assert!(is_open.get());
                 assert_eq!(open_count.get(), 1);
                 assert_eq!(close_count.get(), 0);
 
-                let button = center_of_first::<FilledButton>(&tester);
+                let button = center_of_first::<FilledButton>(tester);
                 tester.tap(button, 1);
-                pump(&mut tester);
+                pump(tester);
 
-                assert!(shows(&tester, "open"));
+                assert!(shows(tester, "open"));
                 assert!(!is_open.get());
                 assert_eq!(open_count.get(), 1);
                 assert_eq!(close_count.get(), 1);
@@ -11559,9 +11432,8 @@ mod tests {
         // menu_anchor_test.dart 'SubmenuButton.submenuIcon updates default arrow icon'.
         #[test]
         fn a_submenu_icon_resolves_against_the_buttons_states() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let disabled_icon = Icons::close();
                 let hovered_icon = Icons::bolt();
                 let focused_icon = Icons::favorite();
@@ -11622,41 +11494,41 @@ mod tests {
                     });
                 };
 
-                build_menu(&mut tester, None, true);
-                tap_text(&mut tester, &TestMenu::SubMenu00.label());
-                pump(&mut tester);
+                build_menu(tester, None, true);
+                tap_text(tester, &TestMenu::SubMenu00.label());
+                pump(tester);
 
-                assert_eq!(count_icon(&tester, &Icons::arrow_right()), 1);
-
-                controller.close(&mut tester.cell.borrow_mut());
-                pump(&mut tester);
-
-                build_menu(&mut tester, Some(Rc::clone(&submenu_icon)), true);
-                tap_text(&mut tester, &TestMenu::SubMenu00.label());
-                pump(&mut tester);
-                assert_eq!(count_icon(&tester, &default_icon), 1);
-
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                pump(&mut tester);
-                assert_eq!(count_icon(&tester, &focused_icon), 1);
+                assert_eq!(count_icon(tester, &Icons::arrow_right()), 1);
 
                 controller.close(&mut tester.cell.borrow_mut());
-                pump(&mut tester);
+                pump(tester);
 
-                tap_text(&mut tester, &TestMenu::SubMenu00.label());
-                pump(&mut tester);
-                let at = text_rect(&tester, &TestMenu::SubSubMenu110.label()).center();
-                hover_over(&mut tester, at);
-                pump(&mut tester);
-                assert_eq!(count_icon(&tester, &hovered_icon), 1);
+                build_menu(tester, Some(Rc::clone(&submenu_icon)), true);
+                tap_text(tester, &TestMenu::SubMenu00.label());
+                pump(tester);
+                assert_eq!(count_icon(tester, &default_icon), 1);
+
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                pump(tester);
+                assert_eq!(count_icon(tester, &focused_icon), 1);
 
                 controller.close(&mut tester.cell.borrow_mut());
-                pump(&mut tester);
+                pump(tester);
 
-                build_menu(&mut tester, Some(Rc::clone(&submenu_icon)), false);
-                tap_text(&mut tester, &TestMenu::SubMenu00.label());
-                pump(&mut tester);
-                assert_eq!(count_icon(&tester, &disabled_icon), 1);
+                tap_text(tester, &TestMenu::SubMenu00.label());
+                pump(tester);
+                let at = text_rect(tester, &TestMenu::SubSubMenu110.label()).center();
+                hover_over(tester, at);
+                pump(tester);
+                assert_eq!(count_icon(tester, &hovered_icon), 1);
+
+                controller.close(&mut tester.cell.borrow_mut());
+                pump(tester);
+
+                build_menu(tester, Some(Rc::clone(&submenu_icon)), false);
+                tap_text(tester, &TestMenu::SubMenu00.label());
+                pump(tester);
+                assert_eq!(count_icon(tester, &disabled_icon), 1);
             });
         }
 
@@ -11670,7 +11542,7 @@ mod tests {
         /// Dart's mouse gesture added at (1000, 1000), checked to show the basic cursor there,
         /// then moved to `at`.
         fn hover_from_outside(tester: &mut WidgetTester, at: impl FnOnce(&WidgetTester) -> Offset) {
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::new(1000.0, 1000.0));
 
             assert!(shows_cursor(tester, SystemMouseCursors::BASIC));
@@ -11683,9 +11555,8 @@ mod tests {
         // menu_anchor_test.dart 'SubmenuButton has expected default mouse cursor on hover'.
         #[test]
         fn a_submenu_button_shows_the_basic_cursor_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     SubmenuButton::new(
                         vec![
                             MenuItemButton::new()
@@ -11698,18 +11569,17 @@ mod tests {
                     .into_widget()
                 });
 
-                hover_from_outside(&mut tester, center_of_first::<SubmenuButton>);
+                hover_from_outside(tester, center_of_first::<SubmenuButton>);
 
-                assert!(shows_cursor(&tester, SystemMouseCursors::BASIC));
+                assert!(shows_cursor(tester, SystemMouseCursors::BASIC));
             });
         }
 
         // menu_anchor_test.dart 'MenuItemButton has expected default mouse cursor on hover'.
         #[test]
         fn a_menu_item_button_shows_the_basic_cursor_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(vec![
                         SubmenuButton::new(
                             vec![
@@ -11726,22 +11596,21 @@ mod tests {
                 });
 
                 // Open SubmenuButton.
-                tap_text(&mut tester, "File");
+                tap_text(tester, "File");
                 tester.pump_and_settle();
 
                 // Move to MenuItemButton.
-                hover_from_outside(&mut tester, center_of_first::<MenuItemButton>);
+                hover_from_outside(tester, center_of_first::<MenuItemButton>);
 
-                assert!(shows_cursor(&tester, SystemMouseCursors::BASIC));
+                assert!(shows_cursor(tester, SystemMouseCursors::BASIC));
             });
         }
 
         // menu_anchor_test.dart 'CheckboxMenuButton has expected default mouse cursor on hover'.
         #[test]
         fn a_checkbox_menu_button_shows_the_basic_cursor_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     CheckboxMenuButton::new(
                         Some(false),
                         Some(Rc::new(|_app: &mut App, _value: Option<bool>| {})),
@@ -11750,18 +11619,17 @@ mod tests {
                     .into_widget()
                 });
 
-                hover_from_outside(&mut tester, center_of_first::<CheckboxMenuButton>);
+                hover_from_outside(tester, center_of_first::<CheckboxMenuButton>);
 
-                assert!(shows_cursor(&tester, SystemMouseCursors::BASIC));
+                assert!(shows_cursor(tester, SystemMouseCursors::BASIC));
             });
         }
 
         // menu_anchor_test.dart 'RadioMenuButton has expected default mouse cursor on hover'.
         #[test]
         fn a_radio_menu_button_shows_the_basic_cursor_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     RadioMenuButton::new(
                         1,
                         Some(0),
@@ -11771,9 +11639,9 @@ mod tests {
                     .into_widget()
                 });
 
-                hover_from_outside(&mut tester, center_of_first::<RadioMenuButton<i32>>);
+                hover_from_outside(tester, center_of_first::<RadioMenuButton<i32>>);
 
-                assert!(shows_cursor(&tester, SystemMouseCursors::BASIC));
+                assert!(shows_cursor(tester, SystemMouseCursors::BASIC));
             });
         }
 
@@ -11786,7 +11654,7 @@ mod tests {
 
         /// Dart's mouse gesture added at `at`.
         fn add_mouse_at(tester: &mut WidgetTester, at: Offset) {
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, at);
         }
 
@@ -11794,9 +11662,8 @@ mod tests {
         // configured'.
         #[test]
         fn a_menu_item_button_shows_the_cursor_of_its_style() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     MenuItemButton::new()
                         .on_pressed(Listener::new(|_app| {}))
                         .style(cell_cursor_style())
@@ -11804,10 +11671,10 @@ mod tests {
                         .into_widget()
                 });
 
-                let at = center_of_first::<MenuItemButton>(&tester);
-                add_mouse_at(&mut tester, at);
+                let at = center_of_first::<MenuItemButton>(tester);
+                add_mouse_at(tester, at);
 
-                assert!(shows_cursor(&tester, SystemMouseCursors::CELL));
+                assert!(shows_cursor(tester, SystemMouseCursors::CELL));
             });
         }
 
@@ -11815,9 +11682,8 @@ mod tests {
         // configured'.
         #[test]
         fn a_checkbox_menu_button_shows_the_cursor_of_its_style() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     CheckboxMenuButton::new(
                         Some(true),
                         Some(Rc::new(|_app: &mut App, _value: Option<bool>| {})),
@@ -11827,10 +11693,10 @@ mod tests {
                     .into_widget()
                 });
 
-                let at = center_of_first::<CheckboxMenuButton>(&tester);
-                add_mouse_at(&mut tester, at);
+                let at = center_of_first::<CheckboxMenuButton>(tester);
+                add_mouse_at(tester, at);
 
-                assert!(shows_cursor(&tester, SystemMouseCursors::CELL));
+                assert!(shows_cursor(tester, SystemMouseCursors::CELL));
             });
         }
 
@@ -11838,9 +11704,8 @@ mod tests {
         // configured'.
         #[test]
         fn a_radio_menu_button_shows_the_cursor_of_its_style() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     RadioMenuButton::new(
                         false,
                         None,
@@ -11851,10 +11716,10 @@ mod tests {
                     .into_widget()
                 });
 
-                let at = center_of_first::<RadioMenuButton<bool>>(&tester);
-                add_mouse_at(&mut tester, at);
+                let at = center_of_first::<RadioMenuButton<bool>>(tester);
+                add_mouse_at(tester, at);
 
-                assert!(shows_cursor(&tester, SystemMouseCursors::CELL));
+                assert!(shows_cursor(tester, SystemMouseCursors::CELL));
             });
         }
 
@@ -11862,9 +11727,8 @@ mod tests {
         // configured'.
         #[test]
         fn a_submenu_button_shows_the_cursor_of_its_style() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(vec![
                         SubmenuButton::new(
                             vec![
@@ -11881,10 +11745,10 @@ mod tests {
                     .into_widget()
                 });
 
-                let at = center_of_first::<SubmenuButton>(&tester);
-                add_mouse_at(&mut tester, at);
+                let at = center_of_first::<SubmenuButton>(tester);
+                add_mouse_at(tester, at);
 
-                assert!(shows_cursor(&tester, SystemMouseCursors::CELL));
+                assert!(shows_cursor(tester, SystemMouseCursors::CELL));
             });
         }
     }
@@ -11919,7 +11783,7 @@ mod tests {
         }
 
         fn pump_ms(tester: &mut WidgetTester, ms: u64) {
-            tester.pump(Duration::from_millis(ms));
+            tester.pump_by(Duration::from_millis(ms));
         }
 
         fn new_focus_node(tester: &WidgetTester, label: Option<&str>) -> FocusNodeRef {
@@ -11959,10 +11823,10 @@ mod tests {
         /// Dart's `hoverOver`, whose `tester.createGesture` gives each gesture a pointer and a
         /// device of its own.
         fn hover_with_new_mouse(tester: &mut WidgetTester, device: i64, at: Offset) {
-            let mut mouse = WidgetTester::mouse(device, 0);
+            let mut mouse = TestPointer::mouse(device, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
             tester.move_to(&mut mouse, at, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
         }
 
         /// The value of a `FadeTransition`'s opacity.
@@ -12070,62 +11934,59 @@ mod tests {
         // menu_anchor_test.dart 'Animations can be disabled'.
         #[test]
         fn animations_can_be_disabled() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_animated_anchor(&mut tester, controller.clone(), items(&["Item 0"]));
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_animated_anchor(tester, controller.clone(), items(&["Item 0"]));
 
                 // Open the menu and verify animations are enabled.
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
-                pump_ms(&mut tester, 50);
+                open(tester, controller.handle(), None);
+                pump(tester);
+                pump_ms(tester, 50);
 
-                assert_close(item_opacity(&tester, "Item 0"), 0.2, 0.05, "animated");
+                assert_close(item_opacity(tester, "Item 0"), 0.2, 0.05, "animated");
 
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuAnchor::new(items(&["Item 0"]))
                         .controller(controller)
                         .into_widget()
                 });
 
-                assert_eq!(item_opacity(&tester, "Item 0"), 1.0);
+                assert_eq!(item_opacity(tester, "Item 0"), 1.0);
             });
         }
 
         // menu_anchor_test.dart 'MenuAnchor children can be changed'.
         #[test]
         fn the_children_of_an_animated_menu_anchor_can_be_changed() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_animated_anchor(&mut tester, controller.clone(), items(&["Item 0"]));
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_animated_anchor(tester, controller.clone(), items(&["Item 0"]));
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
-                pump_ms(&mut tester, 50);
+                open(tester, controller.handle(), None);
+                pump(tester);
+                pump_ms(tester, 50);
 
-                assert_close(item_opacity(&tester, "Item 0"), 0.2, 0.05, "Item 0");
+                assert_close(item_opacity(tester, "Item 0"), 0.2, 0.05, "Item 0");
 
-                pump_animated_anchor(&mut tester, controller.clone(), items(&["Item 1"]));
+                pump_animated_anchor(tester, controller.clone(), items(&["Item 1"]));
 
-                assert_close(item_opacity(&tester, "Item 1"), 0.2, 0.05, "Item 1");
+                assert_close(item_opacity(tester, "Item 1"), 0.2, 0.05, "Item 1");
             });
         }
 
         // menu_anchor_test.dart 'Menu panel fades in'.
         #[test]
         fn the_menu_panel_fades_in_over_50_ms() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 pump_animated_anchor(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     items(&["Item 0", "Item 1", "Item 2"]),
                 );
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 // Opacity values at different millisecond offsets during the 50 ms fade-in
                 // animation.
@@ -12137,13 +11998,8 @@ mod tests {
                     (40, 0.8),
                     (50, 1.0),
                 ] {
-                    assert_close(
-                        panel_opacity(&tester),
-                        expected,
-                        0.05,
-                        &format!("at t={ms}"),
-                    );
-                    pump_ms(&mut tester, 10);
+                    assert_close(panel_opacity(tester), expected, 0.05, &format!("at t={ms}"));
+                    pump_ms(tester, 10);
                 }
             });
         }
@@ -12151,35 +12007,29 @@ mod tests {
         // menu_anchor_test.dart 'Menu panel fades out'.
         #[test]
         fn the_menu_panel_fades_out_over_the_last_50_ms_of_closing() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 pump_animated_anchor(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     items(&["Item 0", "Item 1", "Item 2"]),
                 );
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
                 tester.pump_and_settle();
-                close(&mut tester, controller.handle());
-                pump(&mut tester);
+                close(tester, controller.handle());
+                pump(tester);
 
-                assert_close(panel_opacity(&tester), 1.0, 0.05, "at t=0");
+                assert_close(panel_opacity(tester), 1.0, 0.05, "at t=0");
 
-                pump_ms(&mut tester, 100);
+                pump_ms(tester, 100);
 
                 // Opacity values at different millisecond offsets during the 50 ms fade-out
                 // animation.
                 for (ms, expected) in [(110, 1.0), (120, 0.8), (130, 0.6), (140, 0.4), (150, 0.2)] {
-                    assert_close(
-                        panel_opacity(&tester),
-                        expected,
-                        0.05,
-                        &format!("at t={ms}"),
-                    );
-                    pump_ms(&mut tester, 10);
+                    assert_close(panel_opacity(tester), expected, 0.05, &format!("at t={ms}"));
+                    pump_ms(tester, 10);
                 }
             });
         }
@@ -12198,13 +12048,12 @@ mod tests {
         // menu_anchor_test.dart 'Menu panel height eases out while opening'.
         #[test]
         fn the_menu_panel_height_eases_out_while_opening() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_tall_anchor(&mut tester, controller.clone());
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_tall_anchor(tester, controller.clone());
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 for (ms, expected) in [
                     (0, 0.0),
@@ -12214,9 +12063,9 @@ mod tests {
                     (400, 157.5),
                     (500, 160.0),
                 ] {
-                    let height = panel_rect(&tester).height();
+                    let height = panel_rect(tester).height();
                     assert_close(height, expected, 1.0, &format!("at t={ms}"));
-                    pump_ms(&mut tester, 100);
+                    pump_ms(tester, 100);
                 }
             });
         }
@@ -12224,24 +12073,23 @@ mod tests {
         // menu_anchor_test.dart 'Menu panel height eases in while closing'.
         #[test]
         fn the_menu_panel_height_eases_in_while_closing() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_tall_anchor(&mut tester, controller.clone());
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_tall_anchor(tester, controller.clone());
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
                 tester.pump_and_settle();
-                close(&mut tester, controller.handle());
-                pump(&mut tester);
+                close(tester, controller.handle());
+                pump(tester);
 
-                assert_eq!(panel_rect(&tester).height(), 160.0, "at t=0");
+                assert_eq!(panel_rect(tester).height(), 160.0, "at t=0");
 
-                pump_ms(&mut tester, 50);
+                pump_ms(tester, 50);
 
-                assert_close(panel_rect(&tester).height(), 153.0, 2.0, "at t=50");
+                assert_close(panel_rect(tester).height(), 153.0, 2.0, "at t=50");
 
-                pump_ms(&mut tester, 50);
+                pump_ms(tester, 50);
 
                 for (ms, expected) in [
                     (100, 129.0),
@@ -12252,12 +12100,12 @@ mod tests {
                     (150, 0.0),
                 ] {
                     assert_close(
-                        panel_rect(&tester).height(),
+                        panel_rect(tester).height(),
                         expected,
                         2.0,
                         &format!("at t={ms}"),
                     );
-                    pump_ms(&mut tester, 10);
+                    pump_ms(tester, 10);
                 }
             });
         }
@@ -12265,17 +12113,16 @@ mod tests {
         // menu_anchor_test.dart 'Item fade-in animation staggers over 500 ms'.
         #[test]
         fn the_item_fade_in_staggers_over_500_ms() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 pump_animated_anchor(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     items(&["Item 0", "Item 1", "Item 2", "Item 3"]),
                 );
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 // Opacity values at different millisecond offsets during the 500ms opening
                 // animation.
@@ -12286,9 +12133,9 @@ mod tests {
                     (400, [1.00, 1.00, 0.933, 0.600]),
                     (500, [1.00, 1.00, 1.00, 1.00]),
                 ] {
-                    pump_ms(&mut tester, 100);
+                    pump_ms(tester, 100);
                     for (i, expected) in expected.into_iter().enumerate() {
-                        let opacity = item_opacity(&tester, &format!("Item {i}"));
+                        let opacity = item_opacity(tester, &format!("Item {i}"));
                         assert_close(opacity, expected, 0.05, &format!("Item {i} at t={time}"));
                     }
                 }
@@ -12298,10 +12145,9 @@ mod tests {
         // menu_anchor_test.dart 'Item fade-out animation staggers over 150 ms with 50 ms delay'.
         #[test]
         fn the_item_fade_out_staggers_over_150_ms_after_a_50_ms_delay() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_material(tester, m3, |_app| {
                     MenuAnchor::new(items(&["Item 0", "Item 1", "Item 2", "Item 3"]))
                         .builder(toggle_button("Open Menu"))
                         .controller(controller.clone())
@@ -12309,11 +12155,11 @@ mod tests {
                         .into_widget()
                 });
 
-                tap_text(&mut tester, "Open Menu");
-                pump(&mut tester);
-                pump_ms(&mut tester, 501);
-                close(&mut tester, controller.handle());
-                pump(&mut tester);
+                tap_text(tester, "Open Menu");
+                pump(tester);
+                pump_ms(tester, 501);
+                close(tester, controller.handle());
+                pump(tester);
 
                 // Opacity values at different millisecond offsets during the 150ms close animation.
                 for (time, expected) in [
@@ -12326,10 +12172,10 @@ mod tests {
                     (150, [0.00, 0.00, 0.00, 0.00]),
                 ] {
                     for (i, expected) in expected.into_iter().enumerate() {
-                        let opacity = text_fade_opacity(&tester, &format!("Item {i}"));
+                        let opacity = text_fade_opacity(tester, &format!("Item {i}"));
                         assert_close(opacity, expected, 0.05, &format!("Item {i} at t={time}"));
                     }
-                    pump_ms(&mut tester, 25);
+                    pump_ms(tester, 25);
                 }
             });
         }
@@ -12337,11 +12183,10 @@ mod tests {
         // menu_anchor_test.dart 'MenuAnchor calls onAnimationStatusChanged with correct values'.
         #[test]
         fn an_animated_menu_anchor_reports_each_animation_status() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let (status, on_status) = status_sink();
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuAnchor::new(items(&["Item 0"]))
                         .controller(controller.clone())
                         .animated(true)
@@ -12350,26 +12195,26 @@ mod tests {
                 });
 
                 // Open the menu
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Forward));
 
-                pump_ms(&mut tester, 200);
+                pump_ms(tester, 200);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Forward));
 
-                close(&mut tester, controller.handle());
-                pump(&mut tester);
+                close(tester, controller.handle());
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Reverse));
 
-                pump_ms(&mut tester, 50);
+                pump_ms(tester, 50);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Reverse));
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Forward));
 
@@ -12377,7 +12222,7 @@ mod tests {
 
                 assert_eq!(status.get(), Some(AnimationStatus::Completed));
 
-                close(&mut tester, controller.handle());
+                close(tester, controller.handle());
 
                 tester.pump_and_settle();
 
@@ -12389,11 +12234,10 @@ mod tests {
         // correct values'.
         #[test]
         fn a_menu_anchor_without_animations_reports_completed_and_dismissed() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let (status, on_status) = status_sink();
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuAnchor::new(items(&["Item 0"]))
                         .controller(controller.clone())
                         .on_animation_status_changed(on_status)
@@ -12401,18 +12245,18 @@ mod tests {
                 });
 
                 // Open the menu
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Completed));
 
-                close(&mut tester, controller.handle());
-                pump(&mut tester);
+                close(tester, controller.handle());
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Dismissed));
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Completed));
             });
@@ -12422,12 +12266,11 @@ mod tests {
         // values'.
         #[test]
         fn an_animated_submenu_button_reports_each_animation_status() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                let submenu_controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                let submenu_controller = new_controller(tester);
                 let (status, on_status) = status_sink();
-                pump_material(&mut tester, m3, |_app| {
+                pump_material(tester, m3, |_app| {
                     MenuAnchor::new(vec![
                         SubmenuButton::new(items(&["Item 0"]), Some(Text::new("Submenu")))
                             .controller(submenu_controller.clone())
@@ -12441,28 +12284,28 @@ mod tests {
                 });
 
                 // Open the menu
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
-                open(&mut tester, submenu_controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
+                open(tester, submenu_controller.handle(), None);
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Forward));
 
-                pump_ms(&mut tester, 200);
+                pump_ms(tester, 200);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Forward));
 
-                close(&mut tester, submenu_controller.handle());
-                pump(&mut tester);
+                close(tester, submenu_controller.handle());
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Reverse));
 
-                pump_ms(&mut tester, 50);
+                pump_ms(tester, 50);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Reverse));
 
-                open(&mut tester, submenu_controller.handle(), None);
-                pump(&mut tester);
+                open(tester, submenu_controller.handle(), None);
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Forward));
 
@@ -12470,32 +12313,32 @@ mod tests {
 
                 assert_eq!(status.get(), Some(AnimationStatus::Completed));
 
-                close(&mut tester, submenu_controller.handle());
+                close(tester, submenu_controller.handle());
 
                 tester.pump_and_settle();
 
                 assert_eq!(status.get(), Some(AnimationStatus::Dismissed));
 
-                open(&mut tester, submenu_controller.handle(), None);
+                open(tester, submenu_controller.handle(), None);
                 tester.pump_and_settle();
 
                 assert_eq!(status.get(), Some(AnimationStatus::Completed));
 
-                close(&mut tester, controller.handle());
-                pump(&mut tester);
+                close(tester, controller.handle());
+                pump(tester);
 
                 assert_eq!(status.get(), Some(AnimationStatus::Reverse));
 
-                pump_ms(&mut tester, 50);
+                pump_ms(tester, 50);
 
-                open(&mut tester, submenu_controller.handle(), None);
-                pump(&mut tester);
-                pump_ms(&mut tester, 25);
+                open(tester, submenu_controller.handle(), None);
+                pump(tester);
+                pump_ms(tester, 25);
 
                 // Reopen request should be ignored since the parent menu is closing.
                 assert_eq!(status.get(), Some(AnimationStatus::Reverse));
 
-                pump(&mut tester);
+                pump(tester);
                 tester.pump_and_settle();
 
                 assert_eq!(status.get(), Some(AnimationStatus::Dismissed));
@@ -12505,9 +12348,8 @@ mod tests {
         // menu_anchor_test.dart 'Menu items can be pressed during opening animation'.
         #[test]
         fn menu_items_can_be_pressed_while_the_menu_opens() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let press_count = Rc::new(Cell::new(0));
                 let pressable = |text: &str| {
                     let press_count = Rc::clone(&press_count);
@@ -12519,22 +12361,22 @@ mod tests {
                         .into_widget()
                 };
                 let children = vec![pressable("Item 0"), pressable("Item 1")];
-                pump_animated_anchor(&mut tester, controller.clone(), children);
+                pump_animated_anchor(tester, controller.clone(), children);
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
-                pump_ms(&mut tester, 100);
+                open(tester, controller.handle(), None);
+                pump(tester);
+                pump_ms(tester, 100);
 
-                tap_text(&mut tester, "Item 0");
-                pump(&mut tester);
+                tap_text(tester, "Item 0");
+                pump(tester);
 
                 assert_eq!(press_count.get(), 1);
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
-                pump_ms(&mut tester, 250);
-                tap_text(&mut tester, "Item 1");
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
+                pump_ms(tester, 250);
+                tap_text(tester, "Item 1");
+                pump(tester);
 
                 assert_eq!(press_count.get(), 2);
             });
@@ -12543,13 +12385,12 @@ mod tests {
         // menu_anchor_test.dart 'Pointer is blocked while menu is closing'.
         #[test]
         fn a_closing_menu_does_not_take_taps() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let item_pressed = Rc::new(Cell::new(false));
                 let pressed = Rc::clone(&item_pressed);
                 pump_animated_anchor(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     vec![
                         MenuItemButton::new()
@@ -12560,18 +12401,18 @@ mod tests {
                 );
 
                 // Open and wait for animation to complete
-                open(&mut tester, controller.handle(), None);
+                open(tester, controller.handle(), None);
                 tester.pump_and_settle();
 
-                assert!(shows(&tester, "Item 0"));
+                assert!(shows(tester, "Item 0"));
 
                 // Start closing
-                close(&mut tester, controller.handle());
-                pump(&mut tester);
+                close(tester, controller.handle());
+                pump(tester);
 
                 // Try to tap the item while closing
-                tap_text(&mut tester, "Item 0");
-                pump(&mut tester);
+                tap_text(tester, "Item 0");
+                pump(tester);
 
                 // Item should not have been pressed
                 assert!(!item_pressed.get());
@@ -12581,13 +12422,12 @@ mod tests {
         // menu_anchor_test.dart 'Menu items can be focused during opening animation'.
         #[test]
         fn menu_items_can_be_focused_while_the_menu_opens() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                let item0_focus_node = new_focus_node(&tester, None);
-                let item1_focus_node = new_focus_node(&tester, None);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                let item0_focus_node = new_focus_node(tester, None);
+                let item1_focus_node = new_focus_node(tester, None);
                 pump_animated_anchor(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     vec![
                         MenuItemButton::new()
@@ -12603,30 +12443,29 @@ mod tests {
                     ],
                 );
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
-                request_focus(&mut tester, item0_focus_node.handle());
-                pump(&mut tester);
+                request_focus(tester, item0_focus_node.handle());
+                pump(tester);
 
-                assert!(has_focus(&tester, item0_focus_node.handle()));
+                assert!(has_focus(tester, item0_focus_node.handle()));
 
-                request_focus(&mut tester, item1_focus_node.handle());
-                pump(&mut tester);
+                request_focus(tester, item1_focus_node.handle());
+                pump(tester);
 
-                assert!(has_focus(&tester, item1_focus_node.handle()));
+                assert!(has_focus(tester, item1_focus_node.handle()));
             });
         }
 
         // menu_anchor_test.dart 'Focus returns to parent scope during closing animation'.
         #[test]
         fn focus_returns_to_the_outside_button_as_soon_as_the_menu_starts_closing() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                let submenu_focus_node = new_focus_node(&tester, None);
-                let outside_focus_node = new_focus_node(&tester, None);
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                let submenu_focus_node = new_focus_node(tester, None);
+                let outside_focus_node = new_focus_node(tester, None);
+                pump_material(tester, m3, |_app| {
                     ConstrainedBox::new(BoxConstraints::new().min_width(400.0).min_height(400.0))
                         .child(Column::new().children(vec![
                                 TextButton::new(
@@ -12675,49 +12514,48 @@ mod tests {
                         .into_widget()
                 });
 
-                request_focus(&mut tester, outside_focus_node.handle());
-                pump(&mut tester);
+                request_focus(tester, outside_focus_node.handle());
+                pump(tester);
 
-                assert!(has_primary_focus(&tester, outside_focus_node.handle()));
+                assert!(has_primary_focus(tester, outside_focus_node.handle()));
 
-                tap_text(&mut tester, "Open Menu");
-                pump(&mut tester);
-                pump_ms(&mut tester, 500);
+                tap_text(tester, "Open Menu");
+                pump(tester);
+                pump_ms(tester, 500);
 
-                let submenu = text_rect(&tester, "Submenu").center();
-                hover_over(&mut tester, submenu);
-                pump(&mut tester);
-                pump_ms(&mut tester, 500);
+                let submenu = text_rect(tester, "Submenu").center();
+                hover_over(tester, submenu);
+                pump(tester);
+                pump_ms(tester, 500);
 
-                assert!(shows(&tester, "Nested"));
+                assert!(shows(tester, "Nested"));
 
-                request_focus(&mut tester, submenu_focus_node.handle());
-                pump(&mut tester);
+                request_focus(tester, submenu_focus_node.handle());
+                pump(tester);
 
-                assert!(has_primary_focus(&tester, submenu_focus_node.handle()));
+                assert!(has_primary_focus(tester, submenu_focus_node.handle()));
 
-                close(&mut tester, controller.handle());
-                pump(&mut tester);
+                close(tester, controller.handle());
+                pump(tester);
 
-                assert!(has_primary_focus(&tester, outside_focus_node.handle()));
+                assert!(has_primary_focus(tester, outside_focus_node.handle()));
 
-                pump_ms(&mut tester, 50);
+                pump_ms(tester, 50);
 
-                assert!(has_primary_focus(&tester, outside_focus_node.handle()));
+                assert!(has_primary_focus(tester, outside_focus_node.handle()));
 
                 tester.pump_and_settle();
 
-                assert!(has_primary_focus(&tester, outside_focus_node.handle()));
+                assert!(has_primary_focus(tester, outside_focus_node.handle()));
             });
         }
 
         // menu_anchor_test.dart 'Submenu items can be traversed during opening animation'.
         #[test]
         fn submenu_items_can_be_traversed_while_the_menus_open() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_material(tester, m3, |_app| {
                     MenuBar::new(vec![
                         SubmenuButton::new(
                             vec![
@@ -12738,70 +12576,70 @@ mod tests {
                     .into_widget()
                 });
 
-                tap_text(&mut tester, "Menu");
-                pump(&mut tester);
-                pump_ms(&mut tester, 100);
+                tap_text(tester, "Menu");
+                pump(tester);
+                pump_ms(tester, 100);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("SubmenuButton", "Menu"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("MenuItemButton", "Item 0"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("SubmenuButton", "Submenu"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("MenuItemButton", "Sub Item 0"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("MenuItemButton", "Sub Item 1"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_LEFT);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("SubmenuButton", "Submenu"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("MenuItemButton", "Sub Item 0"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_LEFT);
+                pump(tester);
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_UP);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_UP);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("MenuItemButton", "Item 0"))
                 );
             });
@@ -12810,18 +12648,17 @@ mod tests {
         // menu_anchor_test.dart 'Hover traversal works during opening animation'.
         #[test]
         fn hovering_moves_focus_while_the_menu_opens() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 pump_animated_anchor(
-                    &mut tester,
+                    tester,
                     controller.clone(),
                     items(&["Item 0", "Item 1", "Item 2"]),
                 );
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
-                pump_ms(&mut tester, 100);
+                open(tester, controller.handle(), None);
+                pump(tester);
+                pump_ms(tester, 100);
 
                 for (device, (wait, text)) in [
                     (0, "Item 0"),
@@ -12833,14 +12670,14 @@ mod tests {
                 .enumerate()
                 {
                     if wait > 0 {
-                        pump_ms(&mut tester, wait);
+                        pump_ms(tester, wait);
                     }
-                    let center = text_rect(&tester, text).center();
-                    hover_with_new_mouse(&mut tester, device as i64 + 1, center);
-                    pump(&mut tester);
+                    let center = text_rect(tester, text).center();
+                    hover_with_new_mouse(tester, device as i64 + 1, center);
+                    pump(tester);
 
                     assert_eq!(
-                        focused_menu(&tester),
+                        focused_menu(tester),
                         Some(button_label("MenuItemButton", text))
                     );
                 }
@@ -12850,10 +12687,9 @@ mod tests {
         // menu_anchor_test.dart 'MenuBar items can be traversed during submenu opening animation'.
         #[test]
         fn menu_bar_items_can_be_traversed_while_a_submenu_opens() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_material(tester, m3, |_app| {
                     let submenu = |label: &str| {
                         SubmenuButton::new(
                             items(&[&format!("{label} Item")]),
@@ -12871,31 +12707,31 @@ mod tests {
                     .into_widget()
                 });
 
-                tap_text(&mut tester, "Menu 0");
-                pump(&mut tester);
-                pump_ms(&mut tester, 20);
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
-                pump(&mut tester);
+                tap_text(tester, "Menu 0");
+                pump(tester);
+                pump_ms(tester, 20);
+                send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("SubmenuButton", "Menu 1"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("SubmenuButton", "Menu 2"))
                 );
 
-                pump_ms(&mut tester, 20);
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
-                pump(&mut tester);
+                pump_ms(tester, 20);
+                send_key(tester, LogicalKeyboardKey::ARROW_LEFT);
+                pump(tester);
 
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("SubmenuButton", "Menu 1"))
                 );
             });
@@ -12904,11 +12740,10 @@ mod tests {
         // menu_anchor_test.dart 'Focus state remains consistent throughout opening animation'.
         #[test]
         fn a_focused_item_keeps_focus_while_the_menu_opens() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                let item_focus_node = new_focus_node(&tester, None);
-                pump_material(&mut tester, m3, |_app| {
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                let item_focus_node = new_focus_node(tester, None);
+                pump_material(tester, m3, |_app| {
                     Column::new()
                         .children(vec![
                             TextButton::new(
@@ -12936,74 +12771,72 @@ mod tests {
                         .into_widget()
                 });
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
-                request_focus(&mut tester, item_focus_node.handle());
-                pump(&mut tester);
+                request_focus(tester, item_focus_node.handle());
+                pump(tester);
 
-                assert!(has_primary_focus(&tester, item_focus_node.handle()));
+                assert!(has_primary_focus(tester, item_focus_node.handle()));
 
-                pump_ms(&mut tester, 200);
+                pump_ms(tester, 200);
 
-                assert!(has_primary_focus(&tester, item_focus_node.handle()));
+                assert!(has_primary_focus(tester, item_focus_node.handle()));
 
                 tester.pump_and_settle();
 
-                assert!(has_primary_focus(&tester, item_focus_node.handle()));
+                assert!(has_primary_focus(tester, item_focus_node.handle()));
             });
         }
 
         // menu_anchor_test.dart 'Scrollbar thumb is not shown while animated menu is opening'.
         #[test]
         fn the_scrollbar_thumb_shows_only_once_the_menu_has_opened() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let texts: Vec<String> = (0..20).map(|i| format!("Item {i}")).collect();
                 let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
-                pump_animated_anchor(&mut tester, controller.clone(), items(&texts));
+                pump_animated_anchor(tester, controller.clone(), items(&texts));
 
                 let thumb_visibility = |tester: &WidgetTester| {
                     let scrollbar = only(tester.find_by_type::<Scrollbar>());
                     tester.widget::<Scrollbar, _>(scrollbar, |scrollbar| scrollbar.thumb_visibility)
                 };
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
-                assert_eq!(thumb_visibility(&tester), Some(false));
+                assert_eq!(thumb_visibility(tester), Some(false));
 
                 // Progress the animation to the middle.
-                pump_ms(&mut tester, 250);
+                pump_ms(tester, 250);
 
-                assert_eq!(thumb_visibility(&tester), Some(false));
+                assert_eq!(thumb_visibility(tester), Some(false));
 
                 tester.pump_and_settle();
 
-                assert_eq!(thumb_visibility(&tester), Some(true));
+                assert_eq!(thumb_visibility(tester), Some(true));
             });
         }
 
         // menu_anchor_test.dart 'Positioned menus always begin animating at the target position'.
         #[test]
         fn a_positioned_menu_begins_animating_at_its_position() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let target_position = Offset::new(400.0, 400.0);
-                pump_tall_anchor(&mut tester, controller.clone());
+                pump_tall_anchor(tester, controller.clone());
 
-                open(&mut tester, controller.handle(), Some(target_position));
+                open(tester, controller.handle(), Some(target_position));
 
-                pump(&mut tester);
-                pump_ms(&mut tester, 2);
+                pump(tester);
+                pump_ms(tester, 2);
 
-                assert_eq!(panel_rect(&tester).top_left(), target_position);
+                assert_eq!(panel_rect(tester).top_left(), target_position);
 
                 tester.pump_and_settle();
 
-                assert_eq!(panel_rect(&tester).top_left(), target_position);
+                assert_eq!(panel_rect(tester).top_left(), target_position);
             });
         }
 
@@ -13035,17 +12868,16 @@ mod tests {
         // menu_anchor_test.dart 'Menu panel default reserved padding'.
         #[test]
         fn the_menu_panel_keeps_8_pixels_from_the_view_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
-                pump_wide_anchor(&mut tester, controller.clone(), None);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
+                pump_wide_anchor(tester, controller.clone(), None);
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 let default_reserved_padding = 8.0; // See K_MENU_VIEW_PADDING.
                 assert_eq!(
-                    menu_panel_rect(&tester).width(),
+                    menu_panel_rect(tester).width(),
                     800.0 - default_reserved_padding * 2.0
                 );
             });
@@ -13054,17 +12886,16 @@ mod tests {
         // menu_anchor_test.dart 'Menu panel accepts custom reserved padding'.
         #[test]
         fn the_menu_panel_keeps_its_reserved_padding_from_the_view() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let reserved_padding = EdgeInsetsGeometry::symmetric(0.0, 13.0);
-                pump_wide_anchor(&mut tester, controller.clone(), Some(reserved_padding));
+                pump_wide_anchor(tester, controller.clone(), Some(reserved_padding));
 
-                open(&mut tester, controller.handle(), None);
-                pump(&mut tester);
+                open(tester, controller.handle(), None);
+                pump(tester);
 
                 assert_eq!(
-                    menu_panel_rect(&tester).width(),
+                    menu_panel_rect(tester).width(),
                     800.0 - reserved_padding.horizontal()
                 );
             });
@@ -13097,32 +12928,30 @@ mod tests {
         // menu_anchor_test.dart 'MenuAcceleratorLabel does not crash at zero area'.
         #[test]
         fn a_menu_accelerator_label_of_zero_area_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_shrunk(&mut tester, MenuAcceleratorLabel::new("X").into_widget());
-                assert_eq!(size_of::<MenuAcceleratorLabel>(&tester), Size::ZERO);
+            test_widgets(|tester| {
+                pump_shrunk(tester, MenuAcceleratorLabel::new("X").into_widget());
+                assert_eq!(size_of::<MenuAcceleratorLabel>(tester), Size::ZERO);
             });
         }
 
         // menu_anchor_test.dart 'Layout updates when reserved padding changes'.
         #[test]
         fn the_menu_lays_out_again_when_its_reserved_padding_changes() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let controller = new_controller(&tester);
+            test_widgets(|tester| {
+                let controller = new_controller(tester);
                 let reserved_padding = EdgeInsetsGeometry::symmetric(0.0, 13.0);
                 let wide = || vec![SizedBox::new().width(800.0).height(24.0).into_widget()];
 
-                pump_home(&mut tester, |_app| {
+                pump_home(tester, |_app| {
                     MenuAnchor::new(wide())
                         .controller(controller.clone())
                         .into_widget()
                 });
 
-                open(&mut tester, controller.handle(), Some(Offset::ZERO));
-                pump(&mut tester);
+                open(tester, controller.handle(), Some(Offset::ZERO));
+                pump(tester);
 
-                pump_home(&mut tester, |_app| {
+                pump_home(tester, |_app| {
                     MenuAnchor::new(wide())
                         .controller(controller)
                         .reserved_padding(reserved_padding)
@@ -13130,7 +12959,7 @@ mod tests {
                 });
 
                 assert_eq!(
-                    menu_panel_rect(&tester).width(),
+                    menu_panel_rect(tester).width(),
                     800.0 - reserved_padding.horizontal()
                 );
             });
@@ -13139,46 +12968,42 @@ mod tests {
         // menu_anchor_test.dart 'SubmenuButton does not crash at zero area'.
         #[test]
         fn a_submenu_button_of_zero_area_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 pump_shrunk(
-                    &mut tester,
+                    tester,
                     SubmenuButton::new(Vec::new(), None::<WidgetRef>).into_widget(),
                 );
-                assert_eq!(size_of::<SubmenuButton>(&tester), Size::ZERO);
+                assert_eq!(size_of::<SubmenuButton>(tester), Size::ZERO);
             });
         }
 
         // menu_anchor_test.dart 'MenuBar does not crash at zero area'.
         #[test]
         fn a_menu_bar_of_zero_area_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 pump_shrunk(
-                    &mut tester,
+                    tester,
                     MenuBar::new(vec![Text::new("X").into_widget()]).into_widget(),
                 );
-                assert_eq!(size_of::<MenuBar>(&tester), Size::ZERO);
+                assert_eq!(size_of::<MenuBar>(tester), Size::ZERO);
             });
         }
 
         // menu_anchor_test.dart 'MenuItemButton does not crash at zero area'.
         #[test]
         fn a_menu_item_button_of_zero_area_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_shrunk(&mut tester, MenuItemButton::new().into_widget());
-                assert_eq!(size_of::<MenuItemButton>(&tester), Size::ZERO);
+            test_widgets(|tester| {
+                pump_shrunk(tester, MenuItemButton::new().into_widget());
+                assert_eq!(size_of::<MenuItemButton>(tester), Size::ZERO);
             });
         }
 
         // menu_anchor_test.dart 'RadioMenuButton does not crash at zero area'.
         #[test]
         fn a_radio_menu_button_of_zero_area_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 pump_shrunk(
-                    &mut tester,
+                    tester,
                     RadioMenuButton::new(
                         true,
                         Some(true),
@@ -13187,17 +13012,16 @@ mod tests {
                     )
                     .into_widget(),
                 );
-                assert_eq!(size_of::<RadioMenuButton<bool>>(&tester), Size::ZERO);
+                assert_eq!(size_of::<RadioMenuButton<bool>>(tester), Size::ZERO);
             });
         }
 
         // menu_anchor_test.dart 'CheckboxMenuButton does not crash at zero area'.
         #[test]
         fn a_checkbox_menu_button_of_zero_area_does_not_panic() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 pump_shrunk(
-                    &mut tester,
+                    tester,
                     CheckboxMenuButton::new(
                         Some(true),
                         Some(Rc::new(|_app: &mut App, _value: Option<bool>| {})),
@@ -13205,21 +13029,21 @@ mod tests {
                     )
                     .into_widget(),
                 );
-                assert_eq!(size_of::<CheckboxMenuButton>(&tester), Size::ZERO);
+                assert_eq!(size_of::<CheckboxMenuButton>(tester), Size::ZERO);
             });
         }
 
         // menu_anchor_test.dart 'MenuAnchor does not crash at zero area'.
         #[test]
         fn a_menu_anchor_in_a_view_of_zero_area_does_not_panic() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let mut tester = WidgetTester::with_physical_size(
                     TestPlatform::new().on(waft_embedder::TargetPlatform::Android),
                     Size::ZERO,
                 );
-                tester.install_platform_fonts();
-                let menu_controller = new_controller(&tester);
-                pump_home(&mut tester, |_app| {
+                let tester = &mut tester;
+                let menu_controller = new_controller(tester);
+                pump_home(tester, |_app| {
                     Scaffold::new()
                         .body(
                             Center::new().child(
@@ -13229,20 +13053,19 @@ mod tests {
                         )
                         .into_widget()
                 });
-                assert_eq!(size_of::<MenuAnchor>(&tester), Size::ZERO);
-                open(&mut tester, menu_controller.handle(), None);
-                pump(&mut tester);
-                assert!(shows(&tester, "X"));
+                assert_eq!(size_of::<MenuAnchor>(tester), Size::ZERO);
+                open(tester, menu_controller.handle(), None);
+                pump(tester);
+                assert!(shows(tester, "X"));
             });
         }
 
         // menu_anchor_test.dart 'Escape closes MenuAnchor opened by tap without childFocusNode'.
         #[test]
         fn escape_closes_a_menu_anchor_opened_by_a_tap_without_a_child_focus_node() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let outside_focus_node = new_focus_node(&tester, Some("Outside Focus"));
-                pump_home(&mut tester, |_app| {
+            test_widgets(|tester| {
+                let outside_focus_node = new_focus_node(tester, Some("Outside Focus"));
+                pump_home(tester, |_app| {
                     Scaffold::new()
                         .body(Column::new().children(vec![
                                 TextButton::new(
@@ -13259,34 +13082,34 @@ mod tests {
                         .into_widget()
                 });
 
-                pump(&mut tester);
-                assert!(has_primary_focus(&tester, outside_focus_node.handle()));
+                pump(tester);
+                assert!(has_primary_focus(tester, outside_focus_node.handle()));
 
-                tap_text(&mut tester, "Open menu");
+                tap_text(tester, "Open menu");
                 tester.pump_and_settle();
-                assert!(shows(&tester, "Item 1"));
+                assert!(shows(tester, "Item 1"));
 
-                send_key(&mut tester, LogicalKeyboardKey::ESCAPE);
+                send_key(tester, LogicalKeyboardKey::ESCAPE);
                 tester.pump_and_settle();
-                assert!(!shows(&tester, "Item 1"));
-                assert!(has_primary_focus(&tester, outside_focus_node.handle()));
+                assert!(!shows(tester, "Item 1"));
+                assert!(has_primary_focus(tester, outside_focus_node.handle()));
 
                 // Reopen by tap, traverse with arrow key, and close with Escape.
-                tap_text(&mut tester, "Open menu");
+                tap_text(tester, "Open menu");
                 tester.pump_and_settle();
-                assert!(shows(&tester, "Item 1"));
+                assert!(shows(tester, "Item 1"));
 
-                send_key(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
-                pump(&mut tester);
+                send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
+                pump(tester);
                 assert_eq!(
-                    focused_menu(&tester),
+                    focused_menu(tester),
                     Some(button_label("MenuItemButton", "Item 1"))
                 );
 
-                send_key(&mut tester, LogicalKeyboardKey::ESCAPE);
+                send_key(tester, LogicalKeyboardKey::ESCAPE);
                 tester.pump_and_settle();
-                assert!(!shows(&tester, "Item 1"));
-                assert!(has_primary_focus(&tester, outside_focus_node.handle()));
+                assert!(!shows(tester, "Item 1"));
+                assert!(has_primary_focus(tester, outside_focus_node.handle()));
             });
         }
 
@@ -13294,9 +13117,8 @@ mod tests {
         // dismissing the Dialog'.
         #[test]
         fn escape_closes_a_menu_anchor_in_a_dialog_before_it_dismisses_the_dialog() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                pump_home(&mut tester, |_app| {
+            test_widgets(|tester| {
+                pump_home(tester, |_app| {
                     Scaffold::new()
                         .body(Builder::new(|_app, context| {
                             TextButton::new(
@@ -13336,24 +13158,24 @@ mod tests {
                         .into_widget()
                 });
 
-                tap_text(&mut tester, "Show Dialog");
+                tap_text(tester, "Show Dialog");
                 tester.pump_and_settle();
-                assert!(shows(&tester, "Dialog Title"));
+                assert!(shows(tester, "Dialog Title"));
 
-                tap_text(&mut tester, "Open menu");
+                tap_text(tester, "Open menu");
                 tester.pump_and_settle();
-                assert!(shows(&tester, "Menu Item 1"));
+                assert!(shows(tester, "Menu Item 1"));
 
                 // First Escape closes only the MenuAnchor menu, keeping the Dialog open.
-                send_key(&mut tester, LogicalKeyboardKey::ESCAPE);
+                send_key(tester, LogicalKeyboardKey::ESCAPE);
                 tester.pump_and_settle();
-                assert!(!shows(&tester, "Menu Item 1"));
-                assert!(shows(&tester, "Dialog Title"));
+                assert!(!shows(tester, "Menu Item 1"));
+                assert!(shows(tester, "Dialog Title"));
 
                 // Second Escape dismisses the Dialog.
-                send_key(&mut tester, LogicalKeyboardKey::ESCAPE);
+                send_key(tester, LogicalKeyboardKey::ESCAPE);
                 tester.pump_and_settle();
-                assert!(!shows(&tester, "Dialog Title"));
+                assert!(!shows(tester, "Dialog Title"));
             });
         }
     }

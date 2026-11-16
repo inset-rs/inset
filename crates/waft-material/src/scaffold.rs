@@ -4179,7 +4179,6 @@ impl ScaffoldState {
 }
 
 /// The optional arguments [`ScaffoldState::build_bottom_sheet`] passes on to the sheet.
-#[derive(Default)]
 struct BottomSheetOptions {
     background_color: Option<Color>,
     elevation: Option<f64>,
@@ -4190,6 +4189,21 @@ struct BottomSheetOptions {
     show_drag_handle: Option<bool>,
     /// Dart's `shouldDisposeAnimationController = true`.
     should_dispose_animation_controller: bool,
+}
+
+impl Default for BottomSheetOptions {
+    fn default() -> BottomSheetOptions {
+        BottomSheetOptions {
+            background_color: None,
+            elevation: None,
+            shape: None,
+            clip_behavior: None,
+            constraints: None,
+            enable_drag: None,
+            show_drag_handle: None,
+            should_dispose_animation_controller: true,
+        }
+    }
 }
 
 impl TickerProviderStateMixin for ScaffoldState {
@@ -5363,21 +5377,15 @@ mod tests {
         SingleChildScrollView,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::elevated_button::ElevatedButton;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
-
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
-
-    fn tester() -> WidgetTester {
-        tester_on(TargetPlatform::Android)
-    }
 
     /// `tester.pumpWidget(MaterialApp(home: home(app)))`.
     fn pump_app(tester: &mut WidgetTester, home: impl FnOnce(&mut App) -> WidgetRef) {
@@ -5462,9 +5470,8 @@ mod tests {
     // 'extendBodyBehindAppBar change should not cause the body widget lose state'.
     #[test]
     fn switching_extend_body_behind_app_bar_keeps_the_bodys_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/103741
-            let mut tester = tester();
             use waft_widgets::ScrollControllerLeaf;
             let controller = waft_widgets::ScrollController::default(&mut tester.cell.borrow_mut());
             let frame = |extend_body_behind_app_bar: bool| {
@@ -5486,22 +5493,21 @@ mod tests {
                 |tester: &WidgetTester| controller.as_controller().offset(&tester.cell.borrow());
 
             tester.pump_widget(frame(true));
-            assert_eq!(pixels(&tester), 0.0);
+            assert_eq!(pixels(tester), 0.0);
 
             controller.jump_to(&mut tester.cell.borrow_mut(), 100.0);
-            tester.pump(Duration::ZERO);
-            assert_eq!(pixels(&tester), 100.0);
+            tester.pump();
+            assert_eq!(pixels(tester), 100.0);
 
             tester.pump_widget(frame(false));
-            assert_eq!(pixels(&tester), 100.0);
+            assert_eq!(pixels(tester), 100.0);
         });
     }
 
     // 'Scaffold large bottom padding test'.
     #[test]
     fn a_keyboard_taller_than_the_scaffold_gives_the_body_no_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let body_key = GlobalKey::new();
             let frame = |bottom: f64| {
                 directional(
@@ -5511,10 +5517,10 @@ mod tests {
                 )
             };
             tester.pump_widget(frame(700.0));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 0.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 0.0));
 
             tester.pump_widget(frame(500.0));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 100.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 100.0));
 
             tester.pump_widget(boilerplate(
                 MediaQuery::new(
@@ -5524,21 +5530,20 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 0.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 0.0));
         });
     }
 
     fn body_size_case(body: fn(&GlobalKey) -> WidgetRef) -> (Size, Offset) {
         let mut result = (Size::ZERO, Offset::ZERO);
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let test_key = GlobalKey::new();
             tester.pump_widget(directional(
                 TextDirection::Ltr,
                 MediaQueryData::new(),
                 Scaffold::new().body(body(&test_key)),
             ));
-            let rect = rect_of(&tester, &test_key);
+            let rect = rect_of(tester, &test_key);
             result = (rect.size(), rect.top_left());
         });
         result
@@ -5596,8 +5601,7 @@ mod tests {
     // 'body size with extendBody'.
     #[test]
     fn extend_body_lays_the_body_out_under_the_bottom_navigation_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let body_key = GlobalKey::new();
             let media_query_bottom = Rc::new(Cell::new(f64::NAN));
             let frame = |tester: &WidgetTester,
@@ -5636,32 +5640,32 @@ mod tests {
                 )
             };
 
-            tester.pump_widget(frame(&tester, true, None, 0.0));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 600.0));
+            tester.pump_widget(frame(tester, true, None, 0.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 600.0));
             assert_eq!(media_query_bottom.get(), 48.0);
 
-            tester.pump_widget(frame(&tester, false, None, 0.0));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 552.0)); // 552 = 600 - 48 (BAB height)
+            tester.pump_widget(frame(tester, false, None, 0.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 552.0)); // 552 = 600 - 48 (BAB height)
             assert_eq!(media_query_bottom.get(), 0.0);
 
             // If resizeToAvoidBottomInsets is false, same results as if it was unspecified (null).
-            tester.pump_widget(frame(&tester, true, Some(false), 100.0));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 600.0));
+            tester.pump_widget(frame(tester, true, Some(false), 100.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 600.0));
             assert_eq!(media_query_bottom.get(), 48.0);
 
-            tester.pump_widget(frame(&tester, false, Some(false), 100.0));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 552.0));
+            tester.pump_widget(frame(tester, false, Some(false), 100.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 552.0));
             assert_eq!(media_query_bottom.get(), 0.0);
 
             // If resizeToAvoidBottomInsets is true and viewInsets.bottom is > the bottom
             // navigation bar's height then the body always resizes and the MediaQuery
             // isn't adjusted. This case corresponds to the keyboard appearing.
-            tester.pump_widget(frame(&tester, true, Some(true), 100.0));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 500.0));
+            tester.pump_widget(frame(tester, true, Some(true), 100.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 500.0));
             assert_eq!(media_query_bottom.get(), 0.0);
 
-            tester.pump_widget(frame(&tester, false, Some(true), 100.0));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 500.0));
+            tester.pump_widget(frame(tester, false, Some(true), 100.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 500.0));
             assert_eq!(media_query_bottom.get(), 0.0);
         });
     }
@@ -5669,8 +5673,7 @@ mod tests {
     // 'body size with extendBodyBehindAppBar'.
     #[test]
     fn extend_body_behind_app_bar_lays_the_body_out_under_the_app_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let app_bar_key = GlobalKey::new();
             let body_key = GlobalKey::new();
 
@@ -5731,61 +5734,61 @@ mod tests {
             // material/scaffold.dart.
 
             tester.pump_widget(frame(true, true, false));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 600.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 600.0));
             assert_eq!(
-                size_of(&tester, &app_bar_key),
+                size_of(tester, &app_bar_key),
                 Size::new(800.0, APP_BAR_HEIGHT + WINDOW_PADDING_TOP)
             );
             assert_eq!(media_query_top.get(), APP_BAR_HEIGHT + WINDOW_PADDING_TOP);
 
             tester.pump_widget(frame(true, false, false));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 600.0));
-            assert!(!app_bar_found(&tester));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 600.0));
+            assert!(!app_bar_found(tester));
             assert_eq!(media_query_top.get(), WINDOW_PADDING_TOP);
 
             tester.pump_widget(frame(false, true, false));
             assert_eq!(
-                size_of(&tester, &body_key),
+                size_of(tester, &body_key),
                 Size::new(800.0, 600.0 - APP_BAR_HEIGHT - WINDOW_PADDING_TOP)
             );
             assert_eq!(
-                size_of(&tester, &app_bar_key),
+                size_of(tester, &app_bar_key),
                 Size::new(800.0, APP_BAR_HEIGHT + WINDOW_PADDING_TOP)
             );
             assert_eq!(media_query_top.get(), 0.0);
 
             tester.pump_widget(frame(false, false, false));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 600.0));
-            assert!(!app_bar_found(&tester));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 600.0));
+            assert!(!app_bar_found(tester));
             assert_eq!(media_query_top.get(), WINDOW_PADDING_TOP);
 
             tester.pump_widget(frame(true, true, true));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 600.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 600.0));
             assert_eq!(
-                size_of(&tester, &app_bar_key),
+                size_of(tester, &app_bar_key),
                 Size::new(800.0, APP_BAR_HEIGHT)
             );
             assert_eq!(media_query_top.get(), APP_BAR_HEIGHT);
 
             tester.pump_widget(frame(true, false, true));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 600.0));
-            assert!(!app_bar_found(&tester));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 600.0));
+            assert!(!app_bar_found(tester));
             assert_eq!(media_query_top.get(), WINDOW_PADDING_TOP);
 
             tester.pump_widget(frame(false, true, true));
             assert_eq!(
-                size_of(&tester, &body_key),
+                size_of(tester, &body_key),
                 Size::new(800.0, 600.0 - APP_BAR_HEIGHT)
             );
             assert_eq!(
-                size_of(&tester, &app_bar_key),
+                size_of(tester, &app_bar_key),
                 Size::new(800.0, APP_BAR_HEIGHT)
             );
             assert_eq!(media_query_top.get(), 0.0);
 
             tester.pump_widget(frame(false, false, true));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 600.0));
-            assert!(!app_bar_found(&tester));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 600.0));
+            assert!(!app_bar_found(tester));
             assert_eq!(media_query_top.get(), WINDOW_PADDING_TOP);
         });
     }
@@ -5793,8 +5796,7 @@ mod tests {
     // 'Nested scaffold body insets'.
     #[test]
     fn nested_scaffolds_inset_the_body_unless_both_opt_out() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let body_key = GlobalKey::new();
             let frame = |inner: Option<bool>, outer: Option<bool>| {
                 let body_key = body_key.clone();
@@ -5834,7 +5836,7 @@ mod tests {
             ] {
                 tester.pump_widget(frame(inner, outer));
                 assert_eq!(
-                    size_of(&tester, &body_key),
+                    size_of(tester, &body_key),
                     Size::new(800.0, height),
                     "inner {inner:?}, outer {outer:?}"
                 );
@@ -5845,8 +5847,7 @@ mod tests {
     // 'Floating action button directionality'.
     #[test]
     fn the_floating_action_button_sits_at_the_end_for_the_text_direction() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let fab_key = GlobalKey::new();
             let frame = |direction: TextDirection| {
                 directional(
@@ -5860,19 +5861,18 @@ mod tests {
                 )
             };
             tester.pump_widget(frame(TextDirection::Ltr));
-            assert_through_transforms(center_of(&tester, &fab_key), Offset::new(756.0, 356.0));
+            assert_through_transforms(center_of(tester, &fab_key), Offset::new(756.0, 356.0));
 
             tester.pump_widget(frame(TextDirection::Rtl));
-            assert_eq!(transient_callback_count(&tester), 0);
-            assert_through_transforms(center_of(&tester, &fab_key), Offset::new(44.0, 356.0));
+            assert_eq!(transient_callback_count(tester), 0);
+            assert_through_transforms(center_of(tester, &fab_key), Offset::new(44.0, 356.0));
         });
     }
 
     // 'Floating Action Button bottom padding not consumed by viewInsets'.
     #[test]
     fn the_keyboard_does_not_consume_the_floating_action_buttons_bottom_view_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let fab_key = GlobalKey::new();
             let frame = |data: MediaQueryData| {
                 directional(
@@ -5887,8 +5887,8 @@ mod tests {
             tester.pump_widget(frame(
                 MediaQueryData::new().view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 20.0)),
             ));
-            let initial_point = center_of(&tester, &fab_key);
-            let bottom_left = point_of(&tester, &fab_key, |size| size.bottom_left(Offset::ZERO));
+            let initial_point = center_of(tester, &fab_key);
+            let bottom_left = point_of(tester, &fab_key, |size| size.bottom_left(Offset::ZERO));
             assert_through_transforms(
                 Offset::new(
                     bottom_left.dx(),
@@ -5903,7 +5903,7 @@ mod tests {
                     .view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 20.0))
                     .view_insets(EdgeInsets::only(0.0, 0.0, 0.0, 300.0)),
             ));
-            let final_point = center_of(&tester, &fab_key);
+            let final_point = center_of(tester, &fab_key);
             assert_eq!(initial_point, final_point);
         });
     }
@@ -5911,8 +5911,7 @@ mod tests {
     // 'viewPadding change should trigger _ScaffoldLayout re-layout'.
     #[test]
     fn a_view_padding_change_lays_the_scaffold_out_again() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = |bottom: f64| {
                 directional(
                     TextDirection::Ltr,
@@ -5951,8 +5950,7 @@ mod tests {
     // 'BottomSheet bottom padding is not consumed by viewInsets'.
     #[test]
     fn the_keyboard_does_not_move_a_bottom_sheet_that_does_not_avoid_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let sheet_key = GlobalKey::new();
             let frame = |data: MediaQueryData| {
                 directional(
@@ -5967,14 +5965,14 @@ mod tests {
             tester.pump_widget(frame(
                 MediaQueryData::new().padding(EdgeInsets::only(0.0, 0.0, 0.0, 20.0)),
             ));
-            let initial_point = center_of(&tester, &sheet_key);
+            let initial_point = center_of(tester, &sheet_key);
             // Consume bottom padding - as if by the keyboard opening
             tester.pump_widget(frame(
                 MediaQueryData::new()
                     .view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 20.0))
                     .view_insets(EdgeInsets::only(0.0, 0.0, 0.0, 300.0)),
             ));
-            let final_point = center_of(&tester, &sheet_key);
+            let final_point = center_of(tester, &sheet_key);
             assert_eq!(initial_point, final_point);
         });
     }
@@ -5997,10 +5995,9 @@ mod tests {
     // 'Persistent bottom buttons are persistent'.
     #[test]
     fn persistent_footer_buttons_stay_tappable_after_the_body_scrolls() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let did_press_button = Rc::new(Cell::new(false));
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 let did_press_button = Rc::clone(&did_press_button);
                 Scaffold::new()
                     .body(tall_body())
@@ -6015,12 +6012,12 @@ mod tests {
             });
 
             let scroll_view = tester.find_by_type::<SingleChildScrollView>()[0];
-            let start = center_of_element(&tester, scroll_view);
+            let start = center_of_element(tester, scroll_view);
             tester.drag_from(start, Offset::new(0.0, -1000.0), 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(!did_press_button.get());
             let x = tester.find_text("X")[0];
-            let at = center_of_element(&tester, x);
+            let at = center_of_element(tester, x);
             tester.tap(at, 2);
             assert!(did_press_button.get());
         });
@@ -6029,8 +6026,7 @@ mod tests {
     // 'Persistent bottom buttons alignment'.
     #[test]
     fn persistent_footer_buttons_follow_the_footer_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_app = |tester: &mut WidgetTester, alignment: AlignmentDirectional| {
                 pump_app(tester, |_app| {
                     Scaffold::new()
@@ -6051,14 +6047,14 @@ mod tests {
                 tester.global_rect(tester.render_box_of(button))
             };
 
-            build_app(&mut tester, AlignmentDirectional::CENTER_END);
-            assert_eq!(footer_button(&tester).right, 800.0 - 8.0);
+            build_app(tester, AlignmentDirectional::CENTER_END);
+            assert_eq!(footer_button(tester).right, 800.0 - 8.0);
 
-            build_app(&mut tester, AlignmentDirectional::CENTER);
-            assert_eq!(footer_button(&tester).center().dx(), 800.0 / 2.0);
+            build_app(tester, AlignmentDirectional::CENTER);
+            assert_eq!(footer_button(tester).center().dx(), 800.0 / 2.0);
 
-            build_app(&mut tester, AlignmentDirectional::CENTER_START);
-            assert_eq!(footer_button(&tester).left, 8.0);
+            build_app(tester, AlignmentDirectional::CENTER_START);
+            assert_eq!(footer_button(tester).left, 8.0);
         });
     }
 
@@ -6071,8 +6067,7 @@ mod tests {
     // 'Persistent bottom buttons apply media padding'.
     #[test]
     fn persistent_footer_buttons_apply_the_media_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(directional(
                 TextDirection::Ltr,
                 MediaQueryData::new().padding(EdgeInsets::only(10.0, 20.0, 30.0, 40.0)),
@@ -6081,7 +6076,7 @@ mod tests {
                     .persistent_footer_buttons(vec![placeholder(None)]),
             ));
 
-            let buttons_bar = overflow_bar_ancestor::<Padding>(&tester);
+            let buttons_bar = overflow_bar_ancestor::<Padding>(tester);
             let rect = tester.global_rect(tester.render_box_of(buttons_bar));
             assert_eq!(rect.bottom_left(), Offset::new(10.0, 560.0));
             assert_eq!(rect.bottom_right(), Offset::new(770.0, 560.0));
@@ -6091,8 +6086,7 @@ mod tests {
     // 'Persistent bottom buttons bottom padding is not consumed by viewInsets'.
     #[test]
     fn the_keyboard_does_not_move_persistent_footer_buttons_that_do_not_avoid_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let frame = |data: MediaQueryData| {
                 directional(
@@ -6107,14 +6101,14 @@ mod tests {
             tester.pump_widget(frame(
                 MediaQueryData::new().padding(EdgeInsets::only(0.0, 0.0, 0.0, 20.0)),
             ));
-            let initial_point = center_of(&tester, &button_key);
+            let initial_point = center_of(tester, &button_key);
             // Consume bottom padding - as if by the keyboard opening
             tester.pump_widget(frame(
                 MediaQueryData::new()
                     .view_padding(EdgeInsets::only(0.0, 0.0, 0.0, 20.0))
                     .view_insets(EdgeInsets::only(0.0, 0.0, 0.0, 300.0)),
             ));
-            let final_point = center_of(&tester, &button_key);
+            let final_point = center_of(tester, &button_key);
             assert_eq!(initial_point, final_point);
         });
     }
@@ -6122,8 +6116,7 @@ mod tests {
     // 'Persistent bottom buttons can apply decoration'.
     #[test]
     fn persistent_footer_buttons_take_the_footer_decoration() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(directional(
                 TextDirection::Ltr,
                 MediaQueryData::new().padding(EdgeInsets::only(10.0, 20.0, 30.0, 40.0)),
@@ -6139,7 +6132,7 @@ mod tests {
                     .persistent_footer_buttons(vec![placeholder(None)]),
             ));
 
-            let persistent_footer = overflow_bar_ancestor::<Container>(&tester);
+            let persistent_footer = overflow_bar_ancestor::<Container>(tester);
             let top_color = tester.widget(persistent_footer, |container: &Container| {
                 let decoration = container.decoration.as_ref().expect("a decoration");
                 let decoration = decoration
@@ -6155,8 +6148,7 @@ mod tests {
     // 'Scaffold background color defaults to ColorScheme.surface'.
     #[test]
     fn the_background_colour_defaults_to_the_colour_schemes_surface() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = {
                 let app = tester.cell.borrow();
                 let base = ThemeData::new(&app);
@@ -6190,8 +6182,7 @@ mod tests {
     // and extendBody is true'.
     #[test]
     fn an_extended_body_keeps_the_scaffolds_height_under_a_keyboard_shorter_than_the_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let body_key = GlobalKey::new();
             let frame = |tester: &mut WidgetTester, keyboard_height: f64| {
                 let body_key = body_key.clone();
@@ -6212,14 +6203,14 @@ mod tests {
                 });
             };
 
-            frame(&mut tester, 0.0);
-            assert_eq!(size_of(&tester, &body_key).height(), 600.0);
+            frame(tester, 0.0);
+            assert_eq!(size_of(tester, &body_key).height(), 600.0);
 
-            frame(&mut tester, 100.0);
-            assert_eq!(size_of(&tester, &body_key).height(), 600.0);
+            frame(tester, 100.0);
+            assert_eq!(size_of(tester, &body_key).height(), 600.0);
 
-            frame(&mut tester, 200.0);
-            assert_eq!(size_of(&tester, &body_key).height(), 400.0);
+            frame(tester, 200.0);
+            assert_eq!(size_of(tester, &body_key).height(), 400.0);
         });
     }
 
@@ -6255,14 +6246,13 @@ mod tests {
     // 'Scaffold drawer callback test'.
     #[test]
     fn opening_one_drawer_closes_the_other_and_reports_both() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let (is_drawer_open, is_end_drawer_open) = (Flag::default(), Flag::default());
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 drawer_scaffold(&key, &is_drawer_open, &is_end_drawer_open).into_widget()
             });
-            let scaffold_state = scaffold_state(&tester, &key);
+            let scaffold_state = scaffold_state(tester, &key);
 
             scaffold_state.open_drawer(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
@@ -6283,12 +6273,11 @@ mod tests {
     // 'Scaffold drawer callback test - only call when changed'.
     #[test]
     fn a_fling_too_short_to_open_a_drawer_calls_no_drawer_callback() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let on_drawer_changed_called = Flag::default();
             let on_end_drawer_changed_called = Flag::default();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 let drawer_called = Rc::clone(&on_drawer_changed_called.0);
                 let end_drawer_called = Rc::clone(&on_end_drawer_changed_called.0);
                 Scaffold::new()
@@ -6321,14 +6310,13 @@ mod tests {
     // 'Drawer can be dismissed with escape keyboard shortcut'.
     #[test]
     fn the_escape_key_dismisses_an_open_drawer() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let (is_drawer_open, is_end_drawer_open) = (Flag::default(), Flag::default());
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 drawer_scaffold(&key, &is_drawer_open, &is_end_drawer_open).into_widget()
             });
-            let scaffold_state = scaffold_state(&tester, &key);
+            let scaffold_state = scaffold_state(tester, &key);
             let escape = |tester: &mut WidgetTester| {
                 tester.send_key_event(
                     waft_services::PhysicalKeyboardKey::ESCAPE,
@@ -6342,7 +6330,7 @@ mod tests {
             assert!(!is_end_drawer_open.get());
 
             // Try to dismiss the drawer with the shortcut key
-            escape(&mut tester);
+            escape(tester);
             tester.pump_and_settle();
             assert!(!is_drawer_open.get());
             assert!(!is_end_drawer_open.get());
@@ -6353,7 +6341,7 @@ mod tests {
             assert!(is_end_drawer_open.get());
 
             // Try to dismiss the drawer with the shortcut key
-            escape(&mut tester);
+            escape(tester);
             tester.pump_and_settle();
             assert!(!is_drawer_open.get());
             assert!(!is_end_drawer_open.get());
@@ -6392,26 +6380,25 @@ mod tests {
     // 'Drawer opens correctly with custom edgeDragWidth' .
     #[test]
     fn a_wider_edge_drag_width_opens_the_drawer_from_further_in() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             // The default edge drag width is 20.0.
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 text_drawer_scaffold(&key, "Scaffold body").into_widget()
             });
-            let scaffold_state = scaffold_state(&tester, &key);
+            let scaffold_state = scaffold_state(tester, &key);
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
             tester.drag_from(Offset::new(35.0, 100.0), Offset::new(300.0, 0.0), 1);
             tester.pump_and_settle();
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 text_drawer_scaffold(&key, "Scaffold Body")
                     .drawer_edge_drag_width(40.0)
                     .into_widget()
             });
-            let scaffold_state = self::scaffold_state(&tester, &key);
+            let scaffold_state = self::scaffold_state(tester, &key);
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
             tester.drag_from(Offset::new(35.0, 100.0), Offset::new(300.0, 0.0), 2);
@@ -6425,13 +6412,12 @@ mod tests {
     // 'Drawer opens correctly with padding from MediaQuery (LTR)' .
     #[test]
     fn the_left_padding_widens_the_drawers_edge_drag_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 text_drawer_scaffold(&key, "Scaffold Body").into_widget()
             });
-            let scaffold_state = scaffold_state(&tester, &key);
+            let scaffold_state = scaffold_state(tester, &key);
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
             tester.drag_from(
@@ -6442,7 +6428,7 @@ mod tests {
             tester.pump_and_settle();
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 MediaQuery::new(
                     MediaQueryData::new().padding(EdgeInsets::only(
                         SIMULATED_NOTCH_SIZE,
@@ -6454,7 +6440,7 @@ mod tests {
                 )
                 .into_widget()
             });
-            let scaffold_state = self::scaffold_state(&tester, &key);
+            let scaffold_state = self::scaffold_state(tester, &key);
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
             tester.drag_from(
@@ -6470,14 +6456,13 @@ mod tests {
     // 'Drawer opens correctly with padding from MediaQuery (RTL)' .
     #[test]
     fn the_right_padding_widens_the_drawers_edge_drag_area_right_to_left() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 text_drawer_scaffold(&key, "Scaffold Body").into_widget()
             });
-            let scaffold_width = size_of(&tester, &key).width();
-            let scaffold_state = scaffold_state(&tester, &key);
+            let scaffold_width = size_of(tester, &key).width();
+            let scaffold_state = scaffold_state(tester, &key);
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
             tester.drag_from(
@@ -6488,7 +6473,7 @@ mod tests {
             tester.pump_and_settle();
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 MediaQuery::new(
                     MediaQueryData::new().padding(EdgeInsets::only(
                         0.0,
@@ -6503,7 +6488,7 @@ mod tests {
                 )
                 .into_widget()
             });
-            let scaffold_state = self::scaffold_state(&tester, &key);
+            let scaffold_state = self::scaffold_state(tester, &key);
             assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
             tester.drag_from(
@@ -6524,13 +6509,12 @@ mod tests {
             TargetPlatform::Fuchsia,
             TargetPlatform::IOS,
         ] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let key = GlobalKey::new();
-                pump_app(&mut tester, |_app| {
+                pump_app(tester, |_app| {
                     text_drawer_scaffold(&key, "Scaffold Body").into_widget()
                 });
-                let scaffold_state = scaffold_state(&tester, &key);
+                let scaffold_state = scaffold_state(tester, &key);
                 assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
                 // Test that we can open the drawer with a drag gesture when
@@ -6549,12 +6533,12 @@ mod tests {
                     "{platform:?}"
                 );
 
-                pump_app(&mut tester, |_app| {
+                pump_app(tester, |_app| {
                     text_drawer_scaffold(&key, "Scaffold body")
                         .drawer_enable_open_drag_gesture(false)
                         .into_widget()
                 });
-                let scaffold_state = self::scaffold_state(&tester, &key);
+                let scaffold_state = self::scaffold_state(tester, &key);
                 assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
                 // Test that we cannot open the drawer with a drag gesture when
@@ -6568,7 +6552,7 @@ mod tests {
 
                 // Test that we can close drawer with a drag gesture when
                 // `Scaffold.drawerEnableDragGesture` is false.
-                tap_first_icon_button(&mut tester, 5);
+                tap_first_icon_button(tester, 5);
                 tester.pump_and_settle();
                 assert!(
                     scaffold_state.is_drawer_open(&tester.cell.borrow()),
@@ -6593,13 +6577,12 @@ mod tests {
             TargetPlatform::MacOS,
             TargetPlatform::Windows,
         ] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let key = GlobalKey::new();
-                pump_app(&mut tester, |_app| {
+                pump_app(tester, |_app| {
                     text_drawer_scaffold(&key, "Scaffold Body").into_widget()
                 });
-                let scaffold_state = scaffold_state(&tester, &key);
+                let scaffold_state = scaffold_state(tester, &key);
                 assert!(!scaffold_state.is_drawer_open(&tester.cell.borrow()));
 
                 // Test that we cannot open the drawer with a drag gesture.
@@ -6611,7 +6594,7 @@ mod tests {
                 );
 
                 // Test that we can open the drawer with a tap gesture on drawer icon button.
-                tap_first_icon_button(&mut tester, 5);
+                tap_first_icon_button(tester, 5);
                 tester.pump_and_settle();
                 assert!(
                     scaffold_state.is_drawer_open(&tester.cell.borrow()),
@@ -6640,8 +6623,7 @@ mod tests {
     // 'End drawer does not open with a drag gesture when it is disabled'.
     #[test]
     fn a_disabled_drag_gesture_does_not_open_the_end_drawer_but_still_closes_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let end_drawer_scaffold = |key: &GlobalKey, body: &str| {
                 Scaffold::new()
@@ -6653,10 +6635,10 @@ mod tests {
                     .app_bar(centered_title_app_bar())
             };
             let screen_width = WidgetTester::SIZE.width();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 end_drawer_scaffold(&key, "Scaffold Body").into_widget()
             });
-            let scaffold_state = scaffold_state(&tester, &key);
+            let scaffold_state = scaffold_state(tester, &key);
             assert!(!scaffold_state.is_end_drawer_open(&tester.cell.borrow()));
 
             // Test that we can open the end drawer with a drag gesture when
@@ -6677,12 +6659,12 @@ mod tests {
             tester.pump_and_settle();
             assert!(!scaffold_state.is_end_drawer_open(&tester.cell.borrow()));
 
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 end_drawer_scaffold(&key, "Scaffold body")
                     .end_drawer_enable_open_drag_gesture(false)
                     .into_widget()
             });
-            let scaffold_state = self::scaffold_state(&tester, &key);
+            let scaffold_state = self::scaffold_state(tester, &key);
             assert!(!scaffold_state.is_end_drawer_open(&tester.cell.borrow()));
 
             // Test that we cannot open the end drawer with a drag gesture when
@@ -6697,7 +6679,7 @@ mod tests {
 
             // Test that we can close the end drawer a with drag gesture when
             // `Scaffold.endDrawerEnableDragGesture` is false.
-            tap_first_icon_button(&mut tester, 5);
+            tap_first_icon_button(tester, 5);
             tester.pump_and_settle();
             assert!(scaffold_state.is_end_drawer_open(&tester.cell.borrow()));
 
@@ -6836,11 +6818,10 @@ mod tests {
     // 'ScaffoldGeometry bottomNavigationBar'.
     #[test]
     fn the_geometry_reports_the_bottom_navigation_bars_top() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let (listener, cache, _) = GeometryListener::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(Container::new())
                     .bottom_navigation_bar(
@@ -6850,7 +6831,7 @@ mod tests {
                     )
                     .into_widget()
             });
-            let navigation_height = size_of(&tester, &key).height();
+            let navigation_height = size_of(tester, &key).height();
             let geometry = cache.get().expect("painted");
             assert_eq!(
                 geometry.bottom_navigation_bar_top,
@@ -6862,10 +6843,9 @@ mod tests {
     // 'ScaffoldGeometry no bottomNavigationBar'.
     #[test]
     fn the_geometry_has_no_bottom_navigation_bar_top_without_a_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (listener, cache, _) = GeometryListener::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(expanded_listener(listener))
                     .into_widget()
@@ -6885,17 +6865,16 @@ mod tests {
     // 'ScaffoldGeometry floatingActionButton'.
     #[test]
     fn the_geometry_reports_the_floating_action_buttons_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let (listener, cache, _) = GeometryListener::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(Container::new())
                     .floating_action_button(fab_with_listener(&key, listener))
                     .into_widget()
             });
-            let fab_rect = rect_of(&tester, &key);
+            let fab_rect = rect_of(tester, &key);
             let geometry = cache.get().expect("painted");
             assert_rect_through_transforms(
                 geometry.floating_action_button_area.expect("a fab area"),
@@ -6907,10 +6886,9 @@ mod tests {
     // 'ScaffoldGeometry no floatingActionButton'.
     #[test]
     fn the_geometry_has_no_floating_action_button_area_without_a_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (listener, cache, _) = GeometryListener::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(expanded_listener(listener))
                     .into_widget()
@@ -6932,36 +6910,35 @@ mod tests {
     // 'ScaffoldGeometry floatingActionButton entrance/exit animation'.
     #[test]
     fn the_geometry_scales_the_floating_action_button_area_while_it_enters() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let (first_listener, _, _) = GeometryListener::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(expanded_listener(first_listener))
                     .into_widget()
             });
 
             let (listener, cache, _) = GeometryListener::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(Container::new())
                     .floating_action_button(fab_with_listener(&key, listener))
                     .into_widget()
             });
 
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
 
             let geometry = cache.get().expect("painted");
             let transitioning_fab_rect = geometry.floating_action_button_area.expect("an area");
 
-            let transitioning_rotation = rotation_turns(&tester);
+            let transitioning_rotation = rotation_turns(tester);
 
-            tester.pump(Duration::from_secs(3));
+            tester.pump_by(Duration::from_secs(3));
             let geometry = cache.get().expect("painted");
-            let fab_rect = rect_of(&tester, &key);
+            let fab_rect = rect_of(tester, &key);
 
-            let completed_rotation = rotation_turns(&tester);
+            let completed_rotation = rotation_turns(tester);
 
             assert!(transitioning_rotation < 1.0);
 
@@ -6981,12 +6958,11 @@ mod tests {
     // 'ScaffoldGeometry change notifications'.
     #[test]
     fn the_geometry_notifies_on_layout_and_while_the_button_animates() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let (listener, _, num_notifications) = GeometryListener::new();
             let mut num_notifications_at_last_frame = 0;
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(expanded_listener(listener))
                     .into_widget()
@@ -6996,7 +6972,7 @@ mod tests {
             num_notifications_at_last_frame = num_notifications.get();
 
             let (fab_listener, _, _) = GeometryListener::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(Container::new())
                     .floating_action_button(fab_with_listener(&key, fab_listener))
@@ -7006,12 +6982,12 @@ mod tests {
             assert!(num_notifications.get() > num_notifications_at_last_frame);
             num_notifications_at_last_frame = num_notifications.get();
 
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
 
             assert!(num_notifications.get() > num_notifications_at_last_frame);
             num_notifications_at_last_frame = num_notifications.get();
 
-            tester.pump(Duration::from_secs(3));
+            tester.pump_by(Duration::from_secs(3));
 
             assert!(num_notifications.get() > num_notifications_at_last_frame);
         });
@@ -7020,42 +6996,41 @@ mod tests {
     // 'Floating action entrance/exit animation'.
     #[test]
     fn a_new_floating_action_button_animates_in_and_the_first_one_does_not() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let fab = |key: &str, label: &str| {
                 FloatingActionButton::new(None)
                     .key(KeyRef::Local(Rc::new(ValueKey::new(key.to_string()))))
                     .child(waft_widgets::Text::new(label))
             };
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .floating_action_button(fab("one", "1"))
                     .into_widget()
             });
 
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_eq!(transient_callback_count(tester), 0);
 
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .floating_action_button(fab("two", "2"))
                     .into_widget()
             });
 
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
             tester.pump_widget(Container::new().into_widget());
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_eq!(transient_callback_count(tester), 0);
 
-            pump_app(&mut tester, |_app| Scaffold::new().into_widget());
+            pump_app(tester, |_app| Scaffold::new().into_widget());
 
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_eq!(transient_callback_count(tester), 0);
 
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .floating_action_button(fab("one", "1"))
                     .into_widget()
             });
 
-            assert!(transient_callback_count(&tester) > 0);
+            assert!(transient_callback_count(tester) > 0);
         });
     }
 
@@ -7077,10 +7052,9 @@ mod tests {
     // 'FAB default entrance and exit animations'.
     #[test]
     fn the_floating_action_button_scales_in_and_out_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let show_fab = Rc::new(Cell::new(false));
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 let show_fab = Rc::clone(&show_fab);
                 StatefulBuilder::new(move |_app, _context, set_state| {
                     let toggle = {
@@ -7109,42 +7083,42 @@ mod tests {
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
 
             // Tap the button to show the FAB.
-            tap_elevated_button(&mut tester, "Toggle FAB", 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(100)); // Advance the animation by 100ms.
+            tap_elevated_button(tester, "Toggle FAB", 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100)); // Advance the animation by 100ms.
             // FAB is partially animated in.
             assert!(
-                (fab_top_left(&tester).dx() - 743.8).abs() < 0.1,
+                (fab_top_left(tester).dx() - 743.8).abs() < 0.1,
                 "{}",
-                fab_top_left(&tester).dx()
+                fab_top_left(tester).dx()
             );
 
-            tester.pump(Duration::from_millis(100)); // Advance the animation by 100ms.
+            tester.pump_by(Duration::from_millis(100)); // Advance the animation by 100ms.
             // FAB is fully animated in.
             assert_through_transforms(
-                fab_top_left(&tester),
-                Offset::new(728.0, fab_top_left(&tester).dy()),
+                fab_top_left(tester),
+                Offset::new(728.0, fab_top_left(tester).dy()),
             );
 
             // Tap the button to hide the FAB.
-            tap_elevated_button(&mut tester, "Toggle FAB", 2);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(100)); // Advance the animation by 100ms.
+            tap_elevated_button(tester, "Toggle FAB", 2);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100)); // Advance the animation by 100ms.
             // FAB is partially animated out.
             assert!(
-                (fab_top_left(&tester).dx() - 747.1).abs() < 0.1,
+                (fab_top_left(tester).dx() - 747.1).abs() < 0.1,
                 "{}",
-                fab_top_left(&tester).dx()
+                fab_top_left(tester).dx()
             );
 
-            tester.pump(Duration::from_millis(100)); // Advance the animation by 100ms.
+            tester.pump_by(Duration::from_millis(100)); // Advance the animation by 100ms.
             // FAB is fully animated out.
             assert_through_transforms(
-                fab_top_left(&tester),
-                Offset::new(756.0, fab_top_left(&tester).dy()),
+                fab_top_left(tester),
+                Offset::new(756.0, fab_top_left(tester).dy()),
             );
 
-            tester.pump(Duration::from_millis(50)); // Advance the animation by 50ms.
+            tester.pump_by(Duration::from_millis(50)); // Advance the animation by 50ms.
             // FAB is not visible.
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
         });
@@ -7153,12 +7127,11 @@ mod tests {
     // 'FAB default entrance and exit animations can be disabled'.
     #[test]
     fn the_no_animation_animator_shows_hides_and_moves_the_button_at_once() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let show_fab = Rc::new(Cell::new(false));
             let fab_location =
                 Rc::new(RefCell::new(<dyn FloatingActionButtonLocation>::end_float()));
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 let show_fab = Rc::clone(&show_fab);
                 let fab_location = Rc::clone(&fab_location);
                 StatefulBuilder::new(move |_app, _context, set_state| {
@@ -7215,33 +7188,33 @@ mod tests {
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
 
             // Tap the button to show the FAB.
-            tap_elevated_button(&mut tester, "Toggle FAB", 1);
-            tester.pump(Duration::ZERO);
+            tap_elevated_button(tester, "Toggle FAB", 1);
+            tester.pump();
             // FAB is visible.
-            assert_eq!(fab_top_left(&tester).dx(), 728.0);
+            assert_eq!(fab_top_left(tester).dx(), 728.0);
 
             // Tap the button to hide the FAB.
-            tap_elevated_button(&mut tester, "Toggle FAB", 2);
-            tester.pump(Duration::ZERO);
+            tap_elevated_button(tester, "Toggle FAB", 2);
+            tester.pump();
             // FAB is not visible.
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
 
             // Tap the button to show the FAB.
-            tap_elevated_button(&mut tester, "Toggle FAB", 3);
-            tester.pump(Duration::ZERO);
+            tap_elevated_button(tester, "Toggle FAB", 3);
+            tester.pump();
             // FAB is visible.
-            assert_eq!(fab_top_left(&tester).dx(), 728.0);
+            assert_eq!(fab_top_left(tester).dx(), 728.0);
 
             // Tap the update location button.
-            tap_elevated_button(&mut tester, "Update FAB Location", 4);
-            tester.pump(Duration::ZERO);
+            tap_elevated_button(tester, "Update FAB Location", 4);
+            tester.pump();
 
             // FAB is visible at the new location.
-            assert_eq!(fab_top_left(&tester).dx(), 372.0);
+            assert_eq!(fab_top_left(tester).dx(), 372.0);
 
             // Tap the button to hide the FAB.
-            tap_elevated_button(&mut tester, "Toggle FAB", 5);
-            tester.pump(Duration::ZERO);
+            tap_elevated_button(tester, "Toggle FAB", 5);
+            tester.pump();
             // FAB is not visible.
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
         });
@@ -7251,9 +7224,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "The showSnackBar() method cannot be called during build.\n")]
     fn show_snack_bar_during_build_explains_where_to_call_it_instead() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .body(Builder::new(|app, context| {
                         ScaffoldMessenger::of(app, context).show_snack_bar(
@@ -7299,11 +7271,10 @@ mod tests {
     // called at the builder's context, which is where Dart's build runs it).
     #[test]
     fn scaffold_of_without_a_scaffold_explains_how_to_reach_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, |_app| keyed_builder(&key));
-            let message = panic_at(&tester, &key, |app, context| {
+            pump_app(tester, |_app| keyed_builder(&key));
+            let message = panic_at(tester, &key, |app, context| {
                 Scaffold::of(app, context);
             });
             assert!(
@@ -7336,11 +7307,10 @@ mod tests {
     // 'Call to Scaffold.geometryOf() without context'.
     #[test]
     fn geometry_of_without_a_scaffold_explains_how_to_reach_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, |_app| keyed_builder(&key));
-            let message = panic_at(&tester, &key, |app, context| {
+            pump_app(tester, |_app| keyed_builder(&key));
+            let message = panic_at(tester, &key, |app, context| {
                 Scaffold::geometry_of(app, context);
             });
             assert!(
@@ -7370,8 +7340,7 @@ mod tests {
     // 'FloatingActionButton always keeps the same position regardless of extendBodyBehindAppBar'.
     #[test]
     fn the_floating_action_button_keeps_its_place_when_the_body_extends_behind_the_app_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let fab_center_y = |tester: &mut WidgetTester, extend_body_behind_app_bar: bool| {
                 pump_app(tester, |_app| {
                     Scaffold::new()
@@ -7391,8 +7360,8 @@ mod tests {
                 tester.global_rect(render).center().dy()
             };
 
-            let default_offset_y = fab_center_y(&mut tester, false);
-            let extended_body_offset_y = fab_center_y(&mut tester, true);
+            let default_offset_y = fab_center_y(tester, false);
+            let extended_body_offset_y = fab_center_y(tester, true);
 
             assert_eq!(default_offset_y, extended_body_offset_y);
         });
@@ -7427,8 +7396,7 @@ mod tests {
     // 'ScaffoldMessenger.maybeOf can return null if not found'.
     #[test]
     fn scaffold_messenger_maybe_of_is_none_without_a_messenger() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tap_target = GlobalKey::new();
             let scaffold_messenger = Rc::new(Cell::new(Some(None)));
             tester.pump_widget(tap_target_scaffold(&tap_target, true, {
@@ -7439,7 +7407,7 @@ mod tests {
             }));
             let at = tester.center_of(&tap_target);
             tester.tap(at, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(scaffold_messenger.get(), Some(None));
         });
     }
@@ -7466,10 +7434,9 @@ mod tests {
     #[test]
     fn the_messenger_checks_for_nesting_when_a_new_scaffold_registers() {
         // Regression test for https://github.com/flutter/flutter/issues/77251
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const SNACK_BAR_CONTENT: &str = "SnackBar Content";
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Builder::new(|_app, context| {
                     Scaffold::new()
                         .body(Scaffold::new().body(text_button("Push route", move |app| {
@@ -7501,37 +7468,36 @@ mod tests {
 
             let snack_bars =
                 |tester: &WidgetTester| tester.find_onstage_text(SNACK_BAR_CONTENT).len();
-            assert_eq!(snack_bars(&tester), 0);
-            tap_onstage_text(&mut tester, "Push route", 1);
+            assert_eq!(snack_bars(tester), 0);
+            tap_onstage_text(tester, "Push route", 1);
             tester.pump_and_settle();
-            assert_eq!(snack_bars(&tester), 0);
+            assert_eq!(snack_bars(tester), 0);
             assert_eq!(tester.find_onstage_text("Pop route").len(), 1);
 
             // Show SnackBar on second page
-            tap_onstage_text(&mut tester, "Show SnackBar", 2);
-            tester.pump(Duration::ZERO);
-            assert_eq!(snack_bars(&tester), 1);
+            tap_onstage_text(tester, "Show SnackBar", 2);
+            tester.pump();
+            assert_eq!(snack_bars(tester), 1);
             // Pop the second page, the SnackBar completes a hero animation to the next route.
             // If we have not handled the nested Scaffolds properly, this will throw an
             // exception as duplicate SnackBars on the first route would have a common hero tag.
-            tap_onstage_text(&mut tester, "Pop route", 3);
-            tester.pump(Duration::ZERO);
+            tap_onstage_text(tester, "Pop route", 3);
+            tester.pump();
             // There are SnackBars two during the execution of the hero animation.
-            assert_eq!(snack_bars(&tester), 2);
+            assert_eq!(snack_bars(tester), 2);
             tester.pump_and_settle();
-            assert_eq!(snack_bars(&tester), 1);
+            assert_eq!(snack_bars(tester), 1);
             // Allow the SnackBar to animate out
-            tester.pump(Duration::from_secs(4));
+            tester.pump_by(Duration::from_secs(4));
             tester.pump_and_settle();
-            assert_eq!(snack_bars(&tester), 0);
+            assert_eq!(snack_bars(tester), 0);
         });
     }
 
     // 'ScaffoldMessenger.of will assert if not found'.
     #[test]
     fn scaffold_messenger_of_asserts_without_a_messenger() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tap_target = GlobalKey::new();
             tester.pump_widget(tap_target_scaffold(&tap_target, false, |app, context| {
                 ScaffoldMessenger::of(app, context);
@@ -7564,8 +7530,7 @@ mod tests {
     // 'Default ScaffoldMessenger can access ambient theme'.
     #[test]
     fn the_default_scaffold_messenger_sees_the_apps_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (theme, color_scheme) = {
                 let app = tester.cell.borrow();
                 let color_scheme =
@@ -7600,10 +7565,8 @@ mod tests {
                         Some(Listener::new(move |app| {
                             ScaffoldMessenger::of(app, context).show_snack_bar(
                                 app,
-                                SnackBar::new(crate::test_support::AhemText::new(
-                                    "I am a snack bar.",
-                                ))
-                                .show_close_icon(true),
+                                SnackBar::new(waft_widgets::Text::new("I am a snack bar."))
+                                    .show_close_icon(true),
                                 style.clone(),
                             );
                         })),
@@ -7617,7 +7580,7 @@ mod tests {
 
     fn snack_bar_text_top(tester: &WidgetTester) -> f64 {
         let text = *tester
-            .find_ahem_text("I am a snack bar.")
+            .find_text("I am a snack bar.")
             .first()
             .expect("the snack bar's text");
         tester.global_rect(tester.render_box_of(text)).top
@@ -7640,45 +7603,43 @@ mod tests {
     // 'ScaffoldMessenger showSnackBar default animation'.
     #[test]
     fn the_snack_bar_slides_in_and_out_in_250_milliseconds_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_snack_bar_app(&mut tester, None);
+        test_widgets(|tester| {
+            pump_snack_bar_app(tester, None);
 
             // Tap the button to show the SnackBar.
-            tap_elevated_button(&mut tester, "Show SnackBar", 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(125)); // Advance the animation by 125ms.
+            tap_elevated_button(tester, "Show SnackBar", 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(125)); // Advance the animation by 125ms.
 
             // The SnackBar is partially visible.
-            assert_close_to(snack_bar_text_top(&tester), 576.7, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 576.7, 0.1);
 
-            tester.pump(Duration::from_millis(125)); // Advance the animation by 125ms.
+            tester.pump_by(Duration::from_millis(125)); // Advance the animation by 125ms.
 
             // The SnackBar is fully visible.
-            assert_close_to(snack_bar_text_top(&tester), 566.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 566.0, 0.1);
 
             // Tap the close button to dismiss the SnackBar.
-            tap_close_icon(&mut tester, 2);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(125)); // Advance the animation by 125ms.
+            tap_close_icon(tester, 2);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(125)); // Advance the animation by 125ms.
 
             // The SnackBar is partially visible.
-            assert_close_to(snack_bar_text_top(&tester), 576.7, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 576.7, 0.1);
 
-            tester.pump(Duration::from_millis(125)); // Advance the animation by 125ms.
+            tester.pump_by(Duration::from_millis(125)); // Advance the animation by 125ms.
 
             // The SnackBar is dismissed.
-            assert_close_to(snack_bar_text_top(&tester), 614.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 614.0, 0.1);
         });
     }
 
     // 'ScaffoldMessenger showSnackBar animation can be customized'.
     #[test]
     fn the_snack_bar_animation_style_sets_its_durations() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_snack_bar_app(
-                &mut tester,
+                tester,
                 Some(AnimationStyle::new(
                     None,
                     Some(Duration::from_millis(1200)),
@@ -7688,46 +7649,45 @@ mod tests {
             );
 
             // Tap the button to show the SnackBar.
-            tap_elevated_button(&mut tester, "Show SnackBar", 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(300)); // Advance the animation by 300ms.
+            tap_elevated_button(tester, "Show SnackBar", 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(300)); // Advance the animation by 300ms.
 
             // The SnackBar is partially visible.
-            assert_close_to(snack_bar_text_top(&tester), 602.6, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 602.6, 0.1);
 
-            tester.pump(Duration::from_millis(300)); // Advance the animation by 300ms.
+            tester.pump_by(Duration::from_millis(300)); // Advance the animation by 300ms.
 
             // The SnackBar is partially visible.
-            assert_close_to(snack_bar_text_top(&tester), 576.7, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 576.7, 0.1);
 
-            tester.pump(Duration::from_millis(600)); // Advance the animation by 600ms.
+            tester.pump_by(Duration::from_millis(600)); // Advance the animation by 600ms.
 
             // The SnackBar is fully visible.
-            assert_close_to(snack_bar_text_top(&tester), 566.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 566.0, 0.1);
 
             // Tap the close button to dismiss the SnackBar.
-            tap_close_icon(&mut tester, 2);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(300)); // Advance the animation by 300ns.
+            tap_close_icon(tester, 2);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(300)); // Advance the animation by 300ns.
 
             // The SnackBar is partially visible.
-            assert_close_to(snack_bar_text_top(&tester), 576.7, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 576.7, 0.1);
 
-            tester.pump(Duration::from_millis(300)); // Advance the animation by 300ms.
+            tester.pump_by(Duration::from_millis(300)); // Advance the animation by 300ms.
 
             // The SnackBar is dismissed.
-            assert_close_to(snack_bar_text_top(&tester), 614.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 614.0, 0.1);
         });
     }
 
     // 'Updated snackBarAnimationStyle updates snack bar animation'.
     #[test]
     fn a_new_snack_bar_animation_style_replaces_the_old_durations() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test custom animation style.
             pump_snack_bar_app(
-                &mut tester,
+                tester,
                 Some(AnimationStyle::new(
                     None,
                     Some(Duration::from_millis(800)),
@@ -7737,54 +7697,53 @@ mod tests {
             );
 
             // Tap the button to show the SnackBar.
-            tap_elevated_button(&mut tester, "Show SnackBar", 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(400)); // Advance the animation by 400ms.
+            tap_elevated_button(tester, "Show SnackBar", 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(400)); // Advance the animation by 400ms.
 
             // The SnackBar is partially visible.
-            assert_close_to(snack_bar_text_top(&tester), 576.7, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 576.7, 0.1);
 
-            tester.pump(Duration::from_millis(400)); // Advance the animation by 400ms.
+            tester.pump_by(Duration::from_millis(400)); // Advance the animation by 400ms.
 
             // The SnackBar is fully visible.
-            assert_close_to(snack_bar_text_top(&tester), 566.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 566.0, 0.1);
 
             // Tap the close button to dismiss the SnackBar.
-            tap_close_icon(&mut tester, 2);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(400)); // Advance the animation by 400ms.
+            tap_close_icon(tester, 2);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(400)); // Advance the animation by 400ms.
 
             // The SnackBar is dismissed.
-            assert_close_to(snack_bar_text_top(&tester), 614.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 614.0, 0.1);
 
             // Test no animation style.
-            pump_snack_bar_app(&mut tester, Some(AnimationStyle::NO_ANIMATION));
+            pump_snack_bar_app(tester, Some(AnimationStyle::NO_ANIMATION));
             tester.pump_and_settle();
 
             // Tap the button to show the SnackBar.
-            tap_elevated_button(&mut tester, "Show SnackBar", 3);
-            tester.pump(Duration::ZERO);
+            tap_elevated_button(tester, "Show SnackBar", 3);
+            tester.pump();
 
             // The SnackBar is fully visible.
-            assert_close_to(snack_bar_text_top(&tester), 566.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 566.0, 0.1);
 
             // Tap the close button to dismiss the SnackBar.
-            tap_close_icon(&mut tester, 4);
-            tester.pump(Duration::ZERO);
+            tap_close_icon(tester, 4);
+            tester.pump();
 
             // The SnackBar is dismissed.
-            assert!(tester.find_ahem_text("I am a snack bar.").is_empty());
+            assert!(tester.find_text("I am a snack bar.").is_empty());
         });
     }
 
     // 'snackBarAnimationStyle with only reverseDuration uses default forward duration'.
     #[test]
     fn a_snack_bar_animation_style_with_only_a_reverse_duration_keeps_the_default_forward_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test custom animation style with only reverseDuration.
             pump_snack_bar_app(
-                &mut tester,
+                tester,
                 Some(AnimationStyle::new(
                     None,
                     None,
@@ -7794,34 +7753,34 @@ mod tests {
             );
 
             // Tap the button to show the SnackBar.
-            tap_elevated_button(&mut tester, "Show SnackBar", 1);
-            tester.pump(Duration::ZERO);
+            tap_elevated_button(tester, "Show SnackBar", 1);
+            tester.pump();
             // Advance the animation by 1/2 of the default forward duration.
-            tester.pump(Duration::from_millis(125));
+            tester.pump_by(Duration::from_millis(125));
 
             // The SnackBar is partially visible.
-            assert_close_to(snack_bar_text_top(&tester), 576.7, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 576.7, 0.1);
 
             // Advance the animation by 1/2 of the default forward duration.
-            tester.pump(Duration::from_millis(125)); // Advance the animation by 125ms.
+            tester.pump_by(Duration::from_millis(125)); // Advance the animation by 125ms.
 
             // The SnackBar is fully visible.
-            assert_close_to(snack_bar_text_top(&tester), 566.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 566.0, 0.1);
 
             // Tap the close button to dismiss the SnackBar.
-            tap_close_icon(&mut tester, 2);
-            tester.pump(Duration::ZERO);
+            tap_close_icon(tester, 2);
+            tester.pump();
             // Advance the animation by 1/2 of the reverse duration.
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
             // The SnackBar is partially visible.
-            assert_close_to(snack_bar_text_top(&tester), 576.7, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 576.7, 0.1);
 
             // Advance the animation by 1/2 of the reverse duration.
-            tester.pump(Duration::from_millis(200)); // Advance the animation by 200ms.
+            tester.pump_by(Duration::from_millis(200)); // Advance the animation by 200ms.
 
             // The SnackBar is dismissed.
-            assert_close_to(snack_bar_text_top(&tester), 614.0, 0.1);
+            assert_close_to(snack_bar_text_top(tester), 614.0, 0.1);
         });
     }
 
@@ -7849,17 +7808,16 @@ mod tests {
     // 'showBottomSheet() while Scaffold has bottom sheet'.
     #[test]
     fn show_bottom_sheet_while_the_scaffold_has_a_bottom_sheet_asserts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .key(key.clone().into())
                     .body(Center::new().child(Container::new()))
                     .bottom_sheet(waft_widgets::Text::new("Bottom sheet"))
                     .into_widget()
             });
-            let scaffold = scaffold_state(&tester, &key);
+            let scaffold = scaffold_state(tester, &key);
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 show_sheet(
                     &mut tester.cell.borrow_mut(),
@@ -7880,13 +7838,15 @@ mod tests {
 
     // 'didUpdate bottomSheet while a previous bottom sheet is still displayed'.
     #[test]
+    #[should_panic(
+        expected = "Scaffold.bottomSheet cannot be specified while a bottom sheet displayed with showBottomSheet() is still visible.\nUse the PersistentBottomSheetController returned by showBottomSheet() to close the old bottom sheet before creating a Scaffold with a (non null) bottomSheet."
+    )]
     fn giving_the_scaffold_a_bottom_sheet_while_a_shown_one_is_visible_asserts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let button_key = GlobalKey::new();
             let state = Rc::new(Cell::new(0));
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 let state = Rc::clone(&state);
                 let (key, button_key) = (key.clone(), button_key.clone());
                 StatefulBuilder::new(move |_app, _context, set_state| {
@@ -7908,7 +7868,7 @@ mod tests {
                 })
                 .into_widget()
             });
-            let scaffold = scaffold_state(&tester, &key);
+            let scaffold = scaffold_state(tester, &key);
             show_sheet(
                 &mut tester.cell.borrow_mut(),
                 scaffold,
@@ -7917,17 +7877,9 @@ mod tests {
             );
             let at = tester.center_of(&button_key);
             tester.tap(at, 1);
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                tester.pump(Duration::ZERO);
-            }));
-            let message = panic_message(outcome.expect_err("didUpdateWidget asserts"));
-            assert_eq!(
-                message,
-                "Scaffold.bottomSheet cannot be specified while a bottom sheet displayed with \
-                 showBottomSheet() is still visible.\n\
-                 Use the PersistentBottomSheetController returned by showBottomSheet() to close \
-                 the old bottom sheet before creating a Scaffold with a (non null) bottomSheet."
-            );
+            // Dart: `expect(tester.takeException(), isAssertionError)`. The assertion unwinds out
+            // of the pump, where `test_widgets` re-raises it.
+            tester.pump();
         });
     }
 
@@ -7988,40 +7940,39 @@ mod tests {
     // 'Scaffold showBottomSheet default animation'.
     #[test]
     fn show_bottom_sheet_animates_in_250_and_out_200_milliseconds_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let sheet_key = GlobalKey::new();
-            pump_bottom_sheet_app(&mut tester, &sheet_key, None);
+            pump_bottom_sheet_app(tester, &sheet_key, None);
 
             // Tap the 'X' to show the bottom sheet.
-            tap_text(&mut tester, "X", 1);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "X", 1);
+            tester.pump();
             // Advance the animation by 1/2 of the default forward duration.
-            tester.pump(Duration::from_millis(125));
+            tester.pump_by(Duration::from_millis(125));
 
             // The bottom sheet is partially visible.
-            assert_close_to(rect_of(&tester, &sheet_key).top, 134.6, 0.1);
+            assert_close_to(rect_of(tester, &sheet_key).top, 134.6, 0.1);
 
             // Advance the animation by 1/2 of the default forward duration.
-            tester.pump(Duration::from_millis(125));
+            tester.pump_by(Duration::from_millis(125));
 
             // The bottom sheet is fully visible.
-            assert_eq!(rect_of(&tester, &sheet_key).top, 0.0);
+            assert_eq!(rect_of(tester, &sheet_key).top, 0.0);
 
             // Dismiss the bottom sheet.
-            tap_text(&mut tester, "Close", 2);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "Close", 2);
+            tester.pump();
             // Advance the animation by 1/2 of the default reverse duration.
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
             // The bottom sheet is partially visible.
-            assert_close_to(rect_of(&tester, &sheet_key).top, 134.6, 0.1);
+            assert_close_to(rect_of(tester, &sheet_key).top, 134.6, 0.1);
 
             // Advance the animation by 1/2 of the default reverse duration.
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
             // The bottom sheet is dismissed.
-            assert_eq!(rect_of(&tester, &sheet_key).top, 600.0);
+            assert_eq!(rect_of(tester, &sheet_key).top, 600.0);
         });
     }
 
@@ -8030,10 +7981,9 @@ mod tests {
     /// Dart's collector frees.
     #[test]
     fn showing_and_closing_a_bottom_sheet_leaves_nothing_behind() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let sheet_key = GlobalKey::new();
-            pump_bottom_sheet_app(&mut tester, &sheet_key, None);
+            pump_bottom_sheet_app(tester, &sheet_key, None);
             tester.assert_leaves_nothing_behind(|tester| {
                 tap_text(tester, "X", 1);
                 tester.pump_and_settle();
@@ -8047,12 +7997,11 @@ mod tests {
     // 'Scaffold showBottomSheet animation can be customized'.
     #[test]
     fn the_sheet_animation_style_sets_show_bottom_sheets_durations() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let sheet_key = GlobalKey::new();
             // Test custom animation style.
             pump_bottom_sheet_app(
-                &mut tester,
+                tester,
                 &sheet_key,
                 Some(AnimationStyle::new(
                     None,
@@ -8061,47 +8010,47 @@ mod tests {
                     Some(Duration::from_millis(400)),
                 )),
             );
-            tap_text(&mut tester, "X", 1);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "X", 1);
+            tester.pump();
             // Advance the animation by 1/2 of the custom forward duration.
-            tester.pump(Duration::from_millis(400));
+            tester.pump_by(Duration::from_millis(400));
 
             // The bottom sheet is partially visible.
-            assert_close_to(rect_of(&tester, &sheet_key).top, 134.6, 0.1);
+            assert_close_to(rect_of(tester, &sheet_key).top, 134.6, 0.1);
 
             // Advance the animation by 1/2 of the custom forward duration.
-            tester.pump(Duration::from_millis(400));
+            tester.pump_by(Duration::from_millis(400));
 
             // The bottom sheet is fully visible.
-            assert_eq!(rect_of(&tester, &sheet_key).top, 0.0);
+            assert_eq!(rect_of(tester, &sheet_key).top, 0.0);
 
             // Dismiss the bottom sheet.
-            tap_text(&mut tester, "Close", 2);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "Close", 2);
+            tester.pump();
             // Advance the animation by 1/2 of the custom reverse duration.
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
             // The bottom sheet is partially visible.
-            assert_close_to(rect_of(&tester, &sheet_key).top, 134.6, 0.1);
+            assert_close_to(rect_of(tester, &sheet_key).top, 134.6, 0.1);
 
             // Advance the animation by 1/2 of the custom reverse duration.
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
             // The bottom sheet is dismissed.
-            assert_eq!(rect_of(&tester, &sheet_key).top, 600.0);
+            assert_eq!(rect_of(tester, &sheet_key).top, 600.0);
 
             // Test no animation style.
-            pump_bottom_sheet_app(&mut tester, &sheet_key, Some(AnimationStyle::NO_ANIMATION));
+            pump_bottom_sheet_app(tester, &sheet_key, Some(AnimationStyle::NO_ANIMATION));
             tester.pump_and_settle();
-            tap_text(&mut tester, "X", 3);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "X", 3);
+            tester.pump();
 
             // The bottom sheet is fully visible.
-            assert_eq!(rect_of(&tester, &sheet_key).top, 0.0);
+            assert_eq!(rect_of(tester, &sheet_key).top, 0.0);
 
             // Dismiss the bottom sheet.
-            tap_text(&mut tester, "Close", 4);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "Close", 4);
+            tester.pump();
 
             // The bottom sheet is dismissed.
             assert!(
@@ -8119,8 +8068,7 @@ mod tests {
     // 'can rebuild and remove bottomSheet at the same time'.
     #[test]
     fn a_bottom_sheet_on_its_way_out_survives_a_rebuild() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme_is_light = Rc::new(Cell::new(true));
             let default_bottom_sheet = Rc::new(Cell::new(Some(true)));
             let bottom_sheet_key1 = GlobalKey::new();
@@ -8170,37 +8118,37 @@ mod tests {
                 set_state(&mut tester.cell.borrow_mut(), change);
             };
 
-            assert!(is_mounted(&tester, &bottom_sheet_key1));
-            assert!(!is_mounted(&tester, &bottom_sheet_key2));
+            assert!(is_mounted(tester, &bottom_sheet_key1));
+            assert!(!is_mounted(tester, &bottom_sheet_key2));
 
             // Change to the other bottomSheet.
-            set(&tester, &mut |_app| default_bottom_sheet.set(Some(false)));
-            assert!(is_mounted(&tester, &bottom_sheet_key1));
-            assert!(!is_mounted(&tester, &bottom_sheet_key2));
+            set(tester, &mut |_app| default_bottom_sheet.set(Some(false)));
+            assert!(is_mounted(tester, &bottom_sheet_key1));
+            assert!(!is_mounted(tester, &bottom_sheet_key2));
             tester.pump_and_settle();
-            assert!(!is_mounted(&tester, &bottom_sheet_key1));
-            assert!(is_mounted(&tester, &bottom_sheet_key2));
+            assert!(!is_mounted(tester, &bottom_sheet_key1));
+            assert!(is_mounted(tester, &bottom_sheet_key2));
 
             // Set bottomSheet to null, which starts its exit animation.
-            set(&tester, &mut |_app| default_bottom_sheet.set(None));
-            assert!(!is_mounted(&tester, &bottom_sheet_key1));
-            assert!(is_mounted(&tester, &bottom_sheet_key2));
+            set(tester, &mut |_app| default_bottom_sheet.set(None));
+            assert!(!is_mounted(tester, &bottom_sheet_key1));
+            assert!(is_mounted(tester, &bottom_sheet_key2));
 
             // While the bottomSheet is on the way out, change the theme to cause it to
             // rebuild.
-            set(&tester, &mut |_app| theme_is_light.set(false));
-            assert!(!is_mounted(&tester, &bottom_sheet_key1));
-            assert!(is_mounted(&tester, &bottom_sheet_key2));
+            set(tester, &mut |_app| theme_is_light.set(false));
+            assert!(!is_mounted(tester, &bottom_sheet_key1));
+            assert!(is_mounted(tester, &bottom_sheet_key2));
 
             // The most recent bottomSheet remains on screen during the exit animation.
-            tester.pump(Duration::from_millis(200));
-            assert!(!is_mounted(&tester, &bottom_sheet_key1));
-            assert!(is_mounted(&tester, &bottom_sheet_key2));
+            tester.pump_by(Duration::from_millis(200));
+            assert!(!is_mounted(tester, &bottom_sheet_key1));
+            assert!(is_mounted(tester, &bottom_sheet_key2));
 
             // After animating out, the bottomSheet is gone.
             tester.pump_and_settle();
-            assert!(!is_mounted(&tester, &bottom_sheet_key1));
-            assert!(!is_mounted(&tester, &bottom_sheet_key2));
+            assert!(!is_mounted(tester, &bottom_sheet_key1));
+            assert!(!is_mounted(tester, &bottom_sheet_key2));
         });
     }
 
@@ -8231,19 +8179,18 @@ mod tests {
     // 'showBottomSheet removes scrim when draggable sheet is dismissed'.
     #[test]
     fn closing_a_shown_draggable_sheet_removes_its_scrim() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let draggable_controller =
                 DraggableScrollableController::new(&mut tester.cell.borrow_mut());
             let scaffold_key = GlobalKey::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .key(scaffold_key.clone().into())
                     .body(Center::new().child(waft_widgets::Text::new("body")))
                     .into_widget()
             });
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             let sheet_controller = show_sheet(
                 &mut tester.cell.borrow_mut(),
                 scaffold,
@@ -8257,23 +8204,23 @@ mod tests {
                 None,
             );
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
 
             // The scrim is not present yet.
-            assert!(modal_barriers(&tester).is_empty());
+            assert!(modal_barriers(tester).is_empty());
 
             // Expand the sheet to 80% of parent height to show the scrim.
             draggable_controller.jump_to(&mut tester.cell.borrow_mut(), 0.8);
-            tester.pump(Duration::ZERO);
-            assert_eq!(modal_barriers(&tester).len(), 1);
+            tester.pump();
+            assert_eq!(modal_barriers(tester).len(), 1);
 
             // Dismiss the sheet.
             sheet_controller.close(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
 
             // The scrim should be gone.
-            assert!(modal_barriers(&tester).is_empty());
+            assert!(modal_barriers(tester).is_empty());
         });
     }
 
@@ -8282,11 +8229,10 @@ mod tests {
     // 'Floating action button shrinks when bottom sheet becomes dominant'.
     #[test]
     fn the_floating_action_button_shrinks_as_a_draggable_bottom_sheet_dominates() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let draggable_controller =
                 DraggableScrollableController::new(&mut tester.cell.borrow_mut());
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .floating_action_button(
                         FloatingActionButton::new(None)
@@ -8317,9 +8263,9 @@ mod tests {
                     let vis_value = extent_remaining * K_BOTTOM_SHEET_DOMINATES * 10.0;
                     // since FAB uses easeIn curve, we're testing this by using the fact that
                     // easeIn curve is always less than or equal to x=y curve.
-                    assert!(get_scale(&tester) <= vis_value, "extent {extent}");
+                    assert!(get_scale(tester) <= vis_value, "extent {extent}");
                 } else {
-                    assert_eq!(get_scale(&tester), 1.0, "extent {extent}");
+                    assert_eq!(get_scale(tester), 1.0, "extent {extent}");
                 }
             }
         });
@@ -8328,13 +8274,12 @@ mod tests {
     // 'Scaffold shows scrim when bottom sheet becomes dominant'.
     #[test]
     fn the_scaffold_shows_a_scrim_as_a_draggable_bottom_sheet_dominates() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let draggable_controller =
                 DraggableScrollableController::new(&mut tester.cell.borrow_mut());
             const K_MIN_BOTTOM_SHEET_SCRIM_OPACITY: f64 = 0.1;
             const K_MAX_BOTTOM_SHEET_SCRIM_OPACITY: f64 = 0.6;
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Scaffold::new()
                     .bottom_sheet(draggable_sheet(draggable_controller.clone(), || {
                         SizedBox::new().into_widget()
@@ -8358,16 +8303,16 @@ mod tests {
             for i in 0..=10 {
                 let extent = f64::from(i) / 10.0;
                 draggable_controller.jump_to(&mut tester.cell.borrow_mut(), extent);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 let extent_remaining = 1.0 - extent;
                 if extent_remaining < K_BOTTOM_SHEET_DOMINATES {
                     let vis_value = extent_remaining * K_BOTTOM_SHEET_DOMINATES * 10.0;
 
-                    assert_eq!(modal_barriers(&tester).len(), 1, "extent {extent}");
-                    assert_close_to(get_opacity(&tester), get_expected_opacity(vis_value), 0.02);
+                    assert_eq!(modal_barriers(tester).len(), 1, "extent {extent}");
+                    assert_close_to(get_opacity(tester), get_expected_opacity(vis_value), 0.02);
                 } else {
-                    assert!(modal_barriers(&tester).is_empty(), "extent {extent}");
+                    assert!(modal_barriers(tester).is_empty(), "extent {extent}");
                 }
             }
         });
@@ -8376,12 +8321,11 @@ mod tests {
     // 'Scaffold uses bottomSheetScrimBuilder if defined'.
     #[test]
     fn the_scaffold_builds_its_scrim_with_the_bottom_sheet_scrim_builder() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let draggable_controller =
                 DraggableScrollableController::new(&mut tester.cell.borrow_mut());
             let scrim_key = GlobalKey::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 let scrim_key = scrim_key.clone();
                 Scaffold::new()
                     .bottom_sheet_scrim_builder(move |_app, _context, animation| {
@@ -8416,17 +8360,17 @@ mod tests {
             for i in 0..=10 {
                 let extent = f64::from(i) / 10.0;
                 draggable_controller.jump_to(&mut tester.cell.borrow_mut(), extent);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 let extent_remaining = 1.0 - extent;
                 if extent_remaining < K_BOTTOM_SHEET_DOMINATES {
                     let animation_value = 1.0 - extent_remaining / K_BOTTOM_SHEET_DOMINATES;
 
-                    assert!(modal_barriers(&tester).is_empty(), "extent {extent}");
-                    assert!(is_mounted(&tester, &scrim_key), "extent {extent}");
-                    assert_close_to(get_opacity(&tester), animation_value, 0.02);
+                    assert!(modal_barriers(tester).is_empty(), "extent {extent}");
+                    assert!(is_mounted(tester, &scrim_key), "extent {extent}");
+                    assert_close_to(get_opacity(tester), animation_value, 0.02);
                 } else {
-                    assert!(!is_mounted(&tester, &scrim_key), "extent {extent}");
+                    assert!(!is_mounted(tester, &scrim_key), "extent {extent}");
                 }
             }
         });
@@ -8435,8 +8379,7 @@ mod tests {
     // "Closing bottom sheet & removing FAB at the same time doesn't throw assertion".
     #[test]
     fn closing_a_bottom_sheet_while_removing_the_floating_action_button_does_not_assert() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let bottom_sheet_key = GlobalKey::new();
             let controller: Rc<RefCell<Option<Rc<PersistentBottomSheetController>>>> =
                 Rc::new(RefCell::new(None));
@@ -8506,24 +8449,24 @@ mod tests {
             tester.pump_widget(root);
 
             // Show bottom sheet.
-            tap_elevated_button(&mut tester, "BottomSheet", 1);
+            tap_elevated_button(tester, "BottomSheet", 1);
             tester.pump_and_settle();
 
             // Bottom sheet and FAB are visible.
             assert_eq!(tester.find_by_type::<FloatingActionButton>().len(), 1);
-            assert!(is_mounted(&tester, &bottom_sheet_key));
+            assert!(is_mounted(tester, &bottom_sheet_key));
 
             // Close bottom sheet while removing FAB.
             let at = tester.center_of(&fab_key);
             tester.tap(at, 2);
-            tester.pump(Duration::ZERO); // start animation
-            tap_elevated_button(&mut tester, "BottomSheet", 3);
+            tester.pump(); // start animation
+            tap_elevated_button(tester, "BottomSheet", 3);
             // Let the animation finish.
             tester.pump_and_settle();
 
             // Bottom sheet and FAB are gone.
             assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
-            assert!(!is_mounted(&tester, &bottom_sheet_key));
+            assert!(!is_mounted(tester, &bottom_sheet_key));
         });
     }
 
@@ -8574,23 +8517,22 @@ mod tests {
     // where Dart's `simulateStatusBarTap` reaches it through the binding.
     #[test]
     fn tapping_the_status_bar_scrolls_the_primary_scroll_view_to_the_top_easing_out() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::IOS);
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
             const DURATION: u64 = 1000;
             let stops = [0.842, 0.959, 0.993, 1.0];
             const SCROLL_OFFSET: f64 = 1000.0;
 
-            build_status_bar_test_app(&mut tester);
-            let position = scrollable_position(&tester);
+            build_status_bar_test_app(tester);
+            let position = scrollable_position(tester);
             position.jump_to(&mut tester.cell.borrow_mut(), SCROLL_OFFSET);
 
-            let scaffold = only_scaffold_state(&tester);
+            let scaffold = only_scaffold_state(tester);
             scaffold.handle_status_bar_tap(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(position.pixels(&tester.cell.borrow()), SCROLL_OFFSET);
 
             for (i, stop) in stops.iter().enumerate() {
-                tester.pump(Duration::from_millis(DURATION / stops.len() as u64));
+                tester.pump_by(Duration::from_millis(DURATION / stops.len() as u64));
                 // Scroll pixel position is very long double, compare with floored int
                 // pixel position
                 assert_eq!(
@@ -8655,8 +8597,7 @@ mod tests {
     // 'Scaffold FAB animates without rebuilding'.
     #[test]
     fn moving_the_floating_action_button_does_not_rebuild_the_scaffolds_layout() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dirty = Rc::new(Cell::new(None));
             let fab_location =
                 tester
@@ -8666,7 +8607,7 @@ mod tests {
                         <dyn FloatingActionButtonLocation>::center_docked(),
                     )));
             let builder_key = GlobalKey::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 let dirty = Rc::clone(&dirty);
                 waft_widgets::ValueListenableBuilder::new(
                     Rc::new(fab_location.clone()),
@@ -8691,7 +8632,7 @@ mod tests {
                 &mut tester.cell.borrow_mut(),
                 LocationValue(<dyn FloatingActionButtonLocation>::end_float()),
             );
-            tester.pump(crate::Durations::SHORT1);
+            tester.pump_by(crate::Durations::SHORT1);
 
             // Trigger a rebuild to update the "dirty" value.
             {
@@ -8699,7 +8640,7 @@ mod tests {
                 let element = builder_key.current_context(&app).expect("mounted");
                 element.mark_needs_build(&mut app);
             }
-            tester.pump(crate::Durations::SHORT1);
+            tester.pump_by(crate::Durations::SHORT1);
 
             // The element that builds the Scaffold's CustomMultiChildLayout should not be dirty.
             assert_eq!(dirty.get(), Some(false));
@@ -8731,15 +8672,14 @@ mod tests {
     // 'Scaffold control test'.
     #[test]
     fn the_app_bar_takes_its_height_from_the_top_of_the_body() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let body_key = GlobalKey::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 with_title_app_bar(Scaffold::new())
                     .body(Container::new().key(body_key.clone().into()))
                     .into_widget()
             });
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 544.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 544.0));
 
             let insets = MediaQueryData::new().view_insets(EdgeInsets::only(0.0, 0.0, 0.0, 100.0));
             tester.pump_widget(boilerplate(
@@ -8750,7 +8690,7 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 444.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 444.0));
 
             tester.pump_widget(boilerplate(
                 MediaQuery::new(
@@ -8761,7 +8701,7 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            assert_eq!(size_of(&tester, &body_key), Size::new(800.0, 544.0));
+            assert_eq!(size_of(tester, &body_key), Size::new(800.0, 544.0));
         });
     }
 
@@ -8798,11 +8738,10 @@ mod tests {
     /// Dart's `back arrow` group's `expectBackIcon`, with the scaffold pushed from the home
     /// route as `Navigator.pushNamed` does.
     fn back_icon_on(platform: TargetPlatform) -> Option<waft_widgets::IconData> {
-        let mut icon = None;
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(platform);
+        let icon = std::sync::Mutex::new(None);
+        test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
             let root_key = GlobalKey::new();
-            pump_app(&mut tester, |_app| {
+            pump_app(tester, |_app| {
                 Container::new()
                     .key(root_key.clone().into())
                     .child(waft_widgets::Text::new("Home"))
@@ -8811,17 +8750,17 @@ mod tests {
             let context = root_key
                 .current_context(&tester.cell.borrow_mut())
                 .expect("the home route is mounted");
-            push_page(&tester, context, false, || {
+            push_page(tester, context, false, || {
                 Scaffold::new()
                     .app_bar(PreferredSizeWidgetRef::new(AppBar::new()))
                     .body(waft_widgets::Text::new("Scaffold"))
                     .into_widget()
             });
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
-            icon = only_onstage_icon(&tester);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            *icon.lock().expect("the icon") = only_onstage_icon(tester);
         });
-        icon
+        icon.into_inner().expect("the icon")
     }
 
     #[test]
@@ -8858,10 +8797,9 @@ mod tests {
             TargetPlatform::MacOS,
             TargetPlatform::Windows,
         ] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let body_key = GlobalKey::new();
-                pump_app(&mut tester, |_app| {
+                pump_app(tester, |_app| {
                     Scaffold::new()
                         .app_bar(PreferredSizeWidgetRef::new(AppBar::new()))
                         .body(waft_widgets::Text::new("Page 1").key(body_key.clone().into()))
@@ -8870,17 +8808,17 @@ mod tests {
                 let context = body_key
                     .current_context(&tester.cell.borrow_mut())
                     .expect("the first page is mounted");
-                push_page(&tester, context, true, || {
+                push_page(tester, context, true, || {
                     Scaffold::new()
                         .app_bar(PreferredSizeWidgetRef::new(AppBar::new()))
                         .body(waft_widgets::Text::new("Page 2"))
                         .into_widget()
                 });
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_secs(1));
+                tester.pump();
+                tester.pump_by(Duration::from_secs(1));
 
                 assert_eq!(
-                    only_onstage_icon(&tester),
+                    only_onstage_icon(tester),
                     Some(crate::Icons::close()),
                     "didn't find close icon for pageRouteBuilder on {platform:?}"
                 );
@@ -8905,8 +8843,7 @@ mod tests {
 
     #[test]
     fn has_app_bar_and_app_bar_max_height_follow_the_app_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
             tester.pump_widget(boilerplate(
                 MediaQuery::new(
@@ -8915,7 +8852,7 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            let state = scaffold_state(&tester, &scaffold_key);
+            let state = scaffold_state(tester, &scaffold_key);
             {
                 let app = tester.cell.borrow();
                 assert!(state.has_app_bar(&app));

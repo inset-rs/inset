@@ -988,6 +988,8 @@ mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{Center, SizedBox, StatefulBuilder, WidgetStatePropertyAll};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::material::Material;
     use crate::range_slider_parts::RangeSliderTrackShape;
@@ -996,13 +998,10 @@ mod tests {
     use crate::slider::Slider;
     use crate::slider::tests::{
         active_cursor, default_theme, is_cursor, noop, paints, paints_circle, slider_rect,
-        slider_render, tester_on,
+        slider_render,
     };
     use crate::slider_parts::{RectangularSliderTrackShape, SliderTrackShape};
-    use crate::test_support::{
-        PaintCall, PaintInspection, WidgetTester, is_same_color_as, material_app,
-        with_main_thread_stack,
-    };
+    use crate::test_support::{PaintCall, PaintInspection, is_same_color_as, material_app};
     use crate::theme_data::ThemeData;
 
     // 'SliderThemeData copyWith, ==, hashCode basics'.
@@ -1037,8 +1036,7 @@ mod tests {
     }
 
     /// Dart's `ThemeData.fallback().textTheme.bodyLarge!.copyWith(color: color)`.
-    fn fallback_body_large(color: Color) -> TextStyle {
-        let tester = WidgetTester::on(TargetPlatform::Android);
+    fn fallback_body_large(tester: &mut WidgetTester, color: Color) -> TextStyle {
         let fallback = ThemeData::fallback(&tester.cell.borrow(), None);
         fallback
             .text_theme
@@ -1051,189 +1049,195 @@ mod tests {
     // 'SliderThemeData generates correct opacities for fromPrimaryColors'.
     #[test]
     fn from_primary_colors_generates_the_opacities() {
-        let (custom_color1, custom_color2, custom_color3, custom_color4) = custom_colors();
-        let slider_theme = SliderThemeData::from_primary_colors(
-            custom_color1,
-            custom_color2,
-            custom_color3,
-            fallback_body_large(custom_color4),
-        );
+        test_widgets(|tester| {
+            let (custom_color1, custom_color2, custom_color3, custom_color4) = custom_colors();
+            let slider_theme = SliderThemeData::from_primary_colors(
+                custom_color1,
+                custom_color2,
+                custom_color3,
+                fallback_body_large(tester, custom_color4),
+            );
 
-        assert_eq!(
-            slider_theme.active_track_color,
-            Some(custom_color1.with_alpha(0xff))
-        );
-        assert_eq!(
-            slider_theme.inactive_track_color,
-            Some(custom_color1.with_alpha(0x3d))
-        );
-        assert_eq!(
-            slider_theme.secondary_active_track_color,
-            Some(custom_color1.with_alpha(0x8a))
-        );
-        assert_eq!(
-            slider_theme.disabled_active_track_color,
-            Some(custom_color2.with_alpha(0x52))
-        );
-        assert_eq!(
-            slider_theme.disabled_inactive_track_color,
-            Some(custom_color2.with_alpha(0x1f))
-        );
-        assert_eq!(
-            slider_theme.disabled_secondary_active_track_color,
-            Some(custom_color2.with_alpha(0x1f))
-        );
-        assert_eq!(
-            slider_theme.active_tick_mark_color,
-            Some(custom_color3.with_alpha(0x8a))
-        );
-        assert_eq!(
-            slider_theme.inactive_tick_mark_color,
-            Some(custom_color1.with_alpha(0x8a))
-        );
-        assert_eq!(
-            slider_theme.disabled_active_tick_mark_color,
-            Some(custom_color3.with_alpha(0x1f))
-        );
-        assert_eq!(
-            slider_theme.disabled_inactive_tick_mark_color,
-            Some(custom_color2.with_alpha(0x1f))
-        );
-        assert_eq!(
-            slider_theme.thumb_color,
-            Some(custom_color1.with_alpha(0xff))
-        );
-        assert_eq!(
-            slider_theme.disabled_thumb_color,
-            Some(custom_color2.with_alpha(0x52))
-        );
-        assert_eq!(
-            slider_theme.overlay_color,
-            Some(AnyColor::new(custom_color1.with_alpha(0x1f)))
-        );
-        assert_eq!(
-            slider_theme.value_indicator_color,
-            Some(custom_color1.with_alpha(0xff))
-        );
-        assert_eq!(
-            slider_theme.value_indicator_stroke_color,
-            Some(custom_color1.with_alpha(0xff))
-        );
-        assert_eq!(
-            slider_theme
-                .value_indicator_text_style
-                .and_then(|style| style.color)
-                .map(|color| color.color()),
-            Some(custom_color4)
-        );
+            assert_eq!(
+                slider_theme.active_track_color,
+                Some(custom_color1.with_alpha(0xff))
+            );
+            assert_eq!(
+                slider_theme.inactive_track_color,
+                Some(custom_color1.with_alpha(0x3d))
+            );
+            assert_eq!(
+                slider_theme.secondary_active_track_color,
+                Some(custom_color1.with_alpha(0x8a))
+            );
+            assert_eq!(
+                slider_theme.disabled_active_track_color,
+                Some(custom_color2.with_alpha(0x52))
+            );
+            assert_eq!(
+                slider_theme.disabled_inactive_track_color,
+                Some(custom_color2.with_alpha(0x1f))
+            );
+            assert_eq!(
+                slider_theme.disabled_secondary_active_track_color,
+                Some(custom_color2.with_alpha(0x1f))
+            );
+            assert_eq!(
+                slider_theme.active_tick_mark_color,
+                Some(custom_color3.with_alpha(0x8a))
+            );
+            assert_eq!(
+                slider_theme.inactive_tick_mark_color,
+                Some(custom_color1.with_alpha(0x8a))
+            );
+            assert_eq!(
+                slider_theme.disabled_active_tick_mark_color,
+                Some(custom_color3.with_alpha(0x1f))
+            );
+            assert_eq!(
+                slider_theme.disabled_inactive_tick_mark_color,
+                Some(custom_color2.with_alpha(0x1f))
+            );
+            assert_eq!(
+                slider_theme.thumb_color,
+                Some(custom_color1.with_alpha(0xff))
+            );
+            assert_eq!(
+                slider_theme.disabled_thumb_color,
+                Some(custom_color2.with_alpha(0x52))
+            );
+            assert_eq!(
+                slider_theme.overlay_color,
+                Some(AnyColor::new(custom_color1.with_alpha(0x1f)))
+            );
+            assert_eq!(
+                slider_theme.value_indicator_color,
+                Some(custom_color1.with_alpha(0xff))
+            );
+            assert_eq!(
+                slider_theme.value_indicator_stroke_color,
+                Some(custom_color1.with_alpha(0xff))
+            );
+            assert_eq!(
+                slider_theme
+                    .value_indicator_text_style
+                    .and_then(|style| style.color)
+                    .map(|color| color.color()),
+                Some(custom_color4)
+            );
+        });
     }
 
     // 'SliderThemeData generates correct shapes for fromPrimaryColors'.
     #[test]
     fn from_primary_colors_generates_the_shapes() {
-        use crate::range_slider_parts::{
-            RoundRangeSliderThumbShape, RoundRangeSliderTickMarkShape,
-            RoundedRectRangeSliderTrackShape,
-        };
-        use crate::slider_parts::{
-            RoundSliderThumbShape, RoundSliderTickMarkShape, RoundedRectSliderTrackShape,
-        };
-        let (custom_color1, custom_color2, custom_color3, custom_color4) = custom_colors();
-        let slider_theme = SliderThemeData::from_primary_colors(
-            custom_color1,
-            custom_color2,
-            custom_color3,
-            fallback_body_large(custom_color4),
-        );
+        test_widgets(|tester| {
+            use crate::range_slider_parts::{
+                RoundRangeSliderThumbShape, RoundRangeSliderTickMarkShape,
+                RoundedRectRangeSliderTrackShape,
+            };
+            use crate::slider_parts::{
+                RoundSliderThumbShape, RoundSliderTickMarkShape, RoundedRectSliderTrackShape,
+            };
+            let (custom_color1, custom_color2, custom_color3, custom_color4) = custom_colors();
+            let slider_theme = SliderThemeData::from_primary_colors(
+                custom_color1,
+                custom_color2,
+                custom_color3,
+                fallback_body_large(tester, custom_color4),
+            );
 
-        fn is<T: PartialEq + 'static>(any: &dyn std::any::Any, expected: T) -> bool {
-            any.downcast_ref::<T>() == Some(&expected)
-        }
-        assert!(is(
-            slider_theme.overlay_shape.unwrap().as_any(),
-            RoundSliderOverlayShape::new()
-        ));
-        assert!(is(
-            slider_theme.tick_mark_shape.unwrap().as_any(),
-            RoundSliderTickMarkShape::new()
-        ));
-        assert!(is(
-            slider_theme.thumb_shape.unwrap().as_any(),
-            RoundSliderThumbShape::new()
-        ));
-        assert!(is(
-            slider_theme.track_shape.unwrap().as_any(),
-            RoundedRectSliderTrackShape::new()
-        ));
-        assert!(is(
-            slider_theme.value_indicator_shape.unwrap().as_any(),
-            PaddleSliderValueIndicatorShape::new()
-        ));
-        assert!(is(
-            slider_theme.range_tick_mark_shape.unwrap().as_any(),
-            RoundRangeSliderTickMarkShape::new()
-        ));
-        assert!(is(
-            slider_theme.range_thumb_shape.unwrap().as_any(),
-            RoundRangeSliderThumbShape::new()
-        ));
-        assert!(is(
-            slider_theme.range_track_shape.unwrap().as_any(),
-            RoundedRectRangeSliderTrackShape::new()
-        ));
-        assert!(is(
-            slider_theme.range_value_indicator_shape.unwrap().as_any(),
-            PaddleRangeSliderValueIndicatorShape::new()
-        ));
+            fn is<T: PartialEq + 'static>(any: &dyn std::any::Any, expected: T) -> bool {
+                any.downcast_ref::<T>() == Some(&expected)
+            }
+            assert!(is(
+                slider_theme.overlay_shape.unwrap().as_any(),
+                RoundSliderOverlayShape::new()
+            ));
+            assert!(is(
+                slider_theme.tick_mark_shape.unwrap().as_any(),
+                RoundSliderTickMarkShape::new()
+            ));
+            assert!(is(
+                slider_theme.thumb_shape.unwrap().as_any(),
+                RoundSliderThumbShape::new()
+            ));
+            assert!(is(
+                slider_theme.track_shape.unwrap().as_any(),
+                RoundedRectSliderTrackShape::new()
+            ));
+            assert!(is(
+                slider_theme.value_indicator_shape.unwrap().as_any(),
+                PaddleSliderValueIndicatorShape::new()
+            ));
+            assert!(is(
+                slider_theme.range_tick_mark_shape.unwrap().as_any(),
+                RoundRangeSliderTickMarkShape::new()
+            ));
+            assert!(is(
+                slider_theme.range_thumb_shape.unwrap().as_any(),
+                RoundRangeSliderThumbShape::new()
+            ));
+            assert!(is(
+                slider_theme.range_track_shape.unwrap().as_any(),
+                RoundedRectRangeSliderTrackShape::new()
+            ));
+            assert!(is(
+                slider_theme.range_value_indicator_shape.unwrap().as_any(),
+                PaddleRangeSliderValueIndicatorShape::new()
+            ));
+        });
     }
 
     // 'SliderThemeData lerps correctly'.
     #[test]
     fn slider_theme_data_lerps() {
-        let slider_theme_black = SliderThemeData::from_primary_colors(
-            Colors::BLACK,
-            Colors::BLACK,
-            Colors::BLACK,
-            fallback_body_large(Colors::BLACK),
-        )
-        .copy_with()
-        .track_height(2.0);
-        let slider_theme_white = SliderThemeData::from_primary_colors(
-            Colors::WHITE,
-            Colors::WHITE,
-            Colors::WHITE,
-            fallback_body_large(Colors::WHITE),
-        )
-        .copy_with()
-        .track_height(6.0);
-        let lerp = SliderThemeData::lerp(&slider_theme_black, &slider_theme_white, 0.5);
-        let middle_grey = Color::new(0xff7f7f7f);
-        let same = |color: Option<Color>, alpha: i32| {
-            is_same_color_as(color.expect("lerped"), middle_grey.with_alpha(alpha))
-        };
+        test_widgets(|tester| {
+            let slider_theme_black = SliderThemeData::from_primary_colors(
+                Colors::BLACK,
+                Colors::BLACK,
+                Colors::BLACK,
+                fallback_body_large(tester, Colors::BLACK),
+            )
+            .copy_with()
+            .track_height(2.0);
+            let slider_theme_white = SliderThemeData::from_primary_colors(
+                Colors::WHITE,
+                Colors::WHITE,
+                Colors::WHITE,
+                fallback_body_large(tester, Colors::WHITE),
+            )
+            .copy_with()
+            .track_height(6.0);
+            let lerp = SliderThemeData::lerp(&slider_theme_black, &slider_theme_white, 0.5);
+            let middle_grey = Color::new(0xff7f7f7f);
+            let same = |color: Option<Color>, alpha: i32| {
+                is_same_color_as(color.expect("lerped"), middle_grey.with_alpha(alpha))
+            };
 
-        assert_eq!(lerp.track_height, Some(4.0));
-        assert!(same(lerp.active_track_color, 0xff));
-        assert!(same(lerp.inactive_track_color, 0x3d));
-        assert!(same(lerp.secondary_active_track_color, 0x8a));
-        assert!(same(lerp.disabled_active_track_color, 0x52));
-        assert!(same(lerp.disabled_inactive_track_color, 0x1f));
-        assert!(same(lerp.disabled_secondary_active_track_color, 0x1f));
-        assert!(same(lerp.active_tick_mark_color, 0x8a));
-        assert!(same(lerp.inactive_tick_mark_color, 0x8a));
-        assert!(same(lerp.disabled_active_tick_mark_color, 0x1f));
-        assert!(same(lerp.disabled_inactive_tick_mark_color, 0x1f));
-        assert!(same(lerp.thumb_color, 0xff));
-        assert!(same(lerp.disabled_thumb_color, 0x52));
-        assert!(same(lerp.overlay_color.map(|color| color.color()), 0x1f));
-        assert!(same(lerp.value_indicator_color, 0xff));
-        assert!(same(lerp.value_indicator_stroke_color, 0xff));
-        assert!(same(
-            lerp.value_indicator_text_style
-                .and_then(|style| style.color)
-                .map(|color| color.color()),
-            0xff
-        ));
+            assert_eq!(lerp.track_height, Some(4.0));
+            assert!(same(lerp.active_track_color, 0xff));
+            assert!(same(lerp.inactive_track_color, 0x3d));
+            assert!(same(lerp.secondary_active_track_color, 0x8a));
+            assert!(same(lerp.disabled_active_track_color, 0x52));
+            assert!(same(lerp.disabled_inactive_track_color, 0x1f));
+            assert!(same(lerp.disabled_secondary_active_track_color, 0x1f));
+            assert!(same(lerp.active_tick_mark_color, 0x8a));
+            assert!(same(lerp.inactive_tick_mark_color, 0x8a));
+            assert!(same(lerp.disabled_active_tick_mark_color, 0x1f));
+            assert!(same(lerp.disabled_inactive_tick_mark_color, 0x1f));
+            assert!(same(lerp.thumb_color, 0xff));
+            assert!(same(lerp.disabled_thumb_color, 0x52));
+            assert!(same(lerp.overlay_color.map(|color| color.color()), 0x1f));
+            assert!(same(lerp.value_indicator_color, 0xff));
+            assert!(same(lerp.value_indicator_stroke_color, 0xff));
+            assert!(same(
+                lerp.value_indicator_text_style
+                    .and_then(|style| style.color)
+                    .map(|color| color.color()),
+                0xff
+            ));
+        });
     }
 
     // 'Track shape isRounded defaults'.
@@ -1278,13 +1282,12 @@ mod tests {
     // 'Slider parameters overrides theme properties'.
     #[test]
     fn slider_parameters_override_theme_properties() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ACTIVE_TRACK_COLOR: Color = Color::new(0xffff0001);
             const INACTIVE_TRACK_COLOR: Color = Color::new(0xffff0002);
             const SECONDARY_ACTIVE_TRACK_COLOR: Color = Color::new(0xffff0003);
             const THUMB_COLOR: Color = Color::new(0xffff0004);
 
-            let mut tester = tester_on(TargetPlatform::Android);
             let theme = ThemeData::builder()
                 .platform(TargetPlatform::Android)
                 .primary_swatch(Colors::BLUE)
@@ -1318,22 +1321,21 @@ mod tests {
 
             // Test Slider parameters.
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &[
                     PaintCall::rrect(Some(INACTIVE_TRACK_COLOR)),
                     PaintCall::rrect(Some(ACTIVE_TRACK_COLOR)),
                     PaintCall::rrect(Some(SECONDARY_ACTIVE_TRACK_COLOR)),
                 ],
             ));
-            assert!(paints_circle(&tester, slider_render(&tester), THUMB_COLOR));
+            assert!(paints_circle(tester, slider_render(tester), THUMB_COLOR));
         });
     }
 
     /// Dart's 'Slider uses ThemeData slider theme if present' and 'Slider overrides ThemeData
     /// theme if SliderTheme present', which pump the same app.
-    fn uses_the_slider_theme_given() {
-        let mut tester = tester_on(TargetPlatform::Android);
+    fn uses_the_slider_theme_given(tester: &mut WidgetTester) {
         let theme = ThemeData::builder()
             .platform(TargetPlatform::Android)
             .primary_swatch(Colors::RED)
@@ -1346,13 +1348,13 @@ mod tests {
             .inactive_track_color(purple.with_alpha(0x3d))
             .secondary_active_track_color(purple.with_alpha(0x8a));
 
-        let app = build_app(&tester, slider_theme, 0.5, Some(0.75), false);
+        let app = build_app(tester, slider_theme, 0.5, Some(0.75), false);
         tester.pump_widget(app);
 
         let rrect = |color: Option<Color>| PaintCall::rrect(color);
         assert!(paints(
-            &tester,
-            slider_render(&tester),
+            tester,
+            slider_render(tester),
             &[
                 rrect(custom_theme.disabled_active_track_color),
                 rrect(custom_theme.disabled_inactive_track_color),
@@ -1364,24 +1366,23 @@ mod tests {
     // 'Slider uses ThemeData slider theme if present'.
     #[test]
     fn a_slider_uses_the_theme_data_slider_theme() {
-        with_main_thread_stack(uses_the_slider_theme_given);
+        test_widgets(uses_the_slider_theme_given);
     }
 
     // 'Slider overrides ThemeData theme if SliderTheme present'.
     #[test]
     fn a_slider_theme_overrides_the_theme_data_slider_theme() {
-        with_main_thread_stack(uses_the_slider_theme_given);
+        test_widgets(uses_the_slider_theme_given);
     }
 
     // 'The mouse cursor is themeable'.
     #[test]
     fn the_mouse_cursor_is_themeable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let cursor: MouseCursorRef = SystemMouseCursors::TEXT.into();
             let app = build_app(
-                &tester,
+                tester,
                 theme
                     .slider_theme
                     .copy_with()
@@ -1393,21 +1394,20 @@ mod tests {
             tester.pump_widget(app);
 
             tester.pump_and_settle();
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).center(), false);
             tester.pump_and_settle();
-            assert!(is_cursor(&active_cursor(&tester), SystemMouseCursors::TEXT));
+            assert!(is_cursor(&active_cursor(tester), SystemMouseCursors::TEXT));
         });
     }
 
     // 'SliderTheme.allowedInteraction is themeable'.
     #[test]
     fn the_allowed_interaction_is_themeable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(0.0));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let build = |theme_null: bool, slider_null: bool| {
                 let value = Rc::clone(&value);
                 let mut slider_theme = theme.slider_theme.copy_with();
@@ -1437,21 +1437,19 @@ mod tests {
                         .into_widget(),
                 )
             };
-            let mut gesture = WidgetTester::touch(1);
-            let tap = |tester: &mut WidgetTester,
-                       gesture: &mut crate::test_support::TestPointer| {
+            let mut gesture = TestPointer::touch(1);
+            let tap = |tester: &mut WidgetTester, gesture: &mut TestPointer| {
                 value.set(0.0);
                 tester.down(gesture, slider_rect(tester).center());
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 let tapped = value.get();
                 tester.up(gesture);
                 tapped
             };
-            let slide = |tester: &mut WidgetTester,
-                         gesture: &mut crate::test_support::TestPointer| {
+            let slide = |tester: &mut WidgetTester, gesture: &mut TestPointer| {
                 value.set(0.0);
                 tester.down(gesture, slider_rect(tester).center());
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 let at = gesture.position + Offset::new(50.0, 0.0);
                 tester.move_to(gesture, at, true);
                 let slid = value.get();
@@ -1462,30 +1460,30 @@ mod tests {
             // when theme and parameter are specified, parameter is used [tapOnly].
             tester.pump_widget(build(false, false));
             // tap is allowed.
-            assert_eq!(tap(&mut tester, &mut gesture), 0.5); // changes
+            assert_eq!(tap(tester, &mut gesture), 0.5); // changes
             // slide isn't allowed.
-            assert_eq!(slide(&mut tester, &mut gesture), 0.0); // no change
+            assert_eq!(slide(tester, &mut gesture), 0.0); // no change
 
             // when only parameter is specified, parameter is used [tapOnly].
             tester.pump_widget(build(true, false));
             // tap is allowed.
-            assert_eq!(tap(&mut tester, &mut gesture), 0.5); // changes
+            assert_eq!(tap(tester, &mut gesture), 0.5); // changes
             // slide isn't allowed.
-            assert_eq!(slide(&mut tester, &mut gesture), 0.0); // no change
+            assert_eq!(slide(tester, &mut gesture), 0.0); // no change
 
             // when theme is specified but parameter is null, theme is used [slideOnly].
             tester.pump_widget(build(false, true));
             // tap isn't allowed.
-            assert_eq!(tap(&mut tester, &mut gesture), 0.0); // no change
+            assert_eq!(tap(tester, &mut gesture), 0.0); // no change
             // slide isn't allowed.
-            assert!(slide(&mut tester, &mut gesture) > 0.0); // changes
+            assert!(slide(tester, &mut gesture) > 0.0); // changes
 
             // when both theme and parameter are null, default is used [tapAndSlide].
             tester.pump_widget(build(true, true));
             // tap is allowed.
-            assert_eq!(tap(&mut tester, &mut gesture), 0.5);
+            assert_eq!(tap(tester, &mut gesture), 0.5);
             // slide is allowed.
-            assert!(slide(&mut tester, &mut gesture) > 0.0); // changes
+            assert!(slide(tester, &mut gesture) > 0.0); // changes
         });
     }
 
@@ -1493,8 +1491,7 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case sets the deprecated `year2023`")]
     fn slider_theme_data_year2023_opts_into_the_2024_appearance() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .slider_theme(SliderThemeData::new().year2023(false))
                 .build(&tester.cell.borrow());
@@ -1511,8 +1508,8 @@ mod tests {
             let outer = Radius::circular(8.0);
             let inner = Radius::circular(2.0);
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &[
                     // Active track.
                     PaintCall::rrect_at(
@@ -1537,14 +1534,13 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case sets the deprecated `year2023`")]
     fn slider_year2023_overrides_the_theme_year2023() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .slider_theme(SliderThemeData::new().year2023(false))
                 .build(&tester.cell.borrow());
             let color_scheme = theme.color_scheme.clone();
             let value = 0.45;
-            let app_theme = default_theme(&tester);
+            let app_theme = default_theme(tester);
             tester.pump_widget(material_app(
                 app_theme,
                 Material::new()
@@ -1559,8 +1555,8 @@ mod tests {
             let active_track_corner_radius = Radius::circular(3.0);
             let inactive_track_corner_radius = Radius::circular(2.0);
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &[
                     // Active track.
                     PaintCall::rrect_at(
@@ -1828,8 +1824,7 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn slider_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let theme = ThemeData::builder().build(&tester.cell.borrow());
             let color_scheme = theme.color_scheme.clone();
             let colors = DefaultColors {
@@ -1850,7 +1845,7 @@ mod tests {
                 disabled_active_tick_mark: color_scheme.on_surface.with_opacity(0.38),
                 disabled_inactive_tick_mark: color_scheme.on_surface.with_opacity(0.38),
             };
-            let app_theme = default_theme(&tester);
+            let app_theme = default_theme(tester);
             let build_app = |divisions: Option<i32>, enabled: bool| {
                 material_app(
                     app_theme.clone(),
@@ -1864,7 +1859,7 @@ mod tests {
                     .into_widget(),
                 )
             };
-            expect_slider_defaults(&mut tester, &colors, &build_app);
+            expect_slider_defaults(tester, &colors, &build_app);
         });
     }
 
@@ -1872,8 +1867,7 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn material2_slider_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .build(&tester.cell.borrow());
@@ -1914,12 +1908,12 @@ mod tests {
                         .into_widget(),
                 )
             };
-            expect_slider_defaults(&mut tester, &colors, &build_app);
+            expect_slider_defaults(tester, &colors, &build_app);
 
             // Test the default color for value indicator.
             tester.pump_widget(build_app(Some(3), true));
-            let center = slider_rect(&tester).center();
-            let mut gesture = WidgetTester::touch(1);
+            let center = slider_rect(tester).center();
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
@@ -1928,7 +1922,7 @@ mod tests {
                 .first::<crate::slider::RenderValueIndicator>()
                 .as_render_object(&tester.cell.borrow());
             assert!(paints(
-                &tester,
+                tester,
                 value_indicator_box,
                 &[
                     PaintCall::path(Some(value_indicator_color)),
@@ -1945,11 +1939,10 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn a_slider_uses_the_right_theme_colors_for_the_right_components() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const CUSTOM_COLOR1: Color = Color::new(0xcafefeed);
             const CUSTOM_COLOR2: Color = Color::new(0xdeadbeef);
             const CUSTOM_COLOR3: Color = Color::new(0xdecaface);
-            let mut tester = tester_on(TargetPlatform::Android);
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .platform(TargetPlatform::Android)
@@ -2047,7 +2040,7 @@ mod tests {
 
             // Check default theme for enabled widget.
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     slider_theme.inactive_track_color,
                     slider_theme.active_track_color,
@@ -2055,17 +2048,17 @@ mod tests {
                 )
             ));
             assert!(painted(
-                &tester,
+                tester,
                 &[PaintCall::shadow(Some(Color::new(0xff000000)))]
             ));
-            assert!(painted(&tester, &[circle(slider_theme.thumb_color)]));
-            no_disabled_tracks(&tester);
+            assert!(painted(tester, &[circle(slider_theme.thumb_color)]));
+            no_disabled_tracks(tester);
             assert!(not_painted(
-                &tester,
+                tester,
                 &[circle(slider_theme.active_tick_mark_color)]
             ));
             assert!(not_painted(
-                &tester,
+                tester,
                 &[circle(slider_theme.inactive_tick_mark_color)]
             ));
 
@@ -2075,17 +2068,17 @@ mod tests {
                 ..Args::default()
             }));
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     slider_theme.inactive_track_color,
                     Some(CUSTOM_COLOR1),
                     slider_theme.secondary_active_track_color
                 )
             ));
-            assert!(painted(&tester, &[PaintCall::shadow(Some(Colors::BLACK))]));
-            assert!(painted(&tester, &[circle(Some(CUSTOM_COLOR1))]));
-            assert!(not_painted(&tester, &[circle(slider_theme.thumb_color)]));
-            no_disabled_tracks(&tester);
+            assert!(painted(tester, &[PaintCall::shadow(Some(Colors::BLACK))]));
+            assert!(painted(tester, &[circle(Some(CUSTOM_COLOR1))]));
+            assert!(not_painted(tester, &[circle(slider_theme.thumb_color)]));
+            no_disabled_tracks(tester);
 
             // Test setting only the inactiveColor.
             tester.pump_widget(build_app(Args {
@@ -2093,16 +2086,16 @@ mod tests {
                 ..Args::default()
             }));
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     Some(CUSTOM_COLOR1),
                     slider_theme.active_track_color,
                     slider_theme.secondary_active_track_color
                 )
             ));
-            assert!(painted(&tester, &[PaintCall::shadow(Some(Colors::BLACK))]));
-            assert!(painted(&tester, &[circle(slider_theme.thumb_color)]));
-            no_disabled_tracks(&tester);
+            assert!(painted(tester, &[PaintCall::shadow(Some(Colors::BLACK))]));
+            assert!(painted(tester, &[circle(slider_theme.thumb_color)]));
+            no_disabled_tracks(tester);
 
             // Test setting only the secondaryActiveColor.
             tester.pump_widget(build_app(Args {
@@ -2110,16 +2103,16 @@ mod tests {
                 ..Args::default()
             }));
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     slider_theme.inactive_track_color,
                     slider_theme.active_track_color,
                     Some(CUSTOM_COLOR1)
                 )
             ));
-            assert!(painted(&tester, &[PaintCall::shadow(Some(Colors::BLACK))]));
-            assert!(painted(&tester, &[circle(slider_theme.thumb_color)]));
-            no_disabled_tracks(&tester);
+            assert!(painted(tester, &[PaintCall::shadow(Some(Colors::BLACK))]));
+            assert!(painted(tester, &[circle(slider_theme.thumb_color)]));
+            no_disabled_tracks(tester);
 
             // Test setting both activeColor, inactiveColor, and secondaryActiveColor.
             tester.pump_widget(build_app(Args {
@@ -2129,17 +2122,17 @@ mod tests {
                 ..Args::default()
             }));
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     Some(CUSTOM_COLOR2),
                     Some(CUSTOM_COLOR1),
                     Some(CUSTOM_COLOR3)
                 )
             ));
-            assert!(painted(&tester, &[PaintCall::shadow(Some(Colors::BLACK))]));
-            assert!(painted(&tester, &[circle(Some(CUSTOM_COLOR1))]));
-            assert!(not_painted(&tester, &[circle(slider_theme.thumb_color)]));
-            no_disabled_tracks(&tester);
+            assert!(painted(tester, &[PaintCall::shadow(Some(Colors::BLACK))]));
+            assert!(painted(tester, &[circle(Some(CUSTOM_COLOR1))]));
+            assert!(not_painted(tester, &[circle(slider_theme.thumb_color)]));
+            no_disabled_tracks(tester);
 
             // Test colors for discrete slider.
             tester.pump_widget(build_app(Args {
@@ -2147,7 +2140,7 @@ mod tests {
                 ..Args::default()
             }));
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     slider_theme.inactive_track_color,
                     slider_theme.active_track_color,
@@ -2155,7 +2148,7 @@ mod tests {
                 )
             ));
             assert!(painted(
-                &tester,
+                tester,
                 &[
                     circle(slider_theme.active_tick_mark_color),
                     circle(slider_theme.active_tick_mark_color),
@@ -2165,7 +2158,7 @@ mod tests {
                     circle(slider_theme.thumb_color),
                 ]
             ));
-            no_disabled_tracks(&tester);
+            no_disabled_tracks(tester);
 
             // Test colors for discrete slider with inactiveColor and activeColor set.
             tester.pump_widget(build_app(Args {
@@ -2176,7 +2169,7 @@ mod tests {
                 ..Args::default()
             }));
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     Some(CUSTOM_COLOR2),
                     Some(CUSTOM_COLOR1),
@@ -2184,7 +2177,7 @@ mod tests {
                 )
             ));
             assert!(painted(
-                &tester,
+                tester,
                 &[
                     circle(Some(CUSTOM_COLOR2)),
                     circle(Some(CUSTOM_COLOR2)),
@@ -2194,14 +2187,14 @@ mod tests {
                     circle(Some(CUSTOM_COLOR1)),
                 ]
             ));
-            assert!(not_painted(&tester, &[circle(slider_theme.thumb_color)]));
-            no_disabled_tracks(&tester);
+            assert!(not_painted(tester, &[circle(slider_theme.thumb_color)]));
+            no_disabled_tracks(tester);
             assert!(not_painted(
-                &tester,
+                tester,
                 &[circle(slider_theme.active_tick_mark_color)]
             ));
             assert!(not_painted(
-                &tester,
+                tester,
                 &[circle(slider_theme.inactive_tick_mark_color)]
             ));
 
@@ -2212,7 +2205,7 @@ mod tests {
             }));
             tester.pump_and_settle();
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     slider_theme.disabled_inactive_track_color,
                     slider_theme.disabled_active_track_color,
@@ -2220,20 +2213,20 @@ mod tests {
                 )
             ));
             assert!(painted(
-                &tester,
+                tester,
                 &[
                     PaintCall::shadow(Some(Colors::BLACK)),
                     circle(slider_theme.disabled_thumb_color)
                 ]
             ));
-            assert!(not_painted(&tester, &[circle(slider_theme.thumb_color)]));
+            assert!(not_painted(tester, &[circle(slider_theme.thumb_color)]));
             // These 2 colors are too close to distinguish.
             assert!(not_painted(
-                &tester,
+                tester,
                 &[rrect(slider_theme.inactive_track_color)]
             ));
             assert!(not_painted(
-                &tester,
+                tester,
                 &[rrect(slider_theme.secondary_active_track_color)]
             ));
 
@@ -2244,7 +2237,7 @@ mod tests {
                 ..Args::default()
             }));
             assert!(painted(
-                &tester,
+                tester,
                 &[
                     circle(slider_theme.disabled_active_tick_mark_color),
                     circle(slider_theme.disabled_active_tick_mark_color),
@@ -2254,22 +2247,22 @@ mod tests {
                     circle(slider_theme.disabled_thumb_color),
                 ]
             ));
-            assert!(not_painted(&tester, &[circle(slider_theme.thumb_color)]));
+            assert!(not_painted(tester, &[circle(slider_theme.thumb_color)]));
             // These 2 colors are too close to distinguish.
             assert!(not_painted(
-                &tester,
+                tester,
                 &[rrect(slider_theme.inactive_track_color)]
             ));
             assert!(not_painted(
-                &tester,
+                tester,
                 &[rrect(slider_theme.secondary_active_track_color)]
             ));
             assert!(not_painted(
-                &tester,
+                tester,
                 &[circle(slider_theme.active_tick_mark_color)]
             ));
             assert!(not_painted(
-                &tester,
+                tester,
                 &[circle(slider_theme.inactive_tick_mark_color)]
             ));
 
@@ -2283,7 +2276,7 @@ mod tests {
                 ..Args::default()
             }));
             assert!(painted(
-                &tester,
+                tester,
                 &tracks(
                     slider_theme.disabled_inactive_track_color,
                     slider_theme.disabled_active_track_color,
@@ -2291,17 +2284,17 @@ mod tests {
                 )
             ));
             assert!(painted(
-                &tester,
+                tester,
                 &[circle(slider_theme.disabled_thumb_color)]
             ));
-            assert!(not_painted(&tester, &[circle(slider_theme.thumb_color)]));
+            assert!(not_painted(tester, &[circle(slider_theme.thumb_color)]));
             // These colors are too close to distinguish.
             assert!(not_painted(
-                &tester,
+                tester,
                 &[rrect(slider_theme.inactive_track_color)]
             ));
             assert!(not_painted(
-                &tester,
+                tester,
                 &[rrect(slider_theme.secondary_active_track_color)]
             ));
 
@@ -2310,15 +2303,15 @@ mod tests {
                 divisions: Some(3),
                 ..Args::default()
             }));
-            let center = slider_rect(&tester).center();
-            let mut gesture = WidgetTester::touch(1);
+            let center = slider_rect(tester).center();
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
             assert_eq!(value.get(), 2.0 / 3.0);
             assert!(paints(
-                &tester,
-                value_indicator_box(&tester),
+                tester,
+                value_indicator_box(tester),
                 &[
                     PaintCall::path(slider_theme.value_indicator_color),
                     PaintCall::Paragraph
@@ -2335,8 +2328,8 @@ mod tests {
                 divisions: Some(3),
                 ..Args::default()
             }));
-            let center = slider_rect(&tester).center();
-            let mut gesture = WidgetTester::touch(2);
+            let center = slider_rect(tester).center();
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, center);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
@@ -2345,7 +2338,7 @@ mod tests {
             // through the indicator; here the slider's part off its render object, the
             // indicator's off its own.
             assert!(painted(
-                &tester,
+                tester,
                 &[
                     rrect(Some(CUSTOM_COLOR2)),                     // Inactive track
                     rrect(Some(CUSTOM_COLOR1)),                     // Active track
@@ -2359,8 +2352,8 @@ mod tests {
                 ]
             ));
             assert!(paints(
-                &tester,
-                value_indicator_box(&tester),
+                tester,
+                value_indicator_box(tester),
                 &[PaintCall::path(slider_theme.value_indicator_color)] // indicator
             ));
             tester.up(&gesture);
@@ -2377,8 +2370,7 @@ mod tests {
     // 'Slider can use theme overlay with material states'.
     #[test]
     fn a_slider_can_use_a_theme_overlay_with_material_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let base_theme = ThemeData::builder()
                 .platform(TargetPlatform::Android)
                 .primary_swatch(Colors::BLUE)
@@ -2429,13 +2421,13 @@ mod tests {
             // Check that the overlay shows when focused.
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
-            assert!(paints_circle(&tester, slider_render(&tester), brown));
+            assert!(paints_circle(tester, slider_render(tester), brown));
 
             // Check that the overlay does not show when focused and disabled.
             tester.pump_widget(build_app(false));
             tester.pump_and_settle();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
-            assert!(!paints_circle(&tester, slider_render(&tester), brown));
+            assert!(!paints_circle(tester, slider_render(tester), brown));
             focus_node.dispose(&mut tester.cell.borrow_mut());
         });
     }
@@ -2510,26 +2502,24 @@ mod tests {
     // 'activeTrackRadius is taken into account when painting the border of the active track'.
     #[test]
     fn the_active_track_radius_counts_when_painting_the_active_track_border() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let slider_theme =
-                default_theme(&tester)
-                    .slider_theme
-                    .copy_with()
-                    .track_shape(Rc::new(
-                        RoundedRectSliderTrackShapeWithCustomAdditionalActiveTrackHeight {
-                            additional_active_track_height: 10.0,
-                        },
-                    ));
-            let app = build_app(&tester, slider_theme, 0.5, None, true);
+        test_widgets(|tester| {
+            let slider_theme = default_theme(tester)
+                .slider_theme
+                .copy_with()
+                .track_shape(Rc::new(
+                    RoundedRectSliderTrackShapeWithCustomAdditionalActiveTrackHeight {
+                        additional_active_track_height: 10.0,
+                    },
+                ));
+            let app = build_app(tester, slider_theme, 0.5, None, true);
             tester.pump_widget(app);
             tester.pump_and_settle();
-            let center = slider_rect(&tester).center();
-            let mut gesture = WidgetTester::touch(1);
+            let center = slider_rect(tester).center();
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &[
                     // Inactive track.
                     PaintCall::rrect_at(
@@ -2554,12 +2544,12 @@ mod tests {
     /// 0.5 labelled '1' in a `Row`, pressed; `slider` is what the slider render object paints
     /// before the indicator, `indicator` the indicator's path colour.
     fn default_value_indicator_color(
+        tester: &mut WidgetTester,
         theme: fn(&WidgetTester) -> ThemeData,
         slider: &[PaintCall],
         indicator: Color,
     ) {
-        let mut tester = tester_on(TargetPlatform::Android);
-        let theme = theme(&tester);
+        let theme = theme(tester);
         tester.pump_widget(material_app(
             theme,
             waft_widgets::Directionality::new(
@@ -2579,18 +2569,18 @@ mod tests {
             .into_widget(),
         ));
 
-        let center = slider_rect(&tester).center();
-        let mut gesture = WidgetTester::touch(1);
+        let center = slider_rect(tester).center();
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, center);
         // Wait for value indicator animation to finish.
         tester.pump_and_settle();
         // Dart reads the sequence off the `Overlay`, from the `Material`'s background rrect
         // through the indicator; here the tracks off the slider's render object and the
         // indicator off its own.
-        assert!(paints(&tester, slider_render(&tester), slider));
+        assert!(paints(tester, slider_render(tester), slider));
         assert!(paints(
-            &tester,
-            value_indicator_box(&tester),
+            tester,
+            value_indicator_box(tester),
             &[PaintCall::path(Some(indicator))]
         ));
 
@@ -2603,14 +2593,14 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case reads the deprecated `value`")]
     fn the_default_value_indicator_color() {
-        with_main_thread_stack(|| {
-            let tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let primary = ThemeData::builder()
                 .platform(TargetPlatform::Android)
                 .build(&tester.cell.borrow())
                 .color_scheme
                 .primary;
             default_value_indicator_color(
+                tester,
                 |tester| {
                     ThemeData::builder()
                         .platform(TargetPlatform::Android)
@@ -2628,8 +2618,9 @@ mod tests {
     // 'Material 2' 'Default value indicator color'.
     #[test]
     fn material2_the_default_value_indicator_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             default_value_indicator_color(
+                tester,
                 |tester| {
                     ThemeData::builder()
                         .use_material3(false)
@@ -2696,15 +2687,15 @@ mod tests {
     /// its value indicator, which paints nothing on the press's first frame and one path the
     /// next.
     fn value_indicator_skips_painting_at_zero_scale(
+        tester: &mut WidgetTester,
         configure: fn(SliderThemeData) -> SliderThemeData,
         check_material: bool,
     ) {
         use crate::slider_parts::SliderTickMarkShape;
         use crate::slider_value_indicator_shape::SliderComponentShape;
-        let mut tester = tester_on(TargetPlatform::Android);
         // Pump a slider with just a value indicator.
         let slider_theme = configure(
-            default_theme(&tester)
+            default_theme(tester)
                 .slider_theme
                 .copy_with()
                 .track_height(0.0)
@@ -2712,31 +2703,25 @@ mod tests {
                 .thumb_shape(<dyn SliderComponentShape>::no_thumb())
                 .tick_mark_shape(<dyn SliderTickMarkShape>::no_tick_mark()),
         );
-        let app = build_discrete_app(&tester, slider_theme, 0.5, 4);
+        let app = build_discrete_app(tester, slider_theme, 0.5, 4);
         tester.pump_widget(app);
 
         // Tap the center of the track to kick off the animation of the value indicator.
-        let center = slider_rect(&tester).center();
-        let mut gesture = WidgetTester::touch(1);
+        let center = slider_rect(tester).center();
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, center);
 
         // Nothing to paint at scale 0.
-        tester.pump(Duration::ZERO);
+        tester.pump();
         if check_material {
-            assert_eq!(count_ops(&tester, slider_render(&tester), draw_rect), 0);
-            assert_eq!(count_ops(&tester, slider_render(&tester), draw_circle), 0);
+            assert_eq!(count_ops(tester, slider_render(tester), draw_rect), 0);
+            assert_eq!(count_ops(tester, slider_render(tester), draw_circle), 0);
         }
-        assert_eq!(
-            count_ops(&tester, value_indicator_box(&tester), draw_path),
-            0
-        );
+        assert_eq!(count_ops(tester, value_indicator_box(tester), draw_path), 0);
 
         // Painting a path for the value indicator.
-        tester.pump(Duration::from_millis(16));
-        assert_eq!(
-            count_ops(&tester, value_indicator_box(&tester), draw_path),
-            1
-        );
+        tester.pump_by(Duration::from_millis(16));
+        assert_eq!(count_ops(tester, value_indicator_box(tester), draw_path), 1);
 
         tester.up(&gesture);
     }
@@ -2748,8 +2733,9 @@ mod tests {
         reason = "Dart's case sets the deprecated `ShowValueIndicator.always`"
     )]
     fn the_paddle_value_indicator_skips_all_painting_at_zero_scale() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             value_indicator_skips_painting_at_zero_scale(
+                tester,
                 |theme| {
                     theme
                         .show_value_indicator(ShowValueIndicator::Always)
@@ -2763,8 +2749,9 @@ mod tests {
     // 'Default slider value indicator shape skips all painting at zero scale'.
     #[test]
     fn the_default_value_indicator_shape_skips_all_painting_at_zero_scale() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             value_indicator_skips_painting_at_zero_scale(
+                tester,
                 |theme| theme.show_value_indicator(ShowValueIndicator::OnDrag),
                 false,
             );
@@ -2790,10 +2777,9 @@ mod tests {
     // trackRect.left and track radius'.
     #[test]
     fn a_rounded_rect_track_draws_its_active_track_only_past_the_left_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             assert!(rounded_rect_tracks(
-                &mut tester,
+                tester,
                 0.0,
                 // Inactive track.
                 &[RRect::from_ltrbr(
@@ -2806,7 +2792,7 @@ mod tests {
             ));
 
             assert!(rounded_rect_tracks(
-                &mut tester,
+                tester,
                 0.025,
                 &[
                     // Inactive track.
@@ -2822,10 +2808,9 @@ mod tests {
     // trackRect.right and track radius'.
     #[test]
     fn a_rounded_rect_track_draws_its_inactive_track_only_before_the_right_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             assert!(rounded_rect_tracks(
-                &mut tester,
+                tester,
                 1.0,
                 // Active track.
                 &[RRect::from_ltrbr(
@@ -2838,7 +2823,7 @@ mod tests {
             ));
 
             assert!(rounded_rect_tracks(
-                &mut tester,
+                tester,
                 0.975,
                 &[
                     // Inactive track.
@@ -2854,11 +2839,10 @@ mod tests {
     // RTL'.
     #[test]
     fn the_active_track_is_painted_on_top_of_the_inactive_track_in_rtl() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::slider_parts::RoundedRectSliderTrackShape;
             // Regression test for https://github.com/flutter/flutter/issues/194278
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 waft_widgets::Directionality::new(
@@ -2878,8 +2862,8 @@ mod tests {
             // height, so the inactive track must be painted first for the rounded end
             // of the active track not to be covered by it.
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &[
                     // Inactive track.
                     PaintCall::rrect_at(
@@ -2899,9 +2883,8 @@ mod tests {
     // 'SliderThemeData.padding can override the default Slider padding'.
     #[test]
     fn slider_theme_data_padding_overrides_the_default_slider_padding() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_painting::{EdgeInsets, EdgeInsetsDirectional};
-            let mut tester = tester_on(TargetPlatform::Android);
             let build_slider = |tester: &WidgetTester, padding: EdgeInsetsGeometry| {
                 let theme = ThemeData::builder()
                     .slider_theme(SliderThemeData::new().padding(padding))
@@ -2948,15 +2931,15 @@ mod tests {
             };
 
             // Test Slider height and tracks spacing with zero padding.
-            let app = build_slider(&tester, EdgeInsets::ZERO.into());
+            let app = build_slider(tester, EdgeInsets::ZERO.into());
             tester.pump_widget(app);
             tester.pump_and_settle();
 
             // The height equals to the default thumb height.
-            assert_eq!(slider_render_box_size(&tester), Size::new(800.0, 20.0));
+            assert_eq!(slider_render_box_size(tester), Size::new(800.0, 20.0));
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &tracks((398.0, 8.0, 800.0, 12.0), (0.0, 7.0, 402.0, 13.0))
             ));
 
@@ -2964,19 +2947,19 @@ mod tests {
             const START_PADDING: f64 = 100.0;
             const END_PADDING: f64 = 20.0;
             let app = build_slider(
-                &tester,
+                tester,
                 EdgeInsetsDirectional::only(START_PADDING, 0.0, END_PADDING, 0.0).into(),
             );
             tester.pump_widget(app);
             tester.pump_and_settle();
 
             assert_eq!(
-                slider_render_box_size(&tester),
+                slider_render_box_size(tester),
                 Size::new(800.0 - START_PADDING - END_PADDING, 20.0)
             );
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &tracks((338.0, 8.0, 680.0, 12.0), (0.0, 7.0, 342.0, 13.0))
             ));
 
@@ -2985,20 +2968,20 @@ mod tests {
             const BOTTOM_PADDING: f64 = 20.0;
             const TRACK_HEIGHT: f64 = 20.0;
             let app = build_slider(
-                &tester,
+                tester,
                 EdgeInsetsDirectional::only(0.0, TOP_PADDING, 0.0, BOTTOM_PADDING).into(),
             );
             tester.pump_widget(app);
             tester.pump_and_settle();
 
             assert_eq!(
-                crate::slider::tests::slider_size(&tester),
+                crate::slider::tests::slider_size(tester),
                 Size::new(800.0, TOP_PADDING + TRACK_HEIGHT + BOTTOM_PADDING)
             );
-            assert_eq!(slider_render_box_size(&tester), Size::new(800.0, 20.0));
+            assert_eq!(slider_render_box_size(tester), Size::new(800.0, 20.0));
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &tracks((398.0, 8.0, 800.0, 12.0), (0.0, 7.0, 402.0, 13.0))
             ));
         });
@@ -3029,9 +3012,8 @@ mod tests {
     // 'Slider with transparent track colors and custom track height can reach extreme ends'.
     #[test]
     fn a_slider_with_transparent_tall_tracks_reaches_its_extreme_ends() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SLIDER_PADDING: f64 = 24.0;
-            let mut tester = tester_on(TargetPlatform::Android);
             let theme = ThemeData::builder()
                 .slider_theme(
                     SliderThemeData::new()
@@ -3056,8 +3038,8 @@ mod tests {
 
             tester.pump_widget(build_slider(0.0));
             assert!(paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 SLIDER_PADDING,
                 300.0,
                 primary
@@ -3065,8 +3047,8 @@ mod tests {
 
             tester.pump_widget(build_slider(1.0));
             assert!(paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 800.0 - SLIDER_PADDING,
                 300.0,
                 primary

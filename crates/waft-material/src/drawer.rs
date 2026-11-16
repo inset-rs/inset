@@ -1122,19 +1122,18 @@ mod tests {
         PreferredSizeWidgetRef, Text,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::app_bar::AppBar;
     use crate::drawer_header::DrawerHeader;
     use crate::icons::Icons;
     use crate::list_tile::ListTile;
     use crate::scaffold::{Scaffold, ScaffoldState};
-    use crate::test_support::{
-        TestPointer, WidgetTester, is_same_color_as, restorable_material_app,
-        with_main_thread_stack,
-    };
+    use crate::test_support::{is_same_color_as, restorable_material_app};
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// Dart's `scaffoldKey.currentState!`, or `tester.firstState(find.byType(Scaffold))` of the
     /// one scaffold, which the case keys.
@@ -1255,8 +1254,11 @@ mod tests {
     }
 
     // drawer_test.dart 'Material2 - Drawer control test' and 'Material3 - Drawer control test'.
-    fn drawer_control_test(theme: fn(&App) -> ThemeData, header_divider: f64) {
-        let mut tester = tester();
+    fn drawer_control_test(
+        tester: &mut WidgetTester,
+        theme: fn(&App) -> ThemeData,
+        header_divider: f64,
+    ) {
         let key = GlobalKey::new();
         let container_key = GlobalKey::new();
         let saved_context = Rc::new(Cell::new(None));
@@ -1265,7 +1267,7 @@ mod tests {
             container_key.clone(),
             Rc::clone(&saved_context),
         );
-        pump_app(&mut tester, theme, move |_app| {
+        pump_app(tester, theme, move |_app| {
             Builder::new(move |_app, context| {
                 saved.set(Some(context));
 
@@ -1293,13 +1295,13 @@ mod tests {
             .into_widget()
         });
 
-        assert_eq!(found(&tester, "Archive"), 0);
-        open_drawer(&tester, &key);
+        assert_eq!(found(tester, "Archive"), 0);
+        open_drawer(tester, &key);
 
-        tester.pump(Duration::ZERO);
-        assert_eq!(found(&tester, "Archive"), 1);
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(found(&tester, "Archive"), 1);
+        tester.pump();
+        assert_eq!(found(tester, "Archive"), 1);
+        tester.pump_by(Duration::from_secs(1));
+        assert_eq!(found(tester, "Archive"), 1);
 
         let header = *tester
             .find_by_type::<DrawerHeader>()
@@ -1319,73 +1321,71 @@ mod tests {
             header_size.height() - 2.0 * 16.0 - header_divider
         );
 
-        assert_eq!(found(&tester, "header"), 1);
+        assert_eq!(found(tester, "header"), 1);
 
         {
             let context = saved_context.get().expect("the builder built");
             let mut app = tester.cell.borrow_mut();
             waft_widgets::Navigator::pop(&mut app, context, None);
         }
-        tester.pump(Duration::ZERO); // drawer should be starting to animate away
-        assert_eq!(found(&tester, "Archive"), 1);
-        tester.pump(Duration::from_secs(1)); // animation done
-        assert_eq!(found(&tester, "Archive"), 0);
+        tester.pump(); // drawer should be starting to animate away
+        assert_eq!(found(tester, "Archive"), 1);
+        tester.pump_by(Duration::from_secs(1)); // animation done
+        assert_eq!(found(tester, "Archive"), 0);
     }
 
     #[test]
     fn material2_drawer_control_test() {
-        with_main_thread_stack(|| drawer_control_test(m2, 0.0));
+        test_widgets(|tester| drawer_control_test(tester, m2, 0.0));
     }
 
     #[test]
     fn material3_drawer_control_test() {
         // Header divider thickness is 1.0 in Material 3.
-        with_main_thread_stack(|| drawer_control_test(m3, 1.0));
+        test_widgets(|tester| drawer_control_test(tester, m3, 1.0));
     }
 
     #[test]
     fn drawer_tap_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 text_drawer_scaffold(&key, "drawer").into_widget()
             });
-            tester.pump(Duration::ZERO); // no effect
-            assert_eq!(found(&tester, "drawer"), 0);
-            open_drawer(&tester, &key);
-            tester.pump(Duration::ZERO); // drawer should be starting to animate in
-            assert_eq!(found(&tester, "drawer"), 1);
-            tester.pump(Duration::from_secs(1)); // animation done
-            assert_eq!(found(&tester, "drawer"), 1);
-            let at = text_rect(&tester, "drawer").center();
+            tester.pump(); // no effect
+            assert_eq!(found(tester, "drawer"), 0);
+            open_drawer(tester, &key);
+            tester.pump(); // drawer should be starting to animate in
+            assert_eq!(found(tester, "drawer"), 1);
+            tester.pump_by(Duration::from_secs(1)); // animation done
+            assert_eq!(found(tester, "drawer"), 1);
+            let at = text_rect(tester, "drawer").center();
             tester.tap(at, 1);
-            tester.pump(Duration::ZERO); // nothing should have happened
-            assert_eq!(found(&tester, "drawer"), 1);
-            tester.pump(Duration::from_secs(1)); // ditto
-            assert_eq!(found(&tester, "drawer"), 1);
+            tester.pump(); // nothing should have happened
+            assert_eq!(found(tester, "drawer"), 1);
+            tester.pump_by(Duration::from_secs(1)); // ditto
+            assert_eq!(found(tester, "drawer"), 1);
             tester.tap(Offset::new(750.0, 100.0), 2); // on the mask
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(10));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(10));
             // drawer should be starting to animate away
-            assert_eq!(found(&tester, "drawer"), 1);
-            tester.pump(Duration::from_secs(1)); // animation done
-            assert_eq!(found(&tester, "drawer"), 0);
+            assert_eq!(found(tester, "drawer"), 1);
+            tester.pump_by(Duration::from_secs(1)); // animation done
+            assert_eq!(found(tester, "drawer"), 0);
         });
     }
 
     #[test]
     fn drawer_hover_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let logs = Rc::new(RefCell::new(Vec::<&'static str>::new()));
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             // Start out of hoverTarget
             tester.add_pointer(&mut gesture, Offset::new(100.0, 100.0));
 
             let log = Rc::clone(&logs);
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 let (enter, hover, exit) = (Rc::clone(&log), Rc::clone(&log), Rc::clone(&log));
                 Scaffold::new()
                     .key(key.clone().into())
@@ -1408,47 +1408,47 @@ mod tests {
                     .into_widget()
             });
             assert!(logs.borrow().is_empty());
-            assert_eq!(found(&tester, "drawer"), 0);
+            assert_eq!(found(tester, "drawer"), 0);
 
             // When drawer is closed, hover is interactable
             tester.move_to(&mut gesture, Offset::new(5.0, 5.0), false);
-            tester.pump(Duration::ZERO); // no effect
+            tester.pump(); // no effect
             assert_eq!(*logs.borrow(), ["enter", "hover"]);
             logs.borrow_mut().clear();
 
             tester.move_to(&mut gesture, Offset::new(20.0, 20.0), false);
-            tester.pump(Duration::ZERO); // no effect
+            tester.pump(); // no effect
             assert_eq!(*logs.borrow(), ["exit"]);
             logs.borrow_mut().clear();
 
             // When drawer is open, hover is uninteractable
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1)); // animation done
-            assert_eq!(found(&tester, "drawer"), 1);
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1)); // animation done
+            assert_eq!(found(tester, "drawer"), 1);
 
             tester.move_to(&mut gesture, Offset::new(5.0, 5.0), false);
-            tester.pump(Duration::ZERO); // no effect
+            tester.pump(); // no effect
             assert!(logs.borrow().is_empty());
             logs.borrow_mut().clear();
 
             tester.move_to(&mut gesture, Offset::new(20.0, 20.0), false);
-            tester.pump(Duration::ZERO); // no effect
+            tester.pump(); // no effect
             assert!(logs.borrow().is_empty());
             logs.borrow_mut().clear();
 
             // Close drawer, hover is interactable again
             tester.tap(Offset::new(750.0, 100.0), 2); // on the mask
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1)); // animation done
-            assert_eq!(found(&tester, "drawer"), 0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1)); // animation done
+            assert_eq!(found(tester, "drawer"), 0);
 
             tester.move_to(&mut gesture, Offset::new(5.0, 5.0), false);
-            tester.pump(Duration::ZERO); // no effect
+            tester.pump(); // no effect
             assert_eq!(*logs.borrow(), ["enter", "hover"]);
             logs.borrow_mut().clear();
 
             tester.move_to(&mut gesture, Offset::new(20.0, 20.0), false);
-            tester.pump(Duration::ZERO); // no effect
+            tester.pump(); // no effect
             assert_eq!(*logs.borrow(), ["exit"]);
             logs.borrow_mut().clear();
         });
@@ -1456,8 +1456,7 @@ mod tests {
 
     #[test]
     fn scaffold_drawer_scrim_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let build_frame = |tester: &mut WidgetTester, drawer_scrim_color: Option<Color>| {
                 pump_app(tester, m3, |_app| {
@@ -1480,7 +1479,7 @@ mod tests {
 
             let check_scrim = |tester: &mut WidgetTester, color: Color| {
                 open_drawer(tester, &key);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert!(is_same_color_as(
                     scrim_color(tester),
                     color.with_values(Some(0.0), None, None, None, None)
@@ -1496,21 +1495,20 @@ mod tests {
             };
 
             // Default drawerScrimColor
-            build_frame(&mut tester, None);
-            check_scrim(&mut tester, Colors::BLACK54);
+            build_frame(tester, None);
+            check_scrim(tester, Colors::BLACK54);
 
             // Specific drawerScrimColor
-            build_frame(&mut tester, Some(Color::new(0xFF323232)));
-            check_scrim(&mut tester, Color::new(0xFF323232));
+            build_frame(tester, Some(Color::new(0xFF323232)));
+            check_scrim(tester, Color::new(0xFF323232));
         });
     }
 
     #[test]
     fn open_close_drawers_by_flinging() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .key(key.clone().into())
                     .drawer(Drawer::new().child(Text::new("start drawer")))
@@ -1519,8 +1517,8 @@ mod tests {
             });
 
             // In the beginning, drawers are closed
-            assert!(!is_drawer_open(&tester, &key));
-            assert!(!is_end_drawer_open(&tester, &key));
+            assert!(!is_drawer_open(tester, &key));
+            assert!(!is_end_drawer_open(tester, &key));
             let size = WidgetTester::SIZE;
 
             // A fling from the left opens the start drawer
@@ -1531,8 +1529,8 @@ mod tests {
                 1,
             );
             tester.pump_and_settle();
-            assert!(is_drawer_open(&tester, &key));
-            assert!(!is_end_drawer_open(&tester, &key));
+            assert!(is_drawer_open(tester, &key));
+            assert!(!is_end_drawer_open(tester, &key));
 
             // Now, a fling from the right closes the drawer
             tester.fling_from(
@@ -1542,8 +1540,8 @@ mod tests {
                 2,
             );
             tester.pump_and_settle();
-            assert!(!is_drawer_open(&tester, &key));
-            assert!(!is_end_drawer_open(&tester, &key));
+            assert!(!is_drawer_open(tester, &key));
+            assert!(!is_end_drawer_open(tester, &key));
 
             // Another fling from the right opens the end drawer
             tester.fling_from(
@@ -1553,8 +1551,8 @@ mod tests {
                 3,
             );
             tester.pump_and_settle();
-            assert!(!is_drawer_open(&tester, &key));
-            assert!(is_end_drawer_open(&tester, &key));
+            assert!(!is_drawer_open(tester, &key));
+            assert!(is_end_drawer_open(tester, &key));
 
             // And a fling from the left closes it
             tester.fling_from(
@@ -1564,17 +1562,16 @@ mod tests {
                 4,
             );
             tester.pump_and_settle();
-            assert!(!is_drawer_open(&tester, &key));
-            assert!(!is_end_drawer_open(&tester, &key));
+            assert!(!is_drawer_open(tester, &key));
+            assert!(!is_end_drawer_open(tester, &key));
         });
     }
 
     #[test]
     fn open_close_drawer_by_dragging() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .platform(TargetPlatform::Android)
@@ -1583,7 +1580,7 @@ mod tests {
                 |_app| Scaffold::new().drawer(Drawer::new()).into_widget(),
             );
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             let drawer_position = |tester: &WidgetTester| {
                 assert_eq!(drawers(tester), 1);
                 tester.global_rect(drawer_box(tester)).left
@@ -1596,49 +1593,48 @@ mod tests {
 
             // Pointer down (drawer is closed).
             tester.down(&mut gesture, Offset::new(2.0, 2.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(drawers(&tester), 0);
+            tester.pump();
+            assert_eq!(drawers(tester), 0);
 
             // Open drawer slightly.
-            move_by(&mut tester, &mut gesture, Offset::new(20.0, 0.0));
-            tester.pump(Duration::ZERO);
-            assert!(drawer_position(&tester) < 0.0);
+            move_by(tester, &mut gesture, Offset::new(20.0, 0.0));
+            tester.pump();
+            assert!(drawer_position(tester) < 0.0);
 
             // Open drawer more than halfway.
-            move_by(&mut tester, &mut gesture, Offset::new(200.0, 0.0));
-            tester.pump(Duration::ZERO);
-            assert!(drawer_position(&tester) < 0.0);
+            move_by(tester, &mut gesture, Offset::new(200.0, 0.0));
+            tester.pump();
+            assert!(drawer_position(tester) < 0.0);
 
             // Drawer is fully open.
-            move_by(&mut tester, &mut gesture, Offset::new(200.0, 0.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(drawer_position(&tester), 0.0);
+            move_by(tester, &mut gesture, Offset::new(200.0, 0.0));
+            tester.pump();
+            assert_eq!(drawer_position(tester), 0.0);
 
             // Drawer is less than halfway closed.
-            move_by(&mut tester, &mut gesture, Offset::new(-100.0, 0.0));
-            tester.pump(Duration::ZERO);
-            assert!((drawer_position(&tester) - -100.0).abs() < 1e-10);
+            move_by(tester, &mut gesture, Offset::new(-100.0, 0.0));
+            tester.pump();
+            assert!((drawer_position(tester) - -100.0).abs() < 1e-10);
 
             // Drawer is more than halfway closed.
-            move_by(&mut tester, &mut gesture, Offset::new(-100.0, 0.0));
-            tester.pump(Duration::ZERO);
-            assert!((drawer_position(&tester) - -200.0).abs() < 1e-10);
+            move_by(tester, &mut gesture, Offset::new(-100.0, 0.0));
+            tester.pump();
+            assert!((drawer_position(tester) - -200.0).abs() < 1e-10);
 
             // Drawer is completely closed.
             tester.move_to(&mut gesture, Offset::ZERO, true);
-            tester.pump(Duration::ZERO);
-            assert_eq!(drawers(&tester), 0);
+            tester.pump();
+            assert_eq!(drawers(tester), 0);
         });
     }
 
     #[test]
     fn close_drawer_with_navigator_pop() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let button_pressed = Rc::new(Cell::new(false));
             let (scaffold, pressed) = (key.clone(), Rc::clone(&button_pressed));
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 Builder::new(move |_app, context| {
                     let pressed = Rc::clone(&pressed);
                     Scaffold::new()
@@ -1667,29 +1663,31 @@ mod tests {
             });
 
             // Open the drawer.
-            open_drawer(&tester, &key);
-            tester.pump(Duration::ZERO); // drawer should be starting to animate in
-            assert_eq!(found(&tester, "drawer"), 1);
+            open_drawer(tester, &key);
+            tester.pump(); // drawer should be starting to animate in
+            assert_eq!(found(tester, "drawer"), 1);
 
             // Tap the close button to pop the drawer route.
-            tester.pump(Duration::from_millis(100));
-            let at = text_rect(&tester, "close").center();
+            tester.pump_by(Duration::from_millis(100));
+            let at = text_rect(tester, "close").center();
             tester.tap(at, 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
-            assert_eq!(found(&tester, "drawer"), 0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            assert_eq!(found(tester, "drawer"), 0);
 
             // Confirm that a button in the scaffold body is still clickable.
-            let at = text_rect(&tester, "button").center();
+            let at = text_rect(tester, "button").center();
             tester.tap(at, 2);
             assert!(button_pressed.get());
         });
     }
 
-    fn drawer_closing_can_be_canceled_by_gesture(text_direction: TextDirection) {
-        let mut tester = tester();
+    fn drawer_closing_can_be_canceled_by_gesture(
+        tester: &mut WidgetTester,
+        text_direction: TextDirection,
+    ) {
         let key = GlobalKey::new();
-        pump_app(&mut tester, m3, |_app| {
+        pump_app(tester, m3, |_app| {
             Directionality::new(
                 text_direction,
                 Scaffold::new()
@@ -1716,52 +1714,56 @@ mod tests {
             let rect = text_rect(tester, "drawer");
             if ltr { rect.left } else { rect.right }
         };
-        assert_eq!(found(&tester, "drawer"), 0);
-        open_drawer(&tester, &key);
-        tester.pump(Duration::ZERO); // drawer should be starting to animate in
-        assert_eq!(found(&tester, "drawer"), 1);
-        tester.pump(Duration::from_secs(1)); // animation done
-        assert_eq!(found(&tester, "drawer"), 1);
+        assert_eq!(found(tester, "drawer"), 0);
+        open_drawer(tester, &key);
+        tester.pump(); // drawer should be starting to animate in
+        assert_eq!(found(tester, "drawer"), 1);
+        tester.pump_by(Duration::from_secs(1)); // animation done
+        assert_eq!(found(tester, "drawer"), 1);
 
         tester.tap(Offset::new(if ltr { 750.0 } else { 50.0 }, 100.0), 1); // on the mask
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(10));
+        tester.pump();
+        tester.pump_by(Duration::from_millis(10));
         // drawer should be starting to animate away
-        let text_start = text_edge(&tester);
+        let text_start = text_edge(tester);
         if ltr {
             assert!(text_start < 0.0);
         } else {
             assert!(text_start > 800.0);
         }
 
-        let mut gesture = WidgetTester::touch(2);
+        let mut gesture = TestPointer::touch(2);
         tester.down(
             &mut gesture,
             Offset::new(if ltr { 100.0 } else { 700.0 }, 100.0),
         );
         // drawer should be stopped.
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(10));
-        assert_eq!(text_edge(&tester), text_start);
+        tester.pump();
+        tester.pump_by(Duration::from_millis(10));
+        assert_eq!(text_edge(tester), text_start);
 
         let at = gesture.position + Offset::new(if ltr { 50.0 } else { -50.0 }, 0.0);
         tester.move_to(&mut gesture, at, true);
         // drawer should be returning to visible
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(text_edge(&tester), if ltr { 0.0 } else { 800.0 });
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
+        assert_eq!(text_edge(tester), if ltr { 0.0 } else { 800.0 });
 
         tester.up(&gesture);
     }
 
     #[test]
     fn drawer_closing_can_be_canceled_by_gesture_ltr() {
-        with_main_thread_stack(|| drawer_closing_can_be_canceled_by_gesture(TextDirection::Ltr));
+        test_widgets(|tester| {
+            drawer_closing_can_be_canceled_by_gesture(tester, TextDirection::Ltr)
+        });
     }
 
     #[test]
     fn drawer_closing_can_be_canceled_by_gesture_rtl() {
-        with_main_thread_stack(|| drawer_closing_can_be_canceled_by_gesture(TextDirection::Rtl));
+        test_widgets(|tester| {
+            drawer_closing_can_be_canceled_by_gesture(tester, TextDirection::Rtl)
+        });
     }
 
     /// Dart's `tester.pumpWidget(MaterialApp(restorationScopeId: 'app', home: scaffold()))` on
@@ -1772,7 +1774,6 @@ mod tests {
         scaffold: &dyn Fn() -> Scaffold,
     ) -> WidgetTester {
         let mut tester = WidgetTester::restoring(data);
-        tester.install_fonts();
         let theme = m3(&tester.cell.borrow());
         tester.pump_widget(restorable_material_app(
             "app",
@@ -1788,31 +1789,33 @@ mod tests {
         let key = GlobalKey::new();
         let scaffold = || text_drawer_scaffold(&key, text);
         let mut tester = restored(None, &scaffold);
-        tester.pump(Duration::ZERO); // no effect
-        assert_eq!(found(&tester, text), 0);
-        open_drawer(&tester, &key);
+        let tester = &mut tester;
+        tester.pump(); // no effect
+        assert_eq!(found(tester, text), 0);
+        open_drawer(tester, &key);
         tester.pump_and_settle();
-        assert_eq!(found(&tester, text), 1);
+        assert_eq!(found(tester, text), 1);
 
-        let tester = restored(tester.restoration_data(), &scaffold);
+        let mut tester = restored(tester.restoration_data(), &scaffold);
+        let tester = &mut tester;
         // Drawer state should not have been saved.
-        assert_eq!(found(&tester, text), 0);
+        assert_eq!(found(tester, text), 0);
     }
 
     #[test]
     fn scaffold_drawer_null_restoration_id() {
-        with_main_thread_stack(|| null_restoration_id("drawer"));
+        test_widgets(|_| null_restoration_id("drawer"));
     }
 
     #[test]
     fn scaffold_end_drawer_null_restoration_id() {
         // Dart's case gives its text as the start drawer.
-        with_main_thread_stack(|| null_restoration_id("endDrawer"));
+        test_widgets(|_| null_restoration_id("endDrawer"));
     }
 
     #[test]
     fn scaffold_drawer_state_restoration_test() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let scaffold = || {
                 Scaffold::new()
@@ -1822,28 +1825,31 @@ mod tests {
                     .body(Container::new())
             };
             let mut tester = restored(None, &scaffold);
-            tester.pump(Duration::ZERO); // no effect
-            assert_eq!(found(&tester, "drawer"), 0);
-            open_drawer(&tester, &key);
+            let tester = &mut tester;
+            tester.pump(); // no effect
+            assert_eq!(found(tester, "drawer"), 0);
+            open_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "drawer"), 1);
+            assert_eq!(found(tester, "drawer"), 1);
 
             let mut tester = restored(tester.restoration_data(), &scaffold);
-            assert_eq!(found(&tester, "drawer"), 1);
+            let tester = &mut tester;
+            assert_eq!(found(tester, "drawer"), 1);
 
             let data = tester.restoration_data();
             tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "drawer"), 0);
+            assert_eq!(found(tester, "drawer"), 0);
 
-            let tester = restored(data, &scaffold);
-            assert_eq!(found(&tester, "drawer"), 1);
+            let mut tester = restored(data, &scaffold);
+            let tester = &mut tester;
+            assert_eq!(found(tester, "drawer"), 1);
         });
     }
 
     #[test]
     fn scaffold_end_drawer_state_restoration_test() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let scaffold = || {
                 Scaffold::new()
@@ -1853,28 +1859,31 @@ mod tests {
                     .body(Container::new())
             };
             let mut tester = restored(None, &scaffold);
-            tester.pump(Duration::ZERO); // no effect
-            assert_eq!(found(&tester, "endDrawer"), 0);
-            open_end_drawer(&tester, &key);
+            let tester = &mut tester;
+            tester.pump(); // no effect
+            assert_eq!(found(tester, "endDrawer"), 0);
+            open_end_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "endDrawer"), 1);
+            assert_eq!(found(tester, "endDrawer"), 1);
 
             let mut tester = restored(tester.restoration_data(), &scaffold);
-            assert_eq!(found(&tester, "endDrawer"), 1);
+            let tester = &mut tester;
+            assert_eq!(found(tester, "endDrawer"), 1);
 
             let data = tester.restoration_data();
             tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "endDrawer"), 0);
+            assert_eq!(found(tester, "endDrawer"), 0);
 
-            let tester = restored(data, &scaffold);
-            assert_eq!(found(&tester, "endDrawer"), 1);
+            let mut tester = restored(data, &scaffold);
+            let tester = &mut tester;
+            assert_eq!(found(tester, "endDrawer"), 1);
         });
     }
 
     #[test]
     fn both_drawer_and_end_drawer_state_restoration_test() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let scaffold = || {
                 Scaffold::new()
@@ -1887,88 +1896,90 @@ mod tests {
             let shown =
                 |tester: &WidgetTester| (found(tester, "drawer"), found(tester, "endDrawer"));
             let mut tester = restored(None, &scaffold);
-            tester.pump(Duration::ZERO); // no effect
-            assert_eq!(shown(&tester), (0, 0));
-            open_drawer(&tester, &key);
+            let tester = &mut tester;
+            tester.pump(); // no effect
+            assert_eq!(shown(tester), (0, 0));
+            open_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(shown(&tester), (1, 0));
+            assert_eq!(shown(tester), (1, 0));
 
             let mut tester = restored(tester.restoration_data(), &scaffold);
-            assert_eq!(shown(&tester), (1, 0));
+            let tester = &mut tester;
+            assert_eq!(shown(tester), (1, 0));
 
             let data = tester.restoration_data();
             tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
-            assert_eq!(shown(&tester), (0, 0));
+            assert_eq!(shown(tester), (0, 0));
 
             let mut tester = restored(data, &scaffold);
-            assert_eq!(shown(&tester), (1, 0));
+            let tester = &mut tester;
+            assert_eq!(shown(tester), (1, 0));
 
             tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
-            assert_eq!(shown(&tester), (0, 0));
+            assert_eq!(shown(tester), (0, 0));
 
-            open_end_drawer(&tester, &key);
+            open_end_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(shown(&tester), (0, 1));
+            assert_eq!(shown(tester), (0, 1));
 
             let mut tester = restored(tester.restoration_data(), &scaffold);
-            assert_eq!(shown(&tester), (0, 1));
+            let tester = &mut tester;
+            assert_eq!(shown(tester), (0, 1));
 
             let data = tester.restoration_data();
             tester.tap(Offset::new(750.0, 100.0), 1); // on the mask
             tester.pump_and_settle();
-            assert_eq!(shown(&tester), (0, 0));
+            assert_eq!(shown(tester), (0, 0));
 
-            let tester = restored(data, &scaffold);
-            assert_eq!(shown(&tester), (0, 1));
+            let mut tester = restored(data, &scaffold);
+            let tester = &mut tester;
+            assert_eq!(shown(tester), (0, 1));
         });
     }
 
     #[test]
     fn scaffold_state_close_drawer() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 text_drawer_scaffold(&key, "Drawer").into_widget()
             });
 
-            assert_eq!(found(&tester, "Drawer"), 0);
+            assert_eq!(found(tester, "Drawer"), 0);
 
-            open_drawer(&tester, &key);
+            open_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "Drawer"), 1);
+            assert_eq!(found(tester, "Drawer"), 1);
 
-            close_drawer(&tester, &key);
+            close_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "Drawer"), 0);
+            assert_eq!(found(tester, "Drawer"), 0);
         });
     }
 
     #[test]
     fn scaffold_state_close_drawer_do_not_crash_if_drawer_is_already_closed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 text_drawer_scaffold(&key, "Drawer").into_widget()
             });
 
-            assert_eq!(found(&tester, "Drawer"), 0);
+            assert_eq!(found(tester, "Drawer"), 0);
 
-            close_drawer(&tester, &key);
+            close_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "Drawer"), 0);
+            assert_eq!(found(tester, "Drawer"), 0);
         });
     }
 
     #[test]
     fn scaffold_state_close_end_drawer() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .key(key.clone().into())
                     .end_drawer(Text::new("endDrawer"))
@@ -1976,58 +1987,56 @@ mod tests {
                     .into_widget()
             });
 
-            assert_eq!(found(&tester, "endDrawer"), 0);
+            assert_eq!(found(tester, "endDrawer"), 0);
 
-            open_end_drawer(&tester, &key);
+            open_end_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "endDrawer"), 1);
+            assert_eq!(found(tester, "endDrawer"), 1);
 
-            close_end_drawer(&tester, &key);
+            close_end_drawer(tester, &key);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "endDrawer"), 0);
+            assert_eq!(found(tester, "endDrawer"), 0);
         });
     }
 
     #[test]
     fn drawer_width_defaults_to_material_spec() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .key(key.clone().into())
                     .drawer(Drawer::new())
                     .into_widget()
             });
 
-            open_drawer(&tester, &key);
+            open_drawer(tester, &key);
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
 
-            assert_eq!(drawer_width(&tester), 304.0);
+            assert_eq!(drawer_width(tester), 304.0);
         });
     }
 
     #[test]
     fn drawer_width_can_be_customized_by_parameter() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SMALL_WIDTH: f64 = 200.0;
 
-            let mut tester = tester();
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Scaffold::new()
                     .key(key.clone().into())
                     .drawer(Drawer::new().width(SMALL_WIDTH))
                     .into_widget()
             });
 
-            open_drawer(&tester, &key);
+            open_drawer(tester, &key);
 
             tester.pump_and_settle();
 
-            assert_eq!(drawer_width(&tester), SMALL_WIDTH);
+            assert_eq!(drawer_width(tester), SMALL_WIDTH);
         });
     }
 
@@ -2035,14 +2044,14 @@ mod tests {
     /// Drawer())`, under `text_direction` where the case gives one; the start drawer opened,
     /// a tap at (750, 300), then the end drawer opened.
     fn drawer_default_shape(
+        tester: &mut WidgetTester,
         theme: fn(&App) -> ThemeData,
         text_direction: Option<TextDirection>,
         start_shape: Option<RoundedRectangleBorder>,
         end_shape: Option<RoundedRectangleBorder>,
     ) {
-        let mut tester = tester();
         let key = GlobalKey::new();
-        pump_app(&mut tester, theme, |_app| {
+        pump_app(tester, theme, |_app| {
             let scaffold = Scaffold::new()
                 .key(key.clone().into())
                 .drawer(Drawer::new())
@@ -2054,24 +2063,24 @@ mod tests {
         });
 
         // Open the drawer.
-        open_drawer(&tester, &key);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_secs(1));
+        open_drawer(tester, &key);
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
 
         // Test the drawer shape.
-        assert_shape(&tester, start_shape);
+        assert_shape(tester, start_shape);
 
         // Close the opened drawer.
         tester.tap(Offset::new(750.0, 300.0), 1);
         tester.pump_and_settle();
 
         // Open the end drawer.
-        open_end_drawer(&tester, &key);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_secs(1));
+        open_end_drawer(tester, &key);
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
 
         // Test the end drawer shape.
-        assert_shape(&tester, end_shape);
+        assert_shape(tester, end_shape);
     }
 
     fn right_rounded() -> RoundedRectangleBorder {
@@ -2094,8 +2103,9 @@ mod tests {
 
     #[test]
     fn material3_drawer_default_shape_ltr() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             drawer_default_shape(
+                tester,
                 m3,
                 Some(TextDirection::Ltr),
                 Some(right_rounded()),
@@ -2106,8 +2116,9 @@ mod tests {
 
     #[test]
     fn material3_drawer_default_shape_rtl() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             drawer_default_shape(
+                tester,
                 m3,
                 Some(TextDirection::Rtl),
                 Some(left_rounded()),
@@ -2118,19 +2129,19 @@ mod tests {
 
     #[test]
     fn material2_drawer_default_shape() {
-        with_main_thread_stack(|| drawer_default_shape(m2, None, None, None));
+        test_widgets(|tester| drawer_default_shape(tester, m2, None, None, None));
     }
 
     /// drawer_test.dart's clip behavior cases: the default, then the drawer `second` makes.
     fn drawer_clip_behavior(
+        tester: &mut WidgetTester,
         theme: fn(&App) -> ThemeData,
         default_clip: Clip,
         second: fn() -> Drawer,
         second_clip: Clip,
     ) {
-        let mut tester = tester();
         let key = GlobalKey::new();
-        pump_app(&mut tester, theme, |_app| {
+        pump_app(tester, theme, |_app| {
             Scaffold::new()
                 .key(key.clone().into())
                 .drawer(Drawer::new())
@@ -2138,21 +2149,21 @@ mod tests {
         });
 
         // Open the drawer.
-        open_drawer(&tester, &key);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_secs(1));
+        open_drawer(tester, &key);
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
 
         // Test default clip behavior.
         assert_eq!(
-            material(&tester, |material| material.clip_behavior),
+            material(tester, |material| material.clip_behavior),
             default_clip
         );
 
-        close_drawer(&tester, &key);
+        close_drawer(tester, &key);
         tester.pump_and_settle();
 
         // Provide a custom clip behavior.
-        pump_app(&mut tester, theme, |_app| {
+        pump_app(tester, theme, |_app| {
             Scaffold::new()
                 .key(key.clone().into())
                 .drawer(second())
@@ -2160,21 +2171,22 @@ mod tests {
         });
 
         // Open the drawer again.
-        open_drawer(&tester, &key);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_secs(1));
+        open_drawer(tester, &key);
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
 
         // Clip behavior is now updated.
         assert_eq!(
-            material(&tester, |material| material.clip_behavior),
+            material(tester, |material| material.clip_behavior),
             second_clip
         );
     }
 
     #[test]
     fn material3_drawer_clip_behavior() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             drawer_clip_behavior(
+                tester,
                 m3,
                 Clip::HardEdge,
                 || Drawer::new().clip_behavior(Clip::AntiAlias),
@@ -2185,8 +2197,9 @@ mod tests {
 
     #[test]
     fn material2_drawer_clip_behavior() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             drawer_clip_behavior(
+                tester,
                 m2,
                 Clip::None,
                 || {
@@ -2201,10 +2214,9 @@ mod tests {
 
     /// drawer_test.dart's barrier cases: an end drawer opened, closed, opened again, and a
     /// tap on the route's barrier at (400, 300).
-    fn drawer_barrier(drawer_barrier_dismissible: bool) {
-        let mut tester = tester();
+    fn drawer_barrier(tester: &mut WidgetTester, drawer_barrier_dismissible: bool) {
         let key = GlobalKey::new();
-        pump_app(&mut tester, m2, |_app| {
+        pump_app(tester, m2, |_app| {
             Scaffold::new()
                 .key(key.clone().into())
                 .drawer_barrier_dismissible(drawer_barrier_dismissible)
@@ -2236,31 +2248,31 @@ mod tests {
         );
 
         // Verify whether the drawer barrier is dismissible via the state
-        let state = scaffold_state(&tester, &key);
+        let state = scaffold_state(tester, &key);
         assert_eq!(
             state.is_drawer_barrier_dismissible(&tester.cell.borrow()),
             drawer_barrier_dismissible
         );
 
         // Open the drawer initially.
-        open_end_drawer(&tester, &key);
+        open_end_drawer(tester, &key);
 
         tester.pump_and_settle();
 
         // Check that the drawer open.
-        assert_eq!(drawers(&tester), 1);
+        assert_eq!(drawers(tester), 1);
 
         // Close the drawer programmatically.
-        close_end_drawer(&tester, &key);
+        close_end_drawer(tester, &key);
         tester.pump_and_settle();
 
-        assert_eq!(drawers(&tester), 0);
+        assert_eq!(drawers(tester), 0);
 
         // Open it again, and make sure the drawer is available.
-        open_end_drawer(&tester, &key);
+        open_end_drawer(tester, &key);
         tester.pump_and_settle();
 
-        assert_eq!(drawers(&tester), 1);
+        assert_eq!(drawers(tester), 1);
 
         // Find the ModalBarrier.
         let modal_barriers = tester.find_by_type::<ModalBarrier>();
@@ -2269,42 +2281,41 @@ mod tests {
         // Calculate a point to tap outside the Drawer.
         // This example taps on the ModalBarrier somewhere outside its boundaries.
         let modal_barrier_center = Offset::new(400.0, 300.0);
-        let tap_position = top_left(&tester, modal_barriers[0]) + modal_barrier_center;
+        let tap_position = top_left(tester, modal_barriers[0]) + modal_barrier_center;
 
         // Tap on the ModalBarrier.
         tester.tap(tap_position, 1);
         tester.pump_and_settle();
 
         assert_eq!(
-            drawers(&tester),
+            drawers(tester),
             if drawer_barrier_dismissible { 0 } else { 1 }
         );
     }
 
     #[test]
     fn drawer_barrier_is_dismissible_by_default() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert!(Scaffold::new().drawer_barrier_dismissible);
             // Make sure the drawer is gone, since the drawerBarrierDismissible flag is set to
             // true by default.
-            drawer_barrier(true);
+            drawer_barrier(tester, true);
         });
     }
 
     #[test]
     fn drawer_can_be_configured_as_not_dismissible() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Make sure the drawer is still present, and that tapping on the modal barrier
             // didn't dismiss it, since the drawerBarrierDismissible property is set to false.
-            drawer_barrier(false);
+            drawer_barrier(tester, false);
         });
     }
 
     /// drawer_test.dart's escape key cases: the drawer opened, and the escape key sent.
-    fn escape_key(drawer_barrier_dismissible: Option<bool>) -> usize {
-        let mut tester = tester();
+    fn escape_key(tester: &mut WidgetTester, drawer_barrier_dismissible: Option<bool>) -> usize {
         let key = GlobalKey::new();
-        pump_app(&mut tester, m3, |_app| {
+        pump_app(tester, m3, |_app| {
             let mut scaffold = Scaffold::new()
                 .key(key.clone().into())
                 .drawer(Drawer::new().child(Text::new("drawer")));
@@ -2314,35 +2325,35 @@ mod tests {
             scaffold.into_widget()
         });
 
-        let state = scaffold_state(&tester, &key);
+        let state = scaffold_state(tester, &key);
         assert_eq!(
             state.is_drawer_barrier_dismissible(&tester.cell.borrow()),
             drawer_barrier_dismissible.unwrap_or(true)
         );
 
         // Open the drawer.
-        open_drawer(&tester, &key);
+        open_drawer(tester, &key);
         tester.pump_and_settle();
-        assert_eq!(found(&tester, "drawer"), 1);
+        assert_eq!(found(tester, "drawer"), 1);
 
         tester.send_key_event(
             waft_services::PhysicalKeyboardKey::ESCAPE,
             waft_services::LogicalKeyboardKey::ESCAPE,
         );
         tester.pump_and_settle();
-        found(&tester, "drawer")
+        found(tester, "drawer")
     }
 
     #[test]
     fn drawer_can_be_dismissed_with_the_escape_key_by_default() {
         // Close the drawer with the escape key.
-        with_main_thread_stack(|| assert_eq!(escape_key(None), 0));
+        test_widgets(|tester| assert_eq!(escape_key(tester, None), 0));
     }
 
     #[test]
     fn drawer_cannot_be_dismissed_with_the_escape_key_when_drawer_barrier_dismissible_is_false() {
         // Try to close the drawer with the escape key, and verify it does not close.
-        with_main_thread_stack(|| assert_eq!(escape_key(Some(false)), 1));
+        test_widgets(|tester| assert_eq!(escape_key(tester, Some(false)), 1));
     }
 
     /// The widget the one `Drawer`'s element built: a new one each time the drawer builds.
@@ -2357,8 +2368,7 @@ mod tests {
     /// direction.
     #[test]
     fn a_material3_drawer_with_its_own_shape_does_not_depend_on_the_text_direction() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let drawer = Drawer::new()
                 .shape(RoundedRectangleBorder::new(
                     BorderSide::NONE,
@@ -2369,12 +2379,12 @@ mod tests {
                 let drawer = drawer.clone();
                 move |_app: &mut App| Directionality::new(text_direction, drawer).into_widget()
             };
-            pump_app(&mut tester, m3, home(TextDirection::Ltr));
-            let built = drawer_built_child(&tester);
-            pump_app(&mut tester, m3, home(TextDirection::Rtl));
+            pump_app(tester, m3, home(TextDirection::Ltr));
+            let built = drawer_built_child(tester);
+            pump_app(tester, m3, home(TextDirection::Rtl));
             assert!(waft_widgets::same_widget(
                 &built,
-                &drawer_built_child(&tester)
+                &drawer_built_child(tester)
             ));
 
             // Without a shape of its own, the drawer reads the direction for its default.
@@ -2383,12 +2393,12 @@ mod tests {
                 let drawer = drawer.clone();
                 move |_app: &mut App| Directionality::new(text_direction, drawer).into_widget()
             };
-            pump_app(&mut tester, m3, home(TextDirection::Ltr));
-            let built = drawer_built_child(&tester);
-            pump_app(&mut tester, m3, home(TextDirection::Rtl));
+            pump_app(tester, m3, home(TextDirection::Ltr));
+            let built = drawer_built_child(tester);
+            pump_app(tester, m3, home(TextDirection::Rtl));
             assert!(!waft_widgets::same_widget(
                 &built,
-                &drawer_built_child(&tester)
+                &drawer_built_child(tester)
             ));
         });
     }
@@ -2398,8 +2408,7 @@ mod tests {
     /// does not have.
     #[test]
     fn the_material3_drawer_defaults_compute_only_the_value_asked_for() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // The elevation and the shadow colour the builder read.
             type Read = Option<(Option<f64>, Option<Color>)>;
             let read: Rc<RefCell<Read>> = Rc::default();
@@ -2423,16 +2432,15 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/6537
     #[test]
     fn drawer_and_drawer_header_do_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, move |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, move |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(
                         Drawer::new().child(DrawerHeader::new(Some(Text::new("X").into_widget()))),
                     ))
                     .into_widget()
             });
-            assert_eq!(drawer_box(&tester).size(&tester.cell.borrow()), Size::ZERO);
+            assert_eq!(drawer_box(tester).size(&tester.cell.borrow()), Size::ZERO);
             let header = *tester
                 .find_by_type::<DrawerHeader>()
                 .first()
@@ -2481,15 +2489,14 @@ mod tests {
     // its swipe back.
     #[test]
     fn drawer_double_tap_to_close_does_not_leak_local_history_entry() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, ios, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, ios, |_app| {
                 second_page(|scaffold, drawer| scaffold.end_drawer(drawer))
             });
             tester.pump_and_settle();
 
             // Open the end drawer.
-            let scaffold = scaffold_of(&tester, "Second Body");
+            let scaffold = scaffold_of(tester, "Second Body");
             scaffold.open_end_drawer(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
 
@@ -2498,70 +2505,69 @@ mod tests {
             tester.tap(Offset::new(10.0, 200.0), 1);
 
             // Pump once to start the closing animation ticker.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Advance time by 150ms so the drawer is more than half closed.
-            tester.pump(Duration::from_millis(150));
+            tester.pump_by(Duration::from_millis(150));
 
             tester.tap(Offset::new(10.0, 200.0), 2);
 
             tester.pump_and_settle();
 
             // The drawer should be closed.
-            assert_eq!(found(&tester, "Drawer Item"), 0);
+            assert_eq!(found(tester, "Drawer Item"), 0);
 
             // The history entry should have been removed, meaning it won't handle pop internally.
-            assert!(!will_handle_pop_internally(&tester, "Second Body"));
+            assert!(!will_handle_pop_internally(tester, "Second Body"));
         });
     }
 
     // drawer_test.dart 'Drawer drag while closing does not leak LocalHistoryEntry'.
     #[test]
     fn drawer_drag_while_closing_does_not_leak_local_history_entry() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, ios, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, ios, |_app| {
                 second_page(|scaffold, drawer| scaffold.drawer(drawer))
             });
             tester.pump_and_settle();
 
             // Open the drawer.
-            let scaffold = scaffold_of(&tester, "Second Body");
+            let scaffold = scaffold_of(tester, "Second Body");
             scaffold.open_drawer(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
 
-            assert!(will_handle_pop_internally(&tester, "Second Body"));
+            assert!(will_handle_pop_internally(tester, "Second Body"));
 
             // Start closing the drawer programmatically to begin the closing animation.
-            let scaffold = scaffold_of(&tester, "Second Body");
+            let scaffold = scaffold_of(tester, "Second Body");
             scaffold.close_drawer(&mut tester.cell.borrow_mut());
 
             // Pump once to start the closing animation ticker.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Advance time so the drawer is in the middle of closing.
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
             // While it is closing (status == AnimationStatus.reverse), grab the drawer.
             // This triggers _handleDragDown, which adds the history entry back.
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(50.0, 200.0));
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // The history entry should have been re-added.
-            assert!(will_handle_pop_internally(&tester, "Second Body"));
+            assert!(will_handle_pop_internally(tester, "Second Body"));
 
             // Drag it closed again by dragging left and releasing.
             let at = gesture.position + Offset::new(-20.0, 0.0);
             tester.move_to(&mut gesture, at, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(!will_handle_pop_internally(&tester, "Second Body"));
+            assert!(!will_handle_pop_internally(tester, "Second Body"));
 
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Drawer Item"), 0);
+            assert_eq!(found(tester, "Drawer Item"), 0);
         });
     }
 
@@ -2580,15 +2586,15 @@ mod tests {
     /// The drawer `drawer` makes, as the start drawer or the end drawer of the `Scaffold` keyed
     /// `key` that `home` builds, opened and settled, as the theme cases read it.
     fn opened_drawer(
+        tester: &mut WidgetTester,
         theme: impl FnOnce(&App) -> ThemeData,
         alignment: DrawerAlignment,
         drawer: impl Fn() -> Drawer + 'static,
         home: impl Fn(Scaffold) -> WidgetRef + 'static,
     ) -> Seen {
-        let mut tester = tester();
         let key = GlobalKey::new();
         let scaffold_key = key.clone();
-        pump_app(&mut tester, theme, move |_app| {
+        pump_app(tester, theme, move |_app| {
             let scaffold = Scaffold::new().key(scaffold_key.clone().into());
             home(match alignment {
                 DrawerAlignment::Start => scaffold.drawer(drawer()),
@@ -2596,12 +2602,12 @@ mod tests {
             })
         });
         match alignment {
-            DrawerAlignment::Start => open_drawer(&tester, &key),
-            DrawerAlignment::End => open_end_drawer(&tester, &key),
+            DrawerAlignment::Start => open_drawer(tester, &key),
+            DrawerAlignment::End => open_end_drawer(tester, &key),
         }
         tester.pump_and_settle();
         let (color, elevation, shadow_color, surface_tint_color, clip_behavior) =
-            material(&tester, |material| {
+            material(tester, |material| {
                 (
                     material.color,
                     material.elevation,
@@ -2615,23 +2621,27 @@ mod tests {
             elevation,
             shadow_color,
             surface_tint_color,
-            shape: material_shape(&tester),
-            scrim_color: scrim_color(&tester),
-            width: drawer_width(&tester),
+            shape: material_shape(tester),
+            scrim_color: scrim_color(tester),
+            width: drawer_width(tester),
             clip_behavior,
         }
     }
 
     fn theme_defaults(
+        tester: &mut WidgetTester,
         theme: fn(&App) -> ThemeData,
         alignment: DrawerAlignment,
         shape: Option<RoundedRectangleBorder>,
     ) {
-        let seen = opened_drawer(theme, alignment, Drawer::new, IntoWidget::into_widget);
-        let theme = {
-            let tester = tester();
-            theme(&tester.cell.borrow())
-        };
+        let seen = opened_drawer(
+            tester,
+            theme,
+            alignment,
+            Drawer::new,
+            IntoWidget::into_widget,
+        );
+        let theme = { theme(&tester.cell.borrow()) };
         if theme.use_material3 {
             assert_eq!(seen.color, Some(theme.color_scheme.surface_container_low()));
             assert_eq!(seen.elevation, 1.0);
@@ -2656,14 +2666,15 @@ mod tests {
     #[test]
     fn material2_default_values_are_used_when_no_drawer_or_drawer_theme_data_properties_are_specified()
      {
-        with_main_thread_stack(|| theme_defaults(m2, DrawerAlignment::Start, None));
+        test_widgets(|tester| theme_defaults(tester, m2, DrawerAlignment::Start, None));
     }
 
     #[test]
     fn material3_default_values_are_used_when_no_drawer_or_drawer_theme_data_properties_are_specified()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             theme_defaults(
+                tester,
                 m3,
                 DrawerAlignment::Start,
                 Some(rounded(BorderRadius::horizontal(
@@ -2677,14 +2688,15 @@ mod tests {
     #[test]
     fn material2_default_values_are_used_when_no_drawer_or_drawer_theme_data_properties_are_specified_in_end_drawer()
      {
-        with_main_thread_stack(|| theme_defaults(m2, DrawerAlignment::End, None));
+        test_widgets(|tester| theme_defaults(tester, m2, DrawerAlignment::End, None));
     }
 
     #[test]
     fn material3_default_values_are_used_when_no_drawer_or_drawer_theme_data_properties_are_specified_in_end_drawer()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             theme_defaults(
+                tester,
                 m3,
                 DrawerAlignment::End,
                 Some(rounded(BorderRadius::horizontal(
@@ -2732,8 +2744,9 @@ mod tests {
 
     #[test]
     fn drawer_theme_data_values_are_used_when_no_drawer_properties_are_specified() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let seen = opened_drawer(
+                tester,
                 |app| ThemeData::builder().drawer_theme(given_theme()).build(app),
                 DrawerAlignment::Start,
                 Drawer::new,
@@ -2759,8 +2772,9 @@ mod tests {
     #[test]
     fn drawer_values_take_priority_over_drawer_theme_data_values_when_both_properties_are_specified()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let seen = opened_drawer(
+                tester,
                 |app| ThemeData::builder().drawer_theme(other_theme()).build(app),
                 DrawerAlignment::Start,
                 || {
@@ -2782,8 +2796,9 @@ mod tests {
     #[test]
     fn drawer_theme_values_take_priority_over_theme_data_drawer_theme_values_when_both_properties_are_specified()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let seen = opened_drawer(
+                tester,
                 |app| {
                     ThemeData::builder()
                         .drawer_theme(
@@ -2805,8 +2820,7 @@ mod tests {
     /// drawer shows at once, fully open, and a rebuild with false closes it at once.
     #[test]
     fn is_drawer_open_opens_the_drawer_at_once() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pump = |tester: &mut WidgetTester, is_drawer_open: bool| {
                 pump_app(tester, m3, move |_app| {
                     Material::new()
@@ -2817,12 +2831,12 @@ mod tests {
                         .into_widget()
                 });
             };
-            pump(&mut tester, true);
-            assert_eq!(found(&tester, "drawer"), 1);
-            assert_eq!(text_rect(&tester, "drawer").left, 0.0);
+            pump(tester, true);
+            assert_eq!(found(tester, "drawer"), 1);
+            assert_eq!(text_rect(tester, "drawer").left, 0.0);
 
-            pump(&mut tester, false);
-            assert_eq!(found(&tester, "drawer"), 0);
+            pump(tester, false);
+            assert_eq!(found(tester, "drawer"), 0);
         });
     }
 }

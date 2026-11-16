@@ -1181,17 +1181,14 @@ name = "cupertino-gallery"
 version = "0.5.0"
 dependencies = [
  "indexmap",
- "valo-system-fonts",
  "waft",
  "waft-animation",
  "waft-cupertino",
  "waft-embedder",
  "waft-embedder-default",
  "waft-foundation",
- "waft-gestures",
  "waft-painting",
  "waft-rendering",
- "waft-scheduler",
  "waft-shell",
  "waft-test",
  "waft-widgets",
@@ -5119,7 +5116,6 @@ name = "waft-cupertino"
 version = "0.5.0"
 dependencies = [
  "indexmap",
- "valo-system-fonts",
  "waft-animation",
  "waft-embedder",
  "waft-foundation",
@@ -5340,7 +5336,6 @@ version = "0.5.0"
 dependencies = [
  "indexmap",
  "unicode-segmentation",
- "valo-system-fonts",
  "waft-animation",
  "waft-cupertino",
  "waft-embedder",

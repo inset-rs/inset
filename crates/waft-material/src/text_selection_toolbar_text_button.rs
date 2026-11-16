@@ -249,9 +249,10 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use waft_embedder::TargetPlatform;
     use waft_painting::EdgeInsets;
     use waft_widgets::{Center, SizedBox, StateSetter, StatefulBuilder, Text, WidgetStates};
+
+    use waft_widgets::testing::{WidgetTester, test_widgets};
 
     use super::*;
     use crate::button_style::ButtonStyle;
@@ -260,15 +261,8 @@ mod tests {
     #[allow(deprecated)]
     use crate::material_state::MaterialStatePropertyAll;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_button_theme::TextButtonThemeData;
-
-    /// A tester on Android with flutter_test's fonts, so a `Text` measures as in Flutter's tests.
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
 
     /// Dart's `<ColorScheme>[ThemeData().colorScheme, ThemeData.dark().colorScheme]`.
     fn color_schemes(tester: &WidgetTester) -> [ColorScheme; 2] {
@@ -315,8 +309,7 @@ mod tests {
 
     #[test]
     fn position_in_the_toolbar_changes_width() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let position = Rc::new(RefCell::new((1, 3)));
             let set_state: Rc<RefCell<Option<StateSetter>>> = Rc::new(RefCell::new(None));
             let root = {
@@ -352,22 +345,22 @@ mod tests {
                 setter(&mut tester.cell.borrow_mut(), &mut |_app| {
                     *position.borrow_mut() = (index, total);
                 });
-                tester.pump(std::time::Duration::ZERO);
+                tester.pump_by(std::time::Duration::ZERO);
             };
 
-            let middle_size = size(&tester);
+            let middle_size = size(tester);
 
-            set(&mut tester, 0, 3);
-            let first_size = size(&tester);
+            set(tester, 0, 3);
+            let first_size = size(tester);
             assert!(first_size.width() > middle_size.width());
 
-            set(&mut tester, 2, 3);
-            let last_size = size(&tester);
+            set(tester, 2, 3);
+            let last_size = size(tester);
             assert!(last_size.width() > middle_size.width());
             assert_eq!(last_size.width(), first_size.width());
 
-            set(&mut tester, 0, 1);
-            let only_size = size(&tester);
+            set(tester, 0, 1);
+            let only_size = size(tester);
             assert!(only_size.width() > middle_size.width());
             assert!(only_size.width() > first_size.width());
             assert!(only_size.width() > last_size.width());
@@ -376,16 +369,16 @@ mod tests {
 
     #[test]
     fn foreground_color_by_default() {
-        with_main_thread_stack(|| {
-            for color_scheme in color_schemes(&tester()) {
-                let mut tester = tester();
+        for index in 0..2 {
+            test_widgets(|tester| {
+                let color_scheme = color_schemes(tester)[index].clone();
                 let brightness = color_scheme.brightness;
-                let theme = themed(&tester, color_scheme);
-                pump_button(&mut tester, theme);
+                let theme = themed(tester, color_scheme);
+                pump_button(tester, theme);
 
                 // The foreground color is hardcoded to black or white by default, not the
                 // default value from ColorScheme.onSurface.
-                let style = text_button_style(&tester);
+                let style = text_button_style(tester);
                 assert_eq!(
                     style
                         .foreground_color
@@ -396,25 +389,25 @@ mod tests {
                         Brightness::Dark => Color::new(0xffffffff),
                     })
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn custom_foreground_color() {
-        with_main_thread_stack(|| {
-            for color_scheme in color_schemes(&tester()) {
-                let mut tester = tester();
+        for index in 0..2 {
+            test_widgets(|tester| {
+                let color_scheme = color_schemes(tester)[index].clone();
                 let custom_foreground_color = Colors::RED.primary();
                 let theme = themed(
-                    &tester,
+                    tester,
                     color_scheme
                         .copy_with()
                         .with_on_surface(custom_foreground_color),
                 );
-                pump_button(&mut tester, theme);
+                pump_button(tester, theme);
 
-                let style = text_button_style(&tester);
+                let style = text_button_style(tester);
                 assert_eq!(
                     style
                         .foreground_color
@@ -422,23 +415,23 @@ mod tests {
                         .resolve(&WidgetStates::new()),
                     Some(custom_foreground_color)
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn background_color_by_default() {
-        with_main_thread_stack(|| {
-            for color_scheme in color_schemes(&tester()) {
-                let mut tester = tester();
-                let theme = themed(&tester, color_scheme);
-                pump_button(&mut tester, theme);
+        for index in 0..2 {
+            test_widgets(|tester| {
+                let color_scheme = color_schemes(tester)[index].clone();
+                let theme = themed(tester, color_scheme);
+                pump_button(tester, theme);
 
                 // The background color is hardcoded to transparent by default so the buttons
                 // are the color of the container behind them. For example TextSelectionToolbar
                 // hardcodes the color value, and TextSelectionToolbarTextButton that are its
                 // children should be that color.
-                let style = text_button_style(&tester);
+                let style = text_button_style(tester);
                 assert_eq!(
                     style
                         .background_color
@@ -446,16 +439,16 @@ mod tests {
                         .resolve(&WidgetStates::new()),
                     Some(Colors::TRANSPARENT)
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     #[allow(deprecated)]
     fn text_button_theme_should_not_override_default_background_color() {
-        with_main_thread_stack(|| {
-            for color_scheme in color_schemes(&tester()) {
-                let mut tester = tester();
+        for index in 0..2 {
+            test_widgets(|tester| {
+                let color_scheme = color_schemes(tester)[index].clone();
                 let theme = ThemeData::builder()
                     .color_scheme(color_scheme)
                     .text_button_theme(TextButtonThemeData::new().style(
@@ -464,13 +457,13 @@ mod tests {
                         )),
                     ))
                     .build(&tester.cell.borrow());
-                pump_button(&mut tester, theme);
+                pump_button(tester, theme);
 
                 // The background color is hardcoded to transparent by default so the buttons
                 // are the color of the container behind them. For example TextSelectionToolbar
                 // hardcodes the color value, and TextSelectionToolbarTextButton that are its
                 // children should be that color.
-                let style = text_button_style(&tester);
+                let style = text_button_style(tester);
                 assert_eq!(
                     style
                         .background_color
@@ -478,14 +471,13 @@ mod tests {
                         .resolve(&WidgetStates::new()),
                     Some(Colors::TRANSPARENT)
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn text_selection_toolbar_text_button_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = {
                 let app = tester.cell.borrow();
                 material_app(

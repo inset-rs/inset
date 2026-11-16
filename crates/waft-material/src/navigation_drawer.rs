@@ -1127,6 +1127,8 @@ mod tests {
         StatefulBuilder, Text, WidgetStatePropertyAll, WidgetsBinding,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::app::MaterialApp;
     use crate::drawer_header::DrawerHeader;
@@ -1135,19 +1137,17 @@ mod tests {
     use crate::material::RenderInkFeatures;
     use crate::navigation_drawer_theme::NavigationDrawerThemeData;
     use crate::scaffold::{Scaffold, ScaffoldState};
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m3, pump_app, tester};
+    use crate::tooltip::tests::{m3, pump_app};
 
     /// Dart's `widgetSetup(tester, viewWidth, viewHeight: viewHeight)`: a 2x view of that
     /// logical size.
     fn tester_sized(view_width: f64, view_height: f64) -> WidgetTester {
-        let tester = WidgetTester::with_physical_size(
+        WidgetTester::with_view(
             TestPlatform::new().on(TargetPlatform::Android),
-            Size::new(view_width * 2.0, view_height * 2.0),
-        );
-        tester.install_platform_fonts();
-        tester
+            waft_test::TestView::with_pixel_ratio(view_width * 2.0, view_height * 2.0, 2.0),
+        )
     }
 
     /// Dart's `_buildWidget(scaffoldKey, child)`: a `MaterialApp` whose home is a scaffold
@@ -1286,30 +1286,31 @@ mod tests {
     // 'Navigation drawer updates destinations when tapped'.
     #[test]
     fn navigation_drawer_updates_destinations_when_tapped() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let mutated_index = Rc::new(Cell::new(-1));
             let key = GlobalKey::new();
             let mut tester = tester_sized(3000.0, 3000.0);
+            let tester = &mut tester;
             let mutated = Rc::clone(&mutated_index);
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(headline_and_two_destinations())
                     .on_destination_selected(Rc::new(move |_app, i| mutated.set(i)))
                     .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::ZERO);
+            open_drawer(tester, &key);
+            tester.pump();
 
-            assert_eq!(found(&tester, "Headline"), 1);
-            assert_eq!(found(&tester, "AC"), 1);
-            assert_eq!(found(&tester, "Alarm"), 1);
+            assert_eq!(found(tester, "Headline"), 1);
+            assert_eq!(found(tester, "AC"), 1);
+            assert_eq!(found(tester, "Alarm"), 1);
 
-            tester.pump(Duration::from_secs(1)); // animation done
+            tester.pump_by(Duration::from_secs(1)); // animation done
 
-            let at = text_center(&tester, "Alarm");
+            let at = text_center(tester, "Alarm");
             tester.tap(at, 1);
             assert_eq!(mutated_index.get(), 1);
 
-            let at = text_center(&tester, "AC");
+            let at = text_center(tester, "AC");
             tester.tap(at, 2);
             assert_eq!(mutated_index.get(), 0);
         });
@@ -1318,32 +1319,30 @@ mod tests {
     // 'NavigationDrawer can update background color'.
     #[test]
     fn navigation_drawer_can_update_background_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = Colors::YELLOW.primary();
             let key = GlobalKey::new();
-            let mut tester = tester();
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(headline_and_two_destinations())
                     .background_color(color)
                     .on_destination_selected(select_nothing())
                     .into_widget()
             });
 
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1)); // animation done
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1)); // animation done
 
-            assert_eq!(material(&tester, |material| material.color), Some(color));
+            assert_eq!(material(tester, |material| material.color), Some(color));
         });
     }
 
     // 'NavigationDestinationDrawer background color is customizable'.
     #[test]
     fn navigation_drawer_destination_background_color_is_customizable() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = Colors::YELLOW.primary();
             let key = GlobalKey::new();
-            let mut tester = tester();
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new([
                     Text::new("Headline").into_widget(),
                     destination(Icons::ac_unit(), "AC"),
@@ -1364,25 +1363,25 @@ mod tests {
                 tester.descendants_of_type::<Ink>(destination)
             };
 
-            open_drawer(&tester, &key);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1)); // Animation done.
+            open_drawer(tester, &key);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1)); // Animation done.
 
             // Destination with no custom background color.
-            let at = text_center(&tester, "AC");
+            let at = text_center(tester, "AC");
             tester.tap(at, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // When no background color is set, only the non-visible indicator Ink is expected.
-            assert_eq!(find_destination_ink(&tester, "AC").len(), 1);
+            assert_eq!(find_destination_ink(tester, "AC").len(), 1);
 
             // Destination with a custom background color.
-            let at = icon_center(&tester, &Icons::access_alarm());
+            let at = icon_center(tester, &Icons::access_alarm());
             tester.tap(at, 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // A Material is added with the custom color.
-            let alarm_inks = find_destination_ink(&tester, "Alarm");
+            let alarm_inks = find_destination_ink(tester, "Alarm");
             assert_eq!(alarm_inks.len(), 2);
             let destination_color = tester.widget(alarm_inks[0], |ink: &Ink| {
                 let decoration = ink
@@ -1403,72 +1402,70 @@ mod tests {
     // 'NavigationDrawer can update elevation'.
     #[test]
     fn navigation_drawer_can_update_elevation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let elevation = 42.0;
             let key = GlobalKey::new();
-            let mut tester = tester();
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(headline_and_two_destinations())
                     .elevation(elevation)
                     .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1));
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1));
 
-            assert_eq!(material(&tester, |material| material.elevation), elevation);
+            assert_eq!(material(tester, |material| material.elevation), elevation);
         });
     }
 
     // 'NavigationDrawer uses proper defaults when no parameters are given'.
     #[test]
     fn navigation_drawer_uses_proper_defaults_when_no_parameters_are_given() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            let mut tester = tester();
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(headline_and_two_destinations())
                     .on_destination_selected(select_nothing())
                     .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1));
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1));
             let theme = ThemeData::new(&tester.cell.borrow());
             let colors = &theme.color_scheme;
 
             // Test drawer Material.
             assert_eq!(
-                material(&tester, |material| material.color),
+                material(tester, |material| material.color),
                 Some(colors.surface_container_low())
             );
             assert_eq!(
-                material(&tester, |material| material.surface_tint_color),
+                material(tester, |material| material.surface_tint_color),
                 Some(Colors::TRANSPARENT)
             );
             assert_eq!(
-                material(&tester, |material| material.shadow_color),
+                material(tester, |material| material.shadow_color),
                 Some(Colors::TRANSPARENT)
             );
-            assert_eq!(material(&tester, |material| material.elevation), 1.0);
+            assert_eq!(material(tester, |material| material.elevation), 1.0);
             // Test indicator decoration.
-            let (color, shape) = indicator_decoration(&tester);
+            let (color, shape) = indicator_decoration(tester);
             assert_eq!(color, Some(colors.secondary_container()));
             assert!(shape_eq(&*shape, &StadiumBorder::new(BorderSide::NONE)));
             // Test selected and unselected icon colors.
             assert_eq!(
-                icon_color(&tester, &Icons::ac_unit()),
+                icon_color(tester, &Icons::ac_unit()),
                 Some(colors.on_secondary_container())
             );
             assert_eq!(
-                icon_color(&tester, &Icons::access_alarm()),
+                icon_color(tester, &Icons::access_alarm()),
                 Some(colors.on_surface_variant())
             );
             // Test selected and unselected label colors.
             assert_eq!(
-                label_color(&tester, "AC"),
+                label_color(tester, "AC"),
                 Some(colors.on_secondary_container())
             );
             assert_eq!(
-                label_color(&tester, "Alarm"),
+                label_color(tester, "Alarm"),
                 Some(colors.on_surface_variant())
             );
             // Test that the icon and label are the correct size.
@@ -1500,37 +1497,38 @@ mod tests {
     // 'Navigation drawer is scrollable'.
     #[test]
     fn navigation_drawer_is_scrollable() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let mut tester = tester_sized(500.0, 300.0);
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            let tester = &mut tester;
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(
                     (0..100).map(|i| destination(Icons::ac_unit(), &format!("Label{i}"))),
                 )
                 .on_destination_selected(select_nothing())
                 .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1));
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1));
 
             for i in 0..=5 {
-                assert!(onstage_label(&tester, &format!("Label{i}")), "Label{i}");
+                assert!(onstage_label(tester, &format!("Label{i}")), "Label{i}");
             }
             for i in 6..=8 {
-                assert!(!onstage_label(&tester, &format!("Label{i}")), "Label{i}");
+                assert!(!onstage_label(tester, &format!("Label{i}")), "Label{i}");
             }
 
             tester.drag_from(Offset::new(0.0, 200.0), Offset::new(0.0, -200.0), 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             for i in 0..=2 {
-                assert!(!onstage_label(&tester, &format!("Label{i}")), "Label{i}");
+                assert!(!onstage_label(tester, &format!("Label{i}")), "Label{i}");
             }
             for i in 3..=8 {
-                assert!(onstage_label(&tester, &format!("Label{i}")), "Label{i}");
+                assert!(onstage_label(tester, &format!("Label{i}")), "Label{i}");
             }
             for i in 9..=10 {
-                assert!(!onstage_label(&tester, &format!("Label{i}")), "Label{i}");
+                assert!(!onstage_label(tester, &format!("Label{i}")), "Label{i}");
             }
         });
     }
@@ -1538,10 +1536,11 @@ mod tests {
     // 'Safe Area test'.
     #[test]
     fn safe_area_test() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let view_height = 300.0;
             let mut tester = tester_sized(500.0, view_height);
+            let tester = &mut tester;
             let scaffold_key = key.clone();
             #[allow(deprecated)]
             let app = MaterialApp::new().use_inherited_media_query(true).home(
@@ -1559,9 +1558,9 @@ mod tests {
                 MediaQuery::new(MediaQueryData::new().padding(EdgeInsets::all(20.0)), app)
                     .into_widget(),
             );
-            open_drawer(&tester, &key);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            open_drawer(tester, &key);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
 
             let destination_rect = |label: &str| -> Rect {
                 let text = *tester.find_text(label).first().expect("the label");
@@ -1583,9 +1582,8 @@ mod tests {
     // 'Navigation destination updates indicator color and shape'.
     #[test]
     fn navigation_destination_updates_indicator_color_and_shape() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            let mut tester = tester();
             let color = Color::new(0xff0000ff);
             let shape = RoundedRectangleBorder::default();
 
@@ -1608,13 +1606,13 @@ mod tests {
                     });
                 };
 
-            build_navigation_drawer(&mut tester, None);
-            open_drawer(&tester, &key);
+            build_navigation_drawer(tester, None);
+            open_drawer(tester, &key);
             tester.pump_and_settle();
 
             let theme = ThemeData::new(&tester.cell.borrow());
             // Test default indicator color and shape.
-            let (indicator_color, indicator_shape) = indicator_decoration(&tester);
+            let (indicator_color, indicator_shape) = indicator_decoration(tester);
             assert_eq!(
                 indicator_color,
                 Some(theme.color_scheme.secondary_container())
@@ -1625,19 +1623,19 @@ mod tests {
             ));
             // Test that InkWell for hover, focus and pressed use default shape.
             assert!(shape_eq(
-                &*ink_well_custom_border(&tester).expect("a custom border"),
+                &*ink_well_custom_border(tester).expect("a custom border"),
                 &StadiumBorder::new(BorderSide::NONE)
             ));
 
-            build_navigation_drawer(&mut tester, Some((color, shape)));
+            build_navigation_drawer(tester, Some((color, shape)));
 
             // Test custom indicator color and shape.
-            let (indicator_color, indicator_shape) = indicator_decoration(&tester);
+            let (indicator_color, indicator_shape) = indicator_decoration(tester);
             assert_eq!(indicator_color, Some(color));
             assert!(shape_eq(&*indicator_shape, &shape));
             // Test that InkWell for hover, focus and pressed use custom shape.
             assert!(shape_eq(
-                &*ink_well_custom_border(&tester).expect("a custom border"),
+                &*ink_well_custom_border(tester).expect("a custom border"),
                 &shape
             ));
         });
@@ -1646,18 +1644,19 @@ mod tests {
     // 'NavigationDrawer.tilePadding defaults to EdgeInsets.symmetric(horizontal: 12.0)'.
     #[test]
     fn navigation_drawer_tile_padding_defaults_to_symmetric_horizontal_12() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let mut tester = tester_sized(3000.0, 3000.0);
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            let tester = &mut tester;
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new([destination(Icons::ac_unit(), "AC")])
                     .on_destination_selected(select_nothing())
                     .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::ZERO);
+            open_drawer(tester, &key);
+            tester.pump();
             let tile_padding = tester
-                .widget(navigation_drawer(&tester), |drawer: &NavigationDrawer| {
+                .widget(navigation_drawer(tester), |drawer: &NavigationDrawer| {
                     drawer.tile_padding
                 });
             assert_eq!(tile_padding, EdgeInsetsGeometry::symmetric(0.0, 12.0));
@@ -1667,12 +1666,13 @@ mod tests {
     // 'Destinations respect their disabled state'.
     #[test]
     fn destinations_respect_their_disabled_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let selected_index = Rc::new(Cell::new(0));
             let mut tester = tester_sized(800.0, 1000.0);
+            let tester = &mut tester;
             let selected = Rc::clone(&selected_index);
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new([
                     destination(Icons::ac_unit(), "AC"),
                     destination(Icons::access_alarm(), "Alarm"),
@@ -1686,22 +1686,22 @@ mod tests {
                 .on_destination_selected(Rc::new(move |_app, i| selected.set(i)))
                 .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::ZERO);
+            open_drawer(tester, &key);
+            tester.pump();
 
-            assert_eq!(found(&tester, "AC"), 1);
-            assert_eq!(found(&tester, "Alarm"), 1);
-            assert_eq!(found(&tester, "Accessible"), 1);
+            assert_eq!(found(tester, "AC"), 1);
+            assert_eq!(found(tester, "Alarm"), 1);
+            assert_eq!(found(tester, "Accessible"), 1);
 
-            tester.pump(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
 
             assert_eq!(selected_index.get(), 0);
 
-            let at = text_center(&tester, "Alarm");
+            let at = text_center(tester, "Alarm");
             tester.tap(at, 1);
             assert_eq!(selected_index.get(), 1);
 
-            let at = text_center(&tester, "Accessible");
+            let at = text_center(tester, "Accessible");
             tester.tap(at, 2);
             assert_eq!(selected_index.get(), 1);
 
@@ -1723,10 +1723,11 @@ mod tests {
     // 'NavigationDrawer can display header and footer'.
     #[test]
     fn navigation_drawer_can_display_header_and_footer() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let mut tester = tester_sized(3000.0, 3000.0);
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            let tester = &mut tester;
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(
                     (0..10).map(|i| destination(Icons::home(), &format!("Item {i}"))),
                 )
@@ -1752,14 +1753,14 @@ mod tests {
                 )
                 .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1));
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1));
 
             assert_eq!(tester.find_by_type::<DrawerHeader>().len(), 1);
-            assert_eq!(found(&tester, "Header"), 1);
+            assert_eq!(found(tester, "Header"), 1);
             assert_eq!(tester.find_by_type::<FlutterLogo>().len(), 2);
             assert_eq!(tester.find_by_type::<ListTile>().len(), 1);
-            assert_eq!(found(&tester, "Footer"), 1);
+            assert_eq!(found(tester, "Footer"), 1);
             tester.find_by_icon(&Icons::settings());
         });
     }
@@ -1767,9 +1768,8 @@ mod tests {
     // 'NavigationDrawer does not crash at zero area'.
     #[test]
     fn navigation_drawer_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(NavigationDrawer::new([destination(
                         Icons::inbox(),
@@ -1777,7 +1777,7 @@ mod tests {
                     )])))
                     .into_widget()
             });
-            let drawer = tester.render_box_of(navigation_drawer(&tester));
+            let drawer = tester.render_box_of(navigation_drawer(tester));
             assert_eq!(drawer.size(&tester.cell.borrow()), Size::ZERO);
         });
     }
@@ -1801,10 +1801,11 @@ mod tests {
     // 'NavigationDrawer ink effects are bounded within scrollable area when footer is present'.
     #[test]
     fn navigation_drawer_ink_effects_are_bounded_within_scrollable_area_when_footer_is_present() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let key = GlobalKey::new();
             let mut tester = tester_sized(800.0, 400.0);
-            pump_drawer(&mut tester, m3, &key, move |_app| {
+            let tester = &mut tester;
+            pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(
                     (0..10).map(|i| destination(Icons::home(), &format!("Item {i}"))),
                 )
@@ -1812,7 +1813,7 @@ mod tests {
                 .into_widget()
             });
 
-            open_drawer(&tester, &key);
+            open_drawer(tester, &key);
             tester.pump_and_settle();
 
             let footer_text = *tester.find_text("Footer").first().expect("the footer");
@@ -1826,7 +1827,7 @@ mod tests {
             let ink_wells = tester.descendants_of_type::<InkWell>(first_destination);
             assert_eq!(ink_wells.len(), 1);
 
-            let ink_material: AnyRenderBox = ink_material_of(&tester, ink_wells[0])
+            let ink_material: AnyRenderBox = ink_material_of(tester, ink_wells[0])
                 .as_box()
                 .expect("a render box");
             let ink_material_rect = tester.get_rect(ink_material);
@@ -1840,11 +1841,10 @@ mod tests {
     // 'Indicator repaints when selectedIndex changes without pointer interaction'.
     #[test]
     fn indicator_repaints_when_selected_index_changes_without_pointer_interaction() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let selected_index = Rc::new(Cell::new(0));
             let set_selected_index: Rc<RefCell<Option<waft_widgets::StateSetter>>> = Rc::default();
-            let mut tester = tester();
             let (scaffold_key, selected, setter) = (
                 key.clone(),
                 Rc::clone(&selected_index),
@@ -1870,7 +1870,7 @@ mod tests {
                 .into_widget(),
             ));
 
-            open_drawer(&tester, &key);
+            open_drawer(tester, &key);
             tester.pump_and_settle();
 
             // The indicator is painted by an Ink widget, which paints on the nearest
@@ -1883,7 +1883,7 @@ mod tests {
                 .descendants_of_type::<Ink>(indicator)
                 .first()
                 .expect("the indicator's Ink");
-            let ink_controller = ink_material_of(&tester, indicator_ink);
+            let ink_controller = ink_material_of(tester, indicator_ink);
 
             // Change the selected index without any pointer interaction and advance
             // one frame, stopping before the paint phase: the Material that hosts the
@@ -1894,16 +1894,16 @@ mod tests {
                 let mut app = tester.cell.borrow_mut();
                 set_state(&mut app, &mut |_app| selected_index.set(1));
             }
-            pump_to_layout(&tester);
+            pump_to_layout(tester);
             assert!(ink_controller.debug_needs_paint(&tester.cell.borrow()));
-            finish_frame(&tester);
+            finish_frame(tester);
 
             // Let the indicator animation run to completion normally.
             tester.pump_and_settle();
         });
     }
 
-    /// The first half of Dart's `tester.pump(null, EnginePhase.layout)`: begins a frame at the
+    /// The first half of Dart's `tester.pump_by(null, EnginePhase.layout)`: begins a frame at the
     /// last frame's time stamp, then builds and lays out without painting.
     fn pump_to_layout(tester: &WidgetTester) {
         let mut app = tester.cell.borrow_mut();
@@ -1991,34 +1991,33 @@ mod tests {
     #[test]
     fn navigation_drawer_theme_data_values_are_used_when_no_navigation_drawer_properties_are_specified()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let theme = navigation_drawer_theme();
-            let mut tester = tester();
-            pump_themed_drawer(&mut tester, &key, theme.clone(), |_app| {
+            pump_themed_drawer(tester, &key, theme.clone(), |_app| {
                 NavigationDrawer::new(headline_and_two_destinations())
                     .on_destination_selected(select_nothing())
                     .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1));
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1));
 
             // Test drawer Material.
             assert_eq!(
-                material(&tester, |material| material.color),
+                material(tester, |material| material.color),
                 theme.background_color
             );
             assert_eq!(
-                material(&tester, |material| material.surface_tint_color),
+                material(tester, |material| material.surface_tint_color),
                 theme.surface_tint_color
             );
             assert_eq!(
-                material(&tester, |material| material.shadow_color),
+                material(tester, |material| material.shadow_color),
                 theme.shadow_color
             );
-            assert_eq!(material(&tester, |material| material.elevation), 7.0);
+            assert_eq!(material(tester, |material| material.elevation), 7.0);
             // Test indicator decoration.
-            let (indicator_color, indicator_shape) = indicator_decoration(&tester);
+            let (indicator_color, indicator_shape) = indicator_decoration(tester);
             assert_eq!(indicator_color, theme.indicator_color);
             assert!(shape_eq(
                 &*indicator_shape,
@@ -2030,9 +2029,9 @@ mod tests {
                 .as_ref()
                 .and_then(|icon_theme| icon_theme.resolve(&WidgetStates::new()))
                 .and_then(|icon_theme| icon_theme.color.as_deref().copied());
-            assert_eq!(icon_color(&tester, &Icons::ac_unit()), themed_icon_color);
+            assert_eq!(icon_color(tester, &Icons::ac_unit()), themed_icon_color);
             assert_eq!(
-                icon_color(&tester, &Icons::access_alarm()),
+                icon_color(tester, &Icons::access_alarm()),
                 themed_icon_color
             );
             // Test label.
@@ -2040,8 +2039,8 @@ mod tests {
                 .label_text_style
                 .as_ref()
                 .and_then(|label_text_style| label_text_style.resolve(&WidgetStates::new()));
-            assert_eq!(Some(label_style(&tester, "AC")), themed_label_style);
-            assert_eq!(Some(label_style(&tester, "Alarm")), themed_label_style);
+            assert_eq!(Some(label_style(tester, "AC")), themed_label_style);
+            assert_eq!(Some(label_style(tester, "Alarm")), themed_label_style);
         });
     }
 
@@ -2049,7 +2048,7 @@ mod tests {
     // properties are specified'.
     #[test]
     fn navigation_drawer_values_take_priority_over_navigation_drawer_theme_data_values() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let background_color = Color::new(0x00000009);
             let elevation = 14.0;
@@ -2058,9 +2057,8 @@ mod tests {
             let indicator_shape =
                 RoundedRectangleBorder::new(BorderSide::NONE, BorderRadiusGeometry::circular(32.0));
             let indicator_color = Color::new(0x00000006);
-            let mut tester = tester();
             let shape = indicator_shape;
-            pump_themed_drawer(&mut tester, &key, navigation_drawer_theme(), move |_app| {
+            pump_themed_drawer(tester, &key, navigation_drawer_theme(), move |_app| {
                 NavigationDrawer::new(headline_and_two_destinations())
                     .background_color(background_color)
                     .elevation(elevation)
@@ -2071,25 +2069,25 @@ mod tests {
                     .on_destination_selected(select_nothing())
                     .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1));
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1));
 
             // Test drawer Material.
             assert_eq!(
-                material(&tester, |material| material.color),
+                material(tester, |material| material.color),
                 Some(background_color)
             );
             assert_eq!(
-                material(&tester, |material| material.surface_tint_color),
+                material(tester, |material| material.surface_tint_color),
                 Some(surface_tint_color)
             );
             assert_eq!(
-                material(&tester, |material| material.shadow_color),
+                material(tester, |material| material.shadow_color),
                 Some(shadow_color)
             );
-            assert_eq!(material(&tester, |material| material.elevation), elevation);
+            assert_eq!(material(tester, |material| material.elevation), elevation);
             // Test indicator decoration.
-            let (color, shape) = indicator_decoration(&tester);
+            let (color, shape) = indicator_decoration(tester);
             assert_eq!(color, Some(indicator_color));
             assert!(shape_eq(&*shape, &indicator_shape));
         });
@@ -2098,7 +2096,7 @@ mod tests {
     // 'Local NavigationDrawerTheme takes priority over ThemeData.navigationDrawerTheme'.
     #[test]
     fn local_navigation_drawer_theme_takes_priority_over_theme_data_navigation_drawer_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let background_color = Color::new(0x00000009);
             let elevation = 7.0;
@@ -2107,8 +2105,7 @@ mod tests {
             let icon_color_value = Color::new(0x00000006);
             let label_style_value = TextStyle::new().font_size(7.0);
             let indicator_color = Color::new(0x00000005);
-            let mut tester = tester();
-            pump_themed_drawer(&mut tester, &key, navigation_drawer_theme(), move |_app| {
+            pump_themed_drawer(tester, &key, navigation_drawer_theme(), move |_app| {
                 NavigationDrawerTheme::new(
                     NavigationDrawerThemeData::new()
                         .background_color(background_color)
@@ -2128,39 +2125,39 @@ mod tests {
                 )
                 .into_widget()
             });
-            open_drawer(&tester, &key);
-            tester.pump(Duration::from_secs(1));
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1));
 
             // Test drawer Material.
             assert_eq!(
-                material(&tester, |material| material.color),
+                material(tester, |material| material.color),
                 Some(background_color)
             );
             assert_eq!(
-                material(&tester, |material| material.surface_tint_color),
+                material(tester, |material| material.surface_tint_color),
                 Some(surface_tint_color)
             );
             assert_eq!(
-                material(&tester, |material| material.shadow_color),
+                material(tester, |material| material.shadow_color),
                 Some(shadow_color)
             );
-            assert_eq!(material(&tester, |material| material.elevation), elevation);
+            assert_eq!(material(tester, |material| material.elevation), elevation);
             // Test indicator decoration.
-            let (color, shape) = indicator_decoration(&tester);
+            let (color, shape) = indicator_decoration(tester);
             assert_eq!(color, Some(indicator_color));
             assert!(shape_eq(&*shape, &CircleBorder::default()));
             // Test icon.
             assert_eq!(
-                icon_color(&tester, &Icons::ac_unit()),
+                icon_color(tester, &Icons::ac_unit()),
                 Some(icon_color_value)
             );
             assert_eq!(
-                icon_color(&tester, &Icons::access_alarm()),
+                icon_color(tester, &Icons::access_alarm()),
                 Some(icon_color_value)
             );
             // Test label.
-            assert_eq!(label_style(&tester, "AC"), label_style_value);
-            assert_eq!(label_style(&tester, "Alarm"), label_style_value);
+            assert_eq!(label_style(tester, "AC"), label_style_value);
+            assert_eq!(label_style(tester, "Alarm"), label_style_value);
         });
     }
 
@@ -2225,8 +2222,7 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_navigation_drawer_theme() {
-        with_main_thread_stack(|| {
-            let tester = tester();
+        test_widgets(|tester| {
             let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(
@@ -2260,12 +2256,11 @@ mod tests {
 
     #[test]
     fn navigation_drawer_theme_of_prefers_the_closest_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = crate::test_support::test_cell();
+        test_widgets(|tester| {
             let widget_theme = NavigationDrawerThemeData::new().tile_height(30.0);
             let expected = widget_theme.clone();
-            let seen = crate::test_support::probe(
-                &cell,
+            let seen = crate::drawer_theme::tests::probe(
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .navigation_drawer_theme(NavigationDrawerThemeData::new().tile_height(70.0))
@@ -2280,9 +2275,8 @@ mod tests {
             );
             assert_eq!(seen, expected);
 
-            let cell = crate::test_support::test_cell();
-            let seen = crate::test_support::probe(
-                &cell,
+            let seen = crate::drawer_theme::tests::probe(
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .navigation_drawer_theme(NavigationDrawerThemeData::new().tile_height(70.0))

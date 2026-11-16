@@ -388,15 +388,18 @@ mod tests {
     use waft_embedder::{Offset, Rect, TargetPlatform};
     use waft_widgets::{ScrollController, WidgetState, WidgetStates};
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::scrollbar::Scrollbar;
     use crate::scrollbar::tests::{
         DESKTOP, K_DEFAULT_IDLE_THUMB_COLOR, K_DEFAULT_THUMB_RADIUS, assert_thumb_rrect,
         assert_track, hover_at, move_by, no_scrollbar, painted, scroll_view, start_gesture,
-        tester_on,
     };
-    use crate::test_support::{Drawn, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{Drawn, material_app};
     use crate::theme_data::ThemeData;
 
     // The const represents the starting position of the scrollbar thumb for
@@ -491,19 +494,18 @@ mod tests {
     #[test]
     fn passing_no_scrollbar_theme_returns_defaults() {
         for platform in DESKTOP_AND_FUCHSIA {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let theme = ThemeData::builder()
                     .use_material3(false)
                     .scrollbar_theme(
                         ScrollbarThemeData::new().track_visibility(hovered_track_visibility()),
                     )
                     .build(&tester.cell.borrow());
-                pump_frame(&mut tester, theme, |scrollbar| scrollbar, |child| child);
+                pump_frame(tester, theme, |scrollbar| scrollbar, |child| child);
                 tester.pump_and_settle();
                 // Idle scrollbar behavior
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
                     K_DEFAULT_THUMB_RADIUS,
                     K_DEFAULT_IDLE_THUMB_COLOR,
@@ -511,19 +513,19 @@ mod tests {
 
                 // Drag scrollbar behavior
                 drag_thumb(
-                    &mut tester,
+                    tester,
                     K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
                     K_DEFAULT_THUMB_RADIUS,
                     K_DEFAULT_DRAG_THUMB_COLOR,
                 );
 
                 // Hover scrollbar behavior
-                hover_at(&mut tester, Offset::new(794.0, 5.0));
+                hover_at(tester, Offset::new(794.0, 5.0));
                 tester.pump_and_settle();
 
-                let drawn = painted(&tester);
+                let drawn = painted(tester);
                 assert_track(
-                    &tester,
+                    tester,
                     &drawn,
                     Rect::from_ltrb(784.0, 0.0, 800.0, 600.0),
                     0x08000000,
@@ -532,7 +534,7 @@ mod tests {
                 );
                 // Scrollbar thumb is larger; hover color
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(786.0, 10.0, 798.0, 100.0),
                     K_DEFAULT_THUMB_RADIUS,
                     0x80000000,
@@ -544,16 +546,15 @@ mod tests {
     #[test]
     fn scrollbar_uses_values_from_scrollbar_theme() {
         for platform in DESKTOP_AND_FUCHSIA {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let theme = ThemeData::builder()
                     .scrollbar_theme(scrollbar_theme())
                     .build(&tester.cell.borrow());
-                pump_frame(&mut tester, theme, |scrollbar| scrollbar, |child| child);
+                pump_frame(tester, theme, |scrollbar| scrollbar, |child| child);
                 tester.pump_and_settle();
                 // Idle scrollbar behavior
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(785.0, 10.0, 795.0, 97.0),
                     Radius::circular(6.0),
                     GREEN.to_argb32(),
@@ -561,19 +562,19 @@ mod tests {
 
                 // Drag scrollbar behavior
                 drag_thumb(
-                    &mut tester,
+                    tester,
                     Rect::from_ltrb(785.0, 10.0, 795.0, 97.0),
                     Radius::circular(6.0),
                     RED.to_argb32(),
                 );
 
                 // Hover scrollbar behavior
-                hover_at(&mut tester, Offset::new(794.0, 15.0));
+                hover_at(tester, Offset::new(794.0, 15.0));
                 tester.pump_and_settle();
 
-                let drawn = painted(&tester);
+                let drawn = painted(tester);
                 assert_track(
-                    &tester,
+                    tester,
                     &drawn,
                     Rect::from_ltrb(770.0, 0.0, 800.0, 600.0),
                     BLACK.to_argb32(),
@@ -582,7 +583,7 @@ mod tests {
                 );
                 // Scrollbar thumb is larger; hover color
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(775.0, 20.0, 795.0, 107.0),
                     Radius::circular(6.0),
                     BLUE.to_argb32(),
@@ -593,13 +594,12 @@ mod tests {
 
     #[test]
     fn scrollbar_uses_values_from_scrollbar_theme_if_exists_instead_of_values_from_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .scrollbar_theme(scrollbar_theme())
                 .build(&tester.cell.borrow());
             pump_frame(
-                &mut tester,
+                tester,
                 theme,
                 |scrollbar| scrollbar,
                 |child| {
@@ -617,7 +617,7 @@ mod tests {
             tester.pump_and_settle();
             // Idle scrollbar behavior
             assert_thumb_rrect(
-                &tester,
+                tester,
                 Rect::from_ltrb(785.0, 10.0, 795.0, 97.0),
                 Radius::circular(6.0),
                 0xFF000000,
@@ -627,99 +627,104 @@ mod tests {
 
     #[test]
     fn scrollbar_theme_can_disable_gestures() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Fuchsia);
-            let theme = ThemeData::builder()
-                .use_material3(false)
-                .scrollbar_theme(ScrollbarThemeData::new().interactive(false))
-                .build(&tester.cell.borrow());
-            let controller = ScrollController::default(&mut tester.cell.borrow_mut())
-                .into_erased::<waft_widgets::AnyScrollController>();
-            tester.pump_widget(material_app(
-                theme,
-                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
-                    .thumb_visibility(true)
-                    .controller(controller.clone())
-                    .into_widget(),
-            ));
-            tester.pump_and_settle();
-            // Idle scrollbar behavior
-            assert_thumb_rrect(
-                &tester,
-                K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::Fuchsia),
+            |tester| {
+                let theme = ThemeData::builder()
+                    .use_material3(false)
+                    .scrollbar_theme(ScrollbarThemeData::new().interactive(false))
+                    .build(&tester.cell.borrow());
+                let controller = ScrollController::default(&mut tester.cell.borrow_mut())
+                    .into_erased::<waft_widgets::AnyScrollController>();
+                tester.pump_widget(material_app(
+                    theme,
+                    Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
+                        .thumb_visibility(true)
+                        .controller(controller.clone())
+                        .into_widget(),
+                ));
+                tester.pump_and_settle();
+                // Idle scrollbar behavior
+                assert_thumb_rrect(
+                    tester,
+                    K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
 
-            // Try to drag scrollbar.
-            drag_thumb(
-                &mut tester,
-                K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
-            // Expect no change
-            assert_thumb_rrect(
-                &tester,
-                K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
-        });
+                // Try to drag scrollbar.
+                drag_thumb(
+                    tester,
+                    K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
+                // Expect no change
+                assert_thumb_rrect(
+                    tester,
+                    K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
+            },
+        );
     }
 
     #[test]
     fn scrollbar_interactive_takes_priority_over_scrollbar_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Fuchsia);
-            let theme = ThemeData::builder()
-                .use_material3(false)
-                .scrollbar_theme(ScrollbarThemeData::new().interactive(false))
-                .build(&tester.cell.borrow());
-            let controller = ScrollController::default(&mut tester.cell.borrow_mut())
-                .into_erased::<waft_widgets::AnyScrollController>();
-            tester.pump_widget(material_app(
-                theme,
-                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
-                    .interactive(true)
-                    .thumb_visibility(true)
-                    .controller(controller.clone())
-                    .into_widget(),
-            ));
-            tester.pump_and_settle();
-            // Idle scrollbar behavior
-            assert_thumb_rrect(
-                &tester,
-                K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::Fuchsia),
+            |tester| {
+                let theme = ThemeData::builder()
+                    .use_material3(false)
+                    .scrollbar_theme(ScrollbarThemeData::new().interactive(false))
+                    .build(&tester.cell.borrow());
+                let controller = ScrollController::default(&mut tester.cell.borrow_mut())
+                    .into_erased::<waft_widgets::AnyScrollController>();
+                tester.pump_widget(material_app(
+                    theme,
+                    Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
+                        .interactive(true)
+                        .thumb_visibility(true)
+                        .controller(controller.clone())
+                        .into_widget(),
+                ));
+                tester.pump_and_settle();
+                // Idle scrollbar behavior
+                assert_thumb_rrect(
+                    tester,
+                    K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
 
-            // Drag scrollbar.
-            drag_thumb(
-                &mut tester,
-                K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_DRAG_THUMB_COLOR,
-            );
-            // Gestures handled by Scrollbar.
-            assert_thumb_rrect(
-                &tester,
-                Rect::from_ltrb(790.0, 10.0, 798.0, 100.0),
-                K_DEFAULT_THUMB_RADIUS,
-                K_DEFAULT_IDLE_THUMB_COLOR,
-            );
-        });
+                // Drag scrollbar.
+                drag_thumb(
+                    tester,
+                    K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_DRAG_THUMB_COLOR,
+                );
+                // Gestures handled by Scrollbar.
+                assert_thumb_rrect(
+                    tester,
+                    Rect::from_ltrb(790.0, 10.0, 798.0, 100.0),
+                    K_DEFAULT_THUMB_RADIUS,
+                    K_DEFAULT_IDLE_THUMB_COLOR,
+                );
+            },
+        );
     }
 
     #[test]
     fn scrollbar_widget_properties_take_priority_over_theme() {
         for platform in DESKTOP_AND_FUCHSIA {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 const THICKNESS: f64 = 4.0;
                 const EDGE_MARGIN: f64 = 2.0;
                 const RADIUS: Radius = Radius::circular(3.0);
-                let mut tester = tester_on(platform);
+                let mut tester = WidgetTester::on(platform);
+                let tester = &mut tester;
                 let theme = ThemeData::builder()
                     .color_scheme(ColorScheme::light())
                     .scrollbar_theme(
@@ -727,7 +732,7 @@ mod tests {
                     )
                     .build(&tester.cell.borrow());
                 pump_frame(
-                    &mut tester,
+                    tester,
                     theme,
                     |scrollbar| scrollbar.thickness(THICKNESS).radius(RADIUS),
                     |child| child,
@@ -737,7 +742,7 @@ mod tests {
                 // Idle scrollbar behavior
                 let thumb = Rect::from_ltrb(800.0 - THICKNESS - EDGE_MARGIN, 0.0, 798.0, 90.0);
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     thumb,
                     Radius::circular(3.0),
                     K_DEFAULT_IDLE_THUMB_COLOR,
@@ -745,19 +750,19 @@ mod tests {
 
                 // Drag scrollbar behavior.
                 drag_thumb(
-                    &mut tester,
+                    tester,
                     thumb,
                     Radius::circular(3.0),
                     K_DEFAULT_DRAG_THUMB_COLOR,
                 );
 
                 // Hover scrollbar behavior.
-                hover_at(&mut tester, Offset::new(794.0, 5.0));
+                hover_at(tester, Offset::new(794.0, 5.0));
                 tester.pump_and_settle();
 
-                let drawn = painted(&tester);
+                let drawn = painted(tester);
                 assert_track(
-                    &tester,
+                    tester,
                     &drawn,
                     Rect::from_ltrb(792.0, 0.0, 800.0, 600.0),
                     0x08000000,
@@ -766,7 +771,7 @@ mod tests {
                 );
                 // Hover color
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(800.0 - THICKNESS - EDGE_MARGIN, 10.0, 798.0, 100.0),
                     Radius::circular(3.0),
                     0x80000000,
@@ -778,8 +783,7 @@ mod tests {
     #[test]
     fn theme_data_color_scheme_is_used_when_no_scrollbar_theme_is_set() {
         for platform in DESKTOP_AND_FUCHSIA {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let build_frame = |tester: &mut WidgetTester, color_scheme: ColorScheme| {
                     let theme = ThemeData::builder()
                         .color_scheme(color_scheme)
@@ -794,11 +798,11 @@ mod tests {
 
                 // Scrollbar defaults for light themes:
                 // - coloring based on ColorScheme.onSurface
-                build_frame(&mut tester, ColorScheme::light());
+                build_frame(tester, ColorScheme::light());
                 tester.pump_and_settle();
                 // Idle scrollbar behavior
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
                     K_DEFAULT_THUMB_RADIUS,
                     K_DEFAULT_IDLE_THUMB_COLOR,
@@ -806,19 +810,19 @@ mod tests {
 
                 // Drag scrollbar behavior
                 drag_thumb(
-                    &mut tester,
+                    tester,
                     K_MATERIAL_DESIGN_INITIAL_THUMB_RECT,
                     K_DEFAULT_THUMB_RADIUS,
                     K_DEFAULT_DRAG_THUMB_COLOR,
                 );
 
                 // Hover scrollbar behavior
-                let mut hover_gesture = hover_at(&mut tester, Offset::new(794.0, 5.0));
+                let mut hover_gesture = hover_at(tester, Offset::new(794.0, 5.0));
                 tester.pump_and_settle();
 
-                let drawn = painted(&tester);
+                let drawn = painted(tester);
                 assert_track(
-                    &tester,
+                    tester,
                     &drawn,
                     Rect::from_ltrb(784.0, 0.0, 800.0, 600.0),
                     0x08000000,
@@ -827,7 +831,7 @@ mod tests {
                 );
                 // Scrollbar thumb is larger; hover color
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(786.0, 10.0, 798.0, 100.0),
                     K_DEFAULT_THUMB_RADIUS,
                     0x80000000,
@@ -837,12 +841,12 @@ mod tests {
 
                 // Scrollbar defaults for dark themes:
                 // - coloring slightly different based on ColorScheme.onSurface
-                build_frame(&mut tester, ColorScheme::dark());
+                build_frame(tester, ColorScheme::dark());
                 tester.pump_and_settle(); // Theme change animation
 
                 // Idle scrollbar behavior
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(790.0, 10.0, 798.0, 100.0),
                     K_DEFAULT_THUMB_RADIUS,
                     0x4dffffff,
@@ -850,7 +854,7 @@ mod tests {
 
                 // Drag scrollbar behavior
                 drag_thumb(
-                    &mut tester,
+                    tester,
                     Rect::from_ltrb(790.0, 10.0, 798.0, 100.0),
                     K_DEFAULT_THUMB_RADIUS,
                     0xbfffffff,
@@ -860,9 +864,9 @@ mod tests {
                 tester.move_to(&mut hover_gesture, Offset::new(794.0, 5.0), false);
                 tester.pump_and_settle();
 
-                let drawn = painted(&tester);
+                let drawn = painted(tester);
                 assert_track(
-                    &tester,
+                    tester,
                     &drawn,
                     Rect::from_ltrb(784.0, 0.0, 800.0, 600.0),
                     0x0dffffff,
@@ -871,7 +875,7 @@ mod tests {
                 );
                 // Scrollbar thumb is larger; hover color
                 assert_thumb_rrect(
-                    &tester,
+                    tester,
                     Rect::from_ltrb(786.0, 20.0, 798.0, 110.0),
                     K_DEFAULT_THUMB_RADIUS,
                     0xa6ffffff,
@@ -883,8 +887,7 @@ mod tests {
     #[test]
     fn scrollbar_theme_data_track_visibility_test() {
         for platform in DESKTOP_AND_FUCHSIA {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let theme = ThemeData::builder()
                     .use_material3(false)
                     .build(&tester.cell.borrow())
@@ -895,10 +898,10 @@ mod tests {
                         |_states: &WidgetStates| Some(true),
                     )))
                     .build();
-                pump_frame(&mut tester, theme, |scrollbar| scrollbar, |child| child);
+                pump_frame(tester, theme, |scrollbar| scrollbar, |child| child);
                 tester.pump_and_settle();
 
-                let drawn = painted(&tester);
+                let drawn = painted(tester);
                 assert!(
                     matches!(drawn.as_slice(), [
                         Drawn::Rect(0x08000000, _),

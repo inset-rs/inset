@@ -977,43 +977,26 @@ impl ToggleablePainter for RadioPainter {
 #[allow(deprecated)]
 mod tests {
     use std::cell::RefCell;
-    use std::time::Duration;
 
     use waft_embedder::valo::{Op, Shader};
-    use waft_embedder::{
-        KeyData, KeyEventDeviceType, KeyEventType, PointerChange, PointerData, PointerDataPacket,
-        PointerDeviceKind, TargetPlatform,
-    };
-    use waft_foundation::AppCell;
-    use waft_gestures::GestureBinding;
-    use waft_painting::PaintingBinding;
     use waft_rendering::{
-        AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject, RendererBinding,
+        AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject,
     };
-    use waft_services::{KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey};
-    use waft_test::TestPlatform;
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
     use waft_widgets::{
-        Center, FocusHighlightStrategy, FocusManager, GlobalKey, Row, SizedBox,
-        WidgetStateMouseCursor,
+        Center, FocusHighlightStrategy, GlobalKey, Row, SizedBox, WidgetStateMouseCursor,
     };
 
     use super::*;
     use crate::app::CupertinoApp;
-    use crate::test_support::{build, pump, test_view};
     use crate::theme::CupertinoThemeData;
 
-    /// The test view is 400x300 logical pixels; a centred radio sits at its centre.
-    const VIEW_CENTER: Offset = Offset::new(200.0, 150.0);
+    /// A centred radio sits at the centre of the tester's 800x600 view.
+    const VIEW_CENTER: Offset = Offset::new(400.0, 300.0);
 
     const INNER_RADIUS: f32 = 2.975;
     const OUTER_RADIUS: f32 = 7.0;
-
-    /// Dart's `WidgetTester` over a `CupertinoApp` on Android, flutter_test's default platform.
-    struct Tester {
-        cell: Rc<AppCell>,
-        clock: Duration,
-        host: Option<Handle<HostState>>,
-    }
 
     /// The app's home, standing in for a second `pumpWidget(CupertinoApp(home: ..))`: a
     /// `CupertinoApp` rebuilt with a new `home` keeps showing the old one here, so a test
@@ -1067,181 +1050,71 @@ mod tests {
         }
     }
 
-    impl Tester {
-        fn new() -> Tester {
-            let platform = TestPlatform::new()
-                .on(TargetPlatform::Android)
-                .with_view(test_view());
-            let cell = AppCell::with_platform(Rc::new(platform));
-            install_fonts(&mut cell.borrow_mut());
-            Tester {
-                cell,
-                clock: Duration::ZERO,
-                host: None,
+    /// Dart's `pumpWidget(CupertinoApp(theme:, home: Center(child: child)))`: the first call
+    /// mounts the app, and a later one hands the mounted [`Host`] the new theme and child.
+    fn pump_app(tester: &mut WidgetTester, theme: Option<CupertinoThemeData>, child: WidgetRef) {
+        let mounted = tester.find_by_type::<Host>().first().map(|host| {
+            let KeyRef::Global(key) = tester.widget(*host, |host: &Host| host.key.clone()) else {
+                unreachable!("pump_app keys its Host globally")
+            };
+            key.current_state::<HostState>(&tester.cell.borrow())
+                .expect("the host is mounted")
+        });
+        match mounted {
+            Some(host) => {
+                host.set_state(&mut tester.cell.borrow_mut(), |host| {
+                    host.theme = theme;
+                    host.child = child;
+                });
+                tester.pump();
             }
-        }
-
-        /// Dart's `pumpWidget(CupertinoApp(theme:, home: Center(child: child)))`.
-        fn pump_app(&mut self, theme: Option<CupertinoThemeData>, child: WidgetRef) {
-            match self.host {
-                Some(host) => {
-                    host.set_state(&mut self.cell.borrow_mut(), |host| {
-                        host.theme = theme;
-                        host.child = child;
-                    });
-                }
-                None => {
-                    let key = GlobalKey::new();
-                    let home = Host {
-                        key: key.clone().into(),
-                        theme,
-                        child,
-                    };
-                    build(&self.cell, CupertinoApp::new().home(home).into_widget());
-                    self.host = key.current_state::<HostState>(&self.cell.borrow_mut());
-                }
+            None => {
+                let home = Host {
+                    key: GlobalKey::new().into(),
+                    theme,
+                    child,
+                };
+                tester.pump_widget(CupertinoApp::new().home(home));
             }
-            self.pump();
-        }
-
-        fn pump(&mut self) {
-            self.clock += Duration::from_millis(16);
-            pump(&mut self.cell.borrow_mut(), self.clock);
-        }
-
-        /// Dart's `pumpAndSettle`: frames until no animation is left.
-        fn settle(&mut self) {
-            for _ in 0..60 {
-                self.pump();
-            }
-        }
-
-        fn highlight_traditionally(&self) {
-            let mut app = self.cell.borrow_mut();
-            let manager = FocusManager::instance(&mut app);
-            manager.set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-        }
-
-        /// The test view is 2x: logical coordinates double into the packet.
-        fn send(&mut self, change: PointerChange, kind: PointerDeviceKind, at: Offset) {
-            self.clock += Duration::from_millis(10);
-            let mut app = self.cell.borrow_mut();
-            GestureBinding::instance(&mut app).handle_pointer_data_packet(
-                &mut app,
-                PointerDataPacket::new(vec![PointerData {
-                    change,
-                    kind,
-                    time_stamp: self.clock,
-                    device: 1,
-                    pointer_identifier: 1,
-                    buttons: if matches!(change, PointerChange::Down | PointerChange::Move) {
-                        1
-                    } else {
-                        0
-                    },
-                    physical_x: at.dx() * 2.0,
-                    physical_y: at.dy() * 2.0,
-                    ..PointerData::default()
-                }]),
-            );
-            app.drain_microtasks();
-        }
-
-        /// Dart's `tester.startGesture` at the view's centre, then `pump`.
-        fn press(&mut self) {
-            self.send(PointerChange::Down, PointerDeviceKind::Touch, VIEW_CENTER);
-            self.pump();
-        }
-
-        fn release(&mut self) {
-            self.send(PointerChange::Up, PointerDeviceKind::Touch, VIEW_CENTER);
-            self.pump();
-        }
-
-        /// Dart's `tester.tap` at the radio's centre.
-        fn tap(&mut self) {
-            self.send(PointerChange::Down, PointerDeviceKind::Touch, VIEW_CENTER);
-            self.send(PointerChange::Up, PointerDeviceKind::Touch, VIEW_CENTER);
-            self.pump();
-        }
-
-        /// A mouse that arrives over the radio's centre.
-        fn hover(&mut self) {
-            self.send(PointerChange::Add, PointerDeviceKind::Mouse, VIEW_CENTER);
-            self.send(PointerChange::Hover, PointerDeviceKind::Mouse, VIEW_CENTER);
-            self.pump();
-        }
-
-        fn cursor(&self) -> Option<MouseCursorRef> {
-            let mut app = self.cell.borrow_mut();
-            RendererBinding::instance(&mut app)
-                .mouse_tracker(&app)
-                .debug_device_active_cursor(&app, 1)
-        }
-
-        /// Dart's `tester.sendKeyEvent`: one key down and up, as the shell delivers it.
-        fn send_key_event(&mut self, physical: PhysicalKeyboardKey, logical: LogicalKeyboardKey) {
-            for event_type in [KeyEventType::Down, KeyEventType::Up] {
-                let mut app = self.cell.borrow_mut();
-                KeyEventManager::instance(&mut app).handle_key_data(
-                    &mut app,
-                    KeyData {
-                        time_stamp: Duration::ZERO,
-                        event_type,
-                        device_type: KeyEventDeviceType::Keyboard,
-                        physical: physical.usb_hid_usage,
-                        logical: logical.key_id,
-                        character: None,
-                        synthesized: false,
-                    },
-                );
-                app.drain_microtasks();
-            }
-        }
-
-        fn custom_paint(&self, key: &GlobalKey) -> RenderHandle<RenderCustomPaint> {
-            let app = self.cell.borrow();
-            let root = key
-                .current_context(&app)
-                .expect("the radio mounted")
-                .find_render_object(&app)
-                .expect("the radio has been laid out");
-            find::<RenderCustomPaint>(&app, root).expect("the radio's paint")
-        }
-
-        /// Dart's `find.byType(CupertinoRadio)` with a `paints` matcher: what the radio's
-        /// painter draws, in paint order.
-        fn drawn(&self, key: &GlobalKey) -> Vec<Drawn> {
-            let custom = self.custom_paint(key);
-            let mut app = self.cell.borrow_mut();
-            let painter = custom.painter(&app).expect("the radio's painter");
-            let size = custom.size(&app);
-            let mut canvas = Canvas::new();
-            painter.paint(&mut app, &mut canvas, size);
-            canvas.build().ops().iter().filter_map(Drawn::of).collect()
-        }
-
-        /// The radio's painter, for a colour whose draw valo drops because it is transparent.
-        fn painter(&self, key: &GlobalKey) -> Handle<RadioPainter> {
-            let custom = self.custom_paint(key);
-            let app = self.cell.borrow();
-            let painter = custom.painter(&app).expect("the radio's painter");
-            painter
-                .as_any()
-                .downcast_ref::<ToggleablePainterRef<RadioPainter>>()
-                .expect("a radio painter")
-                .painter()
         }
     }
 
-    /// What the shell does at start-up: the app-wide fonts, which the debug banner needs.
-    fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
+    /// Dart's `gesture.addPointer(location: center)`, `pump` and `gesture.moveTo(center)`: a
+    /// mouse that arrives over the radio's centre.
+    fn hover(tester: &mut WidgetTester) {
+        let mut mouse = TestPointer::mouse(1, 0);
+        tester.add_pointer(&mut mouse, VIEW_CENTER);
+        tester.pump();
+        tester.move_to(&mut mouse, VIEW_CENTER, false);
+    }
+
+    fn custom_paint(tester: &WidgetTester, key: &GlobalKey) -> RenderHandle<RenderCustomPaint> {
+        let root = tester.render_object(key);
+        find::<RenderCustomPaint>(&tester.cell.borrow(), root).expect("the radio's paint")
+    }
+
+    /// Dart's `find.byType(CupertinoRadio)` with a `paints` matcher: what the radio's painter
+    /// draws, in paint order.
+    fn drawn(tester: &WidgetTester, key: &GlobalKey) -> Vec<Drawn> {
+        let custom = custom_paint(tester, key);
+        let mut app = tester.cell.borrow_mut();
+        let painter = custom.painter(&app).expect("the radio's painter");
+        let size = custom.size(&app);
+        let mut canvas = Canvas::new();
+        painter.paint(&mut app, &mut canvas, size);
+        canvas.build().ops().iter().filter_map(Drawn::of).collect()
+    }
+
+    /// The radio's painter, for a colour whose draw valo drops because it is transparent.
+    fn painter(tester: &WidgetTester, key: &GlobalKey) -> Handle<RadioPainter> {
+        let custom = custom_paint(tester, key);
+        let app = tester.cell.borrow();
+        let painter = custom.painter(&app).expect("the radio's painter");
+        painter
+            .as_any()
+            .downcast_ref::<ToggleablePainterRef<RadioPainter>>()
+            .expect("a radio painter")
+            .painter()
     }
 
     fn find<T: RenderObject>(app: &App, node: AnyRenderObject) -> Option<RenderHandle<T>> {
@@ -1323,129 +1196,139 @@ mod tests {
 
     #[test]
     fn a_radio_reports_its_value_when_tapped_unless_selected_or_without_on_changed() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
 
-        tester.pump_app(
-            None,
-            keyed(radio(1).group_value(2).on_changed(log_into(&log)), &key),
-        );
-        tester.tap();
-        assert_eq!(*log.borrow(), [Some(1)]);
-        log.borrow_mut().clear();
+            pump_app(
+                tester,
+                None,
+                keyed(radio(1).group_value(2).on_changed(log_into(&log)), &key),
+            );
+            tester.tap(VIEW_CENTER, 1);
+            assert_eq!(*log.borrow(), [Some(1)]);
+            log.borrow_mut().clear();
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(1)
-                    .on_changed(log_into(&log))
-                    .active_color(CupertinoColors::SYSTEM_GREEN.color()),
-                &key,
-            ),
-        );
-        tester.tap();
-        assert!(log.borrow().is_empty());
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(1)
+                        .on_changed(log_into(&log))
+                        .active_color(CupertinoColors::SYSTEM_GREEN.color()),
+                    &key,
+                ),
+            );
+            tester.tap(VIEW_CENTER, 1);
+            assert!(log.borrow().is_empty());
 
-        tester.pump_app(None, keyed(radio(1).group_value(2), &key));
-        tester.tap();
-        assert!(log.borrow().is_empty());
+            pump_app(tester, None, keyed(radio(1).group_value(2), &key));
+            tester.tap(VIEW_CENTER, 1);
+            assert!(log.borrow().is_empty());
+        });
     }
 
     #[test]
     fn a_disabled_radio_does_not_report_a_tap() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(2)
-                    .enabled(false)
-                    .on_changed(log_into(&log)),
-                &key,
-            ),
-        );
-        tester.tap();
-        assert!(log.borrow().is_empty());
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(2)
+                        .enabled(false)
+                        .on_changed(log_into(&log)),
+                    &key,
+                ),
+            );
+            tester.tap(VIEW_CENTER, 1);
+            assert!(log.borrow().is_empty());
+        });
     }
 
     #[test]
     fn a_toggleable_radio_reports_null_when_tapped_while_selected() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let log: Rc<RefCell<Vec<Option<i32>>>> = Rc::default();
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(2)
-                    .on_changed(log_into(&log))
-                    .toggleable(true),
-                &key,
-            ),
-        );
-        tester.tap();
-        assert_eq!(*log.borrow(), [Some(1)]);
-        log.borrow_mut().clear();
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(2)
+                        .on_changed(log_into(&log))
+                        .toggleable(true),
+                    &key,
+                ),
+            );
+            tester.tap(VIEW_CENTER, 1);
+            assert_eq!(*log.borrow(), [Some(1)]);
+            log.borrow_mut().clear();
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(1)
-                    .on_changed(log_into(&log))
-                    .toggleable(true),
-                &key,
-            ),
-        );
-        tester.tap();
-        assert_eq!(*log.borrow(), [None]);
-        log.borrow_mut().clear();
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(1)
+                        .on_changed(log_into(&log))
+                        .toggleable(true),
+                    &key,
+                ),
+            );
+            tester.tap(VIEW_CENTER, 1);
+            assert_eq!(*log.borrow(), [None]);
+            log.borrow_mut().clear();
 
-        tester.pump_app(
-            None,
-            keyed(radio(1).on_changed(log_into(&log)).toggleable(true), &key),
-        );
-        tester.tap();
-        assert_eq!(*log.borrow(), [Some(1)]);
+            pump_app(
+                tester,
+                None,
+                keyed(radio(1).on_changed(log_into(&log)).toggleable(true), &key),
+            );
+            tester.tap(VIEW_CENTER, 1);
+            assert_eq!(*log.borrow(), [Some(1)]);
+        });
     }
 
     #[test]
     fn a_radio_under_a_radio_group_selects_through_the_group() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let log: Rc<RefCell<Vec<Option<String>>>> = Rc::default();
-        let group = |group_value: Option<&str>, log: &Rc<RefCell<Vec<Option<String>>>>| {
-            let log = Rc::clone(log);
-            let mut group = RadioGroup::<String>::new(
-                Rc::new(move |_app, value| log.borrow_mut().push(value)),
-                CupertinoRadio::new(String::from("jefferson")).key(key.clone().into()),
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let log: Rc<RefCell<Vec<Option<String>>>> = Rc::default();
+            let group = |group_value: Option<&str>, log: &Rc<RefCell<Vec<Option<String>>>>| {
+                let log = Rc::clone(log);
+                let mut group = RadioGroup::<String>::new(
+                    Rc::new(move |_app, value| log.borrow_mut().push(value)),
+                    CupertinoRadio::new(String::from("jefferson")).key(key.clone().into()),
+                );
+                if let Some(group_value) = group_value {
+                    group = group.group_value(String::from(group_value));
+                }
+                group.into_widget()
+            };
+
+            pump_app(tester, None, group(Some("lafayette"), &log));
+            assert_eq!(
+                painter(tester, &key).value(&tester.cell.borrow()),
+                Some(false)
             );
-            if let Some(group_value) = group_value {
-                group = group.group_value(String::from(group_value));
-            }
-            group.into_widget()
-        };
+            tester.tap(VIEW_CENTER, 1);
+            assert_eq!(*log.borrow(), [Some(String::from("jefferson"))]);
 
-        tester.pump_app(None, group(Some("lafayette"), &log));
-        assert_eq!(
-            tester.painter(&key).value(&tester.cell.borrow()),
-            Some(false)
-        );
-        tester.tap();
-        assert_eq!(*log.borrow(), [Some(String::from("jefferson"))]);
-
-        tester.pump_app(None, group(Some("jefferson"), &log));
-        tester.settle();
-        assert_eq!(
-            tester.painter(&key).value(&tester.cell.borrow()),
-            Some(true)
-        );
+            pump_app(tester, None, group(Some("jefferson"), &log));
+            tester.pump_and_settle();
+            assert_eq!(
+                painter(tester, &key).value(&tester.cell.borrow()),
+                Some(true)
+            );
+        });
     }
 
     /// Dart's `StatefulBuilder` around three radios that share `groupValue`.
@@ -1508,323 +1391,356 @@ mod tests {
 
     #[test]
     fn a_radio_can_be_controlled_by_keyboard_shortcuts() {
-        let mut tester = Tester::new();
-        tester.highlight_traditionally();
-        let group_value = Rc::new(RefCell::new(Some(1)));
-        let focus_node2: FocusNodeRef = FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
-        focus_node2.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio2".into()));
+        test_widgets(|tester| {
+            tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
+            let group_value = Rc::new(RefCell::new(Some(1)));
+            let focus_node2: FocusNodeRef =
+                FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
+            focus_node2.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio2".into()));
 
-        tester.pump_app(
-            None,
-            KeyboardHost {
-                focus_node2: focus_node2.clone(),
-                group_value: Rc::clone(&group_value),
-            }
-            .into_widget(),
-        );
-        tester.settle();
+            pump_app(
+                tester,
+                None,
+                KeyboardHost {
+                    focus_node2: focus_node2.clone(),
+                    group_value: Rc::clone(&group_value),
+                }
+                .into_widget(),
+            );
+            tester.pump_and_settle();
 
-        tester.send_key_event(PhysicalKeyboardKey::ENTER, LogicalKeyboardKey::ENTER);
-        tester.settle();
-        // On web, radios don't respond to the enter key.
-        assert_eq!(
-            *group_value.borrow(),
-            if K_IS_WEB { Some(1) } else { Some(0) }
-        );
+            tester.send_key_event(PhysicalKeyboardKey::ENTER, LogicalKeyboardKey::ENTER);
+            tester.pump_and_settle();
+            // On web, radios don't respond to the enter key.
+            assert_eq!(
+                *group_value.borrow(),
+                if K_IS_WEB { Some(1) } else { Some(0) }
+            );
 
-        focus_node2.request_focus(&mut tester.cell.borrow_mut(), None);
-        tester.settle();
+            focus_node2.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump_and_settle();
 
-        tester.send_key_event(PhysicalKeyboardKey::SPACE, LogicalKeyboardKey::SPACE);
-        tester.settle();
-        assert_eq!(*group_value.borrow(), Some(2));
+            tester.send_key_event(PhysicalKeyboardKey::SPACE, LogicalKeyboardKey::SPACE);
+            tester.pump_and_settle();
+            assert_eq!(*group_value.borrow(), Some(2));
+        });
     }
 
     #[test]
     fn a_checkmark_shows_only_when_use_checkmark_style_is_true_and_selected() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let on_changed: ValueChanged<Option<i32>> = Rc::new(|_app, _value| {});
-        let has_path = |drawn: &[Drawn]| drawn.iter().any(|drawn| matches!(drawn, Drawn::Path(_)));
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let on_changed: ValueChanged<Option<i32>> = Rc::new(|_app, _value| {});
+            let has_path =
+                |drawn: &[Drawn]| drawn.iter().any(|drawn| matches!(drawn, Drawn::Path(_)));
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1).group_value(1).on_changed(Rc::clone(&on_changed)),
-                &key,
-            ),
-        );
-        tester.settle();
-        // Has no checkmark when useCheckmarkStyle is false
-        assert!(!has_path(&tester.drawn(&key)));
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1).group_value(1).on_changed(Rc::clone(&on_changed)),
+                    &key,
+                ),
+            );
+            tester.pump_and_settle();
+            // Has no checkmark when useCheckmarkStyle is false
+            assert!(!has_path(&drawn(tester, &key)));
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(2)
-                    .use_checkmark_style(true)
-                    .on_changed(Rc::clone(&on_changed)),
-                &key,
-            ),
-        );
-        tester.settle();
-        // Has no checkmark when group value doesn't match the value
-        assert!(!has_path(&tester.drawn(&key)));
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(2)
+                        .use_checkmark_style(true)
+                        .on_changed(Rc::clone(&on_changed)),
+                    &key,
+                ),
+            );
+            tester.pump_and_settle();
+            // Has no checkmark when group value doesn't match the value
+            assert!(!has_path(&drawn(tester, &key)));
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(1)
-                    .use_checkmark_style(true)
-                    .on_changed(on_changed),
-                &key,
-            ),
-        );
-        tester.settle();
-        // Draws a path to show the checkmark when toggled on
-        assert_eq!(
-            tester.drawn(&key),
-            [
-                Drawn::Path(K_CHECKMARK_STROKE_WIDTH as f32),
-                Drawn::Path(K_CHECKMARK_STROKE_WIDTH as f32)
-            ]
-        );
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(1)
+                        .use_checkmark_style(true)
+                        .on_changed(on_changed),
+                    &key,
+                ),
+            );
+            tester.pump_and_settle();
+            // Draws a path to show the checkmark when toggled on
+            assert_eq!(
+                drawn(tester, &key),
+                [
+                    Drawn::Path(K_CHECKMARK_STROKE_WIDTH as f32),
+                    Drawn::Path(K_CHECKMARK_STROKE_WIDTH as f32)
+                ]
+            );
+        });
     }
 
     #[test]
     fn a_radio_that_disappears_while_the_pointer_is_down_does_not_crash() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let shown = |show: bool| {
-            if show {
-                CupertinoRadio::new(true)
-                    .key(key.clone().into())
-                    .group_value(false)
-                    .on_changed(Rc::new(|_app, _value| {}))
-                    .into_widget()
-            } else {
-                SizedBox::new().into_widget()
-            }
-        };
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let shown = |show: bool| {
+                if show {
+                    CupertinoRadio::new(true)
+                        .key(key.clone().into())
+                        .group_value(false)
+                        .on_changed(Rc::new(|_app, _value| {}))
+                        .into_widget()
+                } else {
+                    SizedBox::new().into_widget()
+                }
+            };
 
-        tester.pump_app(None, shown(true));
-        // Put a pointer down on the screen.
-        tester.press();
-        // While the pointer is down, the widget disappears.
-        tester.pump_app(None, shown(false));
-        assert!(key.current_context(&tester.cell.borrow_mut()).is_none());
-        // Release pointer after widget disappeared.
-        tester.release();
+            pump_app(tester, None, shown(true));
+            // Put a pointer down on the screen.
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            tester.pump();
+            // While the pointer is down, the widget disappears.
+            pump_app(tester, None, shown(false));
+            assert!(key.current_context(&tester.cell.borrow_mut()).is_none());
+            // Release pointer after widget disappeared.
+            tester.up(&gesture);
+        });
     }
 
     #[test]
     fn a_radio_can_set_its_inactive_active_and_fill_colors() {
-        const INACTIVE_BORDER_COLOR: u32 = 0xffd1d1d6;
-        const ACTIVE_COLOR: Color = Color::new(0x0000000A);
-        const FILL_COLOR: Color = Color::new(0x0000000B);
-        const INACTIVE_COLOR: Color = Color::new(0x0000000C);
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let configured = |group_value: i32| {
-            radio(1)
-                .group_value(group_value)
-                .on_changed(Rc::new(|_app, _value| {}))
-                .active_color(ACTIVE_COLOR)
-                .fill_color(FILL_COLOR)
-                .inactive_color(INACTIVE_COLOR)
-        };
+        test_widgets(|tester| {
+            const INACTIVE_BORDER_COLOR: u32 = 0xffd1d1d6;
+            const ACTIVE_COLOR: Color = Color::new(0x0000000A);
+            const FILL_COLOR: Color = Color::new(0x0000000B);
+            const INACTIVE_COLOR: Color = Color::new(0x0000000C);
+            let key = GlobalKey::new();
+            let configured = |group_value: i32| {
+                radio(1)
+                    .group_value(group_value)
+                    .on_changed(Rc::new(|_app, _value| {}))
+                    .active_color(ACTIVE_COLOR)
+                    .fill_color(FILL_COLOR)
+                    .inactive_color(INACTIVE_COLOR)
+            };
 
-        tester.pump_app(None, keyed(configured(2), &key));
-        // The colours have no alpha, so valo records no draw of the fill: the painter holds
-        // the inactive colour the circle is filled with.
-        {
-            let painter = tester.painter(&key);
+            pump_app(tester, None, keyed(configured(2), &key));
+            // The colours have no alpha, so valo records no draw of the fill: the painter holds
+            // the inactive colour the circle is filled with.
+            {
+                let painter = painter(tester, &key);
+                let app = tester.cell.borrow();
+                assert_eq!(painter.inactive_color(&app), INACTIVE_COLOR);
+                assert_eq!(painter.value(&app), Some(false));
+            }
+            assert_eq!(
+                drawn(tester, &key),
+                [Drawn::StrokedCircle(
+                    OUTER_RADIUS,
+                    K_BORDER_OUTLINE_STROKE_WIDTH as f32,
+                    INACTIVE_BORDER_COLOR
+                )],
+                "Unselected radio button should use inactive and border colors"
+            );
+
+            pump_app(tester, None, keyed(configured(1), &key));
+            let painter = painter(tester, &key);
             let app = tester.cell.borrow();
-            assert_eq!(painter.inactive_color(&app), INACTIVE_COLOR);
-            assert_eq!(painter.value(&app), Some(false));
-        }
-        assert_eq!(
-            tester.drawn(&key),
-            [Drawn::StrokedCircle(
-                OUTER_RADIUS,
-                K_BORDER_OUTLINE_STROKE_WIDTH as f32,
-                INACTIVE_BORDER_COLOR
-            )],
-            "Unselected radio button should use inactive and border colors"
-        );
-
-        tester.pump_app(None, keyed(configured(1), &key));
-        let painter = tester.painter(&key);
-        let app = tester.cell.borrow();
-        assert_eq!(painter.active_color(&app), ACTIVE_COLOR);
-        assert_eq!(painter.fill_color(&app), FILL_COLOR);
-        assert_eq!(
-            painter.value(&app),
-            Some(true),
-            "Selected radio button should use active and fill colors"
-        );
+            assert_eq!(painter.active_color(&app), ACTIVE_COLOR);
+            assert_eq!(painter.fill_color(&app), FILL_COLOR);
+            assert_eq!(
+                painter.value(&app),
+                Some(true),
+                "Selected radio button should use active and fill colors"
+            );
+        });
     }
 
     #[test]
     fn a_radio_has_the_default_colors_in_each_state_and_brightness() {
-        // Dart pins these with goldens; the painter's colours are what the goldens show.
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let cases: Vec<(Option<CupertinoThemeData>, bool, i32, u32, u32, u32)> = vec![
-            (None, true, 1, 0xff007aff, 0xffffffff, 0x00000000),
-            (None, true, 2, 0xff007aff, 0xffffffff, 0xffd1d1d6),
-            (dark(), true, 1, 0xff3264d7, 0xffdee8f8, 0x00000000),
-            (dark(), true, 2, 0xff3264d7, 0xffffffff, 0x40000000),
-            (None, false, 1, 0x80ffffff, 0x40000000, 0x40000000),
-            (None, false, 2, 0x80ffffff, 0xffffffff, 0x40000000),
-            (dark(), false, 1, 0x80ffffff, 0x40ffffff, 0x40000000),
-            (dark(), false, 2, 0x80ffffff, 0xffffffff, 0x40000000),
-        ];
-        for (theme, enabled, group_value, active, fill, border) in cases {
-            let mut configured = radio(1).group_value(group_value);
-            if enabled {
-                configured = configured.on_changed(Rc::new(|_app, _value| {}));
+        test_widgets(|tester| {
+            // Dart pins these with goldens; the painter's colours are what the goldens show.
+            let key = GlobalKey::new();
+            let cases: Vec<(Option<CupertinoThemeData>, bool, i32, u32, u32, u32)> = vec![
+                (None, true, 1, 0xff007aff, 0xffffffff, 0x00000000),
+                (None, true, 2, 0xff007aff, 0xffffffff, 0xffd1d1d6),
+                (dark(), true, 1, 0xff3264d7, 0xffdee8f8, 0x00000000),
+                (dark(), true, 2, 0xff3264d7, 0xffffffff, 0x40000000),
+                (None, false, 1, 0x80ffffff, 0x40000000, 0x40000000),
+                (None, false, 2, 0x80ffffff, 0xffffffff, 0x40000000),
+                (dark(), false, 1, 0x80ffffff, 0x40ffffff, 0x40000000),
+                (dark(), false, 2, 0x80ffffff, 0xffffffff, 0x40000000),
+            ];
+            for (theme, enabled, group_value, active, fill, border) in cases {
+                let mut configured = radio(1).group_value(group_value);
+                if enabled {
+                    configured = configured.on_changed(Rc::new(|_app, _value| {}));
+                }
+                pump_app(tester, theme, keyed(configured, &key));
+                let painter = painter(tester, &key);
+                let app = tester.cell.borrow();
+                let case = format!("enabled {enabled}, group value {group_value}");
+                assert_eq!(painter.active_color(&app).value(), active, "{case}: active");
+                assert_eq!(painter.fill_color(&app).value(), fill, "{case}: fill");
+                assert_eq!(painter.border_color(&app).value(), border, "{case}: border");
             }
-            tester.pump_app(theme, keyed(configured, &key));
-            let painter = tester.painter(&key);
-            let app = tester.cell.borrow();
-            let case = format!("enabled {enabled}, group value {group_value}");
-            assert_eq!(painter.active_color(&app).value(), active, "{case}: active");
-            assert_eq!(painter.fill_color(&app).value(), fill, "{case}: fill");
-            assert_eq!(painter.border_color(&app).value(), border, "{case}: border");
-        }
+        });
     }
 
     #[test]
     fn a_disabled_radio_in_dark_mode_paints_its_outer_circle_with_the_disabled_gradient() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        tester.pump_app(dark(), keyed(radio(1).group_value(1), &key));
-        assert_eq!(
-            tester.drawn(&key),
-            [
-                Drawn::Gradient(vec![0x14ffffff, 0x24ffffff]),
-                Drawn::Circle(INNER_RADIUS, 0x40ffffff),
-                Drawn::StrokedCircle(
-                    OUTER_RADIUS,
-                    K_BORDER_OUTLINE_STROKE_WIDTH as f32,
-                    0x40000000
-                ),
-            ]
-        );
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            pump_app(tester, dark(), keyed(radio(1).group_value(1), &key));
+            assert_eq!(
+                drawn(tester, &key),
+                [
+                    Drawn::Gradient(vec![0x14ffffff, 0x24ffffff]),
+                    Drawn::Circle(INNER_RADIUS, 0x40ffffff),
+                    Drawn::StrokedCircle(
+                        OUTER_RADIUS,
+                        K_BORDER_OUTLINE_STROKE_WIDTH as f32,
+                        0x40000000
+                    ),
+                ]
+            );
+        });
     }
 
     #[test]
     fn a_radio_is_slightly_darkened_when_pressed_in_light_mode() {
-        const ACTIVE_INNER_COLOR: u32 = 0xffffffff;
-        const ACTIVE_OUTER_COLOR: u32 = 0xff007aff;
-        const INACTIVE_BORDER_COLOR: u32 = 0xffd1d1d6;
-        const INACTIVE_OUTER_COLOR: u32 = 0xffffffff;
-        const PRESSED_SHADOW_COLOR: u32 = 0x26ffffff;
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let on_changed: ValueChanged<Option<i32>> = Rc::new(|_app, _value| {});
+        test_widgets(|tester| {
+            const ACTIVE_INNER_COLOR: u32 = 0xffffffff;
+            const ACTIVE_OUTER_COLOR: u32 = 0xff007aff;
+            const INACTIVE_BORDER_COLOR: u32 = 0xffd1d1d6;
+            const INACTIVE_OUTER_COLOR: u32 = 0xffffffff;
+            const PRESSED_SHADOW_COLOR: u32 = 0x26ffffff;
+            let key = GlobalKey::new();
+            let on_changed: ValueChanged<Option<i32>> = Rc::new(|_app, _value| {});
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1).group_value(2).on_changed(Rc::clone(&on_changed)),
-                &key,
-            ),
-        );
-        tester.press();
-        assert_eq!(
-            tester.drawn(&key),
-            [
-                Drawn::Circle(OUTER_RADIUS, INACTIVE_OUTER_COLOR),
-                Drawn::Circle(OUTER_RADIUS, PRESSED_SHADOW_COLOR),
-                Drawn::StrokedCircle(
-                    OUTER_RADIUS,
-                    K_BORDER_OUTLINE_STROKE_WIDTH as f32,
-                    INACTIVE_BORDER_COLOR
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1).group_value(2).on_changed(Rc::clone(&on_changed)),
+                    &key,
                 ),
-            ],
-            "Unselected pressed radio button is slightly darkened"
-        );
-        tester.release();
+            );
+            let mut gesture1 = TestPointer::touch(1);
+            tester.down(&mut gesture1, VIEW_CENTER);
+            tester.pump();
+            assert_eq!(
+                drawn(tester, &key),
+                [
+                    Drawn::Circle(OUTER_RADIUS, INACTIVE_OUTER_COLOR),
+                    Drawn::Circle(OUTER_RADIUS, PRESSED_SHADOW_COLOR),
+                    Drawn::StrokedCircle(
+                        OUTER_RADIUS,
+                        K_BORDER_OUTLINE_STROKE_WIDTH as f32,
+                        INACTIVE_BORDER_COLOR
+                    ),
+                ],
+                "Unselected pressed radio button is slightly darkened"
+            );
 
-        tester.pump_app(
-            None,
-            keyed(radio(2).group_value(2).on_changed(on_changed), &key),
-        );
-        tester.press();
-        assert_eq!(
-            tester.drawn(&key),
-            [
-                Drawn::Circle(OUTER_RADIUS, ACTIVE_OUTER_COLOR),
-                Drawn::Circle(OUTER_RADIUS, PRESSED_SHADOW_COLOR),
-                Drawn::Circle(INNER_RADIUS, ACTIVE_INNER_COLOR),
-            ],
-            "Selected pressed radio button is slightly darkened"
-        );
-        tester.release();
+            pump_app(
+                tester,
+                None,
+                keyed(radio(2).group_value(2).on_changed(on_changed), &key),
+            );
+            let mut gesture2 = TestPointer::touch(2);
+            tester.down(&mut gesture2, VIEW_CENTER);
+            tester.pump();
+            assert_eq!(
+                drawn(tester, &key),
+                [
+                    Drawn::Circle(OUTER_RADIUS, ACTIVE_OUTER_COLOR),
+                    Drawn::Circle(OUTER_RADIUS, PRESSED_SHADOW_COLOR),
+                    Drawn::Circle(INNER_RADIUS, ACTIVE_INNER_COLOR),
+                ],
+                "Selected pressed radio button is slightly darkened"
+            );
+            // Finish gestures to release resources.
+            tester.up(&gesture1);
+            tester.up(&gesture2);
+            tester.pump();
+        });
     }
 
     #[test]
     fn a_radio_is_slightly_lightened_when_pressed_in_dark_mode() {
-        const ACTIVE_INNER_COLOR: u32 = 0xffffffff;
-        const ACTIVE_OUTER_COLOR: u32 = 0xff007aff;
-        const INACTIVE_BORDER_COLOR: u32 = 0x40000000;
-        const PRESSED_SHADOW_COLOR: u32 = 0x26ffffff;
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let on_changed: ValueChanged<Option<i32>> = Rc::new(|_app, _value| {});
+        test_widgets(|tester| {
+            const ACTIVE_INNER_COLOR: u32 = 0xffffffff;
+            const ACTIVE_OUTER_COLOR: u32 = 0xff007aff;
+            const INACTIVE_BORDER_COLOR: u32 = 0x40000000;
+            const PRESSED_SHADOW_COLOR: u32 = 0x26ffffff;
+            let key = GlobalKey::new();
+            let on_changed: ValueChanged<Option<i32>> = Rc::new(|_app, _value| {});
 
-        tester.pump_app(
-            dark(),
-            keyed(
-                radio(1).group_value(2).on_changed(Rc::clone(&on_changed)),
-                &key,
-            ),
-        );
-        tester.press();
-        assert_eq!(
-            tester.drawn(&key),
-            [
-                Drawn::Gradient(vec![0x24ffffff, 0x4affffff]),
-                Drawn::Circle(OUTER_RADIUS, PRESSED_SHADOW_COLOR),
-                Drawn::StrokedCircle(
-                    OUTER_RADIUS,
-                    K_BORDER_OUTLINE_STROKE_WIDTH as f32,
-                    INACTIVE_BORDER_COLOR
+            pump_app(
+                tester,
+                dark(),
+                keyed(
+                    radio(1).group_value(2).on_changed(Rc::clone(&on_changed)),
+                    &key,
                 ),
-            ],
-            "Unselected pressed radio button is slightly lightened"
-        );
-        tester.release();
+            );
+            let mut gesture1 = TestPointer::touch(1);
+            tester.down(&mut gesture1, VIEW_CENTER);
+            tester.pump();
+            assert_eq!(
+                drawn(tester, &key),
+                [
+                    Drawn::Gradient(vec![0x24ffffff, 0x4affffff]),
+                    Drawn::Circle(OUTER_RADIUS, PRESSED_SHADOW_COLOR),
+                    Drawn::StrokedCircle(
+                        OUTER_RADIUS,
+                        K_BORDER_OUTLINE_STROKE_WIDTH as f32,
+                        INACTIVE_BORDER_COLOR
+                    ),
+                ],
+                "Unselected pressed radio button is slightly lightened"
+            );
 
-        tester.pump_app(
-            None,
-            keyed(radio(2).group_value(2).on_changed(on_changed), &key),
-        );
-        tester.press();
-        assert_eq!(
-            tester.drawn(&key),
-            [
-                Drawn::Circle(OUTER_RADIUS, ACTIVE_OUTER_COLOR),
-                Drawn::Circle(OUTER_RADIUS, PRESSED_SHADOW_COLOR),
-                Drawn::Circle(INNER_RADIUS, ACTIVE_INNER_COLOR),
-            ],
-            "Selected pressed radio button is slightly lightened"
-        );
-        tester.release();
+            pump_app(
+                tester,
+                None,
+                keyed(radio(2).group_value(2).on_changed(on_changed), &key),
+            );
+            let mut gesture2 = TestPointer::touch(2);
+            tester.down(&mut gesture2, VIEW_CENTER);
+            tester.pump();
+            assert_eq!(
+                drawn(tester, &key),
+                [
+                    Drawn::Circle(OUTER_RADIUS, ACTIVE_OUTER_COLOR),
+                    Drawn::Circle(OUTER_RADIUS, PRESSED_SHADOW_COLOR),
+                    Drawn::Circle(INNER_RADIUS, ACTIVE_INNER_COLOR),
+                ],
+                "Selected pressed radio button is slightly lightened"
+            );
+            // Finish gestures to release resources.
+            tester.up(&gesture1);
+            tester.up(&gesture2);
+            tester.pump();
+        });
     }
 
     fn mount_focused(
-        tester: &mut Tester,
+        tester: &mut WidgetTester,
         key: &GlobalKey,
         configure: fn(CupertinoRadio<i32>) -> CupertinoRadio<i32>,
     ) -> FocusNodeRef {
-        tester.highlight_traditionally();
+        tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
         let node: FocusNodeRef = FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
-        tester.pump_app(
+        pump_app(
+            tester,
             None,
             keyed(
                 configure(
@@ -1843,167 +1759,185 @@ mod tests {
 
     #[test]
     fn a_radio_is_focusable_and_has_the_default_focus_color() {
-        let default_focus_color = HSLColor::from_color(with_opacity(
-            CupertinoColors::ACTIVE_BLUE.color(),
-            K_CUPERTINO_FOCUS_COLOR_OPACITY,
-        ))
-        .with_lightness(K_CUPERTINO_FOCUS_COLOR_BRIGHTNESS)
-        .with_saturation(K_CUPERTINO_FOCUS_COLOR_SATURATION)
-        .to_color();
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let node = mount_focused(&mut tester, &key, |radio| radio);
+        test_widgets(|tester| {
+            let default_focus_color = HSLColor::from_color(with_opacity(
+                CupertinoColors::ACTIVE_BLUE.color(),
+                K_CUPERTINO_FOCUS_COLOR_OPACITY,
+            ))
+            .with_lightness(K_CUPERTINO_FOCUS_COLOR_BRIGHTNESS)
+            .with_saturation(K_CUPERTINO_FOCUS_COLOR_SATURATION)
+            .to_color();
+            let key = GlobalKey::new();
+            let node = mount_focused(tester, &key, |radio| radio);
 
-        assert!(node.has_primary_focus(&tester.cell.borrow()));
-        let drawn = tester.drawn(&key);
-        assert_eq!(
-            drawn,
-            [
-                Drawn::Circle(OUTER_RADIUS, 0xff007aff),
-                Drawn::Circle(INNER_RADIUS, 0xffffffff),
-                Drawn::StrokedCircle(
-                    OUTER_RADIUS + K_FOCUS_OUTLINE_STROKE_WIDTH as f32 / 2.0,
-                    K_FOCUS_OUTLINE_STROKE_WIDTH as f32,
-                    default_focus_color.value()
-                ),
-            ],
-            "Radio is focusable and shows the default focus color"
-        );
+            assert!(node.has_primary_focus(&tester.cell.borrow()));
+            let drawn = drawn(tester, &key);
+            assert_eq!(
+                drawn,
+                [
+                    Drawn::Circle(OUTER_RADIUS, 0xff007aff),
+                    Drawn::Circle(INNER_RADIUS, 0xffffffff),
+                    Drawn::StrokedCircle(
+                        OUTER_RADIUS + K_FOCUS_OUTLINE_STROKE_WIDTH as f32 / 2.0,
+                        K_FOCUS_OUTLINE_STROKE_WIDTH as f32,
+                        default_focus_color.value()
+                    ),
+                ],
+                "Radio is focusable and shows the default focus color"
+            );
+        });
     }
 
     #[test]
     fn a_radio_can_configure_a_focus_color() {
-        const FOCUS_COLOR: Color = Color::new(0x0000000A);
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let node = mount_focused(&mut tester, &key, |radio| radio.focus_color(FOCUS_COLOR));
+        test_widgets(|tester| {
+            const FOCUS_COLOR: Color = Color::new(0x0000000A);
+            let key = GlobalKey::new();
+            let node = mount_focused(tester, &key, |radio| radio.focus_color(FOCUS_COLOR));
 
-        assert!(node.has_primary_focus(&tester.cell.borrow()));
-        // The focus colour has no alpha, so valo records no draw of the outline: the painter
-        // holds the colour and the focus it paints the outline for.
-        assert_eq!(
-            tester.drawn(&key),
-            [
-                Drawn::Circle(OUTER_RADIUS, 0xff007aff),
-                Drawn::Circle(INNER_RADIUS, 0xffffffff),
-            ]
-        );
-        let painter = tester.painter(&key);
-        let app = tester.cell.borrow();
-        assert!(painter.is_focused(&app));
-        assert_eq!(
-            painter.focus_color(&app),
-            FOCUS_COLOR,
-            "Radio configures the color of the focus outline"
-        );
+            assert!(node.has_primary_focus(&tester.cell.borrow()));
+            // The focus colour has no alpha, so valo records no draw of the outline: the painter
+            // holds the colour and the focus it paints the outline for.
+            assert_eq!(
+                drawn(tester, &key),
+                [
+                    Drawn::Circle(OUTER_RADIUS, 0xff007aff),
+                    Drawn::Circle(INNER_RADIUS, 0xffffffff),
+                ]
+            );
+            let painter = painter(tester, &key);
+            let app = tester.cell.borrow();
+            assert!(painter.is_focused(&app));
+            assert_eq!(
+                painter.focus_color(&app),
+                FOCUS_COLOR,
+                "Radio configures the color of the focus outline"
+            );
+        });
     }
 
     #[test]
     fn a_radio_configures_its_mouse_cursor() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(1)
-                    .on_changed(Rc::new(|_app, _value| {}))
-                    .mouse_cursor(SystemMouseCursors::FORBIDDEN.into()),
-                &key,
-            ),
-        );
-        tester.hover();
-        assert_eq!(tester.cursor(), Some(SystemMouseCursors::FORBIDDEN.into()));
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(1)
+                        .on_changed(Rc::new(|_app, _value| {}))
+                        .mouse_cursor(SystemMouseCursors::FORBIDDEN.into()),
+                    &key,
+                ),
+            );
+            hover(tester);
+            assert_eq!(
+                tester.active_cursor(1),
+                SystemMouseCursors::FORBIDDEN.into()
+            );
+        });
     }
 
     #[test]
     fn the_mouse_cursor_resolves_in_disabled_hovered_and_focused_states() {
-        let cursor: MouseCursorRef = WidgetStateMouseCursor::resolve_with(
-            |states| {
-                if states.contains(&WidgetState::Disabled) {
-                    return SystemMouseCursors::FORBIDDEN.into();
-                }
-                if states.contains(&WidgetState::Focused) {
-                    return SystemMouseCursors::BASIC.into();
-                }
-                SystemMouseCursors::CLICK.into()
-            },
-            Some("_RadioMouseCursor()"),
-        )
-        .into();
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        let focus_node: FocusNodeRef = FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
-        focus_node.set_debug_label(&mut tester.cell.borrow_mut(), Some("Radio".into()));
-        tester.highlight_traditionally();
+        test_widgets(|tester| {
+            let cursor: MouseCursorRef = WidgetStateMouseCursor::resolve_with(
+                |states| {
+                    if states.contains(&WidgetState::Disabled) {
+                        return SystemMouseCursors::FORBIDDEN.into();
+                    }
+                    if states.contains(&WidgetState::Focused) {
+                        return SystemMouseCursors::BASIC.into();
+                    }
+                    SystemMouseCursors::CLICK.into()
+                },
+                Some("_RadioMouseCursor()"),
+            )
+            .into();
+            let key = GlobalKey::new();
+            let focus_node: FocusNodeRef =
+                FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
+            focus_node.set_debug_label(&mut tester.cell.borrow_mut(), Some("Radio".into()));
+            tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(1)
-                    .on_changed(Rc::new(|_app, _value| {}))
-                    .mouse_cursor(Rc::clone(&cursor))
-                    .focus_node(focus_node.clone()),
-                &key,
-            ),
-        );
-        // Test hovered case.
-        tester.hover();
-        assert_eq!(tester.cursor(), Some(SystemMouseCursors::CLICK.into()));
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(1)
+                        .on_changed(Rc::new(|_app, _value| {}))
+                        .mouse_cursor(Rc::clone(&cursor))
+                        .focus_node(focus_node.clone()),
+                    &key,
+                ),
+            );
+            // Test hovered case.
+            hover(tester);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::CLICK.into());
 
-        // Test focused case.
-        focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-        tester.pump();
-        assert_eq!(tester.cursor(), Some(SystemMouseCursors::BASIC.into()));
+            // Test focused case.
+            focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump();
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
 
-        // Test disabled case.
-        tester.pump_app(
-            None,
-            keyed(radio(1).group_value(1).mouse_cursor(cursor), &key),
-        );
-        tester.pump();
-        assert_eq!(tester.cursor(), Some(SystemMouseCursors::FORBIDDEN.into()));
+            // Test disabled case.
+            pump_app(
+                tester,
+                None,
+                keyed(radio(1).group_value(1).mouse_cursor(cursor), &key),
+            );
+            tester.pump();
+            assert_eq!(
+                tester.active_cursor(1),
+                SystemMouseCursors::FORBIDDEN.into()
+            );
+        });
     }
 
     #[test]
     fn a_radio_has_the_default_mouse_cursor() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        tester.pump_app(
-            None,
-            keyed(
-                radio(1)
-                    .group_value(1)
-                    .on_changed(Rc::new(|_app, _value| {})),
-                &key,
-            ),
-        );
-        tester.hover();
-        assert_eq!(
-            tester.cursor(),
-            Some(if K_IS_WEB {
-                SystemMouseCursors::CLICK.into()
-            } else {
-                SystemMouseCursors::BASIC.into()
-            })
-        );
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            pump_app(
+                tester,
+                None,
+                keyed(
+                    radio(1)
+                        .group_value(1)
+                        .on_changed(Rc::new(|_app, _value| {})),
+                    &key,
+                ),
+            );
+            hover(tester);
+            assert_eq!(
+                tester.active_cursor(1),
+                if K_IS_WEB {
+                    SystemMouseCursors::CLICK.into()
+                } else {
+                    SystemMouseCursors::BASIC.into()
+                }
+            );
+        });
     }
 
     #[test]
     fn a_cupertino_radio_does_not_crash_at_zero_area() {
-        let mut tester = Tester::new();
-        let key = GlobalKey::new();
-        tester.pump_app(
-            None,
-            SizedBox::shrink()
-                .child(CupertinoRadio::new(false).key(key.clone().into()))
-                .into_widget(),
-        );
-        let context = key
-            .current_context(&tester.cell.borrow_mut())
-            .expect("the radio mounted");
-        let size = context.size(&tester.cell.borrow());
-        assert_eq!(size, Some(Size::ZERO));
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            pump_app(
+                tester,
+                None,
+                SizedBox::shrink()
+                    .child(CupertinoRadio::new(false).key(key.clone().into()))
+                    .into_widget(),
+            );
+            let context = key
+                .current_context(&tester.cell.borrow_mut())
+                .expect("the radio mounted");
+            let size = context.size(&tester.cell.borrow());
+            assert_eq!(size, Some(Size::ZERO));
+        });
     }
 }

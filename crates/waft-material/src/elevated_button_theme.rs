@@ -244,12 +244,14 @@ impl InheritedWidget for ElevatedButtonTheme {
 #[cfg(test)]
 mod tests {
     #![allow(deprecated)]
+    use crate::drawer_theme::tests::assert_near;
+    use waft_widgets::Text;
 
     use std::cell::Cell;
     use std::rc::Rc;
     use std::time::Duration;
 
-    use waft_embedder::{Color, FontWeight, Radius, Size, TargetPlatform};
+    use waft_embedder::{Color, FontWeight, Radius, Size};
     use waft_foundation::{Listener, ValueNotifier};
     use waft_painting::{
         Alignment, AlignmentGeometry, BorderRadius, BorderSide, BorderStyle, EdgeInsetsGeometry,
@@ -262,6 +264,8 @@ mod tests {
         WidgetStates,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::button_style::{ButtonShapeVariant, ButtonSizeVariant};
     use crate::button_style_button::IconAlignment;
@@ -271,22 +275,15 @@ mod tests {
     use crate::icons::Icons;
     use crate::ink_well::InkWell;
     use crate::material::Material;
-    use crate::test_support::{WidgetTester, ahem_text, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::{MaterialTapTargetSize, ThemeData};
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
-        tester
-    }
 
     fn pressed() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
     }
 
     fn text(text: &str) -> WidgetRef {
-        ahem_text(text).into_widget()
+        Text::new(text).into_widget()
     }
 
     fn states(states: &[WidgetState]) -> WidgetStates {
@@ -380,9 +377,8 @@ mod tests {
     // defaults' and 'Material2: Passing no ElevatedButtonTheme returns defaults'.
     #[test]
     fn without_a_button_theme_the_button_shows_its_defaults() {
-        with_main_thread_stack(|| {
-            for use_material3 in [true, false] {
-                let mut tester = tester();
+        for use_material3 in [true, false] {
+            test_widgets(|tester| {
                 let color_scheme = ColorScheme::light();
                 let theme = ThemeData::from(color_scheme.clone())
                     .use_material3(use_material3)
@@ -394,7 +390,7 @@ mod tests {
                         .into_widget(),
                 ));
 
-                material(&tester, |material| {
+                material(tester, |material| {
                     assert_eq!(material.animation_duration, Duration::from_millis(200));
                     assert!(material.border_radius.is_none());
                     let shape = material.shape.as_deref().expect("a shape");
@@ -416,12 +412,12 @@ mod tests {
                     assert_eq!(text_style.font_size, Some(14.0));
                     assert_eq!(text_style.font_weight, Some(FontWeight::W500));
                 });
-                let align = in_button::<Align>(&tester);
+                let align = in_button::<Align>(tester);
                 tester.widget::<Align, _>(align, |align| {
                     assert!(align.alignment == AlignmentGeometry::from(Alignment::CENTER));
                 });
-            }
-        });
+            });
+        }
     }
 
     const FOREGROUND_COLOR: Color = Color::new(0xff000001);
@@ -569,7 +565,7 @@ mod tests {
     // overrides]': each of its six cases.
     #[test]
     fn the_button_style_the_button_theme_and_the_overall_theme_each_override_the_defaults() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let empty = || Some(ButtonStyle::new());
             // Each case is [button style, button theme style, overall theme style].
             let cases: [[Option<ButtonStyle>; 3]; 6] = [
@@ -589,11 +585,10 @@ mod tests {
                 [empty(), None, Some(override_style())],
             ];
             for [button_style, theme_style, overall_style] in cases {
-                let mut tester = tester();
-                let frame = override_frame(&tester, button_style, theme_style, overall_style);
+                let frame = override_frame(tester, button_style, theme_style, overall_style);
                 tester.pump_widget(frame);
                 tester.pump_and_settle(); // allow the animations to finish
-                check_button(&tester);
+                check_button(tester);
             }
         });
     }
@@ -602,11 +597,10 @@ mod tests {
     // and 'Material2 - ElevatedButton respects Theme shadowColor'.
     #[test]
     fn the_shadow_color_comes_from_the_button_then_its_theme_then_the_overall_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let shadow_color = Color::new(0xff000001);
             let overridden_color = Color::new(0xff000002);
             for use_material3 in [true, false] {
-                let mut tester = tester();
                 let build_frame =
                     |tester: &WidgetTester,
                      overall_shadow_color: Option<Color>,
@@ -653,9 +647,9 @@ mod tests {
                 let shadow =
                     |tester: &WidgetTester| material(tester, |material| material.shadow_color);
 
-                let frame = build_frame(&tester, None, None, None);
+                let frame = build_frame(tester, None, None, None);
                 tester.pump_widget(frame);
-                assert_eq!(shadow(&tester), Some(Colors::BLACK)); //default
+                assert_eq!(shadow(tester), Some(Colors::BLACK)); //default
 
                 for (overall, theme, button) in [
                     (Some(shadow_color), None, None),
@@ -664,10 +658,10 @@ mod tests {
                     (Some(overridden_color), Some(shadow_color), None),
                     (None, Some(overridden_color), Some(shadow_color)),
                 ] {
-                    let frame = build_frame(&tester, overall, theme, button);
+                    let frame = build_frame(tester, overall, theme, button);
                     tester.pump_widget(frame);
                     tester.pump_and_settle(); // theme animation
-                    assert_eq!(shadow(&tester), Some(shadow_color));
+                    assert_eq!(shadow(tester), Some(shadow_color));
                 }
             }
         });
@@ -690,8 +684,7 @@ mod tests {
     // ButtonStyle.iconAlignment'.
     #[test]
     fn an_icon_button_takes_its_icon_alignment_from_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build = |tester: &WidgetTester, icon_alignment: Option<IconAlignment>| {
                 let mut style = ButtonStyle::new();
                 style.icon_alignment = icon_alignment;
@@ -708,16 +701,16 @@ mod tests {
                 (material, icon)
             };
 
-            let frame = build(&tester, None);
+            let frame = build(tester, None);
             tester.pump_widget(frame);
-            let (button, icon) = rects(&tester);
+            let (button, icon) = rects(tester);
             assert_eq!(button.left, icon.left - 16.0);
 
-            let frame = build(&tester, Some(IconAlignment::End));
+            let frame = build(tester, Some(IconAlignment::End));
             tester.pump_widget(frame);
             tester.pump_and_settle();
-            let (button, icon) = rects(&tester);
-            assert_eq!(button.right, icon.right + 24.0);
+            let (button, icon) = rects(tester);
+            assert_near(button.right, icon.right + 24.0);
         });
     }
 
@@ -725,8 +718,7 @@ mod tests {
     // foregroundColor over default icon color'.
     #[test]
     fn an_icon_takes_the_theme_foreground_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xFFFFA500);
             let icon_color = Rc::new(Cell::new(None));
             let probe = Builder::new({
@@ -825,10 +817,9 @@ mod tests {
     // material3 when no theme specifies a variant'.
     #[test]
     fn variant_of_is_material_3_when_no_theme_names_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(Cell::new(None));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -839,7 +830,7 @@ mod tests {
                     .into_widget(),
             ));
             assert_eq!(variant.get(), Some(StyleVariant::Material3));
-            assert!(is_stadium(&tester));
+            assert!(is_stadium(tester));
         });
     }
 
@@ -847,10 +838,9 @@ mod tests {
     // variant of ThemeData.elevatedButtonTheme'.
     #[test]
     fn variant_of_falls_back_to_the_theme_data_variant() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(Cell::new(None));
-            let theme = variant_theme(&tester, StyleVariant::Material3Expressive);
+            let theme = variant_theme(tester, StyleVariant::Material3Expressive);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -858,7 +848,7 @@ mod tests {
                     .into_widget(),
             ));
             assert_eq!(variant.get(), Some(StyleVariant::Material3Expressive));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
         });
     }
 
@@ -868,11 +858,10 @@ mod tests {
     // 'an explicit variant overrides the variant of the ancestors'.
     #[test]
     fn variant_of_takes_the_nearest_theme_that_names_one() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Nested in an expressive ElevatedButtonTheme.
-            let mut tester = tester();
             let variant = Rc::new(Cell::new(None));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -885,13 +874,13 @@ mod tests {
                     ))
                     .into_widget(),
             ));
+            tester.pump_and_settle();
             assert_eq!(variant.get(), Some(StyleVariant::Material3Expressive));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
 
             // Under an expressive ThemeData.
-            let mut tester = self::tester();
             let variant = Rc::new(Cell::new(None));
-            let theme = variant_theme(&tester, StyleVariant::Material3Expressive);
+            let theme = variant_theme(tester, StyleVariant::Material3Expressive);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -901,13 +890,13 @@ mod tests {
                     ))
                     .into_widget(),
             ));
+            tester.pump_and_settle();
             assert_eq!(variant.get(), Some(StyleVariant::Material3Expressive));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
 
             // An explicit Material 3 below an expressive ancestor.
-            let mut tester = self::tester();
             let variant = Rc::new(Cell::new(None));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -922,8 +911,9 @@ mod tests {
                     ))
                     .into_widget(),
             ));
+            tester.pump_and_settle();
             assert_eq!(variant.get(), Some(StyleVariant::Material3));
-            assert!(is_stadium(&tester));
+            assert!(is_stadium(tester));
         });
     }
 
@@ -931,11 +921,10 @@ mod tests {
     // ElevatedButtonTheme takes precedence over a closer Theme'.
     #[test]
     fn an_enclosing_button_theme_wins_over_a_closer_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = Rc::new(Cell::new(None));
-            let theme = default_theme(&tester);
-            let closer = variant_theme(&tester, StyleVariant::Material3);
+            let theme = default_theme(tester);
+            let closer = variant_theme(tester, StyleVariant::Material3);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -946,7 +935,7 @@ mod tests {
                     .into_widget(),
             ));
             assert_eq!(variant.get(), Some(StyleVariant::Material3Expressive));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
         });
     }
 
@@ -954,8 +943,7 @@ mod tests {
     // is rebuilt when an ElevatedButtonTheme above the closest one changes'.
     #[test]
     fn the_button_rebuilds_when_a_farther_theme_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let variant = tester
                 .cell
                 .borrow_mut()
@@ -967,7 +955,7 @@ mod tests {
                 square_button(),
             )
             .into_widget();
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -985,11 +973,11 @@ mod tests {
                     )
                     .into_widget(),
             ));
-            assert!(is_rounded_rectangle(&tester));
+            assert!(is_rounded_rectangle(tester));
 
             variant.set_value(&mut tester.cell.borrow_mut(), Some(StyleVariant::Material3));
             tester.pump_and_settle();
-            assert!(is_stadium(&tester));
+            assert!(is_stadium(tester));
         });
     }
 
@@ -997,9 +985,8 @@ mod tests {
     // uses the inherited variant for the icon-label gap'.
     #[test]
     fn an_icon_button_gap_follows_the_inherited_variant() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -1018,7 +1005,7 @@ mod tests {
 
             // Large Material 3 Expressive buttons have a 12 pixel gap between the
             // icon and the label. Material 3 uses 8 pixels.
-            let row = in_button::<Row>(&tester);
+            let row = in_button::<Row>(tester);
             assert_eq!(tester.widget::<Row, _>(row, |row| row.spacing), 12.0);
         });
     }

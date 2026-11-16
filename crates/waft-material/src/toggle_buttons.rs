@@ -2204,14 +2204,14 @@ pub(crate) mod tests {
     use waft_painting::TextDirection;
     use waft_widgets::{Container, DefaultTextStyle, Icon, IconTheme, Text, WidgetStateColor};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::icons::Icons;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{Drawn, PaintInspection, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::tester;
-    use std::time::Duration;
     use waft_services::SystemMouseCursors;
     use waft_widgets::Directionality as DirectionalityWidget;
     use waft_widgets::FocusNodeLeaf;
@@ -2290,9 +2290,8 @@ pub(crate) mod tests {
     // 'Initial toggle state is reflected'
     #[test]
     fn the_initial_toggle_state_is_reflected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme.clone(),
                 ToggleButtons::new(texts(&["First child", "Second child"]), vec![false, true])
@@ -2300,11 +2299,11 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(theme.color_scheme.on_surface.with_opacity(0.87))
             );
             assert_eq!(
-                style_color(&button_text_style(&tester, "Second child")),
+                style_color(&button_text_style(tester, "Second child")),
                 Some(theme.color_scheme.primary)
             );
         });
@@ -2313,9 +2312,8 @@ pub(crate) mod tests {
     // 'onPressed is triggered on button tap'
     #[test]
     fn on_pressed_is_triggered_on_button_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let is_selected = Rc::new(std::cell::RefCell::new(vec![false, true]));
             let root = {
                 let theme = theme.clone();
@@ -2341,25 +2339,25 @@ pub(crate) mod tests {
 
             assert_eq!(*is_selected.borrow(), [false, true]);
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(theme.color_scheme.on_surface.with_opacity(0.87))
             );
             assert_eq!(
-                style_color(&button_text_style(&tester, "Second child")),
+                style_color(&button_text_style(tester, "Second child")),
                 Some(theme.color_scheme.primary)
             );
 
-            let center = text_center(&tester, "Second child");
+            let center = text_center(tester, "Second child");
             tester.tap(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(*is_selected.borrow(), [false, false]);
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(theme.color_scheme.on_surface.with_opacity(0.87))
             );
             assert_eq!(
-                style_color(&button_text_style(&tester, "Second child")),
+                style_color(&button_text_style(tester, "Second child")),
                 Some(theme.color_scheme.on_surface.with_opacity(0.87))
             );
         });
@@ -2373,9 +2371,8 @@ pub(crate) mod tests {
     // 'onPressed that is null disables buttons'
     #[test]
     fn a_null_on_pressed_disables_the_buttons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme.clone(),
                 ToggleButtons::new(texts(&["First child", "Second child"]), vec![false, true]),
@@ -2383,25 +2380,25 @@ pub(crate) mod tests {
 
             let disabled = Some(theme.color_scheme.on_surface.with_opacity(0.38));
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 disabled
             );
             assert_eq!(
-                style_color(&button_text_style(&tester, "Second child")),
+                style_color(&button_text_style(tester, "Second child")),
                 disabled
             );
 
-            let center = text_center(&tester, "Second child");
+            let center = text_center(tester, "Second child");
             tester.tap(center, 1);
             tester.pump_and_settle();
 
             // Nothing should change
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 disabled
             );
             assert_eq!(
-                style_color(&button_text_style(&tester, "Second child")),
+                style_color(&button_text_style(tester, "Second child")),
                 disabled
             );
         });
@@ -2410,9 +2407,8 @@ pub(crate) mod tests {
     // 'children and isSelected properties have to be the same length'
     #[test]
     fn children_and_is_selected_have_to_be_the_same_length() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 tester.pump_widget(boilerplate(
                     theme,
@@ -2437,9 +2433,8 @@ pub(crate) mod tests {
     // 'Default text style is applied'
     #[test]
     fn the_default_text_style_is_applied() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme.clone(),
                 ToggleButtons::new(texts(&["First child", "Second child"]), vec![false, true])
@@ -2448,7 +2443,7 @@ pub(crate) mod tests {
 
             let body_medium = theme.text_theme.body_medium.clone().expect("a bodyMedium");
             for text in ["First child", "Second child"] {
-                let text_style = button_text_style(&tester, text);
+                let text_style = button_text_style(tester, text);
                 assert_eq!(text_style.font_family, body_medium.font_family);
                 assert_eq!(text_style.decoration, body_medium.decoration);
             }
@@ -2458,9 +2453,8 @@ pub(crate) mod tests {
     // 'Custom text style except color is applied'
     #[test]
     fn a_custom_text_style_is_applied_except_its_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme,
                 ToggleButtons::new(texts(&["First child", "Second child"]), vec![false, true])
@@ -2474,7 +2468,7 @@ pub(crate) mod tests {
             ));
 
             for text in ["First child", "Second child"] {
-                let text_style = button_text_style(&tester, text);
+                let text_style = button_text_style(tester, text);
                 assert_eq!(
                     text_style.text_baseline,
                     Some(waft_embedder::TextBaseline::Ideographic)
@@ -2495,16 +2489,15 @@ pub(crate) mod tests {
     // 'Default BoxConstraints'
     #[test]
     fn the_default_box_constraints_make_buttons_48_by_48() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme,
                 ToggleButtons::new(three_icons(), vec![false; 3]).on_pressed(|_app, _index| {}),
             ));
 
             for index in 0..3 {
-                let rect = button_rect(&tester, index);
+                let rect = button_rect(tester, index);
                 assert_eq!(rect.width(), 48.0);
                 assert_eq!(rect.height(), 48.0);
             }
@@ -2514,9 +2507,8 @@ pub(crate) mod tests {
     // 'Custom BoxConstraints'
     #[test]
     fn custom_box_constraints_size_the_buttons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             // Test for minimum constraints
             tester.pump_widget(boilerplate(
                 theme.clone(),
@@ -2525,7 +2517,7 @@ pub(crate) mod tests {
                     .on_pressed(|_app, _index| {}),
             ));
             for index in 0..3 {
-                let rect = button_rect(&tester, index);
+                let rect = button_rect(tester, index);
                 assert_eq!(rect.width(), 50.0);
                 assert_eq!(rect.height(), 60.0);
             }
@@ -2539,7 +2531,7 @@ pub(crate) mod tests {
                     .on_pressed(|_app, _index| {}),
             ));
             for index in 0..3 {
-                let rect = button_rect(&tester, index);
+                let rect = button_rect(tester, index);
                 assert_eq!(rect.width(), 20.0);
                 assert_eq!(rect.height(), 10.0);
             }
@@ -2560,9 +2552,8 @@ pub(crate) mod tests {
     // 'Default text/icon colors for enabled, selected and disabled states'
     #[test]
     fn the_default_text_and_icon_colors_follow_the_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let check = Icons::check();
 
             tester.pump_widget(boilerplate(
@@ -2572,10 +2563,10 @@ pub(crate) mod tests {
             // Default enabled color
             let enabled = Some(theme.color_scheme.on_surface.with_opacity(0.87));
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 enabled
             );
-            assert_eq!(icon_theme_color(&tester, &check), enabled);
+            assert_eq!(icon_theme_color(tester, &check), enabled);
 
             tester.pump_widget(boilerplate(
                 theme.clone(),
@@ -2585,10 +2576,10 @@ pub(crate) mod tests {
             // Default selected color
             let selected = Some(theme.color_scheme.primary);
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 selected
             );
-            assert_eq!(icon_theme_color(&tester, &check), selected);
+            assert_eq!(icon_theme_color(tester, &check), selected);
 
             tester.pump_widget(boilerplate(
                 theme.clone(),
@@ -2598,19 +2589,18 @@ pub(crate) mod tests {
             // Default disabled color
             let disabled = Some(theme.color_scheme.on_surface.with_opacity(0.38));
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 disabled
             );
-            assert_eq!(icon_theme_color(&tester, &check), disabled);
+            assert_eq!(icon_theme_color(tester, &check), disabled);
         });
     }
 
     // 'Custom text/icon colors for enabled, selected and disabled states'
     #[test]
     fn custom_text_and_icon_colors_follow_the_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let check = Icons::check();
             let enabled_color = Colors::LIME.primary();
             let selected_color = Colors::GREEN.primary();
@@ -2632,10 +2622,10 @@ pub(crate) mod tests {
             ));
             // Custom enabled color
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(enabled_color)
             );
-            assert_eq!(icon_theme_color(&tester, &check), Some(enabled_color));
+            assert_eq!(icon_theme_color(tester, &check), Some(enabled_color));
 
             tester.pump_widget(boilerplate(
                 theme.clone(),
@@ -2646,10 +2636,10 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             // Custom selected color
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(selected_color)
             );
-            assert_eq!(icon_theme_color(&tester, &check), Some(selected_color));
+            assert_eq!(icon_theme_color(tester, &check), Some(selected_color));
 
             tester.pump_widget(boilerplate(
                 theme,
@@ -2658,10 +2648,10 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             // Custom disabled color
             assert_eq!(
-                style_color(&button_text_style(&tester, "First child")),
+                style_color(&button_text_style(tester, "First child")),
                 Some(disabled_color)
             );
-            assert_eq!(icon_theme_color(&tester, &check), Some(disabled_color));
+            assert_eq!(icon_theme_color(tester, &check), Some(disabled_color));
         });
     }
 
@@ -2699,13 +2689,12 @@ pub(crate) mod tests {
     // 'Default button fillColor - unselected'
     #[test]
     fn the_default_fill_color_of_an_unselected_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(theme.clone(), single_button(false, true)));
 
             let (color, material_type) =
-                button_material(&tester, None, |material| (material.color, material.r#type));
+                button_material(tester, None, |material| (material.color, material.r#type));
             assert_eq!(color, Some(theme.color_scheme.surface.with_opacity(0.0)));
             assert_eq!(material_type, MaterialType::Button);
         });
@@ -2714,13 +2703,12 @@ pub(crate) mod tests {
     // 'Default button fillColor - selected'
     #[test]
     fn the_default_fill_color_of_a_selected_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(theme.clone(), single_button(true, true)));
 
             let (color, material_type) =
-                button_material(&tester, None, |material| (material.color, material.r#type));
+                button_material(tester, None, |material| (material.color, material.r#type));
             assert_eq!(color, Some(theme.color_scheme.primary.with_opacity(0.12)));
             assert_eq!(material_type, MaterialType::Button);
         });
@@ -2729,13 +2717,12 @@ pub(crate) mod tests {
     // 'Default button fillColor - disabled'
     #[test]
     fn the_default_fill_color_of_a_disabled_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(theme.clone(), single_button(true, false)));
 
             let (color, material_type) =
-                button_material(&tester, None, |material| (material.color, material.r#type));
+                button_material(tester, None, |material| (material.color, material.r#type));
             assert_eq!(color, Some(theme.color_scheme.surface.with_opacity(0.0)));
             assert_eq!(material_type, MaterialType::Button);
         });
@@ -2744,9 +2731,8 @@ pub(crate) mod tests {
     // 'Custom button fillColor'
     #[test]
     fn a_custom_fill_color_fills_a_selected_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let custom_fill_color = Colors::GREEN.primary();
             tester.pump_widget(boilerplate(
                 theme,
@@ -2754,7 +2740,7 @@ pub(crate) mod tests {
             ));
 
             let (color, material_type) =
-                button_material(&tester, None, |material| (material.color, material.r#type));
+                button_material(tester, None, |material| (material.color, material.r#type));
             assert_eq!(color, Some(custom_fill_color));
             assert_eq!(material_type, MaterialType::Button);
         });
@@ -2771,9 +2757,8 @@ pub(crate) mod tests {
     // 'Custom button fillColor - Non WidgetState'
     #[test]
     fn a_plain_fill_color_fills_only_selected_enabled_buttons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let selected_fill_color = Colors::YELLOW.primary();
             let unselected = Some(theme.color_scheme.surface.with_opacity(0.0));
 
@@ -2784,9 +2769,9 @@ pub(crate) mod tests {
                     .on_pressed(|_app, _index| {}),
             ));
             tester.pump_and_settle();
-            assert_eq!(material_color(&tester, "First child"), unselected);
+            assert_eq!(material_color(tester, "First child"), unselected);
             assert_eq!(
-                material_color(&tester, "Second child"),
+                material_color(tester, "Second child"),
                 Some(selected_fill_color)
             );
 
@@ -2795,17 +2780,16 @@ pub(crate) mod tests {
                 ToggleButtons::new(two_texts(), vec![false, true]).fill_color(selected_fill_color),
             ));
             tester.pump_and_settle();
-            assert_eq!(material_color(&tester, "First child"), unselected);
-            assert_eq!(material_color(&tester, "Second child"), unselected);
+            assert_eq!(material_color(tester, "First child"), unselected);
+            assert_eq!(material_color(tester, "Second child"), unselected);
         });
     }
 
     // 'Custom button fillColor - WidgetState'
     #[test]
     fn a_widget_state_fill_color_resolves_in_the_button_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let selected_fill_color = Colors::ORANGE.primary();
             let default_fill_color = Colors::BLUE.primary();
             let get_fill_color = move |states: &WidgetStates| {
@@ -2823,11 +2807,11 @@ pub(crate) mod tests {
             ));
             tester.pump_and_settle();
             assert_eq!(
-                material_color(&tester, "First child"),
+                material_color(tester, "First child"),
                 Some(default_fill_color)
             );
             assert_eq!(
-                material_color(&tester, "Second child"),
+                material_color(tester, "Second child"),
                 Some(selected_fill_color)
             );
 
@@ -2839,11 +2823,11 @@ pub(crate) mod tests {
             ));
             tester.pump_and_settle();
             assert_eq!(
-                material_color(&tester, "First child"),
+                material_color(tester, "First child"),
                 Some(default_fill_color)
             );
             assert_eq!(
-                material_color(&tester, "Second child"),
+                material_color(tester, "Second child"),
                 Some(default_fill_color)
             );
         });
@@ -2876,8 +2860,8 @@ pub(crate) mod tests {
             .collect()
     }
 
-    pub(crate) fn mouse() -> crate::test_support::TestPointer {
-        WidgetTester::mouse(1, 0)
+    pub(crate) fn mouse() -> TestPointer {
+        TestPointer::mouse(1, 0)
     }
 
     /// Dart's InkWell colors cases: hover, then press, then focus a one-button toggle that
@@ -2895,7 +2879,7 @@ pub(crate) mod tests {
         let argb = |color: Color| color.value();
 
         let mut hover_gesture = mouse();
-        let mut touch_gesture = WidgetTester::touch(2);
+        let mut touch_gesture = TestPointer::touch(2);
         if press_first {
             // splashColor
             tester.down(&mut touch_gesture, center);
@@ -2933,12 +2917,11 @@ pub(crate) mod tests {
     // 'Default InkWell colors - unselected'
     #[test]
     fn the_default_ink_colors_of_an_unselected_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let on_surface = theme.color_scheme.on_surface;
             check_ink_colors(
-                &mut tester,
+                tester,
                 |focus_node| {
                     boilerplate(
                         theme.clone(),
@@ -2960,12 +2943,11 @@ pub(crate) mod tests {
     // 'Default InkWell colors - selected'
     #[test]
     fn the_default_ink_colors_of_a_selected_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let primary = theme.color_scheme.primary;
             check_ink_colors(
-                &mut tester,
+                tester,
                 |focus_node| {
                     boilerplate(
                         theme.clone(),
@@ -2987,15 +2969,14 @@ pub(crate) mod tests {
     // 'Custom InkWell colors'
     #[test]
     fn custom_ink_colors_are_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let splash_color = Color::new(0xff4caf50);
             let highlight_color = Color::new(0xffcddc39);
             let hover_color = Color::new(0xffffeb3b);
             let focus_color = Color::new(0xffffff00);
             check_ink_colors(
-                &mut tester,
+                tester,
                 |focus_node| {
                     boilerplate(
                         theme.clone(),
@@ -3061,18 +3042,17 @@ pub(crate) mod tests {
     // 'Default border width and border colors for enabled, selected and disabled states'
     #[test]
     fn the_default_border_width_and_colors_follow_the_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let border = (
                 theme.color_scheme.on_surface.with_opacity(0.12),
                 DEFAULT_BORDER_WIDTH,
             );
             for (selected, enabled) in [(false, true), (true, true), (false, false)] {
                 tester.pump_widget(boilerplate(theme.clone(), single_button(selected, enabled)));
-                let render = select_toggle_button_objects(&tester)[0].as_object();
+                let render = select_toggle_button_objects(tester)[0].as_object();
                 assert!(paints_physical_model_then_strokes(
-                    &tester,
+                    tester,
                     render,
                     selected && enabled,
                     &[border]
@@ -3084,9 +3064,8 @@ pub(crate) mod tests {
     // 'Custom border width and border colors for enabled, selected and disabled states'
     #[test]
     fn custom_border_width_and_colors_follow_the_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let border_color = Color::new(0xff4caf50);
             let selected_border_color = Color::new(0xffcddc39);
             let disabled_border_color = Color::new(0xffffeb3b);
@@ -3098,9 +3077,9 @@ pub(crate) mod tests {
                     .border_color(border_color)
                     .border_width(CUSTOM_WIDTH),
             ));
-            let render = select_toggle_button_objects(&tester)[0].as_object();
+            let render = select_toggle_button_objects(tester)[0].as_object();
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 render,
                 false,
                 &[(border_color, CUSTOM_WIDTH)]
@@ -3112,9 +3091,9 @@ pub(crate) mod tests {
                     .selected_border_color(selected_border_color)
                     .border_width(CUSTOM_WIDTH),
             ));
-            let render = select_toggle_button_objects(&tester)[0].as_object();
+            let render = select_toggle_button_objects(tester)[0].as_object();
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 render,
                 true,
                 &[(selected_border_color, CUSTOM_WIDTH)]
@@ -3126,9 +3105,9 @@ pub(crate) mod tests {
                     .disabled_border_color(disabled_border_color)
                     .border_width(CUSTOM_WIDTH),
             ));
-            let render = select_toggle_button_objects(&tester)[0].as_object();
+            let render = select_toggle_button_objects(tester)[0].as_object();
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 render,
                 false,
                 &[(disabled_border_color, CUSTOM_WIDTH)]
@@ -3158,9 +3137,8 @@ pub(crate) mod tests {
     // 'Height of segmented control is determined by tallest widget'
     #[test]
     fn the_height_of_the_buttons_is_that_of_the_tallest_child() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let children = sized_boxes(&[
                 (None, Some(100.0)),
                 (None, Some(400.0)), // tallest widget
@@ -3171,7 +3149,7 @@ pub(crate) mod tests {
                 ToggleButtons::new(children, vec![false, true, false]),
             ));
 
-            for rect in select_toggle_button_rects(&tester) {
+            for rect in select_toggle_button_rects(tester) {
                 assert_eq!(rect.height(), 400.0 + 2.0 * DEFAULT_BORDER_WIDTH);
             }
         });
@@ -3180,16 +3158,15 @@ pub(crate) mod tests {
     // 'Sizes of toggle buttons rebuilds with the correct dimensions'
     #[test]
     fn the_sizes_of_the_buttons_follow_a_rebuild() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let children = sized_boxes(&[(Some(100.0), Some(100.0)); 3]);
             tester.pump_widget(boilerplate(
                 theme.clone(),
                 ToggleButtons::new(children, vec![false, true, false]),
             ));
 
-            let rects = select_toggle_button_rects(&tester);
+            let rects = select_toggle_button_rects(tester);
             for (i, rect) in rects.iter().enumerate() {
                 assert_eq!(rect.height(), 100.0 + 2.0 * DEFAULT_BORDER_WIDTH);
 
@@ -3214,7 +3191,7 @@ pub(crate) mod tests {
 
             // Only the last button paints both leading and trailing borders.
             // Other buttons only paint the leading border.
-            let rects = select_toggle_button_rects(&tester);
+            let rects = select_toggle_button_rects(tester);
             for (i, rect) in rects.iter().enumerate() {
                 assert_eq!(rect.height(), 200.0 + 2.0 * CUSTOM_BORDER_WIDTH);
                 if i == rects.len() - 1 {
@@ -3267,8 +3244,7 @@ pub(crate) mod tests {
     // 'Material2 - ToggleButtons text baseline alignment'
     #[test]
     fn material2_toggle_buttons_align_their_text_baseline() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .build(&tester.cell.borrow());
@@ -3283,10 +3259,10 @@ pub(crate) mod tests {
             //  ------------------------------------   baseline
             //  2.0           5.0             7.0      space below the baseline = 0.25 * fontSize
             //  ------------------------------------   widget text dy values
-            let first_toggle_button_dy = bottom_left_dy(&tester, "First child");
-            let second_toggle_button_dy = bottom_left_dy(&tester, "Second child");
-            let elevated_button_dy = bottom_left_dy(&tester, "Elevated Button");
-            let text_dy = bottom_left_dy(&tester, "Text");
+            let first_toggle_button_dy = bottom_left_dy(tester, "First child");
+            let second_toggle_button_dy = bottom_left_dy(tester, "Second child");
+            let elevated_button_dy = bottom_left_dy(tester, "Elevated Button");
+            let text_dy = bottom_left_dy(tester, "Text");
 
             assert_eq!(first_toggle_button_dy, second_toggle_button_dy);
             assert_eq!(first_toggle_button_dy, elevated_button_dy - 3.0);
@@ -3297,17 +3273,16 @@ pub(crate) mod tests {
     // 'Material3 - ToggleButtons text baseline alignment'
     #[test]
     fn material3_toggle_buttons_align_their_text_baseline() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             // The point size of the fonts must be a multiple of 4 until
             // https://github.com/flutter/flutter/issues/122066 is resolved.
             tester.pump_widget(boilerplate(theme, baseline_row()));
 
-            let first_toggle_button_dy = bottom_left_dy(&tester, "First child");
-            let second_toggle_button_dy = bottom_left_dy(&tester, "Second child");
-            let elevated_button_dy = bottom_left_dy(&tester, "Elevated Button");
-            let text_dy = bottom_left_dy(&tester, "Text");
+            let first_toggle_button_dy = bottom_left_dy(tester, "First child");
+            let second_toggle_button_dy = bottom_left_dy(tester, "Second child");
+            let elevated_button_dy = bottom_left_dy(tester, "Elevated Button");
+            let text_dy = bottom_left_dy(tester, "Text");
 
             assert_eq!(first_toggle_button_dy, second_toggle_button_dy);
             assert!((first_toggle_button_dy - (elevated_button_dy - 1.7)).abs() <= 0.1);
@@ -3323,8 +3298,7 @@ pub(crate) mod tests {
     // 'Directionality test'
     #[test]
     fn the_buttons_follow_the_text_direction() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (direction, first_is_left) in
                 [(TextDirection::Ltr, true), (TextDirection::Rtl, false)]
             {
@@ -3344,7 +3318,7 @@ pub(crate) mod tests {
                 );
 
                 let first_is_before_second =
-                    top_right_dx(&tester, "First child") < top_right_dx(&tester, "Second child");
+                    top_right_dx(tester, "First child") < top_right_dx(tester, "Second child");
                 assert_eq!(first_is_before_second, first_is_left);
             }
         });
@@ -3357,9 +3331,8 @@ pub(crate) mod tests {
     // 'Properly draws borders based on state'
     #[test]
     fn borders_are_drawn_based_on_the_state_of_each_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme.clone(),
                 ToggleButtons::new(three_texts(), vec![false, true, false])
@@ -3369,11 +3342,11 @@ pub(crate) mod tests {
                 theme.color_scheme.on_surface.with_opacity(0.12),
                 DEFAULT_BORDER_WIDTH,
             );
-            let objects = select_toggle_button_objects(&tester);
+            let objects = select_toggle_button_objects(tester);
 
             // The first button paints the leading, top and bottom sides with a path
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 objects[0].as_object(),
                 false,
                 &[border]
@@ -3381,7 +3354,7 @@ pub(crate) mod tests {
             // The middle buttons paint a leading side path first, followed by a
             // top and bottom side path
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 objects[1].as_object(),
                 true,
                 &[border, border]
@@ -3389,7 +3362,7 @@ pub(crate) mod tests {
             // The last button paints a leading side path first, followed by
             // a trailing, top and bottom side path
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 objects[2].as_object(),
                 false,
                 &[border, border]
@@ -3401,9 +3374,8 @@ pub(crate) mod tests {
     // is down.'
     #[test]
     fn vertical_borders_are_drawn_based_on_the_state_of_each_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme.clone(),
                 ToggleButtons::new(three_texts(), vec![false, true, false])
@@ -3414,15 +3386,15 @@ pub(crate) mod tests {
             // The children should be laid out along vertical and the first child at top.
             // The item height is icon height + default border width (48.0 + 1.0) pixels.
             assert_eq!(
-                text_center(&tester, "First child"),
+                text_center(tester, "First child"),
                 Offset::new(400.0, 251.0)
             );
             assert_eq!(
-                text_center(&tester, "Second child"),
+                text_center(tester, "Second child"),
                 Offset::new(400.0, 300.0)
             );
             assert_eq!(
-                text_center(&tester, "Third child"),
+                text_center(tester, "Third child"),
                 Offset::new(400.0, 349.0)
             );
 
@@ -3430,10 +3402,10 @@ pub(crate) mod tests {
                 theme.color_scheme.on_surface.with_opacity(0.12),
                 DEFAULT_BORDER_WIDTH,
             );
-            let objects = select_toggle_button_objects(&tester);
+            let objects = select_toggle_button_objects(tester);
             // The first button paints the left, top and right sides with a path.
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 objects[0].as_object(),
                 false,
                 &[border]
@@ -3441,7 +3413,7 @@ pub(crate) mod tests {
             // The middle buttons paint a top side path first, followed by a
             // left and right side path.
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 objects[1].as_object(),
                 true,
                 &[border, border]
@@ -3449,7 +3421,7 @@ pub(crate) mod tests {
             // The last button paints a top side path first, followed by
             // a left, bottom and right side path
             assert!(paints_physical_model_then_strokes(
-                &tester,
+                tester,
                 objects[2].as_object(),
                 false,
                 &[border, border]
@@ -3460,9 +3432,8 @@ pub(crate) mod tests {
     // 'VerticalDirection test when direction is vertical.'
     #[test]
     fn the_vertical_direction_orders_the_buttons_of_a_vertical_toggle() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme,
                 ToggleButtons::new(three_texts(), vec![false, true, false])
@@ -3473,15 +3444,15 @@ pub(crate) mod tests {
 
             // The children should be laid out along vertical and the last child at top.
             assert_eq!(
-                text_center(&tester, "Third child"),
+                text_center(tester, "Third child"),
                 Offset::new(400.0, 251.0)
             );
             assert_eq!(
-                text_center(&tester, "Second child"),
+                text_center(tester, "Second child"),
                 Offset::new(400.0, 300.0)
             );
             assert_eq!(
-                text_center(&tester, "First child"),
+                text_center(tester, "First child"),
                 Offset::new(400.0, 349.0)
             );
         });
@@ -3506,8 +3477,7 @@ pub(crate) mod tests {
     // 'Material2 - Tap target size is configurable by ThemeData.materialTapTargetSize'
     #[test]
     fn material2_tap_target_size_is_configurable_by_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Dart's `boilerplate` takes `theme ?? ThemeData(materialTapTargetSize:)`, so the
             // Material 2 theme given here makes the argument moot: both sizes stay padded.
             for expected in [Size::new(228.0, 48.0), Size::new(228.0, 48.0)] {
@@ -3518,7 +3488,7 @@ pub(crate) mod tests {
                     theme,
                     tap_target_buttons(min_32(), ["First", "Second", "Third"]),
                 ));
-                assert_eq!(toggle_buttons_size(&tester), expected);
+                assert_eq!(toggle_buttons_size(tester), expected);
             }
         });
     }
@@ -3526,18 +3496,17 @@ pub(crate) mod tests {
     // 'Material3 - Tap target size is configurable by ThemeData.materialTapTargetSize'
     #[test]
     fn material3_tap_target_size_is_configurable_by_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (tap_target_size, expected) in [
                 (MaterialTapTargetSize::Padded, Size::new(232.0, 48.0)),
                 (MaterialTapTargetSize::ShrinkWrap, Size::new(232.0, 34.0)),
             ] {
-                let theme = themed(&tester, tap_target_size);
+                let theme = themed(tester, tap_target_size);
                 tester.pump_widget(boilerplate(
                     theme,
                     tap_target_buttons(min_32(), ["First", "Second", "Third"]),
                 ));
-                assert_eq!(toggle_buttons_size(&tester), expected);
+                assert_eq!(toggle_buttons_size(tester), expected);
             }
         });
     }
@@ -3545,8 +3514,7 @@ pub(crate) mod tests {
     // 'Material2 - Tap target size is configurable'
     #[test]
     fn material2_tap_target_size_is_configurable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (tap_target_size, expected) in [
                 (MaterialTapTargetSize::Padded, Size::new(228.0, 48.0)),
                 (MaterialTapTargetSize::ShrinkWrap, Size::new(228.0, 34.0)),
@@ -3559,7 +3527,7 @@ pub(crate) mod tests {
                     tap_target_buttons(min_32(), ["First", "Second", "Third"])
                         .tap_target_size(tap_target_size),
                 ));
-                assert_eq!(toggle_buttons_size(&tester), expected);
+                assert_eq!(toggle_buttons_size(tester), expected);
             }
         });
     }
@@ -3567,19 +3535,18 @@ pub(crate) mod tests {
     // 'Material3 - Tap target size is configurable'
     #[test]
     fn material3_tap_target_size_is_configurable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (tap_target_size, expected) in [
                 (MaterialTapTargetSize::Padded, Size::new(232.0, 48.0)),
                 (MaterialTapTargetSize::ShrinkWrap, Size::new(232.0, 34.0)),
             ] {
-                let theme = default_theme(&tester);
+                let theme = default_theme(tester);
                 tester.pump_widget(boilerplate(
                     theme,
                     tap_target_buttons(min_32(), ["First", "Second", "Third"])
                         .tap_target_size(tap_target_size),
                 ));
-                assert_eq!(toggle_buttons_size(&tester), expected);
+                assert_eq!(toggle_buttons_size(tester), expected);
             }
         });
     }
@@ -3587,20 +3554,19 @@ pub(crate) mod tests {
     // 'Tap target size is configurable for vertical axis'
     #[test]
     fn tap_target_size_is_configurable_for_the_vertical_axis() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (tap_target_size, expected) in [
                 (MaterialTapTargetSize::Padded, Size::new(48.0, 100.0)),
                 (MaterialTapTargetSize::ShrinkWrap, Size::new(34.0, 100.0)),
             ] {
-                let theme = default_theme(&tester);
+                let theme = default_theme(tester);
                 tester.pump_widget(boilerplate(
                     theme,
                     tap_target_buttons(min_32(), ["1", "2", "3"])
                         .tap_target_size(tap_target_size)
                         .direction(Axis::Vertical),
                 ));
-                assert_eq!(toggle_buttons_size(&tester), expected);
+                assert_eq!(toggle_buttons_size(tester), expected);
             }
         });
     }
@@ -3609,9 +3575,8 @@ pub(crate) mod tests {
     // twin; their golden files are not compared.
     #[test]
     fn a_lone_button_with_a_border_radius_is_centered_and_strokes_its_border() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for use_material3 in [false, true] {
-                let mut tester = tester();
                 let theme = ThemeData::builder()
                     .use_material3(use_material3)
                     .build(&tester.cell.borrow());
@@ -3624,7 +3589,7 @@ pub(crate) mod tests {
 
                 // The only button should be laid out at the center of the screen.
                 assert_eq!(
-                    text_center(&tester, "First child"),
+                    text_center(tester, "First child"),
                     Offset::new(400.0, 300.0)
                 );
 
@@ -3632,9 +3597,9 @@ pub(crate) mod tests {
                     theme.color_scheme.on_surface.with_opacity(0.12),
                     DEFAULT_BORDER_WIDTH,
                 );
-                let render = select_toggle_button_objects(&tester)[0].as_object();
+                let render = select_toggle_button_objects(tester)[0].as_object();
                 assert!(paints_physical_model_then_strokes(
-                    &tester,
+                    tester,
                     render,
                     true,
                     &[border]
@@ -3646,9 +3611,8 @@ pub(crate) mod tests {
     // 'ToggleButtons changes mouse cursor when the button is hovered'
     #[test]
     fn the_mouse_cursor_follows_the_toggle_buttons_configuration() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let forbidden_region = |buttons: ToggleButtons| {
                 waft_widgets::MouseRegion::new()
                     .cursor(SystemMouseCursors::FORBIDDEN.into())
@@ -3663,10 +3627,10 @@ pub(crate) mod tests {
                 ),
             ));
 
-            let mut gesture = WidgetTester::mouse(1, 0);
-            let center = text_center(&tester, "First child");
+            let mut gesture = TestPointer::mouse(1, 0);
+            let center = text_center(tester, "First child");
             tester.add_pointer(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
 
             // Test default cursor
@@ -3691,9 +3655,8 @@ pub(crate) mod tests {
     // 'ToggleButtons focus, hover, and highlight elevations are 0'
     #[test]
     fn focus_hover_and_highlight_elevations_are_zero() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let focus_nodes: Vec<_> = (0..2)
                 .map(|_| waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut()))
                 .collect();
@@ -3716,20 +3679,20 @@ pub(crate) mod tests {
             };
 
             // Default toggle button elevation
-            assert_eq!(toggle_button_elevation(&tester, "one"), 0.0); // highlighted
-            assert_eq!(toggle_button_elevation(&tester, "two"), 0.0); // not highlighted
+            assert_eq!(toggle_button_elevation(tester, "one"), 0.0); // highlighted
+            assert_eq!(toggle_button_elevation(tester, "two"), 0.0); // not highlighted
 
             // Hovered button elevation
-            let mut hover_gesture = WidgetTester::mouse(1, 0);
-            let one = text_center(&tester, "one");
+            let mut hover_gesture = TestPointer::mouse(1, 0);
+            let one = text_center(tester, "one");
             tester.add_pointer(&mut hover_gesture, one);
             tester.move_to(&mut hover_gesture, one, false);
             tester.pump_and_settle();
-            assert_eq!(toggle_button_elevation(&tester, "one"), 0.0);
-            let two = text_center(&tester, "two");
+            assert_eq!(toggle_button_elevation(tester, "one"), 0.0);
+            let two = text_center(tester, "two");
             tester.move_to(&mut hover_gesture, two, false);
             tester.pump_and_settle();
-            assert_eq!(toggle_button_elevation(&tester, "two"), 0.0);
+            assert_eq!(toggle_button_elevation(tester, "two"), 0.0);
 
             // Focused button elevation
             let has_focus =
@@ -3738,30 +3701,29 @@ pub(crate) mod tests {
                 };
             focus_nodes[0].request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert!(has_focus(&tester, &focus_nodes[0]));
-            assert!(!has_focus(&tester, &focus_nodes[1]));
-            assert_eq!(toggle_button_elevation(&tester, "one"), 0.0);
+            assert!(has_focus(tester, &focus_nodes[0]));
+            assert!(!has_focus(tester, &focus_nodes[1]));
+            assert_eq!(toggle_button_elevation(tester, "one"), 0.0);
             focus_nodes[1].request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert!(!has_focus(&tester, &focus_nodes[0]));
-            assert!(has_focus(&tester, &focus_nodes[1]));
-            assert_eq!(toggle_button_elevation(&tester, "two"), 0.0);
+            assert!(!has_focus(tester, &focus_nodes[0]));
+            assert!(has_focus(tester, &focus_nodes[1]));
+            assert_eq!(toggle_button_elevation(tester, "two"), 0.0);
         });
     }
 
     // 'Toggle buttons height matches MaterialTapTargetSize.padded height'
     #[test]
     fn the_buttons_height_matches_the_padded_tap_target_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme,
                 ToggleButtons::new(three_icons(), vec![false; 3]).on_pressed(|_app, _index| {}),
             ));
 
             for index in 0..3 {
-                assert_eq!(button_rect(&tester, index).height(), 48.0);
+                assert_eq!(button_rect(tester, index).height(), 48.0);
             }
         });
     }
@@ -3770,9 +3732,8 @@ pub(crate) mod tests {
     // semantics-tree expectation (its flags, actions and rects are not ported).
     #[test]
     fn constraints_size_sets_the_height_of_the_buttons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme,
                 ToggleButtons::new(three_icons(), vec![false; 3])
@@ -3782,7 +3743,7 @@ pub(crate) mod tests {
 
             // Button's height is constrained to `32.0`.
             for index in 0..3 {
-                assert_eq!(button_rect(&tester, index).height(), 32.0);
+                assert_eq!(button_rect(tester, index).height(), 32.0);
             }
         });
     }
@@ -3790,16 +3751,15 @@ pub(crate) mod tests {
     // 'ToggleButtons does not crash at zero area'
     #[test]
     fn toggle_buttons_do_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(boilerplate(
                 theme,
                 Center::new()
                     .child(SizedBox::shrink().child(ToggleButtons::new(texts(&["X"]), vec![true]))),
             ));
 
-            assert_eq!(toggle_buttons_size(&tester), Size::ZERO);
+            assert_eq!(toggle_buttons_size(tester), Size::ZERO);
         });
     }
 }

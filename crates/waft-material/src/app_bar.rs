@@ -3516,27 +3516,17 @@ mod tests {
         SingleChildScrollView, SizedBox, SliverToBoxAdapter, Text, WidgetStateColor,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::drawer::Drawer;
     use crate::icons::Icons;
     use crate::tab_controller::DefaultTabController;
     use crate::tabs::{Tab, TabBar};
-    use crate::test_support::{
-        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintInspection, material_app};
 
     /// `kTextTabBarHeight`: the height of the `TabBar` Dart's sliver cases put in `bottom`.
     const K_TEXT_TAB_BAR_HEIGHT: f64 = 48.0;
-
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
-
-    fn tester() -> WidgetTester {
-        tester_on(TargetPlatform::Android)
-    }
 
     /// `tester.pumpWidget(MaterialApp(theme: theme(app), home: home(app)))`.
     fn pump_app(
@@ -3671,12 +3661,11 @@ mod tests {
 
     #[test]
     fn the_title_is_centered_on_ios_and_macos_unless_there_are_two_actions() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().title(Text::new("X"))).into_widget()
             });
-            let title = text_rect(&tester, "X");
+            let title = text_rect(tester, "X");
             assert!(title.center().dx() < 400.0 - title.width() / 2.0);
 
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
@@ -3684,10 +3673,10 @@ mod tests {
                 // Clear the widget tree to avoid animating between platforms.
                 tester.pump_widget(Container::new().into_widget());
 
-                pump_app(&mut tester, theme, |_app| {
+                pump_app(tester, theme, |_app| {
                     scaffold_with(AppBar::new().title(Text::new("X"))).into_widget()
                 });
-                let title = text_rect(&tester, "X");
+                let title = text_rect(tester, "X");
                 assert!(
                     title.center().dx() > 400.0 - title.width() / 2.0,
                     "on {platform:?}"
@@ -3698,7 +3687,7 @@ mod tests {
                 );
 
                 // One action is still centered.
-                pump_app(&mut tester, theme, |_app| {
+                pump_app(tester, theme, |_app| {
                     scaffold_with(
                         AppBar::new()
                             .title(Text::new("X"))
@@ -3706,7 +3695,7 @@ mod tests {
                     )
                     .into_widget()
                 });
-                let title = text_rect(&tester, "X");
+                let title = text_rect(tester, "X");
                 assert!(
                     title.center().dx() > 400.0 - title.width() / 2.0,
                     "on {platform:?}"
@@ -3717,14 +3706,14 @@ mod tests {
                 );
 
                 // Two actions is left aligned again.
-                pump_app(&mut tester, theme, |_app| {
+                pump_app(tester, theme, |_app| {
                     scaffold_with(AppBar::new().title(Text::new("X")).actions(vec![
                         Icon::new(Some(Icons::thumb_up())).into_widget(),
                         Icon::new(Some(Icons::thumb_up())).into_widget(),
                     ]))
                     .into_widget()
                 });
-                let title = text_rect(&tester, "X");
+                let title = text_rect(tester, "X");
                 assert!(
                     title.center().dx() < 400.0 - title.width() / 2.0,
                     "on {platform:?}"
@@ -3735,12 +3724,11 @@ mod tests {
 
     #[test]
     fn center_title_true_centers_the_title_on_android() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().center_title(true).title(Text::new("X"))).into_widget()
             });
-            let title = text_rect(&tester, "X");
+            let title = text_rect(tester, "X");
             assert!(title.center().dx() > 400.0 - title.width() / 2.0);
             assert!(title.center().dx() < 400.0 + title.width() / 2.0);
         });
@@ -3748,17 +3736,16 @@ mod tests {
 
     fn start_aligned_title_rect(direction: TextDirection, title_spacing: Option<f64>) -> Rect {
         let mut rect = Rect::ZERO;
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 let mut app_bar = AppBar::new().center_title(false).title(placeholder(&key));
                 if let Some(title_spacing) = title_spacing {
                     app_bar = app_bar.title_spacing(title_spacing);
                 }
                 Directionality::new(direction, scaffold_with(app_bar).into_widget()).into_widget()
             });
-            rect = key_rect(&tester, &key);
+            rect = key_rect(tester, &key);
         });
         rect
     }
@@ -3793,9 +3780,8 @@ mod tests {
 
     fn title_rect_after_drawer_button(direction: TextDirection) -> Rect {
         let mut rect = Rect::ZERO;
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Directionality::new(
                     direction,
                     scaffold_with(AppBar::new().center_title(false).title(Text::new("X")))
@@ -3805,7 +3791,7 @@ mod tests {
                 )
                 .into_widget()
             });
-            rect = text_rect(&tester, "X");
+            rect = text_rect(tester, "X");
         });
         rect
     }
@@ -3828,9 +3814,8 @@ mod tests {
 
     #[test]
     fn an_app_bar_builds_without_a_scaffold() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 SizedBox::new()
                     .height(K_TOOLBAR_HEIGHT)
                     .child(
@@ -3852,9 +3837,8 @@ mod tests {
 
     #[test]
     fn an_app_bar_renders_at_zero_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 waft_widgets::Center::new()
                     .child(
                         SizedBox::shrink()
@@ -3862,20 +3846,19 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(text_rect(&tester, "X").size().is_empty());
+            assert!(text_rect(tester, "X").size().is_empty());
         });
     }
 
     #[test]
     fn leading_title_and_actions_are_vertically_centered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let app_bar_key = GlobalKey::new();
             let leading_key = GlobalKey::new();
             let title_key = GlobalKey::new();
             let action0_key = GlobalKey::new();
             let action1_key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 let sized = |key: &GlobalKey, height: f64| {
                     SizedBox::new()
                         .height(height)
@@ -3892,7 +3875,7 @@ mod tests {
                 .into_widget()
             });
             // The vertical center of the widget with key, in global coordinates.
-            let y_center = |key: &GlobalKey| key_rect(&tester, key).center().dy();
+            let y_center = |key: &GlobalKey| key_rect(tester, key).center().dy();
             assert_eq!(y_center(&app_bar_key), y_center(&leading_key));
             assert_eq!(y_center(&app_bar_key), y_center(&title_key));
             assert_eq!(y_center(&app_bar_key), y_center(&action0_key));
@@ -3909,9 +3892,8 @@ mod tests {
         read: impl FnOnce(&WidgetTester) -> R + Send,
     ) -> R {
         let mut result = None;
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, theme, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, theme, |_app| {
                 let mut app_bar = AppBar::new().title(Text::new("Howdy!"));
                 if let Some(icon_theme) = icon_theme() {
                     app_bar = app_bar.icon_theme(icon_theme);
@@ -3924,7 +3906,7 @@ mod tests {
                 }
                 .into_widget()
             });
-            result = Some(read(&tester));
+            result = Some(read(tester));
         });
         result.expect("the case ran")
     }
@@ -3935,111 +3917,126 @@ mod tests {
 
     #[test]
     fn the_drawer_icon_has_the_default_size() {
-        let size = drawer_icon_case(
-            false,
-            m3,
-            || None,
-            |tester| icon_size(tester, &Icons::menu()),
-        );
-        let icon_size = IconThemeData::fallback().size.expect("a size");
-        assert_eq!(size, Size::new(icon_size, icon_size));
+        test_widgets(|_tester| {
+            let size = drawer_icon_case(
+                false,
+                m3,
+                || None,
+                |tester| icon_size(tester, &Icons::menu()),
+            );
+            let icon_size = IconThemeData::fallback().size.expect("a size");
+            assert_eq!(size, Size::new(icon_size, icon_size));
+        });
     }
 
     #[test]
     fn material3_the_drawer_icon_has_the_default_color() {
-        let (color, expected) = drawer_icon_case(
-            false,
-            light_scheme_theme,
-            || None,
-            |tester| {
-                let app = tester.cell.borrow();
-                let expected = light_scheme_theme(&app).color_scheme.on_surface_variant();
-                drop(app);
-                (icon_color(tester, &Icons::menu()), expected)
-            },
-        );
-        assert_eq!(color, Some(expected));
+        test_widgets(|_tester| {
+            let (color, expected) = drawer_icon_case(
+                false,
+                light_scheme_theme,
+                || None,
+                |tester| {
+                    let app = tester.cell.borrow();
+                    let expected = light_scheme_theme(&app).color_scheme.on_surface_variant();
+                    drop(app);
+                    (icon_color(tester, &Icons::menu()), expected)
+                },
+            );
+            assert_eq!(color, Some(expected));
+        });
     }
 
     #[test]
     fn the_drawer_icon_is_sized_by_the_icon_theme() {
-        let size = drawer_icon_case(
-            false,
-            m3,
-            || Some(IconThemeData::new().size(30.0)),
-            |tester| icon_size(tester, &Icons::menu()),
-        );
-        assert_eq!(size, Size::new(30.0, 30.0));
+        test_widgets(|_tester| {
+            let size = drawer_icon_case(
+                false,
+                m3,
+                || Some(IconThemeData::new().size(30.0)),
+                |tester| icon_size(tester, &Icons::menu()),
+            );
+            assert_eq!(size, Size::new(30.0, 30.0));
+        });
     }
 
     #[test]
     fn the_drawer_icon_is_colored_by_the_icon_theme() {
-        const COLOR: Color = Color::new(0xFF2196F3);
-        let color = drawer_icon_case(
-            false,
-            light_scheme_theme,
-            || Some(IconThemeData::new().color(COLOR)),
-            |tester| icon_color(tester, &Icons::menu()),
-        );
-        assert_eq!(color, Some(COLOR));
+        test_widgets(|_tester| {
+            const COLOR: Color = Color::new(0xFF2196F3);
+            let color = drawer_icon_case(
+                false,
+                light_scheme_theme,
+                || Some(IconThemeData::new().color(COLOR)),
+                |tester| icon_color(tester, &Icons::menu()),
+            );
+            assert_eq!(color, Some(COLOR));
+        });
     }
 
     #[test]
     fn the_end_drawer_icon_has_the_default_size() {
-        let size = drawer_icon_case(
-            true,
-            m3,
-            || None,
-            |tester| icon_size(tester, &Icons::menu()),
-        );
-        let icon_size = IconThemeData::fallback().size.expect("a size");
-        assert_eq!(size, Size::new(icon_size, icon_size));
+        test_widgets(|_tester| {
+            let size = drawer_icon_case(
+                true,
+                m3,
+                || None,
+                |tester| icon_size(tester, &Icons::menu()),
+            );
+            let icon_size = IconThemeData::fallback().size.expect("a size");
+            assert_eq!(size, Size::new(icon_size, icon_size));
+        });
     }
 
     #[test]
     fn material3_the_end_drawer_icon_has_the_default_color() {
-        let (color, expected) = drawer_icon_case(
-            true,
-            light_scheme_theme,
-            || None,
-            |tester| {
-                let app = tester.cell.borrow();
-                let expected = light_scheme_theme(&app).color_scheme.on_surface_variant();
-                drop(app);
-                (icon_color(tester, &Icons::menu()), expected)
-            },
-        );
-        assert_eq!(color, Some(expected));
+        test_widgets(|_tester| {
+            let (color, expected) = drawer_icon_case(
+                true,
+                light_scheme_theme,
+                || None,
+                |tester| {
+                    let app = tester.cell.borrow();
+                    let expected = light_scheme_theme(&app).color_scheme.on_surface_variant();
+                    drop(app);
+                    (icon_color(tester, &Icons::menu()), expected)
+                },
+            );
+            assert_eq!(color, Some(expected));
+        });
     }
 
     #[test]
     fn the_end_drawer_icon_is_sized_by_the_icon_theme() {
-        let size = drawer_icon_case(
-            true,
-            m3,
-            || Some(IconThemeData::new().size(30.0)),
-            |tester| icon_size(tester, &Icons::menu()),
-        );
-        assert_eq!(size, Size::new(30.0, 30.0));
+        test_widgets(|_tester| {
+            let size = drawer_icon_case(
+                true,
+                m3,
+                || Some(IconThemeData::new().size(30.0)),
+                |tester| icon_size(tester, &Icons::menu()),
+            );
+            assert_eq!(size, Size::new(30.0, 30.0));
+        });
     }
 
     #[test]
     fn the_end_drawer_icon_is_colored_by_the_icon_theme() {
-        const COLOR: Color = Color::new(0xFF2196F3);
-        let color = drawer_icon_case(
-            true,
-            light_scheme_theme,
-            || Some(IconThemeData::new().color(COLOR)),
-            |tester| icon_color(tester, &Icons::menu()),
-        );
-        assert_eq!(color, Some(COLOR));
+        test_widgets(|_tester| {
+            const COLOR: Color = Color::new(0xFF2196F3);
+            let color = drawer_icon_case(
+                true,
+                light_scheme_theme,
+                || Some(IconThemeData::new().color(COLOR)),
+                |tester| icon_color(tester, &Icons::menu()),
+            );
+            assert_eq!(color, Some(COLOR));
+        });
     }
 
     #[test]
     fn material3_the_leading_widget_extends_to_the_edge_and_is_square() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .leading(IconButton::new(
@@ -4053,12 +4050,12 @@ mod tests {
                 .into_widget()
             });
             // Default IconButton has a size of (48x48).
-            let hamburger = rect_of(&tester, tester.find_by_type::<IconButton>()[0]);
+            let hamburger = rect_of(tester, tester.find_by_type::<IconButton>()[0]);
             assert_eq!(hamburger.top_left(), Offset::new(4.0, 4.0));
             assert_eq!(hamburger.size(), Size::new(48.0, 48.0));
 
             let leading_key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .leading(Container::new().key(leading_key.clone().into()))
@@ -4067,13 +4064,13 @@ mod tests {
                 .into_widget()
             });
             // Default leading widget has a size of (56x56).
-            let leading_box = key_rect(&tester, &leading_key);
+            let leading_box = key_rect(tester, &leading_key);
             assert_eq!(leading_box.top_left(), Offset::ZERO);
             assert_eq!(leading_box.size(), Size::new(56.0, 56.0));
 
             // The custom leading widget should still be 56x56 even if its size is smaller.
             let sized_key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .leading(
@@ -4086,7 +4083,7 @@ mod tests {
                 )
                 .into_widget()
             });
-            let leading = key_rect(&tester, &sized_key);
+            let leading = key_rect(tester, &sized_key);
             assert_eq!(leading.top_left(), Offset::ZERO);
             assert_eq!(leading.size(), Size::new(56.0, 56.0));
         });
@@ -4094,9 +4091,8 @@ mod tests {
 
     #[test]
     fn material3_an_action_is_4_from_the_edge_and_at_least_48() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().title(Text::new("X")).actions(vec![
                     IconButton::new(None, Icon::new(Some(Icons::share())))
                         .tooltip("Share")
@@ -4110,7 +4106,7 @@ mod tests {
                 .into_widget()
             });
             let add_button = rect_of(
-                &tester,
+                tester,
                 tester.ancestor_of_type::<IconButton>(tester.find_by_icon(&Icons::add())),
             );
             assert_eq!(add_button.top_right(), Offset::new(800.0, 0.0));
@@ -4118,7 +4114,7 @@ mod tests {
             assert_eq!(add_button.size(), Size::new(60.0 + 2.0 * 8.0, 56.0));
 
             let share_button = rect_of(
-                &tester,
+                tester,
                 tester.ancestor_of_type::<IconButton>(tester.find_by_icon(&Icons::share())),
             );
             // The 20dp icon is expanded to fill the IconButton's touch target to 48dp.
@@ -4128,16 +4124,15 @@ mod tests {
 
     fn elevation_case(theme: fn(&App) -> ThemeData, elevation: Option<f64>) -> f64 {
         let mut result = 0.0;
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, theme, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, theme, |_app| {
                 let mut app_bar = AppBar::new().title(Text::new("Title"));
                 if let Some(elevation) = elevation {
                     app_bar = app_bar.elevation(elevation);
                 }
                 scaffold_with(app_bar).into_widget()
             });
-            result = app_bar_elevation(&tester);
+            result = app_bar_elevation(tester);
         });
         result
     }
@@ -4173,9 +4168,8 @@ mod tests {
 
     #[test]
     fn the_scrolled_under_elevation_is_used_once_content_scrolls_under() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .title(Text::new("Title"))
@@ -4186,22 +4180,21 @@ mod tests {
                 .into_widget()
             });
             // Starts with the base elevation.
-            assert_eq!(app_bar_elevation(&tester), 2.0);
+            assert_eq!(app_bar_elevation(tester), 2.0);
 
-            let start = text_rect(&tester, "Item 2").center();
+            let start = text_rect(tester, "Item 2").center();
             tester.fling_from(start, Offset::new(0.0, -600.0), 2000.0, 1);
             tester.pump_and_settle();
 
             // After scrolling it should be the scrolledUnderElevation.
-            assert_eq!(app_bar_elevation(&tester), 10.0);
+            assert_eq!(app_bar_elevation(tester), 10.0);
         });
     }
 
     #[test]
     fn material3_the_scrolled_under_elevation_follows_a_nested_scroll_view_its_predicate_picks() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .title(Text::new("Title"))
@@ -4225,14 +4218,14 @@ mod tests {
                 .into_widget()
             });
             // Starts with the base elevation.
-            assert_eq!(app_bar_elevation(&tester), 0.0);
+            assert_eq!(app_bar_elevation(tester), 0.0);
 
-            let start = text_rect(&tester, "Item 2").center();
+            let start = text_rect(tester, "Item 2").center();
             tester.fling_from(start, Offset::new(0.0, -600.0), 2000.0, 1);
             tester.pump_and_settle();
 
             // After scrolling it should be the scrolledUnderElevation.
-            assert_eq!(app_bar_elevation(&tester), 10.0);
+            assert_eq!(app_bar_elevation(tester), 10.0);
         });
     }
 
@@ -4261,24 +4254,23 @@ mod tests {
 
     #[test]
     fn the_app_bar_height_adds_the_bottom_and_the_top_padding_when_primary() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let top_padding_100 = EdgeInsets::only(0.0, 100.0, 0.0, 0.0);
 
             tester.pump_widget(top_padded(
                 scaffold_with(AppBar::new()).primary(false).into_widget(),
                 top_padding_100,
             ));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert_eq!(app_bar_rect(&tester).height(), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).height(), K_TOOLBAR_HEIGHT);
 
             tester.pump_widget(top_padded(
                 scaffold_with(AppBar::new().title(Text::new("title"))).into_widget(),
                 top_padding_100,
             ));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert!(text_rect(&tester, "title").top > 100.0);
-            assert_eq!(app_bar_rect(&tester).height(), K_TOOLBAR_HEIGHT + 100.0);
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert!(text_rect(tester, "title").top > 100.0);
+            assert_eq!(app_bar_rect(tester).height(), K_TOOLBAR_HEIGHT + 100.0);
 
             tester.pump_widget(top_padded(
                 scaffold_with(AppBar::new().bottom(container_bottom(200.0)))
@@ -4286,16 +4278,16 @@ mod tests {
                     .into_widget(),
                 top_padding_100,
             ));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert_eq!(app_bar_rect(&tester).height(), K_TOOLBAR_HEIGHT + 200.0);
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).height(), K_TOOLBAR_HEIGHT + 200.0);
 
             tester.pump_widget(top_padded(
                 scaffold_with(AppBar::new().bottom(container_bottom(200.0))).into_widget(),
                 top_padding_100,
             ));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).top, 0.0);
             assert_eq!(
-                app_bar_rect(&tester).height(),
+                app_bar_rect(tester).height(),
                 K_TOOLBAR_HEIGHT + 100.0 + 200.0
             );
 
@@ -4306,15 +4298,14 @@ mod tests {
                     .into_widget(),
                 top_padding_100,
             ));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert!(text_rect(&tester, "title").top < 100.0);
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert!(text_rect(tester, "title").top < 100.0);
         });
     }
 
     #[test]
     fn an_app_bar_in_the_body_leaves_out_the_bottom_safe_area_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(top_padded(
                 Scaffold::new()
                     .body(
@@ -4324,15 +4315,14 @@ mod tests {
                     .into_widget(),
                 EdgeInsets::symmetric(100.0, 0.0),
             ));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert_eq!(app_bar_rect(&tester).height(), K_TOOLBAR_HEIGHT + 100.0);
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).height(), K_TOOLBAR_HEIGHT + 100.0);
         });
     }
 
     #[test]
     fn the_title_sees_no_padding_from_the_media_query() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let title_built = Rc::new(Cell::new(false));
             let seen_padding = Rc::new(Cell::new(None));
             let built = Rc::clone(&title_built);
@@ -4353,95 +4343,88 @@ mod tests {
 
     #[test]
     fn the_app_bar_shows_a_menu_button_once_a_drawer_is_added() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new()).into_widget()
             });
-            assert_eq!(icon_count(&tester, &Icons::menu()), 0);
-            pump_app(&mut tester, m3, |_app| {
+            assert_eq!(icon_count(tester, &Icons::menu()), 0);
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new())
                     .drawer(Drawer::new())
                     .into_widget()
             });
-            assert_eq!(icon_count(&tester, &Icons::menu()), 1);
+            assert_eq!(icon_count(tester, &Icons::menu()), 1);
         });
     }
 
     #[test]
     fn no_menu_button_for_the_drawer_without_automatically_imply_leading() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().automatically_imply_leading(false))
                     .drawer(Drawer::new())
                     .into_widget()
             });
-            assert_eq!(icon_count(&tester, &Icons::menu()), 0);
+            assert_eq!(icon_count(tester, &Icons::menu()), 0);
         });
     }
 
     #[test]
     fn no_menu_button_for_the_end_drawer_without_automatically_imply_actions() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().automatically_imply_actions(false))
                     .end_drawer(Drawer::new())
                     .into_widget()
             });
-            assert_eq!(icon_count(&tester, &Icons::menu()), 0);
+            assert_eq!(icon_count(tester, &Icons::menu()), 0);
         });
     }
 
     #[test]
     fn a_menu_button_for_the_end_drawer_when_actions_are_implied() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new())
                     .end_drawer(Drawer::new())
                     .into_widget()
             });
-            assert_eq!(icon_count(&tester, &Icons::menu()), 1);
+            assert_eq!(icon_count(tester, &Icons::menu()), 1);
         });
     }
 
     #[test]
     fn given_actions_replace_the_end_drawer_menu_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new().actions(vec![Icon::new(Some(Icons::settings())).into_widget()]),
                 )
                 .end_drawer(Drawer::new())
                 .into_widget()
             });
-            assert_eq!(icon_count(&tester, &Icons::menu()), 0);
-            assert_eq!(icon_count(&tester, &Icons::settings()), 1);
+            assert_eq!(icon_count(tester, &Icons::menu()), 0);
+            assert_eq!(icon_count(tester, &Icons::settings()), 1);
         });
     }
 
     #[test]
     fn the_app_bar_uses_its_toolbar_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().title(Text::new("Title")).toolbar_height(48.0))
                     .body(Container::new())
                     .into_widget()
             });
-            assert_eq!(app_bar_rect(&tester).height(), 48.0);
+            assert_eq!(app_bar_rect(tester).height(), 48.0);
         });
     }
 
     #[test]
     fn the_app_bar_uses_its_leading_width() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .leading(placeholder(&key))
@@ -4452,7 +4435,7 @@ mod tests {
             });
             // By default toolbarHeight is 56.0.
             assert_eq!(
-                key_rect(&tester, &key),
+                key_rect(tester, &key),
                 Rect::from_ltrb(0.0, 0.0, 100.0, 56.0)
             );
         });
@@ -4460,18 +4443,17 @@ mod tests {
 
     #[test]
     fn an_end_drawer_gives_the_app_bar_no_leading() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new())
                     .end_drawer(Drawer::new())
                     .into_widget()
             });
-            let menu = rect_of(&tester, tester.find_by_icon(&Icons::menu())).center();
+            let menu = rect_of(tester, tester.find_by_icon(&Icons::menu())).center();
             tester.tap(menu, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(navigation_toolbar(&tester, |toolbar| toolbar
+            assert!(navigation_toolbar(tester, |toolbar| toolbar
                 .leading
                 .is_none()));
         });
@@ -4479,13 +4461,12 @@ mod tests {
 
     #[test]
     fn the_title_spacing_defaults_to_the_navigation_toolbars_middle_spacing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().title(Text::new("Title"))).into_widget()
             });
             assert_eq!(
-                navigation_toolbar(&tester, |toolbar| toolbar.middle_spacing),
+                navigation_toolbar(tester, |toolbar| toolbar.middle_spacing),
                 NavigationToolbar::K_MIDDLE_SPACING
             );
         });
@@ -4493,13 +4474,12 @@ mod tests {
 
     #[test]
     fn the_foreground_and_background_colors_reach_the_material_texts_and_icons() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const FOREGROUND_COLOR: Color = Color::new(0xff00ff00);
             const BACKGROUND_COLOR: Color = Color::new(0xff00ffff);
-            let mut tester = tester();
             let leading_icon_key = GlobalKey::new();
             let action_icon_key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .foreground_color(FOREGROUND_COLOR)
@@ -4519,7 +4499,7 @@ mod tests {
                 .into_widget()
             });
 
-            assert_eq!(app_bar_background_color(&tester), Some(BACKGROUND_COLOR));
+            assert_eq!(app_bar_background_color(tester), Some(BACKGROUND_COLOR));
 
             let title = tester.find_onstage_text("title")[0];
             let title_style = tester.ancestor_of_type::<DefaultTextStyle>(title);
@@ -4549,11 +4529,11 @@ mod tests {
 
             // Test icon color
             assert_eq!(
-                icon_color(&tester, &Icons::add_circle()),
+                icon_color(tester, &Icons::add_circle()),
                 Some(FOREGROUND_COLOR)
             );
             assert_eq!(
-                icon_color(&tester, &Icons::ac_unit()),
+                icon_color(tester, &Icons::ac_unit()),
                 Some(FOREGROUND_COLOR)
             );
         });
@@ -4564,12 +4544,9 @@ mod tests {
         app_bar: fn() -> AppBar,
     ) -> Option<SystemUiOverlayStyle> {
         let mut result = None;
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, theme, |_app| {
-                scaffold_with(app_bar()).into_widget()
-            });
-            result = latest_style(&tester);
+        test_widgets(|tester| {
+            pump_app(tester, theme, |_app| scaffold_with(app_bar()).into_widget());
+            result = latest_style(tester);
         });
         result
     }
@@ -4680,9 +4657,8 @@ mod tests {
 
     #[test]
     fn the_app_bar_has_no_shape_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 AppBar::new()
                     .leading(Text::new("L"))
                     .title(Text::new("No Scaffold"))
@@ -4694,7 +4670,7 @@ mod tests {
             });
             let app_bar = tester.find_by_type::<AppBar>()[0];
             assert!(tester.widget(app_bar, |app_bar: &AppBar| app_bar.shape.is_none()));
-            assert!(app_bar_material(&tester, |material| material
+            assert!(app_bar_material(tester, |material| material
                 .shape
                 .is_none()));
         });
@@ -4702,15 +4678,14 @@ mod tests {
 
     #[test]
     fn the_app_bar_gives_its_shape_to_its_material() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let rounded_rectangle_border = || {
                 RoundedRectangleBorder::new(
                     BorderSide::NONE,
                     BorderRadiusGeometry::all(Radius::circular(15.0)),
                 )
             };
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 AppBar::new()
                     .leading(Text::new("L"))
                     .title(Text::new("No Scaffold"))
@@ -4727,7 +4702,7 @@ mod tests {
                 tester.widget(app_bar, |app_bar: &AppBar| app_bar.shape.as_deref()
                     == Some(&*expected))
             );
-            assert!(app_bar_material(&tester, |material| material
+            assert!(app_bar_material(tester, |material| material
                 .shape
                 .as_deref()
                 == Some(&*expected)));
@@ -4736,8 +4711,7 @@ mod tests {
 
     #[test]
     fn preferred_height_for_reads_the_themes_toolbar_height_when_the_app_bar_gives_none() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let preferred_height = Rc::new(Cell::new(0.0));
             let preferred_size = Rc::new(Cell::new(Size::ZERO));
             let frame = |tester: &mut WidgetTester,
@@ -4774,25 +4748,25 @@ mod tests {
                 tester.pump_and_settle();
             };
 
-            frame(&mut tester, None, None);
-            assert_eq!(app_bar_rect(&tester).height(), K_TOOLBAR_HEIGHT);
+            frame(tester, None, None);
+            assert_eq!(app_bar_rect(tester).height(), K_TOOLBAR_HEIGHT);
             assert_eq!(preferred_height.get(), K_TOOLBAR_HEIGHT);
             assert_eq!(preferred_size.get().height(), K_TOOLBAR_HEIGHT);
 
-            frame(&mut tester, Some(96.0), None);
-            assert_eq!(app_bar_rect(&tester).height(), 96.0);
+            frame(tester, Some(96.0), None);
+            assert_eq!(app_bar_rect(tester).height(), 96.0);
             assert_eq!(preferred_height.get(), 96.0);
             // Special case: AppBarTheme.toolbarHeight specified,
             // AppBar.theme.toolbarHeight is null.
             assert_eq!(preferred_size.get().height(), K_TOOLBAR_HEIGHT);
 
-            frame(&mut tester, None, Some(64.0));
-            assert_eq!(app_bar_rect(&tester).height(), 64.0);
+            frame(tester, None, Some(64.0));
+            assert_eq!(app_bar_rect(tester).height(), 64.0);
             assert_eq!(preferred_height.get(), 64.0);
             assert_eq!(preferred_size.get().height(), 64.0);
 
-            frame(&mut tester, Some(96.0), Some(64.0));
-            assert_eq!(app_bar_rect(&tester).height(), 64.0);
+            frame(tester, Some(96.0), Some(64.0));
+            assert_eq!(app_bar_rect(tester).height(), 64.0);
             assert_eq!(preferred_height.get(), 64.0);
             assert_eq!(preferred_size.get().height(), 64.0);
         });
@@ -4800,12 +4774,11 @@ mod tests {
 
     #[test]
     fn a_preferred_size_that_reuses_an_app_bars_size_still_reads_the_themes_toolbar_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let preferred_height = Rc::new(Cell::new(0.0));
             let reused_height = Rc::clone(&preferred_height);
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     let mut theme = AppBarThemeData::new();
                     theme.toolbar_height = Some(96.0);
@@ -4831,8 +4804,7 @@ mod tests {
 
     #[test]
     fn the_actions_padding_insets_the_actions_from_the_end() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let app_bar_key = GlobalKey::new();
             let action_key = GlobalKey::new();
             let frame = |tester: &mut WidgetTester, actions_padding: Option<EdgeInsets>| {
@@ -4849,15 +4821,15 @@ mod tests {
                 });
             };
 
-            frame(&mut tester, None);
+            frame(tester, None);
             // Actions padding default to zero padding.
-            let app_bar_right = key_rect(&tester, &app_bar_key).right;
-            assert_eq!(app_bar_right - key_rect(&tester, &action_key).right, 0.0);
+            let app_bar_right = key_rect(tester, &app_bar_key).right;
+            assert_eq!(app_bar_right - key_rect(tester, &action_key).right, 0.0);
 
             let actions_padding = EdgeInsets::only(0.0, 0.0, 8.0, 0.0);
-            frame(&mut tester, Some(actions_padding));
+            frame(tester, Some(actions_padding));
             assert_eq!(
-                key_rect(&tester, &action_key).right,
+                key_rect(tester, &action_key).right,
                 app_bar_right - actions_padding.right
             );
         });
@@ -4904,18 +4876,14 @@ mod tests {
     }
 
     /// Dart's `gesture.moveBy(by)`.
-    fn move_by(
-        tester: &mut WidgetTester,
-        gesture: &mut crate::test_support::TestPointer,
-        by: Offset,
-    ) {
+    fn move_by(tester: &mut WidgetTester, gesture: &mut TestPointer, by: Offset) {
         let at = gesture.position + by;
         tester.move_to(gesture, at, true);
     }
 
     /// Dart's `startGesture(at)`, `moveBy(by)`, `up()`, then `pumpAndSettle`.
     fn drag(tester: &mut WidgetTester, at: Offset, by: Offset, pointer: i64) {
-        let mut gesture = WidgetTester::touch(pointer);
+        let mut gesture = TestPointer::touch(pointer);
         tester.down(&mut gesture, at);
         tester.move_to(&mut gesture, at + by, true);
         tester.up(&gesture);
@@ -4934,34 +4902,33 @@ mod tests {
 
     /// Dart's 'backgroundColor' and 'backgroundColor with FlexibleSpace'.
     fn scrolled_under_background_case(include_flexible_space: bool) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 scrolled_under_app(1200.0, false, include_flexible_space),
             );
 
-            assert_eq!(app_bar_background_color(&tester), Some(DEFAULT_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(DEFAULT_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
 
             drag(
-                &mut tester,
+                tester,
                 Offset::new(50.0, 400.0),
                 Offset::new(0.0, -K_TOOLBAR_HEIGHT),
                 1,
             );
-            assert_eq!(app_bar_background_color(&tester), Some(SCROLLED_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(SCROLLED_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
 
             drag(
-                &mut tester,
+                tester,
                 Offset::new(50.0, 300.0),
                 Offset::new(0.0, K_TOOLBAR_HEIGHT),
                 2,
             );
-            assert_eq!(app_bar_background_color(&tester), Some(DEFAULT_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(DEFAULT_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
         });
     }
 
@@ -4977,37 +4944,36 @@ mod tests {
 
     /// Dart's 'backgroundColor - reverse' and 'backgroundColor with FlexibleSpace - reverse'.
     fn reversed_scrolled_under_background_case(include_flexible_space: bool) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 scrolled_under_app(1200.0, true, include_flexible_space),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // In this test case, the content always extends under the AppBar, so it
             // should always be the scrolledColor.
-            assert_eq!(app_bar_background_color(&tester), Some(SCROLLED_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(SCROLLED_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
 
             drag(
-                &mut tester,
+                tester,
                 Offset::new(50.0, 400.0),
                 Offset::new(0.0, K_TOOLBAR_HEIGHT),
                 1,
             );
-            assert_eq!(app_bar_background_color(&tester), Some(SCROLLED_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(SCROLLED_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
 
             drag(
-                &mut tester,
+                tester,
                 Offset::new(50.0, 300.0),
                 Offset::new(0.0, -K_TOOLBAR_HEIGHT),
                 2,
             );
-            assert_eq!(app_bar_background_color(&tester), Some(SCROLLED_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(SCROLLED_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
         });
     }
 
@@ -5025,28 +4991,27 @@ mod tests {
     /// Dart's 'backgroundColor - not triggered in reverse for short content' and its
     /// flexible-space twin.
     fn short_reversed_scrolled_under_background_case(include_flexible_space: bool) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 scrolled_under_app(200.0, true, include_flexible_space),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // In reverse, the content here is not long enough to scroll under the app
             // bar.
-            assert_eq!(app_bar_background_color(&tester), Some(DEFAULT_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(DEFAULT_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
 
             drag(
-                &mut tester,
+                tester,
                 Offset::new(50.0, 400.0),
                 Offset::new(0.0, K_TOOLBAR_HEIGHT),
                 1,
             );
-            assert_eq!(app_bar_background_color(&tester), Some(DEFAULT_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(DEFAULT_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
         });
     }
 
@@ -5063,9 +5028,8 @@ mod tests {
 
     #[test]
     fn horizontal_scrolling_does_not_change_the_scrolled_under_background_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .elevation(0.0)
@@ -5091,17 +5055,17 @@ mod tests {
                 )
                 .into_widget()
             });
-            assert_eq!(app_bar_background_color(&tester), Some(DEFAULT_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(DEFAULT_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(50.0, 400.0));
             tester.move_to(
                 &mut gesture,
                 Offset::new(50.0, 400.0 - K_TOOLBAR_HEIGHT),
                 true,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.move_to(
                 &mut gesture,
                 Offset::new(50.0, 400.0 - 2.0 * K_TOOLBAR_HEIGHT),
@@ -5109,10 +5073,10 @@ mod tests {
             );
             tester.up(&gesture);
             tester.pump_and_settle();
-            assert_eq!(app_bar_background_color(&tester), Some(SCROLLED_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(SCROLLED_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
 
-            let mut gesture = WidgetTester::touch(2);
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, Offset::new(50.0, 300.0));
             // Scroll horizontally
             tester.move_to(
@@ -5120,7 +5084,7 @@ mod tests {
                 Offset::new(50.0 - K_TOOLBAR_HEIGHT, 300.0),
                 true,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.move_to(
                 &mut gesture,
                 Offset::new(50.0 - 2.0 * K_TOOLBAR_HEIGHT, 300.0),
@@ -5130,16 +5094,15 @@ mod tests {
             tester.pump_and_settle();
             // The app bar is still scrolled under vertically, so it should not have
             // changed back in response to horizontal scrolling.
-            assert_eq!(app_bar_background_color(&tester), Some(SCROLLED_COLOR));
-            assert_eq!(app_bar_material_height(&tester), K_TOOLBAR_HEIGHT);
+            assert_eq!(app_bar_background_color(tester), Some(SCROLLED_COLOR));
+            assert_eq!(app_bar_material_height(tester), K_TOOLBAR_HEIGHT);
         });
     }
 
     #[test]
     fn a_toolbar_opacity_fades_the_title_and_the_icons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .title(Text::new("title"))
@@ -5174,9 +5137,8 @@ mod tests {
 
     #[test]
     fn a_bottom_opacity_fades_the_bottom() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .bottom(container_bottom(48.0))
@@ -5280,7 +5242,7 @@ mod tests {
 
     fn jump_to(tester: &mut WidgetTester, controller: Handle<ScrollController>, value: f64) {
         controller.jump_to(&mut tester.cell.borrow_mut(), value);
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     fn scroll_offset(tester: &WidgetTester, controller: Handle<ScrollController>) -> f64 {
@@ -5310,76 +5272,73 @@ mod tests {
 
     #[test]
     fn the_default_sliver_app_bar_scrolls_out_of_view_at_its_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let handles = pump_sliver_app_bar_app(&mut tester, SliverAppBarApp::default());
-            assert_eq!(scroll_offset(&tester, handles.controller), 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
+        test_widgets(|tester| {
+            let handles = pump_sliver_app_bar_app(tester, SliverAppBarApp::default());
+            assert_eq!(scroll_offset(tester, handles.controller), 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
 
-            let initial_app_bar_height = app_bar_rect(&tester).height();
-            let initial_tab_bar_height = tab_bar_height(&tester, &handles);
+            let initial_app_bar_height = app_bar_rect(tester).height();
+            let initial_tab_bar_height = tab_bar_height(tester, &handles);
 
             // Scroll the not-pinned appbar partially out of view
-            jump_to(&mut tester, handles.controller, 50.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), initial_app_bar_height);
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
+            jump_to(tester, handles.controller, 50.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), initial_app_bar_height);
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
 
             // Scroll the not-pinned appbar out of view
-            jump_to(&mut tester, handles.controller, 600.0);
-            assert!(!sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), initial_app_bar_height);
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
+            jump_to(tester, handles.controller, 600.0);
+            assert!(!sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), initial_app_bar_height);
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
 
             // Scroll the not-pinned appbar back into view
-            jump_to(&mut tester, handles.controller, 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), initial_app_bar_height);
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
+            jump_to(tester, handles.controller, 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), initial_app_bar_height);
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
         });
     }
 
     #[test]
     fn a_pinned_sliver_app_bar_collapses_its_expanded_height_but_keeps_the_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let handles = pump_sliver_app_bar_app(
-                &mut tester,
+                tester,
                 SliverAppBarApp {
                     pinned: true,
                     expanded_height: Some(128.0),
                     ..SliverAppBarApp::default()
                 },
             );
-            assert_eq!(scroll_offset(&tester, handles.controller), 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), 128.0);
+            assert_eq!(scroll_offset(tester, handles.controller), 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), 128.0);
 
             const INITIAL_APP_BAR_HEIGHT: f64 = 128.0;
-            let initial_tab_bar_height = tab_bar_height(&tester, &handles);
+            let initial_tab_bar_height = tab_bar_height(tester, &handles);
 
             // Scroll the not-pinned appbar, collapsing the expanded height. At this
             // point both the toolbar and the tabbar are visible.
-            jump_to(&mut tester, handles.controller, 600.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
-            assert!(app_bar_rect(&tester).height() < INITIAL_APP_BAR_HEIGHT);
-            assert!(app_bar_rect(&tester).height() > initial_tab_bar_height);
+            jump_to(tester, handles.controller, 600.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
+            assert!(app_bar_rect(tester).height() < INITIAL_APP_BAR_HEIGHT);
+            assert!(app_bar_rect(tester).height() > initial_tab_bar_height);
 
             // Scroll the not-pinned appbar back into view
-            jump_to(&mut tester, handles.controller, 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), INITIAL_APP_BAR_HEIGHT);
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
+            jump_to(tester, handles.controller, 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), INITIAL_APP_BAR_HEIGHT);
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
         });
     }
 
     #[test]
     fn a_pinned_and_floating_sliver_app_bar_collapses_to_its_bottom() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let handles = pump_sliver_app_bar_app(
-                &mut tester,
+                tester,
                 SliverAppBarApp {
                     floating: true,
                     pinned: true,
@@ -5387,35 +5346,34 @@ mod tests {
                     ..SliverAppBarApp::default()
                 },
             );
-            assert_eq!(scroll_offset(&tester, handles.controller), 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), 128.0);
+            assert_eq!(scroll_offset(tester, handles.controller), 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), 128.0);
 
             const INITIAL_APP_BAR_HEIGHT: f64 = 128.0;
-            let initial_tab_bar_height = tab_bar_height(&tester, &handles);
+            let initial_tab_bar_height = tab_bar_height(tester, &handles);
 
             // Scroll the floating-pinned appbar, collapsing the expanded height. At this
             // point only the tabBar is visible.
-            jump_to(&mut tester, handles.controller, 600.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
-            assert!(app_bar_rect(&tester).height() < INITIAL_APP_BAR_HEIGHT);
-            assert_eq!(app_bar_rect(&tester).height(), initial_tab_bar_height);
+            jump_to(tester, handles.controller, 600.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
+            assert!(app_bar_rect(tester).height() < INITIAL_APP_BAR_HEIGHT);
+            assert_eq!(app_bar_rect(tester).height(), initial_tab_bar_height);
 
             // Scroll the floating-pinned appbar back into view
-            jump_to(&mut tester, handles.controller, 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), INITIAL_APP_BAR_HEIGHT);
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
+            jump_to(tester, handles.controller, 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), INITIAL_APP_BAR_HEIGHT);
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
         });
     }
 
     #[test]
     fn a_floating_sliver_app_bar_with_snap_snaps_open_and_closed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let handles = pump_sliver_app_bar_app(
-                &mut tester,
+                tester,
                 SliverAppBarApp {
                     floating: true,
                     snap: true,
@@ -5423,92 +5381,91 @@ mod tests {
                     ..SliverAppBarApp::default()
                 },
             );
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert_eq!(app_bar_rect(&tester).height(), 128.0);
-            assert_eq!(app_bar_rect(&tester).bottom, 128.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).height(), 128.0);
+            assert_eq!(app_bar_rect(tester).bottom, 128.0);
 
             // Scroll to the middle of the list. The (floating) appbar is no longer visible.
             handles
                 .controller
                 .jump_to(&mut tester.cell.borrow_mut(), 256.0);
             tester.pump_and_settle();
-            assert!(!sliver_app_bar_is_onstage(&tester));
-            assert!(app_bar_rect(&tester).top <= -128.0);
+            assert!(!sliver_app_bar_is_onstage(tester));
+            assert!(app_bar_rect(tester).top <= -128.0);
 
             // Drag the scrollable up and down. The app bar should not snap open, its
             // height should just track the drag offset.
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(50.0, 256.0));
             // drag the appbar all the way open
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, 128.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert_eq!(app_bar_rect(&tester).height(), 128.0);
+            move_by(tester, &mut gesture, Offset::new(0.0, 128.0));
+            tester.pump();
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).height(), 128.0);
 
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, -50.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(app_bar_rect(&tester).bottom, 78.0); // 78 == 128 - 50
+            move_by(tester, &mut gesture, Offset::new(0.0, -50.0));
+            tester.pump();
+            assert_eq!(app_bar_rect(tester).bottom, 78.0); // 78 == 128 - 50
 
             // Trigger the snap open animation: drag down and release
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, 10.0));
+            move_by(tester, &mut gesture, Offset::new(0.0, 10.0));
             tester.up(&gesture);
 
             // Now verify that the appbar is animating open
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
-            let bottom = app_bar_rect(&tester).bottom;
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            let bottom = app_bar_rect(tester).bottom;
             assert!(bottom > 88.0); // 88 = 78 + 10
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
-            assert!(app_bar_rect(&tester).bottom > bottom);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            assert!(app_bar_rect(tester).bottom > bottom);
 
             // The animation finishes when the appbar is full height.
             tester.pump_and_settle();
-            assert_eq!(app_bar_rect(&tester).height(), 128.0);
+            assert_eq!(app_bar_rect(tester).height(), 128.0);
 
             // Now that the app bar is open, perform the same drag scenario
             // in reverse: drag the appbar up and down and then trigger the
             // snap closed animation.
-            let mut gesture = WidgetTester::touch(2);
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, Offset::new(50.0, 256.0));
             // drag the appbar closed
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, -128.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(app_bar_rect(&tester).bottom, 0.0);
+            move_by(tester, &mut gesture, Offset::new(0.0, -128.0));
+            tester.pump();
+            assert_eq!(app_bar_rect(tester).bottom, 0.0);
 
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, 100.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(app_bar_rect(&tester).bottom, 100.0);
+            move_by(tester, &mut gesture, Offset::new(0.0, 100.0));
+            tester.pump();
+            assert_eq!(app_bar_rect(tester).bottom, 100.0);
 
             // Trigger the snap close animation: drag upwards and release
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, -10.0));
+            move_by(tester, &mut gesture, Offset::new(0.0, -10.0));
             tester.up(&gesture);
 
             // Now verify that the appbar is animating closed
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
-            let bottom = app_bar_rect(&tester).bottom;
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            let bottom = app_bar_rect(tester).bottom;
             assert!(bottom < 90.0);
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
-            assert!(app_bar_rect(&tester).bottom < bottom);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            assert!(app_bar_rect(tester).bottom < bottom);
 
             // The animation finishes when the appbar is off screen.
             tester.pump_and_settle();
-            assert!(app_bar_rect(&tester).top <= 0.0);
-            assert!(app_bar_rect(&tester).bottom <= 0.0);
+            assert!(app_bar_rect(tester).top <= 0.0);
+            assert!(app_bar_rect(tester).bottom <= 0.0);
         });
     }
 
     #[test]
     fn a_floating_and_pinned_sliver_app_bar_with_snap_snaps_to_its_pinned_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let handles = pump_sliver_app_bar_app(
-                &mut tester,
+                tester,
                 SliverAppBarApp {
                     floating: true,
                     pinned: true,
@@ -5517,10 +5474,10 @@ mod tests {
                     ..SliverAppBarApp::default()
                 },
             );
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert_eq!(app_bar_rect(&tester).height(), 128.0);
-            assert_eq!(app_bar_rect(&tester).bottom, 128.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).height(), 128.0);
+            assert_eq!(app_bar_rect(tester).bottom, 128.0);
 
             // Scroll to the middle of the list. The only the tab bar is visible
             // because this is a pinned appbar.
@@ -5528,135 +5485,133 @@ mod tests {
                 .controller
                 .jump_to(&mut tester.cell.borrow_mut(), 256.0);
             tester.pump_and_settle();
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert_eq!(app_bar_rect(&tester).height(), K_TEXT_TAB_BAR_HEIGHT);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).height(), K_TEXT_TAB_BAR_HEIGHT);
 
             // Drag the scrollable up and down. The app bar should not snap open, the
             // bottom of the appbar should just track the drag offset.
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(50.0, 200.0));
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, 100.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(app_bar_rect(&tester).height(), 100.0);
+            move_by(tester, &mut gesture, Offset::new(0.0, 100.0));
+            tester.pump();
+            assert_eq!(app_bar_rect(tester).height(), 100.0);
 
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, -25.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(app_bar_rect(&tester).height(), 75.0);
+            move_by(tester, &mut gesture, Offset::new(0.0, -25.0));
+            tester.pump();
+            assert_eq!(app_bar_rect(tester).height(), 75.0);
 
             // Trigger the snap animation: drag down and release
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, 10.0));
+            move_by(tester, &mut gesture, Offset::new(0.0, 10.0));
             tester.up(&gesture);
 
             // Now verify that the appbar is animating open
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
-            let height = app_bar_rect(&tester).height();
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            let height = app_bar_rect(tester).height();
             assert!(height > 85.0);
             assert!(height < 128.0);
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
-            assert!(app_bar_rect(&tester).height() > height);
-            assert!(app_bar_rect(&tester).height() < 128.0);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            assert!(app_bar_rect(tester).height() > height);
+            assert!(app_bar_rect(tester).height() < 128.0);
 
             // The animation finishes when the appbar is fully expanded
             tester.pump_and_settle();
-            assert_eq!(app_bar_rect(&tester).top, 0.0);
-            assert_eq!(app_bar_rect(&tester).height(), 128.0);
-            assert_eq!(app_bar_rect(&tester).bottom, 128.0);
+            assert_eq!(app_bar_rect(tester).top, 0.0);
+            assert_eq!(app_bar_rect(tester).height(), 128.0);
+            assert_eq!(app_bar_rect(tester).bottom, 128.0);
 
             // Now that the appbar is fully expanded, Perform the same drag
             // scenario in reverse: drag the appbar up and down and then trigger
             // the snap closed animation.
-            let mut gesture = WidgetTester::touch(2);
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, Offset::new(50.0, 256.0));
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, -128.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(app_bar_rect(&tester).bottom, K_TEXT_TAB_BAR_HEIGHT);
+            move_by(tester, &mut gesture, Offset::new(0.0, -128.0));
+            tester.pump();
+            assert_eq!(app_bar_rect(tester).bottom, K_TEXT_TAB_BAR_HEIGHT);
 
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, 100.0));
-            tester.pump(Duration::ZERO);
-            assert_eq!(app_bar_rect(&tester).bottom, 100.0);
+            move_by(tester, &mut gesture, Offset::new(0.0, 100.0));
+            tester.pump();
+            assert_eq!(app_bar_rect(tester).bottom, 100.0);
 
             // Trigger the snap close animation: drag upwards and release
-            move_by(&mut tester, &mut gesture, Offset::new(0.0, -10.0));
+            move_by(tester, &mut gesture, Offset::new(0.0, -10.0));
             tester.up(&gesture);
 
             // Now verify that the appbar is animating closed
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
-            let bottom = app_bar_rect(&tester).bottom;
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            let bottom = app_bar_rect(tester).bottom;
             assert!(bottom < 90.0);
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
-            assert!(app_bar_rect(&tester).bottom < bottom);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            assert!(app_bar_rect(tester).bottom < bottom);
 
             // The animation finishes when the appbar shrinks back to its pinned height
             tester.pump_and_settle();
-            assert!(app_bar_rect(&tester).top <= 0.0);
-            assert_eq!(app_bar_rect(&tester).bottom, K_TEXT_TAB_BAR_HEIGHT);
+            assert!(app_bar_rect(tester).top <= 0.0);
+            assert_eq!(app_bar_rect(tester).bottom, K_TEXT_TAB_BAR_HEIGHT);
         });
     }
 
     #[test]
     fn a_sliver_app_bar_scrolls_from_its_expanded_height_to_its_collapsed_height() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const EXPANDED_APP_BAR_HEIGHT: f64 = 400.0;
             const COLLAPSED_APP_BAR_HEIGHT: f64 = 200.0;
-            let mut tester = tester();
             let handles = pump_sliver_app_bar_app(
-                &mut tester,
+                tester,
                 SliverAppBarApp {
                     collapsed_height: Some(COLLAPSED_APP_BAR_HEIGHT),
                     expanded_height: Some(EXPANDED_APP_BAR_HEIGHT),
                     ..SliverAppBarApp::default()
                 },
             );
-            assert_eq!(scroll_offset(&tester, handles.controller), 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), EXPANDED_APP_BAR_HEIGHT);
+            assert_eq!(scroll_offset(tester, handles.controller), 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), EXPANDED_APP_BAR_HEIGHT);
 
-            let initial_tab_bar_height = tab_bar_height(&tester, &handles);
+            let initial_tab_bar_height = tab_bar_height(tester, &handles);
 
             // Scroll the not-pinned appbar partially out of view.
-            jump_to(&mut tester, handles.controller, 50.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
+            jump_to(tester, handles.controller, 50.0);
+            assert!(sliver_app_bar_is_onstage(tester));
             assert_eq!(
-                app_bar_rect(&tester).height(),
+                app_bar_rect(tester).height(),
                 EXPANDED_APP_BAR_HEIGHT - 50.0
             );
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
 
             // Scroll the not-pinned appbar out of view, to its collapsed height.
-            jump_to(&mut tester, handles.controller, 600.0);
-            assert!(!sliver_app_bar_is_onstage(&tester));
+            jump_to(tester, handles.controller, 600.0);
+            assert!(!sliver_app_bar_is_onstage(tester));
             assert_eq!(
-                app_bar_rect(&tester).height(),
+                app_bar_rect(tester).height(),
                 COLLAPSED_APP_BAR_HEIGHT + initial_tab_bar_height
             );
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
 
             // Scroll the not-pinned appbar back into view.
-            jump_to(&mut tester, handles.controller, 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), EXPANDED_APP_BAR_HEIGHT);
-            assert_eq!(tab_bar_height(&tester, &handles), initial_tab_bar_height);
+            jump_to(tester, handles.controller, 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), EXPANDED_APP_BAR_HEIGHT);
+            assert_eq!(tab_bar_height(tester, &handles), initial_tab_bar_height);
         });
     }
 
     fn collapsed_height_case(arguments: SliverAppBarApp, expected_without_bottom: f64) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let handles = pump_sliver_app_bar_app(&mut tester, arguments);
-            let initial_tab_bar_height = tab_bar_height(&tester, &handles);
+        test_widgets(|tester| {
+            let handles = pump_sliver_app_bar_app(tester, arguments);
+            let initial_tab_bar_height = tab_bar_height(tester, &handles);
 
             // Scroll the not-pinned appbar out of view, to its collapsed height.
-            jump_to(&mut tester, handles.controller, 300.0);
-            assert!(!sliver_app_bar_is_onstage(&tester));
+            jump_to(tester, handles.controller, 300.0);
+            assert!(!sliver_app_bar_is_onstage(tester));
             assert_eq!(
-                app_bar_rect(&tester).height(),
+                app_bar_rect(tester).height(),
                 expected_without_bottom + initial_tab_bar_height
             );
         });
@@ -5707,11 +5662,10 @@ mod tests {
         expanded_app_bar_height: f64,
         expanded_title_bottom: fn(&WidgetTester, Rect) -> f64,
     ) {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const COLLAPSED_APP_BAR_HEIGHT: f64 = 64.0;
-            let mut tester = tester();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
-            pump_app(&mut tester, m3, {
+            pump_app(tester, m3, {
                 let controller = controller.clone();
                 move |_app| {
                     Scaffold::new()
@@ -5754,19 +5708,19 @@ mod tests {
             let clip_height = |tester: &WidgetTester| rect_of(tester, expanded_title_clip).height();
 
             // Default, fully expanded app bar.
-            assert_eq!(scroll_offset(&tester, controller.handle()), 0.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), expanded_app_bar_height);
-            assert_eq!(opacity(&tester), 0.0);
+            assert_eq!(scroll_offset(tester, controller.handle()), 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), expanded_app_bar_height);
+            assert_eq!(opacity(tester), 0.0);
             assert_eq!(
-                clip_height(&tester),
+                clip_height(tester),
                 expanded_app_bar_height - COLLAPSED_APP_BAR_HEIGHT
             );
 
             // Test the expanded title is positioned correctly.
-            let title_rect = rect_of(&tester, expanded_title);
+            let title_rect = rect_of(tester, expanded_title);
             assert_eq!(title_rect.left, 16.0);
-            let expected_bottom = expanded_title_bottom(&tester, title_rect);
+            let expected_bottom = expanded_title_bottom(tester, title_rect);
             // Valo's paragraph metrics are f32.
             assert!(
                 (title_rect.bottom - expected_bottom).abs() < 1e-4,
@@ -5775,7 +5729,7 @@ mod tests {
             );
 
             // verifyTextNotClipped
-            let clip_rect = rect_of(&tester, expanded_title_clip);
+            let clip_rect = rect_of(tester, expanded_title_clip);
             assert!((clip_rect.top..=clip_rect.bottom).contains(&title_rect.top));
             assert!((clip_rect.top..=clip_rect.bottom).contains(&title_rect.bottom));
             assert!((clip_rect.left..=clip_rect.right).contains(&title_rect.left));
@@ -5788,33 +5742,33 @@ mod tests {
             assert_eq!(tester.text_color("AppBar Title"), on_surface);
 
             // Scroll the expanded app bar partially out of view.
-            jump_to(&mut tester, controller.handle(), 45.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
+            jump_to(tester, controller.handle(), 45.0);
+            assert!(sliver_app_bar_is_onstage(tester));
             assert_eq!(
-                app_bar_rect(&tester).height(),
+                app_bar_rect(tester).height(),
                 expanded_app_bar_height - 45.0
             );
-            assert_eq!(opacity(&tester), 0.0);
+            assert_eq!(opacity(tester), 0.0);
             assert_eq!(
-                clip_height(&tester),
+                clip_height(tester),
                 expanded_app_bar_height - COLLAPSED_APP_BAR_HEIGHT - 45.0
             );
 
             // Scroll so that it is completely collapsed.
-            jump_to(&mut tester, controller.handle(), 600.0);
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), COLLAPSED_APP_BAR_HEIGHT);
-            assert_eq!(opacity(&tester), 1.0);
-            assert_eq!(clip_height(&tester), 0.0);
+            jump_to(tester, controller.handle(), 600.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), COLLAPSED_APP_BAR_HEIGHT);
+            assert_eq!(opacity(tester), 1.0);
+            assert_eq!(clip_height(tester), 0.0);
 
             // Scroll back to fully expanded.
             controller.jump_to(&mut tester.cell.borrow_mut(), 0.0);
             tester.pump_and_settle();
-            assert!(sliver_app_bar_is_onstage(&tester));
-            assert_eq!(app_bar_rect(&tester).height(), expanded_app_bar_height);
-            assert_eq!(opacity(&tester), 0.0);
+            assert!(sliver_app_bar_is_onstage(tester));
+            assert_eq!(app_bar_rect(tester).height(), expanded_app_bar_height);
+            assert_eq!(opacity(tester), 0.0);
             assert_eq!(
-                clip_height(&tester),
+                clip_height(tester),
                 expanded_app_bar_height - COLLAPSED_APP_BAR_HEIGHT
             );
         });
@@ -5834,15 +5788,14 @@ mod tests {
         title: &'static str,
         collapse_to: f64,
     ) {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // This is a regression test for https://github.com/flutter/flutter/issues/115091
             const COLLAPSED_APP_BAR_HEIGHT: f64 = 64.0;
             const BOTTOM_HEIGHT: f64 = 48.0;
-            let mut tester = tester();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             let tab_bar_key = GlobalKey::new();
             let bottom_key = tab_bar_key.clone();
-            pump_app(&mut tester, m3, {
+            pump_app(tester, m3, {
                 let controller = controller.clone();
                 move |_app| {
                     DefaultTabController::new(
@@ -5881,12 +5834,12 @@ mod tests {
 
             assert_eq!(tester.find_by_type::<SliverAppBar>().len(), 1);
             assert_eq!(
-                app_bar_rect(&tester).height(),
+                app_bar_rect(tester).height(),
                 expanded_app_bar_height + BOTTOM_HEIGHT
             );
 
-            let expanded_title = text_rect(&tester, title);
-            let tab_offset = key_rect(&tester, &tab_bar_key).top_left();
+            let expanded_title = text_rect(tester, title);
+            let tab_offset = key_rect(tester, &tab_bar_key).top_left();
             // Valo's paragraph metrics are f32.
             assert!(
                 (expanded_title.bottom_left().dy() - tab_offset.dy()).abs() < 1e-4,
@@ -5898,7 +5851,7 @@ mod tests {
             tester.pump_and_settle();
 
             assert_eq!(
-                app_bar_rect(&tester).height(),
+                app_bar_rect(tester).height(),
                 COLLAPSED_APP_BAR_HEIGHT + BOTTOM_HEIGHT
             );
         });
@@ -5918,9 +5871,11 @@ mod tests {
 
     #[test]
     fn material3_a_large_sliver_app_bar_expands_its_title_28_above_its_bottom() {
-        medium_or_large_defaults_case(SliverAppBar::large, 152.0, |tester, _title| {
-            // The expanded title and the bottom padding fits in the flexible space.
-            sliver_app_bar_geometry(tester).scroll_extent - 28.0
+        test_widgets(|_tester| {
+            medium_or_large_defaults_case(SliverAppBar::large, 152.0, |tester, _title| {
+                // The expanded title and the bottom padding fits in the flexible space.
+                sliver_app_bar_geometry(tester).scroll_extent - 28.0
+            });
         });
     }
 
@@ -5954,56 +5909,53 @@ mod tests {
 
     #[test]
     fn a_sliver_app_bar_is_elevated_only_when_forced_or_scrolled_under() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let app_bar_elevation_field = |tester: &WidgetTester| {
                 let app_bar = tester.find_by_type::<AppBar>()[0];
                 tester.widget(app_bar, |app_bar: &AppBar| app_bar.elevation)
             };
 
             // When forceElevated is off, SliverAppBar should not be elevated.
-            pump_elevated_sliver_app_bar(&mut tester, false, None, None);
-            assert_eq!(app_bar_elevation(&tester), 0.0);
+            pump_elevated_sliver_app_bar(tester, false, None, None);
+            assert_eq!(app_bar_elevation(tester), 0.0);
 
             // Default elevation should be used by the material, but
             // the AppBar's elevation should not be specified by SliverAppBar.
             // When useMaterial3 is true, and forceElevated is true, the default elevation
             // should be the value of `scrolledUnderElevation` which is 3.0
-            pump_elevated_sliver_app_bar(&mut tester, true, None, None);
-            assert_eq!(app_bar_elevation(&tester), 3.0);
-            assert_eq!(app_bar_elevation_field(&tester), None);
+            pump_elevated_sliver_app_bar(tester, true, None, None);
+            assert_eq!(app_bar_elevation(tester), 3.0);
+            assert_eq!(app_bar_elevation_field(tester), None);
 
             // SliverAppBar should use the specified elevation.
-            pump_elevated_sliver_app_bar(&mut tester, true, Some(8.0), None);
-            assert_eq!(app_bar_elevation(&tester), 8.0);
+            pump_elevated_sliver_app_bar(tester, true, Some(8.0), None);
+            assert_eq!(app_bar_elevation(tester), 8.0);
         });
     }
 
     #[test]
     fn a_sliver_app_bar_takes_its_elevation_from_the_app_bar_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_elevated_sliver_app_bar(&mut tester, false, None, Some(12.0));
-            assert_eq!(app_bar_elevation(&tester), 0.0);
+        test_widgets(|tester| {
+            pump_elevated_sliver_app_bar(tester, false, None, Some(12.0));
+            assert_eq!(app_bar_elevation(tester), 0.0);
 
-            pump_elevated_sliver_app_bar(&mut tester, true, None, Some(12.0));
-            assert_eq!(app_bar_elevation(&tester), 12.0);
+            pump_elevated_sliver_app_bar(tester, true, None, Some(12.0));
+            assert_eq!(app_bar_elevation(tester), 12.0);
 
-            pump_elevated_sliver_app_bar(&mut tester, true, Some(8.0), Some(12.0));
-            assert_eq!(app_bar_elevation(&tester), 8.0);
+            pump_elevated_sliver_app_bar(tester, true, Some(8.0), Some(12.0));
+            assert_eq!(app_bar_elevation(tester), 8.0);
         });
     }
 
     #[test]
     fn changing_snap_from_true_to_false_keeps_the_floating_bar_working() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const APP_BAR_HEIGHT: f64 = 256.0;
-            let mut tester = tester();
             let snap = Rc::new(Cell::new(true));
             let button_key = GlobalKey::new();
             let snap_for_build = Rc::clone(&snap);
             let key = button_key.clone();
-            pump_app(&mut tester, m3, move |_app| {
+            pump_app(tester, m3, move |_app| {
                 waft_widgets::StatefulBuilder::new(move |_app, _context, set_state| {
                     let snap = Rc::clone(&snap_for_build);
                     let set_state = set_state.clone();
@@ -6045,7 +5997,7 @@ mod tests {
                 .into_widget()
             });
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(50.0, 400.0));
             tester.move_to(&mut gesture, Offset::new(50.0, 300.0), true);
             tester.up(&gesture);
@@ -6055,25 +6007,24 @@ mod tests {
             tester.pump_and_settle();
             assert!(!snap.get());
 
-            let mut gesture = WidgetTester::touch(3);
+            let mut gesture = TestPointer::touch(3);
             tester.down(&mut gesture, Offset::new(50.0, 400.0));
             tester.move_to(&mut gesture, Offset::new(50.0, 300.0), true);
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
         });
     }
 
     #[test]
     fn a_sliver_app_bar_gives_its_delegate_a_show_on_screen_configuration_only_when_it_snaps() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (pinned, floating, snap) in [
                 (false, true, false),
                 (false, true, true),
                 (true, true, false),
                 (true, true, true),
             ] {
-                pump_app(&mut tester, m3, move |_app| {
+                pump_app(tester, m3, move |_app| {
                     CustomScrollView::new()
                         .slivers([SliverAppBar::new()
                             .title(Text::new("Jumbo"))
@@ -6104,10 +6055,9 @@ mod tests {
 
     #[test]
     fn a_sliver_app_bar_uses_its_leading_width() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 CustomScrollView::new()
                     .slivers([SliverAppBar::new()
                         .leading(placeholder(&key))
@@ -6118,7 +6068,7 @@ mod tests {
             });
             // By default toolbarHeight is 56.0.
             assert_eq!(
-                key_rect(&tester, &key),
+                key_rect(tester, &key),
                 Rect::from_ltrb(0.0, 0.0, 100.0, 56.0)
             );
         });
@@ -6126,11 +6076,10 @@ mod tests {
 
     #[test]
     fn a_sliver_app_bars_title_spacing_defaults_to_the_middle_spacing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_sliver_app_bar_app(&mut tester, SliverAppBarApp::default());
+        test_widgets(|tester| {
+            pump_sliver_app_bar_app(tester, SliverAppBarApp::default());
             assert_eq!(
-                navigation_toolbar(&tester, |toolbar| toolbar.middle_spacing),
+                navigation_toolbar(tester, |toolbar| toolbar.middle_spacing),
                 NavigationToolbar::K_MIDDLE_SPACING
             );
         });
@@ -6143,10 +6092,10 @@ mod tests {
     /// milliseconds, and an up.
     fn slow_drag(tester: &mut WidgetTester, key: &GlobalKey, offset: Offset, pointer: i64) {
         let target = tester.center_of(key);
-        let mut gesture = WidgetTester::touch(pointer);
+        let mut gesture = TestPointer::touch(pointer);
         tester.down(&mut gesture, target);
         tester.move_to(&mut gesture, target + offset, true);
-        tester.pump(Duration::from_millis(10));
+        tester.pump_by(Duration::from_millis(10));
         tester.up(&gesture);
     }
 
@@ -6190,60 +6139,57 @@ mod tests {
 
     #[test]
     fn a_stretching_sliver_app_bar_triggers_past_the_default_offset() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let anchor = GlobalKey::new();
             let did_trigger = pump_stretching_sliver_app_bar(
-                &mut tester,
+                tester,
                 &anchor,
                 Rc::new(waft_widgets::BouncingScrollPhysics::new()),
                 None,
             );
 
-            slow_drag(&mut tester, &anchor, Offset::new(0.0, 50.0), 1);
+            slow_drag(tester, &anchor, Offset::new(0.0, 50.0), 1);
             assert!(!did_trigger.get());
             tester.pump_and_settle();
-            slow_drag(&mut tester, &anchor, Offset::new(0.0, 150.0), 2);
+            slow_drag(tester, &anchor, Offset::new(0.0, 150.0), 2);
             assert!(did_trigger.get());
         });
     }
 
     #[test]
     fn a_stretching_sliver_app_bar_triggers_past_a_custom_offset() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let anchor = GlobalKey::new();
             let did_trigger = pump_stretching_sliver_app_bar(
-                &mut tester,
+                tester,
                 &anchor,
                 Rc::new(waft_widgets::BouncingScrollPhysics::new()),
                 Some(150.0),
             );
 
-            slow_drag(&mut tester, &anchor, Offset::new(0.0, 100.0), 1);
+            slow_drag(tester, &anchor, Offset::new(0.0, 100.0), 1);
             tester.pump_and_settle();
             assert!(!did_trigger.get());
-            slow_drag(&mut tester, &anchor, Offset::new(0.0, 300.0), 2);
+            slow_drag(tester, &anchor, Offset::new(0.0, 300.0), 2);
             assert!(did_trigger.get());
         });
     }
 
     #[test]
     fn a_stretching_sliver_app_bar_does_not_trigger_without_overscroll_physics() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let anchor = GlobalKey::new();
             let did_trigger = pump_stretching_sliver_app_bar(
-                &mut tester,
+                tester,
                 &anchor,
                 Rc::new(waft_widgets::ClampingScrollPhysics::new()),
                 Some(150.0),
             );
 
-            slow_drag(&mut tester, &anchor, Offset::new(0.0, 100.0), 1);
+            slow_drag(tester, &anchor, Offset::new(0.0, 100.0), 1);
             tester.pump_and_settle();
             assert!(!did_trigger.get());
-            slow_drag(&mut tester, &anchor, Offset::new(0.0, 300.0), 2);
+            slow_drag(tester, &anchor, Offset::new(0.0, 300.0), 2);
             assert!(!did_trigger.get());
         });
     }
@@ -6324,10 +6270,9 @@ mod tests {
 
     #[test]
     fn the_app_bar_uses_the_values_of_the_app_bar_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .app_bar_theme(app_bar_theme())
@@ -6344,8 +6289,8 @@ mod tests {
             );
             let theme = app_bar_theme();
 
-            assert_eq!(status_bar_brightness(&tester), Some(Brightness::Light));
-            app_bar_material(&tester, |material| {
+            assert_eq!(status_bar_brightness(tester), Some(Brightness::Light));
+            app_bar_material(tester, |material| {
                 assert_eq!(material.color, theme.background_color);
                 assert_eq!(Some(material.elevation), theme.elevation);
                 assert_eq!(material.shadow_color, theme.shadow_color);
@@ -6355,33 +6300,32 @@ mod tests {
                         == Some(&waft_painting::StadiumBorder::default() as &dyn ShapeBorder)
                 );
             });
-            assert_eq!(Some(app_bar_icon_theme(&tester)), theme.icon_theme);
+            assert_eq!(Some(app_bar_icon_theme(tester)), theme.icon_theme);
             assert_eq!(
-                Some(app_bar_actions_icon_theme(&tester)),
+                Some(app_bar_actions_icon_theme(tester)),
                 theme.actions_icon_theme
             );
             assert_eq!(
-                app_bar_icon_color(&tester),
+                app_bar_icon_color(tester),
                 theme
                     .actions_icon_theme
                     .as_ref()
                     .and_then(|icon_theme| icon_theme.color.as_ref())
                     .map(|color| color.color())
             );
-            assert_eq!(Some(app_bar_text_style(&tester)), theme.toolbar_text_style);
-            assert_eq!(Some(app_bar_rect(&tester).height()), theme.toolbar_height);
-            assert_eq!(app_bar_rect(&tester).width(), 800.0);
+            assert_eq!(Some(app_bar_text_style(tester)), theme.toolbar_text_style);
+            assert_eq!(Some(app_bar_rect(tester).height()), theme.toolbar_height);
+            assert_eq!(app_bar_rect(tester).width(), 800.0);
         });
     }
 
     #[test]
     fn the_app_bars_properties_take_priority_over_the_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::colors::Colors;
-            let mut tester = tester();
             let shape = || RoundedRectangleBorder::default();
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::from(crate::color_scheme::ColorScheme::light())
                         .build(app)
@@ -6410,8 +6354,8 @@ mod tests {
                 },
             );
 
-            assert_eq!(status_bar_brightness(&tester), Some(Brightness::Dark));
-            app_bar_material(&tester, |material| {
+            assert_eq!(status_bar_brightness(tester), Some(Brightness::Dark));
+            app_bar_material(tester, |material| {
                 assert_eq!(material.color, Some(Colors::ORANGE.primary()));
                 assert_eq!(material.elevation, 3.0);
                 assert_eq!(material.shadow_color, Some(Colors::PURPLE.primary()));
@@ -6419,19 +6363,19 @@ mod tests {
                 assert!(material.shape.as_deref() == Some(&shape() as &dyn ShapeBorder));
             });
             assert_eq!(
-                app_bar_icon_theme(&tester),
+                app_bar_icon_theme(tester),
                 IconThemeData::new().color(Colors::GREEN.primary())
             );
             assert_eq!(
-                app_bar_actions_icon_theme(&tester),
+                app_bar_actions_icon_theme(tester),
                 IconThemeData::new().color(Colors::LIGHT_BLUE.primary())
             );
             assert_eq!(
-                app_bar_icon_color(&tester),
+                app_bar_icon_color(tester),
                 Some(Colors::LIGHT_BLUE.primary())
             );
             assert_eq!(
-                app_bar_text_style(&tester),
+                app_bar_text_style(tester),
                 TextStyle::new().color(Colors::PINK.primary())
             );
         });
@@ -6439,10 +6383,9 @@ mod tests {
 
     #[test]
     fn an_icon_buttons_color_takes_priority_over_every_icon_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::colors::Colors;
-            let mut tester = tester();
-            pump_app(&mut tester, light_scheme_theme, |_app| {
+            pump_app(tester, light_scheme_theme, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .icon_theme(IconThemeData::new().color(Colors::GREEN.primary()))
@@ -6460,16 +6403,15 @@ mod tests {
                 )
                 .into_widget()
             });
-            assert_eq!(app_bar_icon_color(&tester), Some(Colors::LIME.primary()));
+            assert_eq!(app_bar_icon_color(tester), Some(Colors::LIME.primary()));
         });
     }
 
     #[test]
     fn the_app_bar_theme_takes_priority_over_the_theme_datas_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::from(crate::color_scheme::ColorScheme::light())
                         .build(app)
@@ -6481,27 +6423,27 @@ mod tests {
             );
             let theme = app_bar_theme();
 
-            assert_eq!(status_bar_brightness(&tester), Some(Brightness::Light));
-            app_bar_material(&tester, |material| {
+            assert_eq!(status_bar_brightness(tester), Some(Brightness::Light));
+            app_bar_material(tester, |material| {
                 assert_eq!(material.color, theme.background_color);
                 assert_eq!(Some(material.elevation), theme.elevation);
                 assert_eq!(material.shadow_color, theme.shadow_color);
                 assert_eq!(material.surface_tint_color, theme.surface_tint_color);
             });
-            assert_eq!(Some(app_bar_icon_theme(&tester)), theme.icon_theme);
+            assert_eq!(Some(app_bar_icon_theme(tester)), theme.icon_theme);
             assert_eq!(
-                Some(app_bar_actions_icon_theme(&tester)),
+                Some(app_bar_actions_icon_theme(tester)),
                 theme.actions_icon_theme
             );
             assert_eq!(
-                app_bar_icon_color(&tester),
+                app_bar_icon_color(tester),
                 theme
                     .actions_icon_theme
                     .as_ref()
                     .and_then(|icon_theme| icon_theme.color.as_ref())
                     .map(|color| color.color())
             );
-            assert_eq!(Some(app_bar_text_style(&tester)), theme.toolbar_text_style);
+            assert_eq!(Some(app_bar_text_style(tester)), theme.toolbar_text_style);
         });
     }
 
@@ -6515,10 +6457,9 @@ mod tests {
         R: Send,
     {
         let mut result = None;
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .platform(platform)
@@ -6527,7 +6468,7 @@ mod tests {
                 },
                 move |_app| scaffold_with(app_bar()).into_widget(),
             );
-            result = Some(navigation_toolbar(&tester, read));
+            result = Some(navigation_toolbar(tester, read));
         });
         result.expect("the case ran")
     }
@@ -6632,12 +6573,11 @@ mod tests {
     /// and '.. DrawerButton': `leading` built with `key` and a press callback, and `W` the
     /// widget Dart finds by type.
     fn leading_size_case<W: 'static>(leading: fn(KeyRef) -> WidgetRef) {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const TITLE_SPACING: f64 = 16.0;
-            let mut tester = tester();
             let leading_key = GlobalKey::new();
             let title_key = GlobalKey::new();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 scaffold_with(
                     AppBar::new()
                         .leading(leading(leading_key.clone().into()))
@@ -6648,10 +6588,10 @@ mod tests {
             });
 
             let button = tester.find_by_type::<W>()[0];
-            let button_rect = rect_of(&tester, button);
+            let button_rect = rect_of(tester, button);
             assert_eq!(button_rect.size(), Size::new(48.0, 48.0));
 
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, button_rect.center(), false);
             tester.pump_and_settle();
@@ -6671,8 +6611,8 @@ mod tests {
 
             // Get the offset of the Center widget that wraps the IconButton.
             let center = tester.ancestor_of_type::<waft_widgets::Center>(button);
-            let back_button_right = rect_of(&tester, center).right;
-            let title_left = key_rect(&tester, &title_key).left;
+            let back_button_right = rect_of(tester, center).right;
+            let title_left = key_rect(tester, &title_key).left;
             assert_eq!(title_left, back_button_right + TITLE_SPACING);
         });
     }

@@ -107,8 +107,8 @@ impl TargetPlatformVariant {
     pub fn mobile() -> TargetPlatformVariant {
         TargetPlatformVariant::new([
             TargetPlatform::Android,
-            TargetPlatform::Fuchsia,
             TargetPlatform::IOS,
+            TargetPlatform::Fuchsia,
         ])
     }
 

@@ -889,43 +889,28 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
     use std::time::Duration;
-    use waft_foundation::AppCell;
 
-    use waft_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-    use waft_gestures::GestureBinding;
+    use waft_embedder::Offset;
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
     use waft_widgets::{
         Actions, Builder, Directionality, FocusNode, FocusNodeRef, GlobalKey, SizedBox,
     };
 
     use super::*;
-    use crate::test_support::{build, pump};
 
-    /// The test view is 2x: logical coordinates double into the packet.
-    fn send(app: &mut App, change: PointerChange, x: f64, y: f64, at: Duration) {
-        GestureBinding::instance(app).handle_pointer_data_packet(
-            app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Touch,
-                time_stamp: at,
-                pointer_identifier: 1,
-                physical_x: x * 2.0,
-                physical_y: y * 2.0,
-                ..PointerData::default()
-            }]),
-        );
-        app.drain_microtasks();
-    }
-
-    struct Mounted {
-        cell: Rc<AppCell>,
+    struct Mounted<'t> {
+        tester: &'t mut WidgetTester,
         state: Handle<CupertinoButtonState>,
         presses: Rc<Cell<u32>>,
     }
 
     /// Mounts a 40x40 button filling the view, with `on_pressed` counting.
-    fn mount(configure: impl FnOnce(CupertinoButton) -> CupertinoButton) -> Mounted {
-        let cell = crate::test_support::test_cell();
+    fn mount(
+        tester: &mut WidgetTester,
+        configure: impl FnOnce(CupertinoButton) -> CupertinoButton,
+    ) -> Mounted<'_> {
         let presses = Rc::new(Cell::new(0));
         let on_pressed = Listener::new({
             let presses = Rc::clone(&presses);
@@ -938,14 +923,12 @@ mod tests {
             Some(on_pressed),
         ))
         .key(key);
-        build(&cell, button.into_widget());
-        let app = cell.borrow();
+        tester.pump_widget(button);
         let state = global_key
-            .current_state::<CupertinoButtonState>(&app)
+            .current_state::<CupertinoButtonState>(&tester.cell.borrow())
             .expect("the button mounted");
-        drop(app);
         Mounted {
-            cell,
+            tester,
             state,
             presses,
         }
@@ -953,283 +936,242 @@ mod tests {
 
     #[test]
     fn an_activate_intent_presses_the_button_and_autofocus_takes_the_supplied_node() {
-        let cell = crate::test_support::test_cell();
-        let mut app = cell.borrow_mut();
-        let node: FocusNodeRef = FocusNode::new(&mut app).into_erased();
-        let presses = Rc::new(Cell::new(0));
-        let on_pressed = Listener::new({
-            let presses = Rc::clone(&presses);
-            move |_app| presses.set(presses.get() + 1)
-        });
-        let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let child = Builder::new({
-            let inner_context = Rc::clone(&inner_context);
-            move |_app, context| {
-                inner_context.set(Some(context));
-                SizedBox::square(Some(40.0)).into_widget()
-            }
-        });
-        drop(app);
-        build(
-            &cell,
-            CupertinoButton::new(child.into_widget(), Some(on_pressed))
-                .focus_node(node.clone())
-                .autofocus(true)
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        pump(&mut app, Duration::ZERO);
-        assert!(
-            node.has_primary_focus(&app),
-            "autofocus focused the supplied node"
-        );
+        test_widgets(|tester| {
+            let node: FocusNodeRef = FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
+            let presses = Rc::new(Cell::new(0));
+            let on_pressed = Listener::new({
+                let presses = Rc::clone(&presses);
+                move |_app| presses.set(presses.get() + 1)
+            });
+            let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let child = Builder::new({
+                let inner_context = Rc::clone(&inner_context);
+                move |_app, context| {
+                    inner_context.set(Some(context));
+                    SizedBox::square(Some(40.0)).into_widget()
+                }
+            });
+            tester.pump_widget(
+                CupertinoButton::new(child.into_widget(), Some(on_pressed))
+                    .focus_node(node.clone())
+                    .autofocus(true)
+                    .into_widget(),
+            );
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            assert!(
+                node.has_primary_focus(&app),
+                "autofocus focused the supplied node"
+            );
 
-        let context = inner_context.get().expect("the child built");
-        Actions::invoke(&mut app, context, &ActivateIntent);
-        assert_eq!(presses.get(), 1, "ActivateIntent runs onPressed");
+            let context = inner_context.get().expect("the child built");
+            Actions::invoke(&mut app, context, &ActivateIntent);
+            assert_eq!(presses.get(), 1, "ActivateIntent runs onPressed");
+        });
     }
 
-    fn opacity(mounted: &Mounted) -> f64 {
+    impl Mounted<'_> {
+        fn cell(&self) -> &waft_foundation::AppCell {
+            &self.tester.cell
+        }
+    }
+
+    fn opacity(mounted: &Mounted<'_>) -> f64 {
         mounted
+            .tester
             .cell
             .borrow()
             .get(mounted.state)
             .opacity_animation
             .clone()
             .expect("created in init_state")
-            .value(&mounted.cell.borrow())
+            .value(&mounted.cell().borrow())
     }
 
     #[test]
     fn a_press_fades_the_button_and_a_release_fires_on_pressed() {
-        let mounted = mount(|button| button);
-        assert_eq!(opacity(&mounted), 1.0);
+        test_widgets(|tester| {
+            let mounted = mount(tester, |button| button);
+            assert_eq!(opacity(&mounted), 1.0);
 
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Down,
-            20.0,
-            20.0,
-            Duration::ZERO,
-        );
-        assert!(mounted.cell.borrow().get(mounted.state).tap_in_progress);
-        assert!(mounted.cell.borrow().get(mounted.state).button_held_down);
-        pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(16));
-        pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(200));
-        assert!((opacity(&mounted) - 0.4).abs() < 1e-9);
-        assert_eq!(mounted.presses.get(), 0);
+            let mut touch = TestPointer::touch(1);
+            mounted.tester.down(&mut touch, Offset::new(20.0, 20.0));
+            assert!(mounted.cell().borrow().get(mounted.state).tap_in_progress);
+            assert!(mounted.cell().borrow().get(mounted.state).button_held_down);
+            mounted.tester.pump_by(Duration::from_millis(16));
+            mounted.tester.pump_by(Duration::from_millis(184));
+            assert!((opacity(&mounted) - 0.4).abs() < 1e-9);
+            assert_eq!(mounted.presses.get(), 0);
 
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Up,
-            20.0,
-            20.0,
-            Duration::from_millis(210),
-        );
-        assert_eq!(mounted.presses.get(), 1);
-        assert!(!mounted.cell.borrow().get(mounted.state).tap_in_progress);
-        assert!(!mounted.cell.borrow().get(mounted.state).button_held_down);
-        pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(220));
-        pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(500));
-        assert_eq!(opacity(&mounted), 1.0);
+            mounted.tester.up(&touch);
+            assert_eq!(mounted.presses.get(), 1);
+            assert!(!mounted.cell().borrow().get(mounted.state).tap_in_progress);
+            assert!(!mounted.cell().borrow().get(mounted.state).button_held_down);
+            mounted.tester.pump_by(Duration::from_millis(20));
+            mounted.tester.pump_by(Duration::from_millis(280));
+            assert_eq!(opacity(&mounted), 1.0);
+        });
     }
 
     #[test]
     fn moving_past_the_slop_releases_the_button_without_a_press() {
-        let mounted = mount(|button| button);
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Down,
-            20.0,
-            20.0,
-            Duration::ZERO,
-        );
-        assert!(mounted.cell.borrow().get(mounted.state).button_held_down);
+        test_widgets(|tester| {
+            let mounted = mount(tester, |button| button);
+            let mut touch = TestPointer::touch(1);
+            mounted.tester.down(&mut touch, Offset::new(20.0, 20.0));
+            assert!(mounted.cell().borrow().get(mounted.state).button_held_down);
 
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Move,
-            2000.0,
-            2000.0,
-            Duration::from_millis(50),
-        );
-        assert!(mounted.cell.borrow().get(mounted.state).tap_in_progress);
-        assert!(!mounted.cell.borrow().get(mounted.state).button_held_down);
+            mounted
+                .tester
+                .move_to(&mut touch, Offset::new(2000.0, 2000.0), true);
+            assert!(mounted.cell().borrow().get(mounted.state).tap_in_progress);
+            assert!(!mounted.cell().borrow().get(mounted.state).button_held_down);
 
-        send(
-            &mut mounted.cell.borrow_mut(),
-            PointerChange::Up,
-            2000.0,
-            2000.0,
-            Duration::from_millis(60),
-        );
-        assert_eq!(mounted.presses.get(), 0);
-        assert!(!mounted.cell.borrow().get(mounted.state).tap_in_progress);
+            mounted.tester.up(&touch);
+            assert_eq!(mounted.presses.get(), 0);
+            assert!(!mounted.cell().borrow().get(mounted.state).tap_in_progress);
+        });
     }
 
     #[test]
     fn a_disabled_button_ignores_the_pointer() {
-        let cell = crate::test_support::test_cell();
-        let global_key = GlobalKey::new();
-        let key: KeyRef = global_key.clone().into();
-        let button =
-            CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None).key(key);
-        assert!(!button.enabled());
-        build(&cell, button.into_widget());
-        let mut app = cell.borrow_mut();
-        let state = global_key
-            .current_state::<CupertinoButtonState>(&app)
-            .expect("the button mounted");
+        test_widgets(|tester| {
+            let global_key = GlobalKey::new();
+            let key: KeyRef = global_key.clone().into();
+            let button =
+                CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None).key(key);
+            assert!(!button.enabled());
+            tester.pump_widget(button.into_widget());
+            let state = global_key
+                .current_state::<CupertinoButtonState>(&tester.cell.borrow())
+                .expect("the button mounted");
 
-        send(&mut app, PointerChange::Down, 20.0, 20.0, Duration::ZERO);
-        send(
-            &mut app,
-            PointerChange::Up,
-            20.0,
-            20.0,
-            Duration::from_millis(10),
-        );
-        assert!(!app.get(state).tap_in_progress);
-        assert!(!app.get(state).button_held_down);
+            tester.tap(Offset::new(20.0, 20.0), 1);
+            let app = tester.cell.borrow();
+            assert!(!app.get(state).tap_in_progress);
+            assert!(!app.get(state).button_held_down);
+        });
     }
 
     #[test]
     fn a_long_press_alone_enables_the_button_and_the_slop_follows_the_platform() {
-        let cell = crate::test_support::test_cell();
-        let app = cell.borrow();
-        let long_pressed = Rc::new(Cell::new(0));
-        let button = CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None)
-            .on_long_press(Listener::new({
-                let long_pressed = Rc::clone(&long_pressed);
-                move |_app| long_pressed.set(long_pressed.get() + 1)
-            }));
-        assert!(button.enabled());
-        let expected = match app.platform().target_platform() {
-            TargetPlatform::IOS | TargetPlatform::Android | TargetPlatform::Fuchsia => {
-                K_CUPERTINO_BUTTON_TAP_MOVE_SLOP
-            }
-            _ => 0.0,
-        };
-        assert_eq!(CupertinoButton::tap_move_slop(&app), expected);
+        test_widgets_variant(TargetPlatformVariant::all(), |tester| {
+            let app = tester.cell.borrow();
+            let long_pressed = Rc::new(Cell::new(0));
+            let button = CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None)
+                .on_long_press(Listener::new({
+                    let long_pressed = Rc::clone(&long_pressed);
+                    move |_app| long_pressed.set(long_pressed.get() + 1)
+                }));
+            assert!(button.enabled());
+            let expected = match app.platform().target_platform() {
+                TargetPlatform::IOS | TargetPlatform::Android | TargetPlatform::Fuchsia => {
+                    K_CUPERTINO_BUTTON_TAP_MOVE_SLOP
+                }
+                _ => 0.0,
+            };
+            assert_eq!(CupertinoButton::tap_move_slop(&app), expected);
+        });
     }
 
     /// A mouse hovers in, presses, and releases, as a desktop click arrives from the shell.
-    fn click(app: &mut App, x: f64, y: f64) {
-        for (change, buttons, at) in [
-            (PointerChange::Add, 0, 0),
-            (PointerChange::Hover, 0, 10),
-            (PointerChange::Down, 1, 20),
-            (PointerChange::Up, 0, 30),
-        ] {
-            GestureBinding::instance(app).handle_pointer_data_packet(
-                app,
-                PointerDataPacket::new(vec![PointerData {
-                    change,
-                    kind: PointerDeviceKind::Mouse,
-                    time_stamp: Duration::from_millis(at),
-                    device: 1,
-                    pointer_identifier: 1,
-                    buttons,
-                    physical_x: x * 2.0,
-                    physical_y: y * 2.0,
-                    ..PointerData::default()
-                }]),
-            );
-            app.drain_microtasks();
+    fn click(tester: &mut WidgetTester, at: Offset) {
+        let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+        tester.add_pointer(&mut mouse, at);
+        tester.down(&mut mouse, at);
+        tester.up(&mouse);
+    }
+
+    /// The frames of the fade-out running to its end, then of the fade-in it owes: frames at
+    /// 16, 150, 300 and 600 milliseconds.
+    fn fade_out_and_in(tester: &mut WidgetTester) {
+        for step in [16, 134, 150, 300] {
+            tester.pump_by(Duration::from_millis(step));
         }
     }
 
     #[test]
     fn a_mouse_click_presses_and_releases_the_button() {
-        let mounted = mount(|button| button);
-        click(&mut mounted.cell.borrow_mut(), 20.0, 20.0);
-        assert_eq!(mounted.presses.get(), 1);
-        assert!(!mounted.cell.borrow().get(mounted.state).tap_in_progress);
-        // The fade-out runs to its end, then the fade-in it owes runs.
-        for at in [16, 150, 300, 600] {
-            pump(&mut mounted.cell.borrow_mut(), Duration::from_millis(at));
-        }
-        assert_eq!(opacity(&mounted), 1.0);
+        test_widgets(|tester| {
+            let mounted = mount(tester, |button| button);
+            click(mounted.tester, Offset::new(20.0, 20.0));
+            assert_eq!(mounted.presses.get(), 1);
+            assert!(!mounted.cell().borrow().get(mounted.state).tap_in_progress);
+            fade_out_and_in(mounted.tester);
+            assert_eq!(opacity(&mounted), 1.0);
+        });
     }
 
     #[test]
     fn a_mouse_click_on_a_filled_text_button_in_a_dark_theme() {
-        let cell = crate::test_support::test_cell();
-        let mut app = cell.borrow_mut();
-        let binding = waft_painting::PaintingBinding::instance(&mut app);
-        if !binding.has_fonts(&app) {
-            binding.install_fonts(&mut app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
+        test_widgets(|tester| {
+            let presses = Rc::new(Cell::new(0));
+            let on_pressed = Listener::new({
+                let presses = Rc::clone(&presses);
+                move |_app| presses.set(presses.get() + 1)
             });
-        }
-        let presses = Rc::new(Cell::new(0));
-        let on_pressed = Listener::new({
-            let presses = Rc::clone(&presses);
-            move |_app| presses.set(presses.get() + 1)
-        });
-        let button = CupertinoButton::filled(
-            waft_widgets::Text::new("Press me").into_widget(),
-            Some(on_pressed),
-        );
-        // The window example's shape: proxies (a decorated box, a sized box) above the
-        // button, which `globalToLocal` walks through.
-        let tree = Directionality::new(
-            waft_embedder::TextDirection::Ltr,
-            DecoratedBox::new(waft_painting::BoxDecoration::new()).child(
-                Padding::new(EdgeInsetsGeometry::all(24.0)).child(
-                    waft_widgets::Center::new().child(
-                        SizedBox::new()
-                            .width(240.0)
-                            .height(140.0)
-                            .child(CupertinoTheme::new(
-                                crate::theme::CupertinoThemeData::new()
-                                    .with_brightness(Brightness::Dark),
-                                waft_widgets::Center::new().child(button),
-                            )),
+            let button = CupertinoButton::filled(
+                waft_widgets::Text::new("Press me").into_widget(),
+                Some(on_pressed),
+            );
+            // The window example's shape: proxies (a decorated box, a sized box) above the
+            // button, which `globalToLocal` walks through.
+            let tree = Directionality::new(
+                waft_embedder::TextDirection::Ltr,
+                DecoratedBox::new(waft_painting::BoxDecoration::new()).child(
+                    Padding::new(EdgeInsetsGeometry::all(24.0)).child(
+                        waft_widgets::Center::new().child(
+                            SizedBox::new()
+                                .width(240.0)
+                                .height(140.0)
+                                .child(CupertinoTheme::new(
+                                    crate::theme::CupertinoThemeData::new()
+                                        .with_brightness(Brightness::Dark),
+                                    waft_widgets::Center::new().child(button),
+                                )),
+                        ),
                     ),
                 ),
-            ),
-        );
-        drop(app);
-        build(&cell, tree.into_widget());
-        let mut app = cell.borrow_mut();
+            );
+            tester.pump_widget(tree.into_widget());
 
-        click(&mut app, 200.0, 150.0);
-        assert_eq!(presses.get(), 1);
-        for at in [16, 150, 300, 600] {
-            pump(&mut app, Duration::from_millis(at));
-        }
+            click(tester, WidgetTester::SIZE.center(Offset::ZERO));
+            assert_eq!(presses.get(), 1);
+            fade_out_and_in(tester);
+        });
     }
 
     #[test]
     fn a_tinted_button_fills_with_the_primary_color_at_the_light_tinted_opacity() {
-        let cell = crate::test_support::test_cell();
-        let global_key = GlobalKey::new();
-        let key: KeyRef = global_key.clone().into();
-        let button = CupertinoButton::tinted(
-            SizedBox::square(Some(40.0)).into_widget(),
-            Some(Listener::new(|_app| {})),
-        )
-        .key(key);
-        build(&cell, button.into_widget());
-        let app = cell.borrow();
-        let root = global_key
-            .current_context(&app)
-            .expect("the button mounted")
-            .find_render_object(&app)
-            .expect("the button has a render object");
+        test_widgets(|tester| {
+            let global_key = GlobalKey::new();
+            let key: KeyRef = global_key.clone().into();
+            let button = CupertinoButton::tinted(
+                SizedBox::square(Some(40.0)).into_widget(),
+                Some(Listener::new(|_app| {})),
+            )
+            .key(key);
+            tester.pump_widget(button.into_widget());
+            let app = tester.cell.borrow();
+            let root = global_key
+                .current_context(&app)
+                .expect("the button mounted")
+                .find_render_object(&app)
+                .expect("the button has a render object");
 
-        let color = find_decorated_box(&app, root)
-            .expect("the button decorates its background")
-            .decoration(&app)
-            .as_any()
-            .downcast_ref::<ShapeDecoration>()
-            .expect("a shape decoration")
-            .color
-            .clone()
-            .expect("a tinted button has a fill");
-        let expected = CupertinoColors::ACTIVE_BLUE.with_values(Some(0.18), None, None, None, None);
-        assert_eq!(color.color(), expected);
+            let color = find_decorated_box(&app, root)
+                .expect("the button decorates its background")
+                .decoration(&app)
+                .as_any()
+                .downcast_ref::<ShapeDecoration>()
+                .expect("a shape decoration")
+                .color
+                .clone()
+                .expect("a tinted button has a fill");
+            let expected =
+                CupertinoColors::ACTIVE_BLUE.with_values(Some(0.18), None, None, None, None);
+            assert_eq!(color.color(), expected);
+        });
     }
 
     /// The first `RenderDecoratedBox` from `node` down.
@@ -1259,47 +1201,48 @@ mod tests {
 
     #[test]
     fn a_button_that_updates_an_entity_rebuilds_and_an_observer_follows() {
-        let cell = crate::test_support::test_cell();
-        let mut app = cell.borrow_mut();
-        let counter = app.new_entity(|_cx| Counter { count: 0 });
-        let doubler = app.new_entity(|cx| {
-            cx.observe(&counter, |doubler: &mut Doubler, counter, cx| {
-                doubler.count = counter.read(cx).count * 2;
-            })
-            .detach();
-            Doubler { count: 0 }
-        });
-        let shown = Rc::new(Cell::new((0, 0)));
-        let tree = Builder::new({
-            let counter = counter.clone();
-            let doubler = doubler.clone();
-            let shown = Rc::clone(&shown);
-            move |app, _context| {
-                let n = counter.read(app).count;
-                let d = doubler.read(app).count;
-                shown.set((n, d));
-                CupertinoButton::new(
-                    SizedBox::square(Some(40.0)).into_widget(),
-                    Some(Listener::new({
-                        let counter = counter.clone();
-                        move |app| {
-                            counter.update(app, |counter, cx| {
-                                counter.count += 1;
-                                cx.notify();
-                            });
-                        }
-                    })),
-                )
-                .into_widget()
-            }
-        });
-        drop(app);
-        build(&cell, tree.into_widget());
-        assert_eq!(shown.get(), (0, 0));
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let counter = app.new_entity(|_cx| Counter { count: 0 });
+            let doubler = app.new_entity(|cx| {
+                cx.observe(&counter, |doubler: &mut Doubler, counter, cx| {
+                    doubler.count = counter.read(cx).count * 2;
+                })
+                .detach();
+                Doubler { count: 0 }
+            });
+            let shown = Rc::new(Cell::new((0, 0)));
+            let tree = Builder::new({
+                let counter = counter.clone();
+                let doubler = doubler.clone();
+                let shown = Rc::clone(&shown);
+                move |app, _context| {
+                    let n = counter.read(app).count;
+                    let d = doubler.read(app).count;
+                    shown.set((n, d));
+                    CupertinoButton::new(
+                        SizedBox::square(Some(40.0)).into_widget(),
+                        Some(Listener::new({
+                            let counter = counter.clone();
+                            move |app| {
+                                counter.update(app, |counter, cx| {
+                                    counter.count += 1;
+                                    cx.notify();
+                                });
+                            }
+                        })),
+                    )
+                    .into_widget()
+                }
+            });
+            drop(app);
+            tester.pump_widget(tree.into_widget());
+            assert_eq!(shown.get(), (0, 0));
 
-        click(&mut cell.borrow_mut(), 20.0, 20.0);
-        pump(&mut cell.borrow_mut(), Duration::from_millis(16));
-        assert_eq!(shown.get(), (1, 2));
-        assert_eq!(doubler.read(&cell.borrow()).count, 2);
+            click(tester, Offset::new(20.0, 20.0));
+            tester.pump_by(Duration::from_millis(16));
+            assert_eq!(shown.get(), (1, 2));
+            assert_eq!(doubler.read(&tester.cell.borrow()).count, 2);
+        });
     }
 }

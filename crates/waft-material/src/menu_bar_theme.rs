@@ -172,11 +172,12 @@ impl InheritedWidget for MenuBarTheme {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
 
     use waft_embedder::Rect;
     use waft_rendering::BoxConstraints;
     use waft_widgets::{Axis, Builder, Column, ConstrainedBox, Expanded};
+
+    use waft_widgets::testing::{WidgetTester, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
@@ -188,8 +189,8 @@ mod tests {
         menu_panels, only, overriding_bar, panel_material, rect, red_stadium_menu_style, tap_text,
         test_menu, theme_test_menus,
     };
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
-    use crate::tooltip::tests::{m2, tester};
+    use crate::test_support::material_app;
+    use crate::tooltip::tests::m2;
 
     /// The bar of `menu_bar_theme_test.dart`'s two widget cases: `MenuTheme(menu_style)` over
     /// `MenuBarTheme(bar_style)` over `Column([bar, Expanded(Placeholder())])`.
@@ -240,32 +241,31 @@ mod tests {
     // menu_bar_theme_test.dart 'theme is honored'.
     #[test]
     fn a_menu_bar_theme_styles_the_bar_and_a_menu_theme_the_submenus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_themed_bar(
-                &mut tester,
+                tester,
                 MenuThemeData::new().style(green_menu_style()),
                 MenuBarThemeData::new().style(red_stadium_menu_style()),
                 || MenuBar::new(theme_test_menus(ThemeTestMenus::default())).into_widget(),
             );
 
             // Open a test menu.
-            tap_text(&mut tester, test_menu::MAIN_MENU_1);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, test_menu::MAIN_MENU_1);
+            tester.pump();
             assert_eq!(
-                rect(&tester, menu_panels(&tester, Axis::Horizontal)[0]),
+                rect(tester, menu_panels(tester, Axis::Horizontal)[0]),
                 Rect::from_ltrb(228.0, 0.0, 572.0, 68.0)
             );
-            panel_material(&tester, Axis::Horizontal, |material| {
+            panel_material(tester, Axis::Horizontal, |material| {
                 assert_eq!(material.elevation, 15.0);
                 assert_eq!(material.color, Some(Colors::RED.primary()));
             });
 
             assert_eq!(
-                rect(&tester, only(menu_panels(&tester, Axis::Vertical))),
+                rect(tester, only(menu_panels(tester, Axis::Vertical))),
                 Rect::from_ltrb(346.0, 58.0, 560.0, 218.0)
             );
-            panel_material(&tester, Axis::Vertical, |material| {
+            panel_material(tester, Axis::Vertical, |material| {
                 assert_eq!(material.elevation, 20.0);
                 assert_eq!(material.color, Some(Colors::GREEN.primary()));
             });
@@ -275,20 +275,19 @@ mod tests {
     // menu_bar_theme_test.dart 'Constructor parameters override theme parameters'.
     #[test]
     fn a_menu_bars_and_its_buttons_own_styles_override_the_themes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_themed_bar(
-                &mut tester,
+                tester,
                 MenuThemeData::new().style(green_menu_style()),
                 MenuBarThemeData::new().style(red_stadium_menu_style()),
                 overriding_bar,
             );
 
             // Open a test menu.
-            tap_text(&mut tester, test_menu::MAIN_MENU_1);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, test_menu::MAIN_MENU_1);
+            tester.pump();
 
-            assert_constructor_parameters_override_theme_parameters(&tester);
+            assert_constructor_parameters_override_theme_parameters(tester);
         });
     }
 }

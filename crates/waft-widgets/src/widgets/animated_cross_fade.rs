@@ -587,12 +587,7 @@ mod tests {
     use waft_scheduler::FrameCallback;
 
     use super::*;
-    use crate::binding::WidgetsBinding;
-    use crate::framework::AnyElement;
-    use crate::test_harness::{
-        VIEW_HEIGHT, VIEW_WIDTH, binding_cell, binding_mount, binding_pump, platform_view,
-    };
-    use crate::view::View;
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::actions::FocusableActionDetector;
     use crate::widgets::basic::{Builder, Center, Directionality, Semantics, SizedBox};
     use crate::widgets::container::Container;
@@ -603,64 +598,30 @@ mod tests {
         SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData,
     };
 
-    fn at(milliseconds: u64) -> Duration {
+    fn ms(milliseconds: u64) -> Duration {
         Duration::from_millis(milliseconds)
     }
 
-    /// Dart's `tester.pumpWidget(widget)` after the first one: the frame at `time` that builds
-    /// it.
-    fn pump_widget(app: &mut App, widget: WidgetRef, time: Duration) {
-        let view = platform_view(app);
-        let root = View::new(view, widget).into_widget();
-        WidgetsBinding::instance(app).attach_root_widget(app, root);
-        binding_pump(app, time);
+    /// Dart's `tester.getSize(find.byType(AnimatedCrossFade))`.
+    fn cross_fade_size(tester: &WidgetTester) -> Size {
+        let element = tester.find_by_type::<AnimatedCrossFade>()[0];
+        tester.global_rect(tester.render_box_of(element)).size()
     }
 
-    fn elements(app: &mut App) -> Vec<AnyElement> {
-        fn visit(app: &App, element: AnyElement, found: &mut Vec<AnyElement>) {
-            found.push(element);
-            for child in element.children(app) {
-                visit(app, child, found);
-            }
-        }
-        let mut found = Vec::new();
-        let root = WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("a mounted tree");
-        visit(app, root, &mut found);
-        found
+    /// The global top left of the box whose widget is keyed `key`.
+    fn global_offset_of(tester: &WidgetTester, key: &KeyRef) -> Offset {
+        let element = keyed_elements(tester, key)[0];
+        tester.global_rect(tester.render_box_of(element)).top_left()
     }
 
-    /// `find.byType(T)`: the tree's widgets that are a `T`, in tree order.
-    fn find_by_type<T: 'static>(app: &mut App) -> Vec<WidgetRef> {
-        elements(app)
+    /// The elements whose widget is keyed `key`: Dart's `find.byKey(key)`.
+    fn keyed_elements(tester: &WidgetTester, key: &KeyRef) -> Vec<crate::framework::AnyElement> {
+        let elements = tester.elements();
+        let app = tester.cell.borrow();
+        elements
             .into_iter()
-            .map(|element| element.widget(app).clone())
-            .filter(|widget| widget.as_any().is::<T>())
+            .filter(|element| element.widget(&app).key() == Some(key))
             .collect()
-    }
-
-    /// The render box of the first element whose widget `matches`.
-    fn render_box_where(
-        app: &mut App,
-        matches: impl Fn(&WidgetRef) -> bool,
-    ) -> waft_rendering::AnyRenderBox {
-        elements(app)
-            .into_iter()
-            .find(|element| matches(element.widget(app)))
-            .and_then(|element| element.find_render_object(app))
-            .and_then(|render_object| render_object.as_box())
-            .expect("a mounted render box")
-    }
-
-    fn cross_fade_size(app: &mut App) -> Size {
-        let render_box = render_box_where(app, |widget| widget.as_any().is::<AnimatedCrossFade>());
-        render_box.size(app)
-    }
-
-    fn global_offset_of(app: &mut App, key: &KeyRef) -> Offset {
-        let render_box = render_box_where(app, |widget| widget.key() == Some(key));
-        render_box.local_to_global(app, Offset::ZERO, None)
     }
 
     fn sized(width: f64, height: f64) -> WidgetRef {
@@ -680,50 +641,40 @@ mod tests {
     }
 
     fn simple_cross_fade(state: CrossFadeState) -> AnimatedCrossFade {
-        AnimatedCrossFade::new(sized(100.0, 100.0), sized(200.0, 200.0), state, at(200))
+        AnimatedCrossFade::new(sized(100.0, 100.0), sized(200.0, 200.0), state, ms(200))
     }
 
     #[test]
     fn animates_between_the_sizes_of_its_children() {
-        let cell = binding_cell();
-        binding_mount(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            tester.pump_widget(centered(
                 TextDirection::Ltr,
                 simple_cross_fade(CrossFadeState::ShowFirst),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(find_by_type::<FadeTransition>(&mut app).len(), 2);
-        assert_eq!(cross_fade_size(&mut app), Size::new(100.0, 100.0));
+            ));
+            assert_eq!(tester.find_by_type::<FadeTransition>().len(), 2);
+            assert_eq!(cross_fade_size(tester), Size::new(100.0, 100.0));
 
-        pump_widget(
-            &mut app,
-            centered(
+            tester.pump_widget(centered(
                 TextDirection::Ltr,
                 simple_cross_fade(CrossFadeState::ShowSecond),
-            ),
-            at(0),
-        );
-        binding_pump(&mut app, at(100));
+            ));
+            tester.pump_by(ms(100));
 
-        assert_eq!(find_by_type::<FadeTransition>(&mut app).len(), 2);
-        assert_eq!(cross_fade_size(&mut app), Size::new(150.0, 150.0));
+            assert_eq!(tester.find_by_type::<FadeTransition>().len(), 2);
+            assert_eq!(cross_fade_size(tester), Size::new(150.0, 150.0));
+        });
     }
 
     #[test]
     fn show_second_starts_at_the_size_of_the_second_child() {
-        let cell = binding_cell();
-        binding_mount(
-            &cell,
-            centered(
+        test_widgets(|tester| {
+            tester.pump_widget(centered(
                 TextDirection::Ltr,
                 simple_cross_fade(CrossFadeState::ShowSecond),
-            ),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(find_by_type::<FadeTransition>(&mut app).len(), 2);
-        assert_eq!(cross_fade_size(&mut app), Size::new(200.0, 200.0));
+            ));
+            assert_eq!(tester.find_by_type::<FadeTransition>().len(), 2);
+            assert_eq!(cross_fade_size(tester), Size::new(200.0, 200.0));
+        });
     }
 
     /// The first and second children keep their places in the stack while the size animates:
@@ -733,34 +684,28 @@ mod tests {
         alignment: AlignmentGeometry,
         expected: Offset,
     ) {
-        let cell = binding_cell();
-        let (first_key, second_key): (KeyRef, KeyRef) =
-            (UniqueKey::new().into(), UniqueKey::new().into());
-        let tree = |state: CrossFadeState| {
-            centered(
-                text_direction,
-                AnimatedCrossFade::new(
-                    keyed(&first_key, 100.0, 100.0),
-                    keyed(&second_key, 200.0, 200.0),
-                    state,
-                    at(200),
+        test_widgets(|tester| {
+            let (first_key, second_key): (KeyRef, KeyRef) =
+                (UniqueKey::new().into(), UniqueKey::new().into());
+            let tree = |state: CrossFadeState| {
+                centered(
+                    text_direction,
+                    AnimatedCrossFade::new(
+                        keyed(&first_key, 100.0, 100.0),
+                        keyed(&second_key, 200.0, 200.0),
+                        state,
+                        ms(200),
+                    )
+                    .alignment(alignment),
                 )
-                .alignment(alignment),
-            )
-        };
-        binding_mount(&cell, tree(CrossFadeState::ShowFirst));
-        let mut app = cell.borrow_mut();
-        pump_widget(&mut app, tree(CrossFadeState::ShowSecond), at(0));
-        binding_pump(&mut app, at(100));
+            };
+            tester.pump_widget(tree(CrossFadeState::ShowFirst));
+            tester.pump_widget(tree(CrossFadeState::ShowSecond));
+            tester.pump_by(ms(100));
 
-        assert_eq!(global_offset_of(&mut app, &first_key), expected);
-        assert_eq!(global_offset_of(&mut app, &second_key), expected);
-    }
-
-    /// Dart's expected offsets are measured from the centre of its 800 x 600 view, and the
-    /// harness's view is [`VIEW_WIDTH`] x [`VIEW_HEIGHT`].
-    fn from_centre(dx: f64) -> Offset {
-        Offset::new(VIEW_WIDTH / 2.0 + dx, VIEW_HEIGHT / 2.0 - 125.0)
+            assert_eq!(global_offset_of(tester, &first_key), expected);
+            assert_eq!(global_offset_of(tester, &second_key), expected);
+        });
     }
 
     #[test]
@@ -768,7 +713,7 @@ mod tests {
         assert_aligned_halfway(
             TextDirection::Ltr,
             AlignmentGeometry::BOTTOM_RIGHT,
-            from_centre(-125.0),
+            Offset::new(275.0, 175.0),
         );
     }
 
@@ -777,7 +722,7 @@ mod tests {
         assert_aligned_halfway(
             TextDirection::Ltr,
             AlignmentGeometry::BOTTOM_END,
-            from_centre(-125.0),
+            Offset::new(275.0, 175.0),
         );
     }
 
@@ -786,7 +731,7 @@ mod tests {
         assert_aligned_halfway(
             TextDirection::Rtl,
             AlignmentGeometry::BOTTOM_END,
-            from_centre(-75.0),
+            Offset::new(325.0, 175.0),
         );
     }
 
@@ -902,7 +847,7 @@ mod tests {
                     } else {
                         CrossFadeState::ShowFirst
                     },
-                    at(50),
+                    ms(50),
                 ),
             )
             .into_widget()
@@ -915,76 +860,70 @@ mod tests {
 
     #[test]
     fn preserves_widget_state() {
-        let cell = binding_cell();
-        let watcher = Watcher::new();
-        binding_mount(&cell, watcher.cross_fade(false));
-        let mut app = cell.borrow_mut();
-        assert_eq!(watcher.inits.get(), 1);
-
-        pump_widget(&mut app, watcher.cross_fade(true), at(0));
-        for time in [25, 50, 75] {
-            binding_pump(&mut app, at(time));
+        test_widgets(|tester| {
+            let watcher = Watcher::new();
+            tester.pump_widget(watcher.cross_fade(false));
             assert_eq!(watcher.inits.get(), 1);
-        }
+
+            tester.pump_widget(watcher.cross_fade(true));
+            for _ in 0..3 {
+                tester.pump_by(ms(25));
+                assert_eq!(watcher.inits.get(), 1);
+            }
+        });
     }
 
     #[test]
     fn switches_off_ticker_mode_on_the_faded_out_widget() {
-        let cell = binding_cell();
-        let watcher = Watcher::new();
-        binding_mount(&cell, watcher.cross_fade(false));
-        let mut app = cell.borrow_mut();
-        assert!(!watcher.ticker().muted(&app));
+        test_widgets(|tester| {
+            let watcher = Watcher::new();
+            tester.pump_widget(watcher.cross_fade(false));
+            assert!(!watcher.ticker().muted(&tester.cell.borrow()));
 
-        pump_widget(&mut app, watcher.cross_fade(true), at(0));
-        for time in [25, 50] {
-            binding_pump(&mut app, at(time));
-            // Animations are kept alive in the middle of cross-fade
-            assert!(!watcher.ticker().muted(&app));
-        }
+            tester.pump_widget(watcher.cross_fade(true));
+            for _ in 0..2 {
+                tester.pump_by(ms(25));
+                // Animations are kept alive in the middle of cross-fade
+                assert!(!watcher.ticker().muted(&tester.cell.borrow()));
+            }
 
-        // In the final state animations should be off on the widget that's faded out.
-        binding_pump(&mut app, at(75));
-        assert!(watcher.ticker().muted(&app));
+            // In the final state animations should be off on the widget that's faded out.
+            tester.pump_by(ms(25));
+            assert!(watcher.ticker().muted(&tester.cell.borrow()));
+        });
     }
 
     #[test]
     fn layout_builder_decides_which_children_are_in_the_tree() {
-        let cell = binding_cell();
-        let first = UniqueKey::new();
-        let second = UniqueKey::new();
-        let (first, second): (KeyRef, KeyRef) = (first.into(), second.into());
-        let tree = |state: CrossFadeState, only_top: bool| {
-            let mut cross_fade = AnimatedCrossFade::new(
-                keyed(&first, 10.0, 10.0),
-                keyed(&second, 10.0, 10.0),
-                state,
-                at(50),
-            );
-            if only_top {
-                cross_fade =
-                    cross_fade.layout_builder(|_app, top_child, _, _, _| top_child.clone());
-            }
-            Directionality::new(TextDirection::Ltr, cross_fade).into_widget()
-        };
-        let count = |app: &mut App, key: &KeyRef| {
-            elements(app)
-                .into_iter()
-                .filter(|element| element.widget(app).key() == Some(key))
-                .count()
-        };
-        binding_mount(&cell, tree(CrossFadeState::ShowFirst, false));
-        let mut app = cell.borrow_mut();
-        assert_eq!(count(&mut app, &first), 1);
-        assert_eq!(count(&mut app, &second), 1);
+        test_widgets(|tester| {
+            let (first, second): (KeyRef, KeyRef) =
+                (UniqueKey::new().into(), UniqueKey::new().into());
+            let tree = |state: CrossFadeState, only_top: bool| {
+                let mut cross_fade = AnimatedCrossFade::new(
+                    keyed(&first, 10.0, 10.0),
+                    keyed(&second, 10.0, 10.0),
+                    state,
+                    ms(50),
+                );
+                if only_top {
+                    cross_fade =
+                        cross_fade.layout_builder(|_app, top_child, _, _, _| top_child.clone());
+                }
+                Directionality::new(TextDirection::Ltr, cross_fade).into_widget()
+            };
+            let count = |tester: &WidgetTester, key: &KeyRef| keyed_elements(tester, key).len();
+            tester.pump_widget(tree(CrossFadeState::ShowFirst, false));
+            assert_eq!(count(tester, &first), 1);
+            assert_eq!(count(tester, &second), 1);
 
-        pump_widget(&mut app, tree(CrossFadeState::ShowFirst, true), at(0));
-        assert_eq!(count(&mut app, &first), 1);
-        assert_eq!(count(&mut app, &second), 0);
+            tester.pump_widget(tree(CrossFadeState::ShowFirst, true));
+            assert_eq!(count(tester, &first), 1);
+            assert_eq!(count(tester, &second), 0);
 
-        pump_widget(&mut app, tree(CrossFadeState::ShowSecond, true), at(0));
-        assert_eq!(count(&mut app, &second), 1);
-        assert_eq!(count(&mut app, &first), 0);
+            tester.pump_widget(tree(CrossFadeState::ShowSecond, true));
+            assert_eq!(count(tester, &second), 1);
+            assert_eq!(count(tester, &first), 0);
+        });
     }
 
     /// The `Focus` nodes of the two children, as `Focus.of(tester.element(find.text(..)))` finds
@@ -1002,7 +941,7 @@ mod tests {
             .into_widget()
         };
         let mut cross_fade =
-            AnimatedCrossFade::new(probe(0), probe(1), CrossFadeState::ShowFirst, at(50));
+            AnimatedCrossFade::new(probe(0), probe(1), CrossFadeState::ShowFirst, ms(50));
         if let Some(exclude_bottom_focus) = exclude_bottom_focus {
             cross_fade = cross_fade.exclude_bottom_focus(exclude_bottom_focus);
         }
@@ -1010,22 +949,23 @@ mod tests {
     }
 
     fn assert_hidden_focus(exclude_bottom_focus: Option<bool>, hidden_gets_focus: bool) {
-        let cell = binding_cell();
-        let nodes = Rc::new([Cell::new(None), Cell::new(None)]);
-        binding_mount(&cell, focus_tree(exclude_bottom_focus, &nodes));
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let nodes = Rc::new([Cell::new(None), Cell::new(None)]);
+            tester.pump_widget(focus_tree(exclude_bottom_focus, &nodes));
 
-        let visible = nodes[0].get().expect("built");
-        visible.request_focus(&mut app, None);
-        binding_pump(&mut app, at(16));
-        app.drain_microtasks();
-        assert!(visible.has_primary_focus(&app));
+            let visible = nodes[0].get().expect("built");
+            tester.update(|app| visible.request_focus(app, None));
+            tester.pump();
+            assert!(visible.has_primary_focus(&tester.cell.borrow()));
 
-        let hidden = nodes[1].get().expect("built");
-        hidden.request_focus(&mut app, None);
-        binding_pump(&mut app, at(32));
-        app.drain_microtasks();
-        assert_eq!(hidden.has_primary_focus(&app), hidden_gets_focus);
+            let hidden = nodes[1].get().expect("built");
+            tester.update(|app| hidden.request_focus(app, None));
+            tester.pump();
+            assert_eq!(
+                hidden.has_primary_focus(&tester.cell.borrow()),
+                hidden_gets_focus
+            );
+        });
     }
 
     #[test]
@@ -1040,10 +980,8 @@ mod tests {
 
     #[test]
     fn does_not_crash_at_zero_area() {
-        let cell = binding_cell();
-        binding_mount(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Center::new().child(SizedBox::shrink().child(AnimatedCrossFade::new(
                     sized(10.0, 10.0),
@@ -1051,10 +989,9 @@ mod tests {
                     CrossFadeState::ShowFirst,
                     Duration::from_secs(1),
                 ))),
-            )
-            .into_widget(),
-        );
-        assert_eq!(cross_fade_size(&mut cell.borrow_mut()), Size::ZERO);
+            ));
+            assert_eq!(cross_fade_size(tester), Size::ZERO);
+        });
     }
 
     /// An `on_end` that counts its calls.
@@ -1075,98 +1012,81 @@ mod tests {
         .into_widget()
     }
 
+    /// Dart's `onEnd` cases: from `from`, a pump to `to`, no call 100ms in, one once settled.
+    fn assert_on_end_once(from: CrossFadeState, to: CrossFadeState) {
+        test_widgets(|tester| {
+            let (calls, on_end) = counting_on_end();
+            tester.pump_widget(with_on_end(from, &on_end));
+            assert_eq!(calls.get(), 0);
+
+            tester.pump_widget(with_on_end(to, &on_end));
+            tester.pump_by(ms(100));
+            assert_eq!(calls.get(), 0);
+
+            tester.pump_and_settle();
+            assert_eq!(calls.get(), 1);
+        });
+    }
+
     #[test]
     fn on_end_is_called_when_the_animation_completes_forward() {
-        let cell = binding_cell();
-        let (calls, on_end) = counting_on_end();
-        binding_mount(&cell, with_on_end(CrossFadeState::ShowFirst, &on_end));
-        let mut app = cell.borrow_mut();
-        assert_eq!(calls.get(), 0);
-
-        pump_widget(
-            &mut app,
-            with_on_end(CrossFadeState::ShowSecond, &on_end),
-            at(0),
-        );
-        binding_pump(&mut app, at(100));
-        assert_eq!(calls.get(), 0);
-
-        binding_pump(&mut app, at(200));
-        binding_pump(&mut app, at(300));
-        assert_eq!(calls.get(), 1);
+        assert_on_end_once(CrossFadeState::ShowFirst, CrossFadeState::ShowSecond);
     }
 
     #[test]
     fn on_end_is_called_when_the_animation_completes_reverse() {
-        let cell = binding_cell();
-        let (calls, on_end) = counting_on_end();
-        binding_mount(&cell, with_on_end(CrossFadeState::ShowSecond, &on_end));
-        let mut app = cell.borrow_mut();
-        assert_eq!(calls.get(), 0);
-
-        pump_widget(
-            &mut app,
-            with_on_end(CrossFadeState::ShowFirst, &on_end),
-            at(0),
-        );
-        binding_pump(&mut app, at(100));
-        assert_eq!(calls.get(), 0);
-
-        binding_pump(&mut app, at(200));
-        binding_pump(&mut app, at(300));
-        assert_eq!(calls.get(), 1);
+        assert_on_end_once(CrossFadeState::ShowSecond, CrossFadeState::ShowFirst);
     }
 
     #[test]
     fn on_end_is_called_for_each_animation_cycle() {
-        let cell = binding_cell();
-        let (calls, on_end) = counting_on_end();
-        binding_mount(&cell, with_on_end(CrossFadeState::ShowFirst, &on_end));
-        let mut app = cell.borrow_mut();
-        assert_eq!(calls.get(), 0);
+        test_widgets(|tester| {
+            let (calls, on_end) = counting_on_end();
+            tester.pump_widget(with_on_end(CrossFadeState::ShowFirst, &on_end));
+            assert_eq!(calls.get(), 0);
 
-        let mut time = 0;
-        for (state, expected_calls) in [
-            (CrossFadeState::ShowSecond, 1),
-            (CrossFadeState::ShowFirst, 2),
-            (CrossFadeState::ShowSecond, 3),
-        ] {
-            pump_widget(&mut app, with_on_end(state, &on_end), at(time));
-            for _ in 0..3 {
-                time += 100;
-                binding_pump(&mut app, at(time));
+            for (state, expected_calls) in [
+                (CrossFadeState::ShowSecond, 1),
+                (CrossFadeState::ShowFirst, 2),
+                (CrossFadeState::ShowSecond, 3),
+            ] {
+                tester.pump_widget(with_on_end(state, &on_end));
+                tester.pump_and_settle();
+                assert_eq!(calls.get(), expected_calls);
             }
-            assert_eq!(calls.get(), expected_calls);
-        }
+        });
     }
 
-    fn assert_clip_behavior(cross_fade: AnimatedCrossFade, expected: Clip) {
-        let cell = binding_cell();
-        binding_mount(&cell, centered(TextDirection::Ltr, cross_fade));
-        let mut app = cell.borrow_mut();
-        let clip_rect = find_by_type::<ClipRect>(&mut app);
-        let clip_rect = clip_rect[0]
-            .as_any()
-            .downcast_ref::<ClipRect>()
-            .expect("a ClipRect");
-        assert_eq!(clip_rect.clip_behavior, expected);
-        let animated_size = find_by_type::<AnimatedSize>(&mut app);
-        let animated_size = animated_size[0]
-            .as_any()
-            .downcast_ref::<AnimatedSize>()
-            .expect("an AnimatedSize");
-        assert_eq!(animated_size.clip_behavior, expected);
+    fn assert_clip_behavior(cross_fade: fn() -> AnimatedCrossFade, expected: Clip) {
+        test_widgets(|tester| {
+            tester.pump_widget(centered(TextDirection::Ltr, cross_fade()));
+            let clip_rect = tester.find_by_type::<ClipRect>()[0];
+            assert_eq!(
+                tester.widget(clip_rect, |clip_rect: &ClipRect| clip_rect.clip_behavior),
+                expected
+            );
+            let animated_size = tester.find_by_type::<AnimatedSize>()[0];
+            assert_eq!(
+                tester.widget(animated_size, |animated_size: &AnimatedSize| {
+                    animated_size.clip_behavior
+                }),
+                expected
+            );
+        });
     }
 
     #[test]
     fn clip_behavior_defaults_to_hard_edge() {
-        assert_clip_behavior(simple_cross_fade(CrossFadeState::ShowFirst), Clip::HardEdge);
+        assert_clip_behavior(
+            || simple_cross_fade(CrossFadeState::ShowFirst),
+            Clip::HardEdge,
+        );
     }
 
     #[test]
     fn clip_behavior_is_forwarded_to_clip_rect_and_animated_size() {
         assert_clip_behavior(
-            simple_cross_fade(CrossFadeState::ShowFirst).clip_behavior(Clip::None),
+            || simple_cross_fade(CrossFadeState::ShowFirst).clip_behavior(Clip::None),
             Clip::None,
         );
     }
@@ -1177,40 +1097,6 @@ mod tests {
             simple_cross_fade(CrossFadeState::ShowFirst).alignment,
             AlignmentGeometry::TOP_CENTER
         );
-    }
-
-    /// flutter_test's `startGesture(position)` then `up()`: a touch down and up at `position`.
-    fn touch_at(app: &mut App, position: Offset) {
-        use waft_gestures::{GestureBinding, PointerDownEvent, PointerEvent, PointerUpEvent};
-        GestureBinding::instance(app).handle_pointer_event(
-            app,
-            PointerEvent::Down(PointerDownEvent {
-                pointer: 1,
-                position,
-                kind: waft_embedder::PointerDeviceKind::Touch,
-                ..PointerDownEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-        GestureBinding::instance(app).handle_pointer_event(
-            app,
-            PointerEvent::Up(PointerUpEvent {
-                pointer: 1,
-                position,
-                kind: waft_embedder::PointerDeviceKind::Touch,
-                ..PointerUpEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-    }
-
-    fn install_fonts(app: &mut App) {
-        let binding = waft_painting::PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
     }
 
     /// button_tester.dart's `TestButton`, without a focus node, so its `onFocus` does nothing.
@@ -1231,53 +1117,44 @@ mod tests {
 
     #[test]
     fn second_child_do_not_receive_touch_events() {
-        let number_of_touch_event_noticed = Rc::new(Cell::new(0));
-        let on_pressed = Listener::new({
-            let noticed = Rc::clone(&number_of_touch_event_noticed);
-            move |_app| noticed.set(noticed.get() + 1)
+        test_widgets(|tester| {
+            let number_of_touch_event_noticed = Rc::new(Cell::new(0));
+            let on_pressed = Listener::new({
+                let noticed = Rc::clone(&number_of_touch_event_noticed);
+                move |_app| noticed.set(noticed.get() + 1)
+            });
+            let build_animated_frame =
+                |cross_fade_state: CrossFadeState| -> WidgetRef {
+                    SizedBox::new()
+                        .width(300.0)
+                        .height(600.0)
+                        .child(Directionality::new(
+                            TextDirection::Ltr,
+                            AnimatedCrossFade::new(
+                                Text::new("AAA"),
+                                SizedBox::new().width(f64::INFINITY).height(600.0).child(
+                                    test_button(on_pressed.clone(), Text::new("BBB").into_widget()),
+                                ),
+                                cross_fade_state,
+                                ms(50),
+                            ),
+                        ))
+                        .into_widget()
+                };
+            let touch_second_button = |tester: &mut WidgetTester| {
+                tester.tap(Offset::new(150.0, 300.0), 1);
+            };
+
+            tester.pump_widget(build_animated_frame(CrossFadeState::ShowSecond));
+
+            touch_second_button(tester);
+            assert_eq!(number_of_touch_event_noticed.get(), 1);
+
+            tester.pump_widget(build_animated_frame(CrossFadeState::ShowFirst));
+            touch_second_button(tester);
+            touch_second_button(tester);
+
+            assert_eq!(number_of_touch_event_noticed.get(), 1);
         });
-        let build_animated_frame = |cross_fade_state: CrossFadeState| -> WidgetRef {
-            SizedBox::new()
-                .width(300.0)
-                .height(600.0)
-                .child(Directionality::new(
-                    TextDirection::Ltr,
-                    AnimatedCrossFade::new(
-                        Text::new("AAA"),
-                        SizedBox::new()
-                            .width(f64::INFINITY)
-                            .height(600.0)
-                            .child(test_button(
-                                on_pressed.clone(),
-                                Text::new("BBB").into_widget(),
-                            )),
-                        cross_fade_state,
-                        at(50),
-                    ),
-                ))
-                .into_widget()
-        };
-
-        // flutter_test's 800x600 view: the touch at (150, 300) is below `binding_cell`'s.
-        let platform = waft_test::TestPlatform::new()
-            .on(waft_embedder::TargetPlatform::MacOS)
-            .with_view(Rc::new(waft_test::TestView::new(800.0, 600.0)));
-        let cell = waft_foundation::AppCell::with_platform(Rc::new(platform));
-        install_fonts(&mut cell.borrow_mut());
-        binding_mount(&cell, build_animated_frame(CrossFadeState::ShowSecond));
-        let mut app = cell.borrow_mut();
-
-        touch_at(&mut app, Offset::new(150.0, 300.0));
-        assert_eq!(number_of_touch_event_noticed.get(), 1);
-
-        pump_widget(
-            &mut app,
-            build_animated_frame(CrossFadeState::ShowFirst),
-            at(0),
-        );
-        touch_at(&mut app, Offset::new(150.0, 300.0));
-        touch_at(&mut app, Offset::new(150.0, 300.0));
-
-        assert_eq!(number_of_touch_event_noticed.get(), 1);
     }
 }

@@ -3770,6 +3770,8 @@ mod tests {
 
     use waft_painting::TextStyle;
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::bottom_navigation_bar::BottomNavigationBarType;
     use crate::elevated_button::ElevatedButton;
@@ -3780,7 +3782,6 @@ mod tests {
     use crate::menu_anchor::MenuItemButton;
     use crate::menu_style::MenuStyle;
     use crate::outlined_button::OutlinedButton;
-    use crate::test_support::{test_cell, test_cell_on, with_main_thread_stack};
     use crate::text_button::TextButton;
     use waft_cupertino::CupertinoPageTransitionsBuilder;
     use waft_widgets::PageTransitionsBuilderRef;
@@ -3796,18 +3797,17 @@ mod tests {
 
     /// Runs `body` with an app whose `defaultTargetPlatform` is `platform`.
     fn on<T>(platform: TargetPlatform, body: impl FnOnce(&App) -> T + Send) {
-        with_main_thread_stack(move || {
-            let cell = test_cell_on(platform);
-            let app: Ref<'_, App> = cell.borrow();
+        test_widgets(|_tester| {
+            let tester = WidgetTester::on(platform);
+            let app: Ref<'_, App> = tester.cell.borrow();
             body(&app);
         });
     }
 
     /// Runs `body` with an app on Android, the platform Flutter's tests run on.
     fn android<T>(body: impl FnOnce(&App) -> T + Send) {
-        with_main_thread_stack(move || {
-            let cell = test_cell();
-            let app: Ref<'_, App> = cell.borrow();
+        test_widgets(|tester| {
+            let app: Ref<'_, App> = tester.cell.borrow();
             body(&app);
         });
     }
@@ -5662,9 +5662,8 @@ mod tests {
 
     #[test]
     fn localize_merges_the_text_geometry_under_the_theme_text_styles() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
             let theme = Rc::new(ThemeData::new(&app));
             let geometry = Rc::clone(&theme.typography.english_like);
             let localized = ThemeData::localize(&mut app, &theme, &geometry);

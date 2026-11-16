@@ -65,7 +65,6 @@ impl SingleChildLayoutDelegate for SpellCheckSuggestionsToolbarLayoutDelegate {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
-    use std::time::Duration;
 
     use waft_embedder::{Color, TextDirection};
     use waft_widgets::{
@@ -73,12 +72,13 @@ mod tests {
         StateSetter, StatefulBuilder,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
 
     #[test]
     fn positions_itself_at_anchor_above_if_it_fits_and_shifts_up_when_not() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let mut tester = WidgetTester::on(waft_embedder::TargetPlatform::Android);
             let set_state: Rc<RefCell<Option<StateSetter>>> = Rc::new(RefCell::new(None));
             const TOOLBAR_OVERLAP: f64 = 100.0;
@@ -128,7 +128,7 @@ mod tests {
             setter(&mut tester.cell.borrow_mut(), &mut |_app| {
                 anchor_y.set(anchor_y.get() - TOOLBAR_OVERLAP);
             });
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(toolbar_y(&tester), anchor_y.get());
         });
     }

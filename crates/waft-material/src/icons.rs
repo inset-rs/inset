@@ -44470,7 +44470,10 @@ mod tests {
     use waft_painting::{TextPainter, TextSpan, TextStyle};
 
     use super::*;
-    use crate::test_support::{test_cell, test_cell_on};
+    use std::rc::Rc;
+
+    use waft_foundation::AppCell;
+    use waft_test::TestPlatform;
 
     const CUPERTINO_PLATFORMS: [TargetPlatform; 2] = [TargetPlatform::IOS, TargetPlatform::MacOS];
     const OTHER_PLATFORMS: [TargetPlatform; 4] = [
@@ -44526,27 +44529,31 @@ mod tests {
 
     #[test]
     fn adaptive_icons_are_correct_on_cupertino_platforms() {
-        for platform in CUPERTINO_PLATFORMS {
-            let cell = test_cell_on(platform);
-            let app = cell.borrow();
-            assert_eq!(Icons::adaptive().arrow_back(&app), Icons::arrow_back_ios());
-            assert_eq!(
-                Icons::adaptive().arrow_back_outlined(&app),
-                Icons::arrow_back_ios_outlined()
-            );
+        {
+            for platform in CUPERTINO_PLATFORMS {
+                let cell = AppCell::with_platform(Rc::new(TestPlatform::new().on(platform)));
+                let app = cell.borrow();
+                assert_eq!(Icons::adaptive().arrow_back(&app), Icons::arrow_back_ios());
+                assert_eq!(
+                    Icons::adaptive().arrow_back_outlined(&app),
+                    Icons::arrow_back_ios_outlined()
+                );
+            }
         }
     }
 
     #[test]
     fn adaptive_icons_are_correct_on_non_cupertino_platforms() {
-        for platform in OTHER_PLATFORMS {
-            let cell = test_cell_on(platform);
-            let app = cell.borrow();
-            assert_eq!(Icons::adaptive().arrow_back(&app), Icons::arrow_back());
-            assert_eq!(
-                Icons::adaptive().arrow_back_outlined(&app),
-                Icons::arrow_back_outlined()
-            );
+        {
+            for platform in OTHER_PLATFORMS {
+                let cell = AppCell::with_platform(Rc::new(TestPlatform::new().on(platform)));
+                let app = cell.borrow();
+                assert_eq!(Icons::adaptive().arrow_back(&app), Icons::arrow_back());
+                assert_eq!(
+                    Icons::adaptive().arrow_back_outlined(&app),
+                    Icons::arrow_back_outlined()
+                );
+            }
         }
     }
 
@@ -44567,60 +44574,66 @@ mod tests {
 
     #[test]
     fn every_icon_of_the_samples_is_a_glyph_of_the_bundled_font() {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        let fonts = installed_fonts(&mut app);
-        let collection = app.get(fonts);
-        let id = collection.family("MaterialIcons").expect("the icon family");
-        for icon in [
-            Icons::ten_k(),
-            Icons::ac_unit(),
-            Icons::local_taxi(),
-            Icons::local_taxi_outlined(),
-            Icons::local_taxi_rounded(),
-            Icons::local_taxi_sharp(),
-            Icons::zoom_out_sharp(),
-            Icons::water_drop(),
-            Icons::electric_bolt(),
-            Icons::repeat_on(),
-        ] {
-            let glyph = char::from_u32(icon.code_point).expect("an icon code point");
-            assert!(collection.get(id).covers(glyph), "{icon:?}");
+        {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let fonts = installed_fonts(&mut app);
+            let collection = app.get(fonts);
+            let id = collection.family("MaterialIcons").expect("the icon family");
+            for icon in [
+                Icons::ten_k(),
+                Icons::ac_unit(),
+                Icons::local_taxi(),
+                Icons::local_taxi_outlined(),
+                Icons::local_taxi_rounded(),
+                Icons::local_taxi_sharp(),
+                Icons::zoom_out_sharp(),
+                Icons::water_drop(),
+                Icons::electric_bolt(),
+                Icons::repeat_on(),
+            ] {
+                let glyph = char::from_u32(icon.code_point).expect("an icon code point");
+                assert!(collection.get(id).covers(glyph), "{icon:?}");
+            }
         }
     }
 
     #[test]
     fn installing_the_font_twice_registers_it_once() {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        let fonts = installed_fonts(&mut app);
-        install_material_icon_font(&mut app);
-        assert_eq!(app.get(fonts).len(), 1);
+        {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let fonts = installed_fonts(&mut app);
+            install_material_icon_font(&mut app);
+            assert_eq!(app.get(fonts).len(), 1);
+        }
     }
 
     #[test]
     fn an_installed_icon_lays_out_as_one_glyph() {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        let fonts = installed_fonts(&mut app);
-        let icon = Icons::local_taxi();
-        let glyph: String = char::from_u32(icon.code_point)
-            .expect("an icon code point")
-            .into();
-        let mut painter = TextPainter::new();
-        painter.set_text(Some(
-            TextSpan::new()
-                .text(glyph)
-                .style(icon_style(&icon))
-                .into_span(),
-        ));
-        painter.set_text_direction(Some(TextDirection::Ltr));
-        painter.layout(app.get_mut(fonts), 0.0, f64::INFINITY);
-        assert!(painter.width() > 0.0 && painter.height() > 0.0);
-        assert!(
-            app.get_mut(fonts).take_unanswered().is_empty(),
-            "the icon family and its glyph are covered by the bundled font"
-        );
-        painter.dispose();
+        {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let fonts = installed_fonts(&mut app);
+            let icon = Icons::local_taxi();
+            let glyph: String = char::from_u32(icon.code_point)
+                .expect("an icon code point")
+                .into();
+            let mut painter = TextPainter::new();
+            painter.set_text(Some(
+                TextSpan::new()
+                    .text(glyph)
+                    .style(icon_style(&icon))
+                    .into_span(),
+            ));
+            painter.set_text_direction(Some(TextDirection::Ltr));
+            painter.layout(app.get_mut(fonts), 0.0, f64::INFINITY);
+            assert!(painter.width() > 0.0 && painter.height() > 0.0);
+            assert!(
+                app.get_mut(fonts).take_unanswered().is_empty(),
+                "the icon family and its glyph are covered by the bundled font"
+            );
+            painter.dispose();
+        }
     }
 }

@@ -4357,9 +4357,11 @@ impl State for InputDateRangePickerState {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! date_picker_test.dart and date_range_picker_test.dart: the dialogs a user sees, picks a date
     //! or a range in and confirms or cancels.
+
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
     use super::*;
     use crate::chip::tests::{center_of, rect_of, size_of};
@@ -4368,7 +4370,7 @@ mod tests {
     use crate::elevated_button::ElevatedButton;
     use crate::icons::Icons;
     use crate::material::Material;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_field::TextField;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};
@@ -4384,20 +4386,70 @@ mod tests {
         AnyElement, Builder, Center, EditableText, EditableTextState, IntoWidget, Text,
     };
 
-    pub(super) type PickerResult = Rc<RefCell<Option<CompleterFuture<RouteResult>>>>;
-
-    /// A tester whose view is `size` logical pixels: the tester's views are at 2x.
-    pub(super) fn tester_of_size(size: Size) -> WidgetTester {
-        let tester = WidgetTester::with_physical_size(
-            waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            Size::new(size.width() * 2.0, size.height() * 2.0),
-        );
-        tester.install_platform_fonts();
-        tester
+    /// The one onstage `Text` showing `text`: Dart's `find.text(text)` expected to find one widget.
+    pub(crate) fn only_onstage_text(tester: &WidgetTester, text: &str) -> AnyElement {
+        let found = tester.find_onstage_text(text);
+        assert_eq!(found.len(), 1, "one Text showing {text:?}");
+        found[0]
     }
 
-    /// flutter_test's default view, 800 by 600 logical pixels.
-    pub(super) const DEFAULT_WINDOW_SIZE: Size = Size::new(800.0, 600.0);
+    /// Dart's `find.byIcon(icon)` with its default `skipOffstage`: every onstage `Icon` showing
+    /// `icon`.
+    pub(crate) fn find_onstage_by_icon(
+        tester: &WidgetTester,
+        icon: &waft_widgets::IconData,
+    ) -> Vec<AnyElement> {
+        tester
+            .find_onstage_by_type::<waft_widgets::Icon>()
+            .into_iter()
+            .filter(|element| {
+                tester.widget(*element, |widget: &waft_widgets::Icon| {
+                    widget.icon.as_ref() == Some(icon)
+                })
+            })
+            .collect()
+    }
+
+    /// Dart's `tester.widget<TextField>(find.byType(TextField)).controller!.text`: the text of
+    /// the first `TextField`'s controller.
+    pub(crate) fn text_field_controller_text(tester: &WidgetTester) -> String {
+        let field = tester.find_by_type::<TextField>()[0];
+        let controller = tester.widget(field, |field: &TextField| {
+            field.controller.clone().expect("a controller")
+        });
+        controller.text_value(&tester.cell.borrow()).to_owned()
+    }
+
+    pub(super) type PickerResult = Rc<RefCell<Option<CompleterFuture<RouteResult>>>>;
+
+    /// A tester whose view is `size` physical pixels at a device pixel ratio of 1: Dart's
+    /// `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1.0`.
+    pub(super) fn tester_of_size(size: Size) -> WidgetTester {
+        WidgetTester::with_view(
+            waft_test::TestPlatform::new().on(TargetPlatform::Android),
+            waft_test::TestView::with_pixel_ratio(size.width(), size.height(), 1.0),
+        )
+    }
+
+    /// What the host does when the view's size changes: Dart's `tester.view.physicalSize = size`
+    /// followed by the binding's metrics change. The tester's views here are at a device pixel
+    /// ratio of 1 (see [`tester_of_size`]).
+    pub(super) fn resize_view(tester: &mut WidgetTester, size: Size) {
+        tester.view().resize(size.width(), size.height());
+        tester.update(|app| {
+            waft_rendering::RendererBinding::instance(app).handle_metrics_changed(app);
+        });
+    }
+
+    /// Runs a case whose Dart source sets the view size first: `test_widgets` for its stack,
+    /// with the sized tester inside.
+    pub(super) fn test_widgets_sized(size: Size, body: impl FnOnce(&mut WidgetTester) + Send) {
+        test_widgets(move |_| {
+            let mut tester = tester_of_size(size);
+            body(&mut tester);
+        });
+    }
+
     /// Dart's `wideWindowSize` and `narrowWindowSize`, set as the physical size at a device pixel
     /// ratio of 1, so the logical size here.
     pub(super) const WIDE_WINDOW_SIZE: Size = Size::new(1920.0, 1080.0);
@@ -4581,7 +4633,7 @@ mod tests {
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");
         state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump(std::time::Duration::ZERO);
+        tester.pump();
         let length = text.encode_utf16().count() as i32;
         TextInputClient::update_editing_value(
             state,
@@ -4610,23 +4662,23 @@ mod tests {
 
     #[test]
     fn material3_default_dialog_size() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let mut options = DatePickerOptions::new();
             options.use_material3 = true;
 
             // Test landscape layout.
-            let mut tester = tester_of_size(WIDE_WINDOW_SIZE);
-            prepare_date_picker(&mut tester, &options);
+            let tester = &mut tester_of_size(WIDE_WINDOW_SIZE);
+            prepare_date_picker(tester, &options);
             assert_eq!(
-                dialog_container_size(&tester),
+                dialog_container_size(tester),
                 CALENDAR_LANDSCAPE_DIALOG_SIZE
             );
 
             // Test portrait layout.
-            let mut tester = tester_of_size(NARROW_WINDOW_SIZE);
-            prepare_date_picker(&mut tester, &options);
+            let tester = &mut tester_of_size(NARROW_WINDOW_SIZE);
+            prepare_date_picker(tester, &options);
             assert_eq!(
-                dialog_container_size(&tester),
+                dialog_container_size(tester),
                 CALENDAR_PORTRAIT_DIALOG_SIZE_M3
             );
         });
@@ -4634,36 +4686,33 @@ mod tests {
 
     #[test]
     fn material3_uses_sentence_case_labels() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.use_material3 = true;
-            prepare_date_picker(&mut tester, &options);
-            assert!(has_text(&tester, "Select date"));
+            prepare_date_picker(tester, &options);
+            assert!(has_text(tester, "Select date"));
         });
     }
 
     #[test]
     fn cancel_confirm_and_help_text_is_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.cancel_text = Some("nope".to_string());
             options.confirm_text = Some("yep".to_string());
             options.help_text = Some("help".to_string());
-            prepare_date_picker(&mut tester, &options);
-            assert!(has_text(&tester, "nope"));
-            assert!(has_text(&tester, "yep"));
-            assert!(has_text(&tester, "help"));
+            prepare_date_picker(tester, &options);
+            assert!(has_text(tester, "nope"));
+            assert!(has_text(tester, "yep"));
+            assert!(has_text(tester, "help"));
         });
     }
 
     #[test]
     fn initial_date_is_the_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
-            let result = prepare_date_picker(&mut tester, &DatePickerOptions::new());
-            tap_text(&mut tester, "OK");
+        test_widgets(|tester| {
+            let result = prepare_date_picker(tester, &DatePickerOptions::new());
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(DateTime::utc(2016, 1, 15)));
         });
@@ -4671,10 +4720,9 @@ mod tests {
 
     #[test]
     fn can_cancel() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
-            let result = prepare_date_picker(&mut tester, &DatePickerOptions::new());
-            tap_text(&mut tester, "CANCEL");
+        test_widgets(|tester| {
+            let result = prepare_date_picker(tester, &DatePickerOptions::new());
+            tap_text(tester, "CANCEL");
             tester.pump_and_settle();
             assert!(is_completed(&result));
             assert_eq!(picked_date(&result), None);
@@ -4683,64 +4731,55 @@ mod tests {
 
     #[test]
     fn can_switch_from_calendar_to_input_entry_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
-            prepare_date_picker(&mut tester, &DatePickerOptions::new());
-            assert_eq!(text_field_count(&tester), 0);
-            tap_icon(&mut tester, &Icons::edit());
-            assert_eq!(text_field_count(&tester), 1);
+        test_widgets(|tester| {
+            prepare_date_picker(tester, &DatePickerOptions::new());
+            assert_eq!(text_field_count(tester), 0);
+            tap_icon(tester, &Icons::edit());
+            assert_eq!(text_field_count(tester), 1);
         });
     }
 
     #[test]
     fn can_switch_from_input_to_calendar_entry_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
-            prepare_date_picker(&mut tester, &options);
-            assert_eq!(text_field_count(&tester), 1);
-            tap_icon(&mut tester, &Icons::calendar_today());
-            assert_eq!(text_field_count(&tester), 0);
+            prepare_date_picker(tester, &options);
+            assert_eq!(text_field_count(tester), 1);
+            tap_icon(tester, &Icons::calendar_today());
+            assert_eq!(text_field_count(tester), 0);
         });
     }
 
     #[test]
     fn can_not_switch_out_of_calendar_only_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::CalendarOnly;
-            prepare_date_picker(&mut tester, &options);
-            assert_eq!(text_field_count(&tester), 0);
-            assert!(tester.find_onstage_by_icon(&Icons::edit()).is_empty());
+            prepare_date_picker(tester, &options);
+            assert_eq!(text_field_count(tester), 0);
+            assert!(find_onstage_by_icon(tester, &Icons::edit()).is_empty());
         });
     }
 
     #[test]
     fn can_not_switch_out_of_input_only_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::InputOnly;
-            prepare_date_picker(&mut tester, &options);
-            assert_eq!(text_field_count(&tester), 1);
-            assert!(
-                tester
-                    .find_onstage_by_icon(&Icons::calendar_today())
-                    .is_empty()
-            );
+            prepare_date_picker(tester, &options);
+            assert_eq!(text_field_count(tester), 1);
+            assert!(find_onstage_by_icon(tester, &Icons::calendar_today()).is_empty());
         });
     }
 
     #[test]
     fn switching_to_input_mode_keeps_selected_date() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
-            let result = prepare_date_picker(&mut tester, &DatePickerOptions::new());
-            tap_text(&mut tester, "12");
-            tap_icon(&mut tester, &Icons::edit());
-            tap_text(&mut tester, "OK");
+        test_widgets(|tester| {
+            let result = prepare_date_picker(tester, &DatePickerOptions::new());
+            tap_text(tester, "12");
+            tap_icon(tester, &Icons::edit());
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(DateTime::utc(2016, 1, 12)));
         });
@@ -4748,29 +4787,27 @@ mod tests {
 
     #[test]
     fn callback_on_toggle_of_date_picker_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let options = DatePickerOptions::new();
-            prepare_date_picker(&mut tester, &options);
-            tap_icon(&mut tester, &Icons::edit());
+            prepare_date_picker(tester, &options);
+            tap_icon(tester, &Icons::edit());
             assert_eq!(*options.current_mode.borrow(), DatePickerEntryMode::Input);
-            assert_eq!(text_field_count(&tester), 1);
-            tap_icon(&mut tester, &Icons::calendar_today());
+            assert_eq!(text_field_count(tester), 1);
+            tap_icon(tester, &Icons::calendar_today());
             assert_eq!(
                 *options.current_mode.borrow(),
                 DatePickerEntryMode::Calendar
             );
-            assert_eq!(text_field_count(&tester), 0);
+            assert_eq!(text_field_count(tester), 0);
         });
     }
 
     #[test]
     fn can_select_a_day() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
-            let result = prepare_date_picker(&mut tester, &DatePickerOptions::new());
-            tap_text(&mut tester, "12");
-            tap_text(&mut tester, "OK");
+        test_widgets(|tester| {
+            let result = prepare_date_picker(tester, &DatePickerOptions::new());
+            tap_text(tester, "12");
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(DateTime::utc(2016, 1, 12)));
         });
@@ -4778,13 +4815,12 @@ mod tests {
 
     #[test]
     fn can_select_a_day_with_no_initial_date() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_date = None;
-            let result = prepare_date_picker(&mut tester, &options);
-            tap_text(&mut tester, "12");
-            tap_text(&mut tester, "OK");
+            let result = prepare_date_picker(tester, &options);
+            tap_text(tester, "12");
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(DateTime::utc(2016, 1, 12)));
         });
@@ -4792,18 +4828,17 @@ mod tests {
 
     #[test]
     fn only_predicate_days_are_selectable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_date = Some(DateTime::utc(2017, 1, 16));
             options.first_date = DateTime::utc(2017, 1, 10);
             options.last_date = DateTime::utc(2017, 1, 20);
             options.selectable_day_predicate = Some(Rc::new(|day| day.day() % 2 == 0));
-            let result = prepare_date_picker(&mut tester, &options);
-            tap_text(&mut tester, "13"); // Odd, doesn't work.
-            tap_text(&mut tester, "10"); // Even, works.
-            tap_text(&mut tester, "17"); // Odd, doesn't work.
-            tap_text(&mut tester, "OK");
+            let result = prepare_date_picker(tester, &options);
+            tap_text(tester, "13"); // Odd, doesn't work.
+            tap_text(tester, "10"); // Even, works.
+            tap_text(tester, "17"); // Odd, doesn't work.
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(DateTime::utc(2017, 1, 10)));
         });
@@ -4811,19 +4846,17 @@ mod tests {
 
     #[test]
     fn input_mode_initial_entry_mode_is_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
-            prepare_date_picker(&mut tester, &options);
-            assert_eq!(text_field_count(&tester), 1);
+            prepare_date_picker(tester, &options);
+            assert_eq!(text_field_count(tester), 1);
         });
     }
 
     #[test]
     fn input_mode_hint_label_and_help_text_is_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
             options.cancel_text = Some("nope".to_string());
@@ -4831,23 +4864,22 @@ mod tests {
             options.field_hint_text = Some("hint".to_string());
             options.field_label_text = Some("label".to_string());
             options.help_text = Some("help".to_string());
-            prepare_date_picker(&mut tester, &options);
-            assert!(has_text(&tester, "nope"));
-            assert!(has_text(&tester, "yep"));
-            assert!(has_text(&tester, "hint"));
-            assert!(has_text(&tester, "label"));
-            assert!(has_text(&tester, "help"));
+            prepare_date_picker(tester, &options);
+            assert!(has_text(tester, "nope"));
+            assert!(has_text(tester, "yep"));
+            assert!(has_text(tester, "hint"));
+            assert!(has_text(tester, "label"));
+            assert!(has_text(tester, "help"));
         });
     }
 
     #[test]
     fn input_mode_initial_date_is_the_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
-            let result = prepare_date_picker(&mut tester, &options);
-            tap_text(&mut tester, "OK");
+            let result = prepare_date_picker(tester, &options);
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(DateTime::utc(2016, 1, 15)));
         });
@@ -4855,14 +4887,13 @@ mod tests {
 
     #[test]
     fn input_mode_toggle_to_calendar_mode_keeps_selected_date() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
-            let result = prepare_date_picker(&mut tester, &options);
-            enter_text(&mut tester, "12/25/2016");
-            tap_icon(&mut tester, &Icons::calendar_today());
-            tap_text(&mut tester, "OK");
+            let result = prepare_date_picker(tester, &options);
+            enter_text(tester, "12/25/2016");
+            tap_icon(tester, &Icons::calendar_today());
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(DateTime::utc(2016, 12, 25)));
         });
@@ -4870,13 +4901,12 @@ mod tests {
 
     #[test]
     fn input_mode_entered_text_returns_date() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
-            let result = prepare_date_picker(&mut tester, &options);
-            enter_text(&mut tester, "12/25/2016");
-            tap_text(&mut tester, "OK");
+            let result = prepare_date_picker(tester, &options);
+            enter_text(tester, "12/25/2016");
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(DateTime::utc(2016, 12, 25)));
         });
@@ -4884,97 +4914,93 @@ mod tests {
 
     #[test]
     fn input_mode_too_short_entered_text_shows_error() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
             options.error_format_text = Some("oops".to_string());
-            prepare_date_picker(&mut tester, &options);
+            prepare_date_picker(tester, &options);
             tester.pump_and_settle();
-            enter_text(&mut tester, "1225");
-            assert!(has_no_text(&tester, "oops"));
+            enter_text(tester, "1225");
+            assert!(has_no_text(tester, "oops"));
 
-            tap_text(&mut tester, "OK");
+            tap_text(tester, "OK");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "oops"));
+            assert!(has_text(tester, "oops"));
         });
     }
 
     #[test]
     fn input_mode_bad_format_entered_text_shows_error() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
             options.error_format_text = Some("oops".to_string());
-            prepare_date_picker(&mut tester, &options);
+            prepare_date_picker(tester, &options);
             tester.pump_and_settle();
-            enter_text(&mut tester, "20 days, 3 months, 2003");
+            enter_text(tester, "20 days, 3 months, 2003");
             // Dart's `find.text` finds the `EditableText` showing it; `find_text` reads `Text` only.
             assert_eq!(
-                tester.text_field_controller_text(),
+                text_field_controller_text(tester),
                 "20 days, 3 months, 2003"
             );
-            assert!(has_no_text(&tester, "oops"));
+            assert!(has_no_text(tester, "oops"));
 
-            tap_text(&mut tester, "OK");
+            tap_text(tester, "OK");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "oops"));
+            assert!(has_text(tester, "oops"));
         });
     }
 
     #[test]
     fn input_mode_invalid_entered_text_shows_error() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
             options.error_invalid_text = Some("oops".to_string());
-            prepare_date_picker(&mut tester, &options);
+            prepare_date_picker(tester, &options);
             tester.pump_and_settle();
-            enter_text(&mut tester, "08/10/1969");
-            assert!(has_no_text(&tester, "oops"));
+            enter_text(tester, "08/10/1969");
+            assert!(has_no_text(tester, "oops"));
 
-            tap_text(&mut tester, "OK");
+            tap_text(tester, "OK");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "oops"));
+            assert!(has_text(tester, "oops"));
         });
     }
 
     #[test]
     fn input_only_mode_should_validate_date() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::InputOnly;
-            prepare_date_picker(&mut tester, &options);
+            prepare_date_picker(tester, &options);
             // Enter text input mode and type an invalid date to get error.
-            enter_text(&mut tester, "1234567");
-            tap_text(&mut tester, "OK");
+            enter_text(tester, "1234567");
+            tap_text(tester, "OK");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "Invalid format."));
+            assert!(has_text(tester, "Invalid format."));
         });
     }
 
     // The Material 2 'Default dialog size'.
     #[test]
     fn material2_default_dialog_size() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let options = DatePickerOptions::new();
 
             // Test landscape layout.
-            let mut tester = tester_of_size(WIDE_WINDOW_SIZE);
-            prepare_date_picker(&mut tester, &options);
+            let tester = &mut tester_of_size(WIDE_WINDOW_SIZE);
+            prepare_date_picker(tester, &options);
             assert_eq!(
-                dialog_container_size(&tester),
+                dialog_container_size(tester),
                 CALENDAR_LANDSCAPE_DIALOG_SIZE
             );
 
             // Test portrait layout.
-            let mut tester = tester_of_size(NARROW_WINDOW_SIZE);
-            prepare_date_picker(&mut tester, &options);
+            let tester = &mut tester_of_size(NARROW_WINDOW_SIZE);
+            prepare_date_picker(tester, &options);
             assert_eq!(
-                dialog_container_size(&tester),
+                dialog_container_size(tester),
                 CALENDAR_PORTRAIT_DIALOG_SIZE_M2
             );
         });
@@ -4994,7 +5020,7 @@ mod tests {
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");
         state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump(std::time::Duration::ZERO);
+        tester.pump();
         let length = text.encode_utf16().count() as i32;
         TextInputClient::update_editing_value(
             state,
@@ -5045,11 +5071,11 @@ mod tests {
     }
 
     pub(super) fn text_rect(tester: &WidgetTester, text: &str) -> waft_embedder::Rect {
-        rect_of(tester, tester.only_onstage_text(text))
+        rect_of(tester, only_onstage_text(tester, text))
     }
 
     pub(super) fn header_font_size(tester: &WidgetTester, text: &str) -> Option<f64> {
-        tester.widget(tester.only_onstage_text(text), |text: &Text| {
+        tester.widget(only_onstage_text(tester, text), |text: &Text| {
             text.style.as_ref().and_then(|style| style.font_size)
         })
     }
@@ -5128,8 +5154,8 @@ mod tests {
 
         use super::*;
         use super::{
-            DEFAULT_WINDOW_SIZE, DatePickerOptions, enter_text, has_no_text, has_text, picked_date,
-            prepare_date_picker, tap_icon, tap_text, tester_of_size, text_field_count,
+            DatePickerOptions, enter_text, has_no_text, has_text, picked_date, prepare_date_picker,
+            resize_view, tap_icon, tap_text, tester_of_size, text_field_count,
         };
         use crate::chip::tests::{center_of, rect_of, size_of};
         use crate::colors::Colors;
@@ -5139,10 +5165,7 @@ mod tests {
         use crate::icons::Icons;
         use crate::material::Material;
         use crate::material_localizations::MaterialLocalizations;
-        use crate::test_support::{
-            PaintCall, PaintInspection, WidgetTester, material_app, paints_calls,
-            with_main_thread_stack,
-        };
+        use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
         use crate::text_field::TextField;
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::{m2, m3};
@@ -5310,8 +5333,7 @@ mod tests {
 
         #[test]
         fn forwards_day_builder_and_weekday_builder_to_the_calendar() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.day_builder = Some(Rc::new(|_app, _context, details| {
                     if details.day.day() == 1 {
@@ -5327,7 +5349,7 @@ mod tests {
                         details.child
                     }
                 }));
-                prepare_date_picker(&mut tester, &options);
+                prepare_date_picker(tester, &options);
                 assert_eq!(tester.find_onstage_text("Custom day 1").len(), 1);
                 assert_eq!(tester.find_onstage_text("Custom Sunday").len(), 1);
             });
@@ -5335,15 +5357,14 @@ mod tests {
 
         #[test]
         fn material3_default_dialog_properties() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.use_material3 = true;
-                prepare_date_picker(&mut tester, &options);
+                prepare_date_picker(tester, &options);
                 let theme = m3(&tester.cell.borrow());
 
                 let (color, shadow_color, surface_tint_color, elevation, shape, clip_behavior) =
-                    tester.widget(dialog_material(&tester), |material: &Material| {
+                    tester.widget(dialog_material(tester), |material: &Material| {
                         (
                             material.color,
                             material.shadow_color,
@@ -5368,13 +5389,12 @@ mod tests {
 
         #[test]
         fn material2_default_dialog_properties() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
-                prepare_date_picker(&mut tester, &DatePickerOptions::new());
+            test_widgets(|tester| {
+                prepare_date_picker(tester, &DatePickerOptions::new());
                 let theme = m2(&tester.cell.borrow());
 
                 let (color, shadow_color, elevation, shape, clip_behavior) =
-                    tester.widget(dialog_material(&tester), |material: &Material| {
+                    tester.widget(dialog_material(tester), |material: &Material| {
                         (
                             material.color,
                             material.shadow_color,
@@ -5397,55 +5417,53 @@ mod tests {
 
         #[test]
         fn switching_to_input_mode_resets_input_error_state() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
-                prepare_date_picker(&mut tester, &DatePickerOptions::new());
+            test_widgets(|tester| {
+                prepare_date_picker(tester, &DatePickerOptions::new());
 
                 // Enter text input mode and type an invalid date to get error.
-                tap_icon(&mut tester, &Icons::edit());
-                enter_text(&mut tester, "1234567");
-                tap_text(&mut tester, "OK");
+                tap_icon(tester, &Icons::edit());
+                enter_text(tester, "1234567");
+                tap_text(tester, "OK");
                 tester.pump_and_settle();
-                assert!(has_text(&tester, "Invalid format."));
+                assert!(has_text(tester, "Invalid format."));
 
                 // Toggle to calendar mode and then back to input mode
-                tap_icon(&mut tester, &Icons::calendar_today());
-                tap_icon(&mut tester, &Icons::edit());
-                assert!(has_no_text(&tester, "Invalid format."));
+                tap_icon(tester, &Icons::calendar_today());
+                tap_icon(tester, &Icons::edit());
+                assert!(has_no_text(tester, "Invalid format."));
 
                 // Edit the text, the error should not be showing until ok is tapped
-                enter_text(&mut tester, "1234567");
+                enter_text(tester, "1234567");
                 tester.pump_and_settle();
-                assert!(has_no_text(&tester, "Invalid format."));
+                assert!(has_no_text(tester, "Invalid format."));
             });
         }
 
         #[test]
         fn builder_parameter() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let build_frame = |tester: &mut WidgetTester, text_direction: TextDirection| {
                     let mut show = Show::new();
                     show.builder = Some(directionality_builder(text_direction));
                     open_app(tester, true, "X", show);
                 };
 
-                build_frame(&mut tester, TextDirection::Ltr);
-                tap_text(&mut tester, "X");
+                build_frame(tester, TextDirection::Ltr);
+                tap_text(tester, "X");
                 tester.pump_and_settle();
-                let ltr_ok_right = text_rect(&tester, "OK").right;
+                let ltr_ok_right = text_rect(tester, "OK").right;
 
-                tap_text(&mut tester, "OK"); // Dismiss the dialog.
+                tap_text(tester, "OK"); // Dismiss the dialog.
                 tester.pump_and_settle();
 
-                build_frame(&mut tester, TextDirection::Rtl);
-                tap_text(&mut tester, "X");
+                build_frame(tester, TextDirection::Rtl);
+                tap_text(tester, "X");
                 tester.pump_and_settle();
 
                 // Verify that the time picker is being laid out RTL. We expect the left edge of the
                 // 'OK' button in the RTL layout to match the gap between right edge of the 'OK'
                 // button and the right edge of the 800 wide view.
-                let rtl_ok_left = text_rect(&tester, "OK").left;
+                let rtl_ok_left = text_rect(tester, "OK").left;
                 // Dart's `moreOrLessEquals`, at the f32 precision Valo lays out in.
                 let expected = 800.0 - ltr_ok_right;
                 assert!(
@@ -5457,8 +5475,7 @@ mod tests {
 
         #[test]
         fn barrier_is_dismissible_with_default_parameter() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let mut show = Show::new();
                 show.builder = Some(sized_box_builder());
                 let observer = tester
@@ -5490,7 +5507,7 @@ mod tests {
 
                 // Open the dialog.
                 let button = tester.find_by_type::<ElevatedButton>()[0];
-                let center = center_of(&tester, button);
+                let center = center_of(tester, button);
                 tester.tap(center, 1);
                 tester.pump_and_settle();
                 assert_eq!(
@@ -5510,8 +5527,7 @@ mod tests {
 
         #[test]
         fn barrier_is_not_dismissible_with_barrier_dismissible_is_false() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let mut show = Show::new();
                 show.builder = Some(sized_box_builder());
                 show.barrier_dismissible = false;
@@ -5544,7 +5560,7 @@ mod tests {
 
                 // Open the dialog.
                 let button = tester.find_by_type::<ElevatedButton>()[0];
-                let center = center_of(&tester, button);
+                let center = center_of(tester, button);
                 tester.tap(center, 1);
                 tester.pump_and_settle();
                 assert_eq!(
@@ -5575,17 +5591,16 @@ mod tests {
 
         #[test]
         fn barrier_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let mut show = Show::new();
                 show.builder = Some(sized_box_builder());
-                open_app(&mut tester, true, "X", show.clone());
+                open_app(tester, true, "X", show.clone());
 
                 // Open the dialog.
-                tap_text(&mut tester, "X");
+                tap_text(tester, "X");
                 tester.pump_and_settle();
                 assert_eq!(
-                    last_modal_barrier(&tester, |barrier| barrier.color),
+                    last_modal_barrier(tester, |barrier| barrier.color),
                     Some(Colors::BLACK54)
                 );
 
@@ -5593,13 +5608,13 @@ mod tests {
                 tester.tap(Offset::new(10.0, 10.0), 1);
 
                 show.barrier_color = Some(Colors::PINK.primary());
-                open_app(&mut tester, true, "X", show);
+                open_app(tester, true, "X", show);
 
                 // Open the dialog.
-                tap_text(&mut tester, "X");
+                tap_text(tester, "X");
                 tester.pump_and_settle();
                 assert_eq!(
-                    last_modal_barrier(&tester, |barrier| barrier.color),
+                    last_modal_barrier(tester, |barrier| barrier.color),
                     Some(Colors::PINK.primary())
                 );
             });
@@ -5607,18 +5622,17 @@ mod tests {
 
         #[test]
         fn barrier_label() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let mut show = Show::new();
                 show.builder = Some(sized_box_builder());
                 show.barrier_label = Some("Custom Label".to_string());
-                open_app(&mut tester, true, "X", show);
+                open_app(tester, true, "X", show);
 
                 // Open the dialog.
-                tap_text(&mut tester, "X");
+                tap_text(tester, "X");
                 tester.pump_and_settle();
                 assert_eq!(
-                    last_modal_barrier(&tester, |barrier| barrier.semantics_label.clone()),
+                    last_modal_barrier(tester, |barrier| barrier.semantics_label.clone()),
                     Some("Custom Label".to_string())
                 );
             });
@@ -5626,8 +5640,7 @@ mod tests {
 
         #[test]
         fn uses_nested_navigator_if_use_root_navigator_is_false() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let (root_observer, nested_observer) = {
                     let mut app = tester.cell.borrow_mut();
                     (
@@ -5672,7 +5685,7 @@ mod tests {
 
                 // Open the dialog.
                 let button = tester.find_by_type::<ElevatedButton>()[0];
-                let center = center_of(&tester, button);
+                let center = center_of(tester, button);
                 tester.tap(center, 1);
 
                 let app = tester.cell.borrow();
@@ -5683,15 +5696,13 @@ mod tests {
 
         #[test]
         fn honors_dialog_theme_for_shape_and_elevation() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-
+            test_widgets(|tester| {
                 // Test that the defaults work
-                open_app(&mut tester, false, "X", Show::new());
-                tap_text(&mut tester, "X");
+                open_app(tester, false, "X", Show::new());
+                tap_text(tester, "X");
                 tester.pump_and_settle();
                 let (shape, elevation) = tester
-                    .widget(dialog_material(&tester), |material: &Material| {
+                    .widget(dialog_material(tester), |material: &Material| {
                         (material.shape.clone(), material.elevation)
                     });
                 assert_eq!(shape, Some(rounded(4.0)));
@@ -5708,11 +5719,11 @@ mod tests {
                     .copy_with()
                     .dialog_theme(custom_dialog_theme.clone())
                     .build();
-                open_app_with_theme(&mut tester, theme, "X", Show::new());
-                tester.pump(std::time::Duration::ZERO); // start theme animation
-                tester.pump(std::time::Duration::from_secs(5)); // end theme animation
+                open_app_with_theme(tester, theme, "X", Show::new());
+                tester.pump(); // start theme animation
+                tester.pump_by(std::time::Duration::from_secs(5)); // end theme animation
                 let (shape, elevation) = tester
-                    .widget(dialog_material(&tester), |material: &Material| {
+                    .widget(dialog_material(tester), |material: &Material| {
                         (material.shape.clone(), material.elevation)
                     });
                 assert_eq!(shape, custom_dialog_theme.shape.clone());
@@ -5722,7 +5733,7 @@ mod tests {
 
         fn text_button_of(tester: &WidgetTester, text: &str) -> AnyElement {
             tester
-                .ancestor_of_type::<crate::text_button::TextButton>(tester.only_onstage_text(text))
+                .ancestor_of_type::<crate::text_button::TextButton>(only_onstage_text(tester, text))
         }
 
         fn animated_container(tester: &WidgetTester) -> AnyElement {
@@ -5755,66 +5766,56 @@ mod tests {
 
         #[test]
         fn honors_switch_to_input_entry_mode_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
+                pump_icon_app(tester, false, DatePickerEntryMode::Calendar, None, None);
+                assert_eq!(find_onstage_by_icon(tester, &Icons::edit()).len(), 1);
+                dismiss_with_ok(tester);
 
-                pump_icon_app(
-                    &mut tester,
-                    false,
-                    DatePickerEntryMode::Calendar,
-                    None,
-                    None,
-                );
-                assert_eq!(tester.find_onstage_by_icon(&Icons::edit()).len(), 1);
-                dismiss_with_ok(&mut tester);
-
-                pump_icon_app(&mut tester, true, DatePickerEntryMode::Calendar, None, None);
+                pump_icon_app(tester, true, DatePickerEntryMode::Calendar, None, None);
                 assert_eq!(
-                    tester.find_onstage_by_icon(&Icons::edit_outlined()).len(),
+                    find_onstage_by_icon(tester, &Icons::edit_outlined()).len(),
                     1
                 );
-                dismiss_with_ok(&mut tester);
+                dismiss_with_ok(tester);
 
                 pump_icon_app(
-                    &mut tester,
+                    tester,
                     false,
                     DatePickerEntryMode::Calendar,
                     Some(|| Icon::new(Some(Icons::keyboard()))),
                     None,
                 );
-                assert_eq!(tester.find_onstage_by_icon(&Icons::keyboard()).len(), 1);
-                dismiss_with_ok(&mut tester);
+                assert_eq!(find_onstage_by_icon(tester, &Icons::keyboard()).len(), 1);
+                dismiss_with_ok(tester);
             });
         }
 
         #[test]
         fn honors_switch_to_calendar_entry_mode_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-
-                pump_icon_app(&mut tester, false, DatePickerEntryMode::Input, None, None);
+            test_widgets(|tester| {
+                pump_icon_app(tester, false, DatePickerEntryMode::Input, None, None);
                 assert_eq!(
-                    tester.find_onstage_by_icon(&Icons::calendar_today()).len(),
+                    find_onstage_by_icon(tester, &Icons::calendar_today()).len(),
                     1
                 );
-                dismiss_with_ok(&mut tester);
+                dismiss_with_ok(tester);
 
-                pump_icon_app(&mut tester, true, DatePickerEntryMode::Input, None, None);
+                pump_icon_app(tester, true, DatePickerEntryMode::Input, None, None);
                 assert_eq!(
-                    tester.find_onstage_by_icon(&Icons::calendar_today()).len(),
+                    find_onstage_by_icon(tester, &Icons::calendar_today()).len(),
                     1
                 );
-                dismiss_with_ok(&mut tester);
+                dismiss_with_ok(tester);
 
                 pump_icon_app(
-                    &mut tester,
+                    tester,
                     false,
                     DatePickerEntryMode::Input,
                     None,
                     Some(|| Icon::new(Some(Icons::favorite()))),
                 );
-                assert_eq!(tester.find_onstage_by_icon(&Icons::favorite()).len(), 1);
-                dismiss_with_ok(&mut tester);
+                assert_eq!(find_onstage_by_icon(tester, &Icons::favorite()).len(), 1);
+                dismiss_with_ok(tester);
             });
         }
 
@@ -5828,7 +5829,7 @@ mod tests {
 
         #[test]
         fn ok_cancel_button_layout() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let build_frame = |tester: &mut WidgetTester, text_direction: TextDirection| {
                     let mut show = Show::new();
                     show.builder = Some(directionality_builder(text_direction));
@@ -5847,24 +5848,23 @@ mod tests {
                 };
 
                 // Default landscape layout.
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
                 assert_eq!(
-                    show_and_read(&mut tester, TextDirection::Ltr),
+                    show_and_read(tester, TextDirection::Ltr),
                     (622.0, 594.0, 560.0)
                 );
                 assert_eq!(
-                    show_and_read(&mut tester, TextDirection::Rtl),
+                    show_and_read(tester, TextDirection::Rtl),
                     (206.0, 178.0, 324.0)
                 );
 
                 // Portrait layout (Dart's 900x1200 physical pixels at the default pixel ratio of 3).
-                let mut tester = tester_of_size(Size::new(300.0, 400.0));
+                let tester = &mut tester_of_size(Size::new(300.0, 400.0));
                 assert_eq!(
-                    show_and_read(&mut tester, TextDirection::Ltr),
+                    show_and_read(tester, TextDirection::Ltr),
                     (258.0, 230.0, 196.0)
                 );
                 assert_eq!(
-                    show_and_read(&mut tester, TextDirection::Rtl),
+                    show_and_read(tester, TextDirection::Rtl),
                     (70.0, 42.0, 188.0)
                 );
             });
@@ -5895,31 +5895,34 @@ mod tests {
 
         /// Prepares the picker, runs `steps` and taps OK: what the picker completes with.
         fn pick(
+            tester: &mut WidgetTester,
             options: DatePickerOptions,
             steps: impl FnOnce(&mut WidgetTester),
         ) -> Option<DateTime> {
-            let mut tester = tester_of_size(Size::new(800.0, 600.0));
-            let result = prepare_date_picker(&mut tester, &options);
-            steps(&mut tester);
-            tap_text(&mut tester, "OK");
+            let result = prepare_date_picker(tester, &options);
+            steps(tester);
+            tap_text(tester, "OK");
             tester.pump_and_settle();
             picked_date(&result)
         }
 
-        fn prepared(options: &DatePickerOptions, steps: impl FnOnce(&mut WidgetTester)) {
-            let mut tester = tester_of_size(Size::new(800.0, 600.0));
-            prepare_date_picker(&mut tester, options);
-            steps(&mut tester);
+        fn prepared(
+            tester: &mut WidgetTester,
+            options: &DatePickerOptions,
+            steps: impl FnOnce(&mut WidgetTester),
+        ) {
+            prepare_date_picker(tester, options);
+            steps(tester);
         }
 
         fn pump_zero(tester: &mut WidgetTester) {
-            tester.pump(std::time::Duration::ZERO);
+            tester.pump();
         }
 
         #[test]
         fn can_select_a_month() {
-            with_main_thread_stack(|| {
-                let date = pick(DatePickerOptions::new(), |tester| {
+            test_widgets(|tester| {
+                let date = pick(tester, DatePickerOptions::new(), |tester| {
                     tap_previous_month(tester);
                     tap_text(tester, "25");
                 });
@@ -5929,8 +5932,8 @@ mod tests {
 
         #[test]
         fn can_select_a_year() {
-            with_main_thread_stack(|| {
-                prepared(&DatePickerOptions::new(), |tester| {
+            test_widgets(|tester| {
+                prepared(tester, &DatePickerOptions::new(), |tester| {
                     tap_text(tester, "January 2016"); // Switch to year mode.
                     pump_zero(tester);
                     tap_text(tester, "2018");
@@ -5942,10 +5945,10 @@ mod tests {
 
         #[test]
         fn can_select_a_month_with_no_initial_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = None;
-                let date = pick(options, |tester| {
+                let date = pick(tester, options, |tester| {
                     tap_previous_month(tester);
                     tap_text(tester, "25");
                 });
@@ -5955,10 +5958,10 @@ mod tests {
 
         #[test]
         fn can_select_a_year_with_no_initial_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = None;
-                prepared(&options, |tester| {
+                prepared(tester, &options, |tester| {
                     tap_text(tester, "January 2016"); // Switch to year mode.
                     pump_zero(tester);
                     tap_text(tester, "2018");
@@ -5970,10 +5973,10 @@ mod tests {
 
         #[test]
         fn selecting_date_does_not_change_displayed_month() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = Some(DateTime::utc(2020, 3, 15));
-                prepared(&options, |tester| {
+                prepared(tester, &options, |tester| {
                     tap_next_month(tester);
                     assert_eq!(count_text(tester, "April 2020"), 1);
                     tap_text(tester, "25");
@@ -5987,8 +5990,8 @@ mod tests {
 
         #[test]
         fn changing_year_does_change_selected_date() {
-            with_main_thread_stack(|| {
-                let date = pick(DatePickerOptions::new(), |tester| {
+            test_widgets(|tester| {
+                let date = pick(tester, DatePickerOptions::new(), |tester| {
                     tap_text(tester, "January 2016");
                     pump_zero(tester);
                     tap_text(tester, "2018");
@@ -6000,8 +6003,8 @@ mod tests {
 
         #[test]
         fn changing_year_does_not_change_the_month() {
-            with_main_thread_stack(|| {
-                prepared(&DatePickerOptions::new(), |tester| {
+            test_widgets(|tester| {
+                prepared(tester, &DatePickerOptions::new(), |tester| {
                     tap_next_month(tester);
                     tap_next_month(tester);
                     tap_text(tester, "March 2016");
@@ -6015,8 +6018,8 @@ mod tests {
 
         #[test]
         fn can_select_a_year_and_then_a_day() {
-            with_main_thread_stack(|| {
-                let date = pick(DatePickerOptions::new(), |tester| {
+            test_widgets(|tester| {
+                let date = pick(tester, DatePickerOptions::new(), |tester| {
                     tap_text(tester, "January 2016"); // Switch to year mode.
                     pump_zero(tester);
                     tap_text(tester, "2017");
@@ -6029,8 +6032,8 @@ mod tests {
 
         #[test]
         fn current_year_is_visible_in_year_picker() {
-            with_main_thread_stack(|| {
-                prepared(&DatePickerOptions::new(), |tester| {
+            test_widgets(|tester| {
+                prepared(tester, &DatePickerOptions::new(), |tester| {
                     tap_text(tester, "January 2016"); // Switch to year mode.
                     pump_zero(tester);
                     assert_eq!(count_text(tester, "2016"), 1);
@@ -6040,13 +6043,13 @@ mod tests {
 
         #[test]
         fn cannot_select_a_day_outside_bounds() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 let initial = DateTime::utc(2017, 1, 15);
                 options.initial_date = Some(initial);
                 options.first_date = initial;
                 options.last_date = initial;
-                let date = pick(options, |tester| {
+                let date = pick(tester, options, |tester| {
                     // Earlier than firstDate. Should be ignored.
                     tap_text(tester, "10");
                     // Later than lastDate. Should be ignored.
@@ -6059,12 +6062,12 @@ mod tests {
 
         #[test]
         fn cannot_select_a_month_past_last_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = Some(DateTime::utc(2017, 1, 15));
                 options.first_date = DateTime::utc(2017, 1, 15);
                 options.last_date = DateTime::utc(2017, 2, 20);
-                prepared(&options, |tester| {
+                prepared(tester, &options, |tester| {
                     tap_next_month(tester);
                     // Shouldn't be possible to keep going into March.
                     assert!(!month_button_present(tester, "Next month"));
@@ -6074,12 +6077,12 @@ mod tests {
 
         #[test]
         fn cannot_select_a_month_before_first_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = Some(DateTime::utc(2017, 1, 15));
                 options.first_date = DateTime::utc(2016, 12, 10);
                 options.last_date = DateTime::utc(2017, 1, 15);
-                prepared(&options, |tester| {
+                prepared(tester, &options, |tester| {
                     tap_previous_month(tester);
                     // Shouldn't be possible to keep going into November.
                     assert!(!month_button_present(tester, "Previous month"));
@@ -6089,12 +6092,12 @@ mod tests {
 
         #[test]
         fn cannot_select_disabled_year() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = Some(DateTime::utc(2018, 7, 4));
                 options.first_date = DateTime::utc(2018, 6, 9);
                 options.last_date = DateTime::utc(2018, 12, 15);
-                let date = pick(options, |tester| {
+                let date = pick(tester, options, |tester| {
                     tap_text(tester, "July 2018"); // Switch to year mode.
                     tester.pump_and_settle();
                     tap_text(tester, "2016"); // Disabled, doesn't change the year.
@@ -6106,12 +6109,12 @@ mod tests {
 
         #[test]
         fn selecting_first_date_year_respects_first_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = Some(DateTime::utc(2018, 5, 4));
                 options.first_date = DateTime::utc(2016, 6, 9);
                 options.last_date = DateTime::utc(2019, 1, 15);
-                prepared(&options, |tester| {
+                prepared(tester, &options, |tester| {
                     tap_text(tester, "May 2018");
                     tester.pump_and_settle();
                     tap_text(tester, "2016");
@@ -6124,12 +6127,12 @@ mod tests {
 
         #[test]
         fn selecting_last_date_year_respects_last_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = Some(DateTime::utc(2018, 5, 4));
                 options.first_date = DateTime::utc(2016, 6, 9);
                 options.last_date = DateTime::utc(2019, 1, 15);
-                prepared(&options, |tester| {
+                prepared(tester, &options, |tester| {
                     tap_text(tester, "May 2018");
                     tester.pump_and_settle();
                     tap_text(tester, "2019");
@@ -6142,11 +6145,11 @@ mod tests {
 
         #[test]
         fn can_select_initial_calendar_picker_mode() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = Some(DateTime::utc(2014, 1, 15));
                 options.initial_calendar_mode = DatePickerMode::Year;
-                prepared(&options, |tester| {
+                prepared(tester, &options, |tester| {
                     pump_zero(tester);
                     // 2018 wouldn't be available if the year picker wasn't showing.
                     // The initial current year is 2014.
@@ -6180,12 +6183,10 @@ mod tests {
             })
         }
 
-        fn pump_picker_with(use_material3: bool) -> WidgetTester {
-            let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+        fn pump_picker_with(tester: &mut WidgetTester, use_material3: bool) {
             let mut options = DatePickerOptions::new();
             options.use_material3 = use_material3;
-            prepare_date_picker(&mut tester, &options);
-            tester
+            prepare_date_picker(tester, &options);
         }
 
         fn theme_of(tester: &WidgetTester, use_material3: bool) -> ThemeData {
@@ -6212,15 +6213,15 @@ mod tests {
 
         fn hover_day_30(tester: &mut WidgetTester) {
             let center = center_of(tester, tester.find_onstage_text("30")[0]);
-            let mut pointer = WidgetTester::mouse(1, 1);
+            let mut pointer = TestPointer::mouse(1, 1);
             tester.add_pointer(&mut pointer, Offset::ZERO);
             tester.move_to(&mut pointer, center, false);
             tester.pump_and_settle();
         }
 
-        fn press_day_30(tester: &mut WidgetTester) -> crate::test_support::TestPointer {
+        fn press_day_30(tester: &mut WidgetTester) -> TestPointer {
             let center = center_of(tester, tester.find_onstage_text("30")[0]);
-            let mut pointer = WidgetTester::mouse(1, 1);
+            let mut pointer = TestPointer::mouse(1, 1);
             tester.add_pointer(&mut pointer, Offset::ZERO);
             tester.down(&mut pointer, center);
             tester.pump_and_settle();
@@ -6238,40 +6239,39 @@ mod tests {
 
         #[test]
         fn current_date_is_highlighted() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.today = DateTime::utc(2016, 1, 2);
-                prepare_date_picker(&mut tester, &options);
-                pump_zero(&mut tester);
+                prepare_date_picker(tester, &options);
+                pump_zero(tester);
                 let today_color = waft_embedder::Color::new(0xff2196f3); // default primary color
                 // The current day should be painted with a circle outline.
                 assert!(paints_calls(
-                    &day_grid_material_ops(&tester),
+                    &day_grid_material_ops(tester),
                     &[PaintCall::stroked_circle(today_color, 1.0)]
                 ));
             });
         }
 
         #[allow(deprecated)]
-        fn day_overlay_hovered(use_material3: bool) {
-            let mut tester = pump_picker_with(use_material3);
-            let theme = theme_of(&tester, use_material3);
-            hover_day_30(&mut tester);
+        fn day_overlay_hovered(tester: &mut WidgetTester, use_material3: bool) {
+            pump_picker_with(tester, use_material3);
+            let theme = theme_of(tester, use_material3);
+            hover_day_30(tester);
             assert_day_overlay(
-                &tester,
+                tester,
                 false,
                 theme.color_scheme.on_surface_variant().with_opacity(0.08),
             );
         }
 
         #[allow(deprecated)]
-        fn day_overlay_focused(use_material3: bool, opacity: f64) {
-            let mut tester = pump_picker_with(use_material3);
+        fn day_overlay_focused(tester: &mut WidgetTester, use_material3: bool, opacity: f64) {
+            pump_picker_with(tester, use_material3);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = theme_of(&tester, use_material3);
+            let theme = theme_of(tester, use_material3);
             // Navigate to the grid.
-            tabs(&mut tester, 4);
+            tabs(tester, 4);
             // Navigate to day 30.
             for (physical, logical) in [
                 (
@@ -6287,11 +6287,11 @@ mod tests {
                     LogicalKeyboardKey::ARROW_RIGHT,
                 ),
             ] {
-                press(&mut tester, physical, logical);
+                press(tester, physical, logical);
             }
             tester.pump_and_settle();
             assert_day_overlay(
-                &tester,
+                tester,
                 false,
                 theme
                     .color_scheme
@@ -6301,12 +6301,12 @@ mod tests {
         }
 
         #[allow(deprecated)]
-        fn day_overlay_pressed(use_material3: bool, opacity: f64) {
-            let mut tester = pump_picker_with(use_material3);
-            let theme = theme_of(&tester, use_material3);
-            let pointer = press_day_30(&mut tester);
+        fn day_overlay_pressed(tester: &mut WidgetTester, use_material3: bool, opacity: f64) {
+            pump_picker_with(tester, use_material3);
+            let theme = theme_of(tester, use_material3);
+            let pointer = press_day_30(tester);
             assert_day_overlay(
-                &tester,
+                tester,
                 true,
                 theme
                     .color_scheme
@@ -6317,43 +6317,51 @@ mod tests {
         }
 
         #[allow(deprecated)]
-        fn day_overlay_selected_and_hovered(use_material3: bool) {
-            let mut tester = pump_picker_with(use_material3);
-            let theme = theme_of(&tester, use_material3);
-            select_day_30(&mut tester, &theme);
-            hover_day_30(&mut tester);
+        fn day_overlay_selected_and_hovered(tester: &mut WidgetTester, use_material3: bool) {
+            pump_picker_with(tester, use_material3);
+            let theme = theme_of(tester, use_material3);
+            select_day_30(tester, &theme);
+            hover_day_30(tester);
             assert_day_overlay(
-                &tester,
+                tester,
                 false,
                 theme.color_scheme.on_primary.with_opacity(0.08),
             );
         }
 
         #[allow(deprecated)]
-        fn day_overlay_selected_and_focused(use_material3: bool, opacity: f64) {
-            let mut tester = pump_picker_with(use_material3);
+        fn day_overlay_selected_and_focused(
+            tester: &mut WidgetTester,
+            use_material3: bool,
+            opacity: f64,
+        ) {
+            pump_picker_with(tester, use_material3);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = theme_of(&tester, use_material3);
-            select_day_30(&mut tester, &theme);
+            let theme = theme_of(tester, use_material3);
+            select_day_30(tester, &theme);
             // Navigate to the grid.
-            tabs(&mut tester, 4);
+            tabs(tester, 4);
             tester.pump_and_settle();
             // Day 30 is selected and focused.
             assert_day_overlay(
-                &tester,
+                tester,
                 false,
                 theme.color_scheme.on_primary.with_opacity(opacity),
             );
         }
 
         #[allow(deprecated)]
-        fn day_overlay_selected_and_pressed(use_material3: bool, opacity: f64) {
-            let mut tester = pump_picker_with(use_material3);
-            let theme = theme_of(&tester, use_material3);
-            select_day_30(&mut tester, &theme);
-            let pointer = press_day_30(&mut tester);
+        fn day_overlay_selected_and_pressed(
+            tester: &mut WidgetTester,
+            use_material3: bool,
+            opacity: f64,
+        ) {
+            pump_picker_with(tester, use_material3);
+            let theme = theme_of(tester, use_material3);
+            select_day_30(tester, &theme);
+            let pointer = press_day_30(tester);
             assert_day_overlay(
-                &tester,
+                tester,
                 true,
                 theme.color_scheme.on_primary.with_opacity(opacity),
             );
@@ -6362,72 +6370,72 @@ mod tests {
 
         #[test]
         fn date_picker_day_overlay_color_resolves_hovered_state() {
-            with_main_thread_stack(|| day_overlay_hovered(true));
+            test_widgets(|tester| day_overlay_hovered(tester, true));
         }
 
         #[test]
         fn date_picker_day_overlay_color_resolves_focused_state() {
-            with_main_thread_stack(|| day_overlay_focused(true, 0.10));
+            test_widgets(|tester| day_overlay_focused(tester, true, 0.10));
         }
 
         #[test]
         fn date_picker_day_overlay_color_resolves_pressed_state() {
-            with_main_thread_stack(|| day_overlay_pressed(true, 0.10));
+            test_widgets(|tester| day_overlay_pressed(tester, true, 0.10));
         }
 
         // Regression test for https://github.com/flutter/flutter/issues/130586.
         #[test]
         fn date_picker_day_overlay_color_resolves_selected_and_hovered_state() {
-            with_main_thread_stack(|| day_overlay_selected_and_hovered(true));
+            test_widgets(|tester| day_overlay_selected_and_hovered(tester, true));
         }
 
         #[test]
         fn date_picker_day_overlay_color_resolves_selected_and_focused_state() {
-            with_main_thread_stack(|| day_overlay_selected_and_focused(true, 0.10));
+            test_widgets(|tester| day_overlay_selected_and_focused(tester, true, 0.10));
         }
 
         #[test]
         fn date_picker_day_overlay_color_resolves_selected_and_pressed_state() {
-            with_main_thread_stack(|| day_overlay_selected_and_pressed(true, 0.10));
+            test_widgets(|tester| day_overlay_selected_and_pressed(tester, true, 0.10));
         }
 
         #[test]
         fn material2_date_picker_day_overlay_color_resolves_hovered_state() {
-            with_main_thread_stack(|| day_overlay_hovered(false));
+            test_widgets(|tester| day_overlay_hovered(tester, false));
         }
 
         #[test]
         fn material2_date_picker_day_overlay_color_resolves_focused_state() {
-            with_main_thread_stack(|| day_overlay_focused(false, 0.12));
+            test_widgets(|tester| day_overlay_focused(tester, false, 0.12));
         }
 
         #[test]
         fn material2_date_picker_day_overlay_color_resolves_pressed_state() {
-            with_main_thread_stack(|| day_overlay_pressed(false, 0.12));
+            test_widgets(|tester| day_overlay_pressed(tester, false, 0.12));
         }
 
         #[test]
         fn material2_date_picker_day_overlay_color_resolves_selected_and_hovered_state() {
-            with_main_thread_stack(|| day_overlay_selected_and_hovered(false));
+            test_widgets(|tester| day_overlay_selected_and_hovered(tester, false));
         }
 
         #[test]
         fn material2_date_picker_day_overlay_color_resolves_selected_and_focused_state() {
-            with_main_thread_stack(|| day_overlay_selected_and_focused(false, 0.12));
+            test_widgets(|tester| day_overlay_selected_and_focused(tester, false, 0.12));
         }
 
         #[test]
         fn material2_date_picker_day_overlay_color_resolves_selected_and_pressed_state() {
-            with_main_thread_stack(|| day_overlay_selected_and_pressed(false, 0.38));
+            test_widgets(|tester| day_overlay_selected_and_pressed(tester, false, 0.38));
         }
 
         #[test]
         fn selecting_date_does_not_switch_picker_to_year_selection() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_date = Some(DateTime::utc(2020, 5, 10));
                 options.initial_calendar_mode = DatePickerMode::Year;
-                prepared(&options, |tester| {
+                prepared(tester, &options, |tester| {
                     pump_zero(tester);
                     tap_text(tester, "2017");
                     pump_zero(tester);
@@ -6455,10 +6463,10 @@ mod tests {
 
         /// Dart's `tester.view.physicalSize = size` at the default pixel ratio of 3.
         fn tester_of_physical_size(physical_size: Size) -> WidgetTester {
-            tester_of_size(Size::new(
-                physical_size.width() / 3.0,
-                physical_size.height() / 3.0,
-            ))
+            WidgetTester::with_physical_size(
+                waft_test::TestPlatform::new().on(TargetPlatform::Android),
+                physical_size,
+            )
         }
 
         fn top_right(tester: &WidgetTester, element: AnyElement) -> Offset {
@@ -6481,21 +6489,21 @@ mod tests {
 
         #[test]
         fn default_calendar_mode_layout_landscape() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_physical_size(Size::new(1920.0, 1080.0));
-                pump_dialog_m3(&mut tester, layout_dialog());
+            test_widgets(|_| {
+                let tester = &mut tester_of_physical_size(Size::new(1920.0, 1080.0));
+                pump_dialog_m3(tester, layout_dialog());
 
-                let help_text = tester.only_onstage_text("Select date");
-                let header_text = tester.only_onstage_text("Fri, Jan 15");
-                let sub_header_text = tester.only_onstage_text("January 2016");
-                assert_eq!(count_text(&tester, "Cancel"), 1);
-                assert_eq!(count_text(&tester, "OK"), 1);
+                let help_text = only_onstage_text(tester, "Select date");
+                let header_text = only_onstage_text(tester, "Fri, Jan 15");
+                let sub_header_text = only_onstage_text(tester, "January 2016");
+                assert_eq!(count_text(tester, "Cancel"), 1);
+                assert_eq!(count_text(tester, "OK"), 1);
                 let inset_padding = EdgeInsets::symmetric(24.0, 16.0);
 
                 // Test help text position.
-                let container = animated_container(&tester);
-                let dialog_top_left = top_left(&tester, container);
-                let help_text_top_left = top_left(&tester, help_text);
+                let container = animated_container(tester);
+                let dialog_top_left = top_left(tester, container);
+                let help_text_top_left = top_left(tester, help_text);
                 assert_near!(
                     help_text_top_left.dx(),
                     dialog_top_left.dx() + (inset_padding.horizontal() / 2.0)
@@ -6503,8 +6511,8 @@ mod tests {
                 assert_near!(help_text_top_left.dy(), dialog_top_left.dy() + 16.0);
 
                 // Test header text position.
-                let header_text_top_left = top_left(&tester, header_text);
-                let help_text_bottom_left = bottom_left(&tester, help_text);
+                let header_text_top_left = top_left(tester, header_text);
+                let help_text_bottom_left = bottom_left(tester, help_text);
                 assert_near!(
                     header_text_top_left.dx(),
                     dialog_top_left.dx() + (inset_padding.horizontal() / 2.0)
@@ -6512,11 +6520,11 @@ mod tests {
                 assert_near!(header_text_top_left.dy(), help_text_bottom_left.dy() + 16.0);
 
                 // Test switch button position.
-                let switch_button = icon_button_of(&tester, &Icons::edit_outlined());
-                let switch_button_top_left = top_left(&tester, switch_button);
-                let switch_button_bottom_left = bottom_left(&tester, switch_button);
-                let header_text_bottom_left = bottom_left(&tester, header_text);
-                let dialog_bottom_left = bottom_left(&tester, container);
+                let switch_button = icon_button_of(tester, &Icons::edit_outlined());
+                let switch_button_top_left = top_left(tester, switch_button);
+                let switch_button_bottom_left = bottom_left(tester, switch_button);
+                let header_text_bottom_left = bottom_left(tester, header_text);
+                let dialog_bottom_left = bottom_left(tester, container);
                 assert_near!(switch_button_top_left.dx(), dialog_top_left.dx() + 8.0);
                 assert_near!(switch_button_top_left.dy(), header_text_bottom_left.dy());
                 assert_near!(switch_button_bottom_left.dx(), dialog_top_left.dx() + 8.0);
@@ -6527,21 +6535,21 @@ mod tests {
 
                 // Test vertical divider position.
                 let divider = tester.find_by_type::<crate::divider::VerticalDivider>()[0];
-                let divider_top_left = top_left(&tester, divider);
-                let header_text_top_right = top_right(&tester, header_text);
+                let divider_top_left = top_left(tester, divider);
+                let header_text_top_right = top_right(tester, header_text);
                 assert_near!(divider_top_left.dx(), header_text_top_right.dx() + 16.0);
                 assert_near!(divider_top_left.dy(), dialog_top_left.dy());
 
                 // Test sub header text position.
-                let sub_header_text_top_left = top_left(&tester, sub_header_text);
-                let divider_top_right = top_right(&tester, divider);
+                let sub_header_text_top_left = top_left(tester, sub_header_text);
+                let divider_top_right = top_right(tester, divider);
                 assert_near!(sub_header_text_top_left.dx(), divider_top_right.dx() + 24.0);
                 assert_near!(sub_header_text_top_left.dy(), dialog_top_left.dy() + 16.0);
 
                 // Test sub header icon position.
                 let sub_header_icon = tester.find_by_icon(&Icons::arrow_drop_down());
-                let sub_header_icon_top_left = top_left(&tester, sub_header_icon);
-                let sub_header_text_top_right = top_right(&tester, sub_header_text);
+                let sub_header_icon_top_left = top_left(tester, sub_header_icon);
+                let sub_header_text_top_right = top_right(tester, sub_header_text);
                 assert_near!(
                     sub_header_icon_top_left.dx(),
                     sub_header_text_top_right.dx()
@@ -6550,8 +6558,8 @@ mod tests {
 
                 // Test calendar page view position.
                 let calendar_page_view = tester.find_by_type::<waft_widgets::PageView>()[0];
-                let calendar_page_view_top_left = top_left(&tester, calendar_page_view);
-                let sub_header_text_bottom_left = bottom_left(&tester, sub_header_text);
+                let calendar_page_view_top_left = top_left(tester, calendar_page_view);
+                let sub_header_text_bottom_left = bottom_left(tester, sub_header_text);
                 assert_near!(calendar_page_view_top_left.dx(), divider_top_right.dx());
                 assert_near!(
                     calendar_page_view_top_left.dy(),
@@ -6559,11 +6567,11 @@ mod tests {
                 );
 
                 // Test month navigation icons position.
-                let previous_month_button = icon_button_of(&tester, &Icons::chevron_left());
-                let next_month_button = icon_button_of(&tester, &Icons::chevron_right());
-                let previous_month_button_top_right = top_right(&tester, previous_month_button);
-                let next_month_button_top_right = top_right(&tester, next_month_button);
-                let dialog_top_right = top_right(&tester, container);
+                let previous_month_button = icon_button_of(tester, &Icons::chevron_left());
+                let next_month_button = icon_button_of(tester, &Icons::chevron_right());
+                let previous_month_button_top_right = top_right(tester, previous_month_button);
+                let next_month_button_top_right = top_right(tester, next_month_button);
+                let dialog_top_right = top_right(tester, container);
                 assert_near!(
                     next_month_button_top_right.dx(),
                     dialog_top_right.dx() - 4.0
@@ -6578,51 +6586,51 @@ mod tests {
                 );
 
                 // Test action buttons position.
-                let dialog_bottom_right = bottom_right(&tester, container);
-                let ok_button = text_button_of(&tester, "OK");
-                let cancel_button = text_button_of(&tester, "Cancel");
-                let ok_button_top_right = top_right(&tester, ok_button);
-                let cancel_button_top_right = top_right(&tester, cancel_button);
-                let calendar_page_view_bottom_right = bottom_right(&tester, calendar_page_view);
+                let dialog_bottom_right = bottom_right(tester, container);
+                let ok_button = text_button_of(tester, "OK");
+                let cancel_button = text_button_of(tester, "Cancel");
+                let ok_button_top_right = top_right(tester, ok_button);
+                let cancel_button_top_right = top_right(tester, cancel_button);
+                let calendar_page_view_bottom_right = bottom_right(tester, calendar_page_view);
                 assert_near!(ok_button_top_right.dx(), dialog_bottom_right.dx() - 8.0);
                 assert_near!(
                     ok_button_top_right.dy(),
                     calendar_page_view_bottom_right.dy() + 2.0
                 );
-                let ok_button_top_left = top_left(&tester, ok_button);
+                let ok_button_top_left = top_left(tester, ok_button);
                 assert_near!(cancel_button_top_right.dx(), ok_button_top_left.dx() - 8.0);
             });
         }
 
         #[test]
         fn default_calendar_mode_layout_portrait() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_physical_size(Size::new(1070.0, 1770.0));
-                pump_dialog_m3(&mut tester, layout_dialog());
+            test_widgets(|_| {
+                let tester = &mut tester_of_physical_size(Size::new(1070.0, 1770.0));
+                pump_dialog_m3(tester, layout_dialog());
 
-                let help_text = tester.only_onstage_text("Select date");
-                let header_text = tester.only_onstage_text("Fri, Jan 15");
-                let sub_header_text = tester.only_onstage_text("January 2016");
-                assert_eq!(count_text(&tester, "Cancel"), 1);
-                assert_eq!(count_text(&tester, "OK"), 1);
+                let help_text = only_onstage_text(tester, "Select date");
+                let header_text = only_onstage_text(tester, "Fri, Jan 15");
+                let sub_header_text = only_onstage_text(tester, "January 2016");
+                assert_eq!(count_text(tester, "Cancel"), 1);
+                assert_eq!(count_text(tester, "OK"), 1);
 
                 // Test help text position.
-                let container = animated_container(&tester);
-                let dialog_top_left = top_left(&tester, container);
-                let help_text_top_left = top_left(&tester, help_text);
+                let container = animated_container(tester);
+                let dialog_top_left = top_left(tester, container);
+                let help_text_top_left = top_left(tester, help_text);
                 assert_near!(help_text_top_left.dx(), dialog_top_left.dx() + 24.0);
                 assert_near!(help_text_top_left.dy(), dialog_top_left.dy() + 16.0);
 
                 // Test header text position
-                let header_text_top_left = top_left(&tester, header_text);
-                let help_text_bottom_left = bottom_left(&tester, help_text);
+                let header_text_top_left = top_left(tester, header_text);
+                let help_text_bottom_left = bottom_left(tester, help_text);
                 assert_near!(header_text_top_left.dx(), dialog_top_left.dx() + 24.0);
                 assert_near!(header_text_top_left.dy(), help_text_bottom_left.dy() + 28.0);
 
                 // Test switch button position.
-                let switch_button = icon_button_of(&tester, &Icons::edit_outlined());
-                let switch_button_top_right = top_right(&tester, switch_button);
-                let dialog_top_right = top_right(&tester, container);
+                let switch_button = icon_button_of(tester, &Icons::edit_outlined());
+                let switch_button_top_right = top_right(tester, switch_button);
+                let dialog_top_right = top_right(tester, container);
                 assert_near!(switch_button_top_right.dx(), dialog_top_right.dx() - 12.0);
                 assert_near!(
                     switch_button_top_right.dy(),
@@ -6631,14 +6639,14 @@ mod tests {
 
                 // Test horizontal divider position.
                 let divider = tester.find_by_type::<crate::divider::Divider>()[0];
-                let divider_top_left = top_left(&tester, divider);
-                let header_text_bottom_left = bottom_left(&tester, header_text);
+                let divider_top_left = top_left(tester, divider);
+                let header_text_bottom_left = bottom_left(tester, header_text);
                 assert_near!(divider_top_left.dx(), dialog_top_left.dx());
                 assert_near!(divider_top_left.dy(), header_text_bottom_left.dy() + 16.0);
 
                 // Test subHeaderText position.
-                let sub_header_text_top_left = top_left(&tester, sub_header_text);
-                let divider_bottom_left = bottom_left(&tester, divider);
+                let sub_header_text_top_left = top_left(tester, sub_header_text);
+                let divider_bottom_left = bottom_left(tester, divider);
                 assert_near!(sub_header_text_top_left.dx(), dialog_top_left.dx() + 24.0);
                 assert_near!(
                     sub_header_text_top_left.dy(),
@@ -6647,8 +6655,8 @@ mod tests {
 
                 // Test sub header icon position.
                 let sub_header_icon = tester.find_by_icon(&Icons::arrow_drop_down());
-                let sub_header_icon_top_left = top_left(&tester, sub_header_icon);
-                let sub_header_text_top_right = top_right(&tester, sub_header_text);
+                let sub_header_icon_top_left = top_left(tester, sub_header_icon);
+                let sub_header_text_top_right = top_right(tester, sub_header_text);
                 assert_near!(
                     sub_header_icon_top_left.dx(),
                     sub_header_text_top_right.dx()
@@ -6659,10 +6667,10 @@ mod tests {
                 );
 
                 // Test month navigation icons position.
-                let previous_month_button = icon_button_of(&tester, &Icons::chevron_left());
-                let next_month_button = icon_button_of(&tester, &Icons::chevron_right());
-                let previous_month_button_top_right = top_right(&tester, previous_month_button);
-                let next_month_button_top_right = top_right(&tester, next_month_button);
+                let previous_month_button = icon_button_of(tester, &Icons::chevron_left());
+                let next_month_button = icon_button_of(tester, &Icons::chevron_right());
+                let previous_month_button_top_right = top_right(tester, previous_month_button);
+                let next_month_button_top_right = top_right(tester, next_month_button);
                 assert_near!(
                     next_month_button_top_right.dx(),
                     dialog_top_right.dx() - 4.0
@@ -6678,8 +6686,8 @@ mod tests {
 
                 // Test calendar page view position.
                 let calendar_page_view = tester.find_by_type::<waft_widgets::PageView>()[0];
-                let calendar_page_view_top_left = top_left(&tester, calendar_page_view);
-                let sub_header_text_bottom_left = bottom_left(&tester, sub_header_text);
+                let calendar_page_view_top_left = top_left(tester, calendar_page_view);
+                let sub_header_text_bottom_left = bottom_left(tester, sub_header_text);
                 assert_near!(calendar_page_view_top_left.dx(), dialog_top_left.dx());
                 assert_near!(
                     calendar_page_view_top_left.dy(),
@@ -6687,13 +6695,13 @@ mod tests {
                 );
 
                 // Test action buttons position.
-                let dialog_bottom_right = bottom_right(&tester, container);
-                let ok_button = text_button_of(&tester, "OK");
-                let cancel_button = text_button_of(&tester, "Cancel");
-                let ok_button_top_right = top_right(&tester, ok_button);
-                let cancel_button_top_right = top_right(&tester, cancel_button);
-                let calendar_page_view_bottom_right = bottom_right(&tester, calendar_page_view);
-                let ok_button_top_left = top_left(&tester, ok_button);
+                let dialog_bottom_right = bottom_right(tester, container);
+                let ok_button = text_button_of(tester, "OK");
+                let cancel_button = text_button_of(tester, "Cancel");
+                let ok_button_top_right = top_right(tester, ok_button);
+                let cancel_button_top_right = top_right(tester, cancel_button);
+                let calendar_page_view_bottom_right = bottom_right(tester, calendar_page_view);
+                let ok_button_top_left = top_left(tester, ok_button);
                 assert_near!(ok_button_top_right.dx(), dialog_bottom_right.dx() - 8.0);
                 assert_near!(
                     ok_button_top_right.dy(),
@@ -6877,71 +6885,67 @@ mod tests {
 
         #[test]
         fn keyboard_can_toggle_to_calendar_entry_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                prepare_date_picker(&mut tester, &DatePickerOptions::new());
-                assert_eq!(text_field_count(&tester), 0);
+            test_widgets(|tester| {
+                prepare_date_picker(tester, &DatePickerOptions::new());
+                assert_eq!(text_field_count(tester), 0);
                 // Navigate to the entry toggle button and activate it
-                tabs(&mut tester, 5);
-                space(&mut tester);
+                tabs(tester, 5);
+                space(tester);
                 tester.pump_and_settle();
                 // Should be in the input mode
-                assert_eq!(text_field_count(&tester), 1);
+                assert_eq!(text_field_count(tester), 1);
             });
         }
 
         #[test]
         fn keyboard_can_toggle_to_year_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                prepare_date_picker(&mut tester, &DatePickerOptions::new());
-                assert_eq!(count_text(&tester, "2016"), 0);
+            test_widgets(|tester| {
+                prepare_date_picker(tester, &DatePickerOptions::new());
+                assert_eq!(count_text(tester, "2016"), 0);
                 // Navigate to the year selector and activate it
-                tab(&mut tester);
-                space(&mut tester);
+                tab(tester);
+                space(tester);
                 tester.pump_and_settle();
                 // The years should be visible
-                assert_eq!(count_text(&tester, "2016"), 1);
+                assert_eq!(count_text(tester, "2016"), 1);
             });
         }
 
         #[test]
         fn keyboard_can_navigate_next_previous_months() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                prepare_date_picker(&mut tester, &DatePickerOptions::new());
-                assert_eq!(count_text(&tester, "January 2016"), 1);
+            test_widgets(|tester| {
+                prepare_date_picker(tester, &DatePickerOptions::new());
+                assert_eq!(count_text(tester, "January 2016"), 1);
                 // Navigate to the previous month button and activate it twice
-                tabs(&mut tester, 2);
-                space(&mut tester);
+                tabs(tester, 2);
+                space(tester);
                 tester.pump_and_settle();
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
                 // Should be showing Nov 2015
-                assert_eq!(count_text(&tester, "November 2015"), 1);
+                assert_eq!(count_text(tester, "November 2015"), 1);
 
                 // Navigate to the next month button and activate it four times
-                tab(&mut tester);
+                tab(tester);
                 for _ in 0..4 {
-                    space(&mut tester);
+                    space(tester);
                     tester.pump_and_settle();
                 }
                 // Should be on Mar 2016
-                assert_eq!(count_text(&tester, "March 2016"), 1);
+                assert_eq!(count_text(tester, "March 2016"), 1);
             });
         }
 
         #[test]
         fn keyboard_can_navigate_date_grid_with_arrow_keys() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                let result = prepare_date_picker(&mut tester, &DatePickerOptions::new());
+            test_widgets(|tester| {
+                let result = prepare_date_picker(tester, &DatePickerOptions::new());
                 // Navigate to the grid
-                tabs(&mut tester, 4);
+                tabs(tester, 4);
 
                 // Navigate from Jan 15 to Jan 18 with arrow keys
                 arrows(
-                    &mut tester,
+                    tester,
                     &[
                         Arrow::Left,
                         Arrow::Up,
@@ -6955,14 +6959,14 @@ mod tests {
                 tester.pump_and_settle();
 
                 // Activate it
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate out of the grid and to the OK button
-                tabs(&mut tester, 3);
+                tabs(tester, 3);
 
                 // Activate OK
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Should have selected Jan 18
@@ -6972,37 +6976,36 @@ mod tests {
 
         #[test]
         fn keyboard_navigating_with_arrow_keys_scrolls_months() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                let result = prepare_date_picker(&mut tester, &DatePickerOptions::new());
+            test_widgets(|tester| {
+                let result = prepare_date_picker(tester, &DatePickerOptions::new());
                 // Navigate to the grid
-                tabs(&mut tester, 4);
+                tabs(tester, 4);
                 tester.pump_and_settle();
 
                 // Navigate from Jan 15 to Dec 31 with arrow keys
-                arrows(&mut tester, &[Arrow::Up, Arrow::Up, Arrow::Left]);
+                arrows(tester, &[Arrow::Up, Arrow::Up, Arrow::Left]);
                 tester.pump_and_settle();
 
                 // Should have scrolled to Dec 2015
-                assert_eq!(count_text(&tester, "December 2015"), 1);
+                assert_eq!(count_text(tester, "December 2015"), 1);
 
                 // Navigate from Dec 31 to Nov 26 with arrow keys
-                arrows(&mut tester, &[Arrow::Up; 5]);
+                arrows(tester, &[Arrow::Up; 5]);
                 tester.pump_and_settle();
 
                 // Should have scrolled to Nov 2015
-                assert_eq!(count_text(&tester, "November 2015"), 1);
+                assert_eq!(count_text(tester, "November 2015"), 1);
 
                 // Activate it
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate out of the grid and to the OK button
-                tabs(&mut tester, 3);
+                tabs(tester, 3);
                 tester.pump_and_settle();
 
                 // Activate OK
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 assert_eq!(picked_date(&result), Some(DateTime::utc(2015, 11, 26)));
@@ -7011,18 +7014,17 @@ mod tests {
 
         #[test]
         fn keyboard_rtl_text_direction_reverses_the_horizontal_arrow_key_navigation() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let mut options = DatePickerOptions::new();
                 options.builder = Some(directionality_builder(TextDirection::Rtl));
-                let result = prepare_date_picker(&mut tester, &options);
+                let result = prepare_date_picker(tester, &options);
                 // Navigate to the grid
-                tabs(&mut tester, 4);
+                tabs(tester, 4);
                 tester.pump_and_settle();
 
                 // Navigate from Jan 15 to 19 with arrow keys
                 arrows(
-                    &mut tester,
+                    tester,
                     &[
                         Arrow::Right,
                         Arrow::Right,
@@ -7035,15 +7037,15 @@ mod tests {
                 tester.pump_and_settle();
 
                 // Activate it
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate out of the grid and to the OK button
-                tabs(&mut tester, 3);
+                tabs(tester, 3);
                 tester.pump_and_settle();
 
                 // Activate OK
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 assert_eq!(picked_date(&result), Some(DateTime::utc(2016, 1, 19)));
@@ -7068,12 +7070,11 @@ mod tests {
 
         #[test]
         fn material3_input_mode_default_input_decoration() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let mut options = input_group_options();
                 options.use_material3 = true;
-                prepare_date_picker(&mut tester, &options);
-                let decoration = text_field_decoration(&tester);
+                prepare_date_picker(tester, &options);
+                let decoration = text_field_decoration(tester);
                 assert_eq!(
                     decoration.border,
                     Some(crate::input_border::InputBorderRef::new(
@@ -7089,10 +7090,9 @@ mod tests {
 
         #[test]
         fn material2_input_mode_default_input_decoration() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                prepare_date_picker(&mut tester, &input_group_options());
-                let decoration = text_field_decoration(&tester);
+            test_widgets(|tester| {
+                prepare_date_picker(tester, &input_group_options());
+                let decoration = text_field_decoration(tester);
                 assert_eq!(
                     decoration.border,
                     Some(crate::input_border::InputBorderRef::new(
@@ -7108,11 +7108,10 @@ mod tests {
 
         #[test]
         fn input_mode_keyboard_type_is_used() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let mut options = input_group_options();
                 options.keyboard_type = Some(TextInputType::TEXT);
-                prepare_date_picker(&mut tester, &options);
+                prepare_date_picker(tester, &options);
                 let field = tester.find_by_type::<TextField>()[0];
                 let keyboard_type = tester.widget(field, |field: &TextField| field.keyboard_type);
                 assert_eq!(keyboard_type, Some(TextInputType::TEXT));
@@ -7121,62 +7120,84 @@ mod tests {
 
         #[test]
         fn input_mode_invalid_entered_text_shows_error_on_autovalidate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                prepare_date_picker(&mut tester, &input_group_options());
-                enter_text(&mut tester, "");
+            test_widgets(|tester| {
+                prepare_date_picker(tester, &input_group_options());
+                enter_text(tester, "");
 
                 // Enter some text to trigger autovalidate.
-                enter_text(&mut tester, "xyz");
-                tap_text(&mut tester, "OK");
+                enter_text(tester, "xyz");
+                tap_text(tester, "OK");
                 tester.pump_and_settle();
 
                 // Invalid format validation error should be shown.
-                assert_eq!(count_text(&tester, "Invalid format."), 1);
+                assert_eq!(count_text(tester, "Invalid format."), 1);
 
                 // Clear the text.
-                enter_text(&mut tester, "");
+                enter_text(tester, "");
 
                 // Enter an invalid date that is too long while autovalidate is still on.
-                enter_text(&mut tester, "10/05/2023666777889");
-                pump_zero(&mut tester);
+                enter_text(tester, "10/05/2023666777889");
+                pump_zero(tester);
 
                 // Invalid format validation error should be shown.
-                assert_eq!(count_text(&tester, "Invalid format."), 1);
+                assert_eq!(count_text(tester, "Invalid format."), 1);
             });
         }
 
         #[test]
         fn landscape_input_only_date_picker_headers_use_headline_small_in_portrait() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(1070.0, 1770.0));
+            test_widgets_sized(Size::new(1070.0, 1770.0), |tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_entry_mode = DatePickerEntryMode::Input;
                 options.use_material3 = true;
-                prepare_date_picker(&mut tester, &options);
-                assert_eq!(header_font_size(&tester, "Fri, Jan 15"), Some(32.0));
-                tap_text(&mut tester, "Cancel");
+                prepare_date_picker(tester, &options);
+                assert_eq!(header_font_size(tester, "Fri, Jan 15"), Some(32.0));
+                tap_text(tester, "Cancel");
                 tester.pump_and_settle();
             });
         }
 
         #[test]
         fn landscape_input_only_date_picker_headers_use_headline_small_in_landscape() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(1770.0, 1070.0));
+            test_widgets_sized(Size::new(1770.0, 1070.0), |tester| {
                 let mut options = DatePickerOptions::new();
                 options.initial_entry_mode = DatePickerEntryMode::Input;
                 options.use_material3 = true;
-                prepare_date_picker(&mut tester, &options);
-                assert_eq!(header_font_size(&tester, "Fri, Jan 15"), Some(24.0));
-                tap_text(&mut tester, "Cancel");
+                prepare_date_picker(tester, &options);
+                assert_eq!(header_font_size(tester, "Fri, Jan 15"), Some(24.0));
+                tap_text(tester, "Cancel");
                 tester.pump_and_settle();
+            });
+        }
+
+        /// A regression test for https://github.com/flutter/flutter/issues/131989.
+        #[test]
+        fn dialog_contents_do_not_overflow_when_resized_during_orientation_change() {
+            test_widgets(|_| {
+                // Initial window size is wide for landscape mode.
+                let tester = &mut tester_of_size(WIDE_WINDOW_SIZE);
+                let mut options = DatePickerOptions::new();
+                options.use_material3 = true;
+                prepare_date_picker(tester, &options);
+                assert_eq!(
+                    dialog_container_size(tester),
+                    CALENDAR_LANDSCAPE_DIALOG_SIZE
+                );
+
+                // Change window size to narrow for portrait mode.
+                resize_view(tester, NARROW_WINDOW_SIZE);
+                tester.pump();
+                tester.pump_and_settle();
+                assert_eq!(
+                    dialog_container_size(tester),
+                    CALENDAR_PORTRAIT_DIALOG_SIZE_M3
+                );
             });
         }
 
         #[test]
         fn screen_configurations_show_and_close_the_picker_without_failing() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 // Common screen size roughly based on a Pixel 1, and a small one based on a LG K130.
                 for size in [
                     Size::new(1070.0, 1770.0),
@@ -7184,9 +7205,9 @@ mod tests {
                     Size::new(320.0, 521.0),
                     Size::new(521.0, 320.0),
                 ] {
-                    let mut tester = tester_of_size(size);
-                    let result = prepare_date_picker(&mut tester, &DatePickerOptions::new());
-                    tap_text(&mut tester, "OK");
+                    let tester = &mut tester_of_size(size);
+                    let result = prepare_date_picker(tester, &DatePickerOptions::new());
+                    tap_text(tester, "OK");
                     tester.pump_and_settle();
                     assert_eq!(
                         picked_date(&result),
@@ -7199,10 +7220,9 @@ mod tests {
 
         #[test]
         fn date_picker_dialog_with_updated_inset_padding() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 pump_dialog_m3(
-                    &mut tester,
+                    tester,
                     layout_dialog().inset_padding(EdgeInsets::from_ltrb(10.0, 20.0, 30.0, 40.0)),
                 );
                 let dialog = tester.find_by_type::<Dialog>()[0];
@@ -7216,8 +7236,7 @@ mod tests {
 
         #[test]
         fn date_picker_dialog_renders_at_zero_area() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 let theme = m3(&tester.cell.borrow());
                 tester.pump_widget(material_app(
                     theme,
@@ -7229,7 +7248,7 @@ mod tests {
                         .into_widget(),
                 ));
                 let dialog = tester.find_by_type::<DatePickerDialog>()[0];
-                assert_eq!(size_of(&tester, dialog), Size::new(0.0, 0.0));
+                assert_eq!(size_of(tester, dialog), Size::new(0.0, 0.0));
             });
         }
 
@@ -7246,28 +7265,27 @@ mod tests {
 
         #[test]
         fn displays_calendar_based_on_the_calendar_delegate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
+            test_widgets(|tester| {
                 pump_dialog_m3(
-                    &mut tester,
+                    tester,
                     layout_dialog().calendar_delegate(Rc::new(TestDelegate::Calendar)),
                 );
-                let next_month_button = icon_button_of(&tester, &Icons::chevron_right());
+                let next_month_button = icon_button_of(tester, &Icons::chevron_right());
 
-                assert_eq!(count_text(&tester, "January 2016"), 1);
-                assert_eq!(last_day_text(&tester).as_deref(), Some("28"));
+                assert_eq!(count_text(tester, "January 2016"), 1);
+                assert_eq!(last_day_text(tester).as_deref(), Some("28"));
 
-                let center = center_of(&tester, next_month_button);
+                let center = center_of(tester, next_month_button);
                 tester.tap(center, 1);
                 tester.pump_and_settle();
-                assert_eq!(count_text(&tester, "February 2016"), 1);
-                assert_eq!(last_day_text(&tester).as_deref(), Some("21"));
+                assert_eq!(count_text(tester, "February 2016"), 1);
+                assert_eq!(last_day_text(tester).as_deref(), Some("21"));
 
-                let center = center_of(&tester, next_month_button);
+                let center = center_of(tester, next_month_button);
                 tester.tap(center, 1);
                 tester.pump_and_settle();
-                assert_eq!(count_text(&tester, "March 2016"), 1);
-                assert_eq!(last_day_text(&tester).as_deref(), Some("28"));
+                assert_eq!(count_text(tester, "March 2016"), 1);
+                assert_eq!(last_day_text(tester).as_deref(), Some("28"));
             });
         }
 
@@ -7290,14 +7308,13 @@ mod tests {
 
         #[test]
         fn date_text_input_formatter_applies_input_formatters_and_allows_text_entry_parsing() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                let result = open_date_input_picker(&mut tester);
+            test_widgets(|tester| {
+                let result = open_date_input_picker(tester);
 
-                enter_text(&mut tester, "20240620");
-                pump_zero(&mut tester);
+                enter_text(tester, "20240620");
+                pump_zero(tester);
 
-                tap_text(&mut tester, "OK");
+                tap_text(tester, "OK");
                 tester.pump_and_settle();
 
                 assert_eq!(picked_date(&result), Some(DateTime::utc(2024, 6, 20)));
@@ -7306,29 +7323,27 @@ mod tests {
 
         #[test]
         fn date_text_input_formatter_filters_non_digit_input_via_input_formatters() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                open_date_input_picker(&mut tester);
+            test_widgets(|tester| {
+                open_date_input_picker(tester);
 
-                enter_text(&mut tester, "2024-06-20");
-                pump_zero(&mut tester);
+                enter_text(tester, "2024-06-20");
+                pump_zero(tester);
 
                 // Verify that hyphens were removed by the formatter.
-                assert_eq!(tester.text_field_controller_text(), "20240620");
+                assert_eq!(text_field_controller_text(tester), "20240620");
             });
         }
 
         #[test]
         fn date_text_input_formatter_rejects_alphabetic_characters_via_input_formatters() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(Size::new(800.0, 600.0));
-                open_date_input_picker(&mut tester);
+            test_widgets(|tester| {
+                open_date_input_picker(tester);
 
-                enter_text(&mut tester, "20ab24cd0620");
-                pump_zero(&mut tester);
+                enter_text(tester, "20ab24cd0620");
+                pump_zero(tester);
 
                 // Only digits should remain in the controller.
-                assert_eq!(tester.text_field_controller_text(), "20240620");
+                assert_eq!(text_field_controller_text(tester), "20240620");
             });
         }
     }
@@ -7351,8 +7366,8 @@ mod tests {
 
         use super::*;
         use super::{
-            PickerResult, enter_text_in_field, picked_range, range, tap_icon, tap_text,
-            tester_of_size, text_field_count,
+            PickerResult, enter_text_in_field, picked_range, range, resize_view, tap_icon,
+            tap_text, tester_of_size, text_field_count,
         };
         use crate::chip::tests::{center_of, size_of};
         use crate::colors::Colors;
@@ -7361,10 +7376,7 @@ mod tests {
         use crate::elevated_button::ElevatedButton;
         use crate::icons::Icons;
         use crate::material::Material;
-        use crate::test_support::{
-            PaintCall, PaintInspection, WidgetTester, material_app, paints_calls,
-            with_main_thread_stack,
-        };
+        use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
         use crate::text_field::TextField;
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::{m2, m3};
@@ -7539,56 +7551,53 @@ mod tests {
             steps: impl FnOnce(&mut WidgetTester),
             action: &str,
         ) -> Option<DateTimeRange> {
-            let mut tester = tester_of_size(size);
-            let result = prepare_picker(&mut tester, prepare);
-            steps(&mut tester);
-            tap_text(&mut tester, action);
+            let tester = &mut tester_of_size(size);
+            let result = prepare_picker(tester, prepare);
+            steps(tester);
+            tap_text(tester, action);
             tester.pump_and_settle();
             picked_range(&result)
         }
 
         #[test]
         fn range_save_and_help_text_is_used_in_the_dialog() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.help_text = Some("help".to_string());
                 prepare.save_text = Some("make it so".to_string());
-                prepare_picker(&mut tester, &prepare);
-                assert_eq!(count_text(&tester, "help"), 1);
-                assert_eq!(count_text(&tester, "make it so"), 1);
+                prepare_picker(tester, &prepare);
+                assert_eq!(count_text(tester, "help"), 1);
+                assert_eq!(count_text(tester, "make it so"), 1);
             });
         }
 
         #[test]
         fn long_help_text_does_not_cutoff_the_save_button() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 let help_text = "long helpText".repeat(100);
                 prepare.help_text = Some(help_text.clone());
                 prepare.save_text = Some("make it so".to_string());
-                prepare_picker(&mut tester, &prepare);
-                assert_eq!(count_text(&tester, &help_text), 1);
-                assert_eq!(count_text(&tester, "make it so"), 1);
+                prepare_picker(tester, &prepare);
+                assert_eq!(count_text(tester, &help_text), 1);
+                assert_eq!(count_text(tester, "make it so"), 1);
             });
         }
 
         #[test]
         fn material3_has_sentence_case_labels() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.use_material3 = true;
-                prepare_picker(&mut tester, &prepare);
-                assert_eq!(count_text(&tester, "Save"), 1);
-                assert_eq!(count_text(&tester, "Select range"), 1);
+                prepare_picker(tester, &prepare);
+                assert_eq!(count_text(tester, "Save"), 1);
+                assert_eq!(count_text(tester, "Select range"), 1);
             });
         }
 
         #[test]
         fn initial_date_is_the_default() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let result = pick_range(&Prepare::new(), default_size(), |_tester| {}, "SAVE");
                 assert_eq!(result, Some(range((2016, 1, 15), (2016, 1, 25))));
             });
@@ -7596,54 +7605,50 @@ mod tests {
 
         #[test]
         fn last_month_header_should_be_visible_if_last_date_is_selected() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range =
                     Some(DateTimeRange::new(prepare.last_date, prepare.last_date));
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 // December header should be showing, but no November
-                assert_eq!(count_text(&tester, "December 2016"), 1);
-                assert_eq!(count_text(&tester, "November 2016"), 0);
+                assert_eq!(count_text(tester, "December 2016"), 1);
+                assert_eq!(count_text(tester, "November 2016"), 0);
             });
         }
 
         #[test]
         fn first_month_header_should_be_visible_if_first_date_is_selected() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range =
                     Some(DateTimeRange::new(prepare.first_date, prepare.first_date));
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 // January and February headers should be showing, but no March
-                assert_eq!(count_text(&tester, "January 2015"), 1);
-                assert_eq!(count_text(&tester, "February 2015"), 1);
-                assert_eq!(count_text(&tester, "March 2015"), 0);
+                assert_eq!(count_text(tester, "January 2015"), 1);
+                assert_eq!(count_text(tester, "February 2015"), 1);
+                assert_eq!(count_text(tester, "March 2015"), 0);
             });
         }
 
         #[test]
         fn current_month_header_should_be_visible_if_no_date_is_selected() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.current_date = Some(DateTime::utc(2016, 9, 1));
                 prepare.initial_date_range = None;
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 // September and October headers should be showing, but no August
-                assert_eq!(count_text(&tester, "September 2016"), 1);
-                assert_eq!(count_text(&tester, "October 2016"), 1);
-                assert_eq!(count_text(&tester, "August 2016"), 0);
+                assert_eq!(count_text(tester, "September 2016"), 1);
+                assert_eq!(count_text(tester, "October 2016"), 1);
+                assert_eq!(count_text(tester, "August 2016"), 0);
             });
         }
 
         #[test]
         fn can_cancel() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                let result = prepare_picker(&mut tester, &Prepare::new());
-                tap_icon(&mut tester, &Icons::close());
+            test_widgets(|tester| {
+                let result = prepare_picker(tester, &Prepare::new());
+                tap_icon(tester, &Icons::close());
                 assert!(is_completed(&result));
                 assert_eq!(picked_range(&result), None);
             });
@@ -7651,7 +7656,7 @@ mod tests {
 
         #[test]
         fn can_select_a_range() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let result = pick_range(
                     &Prepare::new(),
                     default_size(),
@@ -7667,7 +7672,7 @@ mod tests {
 
         #[test]
         fn tapping_earlier_date_resets_selected_range() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let result = pick_range(
                     &Prepare::new(),
                     default_size(),
@@ -7684,7 +7689,7 @@ mod tests {
 
         #[test]
         fn can_select_single_day_range() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let result = pick_range(
                     &Prepare::new(),
                     default_size(),
@@ -7700,7 +7705,7 @@ mod tests {
 
         #[test]
         fn cannot_select_a_day_outside_bounds() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 15)));
                 prepare.first_date = DateTime::utc(2017, 1, 12);
@@ -7723,7 +7728,7 @@ mod tests {
 
         #[test]
         fn can_select_a_range_even_if_the_range_includes_non_selectable_days() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let mut prepare = Prepare::new();
                 prepare.selectable_day_predicate = Some(Rc::new(|day, _, _| day.day() != 13));
                 let result = pick_range(
@@ -7742,7 +7747,7 @@ mod tests {
 
         #[test]
         fn cannot_select_a_day_inside_bounds_but_not_selectable() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 14)));
                 prepare.first_date = DateTime::utc(2017, 1, 12);
@@ -7764,7 +7769,7 @@ mod tests {
 
         #[test]
         fn selectable_date_becoming_non_selectable_when_selected_start_day() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let mut prepare = Prepare::new();
                 prepare.selectable_day_predicate =
                     Some(Rc::new(|day, selected_start, selected_end| {
@@ -7792,8 +7797,7 @@ mod tests {
 
         #[test]
         fn selectable_day_predicate_should_be_called_with_the_selected_start_and_end_dates() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 15)));
                 prepare.first_date = DateTime::utc(2017, 1, 12);
@@ -7808,7 +7812,7 @@ mod tests {
                         true
                     })
                 });
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 assert!(
                     calls.get() > 0,
                     "the predicate is asked about the days shown"
@@ -7818,77 +7822,68 @@ mod tests {
 
         #[test]
         fn can_switch_from_calendar_to_input_entry_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::new());
-                assert_eq!(field_count(&tester), 0);
-                tap_icon(&mut tester, &Icons::edit());
-                assert_eq!(field_count(&tester), 2);
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::new());
+                assert_eq!(field_count(tester), 0);
+                tap_icon(tester, &Icons::edit());
+                assert_eq!(field_count(tester), 2);
             });
         }
 
         #[test]
         fn can_switch_from_input_to_calendar_entry_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_entry_mode = DatePickerEntryMode::Input;
-                prepare_picker(&mut tester, &prepare);
-                assert_eq!(field_count(&tester), 2);
-                tap_icon(&mut tester, &Icons::calendar_today());
-                assert_eq!(field_count(&tester), 0);
+                prepare_picker(tester, &prepare);
+                assert_eq!(field_count(tester), 2);
+                tap_icon(tester, &Icons::calendar_today());
+                assert_eq!(field_count(tester), 0);
             });
         }
 
         #[test]
         fn can_not_switch_out_of_calendar_only_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_entry_mode = DatePickerEntryMode::CalendarOnly;
-                prepare_picker(&mut tester, &prepare);
-                assert_eq!(field_count(&tester), 0);
-                assert!(tester.find_onstage_by_icon(&Icons::edit()).is_empty());
+                prepare_picker(tester, &prepare);
+                assert_eq!(field_count(tester), 0);
+                assert!(find_onstage_by_icon(tester, &Icons::edit()).is_empty());
             });
         }
 
         #[test]
         fn can_not_switch_out_of_input_only_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_entry_mode = DatePickerEntryMode::InputOnly;
-                prepare_picker(&mut tester, &prepare);
-                assert_eq!(field_count(&tester), 2);
-                assert!(
-                    tester
-                        .find_onstage_by_icon(&Icons::calendar_today())
-                        .is_empty()
-                );
+                prepare_picker(tester, &prepare);
+                assert_eq!(field_count(tester), 2);
+                assert!(find_onstage_by_icon(tester, &Icons::calendar_today()).is_empty());
             });
         }
 
         #[test]
         fn input_only_mode_should_validate_date() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_entry_mode = DatePickerEntryMode::InputOnly;
                 prepare.error_invalid_text = Some("oops".to_string());
-                prepare_picker(&mut tester, &prepare);
-                enter_in(&mut tester, 0, "08/08/2014");
-                enter_in(&mut tester, 1, "08/08/2014");
-                assert_eq!(count_text(&tester, "oops"), 0);
+                prepare_picker(tester, &prepare);
+                enter_in(tester, 0, "08/08/2014");
+                enter_in(tester, 1, "08/08/2014");
+                assert_eq!(count_text(tester, "oops"), 0);
 
-                tap_text(&mut tester, "OK");
+                tap_text(tester, "OK");
                 tester.pump_and_settle();
-                assert_eq!(count_text(&tester, "oops"), 2);
+                assert_eq!(count_text(tester, "oops"), 2);
             });
         }
 
         #[test]
         fn switching_to_input_mode_keeps_selected_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let result = pick_range(
                     &Prepare::new(),
                     default_size(),
@@ -7917,33 +7912,32 @@ mod tests {
 
         #[test]
         fn material3_default_layout_calendar_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.use_material3 = true;
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
 
-                let help_text = tester.only_onstage_text("Select range");
-                let first_date_header_text = tester.only_onstage_text("Jan 15");
-                let last_date_header_text = tester.only_onstage_text("Jan 25, 2016");
-                assert_eq!(count_text(&tester, "Save"), 1);
+                let help_text = only_onstage_text(tester, "Select range");
+                let first_date_header_text = only_onstage_text(tester, "Jan 15");
+                let last_date_header_text = only_onstage_text(tester, "Jan 25, 2016");
+                assert_eq!(count_text(tester, "Save"), 1);
 
                 // Test the close button position.
                 let close_button = tester.ancestor_of_type::<Center>(
                     tester.find_by_type::<crate::icon_button::IconButton>()[0],
                 );
-                let close_button_bottom_right = bottom_right(&tester, close_button);
-                let help_text_top_left = top_left(&tester, help_text);
+                let close_button_bottom_right = bottom_right(tester, close_button);
+                let help_text_top_left = top_left(tester, help_text);
                 assert_near!(close_button_bottom_right.dx(), 56.0);
                 assert_near!(close_button_bottom_right.dy(), help_text_top_left.dy());
 
                 // Test the save and entry buttons position.
                 let save_button_bottom_left = bottom_left(
-                    &tester,
+                    tester,
                     tester.find_by_type::<crate::text_button::TextButton>()[0],
                 );
                 let entry_button_bottom_left =
-                    bottom_left(&tester, icon_button_of(&tester, &Icons::edit_outlined()));
+                    bottom_left(tester, icon_button_of(tester, &Icons::edit_outlined()));
                 assert_near!(save_button_bottom_left.dx(), 711.6);
                 assert_near!(save_button_bottom_left.dy(), help_text_top_left.dy());
                 assert_near!(
@@ -7953,7 +7947,7 @@ mod tests {
                 assert_near!(entry_button_bottom_left.dy(), help_text_top_left.dy());
 
                 // Test help text position.
-                let help_text_bottom_left = bottom_left(&tester, help_text);
+                let help_text_bottom_left = bottom_left(tester, help_text);
                 assert_near!(help_text_bottom_left.dx(), 72.0);
                 assert_near!(
                     help_text_bottom_left.dy(),
@@ -7961,8 +7955,8 @@ mod tests {
                 );
 
                 // Test the header position.
-                let first_date_header_top_left = top_left(&tester, first_date_header_text);
-                let last_date_header_top_left = top_left(&tester, last_date_header_text);
+                let first_date_header_top_left = top_left(tester, first_date_header_text);
+                let last_date_header_top_left = top_left(tester, last_date_header_text);
                 assert_near!(first_date_header_top_left.dx(), 72.0);
                 assert_near!(
                     first_date_header_top_left.dy(),
@@ -7979,8 +7973,8 @@ mod tests {
 
                 // Test the day headers position.
                 let day_headers_grid = tester.find_by_type::<waft_widgets::GridView>()[0];
-                let day_headers_grid_top_left = top_left(&tester, day_headers_grid);
-                let first_date_header_bottom_left = bottom_left(&tester, first_date_header_text);
+                let day_headers_grid_top_left = top_left(tester, day_headers_grid);
+                let first_date_header_bottom_left = bottom_left(tester, first_date_header_text);
                 assert_near!(day_headers_grid_top_left.dx(), (800.0 - 384.0) / 2.0);
                 assert_near!(
                     day_headers_grid_top_left.dy(),
@@ -7990,8 +7984,8 @@ mod tests {
                 // Test the calendar custom scroll view position.
                 let calendar_scroll_view =
                     tester.find_by_type::<waft_widgets::CustomScrollView>()[0];
-                let calendar_scroll_view_top_left = top_left(&tester, calendar_scroll_view);
-                let day_headers_grid_bottom_left = bottom_left(&tester, day_headers_grid);
+                let calendar_scroll_view_top_left = top_left(tester, calendar_scroll_view);
+                let day_headers_grid_bottom_left = bottom_left(tester, day_headers_grid);
                 assert_near!(calendar_scroll_view_top_left.dx(), 0.0);
                 assert_near!(
                     calendar_scroll_view_top_left.dy(),
@@ -8002,19 +7996,18 @@ mod tests {
 
         #[test]
         fn material2_default_layout_calendar_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::new());
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::new());
 
-                let help_text = tester.only_onstage_text("SELECT RANGE");
-                let first_date_header_text = tester.only_onstage_text("Jan 15");
-                let last_date_header_text = tester.only_onstage_text("Jan 25, 2016");
-                assert_eq!(count_text(&tester, "SAVE"), 1);
+                let help_text = only_onstage_text(tester, "SELECT RANGE");
+                let first_date_header_text = only_onstage_text(tester, "Jan 15");
+                let last_date_header_text = only_onstage_text(tester, "Jan 25, 2016");
+                assert_eq!(count_text(tester, "SAVE"), 1);
 
                 // Test the close button position.
                 let close_button = tester.find_by_type::<crate::action_buttons::CloseButton>()[0];
-                let close_button_bottom_right = bottom_right(&tester, close_button);
-                let help_text_top_left = top_left(&tester, help_text);
+                let close_button_bottom_right = bottom_right(tester, close_button);
+                let help_text_top_left = top_left(tester, help_text);
                 assert_near!(close_button_bottom_right.dx(), 56.0);
                 assert_near!(
                     close_button_bottom_right.dy(),
@@ -8023,11 +8016,11 @@ mod tests {
 
                 // Test the save and entry buttons position.
                 let save_button_bottom_left = bottom_left(
-                    &tester,
+                    tester,
                     tester.find_by_type::<crate::text_button::TextButton>()[0],
                 );
                 let entry_button_bottom_left =
-                    bottom_left(&tester, icon_button_of(&tester, &Icons::edit()));
+                    bottom_left(tester, icon_button_of(tester, &Icons::edit()));
                 assert_near!(save_button_bottom_left.dx(), 800.0 - 80.0);
                 assert_near!(save_button_bottom_left.dy(), help_text_top_left.dy() - 6.0);
                 assert_near!(
@@ -8037,7 +8030,7 @@ mod tests {
                 assert_near!(entry_button_bottom_left.dy(), help_text_top_left.dy() - 6.0);
 
                 // Test help text position.
-                let help_text_bottom_left = bottom_left(&tester, help_text);
+                let help_text_bottom_left = bottom_left(tester, help_text);
                 assert_near!(help_text_bottom_left.dx(), 72.0);
                 assert_near!(
                     help_text_bottom_left.dy(),
@@ -8045,8 +8038,8 @@ mod tests {
                 );
 
                 // Test the header position.
-                let first_date_header_top_left = top_left(&tester, first_date_header_text);
-                let last_date_header_top_left = top_left(&tester, last_date_header_text);
+                let first_date_header_top_left = top_left(tester, first_date_header_text);
+                let last_date_header_top_left = top_left(tester, last_date_header_text);
                 assert_near!(first_date_header_top_left.dx(), 72.0);
                 assert_near!(
                     first_date_header_top_left.dy(),
@@ -8063,8 +8056,8 @@ mod tests {
 
                 // Test the day headers position.
                 let day_headers_grid = tester.find_by_type::<waft_widgets::GridView>()[0];
-                let day_headers_grid_top_left = top_left(&tester, day_headers_grid);
-                let first_date_header_bottom_left = bottom_left(&tester, first_date_header_text);
+                let day_headers_grid_top_left = top_left(tester, day_headers_grid);
+                let first_date_header_bottom_left = bottom_left(tester, first_date_header_text);
                 assert_near!(day_headers_grid_top_left.dx(), (800.0 - 384.0) / 2.0);
                 assert_near!(
                     day_headers_grid_top_left.dy(),
@@ -8074,8 +8067,8 @@ mod tests {
                 // Test the calendar custom scroll view position.
                 let calendar_scroll_view =
                     tester.find_by_type::<waft_widgets::CustomScrollView>()[0];
-                let calendar_scroll_view_top_left = top_left(&tester, calendar_scroll_view);
-                let day_headers_grid_bottom_left = bottom_left(&tester, day_headers_grid);
+                let calendar_scroll_view_top_left = top_left(tester, calendar_scroll_view);
+                let day_headers_grid_bottom_left = bottom_left(tester, day_headers_grid);
                 assert_near!(calendar_scroll_view_top_left.dx(), 0.0);
                 assert_near!(
                     calendar_scroll_view_top_left.dy(),
@@ -8119,13 +8112,12 @@ mod tests {
 
         #[test]
         fn material3_default_dialog_properties_calendar_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.use_material3 = true;
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 let theme = m3(&tester.cell.borrow());
-                let properties = dialog_properties(&tester);
+                let properties = dialog_properties(tester);
                 assert_eq!(
                     properties.color,
                     Some(theme.color_scheme.surface_container_high())
@@ -8141,11 +8133,10 @@ mod tests {
 
         #[test]
         fn material2_default_dialog_properties_calendar_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::new());
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::new());
                 let theme = m2(&tester.cell.borrow());
-                let properties = dialog_properties(&tester);
+                let properties = dialog_properties(tester);
                 assert_eq!(properties.color, Some(theme.color_scheme.surface));
                 assert_eq!(properties.shadow_color, Some(Colors::TRANSPARENT));
                 assert_eq!(properties.surface_tint_color, Some(Colors::TRANSPARENT));
@@ -8158,13 +8149,12 @@ mod tests {
 
         #[test]
         fn material3_default_dialog_properties_input_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::input_mode();
                 prepare.use_material3 = true;
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 let theme = m3(&tester.cell.borrow());
-                let properties = dialog_properties(&tester);
+                let properties = dialog_properties(tester);
                 assert_eq!(
                     properties.color,
                     Some(theme.color_scheme.surface_container_high())
@@ -8183,11 +8173,10 @@ mod tests {
 
         #[test]
         fn material2_default_dialog_properties_input_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::input_mode());
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::input_mode());
                 let theme = m2(&tester.cell.borrow());
-                let properties = dialog_properties(&tester);
+                let properties = dialog_properties(tester);
                 assert_eq!(properties.color, Some(theme.color_scheme.surface));
                 assert_eq!(properties.shadow_color, Some(theme.shadow_color));
                 assert_eq!(properties.surface_tint_color, None);
@@ -8203,11 +8192,10 @@ mod tests {
 
         #[test]
         fn material3_scaffold_and_app_bar_defaults() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.use_material3 = true;
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 let theme = m3(&tester.cell.borrow());
 
                 let scaffold = tester.find_by_type::<crate::scaffold::Scaffold>()[0];
@@ -8243,9 +8231,8 @@ mod tests {
 
         #[test]
         fn material2_scaffold_and_app_bar_defaults() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::new());
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::new());
                 let theme = m2(&tester.cell.borrow());
 
                 let scaffold = tester.find_by_type::<crate::scaffold::Scaffold>()[0];
@@ -8299,13 +8286,12 @@ mod tests {
 
         #[test]
         fn material3_input_mode_default_input_decoration() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::input_mode();
                 prepare.use_material3 = true;
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 for (index, label) in [(0, "Start Date"), (1, "End Date")] {
-                    let decoration = input_text_field_decoration(&tester, index);
+                    let decoration = input_text_field_decoration(tester, index);
                     assert_eq!(
                         decoration.border,
                         Some(crate::input_border::InputBorderRef::new(
@@ -8322,11 +8308,10 @@ mod tests {
 
         #[test]
         fn material2_input_mode_default_input_decoration() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::input_mode());
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::input_mode());
                 for (index, label) in [(0, "Start Date"), (1, "End Date")] {
-                    let decoration = input_text_field_decoration(&tester, index);
+                    let decoration = input_text_field_decoration(tester, index);
                     assert_eq!(
                         decoration.border,
                         Some(crate::input_border::InputBorderRef::new(
@@ -8343,17 +8328,15 @@ mod tests {
 
         #[test]
         fn input_mode_initial_entry_mode_is_used() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::input_mode());
-                assert_eq!(field_count(&tester), 2);
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::input_mode());
+                assert_eq!(field_count(tester), 2);
             });
         }
 
         #[test]
         fn input_mode_all_custom_strings_are_used() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::input_mode();
                 prepare.initial_date_range = None;
                 prepare.cancel_text = Some("nope".to_string());
@@ -8363,16 +8346,16 @@ mod tests {
                 prepare.field_start_label_text = Some("label1".to_string());
                 prepare.field_end_label_text = Some("label2".to_string());
                 prepare.help_text = Some("help".to_string());
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 for text in ["nope", "yep", "hint1", "hint2", "label1", "label2", "help"] {
-                    assert_eq!(count_text(&tester, text), 1, "{text}");
+                    assert_eq!(count_text(tester, text), 1, "{text}");
                 }
             });
         }
 
         #[test]
         fn input_mode_initial_date_range_is_the_default() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let result = pick_range(&Prepare::input_mode(), default_size(), |_tester| {}, "OK");
                 assert_eq!(result, Some(range((2017, 1, 15), (2017, 1, 17))));
             });
@@ -8380,18 +8363,17 @@ mod tests {
 
         #[test]
         fn input_mode_can_toggle_to_calendar_entry_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::input_mode());
-                assert_eq!(field_count(&tester), 2);
-                tap_icon(&mut tester, &Icons::calendar_today());
-                assert_eq!(field_count(&tester), 0);
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::input_mode());
+                assert_eq!(field_count(tester), 2);
+                tap_icon(tester, &Icons::calendar_today());
+                assert_eq!(field_count(tester), 0);
             });
         }
 
         #[test]
         fn input_mode_toggle_to_calendar_mode_keeps_selected_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let mut prepare = Prepare::input_mode();
                 prepare.initial_date_range = None;
                 let result = pick_range(
@@ -8410,7 +8392,7 @@ mod tests {
 
         #[test]
         fn input_mode_entered_text_returns_range() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 let mut prepare = Prepare::input_mode();
                 prepare.initial_date_range = None;
                 let result = pick_range(
@@ -8427,30 +8409,31 @@ mod tests {
         }
 
         fn range_error_case(
+            tester: &mut WidgetTester,
             set: impl FnOnce(&mut Prepare),
             start: &str,
             end: &str,
             error: &str,
             expected_count: usize,
         ) {
-            let mut tester = tester_of_size(default_size());
             let mut prepare = Prepare::input_mode();
             prepare.initial_date_range = None;
             set(&mut prepare);
-            prepare_picker(&mut tester, &prepare);
-            enter_in(&mut tester, 0, start);
-            enter_in(&mut tester, 1, end);
-            assert_eq!(count_text(&tester, error), 0);
+            prepare_picker(tester, &prepare);
+            enter_in(tester, 0, start);
+            enter_in(tester, 1, end);
+            assert_eq!(count_text(tester, error), 0);
 
-            tap_text(&mut tester, "OK");
+            tap_text(tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(count_text(&tester, error), expected_count);
+            assert_eq!(count_text(tester, error), expected_count);
         }
 
         #[test]
         fn input_mode_too_short_entered_text_shows_error() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 range_error_case(
+                    tester,
                     |prepare| prepare.error_format_text = Some("oops".to_string()),
                     "12/25",
                     "12/25",
@@ -8462,8 +8445,9 @@ mod tests {
 
         #[test]
         fn input_mode_bad_format_entered_text_shows_error() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 range_error_case(
+                    tester,
                     |prepare| prepare.error_format_text = Some("oops".to_string()),
                     "20202014",
                     "20212014",
@@ -8475,8 +8459,9 @@ mod tests {
 
         #[test]
         fn input_mode_invalid_entered_text_shows_error() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 range_error_case(
+                    tester,
                     |prepare| prepare.error_invalid_text = Some("oops".to_string()),
                     "08/08/2014",
                     "08/08/2014",
@@ -8488,8 +8473,9 @@ mod tests {
 
         #[test]
         fn input_mode_end_before_start_date_shows_error() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 range_error_case(
+                    tester,
                     |prepare| prepare.error_invalid_range_text = Some("oops".to_string()),
                     "12/27/2016",
                     "12/25/2016",
@@ -8501,8 +8487,9 @@ mod tests {
 
         #[test]
         fn input_mode_error_text_only_displayed_for_invalid_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 range_error_case(
+                    tester,
                     |prepare| prepare.error_invalid_text = Some("oops".to_string()),
                     "12/27/2016",
                     "01/01/2018",
@@ -8514,29 +8501,27 @@ mod tests {
 
         #[test]
         fn input_mode_end_before_start_date_does_not_get_passed_to_calendar_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::input_mode();
                 prepare.initial_date_range = None;
-                prepare_picker(&mut tester, &prepare);
-                enter_in(&mut tester, 0, "12/27/2016");
-                enter_in(&mut tester, 1, "12/25/2016");
+                prepare_picker(tester, &prepare);
+                enter_in(tester, 0, "12/27/2016");
+                enter_in(tester, 1, "12/25/2016");
 
-                tap_icon(&mut tester, &Icons::calendar_today());
-                tap_text(&mut tester, "SAVE");
+                tap_icon(tester, &Icons::calendar_today());
+                tap_text(tester, "SAVE");
                 tester.pump_and_settle();
 
                 // Save button should be disabled, so dialog should still be up with the first date
                 // selected, but no end date
-                assert_eq!(count_text(&tester, "Dec 27"), 1);
-                assert_eq!(count_text(&tester, "End Date"), 1);
+                assert_eq!(count_text(tester, "Dec 27"), 1);
+                assert_eq!(count_text(tester, "End Date"), 1);
             });
         }
 
         #[test]
         fn input_decoration_theme_is_honored() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let border = crate::input_border::InputBorderRef::none();
                 let theme = ThemeData::builder()
                     .input_decoration_theme(
@@ -8544,11 +8529,11 @@ mod tests {
                             .border(border.clone()),
                     )
                     .build(&tester.cell.borrow());
-                prepare_picker_in(&mut tester, &Prepare::input_mode(), theme);
+                prepare_picker_in(tester, &Prepare::input_mode(), theme);
 
                 // The start and the end date text fields.
                 let painted =
-                    crate::input_decorator::tests::common::borders_and_container_colors(&tester);
+                    crate::input_decorator::tests::common::borders_and_container_colors(tester);
                 assert_eq!(painted.len(), 2);
                 for (actual_border, container_color) in painted {
                     assert_eq!(actual_border, border);
@@ -8558,38 +8543,38 @@ mod tests {
         }
 
         fn toggled_calendar_texts(
+            tester: &mut WidgetTester,
             set: impl FnOnce(&mut Prepare),
             start: &str,
             end: &str,
-        ) -> WidgetTester {
-            let mut tester = tester_of_size(default_size());
+        ) {
             let mut prepare = Prepare::new();
             prepare.initial_entry_mode = DatePickerEntryMode::Input;
             set(&mut prepare);
-            prepare_picker(&mut tester, &prepare);
-            enter_in(&mut tester, 0, start);
-            enter_in(&mut tester, 1, end);
-            tap_icon(&mut tester, &Icons::calendar_today());
-            tester
+            prepare_picker(tester, &prepare);
+            enter_in(tester, 0, start);
+            enter_in(tester, 1, end);
+            tap_icon(tester, &Icons::calendar_today());
         }
 
         #[test]
         fn toggle_from_input_entry_mode_validates_an_invalid_start_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Invalid start date should have neither a start nor end date selected in calendar
                 // mode
-                let tester = toggled_calendar_texts(|_| {}, "12/27/1918", "12/25/2016");
-                assert_eq!(count_text(&tester, "Start Date"), 1);
-                assert_eq!(count_text(&tester, "End Date"), 1);
+                toggled_calendar_texts(tester, |_| {}, "12/27/1918", "12/25/2016");
+                assert_eq!(count_text(tester, "Start Date"), 1);
+                assert_eq!(count_text(tester, "End Date"), 1);
             });
         }
 
         #[test]
         fn toggle_from_input_entry_mode_validates_a_non_selectable_start_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Even if start and end dates are selected, the start date is not selectable ending up
                 // to no date selected at all in calendar mode.
-                let tester = toggled_calendar_texts(
+                toggled_calendar_texts(
+                    tester,
                     |prepare| {
                         prepare.selectable_day_predicate =
                             Some(Rc::new(|day, _, _| day != DateTime::utc(2016, 12, 24)));
@@ -8597,26 +8582,27 @@ mod tests {
                     "12/24/2016",
                     "12/25/2016",
                 );
-                assert_eq!(count_text(&tester, "Start Date"), 1);
-                assert_eq!(count_text(&tester, "End Date"), 1);
+                assert_eq!(count_text(tester, "Start Date"), 1);
+                assert_eq!(count_text(tester, "End Date"), 1);
             });
         }
 
         #[test]
         fn toggle_from_input_entry_mode_validates_an_invalid_end_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Invalid end date should only have a start date selected
-                let tester = toggled_calendar_texts(|_| {}, "12/24/2016", "12/25/2050");
-                assert_eq!(count_text(&tester, "Dec 24"), 1);
-                assert_eq!(count_text(&tester, "End Date"), 1);
+                toggled_calendar_texts(tester, |_| {}, "12/24/2016", "12/25/2050");
+                assert_eq!(count_text(tester, "Dec 24"), 1);
+                assert_eq!(count_text(tester, "End Date"), 1);
             });
         }
 
         #[test]
         fn toggle_from_input_entry_mode_validates_a_non_selectable_end_date() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // The end date is not selectable, so only the start date should be selected.
-                let tester = toggled_calendar_texts(
+                toggled_calendar_texts(
+                    tester,
                     |prepare| {
                         prepare.selectable_day_predicate =
                             Some(Rc::new(|day, _, _| day != DateTime::utc(2016, 12, 25)));
@@ -8624,24 +8610,24 @@ mod tests {
                     "12/24/2016",
                     "12/25/2016",
                 );
-                assert_eq!(count_text(&tester, "Dec 24"), 1);
-                assert_eq!(count_text(&tester, "End Date"), 1);
+                assert_eq!(count_text(tester, "Dec 24"), 1);
+                assert_eq!(count_text(tester, "End Date"), 1);
             });
         }
 
         #[test]
         fn toggle_from_input_entry_mode_validates_an_invalid_range() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 // Start date after end date should just use the start date
-                let tester = toggled_calendar_texts(|_| {}, "12/25/2016", "12/24/2016");
-                assert_eq!(count_text(&tester, "Dec 25"), 1);
-                assert_eq!(count_text(&tester, "End Date"), 1);
+                toggled_calendar_texts(tester, |_| {}, "12/25/2016", "12/24/2016");
+                assert_eq!(count_text(tester, "Dec 25"), 1);
+                assert_eq!(count_text(tester, "End Date"), 1);
             });
         }
 
         #[test]
         fn range_ok_cancel_button_layout() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 let show_ok_cancel_dialog =
                     |tester: &mut WidgetTester, text_direction: TextDirection| {
                         let mut prepare = Prepare::new();
@@ -8657,48 +8643,45 @@ mod tests {
                     tester.pump_and_settle();
                 };
 
-                let mut tester = tester_of_size(default_size());
-                show_ok_cancel_dialog(&mut tester, TextDirection::Ltr);
-                assert_near!(text_rect(&tester, "OK").right, 622.0);
-                assert_near!(text_rect(&tester, "OK").left, 594.0);
-                assert_near!(text_rect(&tester, "CANCEL").right, 560.0);
-                dismiss(&mut tester);
+                show_ok_cancel_dialog(tester, TextDirection::Ltr);
+                assert_near!(text_rect(tester, "OK").right, 622.0);
+                assert_near!(text_rect(tester, "OK").left, 594.0);
+                assert_near!(text_rect(tester, "CANCEL").right, 560.0);
+                dismiss(tester);
 
-                show_ok_cancel_dialog(&mut tester, TextDirection::Rtl);
-                assert_near!(text_rect(&tester, "OK").right, 206.0);
-                assert_near!(text_rect(&tester, "OK").left, 178.0);
-                assert_near!(text_rect(&tester, "CANCEL").right, 324.0);
-                dismiss(&mut tester);
+                show_ok_cancel_dialog(tester, TextDirection::Rtl);
+                assert_near!(text_rect(tester, "OK").right, 206.0);
+                assert_near!(text_rect(tester, "OK").left, 178.0);
+                assert_near!(text_rect(tester, "CANCEL").right, 324.0);
+                dismiss(tester);
             });
         }
 
         #[test]
         fn range_keyboard_can_toggle_to_input_entry_mode() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                prepare_picker(&mut tester, &Prepare::new());
-                assert_eq!(field_count(&tester), 0);
+            test_widgets(|tester| {
+                prepare_picker(tester, &Prepare::new());
+                assert_eq!(field_count(tester), 0);
                 // Navigate to the entry toggle button and activate it
-                tabs(&mut tester, 2);
-                space(&mut tester);
+                tabs(tester, 2);
+                space(tester);
                 tester.pump_and_settle();
                 // Should be in the input mode
-                assert_eq!(field_count(&tester), 2);
+                assert_eq!(field_count(tester), 2);
             });
         }
 
         #[test]
         fn range_keyboard_can_navigate_date_grid_with_arrow_keys() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                let result = prepare_picker(&mut tester, &Prepare::new());
+            test_widgets(|tester| {
+                let result = prepare_picker(tester, &Prepare::new());
                 // Navigate to the grid
-                tabs(&mut tester, 4);
+                tabs(tester, 4);
                 tester.pump_and_settle();
 
                 // Navigate from Jan 15 to Jan 18 with arrow keys
                 arrows(
-                    &mut tester,
+                    tester,
                     &[
                         Arrow::Left,
                         Arrow::Up,
@@ -8712,12 +8695,12 @@ mod tests {
                 tester.pump_and_settle();
 
                 // Activate it to select the beginning of the range
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate to Jan 29
                 arrows(
-                    &mut tester,
+                    tester,
                     &[
                         Arrow::Down,
                         Arrow::Right,
@@ -8729,14 +8712,14 @@ mod tests {
                 tester.pump_and_settle();
 
                 // Activate it to select the end of the range
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate out of the grid and to the OK button
-                tabs(&mut tester, 3);
+                tabs(tester, 3);
 
                 // Activate OK
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Should have selected Jan 18 - Jan 29
@@ -8749,20 +8732,19 @@ mod tests {
 
         #[test]
         fn range_keyboard_navigating_with_arrow_keys_scrolls_as_needed() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-                let result = prepare_picker(&mut tester, &Prepare::new());
+            test_widgets(|tester| {
+                let result = prepare_picker(tester, &Prepare::new());
                 // Jan and Feb headers should be showing, but no March
-                assert_eq!(count_text(&tester, "January 2016"), 1);
-                assert_eq!(count_text(&tester, "February 2016"), 1);
-                assert_eq!(count_text(&tester, "March 2016"), 0);
+                assert_eq!(count_text(tester, "January 2016"), 1);
+                assert_eq!(count_text(tester, "February 2016"), 1);
+                assert_eq!(count_text(tester, "March 2016"), 0);
 
                 // Navigate to the grid
-                tabs(&mut tester, 4);
+                tabs(tester, 4);
 
                 // Navigate from Jan 15 to Jan 18 with arrow keys
                 arrows(
-                    &mut tester,
+                    tester,
                     &[
                         Arrow::Left,
                         Arrow::Left,
@@ -8774,28 +8756,28 @@ mod tests {
                 tester.pump_and_settle();
 
                 // Activate it to select the beginning of the range
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate to Mar 17
-                arrows(&mut tester, &[Arrow::Down; 8]);
-                arrows(&mut tester, &[Arrow::Right; 3]);
+                arrows(tester, &[Arrow::Down; 8]);
+                arrows(tester, &[Arrow::Right; 3]);
                 tester.pump_and_settle();
 
                 // Jan should have scrolled off, Mar should be visible
-                assert_eq!(count_text(&tester, "January 2016"), 0);
-                assert_eq!(count_text(&tester, "February 2016"), 1);
-                assert_eq!(count_text(&tester, "March 2016"), 1);
+                assert_eq!(count_text(tester, "January 2016"), 0);
+                assert_eq!(count_text(tester, "February 2016"), 1);
+                assert_eq!(count_text(tester, "March 2016"), 1);
 
                 // Activate it to select the end of the range
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate out of the grid and to the OK button
-                tabs(&mut tester, 3);
+                tabs(tester, 3);
 
                 // Activate OK
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Should have selected Jan 18 - Mar 17
@@ -8808,17 +8790,16 @@ mod tests {
 
         #[test]
         fn range_keyboard_rtl_text_direction_reverses_the_horizontal_arrow_key_navigation() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.text_direction = TextDirection::Rtl;
-                let result = prepare_picker(&mut tester, &prepare);
+                let result = prepare_picker(tester, &prepare);
                 // Navigate to the grid
-                tabs(&mut tester, 4);
+                tabs(tester, 4);
 
                 // Navigate from Jan 15 to 19 with arrow keys
                 arrows(
-                    &mut tester,
+                    tester,
                     &[
                         Arrow::Right,
                         Arrow::Right,
@@ -8831,22 +8812,22 @@ mod tests {
                 tester.pump_and_settle();
 
                 // Activate it
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate to Jan 21
-                arrows(&mut tester, &[Arrow::Left, Arrow::Left]);
+                arrows(tester, &[Arrow::Left, Arrow::Left]);
                 tester.pump_and_settle();
 
                 // Activate it
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Navigate out of the grid and to the OK button
-                tabs(&mut tester, 3);
+                tabs(tester, 3);
 
                 // Activate OK
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
 
                 // Should have selected Jan 19 - Jan 21
@@ -8874,13 +8855,7 @@ mod tests {
             let platform = waft_test::TestPlatform::new()
                 .on(TargetPlatform::Android)
                 .with_haptics(Rc::clone(&feedback) as Rc<dyn waft_embedder::Haptics>);
-            let size = default_size();
-            let tester = WidgetTester::with_physical_size(
-                platform,
-                Size::new(size.width() * 2.0, size.height() * 2.0),
-            );
-            tester.install_platform_fonts();
-            (tester, feedback)
+            (WidgetTester::with_platform(platform), feedback)
         }
 
         fn haptic_prepare() -> Prepare {
@@ -8891,15 +8866,30 @@ mod tests {
             prepare
         }
 
+        /// A regression test for https://github.com/flutter/flutter/issues/131989.
+        #[test]
+        fn dialog_contents_do_not_overflow_when_resized_from_landscape_to_portrait() {
+            test_widgets(|_| {
+                // Initial window size is wide for landscape mode.
+                let tester = &mut tester_of_size(WIDE_WINDOW_SIZE);
+                prepare_picker(tester, &Prepare::new());
+
+                // Change window size to narrow for portrait mode.
+                resize_view(tester, NARROW_WINDOW_SIZE);
+                tester.pump();
+            });
+        }
+
         #[test]
         fn haptic_feedback_selecting_dates_vibrates() {
-            with_main_thread_stack(|| {
-                let (mut tester, feedback) = feedback_tester();
-                prepare_picker(&mut tester, &haptic_prepare());
+            test_widgets(|_| {
+                let (mut feedback_tester, feedback) = feedback_tester();
+                let tester = &mut feedback_tester;
+                prepare_picker(tester, &haptic_prepare());
                 let interval = std::time::Duration::from_millis(10);
                 for (day, count) in [("10", 1), ("12", 2), ("14", 3)] {
-                    tap_first(&mut tester, day);
-                    tester.pump(interval);
+                    tap_first(tester, day);
+                    tester.pump_by(interval);
                     assert_eq!(feedback.haptics.borrow().len(), count, "after {day}");
                 }
             });
@@ -8907,29 +8897,29 @@ mod tests {
 
         #[test]
         fn haptic_feedback_tapping_unselectable_date_does_not_vibrate() {
-            with_main_thread_stack(|| {
-                let (mut tester, feedback) = feedback_tester();
-                prepare_picker(&mut tester, &haptic_prepare());
-                tap_first(&mut tester, "8");
-                tester.pump(std::time::Duration::from_millis(10));
+            test_widgets(|_| {
+                let (mut feedback_tester, feedback) = feedback_tester();
+                let tester = &mut feedback_tester;
+                prepare_picker(tester, &haptic_prepare());
+                tap_first(tester, "8");
+                tester.pump_by(std::time::Duration::from_millis(10));
                 assert_eq!(feedback.haptics.borrow().len(), 0);
             });
         }
 
         #[test]
         fn range_picker_close_button_shape_should_be_square() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.use_material3 = true;
-                prepare_picker(&mut tester, &prepare);
+                prepare_picker(tester, &prepare);
                 let theme = m3(&tester.cell.borrow());
-                let button = icon_button_of(&tester, &Icons::close());
-                assert_eq!(size_of(&tester, button), Size::new(48.0, 48.0));
+                let button = icon_button_of(tester, &Icons::close());
+                assert_eq!(size_of(tester, button), Size::new(48.0, 48.0));
 
                 // Test the close button overlay size is square.
-                let center = center_of(&tester, button);
-                let mut pointer = WidgetTester::mouse(1, 0);
+                let center = center_of(tester, button);
+                let mut pointer = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut pointer, center);
                 tester.move_to(&mut pointer, center, false);
                 tester.pump_and_settle();
@@ -8948,20 +8938,20 @@ mod tests {
         }
 
         fn input_only_headline_font_size(size: Size) -> Option<f64> {
-            let mut tester = tester_of_size(size);
+            let tester = &mut tester_of_size(size);
             let mut prepare = Prepare::new();
             prepare.initial_entry_mode = DatePickerEntryMode::Input;
             prepare.use_material3 = true;
-            prepare_picker(&mut tester, &prepare);
-            let font_size = header_font_size(&tester, "Jan 15 \u{2013} Jan 25, 2016");
-            tap_text(&mut tester, "Cancel");
+            prepare_picker(tester, &prepare);
+            let font_size = header_font_size(tester, "Jan 15 \u{2013} Jan 25, 2016");
+            tap_text(tester, "Cancel");
             tester.pump_and_settle();
             font_size
         }
 
         #[test]
         fn landscape_input_only_date_picker_headers_use_headline_small_in_portrait() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 assert_eq!(
                     input_only_headline_font_size(Size::new(1070.0, 1770.0)),
                     Some(32.0)
@@ -8971,7 +8961,7 @@ mod tests {
 
         #[test]
         fn landscape_input_only_date_picker_headers_use_headline_small_in_landscape() {
-            with_main_thread_stack(|| {
+            test_widgets(|_| {
                 assert_eq!(
                     input_only_headline_font_size(Size::new(1770.0, 1070.0)),
                     Some(24.0)
@@ -9000,74 +8990,66 @@ mod tests {
 
         #[test]
         fn range_honors_switch_to_input_entry_mode_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
+                pump_icon_app(tester, false, DatePickerEntryMode::Calendar, None, None);
+                assert_eq!(find_onstage_by_icon(tester, &Icons::edit()).len(), 1);
+                tap_icon(tester, &Icons::close());
 
-                pump_icon_app(
-                    &mut tester,
-                    false,
-                    DatePickerEntryMode::Calendar,
-                    None,
-                    None,
-                );
-                assert_eq!(tester.find_onstage_by_icon(&Icons::edit()).len(), 1);
-                tap_icon(&mut tester, &Icons::close());
-
-                pump_icon_app(&mut tester, true, DatePickerEntryMode::Calendar, None, None);
+                pump_icon_app(tester, true, DatePickerEntryMode::Calendar, None, None);
                 assert_eq!(
-                    tester.find_onstage_by_icon(&Icons::edit_outlined()).len(),
+                    find_onstage_by_icon(tester, &Icons::edit_outlined()).len(),
                     1
                 );
-                tap_icon(&mut tester, &Icons::close());
+                tap_icon(tester, &Icons::close());
 
                 pump_icon_app(
-                    &mut tester,
+                    tester,
                     false,
                     DatePickerEntryMode::Calendar,
                     Some(|| Icon::new(Some(Icons::keyboard()))),
                     None,
                 );
-                assert_eq!(tester.find_onstage_by_icon(&Icons::keyboard()).len(), 1);
-                tap_icon(&mut tester, &Icons::close());
+                assert_eq!(find_onstage_by_icon(tester, &Icons::keyboard()).len(), 1);
+                tap_icon(tester, &Icons::close());
             });
         }
 
         #[test]
         fn range_honors_switch_to_calendar_entry_mode_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
-
-                pump_icon_app(&mut tester, false, DatePickerEntryMode::Input, None, None);
+            test_widgets(|tester| {
+                pump_icon_app(tester, false, DatePickerEntryMode::Input, None, None);
                 assert_eq!(
-                    tester.find_onstage_by_icon(&Icons::calendar_today()).len(),
+                    find_onstage_by_icon(tester, &Icons::calendar_today()).len(),
                     1
                 );
-                tap_text(&mut tester, "CANCEL");
+                tap_text(tester, "CANCEL");
                 tester.pump_and_settle();
 
-                pump_icon_app(&mut tester, true, DatePickerEntryMode::Input, None, None);
+                pump_icon_app(tester, true, DatePickerEntryMode::Input, None, None);
                 assert_eq!(
-                    tester.find_onstage_by_icon(&Icons::calendar_today()).len(),
+                    find_onstage_by_icon(tester, &Icons::calendar_today()).len(),
                     1
                 );
-                tap_text(&mut tester, "CANCEL");
+                tap_text(tester, "CANCEL");
                 tester.pump_and_settle();
 
                 pump_icon_app(
-                    &mut tester,
+                    tester,
                     false,
                     DatePickerEntryMode::Input,
                     None,
                     Some(|| Icon::new(Some(Icons::favorite()))),
                 );
-                assert_eq!(tester.find_onstage_by_icon(&Icons::favorite()).len(), 1);
-                tap_text(&mut tester, "CANCEL");
+                assert_eq!(find_onstage_by_icon(tester, &Icons::favorite()).len(), 1);
+                tap_text(tester, "CANCEL");
                 tester.pump_and_settle();
             });
         }
 
-        fn keyboard_type_of_shown_dialog(keyboard_type: Option<TextInputType>) -> TextInputType {
-            let mut tester = tester_of_size(default_size());
+        fn keyboard_type_of_shown_dialog(
+            tester: &mut WidgetTester,
+            keyboard_type: Option<TextInputType>,
+        ) -> TextInputType {
             let (first_date, last_date) = dialog_first_last();
             let launcher = Material::new()
                 .child(Builder::new(move |_app, context| {
@@ -9116,7 +9098,7 @@ mod tests {
                 .into_widget();
             let theme = m2(&tester.cell.borrow());
             tester.pump_widget(material_app(theme, launcher));
-            tap_text(&mut tester, "Go");
+            tap_text(tester, "Go");
             tester.pump_and_settle();
             let dialog = tester.find_by_type::<DateRangePickerDialog>()[0];
             tester.widget(dialog, |dialog: &DateRangePickerDialog| {
@@ -9126,16 +9108,19 @@ mod tests {
 
         #[test]
         fn date_range_picker_takes_the_default_keyboard_type() {
-            with_main_thread_stack(|| {
-                assert_eq!(keyboard_type_of_shown_dialog(None), TextInputType::DATETIME);
+            test_widgets(|tester| {
+                assert_eq!(
+                    keyboard_type_of_shown_dialog(tester, None),
+                    TextInputType::DATETIME
+                );
             });
         }
 
         #[test]
         fn date_range_picker_takes_keyboard_type_email_address() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    keyboard_type_of_shown_dialog(Some(TextInputType::EMAIL_ADDRESS)),
+                    keyboard_type_of_shown_dialog(tester, Some(TextInputType::EMAIL_ADDRESS)),
                     TextInputType::EMAIL_ADDRESS
                 );
             });
@@ -9155,11 +9140,10 @@ mod tests {
 
         #[test]
         fn range_calendar_delegate_displays_calendar_based_on_the_calendar_delegate() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let (first_date, last_date) = dialog_first_last();
                 pump_range_dialog(
-                    &mut tester,
+                    tester,
                     DateRangePickerDialog::new(first_date, last_date)
                         .initial_date_range(range((2016, 1, 15), (2016, 1, 25)))
                         .calendar_delegate(Rc::new(super::dialog::TestDelegate::Calendar)),
@@ -9167,7 +9151,7 @@ mod tests {
 
                 // The month a header text titles: its nearest enclosing Column.
                 let day_count = |month_year: &str| {
-                    let header = tester.only_onstage_text(month_year);
+                    let header = only_onstage_text(tester, month_year);
                     let month = tester.ancestor_of_type::<waft_widgets::Column>(header);
                     tester
                         .descendants_of_type::<crate::ink_well::InkResponse>(month)
@@ -9190,31 +9174,28 @@ mod tests {
 
         #[test]
         fn show_date_range_picker_uses_gregorian_calendar_delegate_by_default() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.use_material3 = true;
-                prepare_picker(&mut tester, &prepare);
-                assert_default_range_header(&tester);
+                prepare_picker(tester, &prepare);
+                assert_default_range_header(tester);
             });
         }
 
         #[test]
         fn show_date_range_picker_using_custom_calendar_delegate_implementation() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.use_material3 = true;
                 prepare.calendar_delegate = Rc::new(super::dialog::TestDelegate::Calendar);
-                prepare_picker(&mut tester, &prepare);
-                assert_default_range_header(&tester);
+                prepare_picker(tester, &prepare);
+                assert_default_range_header(tester);
             });
         }
 
         #[test]
         fn date_range_picker_dialog_does_not_crash_at_zero_area() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let (first_date, last_date) = dialog_first_last();
                 let theme = m3(&tester.cell.borrow());
                 tester.pump_widget(material_app(
@@ -9227,14 +9208,13 @@ mod tests {
                         .into_widget(),
                 ));
                 let dialog = tester.find_by_type::<DateRangePickerDialog>()[0];
-                assert_eq!(size_of(&tester, dialog), Size::new(0.0, 0.0));
+                assert_eq!(size_of(tester, dialog), Size::new(0.0, 0.0));
             });
         }
 
         #[test]
         fn local_input_decoration_theme_is_honored() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let (first_date, last_date) = dialog_first_last();
                 let theme = m3(&tester.cell.borrow());
                 tester.pump_widget(material_app(
@@ -9254,15 +9234,14 @@ mod tests {
                         )
                         .into_widget(),
                 ));
-                let start_date_decoration = input_text_field_decoration(&tester, 0);
+                let start_date_decoration = input_text_field_decoration(tester, 0);
                 assert_eq!(start_date_decoration.filled, Some(true));
             });
         }
 
         #[test]
         fn date_range_picker_dialog_current_date_is_optional() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let (first_date, last_date) = dialog_first_last();
                 let theme = m3(&tester.cell.borrow());
                 tester.pump_widget(material_app(
@@ -9281,14 +9260,13 @@ mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(field_count(&tester), 2);
+                assert_eq!(field_count(tester), 2);
             });
         }
 
         #[test]
         fn date_range_picker_respects_date_picker_theme_day_shape() {
-            with_main_thread_stack(|| {
-                let mut tester = tester_of_size(default_size());
+            test_widgets(|tester| {
                 let custom_shape = waft_painting::BeveledRectangleBorder::new(
                     BorderSide::NONE,
                     BorderRadiusGeometry::circular(10.0),
@@ -9322,10 +9300,10 @@ mod tests {
                     }))
                     .into_widget();
                 tester.pump_widget(material_app(theme, launcher));
-                tap_text(&mut tester, "Open Picker");
+                tap_text(tester, "Open Picker");
                 tester.pump_and_settle();
 
-                let selected_day_text = first_text(&tester, "15");
+                let selected_day_text = first_text(tester, "15");
                 let shapes: Vec<ShapeBorderRef> = tester
                     .ancestors(selected_day_text)
                     .into_iter()

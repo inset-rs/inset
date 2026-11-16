@@ -1750,26 +1750,20 @@ mod tests {
     use std::cell::RefCell;
     use waft_foundation::OptionRetained;
 
+    use waft_embedder::TextDirection;
     use waft_embedder::valo::Op;
-    use waft_embedder::{PointerDeviceKind, TargetPlatform, TextDirection};
-    use waft_foundation::{AppCell, UniqueKey};
-    use waft_gestures::{
-        DragEndDetails, DragStartDetails, DragUpdateDetails, GestureBinding, PointerDownEvent,
-        PointerEvent, PointerMoveEvent, PointerUpEvent, Velocity,
-    };
+    use waft_foundation::UniqueKey;
+    use waft_gestures::{DragEndDetails, DragStartDetails, DragUpdateDetails, Velocity};
     use waft_painting::EdgeInsetsGeometry;
     use waft_physics::Simulation;
     use waft_rendering::{
-        AnyRenderObject, RenderBox, RenderClipRect, RenderCustomClip, RenderCustomPaint,
-        RenderHandle,
+        RenderBox, RenderClipRect, RenderCustomClip, RenderCustomPaint, RenderHandle,
     };
-    use waft_scheduler::SchedulerBinding;
-    use waft_test::{TestPlatform, TestView};
+    use waft_scheduler::{FrameTarget, SchedulerBinding};
 
     use super::*;
-    use crate::binding::WidgetsBinding;
-    use crate::framework::{AnyElement, GlobalKey, downcast_widget};
-    use crate::test_harness::{binding_mount, binding_pump, binding_pump_view, platform_view};
+    use crate::framework::GlobalKey;
+    use crate::testing::{TestPointer, WidgetTester, test_widgets};
     use crate::widgets::basic::{
         Center, Column, Directionality, Opacity, Padding, SliverToBoxAdapter,
     };
@@ -1791,484 +1785,117 @@ mod tests {
     use crate::widgets::sliver::SliverList;
     use crate::widgets::text::Text;
 
-    // ---- flutter_test's `WidgetTester`, as far as these tests use it ----
+    // ---- what these tests read from a `WidgetTester` ----
 
-    /// flutter_test's `kDragSlopDefault`.
-    const DRAG_SLOP_DEFAULT: f64 = 20.0;
+    /// `tester.getCenter(find.byType(CustomScrollView))` for a scroll view that fills the view.
+    const VIEW_CENTER: Offset = Offset::new(
+        WidgetTester::SIZE.width() / 2.0,
+        WidgetTester::SIZE.height() / 2.0,
+    );
 
-    /// flutter_test's 800 x 600 view.
-    const VIEW_SIZE: Size = Size::new(800.0, 600.0);
-
-    /// A fake clock that a pump advances, frames stamped with it, and pointers sent straight to
-    /// the gesture binding, on an Android app with flutter_test's 800 x 600 view at three
-    /// physical pixels to the logical one.
-    struct WidgetTester {
-        cell: Rc<AppCell>,
-        now: Duration,
-        last_pointer: i64,
-        mounted: bool,
+    /// Dart's `gesture.moveBy(offset)`.
+    fn move_by(tester: &mut WidgetTester, gesture: &mut TestPointer, offset: Offset) {
+        let to = gesture.position + offset;
+        tester.move_to(gesture, to, true);
     }
 
-    /// A pointer that is down, as a `flutter_test` `TestGesture` holds one.
-    struct TestGesture {
-        pointer: i64,
-        location: Offset,
-    }
-
-    impl WidgetTester {
-        /// flutter_test's default target platform is Android.
-        fn new() -> WidgetTester {
-            let view = TestView::with_pixel_ratio(2400.0, 1800.0, 3.0);
-            let platform = TestPlatform::new()
-                .on(TargetPlatform::Android)
-                .with_view(Rc::new(view));
-            let cell = AppCell::with_platform(Rc::new(platform));
-            install_fonts(&mut cell.borrow_mut());
-            WidgetTester {
-                cell,
-                now: Duration::ZERO,
-                last_pointer: 0,
-                mounted: false,
-            }
-        }
-
-        /// `tester.pumpWidget(widget)`.
-        fn pump_widget(&mut self, widget: WidgetRef) {
-            if !self.mounted {
-                binding_mount(&self.cell, widget);
-                self.mounted = true;
-                return;
-            }
-            {
-                let mut app = self.cell.borrow_mut();
-                let view = platform_view(&app);
-                crate::binding::run_widget(
-                    &mut app,
-                    crate::view::View::new(view, widget).into_widget(),
-                );
-            }
-            self.cell.elapse(Duration::ZERO);
-            self.pump(Duration::ZERO);
-        }
-
-        /// `tester.pump(duration)`: the clock advances by `duration`, firing the timers that
-        /// come due, then a frame runs if one was asked for.
-        fn pump(&mut self, duration: Duration) {
-            self.cell.elapse(duration);
-            self.now += duration;
-            let mut app = self.cell.borrow_mut();
-            binding_pump(&mut app, self.now);
-            app.drain_microtasks();
-        }
-
-        /// `tester.pumpAndSettle(duration)`: pumps by `duration` until no frame is asked for.
-        fn pump_and_settle(&mut self, duration: Duration) -> u32 {
-            let end_time = self.now + Duration::from_secs(10 * 60);
-            let mut count = 0;
-            loop {
-                assert!(self.now <= end_time, "pumpAndSettle timed out");
-                self.pump(duration);
-                count += 1;
-                if !SchedulerBinding::has_scheduled_frame(&mut self.cell.borrow_mut()) {
-                    return count;
-                }
-            }
-        }
-
-        /// `tester.layers.contains(isA<ImageFilterLayer>())`.
-        fn has_image_filter_layer(&self) -> bool {
-            let mut app = self.cell.borrow_mut();
-            let root = crate::binding::WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .and_then(|root| root.find_render_object(&app))
-                .and_then(|view| view.layer(&app))
-                .expect("the view's layer");
-            crate::test_harness::layer_tree(&app, root)
-                .into_iter()
-                .any(|layer| {
-                    app.handle::<waft_rendering::ImageFilterLayer>(layer.id())
-                        .is_some()
-                })
-        }
-
-        /// `tester.pumpAndSettle()` with its default 100ms step.
-        fn settle(&mut self) {
-            self.pump_and_settle(Duration::from_millis(100));
-        }
-
-        /// `tester.pumpFrames(sameTree, maxDuration)`: a frame of the view at once, then pumps
-        /// of flutter_test's 16.683ms until `max_duration` has passed.
-        fn pump_frames(&mut self, max_duration: Duration) {
-            let interval = Duration::from_micros(16_683);
-            let mut elapsed = Duration::ZERO;
-            let mut first = true;
-            while elapsed < max_duration {
-                self.cell.elapse(interval);
-                self.now += interval;
-                let mut app = self.cell.borrow_mut();
-                if first {
-                    let view = platform_view(&app).id();
-                    binding_pump_view(&mut app, view, self.now);
-                    first = false;
-                } else {
-                    binding_pump(&mut app, self.now);
-                }
-                app.drain_microtasks();
-                elapsed += interval;
-            }
-        }
-
-        fn send_event_to_binding(&self, event: PointerEvent) {
-            let mut app = self.cell.borrow_mut();
-            GestureBinding::instance(&mut app).handle_pointer_event(&mut app, event);
-            app.drain_microtasks();
-        }
-
-        fn next_pointer(&mut self) -> i64 {
-            self.last_pointer += 1;
-            self.last_pointer
-        }
-
-        /// `tester.startGesture(location)`: a touch down at `location`, stamped zero.
-        fn start_gesture(&mut self, location: Offset) -> TestGesture {
-            let gesture = TestGesture {
-                pointer: self.next_pointer(),
-                location,
-            };
-            self.send_event_to_binding(PointerEvent::Down(PointerDownEvent {
-                pointer: gesture.pointer,
-                position: location,
-                kind: PointerDeviceKind::Touch,
-                ..PointerDownEvent::default()
-            }));
-            gesture
-        }
-
-        /// `gesture.moveBy(offset)`, stamped zero.
-        fn move_by(&self, gesture: &mut TestGesture, offset: Offset) {
-            self.move_to(gesture, gesture.location + offset, Duration::ZERO);
-        }
-
-        fn move_to(&self, gesture: &mut TestGesture, location: Offset, time_stamp: Duration) {
-            let delta = location - gesture.location;
-            gesture.location = location;
-            self.send_event_to_binding(PointerEvent::Move(PointerMoveEvent {
-                pointer: gesture.pointer,
-                position: location,
-                delta,
-                time_stamp,
-                ..PointerMoveEvent::default()
-            }));
-        }
-
-        /// `gesture.up()`, stamped zero.
-        fn up(&self, gesture: TestGesture) {
-            self.up_at(gesture, Duration::ZERO);
-        }
-
-        fn up_at(&self, gesture: TestGesture, time_stamp: Duration) {
-            self.send_event_to_binding(PointerEvent::Up(PointerUpEvent {
-                pointer: gesture.pointer,
-                position: gesture.location,
-                time_stamp,
-                ..PointerUpEvent::default()
-            }));
-        }
-
-        /// `tester.dragFrom(start, offset)` with flutter_test's default slops: the move is
-        /// split where it leaves the 20 x 20 slop box, as Flutter's is.
-        fn drag_from(&mut self, start: Offset, offset: Offset) {
-            let touch_slop_x = DRAG_SLOP_DEFAULT;
-            let touch_slop_y = DRAG_SLOP_DEFAULT;
-            let mut gesture = self.start_gesture(start);
-            let x_sign = dart_sign(offset.dx());
-            let y_sign = dart_sign(offset.dy());
-            let offset_x = offset.dx();
-            let offset_y = offset.dy();
-            let separate_x = offset.dx().abs() > touch_slop_x && touch_slop_x > 0.0;
-            let separate_y = offset.dy().abs() > touch_slop_y && touch_slop_y > 0.0;
-            if separate_y || separate_x {
-                let offset_slope = offset_y / offset_x;
-                let inverse_offset_slope = offset_x / offset_y;
-                let slop_slope = touch_slop_y / touch_slop_x;
-                let absolute_offset_slope = offset_slope.abs();
-                let signed_slop_x = touch_slop_x * x_sign;
-                let signed_slop_y = touch_slop_y * y_sign;
-                if absolute_offset_slope != slop_slope {
-                    if absolute_offset_slope < slop_slope {
-                        let diff_y = offset_slope.abs() * touch_slop_x * y_sign;
-                        self.move_by(&mut gesture, Offset::new(signed_slop_x, diff_y));
-                        if offset_y.abs() <= touch_slop_y {
-                            self.move_by(
-                                &mut gesture,
-                                Offset::new(offset_x - signed_slop_x, offset_y - diff_y),
-                            );
-                        } else {
-                            let diff_y2 = signed_slop_y - diff_y;
-                            let diff_x2 = inverse_offset_slope * diff_y2;
-                            self.move_by(&mut gesture, Offset::new(diff_x2, diff_y2));
-                            self.move_by(
-                                &mut gesture,
-                                Offset::new(
-                                    offset_x - diff_x2 - signed_slop_x,
-                                    offset_y - signed_slop_y,
-                                ),
-                            );
-                        }
-                    } else {
-                        let diff_x = inverse_offset_slope.abs() * touch_slop_y * x_sign;
-                        self.move_by(&mut gesture, Offset::new(diff_x, signed_slop_y));
-                        if offset_x.abs() <= touch_slop_x {
-                            self.move_by(
-                                &mut gesture,
-                                Offset::new(offset_x - diff_x, offset_y - signed_slop_y),
-                            );
-                        } else {
-                            let diff_x2 = signed_slop_x - diff_x;
-                            let diff_y2 = offset_slope * diff_x2;
-                            self.move_by(&mut gesture, Offset::new(diff_x2, diff_y2));
-                            self.move_by(
-                                &mut gesture,
-                                Offset::new(
-                                    offset_x - signed_slop_x,
-                                    offset_y - diff_y2 - signed_slop_y,
-                                ),
-                            );
-                        }
-                    }
-                } else {
-                    self.move_by(&mut gesture, Offset::new(signed_slop_x, signed_slop_y));
-                    self.move_by(
-                        &mut gesture,
-                        Offset::new(offset_x - signed_slop_x, offset_y - signed_slop_y),
-                    );
-                }
-            } else {
-                self.move_by(&mut gesture, offset);
-            }
-            self.up(gesture);
-        }
-
-        /// `tester.flingFrom(start, offset, speed)`: 50 moves over `offset` at `speed` pixels
-        /// a second, stamped from zero, with a pump each time more than 16ms of them have
-        /// passed.
-        fn fling_from(&mut self, start: Offset, offset: Offset, speed: f64) {
-            const MOVE_COUNT: u32 = 50;
-            let frame_interval = Duration::from_millis(16).as_micros() as f64;
-            let time_stamp_delta = 1000000.0 * offset.distance() / (MOVE_COUNT as f64 * speed);
-            let mut time_stamp: f64 = 0.0;
-            let mut last_time_stamp = time_stamp;
-            let mut gesture = self.start_gesture(start);
-            for i in 0..=MOVE_COUNT {
-                let location = start
-                    + Offset::lerp(
-                        Some(Offset::ZERO),
-                        Some(offset),
-                        i as f64 / MOVE_COUNT as f64,
-                    )
-                    .expect("both ends are given");
-                self.move_to(&mut gesture, location, micros(time_stamp.round()));
-                time_stamp += time_stamp_delta;
-                if time_stamp - last_time_stamp > frame_interval {
-                    self.pump(micros((time_stamp - last_time_stamp).trunc()));
-                    last_time_stamp = time_stamp;
-                }
-            }
-            self.up_at(gesture, micros(time_stamp.round()));
-        }
-
-        /// The glow tests' `slowDrag`: ten moves by `offset`, 20ms apart.
-        fn slow_drag(&mut self, start: Offset, offset: Offset) {
-            let mut gesture = self.start_gesture(start);
-            for _ in 0..10 {
-                self.move_by(&mut gesture, offset);
-                self.pump(Duration::from_millis(20));
-            }
-            self.up(gesture);
-        }
-
-        fn root(&self) -> AnyElement {
-            let mut app = self.cell.borrow_mut();
-            WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .expect("a mounted tree")
-        }
-
-        /// Every mounted element, in tree order.
-        fn elements(&self) -> Vec<AnyElement> {
-            let root = self.root();
-            let app = self.cell.borrow();
-            let mut found = Vec::new();
-            let mut stack = vec![root];
-            while let Some(element) = stack.pop() {
-                found.push(element);
-                let mut children = Vec::new();
-                element.visit_children(&app, &mut |child| children.push(child));
-                stack.extend(children.into_iter().rev());
-            }
-            found
-        }
-
-        /// How many mounted widgets are a `W`: `find.byType(W)`.
-        fn count<W: 'static>(&self) -> usize {
-            let elements = self.elements();
-            let app = self.cell.borrow();
-            elements
-                .into_iter()
-                .filter(|element| downcast_widget::<W>(&**element.widget(&app)).is_some())
-                .count()
-        }
-
-        /// The mounted `StretchEffect`'s strength: `findStretchEffect(tester).stretchStrength`.
-        fn stretch_strength(&self) -> f64 {
-            let elements = self.elements();
-            let app = self.cell.borrow();
-            elements
-                .into_iter()
-                .find_map(|element| {
-                    downcast_widget::<StretchEffect>(&**element.widget(&app))
-                        .map(|effect| effect.stretch_strength)
-                })
-                .expect("a StretchEffect is mounted")
-        }
-
-        /// Every render object, in tree order.
-        fn render_objects(&self) -> Vec<AnyRenderObject> {
-            let elements = self.elements();
-            let app = self.cell.borrow();
-            let root = elements
-                .into_iter()
-                .find_map(|element| element.find_render_object(&app))
-                .expect("a render tree");
-            let mut found = Vec::new();
-            let mut stack = vec![root];
-            while let Some(object) = stack.pop() {
-                found.push(object);
-                let mut children = Vec::new();
-                object.visit_children(&app, &mut |child| children.push(child));
-                stack.extend(children.into_iter().rev());
-            }
-            found
-        }
-
-        /// `tester.renderObject(find.byType(CustomPaint))`, first to last.
-        fn custom_paints(&self) -> Vec<RenderHandle<RenderCustomPaint>> {
-            let objects = self.render_objects();
-            let app = self.cell.borrow();
-            objects
-                .into_iter()
-                .filter_map(|object| object.downcast::<RenderCustomPaint>(&app))
-                .collect()
-        }
-
-        /// The one `RenderCustomPaint`: `tester.renderObject(find.byType(CustomPaint))`.
-        fn custom_paint(&self) -> RenderHandle<RenderCustomPaint> {
-            let paints = self.custom_paints();
-            assert_eq!(paints.len(), 1, "one CustomPaint");
-            paints[0]
-        }
-
-        /// The first `RenderClipRect`: `tester.allRenderObjects.whereType<RenderClipRect>()
-        /// .first.clipBehavior`.
-        /// The global rect the first `RenderClipRect` clips its child to: its own box, as the
-        /// stretch's `ClipRect` has no clipper.
-        fn first_clip_rect(&self) -> Rect {
-            let objects = self.render_objects();
-            let app = self.cell.borrow();
-            let clip = objects
-                .into_iter()
-                .find_map(|object| object.downcast::<RenderClipRect>(&app))
-                .expect("a RenderClipRect");
-            let origin = clip.as_box().local_to_global(&app, Offset::ZERO, None);
-            origin & clip.as_box().size(&app)
-        }
-
-        fn first_clip_behavior(&self) -> Clip {
-            let objects = self.render_objects();
-            let app = self.cell.borrow();
-            let clip = objects
-                .into_iter()
-                .find_map(|object| object.downcast::<RenderClipRect>(&app))
-                .expect("a RenderClipRect");
-            clip.clip_behavior(&app)
-        }
-
-        /// The calls `custom_paint` makes for its foreground painter when it paints at offset
-        /// zero, the recording Flutter's `paints` matcher walks; the child's own calls, which
-        /// these patterns skip over, are left out.
-        fn painted(&self, custom_paint: RenderHandle<RenderCustomPaint>) -> Vec<Call> {
-            let mut app = self.cell.borrow_mut();
-            let painter = custom_paint
-                .foreground_painter(&app)
-                .expect("the indicator paints in the foreground");
-            let size = custom_paint.size(&app);
-            let mut canvas = Canvas::new();
-            canvas.save();
-            painter.paint(&mut app, &mut canvas, size);
-            canvas.restore();
-            canvas.build().ops().iter().map(Call::of).collect()
-        }
-
-        /// `box.localToGlobal(Offset.zero)` for the box under `key`.
-        fn origin_of(&self, key: &GlobalKey) -> Offset {
-            let app = self.cell.borrow();
-            let render_box = key
-                .current_context(&app)
-                .expect("the keyed widget is mounted")
-                .find_render_object(&app)
-                .and_then(|object| object.as_box())
-                .expect("the keyed widget is a box");
-            render_box.local_to_global(&app, Offset::ZERO, None)
-        }
-
-        /// `tester.getCenter(find.byKey(key))`.
-        fn center_of(&self, key: &GlobalKey) -> Offset {
-            let app = self.cell.borrow();
-            let render_box = key
-                .current_context(&app)
-                .expect("the keyed widget is mounted")
-                .find_render_object(&app)
-                .and_then(|object| object.as_box())
-                .expect("the keyed widget is a box");
-            let size = render_box.size(&app);
-            render_box.local_to_global(
-                &app,
-                Offset::new(size.width() / 2.0, size.height() / 2.0),
-                None,
-            )
-        }
-
-        /// Whether the box under `key` is built and on screen: `find.byKey(key)` finding one
-        /// widget, as its onstage walk only finds what the viewport shows.
-        fn is_onstage(&self, key: &GlobalKey) -> bool {
-            let present = key.current_context(&self.cell.borrow_mut()).is_some();
-            if !present {
-                return false;
-            }
-            let top = self.origin_of(key).dy();
-            (0.0..VIEW_SIZE.height()).contains(&top)
-        }
-
-        /// `tester.getCenter(find.byType(CustomScrollView))` for a scroll view that fills the
-        /// view.
-        fn view_center(&self) -> Offset {
-            Offset::new(VIEW_SIZE.width() / 2.0, VIEW_SIZE.height() / 2.0)
+    /// `tester.pumpFrames(sameTree, maxDuration)`: a frame of the view asked for, then pumps of
+    /// flutter_test's 16.683ms until `max_duration` has passed.
+    fn pump_frames(tester: &mut WidgetTester, max_duration: Duration) {
+        let interval = Duration::from_micros(16_683);
+        let view = waft_embedder::View::id(&**tester.view());
+        tester.update(|app| SchedulerBinding::schedule_frame(app, FrameTarget::View(view)));
+        let mut elapsed = Duration::ZERO;
+        while elapsed < max_duration {
+            tester.pump_by(interval);
+            elapsed += interval;
         }
     }
 
-    fn micros(micros: f64) -> Duration {
-        Duration::from_micros(micros as u64)
+    /// The glow tests' `slowDrag`: ten moves by `offset`, 20ms apart, of the touch `pointer`.
+    fn slow_drag(tester: &mut WidgetTester, start: Offset, offset: Offset, pointer: i64) {
+        let mut gesture = TestPointer::touch(pointer);
+        tester.down(&mut gesture, start);
+        for _ in 0..10 {
+            move_by(tester, &mut gesture, offset);
+            tester.pump_by(Duration::from_millis(20));
+        }
+        tester.up(&gesture);
     }
 
-    /// Dart's `double.sign`.
-    fn dart_sign(value: f64) -> f64 {
-        if value > 0.0 {
-            1.0
-        } else if value < 0.0 {
-            -1.0
-        } else {
-            value
+    /// `tester.layers.contains(isA<ImageFilterLayer>())`.
+    fn has_image_filter_layer(tester: &WidgetTester) -> bool {
+        let root = tester.elements()[0];
+        let layers = tester.layer_list_of(root);
+        let app = tester.cell.borrow();
+        layers.into_iter().any(|layer| {
+            app.handle::<waft_rendering::ImageFilterLayer>(layer.id())
+                .is_some()
+        })
+    }
+
+    /// The mounted `StretchEffect`'s strength: `findStretchEffect(tester).stretchStrength`.
+    fn stretch_strength(tester: &WidgetTester) -> f64 {
+        let effect = tester.find_by_type::<StretchEffect>()[0];
+        tester.widget(effect, |effect: &StretchEffect| effect.stretch_strength)
+    }
+
+    /// `tester.renderObject(find.byType(CustomPaint))`, first to last.
+    fn custom_paints(tester: &WidgetTester) -> Vec<RenderHandle<RenderCustomPaint>> {
+        tester.all::<RenderCustomPaint>()
+    }
+
+    /// The one `RenderCustomPaint`: `tester.renderObject(find.byType(CustomPaint))`.
+    fn custom_paint(tester: &WidgetTester) -> RenderHandle<RenderCustomPaint> {
+        let paints = custom_paints(tester);
+        assert_eq!(paints.len(), 1, "one CustomPaint");
+        paints[0]
+    }
+
+    /// The global rect the first `RenderClipRect` clips its child to: its own box, as the
+    /// stretch's `ClipRect` has no clipper.
+    fn first_clip_rect(tester: &WidgetTester) -> Rect {
+        let clip = tester.first::<RenderClipRect>();
+        tester.global_rect(clip.as_box())
+    }
+
+    /// `tester.allRenderObjects.whereType<RenderClipRect>().first.clipBehavior`.
+    fn first_clip_behavior(tester: &WidgetTester) -> Clip {
+        let clip = tester.first::<RenderClipRect>();
+        clip.clip_behavior(&tester.cell.borrow())
+    }
+
+    /// The calls `custom_paint` makes for its foreground painter when it paints at offset
+    /// zero, the recording Flutter's `paints` matcher walks; the child's own calls, which
+    /// these patterns skip over, are left out.
+    fn painted(tester: &WidgetTester, custom_paint: RenderHandle<RenderCustomPaint>) -> Vec<Call> {
+        let mut app = tester.cell.borrow_mut();
+        let painter = custom_paint
+            .foreground_painter(&app)
+            .expect("the indicator paints in the foreground");
+        let size = custom_paint.size(&app);
+        let mut canvas = Canvas::new();
+        canvas.save();
+        painter.paint(&mut app, &mut canvas, size);
+        canvas.restore();
+        canvas.build().ops().iter().map(Call::of).collect()
+    }
+
+    /// `box.localToGlobal(Offset.zero)` for the box under `key`.
+    fn origin_of(tester: &WidgetTester, key: &GlobalKey) -> Offset {
+        let render_box = tester.render_object(key).as_box().expect("a render box");
+        render_box.local_to_global(&tester.cell.borrow(), Offset::ZERO, None)
+    }
+
+    /// Whether the box under `key` is built and on screen: `find.byKey(key)` finding one
+    /// widget, as its onstage walk only finds what the viewport shows.
+    fn is_onstage(tester: &WidgetTester, key: &GlobalKey) -> bool {
+        let present = key.current_context(&tester.cell.borrow()).is_some();
+        if !present {
+            return false;
         }
+        let top = origin_of(tester, key).dy();
+        (0.0..WidgetTester::SIZE.height()).contains(&top)
     }
 
     // ---- flutter_test's `paints` matcher, over the calls a recording canvas keeps ----
@@ -2444,15 +2071,6 @@ mod tests {
 
     // ---- the trees the tests build ----
 
-    fn install_fonts(app: &mut App) {
-        let binding = waft_painting::PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
-    }
-
     fn ltr<K>(child: impl IntoWidget<K>) -> WidgetRef {
         Directionality::new(TextDirection::Ltr, child).into_widget()
     }
@@ -2521,322 +2139,335 @@ mod tests {
     /// "Overscroll indicator color".
     #[test]
     fn the_default_glow_is_white_and_shows_only_for_a_slow_drag() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(sized_scroll_view(2000.0)));
-        let painter = tester.custom_paint();
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(sized_scroll_view(2000.0)));
+            let painter = custom_paint(tester);
 
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            assert!(does_not_overscroll(&painted(tester, painter)));
 
-        // the scroll gesture from tester.scroll happens in zero time, so nothing should appear:
-        tester.drag_from(tester.view_center(), Offset::new(0.0, 100.0));
-        assert!(does_not_overscroll(&tester.painted(painter)));
-        tester.pump(Duration::ZERO); // allow the ticker to register itself
-        assert!(does_not_overscroll(&tester.painted(painter)));
-        tester.pump(Duration::from_millis(100)); // animate
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            // the scroll gesture from tester.scroll happens in zero time, so nothing should appear:
+            tester.drag_from(VIEW_CENTER, Offset::new(0.0, 100.0), 1);
+            assert!(does_not_overscroll(&painted(tester, painter)));
+            tester.pump(); // allow the ticker to register itself
+            assert!(does_not_overscroll(&painted(tester, painter)));
+            tester.pump_by(Duration::from_millis(100)); // animate
+            assert!(does_not_overscroll(&painted(tester, painter)));
 
-        let gesture = tester.start_gesture(Offset::new(200.0, 200.0));
-        tester.pump(Duration::from_millis(100)); // animate
-        assert!(does_not_overscroll(&tester.painted(painter)));
-        tester.up(gesture);
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            let mut gesture = TestPointer::touch(2);
+            tester.down(&mut gesture, Offset::new(200.0, 200.0));
+            tester.pump_by(Duration::from_millis(100)); // animate
+            assert!(does_not_overscroll(&painted(tester, painter)));
+            tester.up(&gesture);
+            assert!(does_not_overscroll(&painted(tester, painter)));
 
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 5.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![Paints::Circle {
-                x: None,
-                color: Some(0x0DFFFFFF),
-            }],
-        );
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 3);
+            assert_paints(
+                &painted(tester, painter),
+                vec![Paints::Circle {
+                    x: None,
+                    color: Some(0x0DFFFFFF),
+                }],
+            );
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert!(does_not_overscroll(&painted(tester, painter)));
+        });
     }
 
     /// "Nested scrollable".
     #[test]
     fn a_predicate_lets_the_outer_indicator_glow_for_the_inner_scrollable() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(GlowingOverscrollIndicator::new(
-            AxisDirection::Down,
-            Color::new(0x0DFFFFFF),
-        )
-        .notification_predicate(Rc::new(|notification| notification.depth() == 1))
-        .child(
-            SingleChildScrollView::new()
-                .scroll_direction(Axis::Horizontal)
-                .child(
-                    SizedBox::new()
-                        .width(600.0)
-                        .child(sized_scroll_view(2000.0)),
-                ),
-        )));
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(GlowingOverscrollIndicator::new(
+                AxisDirection::Down,
+                Color::new(0x0DFFFFFF),
+            )
+            .notification_predicate(Rc::new(|notification| notification.depth() == 1))
+            .child(
+                SingleChildScrollView::new()
+                    .scroll_direction(Axis::Horizontal)
+                    .child(
+                        SizedBox::new()
+                            .width(600.0)
+                            .child(sized_scroll_view(2000.0)),
+                    ),
+            )));
 
-        let paints_found = tester.custom_paints();
-        let outer_painter = paints_found[0];
-        let inner_painter = *paints_found.last().expect("two CustomPaints");
+            let paints_found = custom_paints(tester);
+            let outer_painter = paints_found[0];
+            let inner_painter = *paints_found.last().expect("two CustomPaints");
 
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 5.0));
-        assert_paints(&tester.painted(outer_painter), vec![circle()]);
-        assert_paints(&tester.painted(inner_painter), vec![circle()]);
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
+            assert_paints(&painted(tester, outer_painter), vec![circle()]);
+            assert_paints(&painted(tester, inner_painter), vec![circle()]);
+        });
     }
 
     /// "Overscroll indicator changes side when you drag on the other side".
     #[test]
     fn the_glow_centers_on_the_side_the_drag_is_on() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(sized_scroll_view(2000.0)));
-        let painter = tester.custom_paint();
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(sized_scroll_view(2000.0)));
+            let painter = custom_paint(tester);
 
-        tester.slow_drag(Offset::new(400.0, 200.0), Offset::new(0.0, 10.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![Paints::Circle {
-                x: Some(400.0),
-                color: None,
-            }],
-        );
-        tester.slow_drag(Offset::new(100.0, 200.0), Offset::new(0.0, 10.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![Paints::Something(Box::new(|call| match call {
-                Call::Circle { x, .. } if *x < 400.0 => Ok(true),
-                Call::Circle { .. } => {
-                    Err("Dragging on left hand side did not overscroll on left hand side.".into())
-                }
-                _ => Ok(false),
-            }))],
-        );
-        tester.slow_drag(Offset::new(700.0, 200.0), Offset::new(0.0, 10.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![Paints::Something(Box::new(|call| match call {
-                Call::Circle { x, .. } if *x > 400.0 => Ok(true),
-                Call::Circle { .. } => {
-                    Err("Dragging on right hand side did not overscroll on right hand side.".into())
-                }
-                _ => Ok(false),
-            }))],
-        );
+            slow_drag(tester, Offset::new(400.0, 200.0), Offset::new(0.0, 10.0), 1);
+            assert_paints(
+                &painted(tester, painter),
+                vec![Paints::Circle {
+                    x: Some(400.0),
+                    color: None,
+                }],
+            );
+            slow_drag(tester, Offset::new(100.0, 200.0), Offset::new(0.0, 10.0), 2);
+            assert_paints(
+                &painted(tester, painter),
+                vec![Paints::Something(Box::new(|call| match call {
+                    Call::Circle { x, .. } if *x < 400.0 => Ok(true),
+                    Call::Circle { .. } => Err(
+                        "Dragging on left hand side did not overscroll on left hand side.".into(),
+                    ),
+                    _ => Ok(false),
+                }))],
+            );
+            slow_drag(tester, Offset::new(700.0, 200.0), Offset::new(0.0, 10.0), 3);
+            assert_paints(
+                &painted(tester, painter),
+                vec![Paints::Something(Box::new(|call| match call {
+                    Call::Circle { x, .. } if *x > 400.0 => Ok(true),
+                    Call::Circle { .. } => Err(
+                        "Dragging on right hand side did not overscroll on right hand side.".into(),
+                    ),
+                    _ => Ok(false),
+                }))],
+            );
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert!(does_not_overscroll(&painted(tester, painter)));
+        });
     }
 
     /// "Overscroll indicator changes side when you shift sides".
     #[test]
     fn the_glow_follows_a_drag_that_slides_sideways() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(sized_scroll_view(2000.0)));
-        let painter = tester.custom_paint();
-        let mut gesture = tester.start_gesture(Offset::new(300.0, 200.0));
-        tester.move_by(&mut gesture, Offset::new(0.0, 10.0));
-        tester.pump(Duration::from_millis(20));
-        let old_x = RefCell::new(0.0);
-        for _ in 0..10 {
-            tester.move_by(&mut gesture, Offset::new(50.0, 50.0));
-            tester.pump(Duration::from_millis(20));
-            assert_paints(
-                &tester.painted(painter),
-                vec![Paints::Something(Box::new(|call| match call {
-                    Call::Circle { x, .. } => {
-                        if *x <= *old_x.borrow() {
-                            return Err("Sliding to the right did not make the center of the \
-                                        radius slide to the right."
-                                .into());
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(sized_scroll_view(2000.0)));
+            let painter = custom_paint(tester);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, Offset::new(300.0, 200.0));
+            move_by(tester, &mut gesture, Offset::new(0.0, 10.0));
+            tester.pump_by(Duration::from_millis(20));
+            let old_x = RefCell::new(0.0);
+            for _ in 0..10 {
+                move_by(tester, &mut gesture, Offset::new(50.0, 50.0));
+                tester.pump_by(Duration::from_millis(20));
+                assert_paints(
+                    &painted(tester, painter),
+                    vec![Paints::Something(Box::new(|call| match call {
+                        Call::Circle { x, .. } => {
+                            if *x <= *old_x.borrow() {
+                                return Err("Sliding to the right did not make the center of the \
+                                            radius slide to the right."
+                                    .into());
+                            }
+                            *old_x.borrow_mut() = *x;
+                            Ok(true)
                         }
-                        *old_x.borrow_mut() = *x;
-                        Ok(true)
-                    }
-                    _ => Ok(false),
-                }))],
-            );
-        }
-        tester.up(gesture);
+                        _ => Ok(false),
+                    }))],
+                );
+            }
+            tester.up(&gesture);
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert!(does_not_overscroll(&painted(tester, painter)));
+        });
     }
 
     /// "Flipping direction of scrollable doesn't change overscroll behavior": "down".
     #[test]
     fn a_downward_scroll_view_glows_at_the_top_when_pulled_down() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(sized_scroll_view(20.0).physics(always_scrollable())));
-        let painter = tester.custom_paint();
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 5.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![
-                Paints::Save,
-                circle(),
-                Paints::Restore,
-                Paints::Save,
-                Paints::Scale(None, Some(-1.0)),
-                Paints::Restore,
-                Paints::Restore,
-            ],
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(sized_scroll_view(20.0).physics(always_scrollable())));
+            let painter = custom_paint(tester);
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
+            assert_paints(
+                &painted(tester, painter),
+                vec![
+                    Paints::Save,
+                    circle(),
+                    Paints::Restore,
+                    Paints::Save,
+                    Paints::Scale(None, Some(-1.0)),
+                    Paints::Restore,
+                    Paints::Restore,
+                ],
+            );
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert!(does_not_overscroll(&painted(tester, painter)));
+        });
     }
 
     /// "Flipping direction of scrollable doesn't change overscroll behavior": "up".
     #[test]
     fn a_reversed_scroll_view_glows_at_the_top_when_pulled_down() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(sized_scroll_view(20.0)
-            .reverse(true)
-            .physics(always_scrollable())));
-        let painter = tester.custom_paint();
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 5.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![
-                Paints::Save,
-                Paints::Scale(None, Some(-1.0)),
-                Paints::Restore,
-                Paints::Save,
-                circle(),
-                Paints::Restore,
-                Paints::Restore,
-            ],
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(sized_scroll_view(20.0)
+                .reverse(true)
+                .physics(always_scrollable())));
+            let painter = custom_paint(tester);
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
+            assert_paints(
+                &painted(tester, painter),
+                vec![
+                    Paints::Save,
+                    Paints::Scale(None, Some(-1.0)),
+                    Paints::Restore,
+                    Paints::Save,
+                    circle(),
+                    Paints::Restore,
+                    Paints::Restore,
+                ],
+            );
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert!(does_not_overscroll(&painted(tester, painter)));
+        });
     }
 
     /// "Overscroll in both directions".
     #[test]
     fn pulling_one_way_then_the_other_glows_at_both_ends() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(sized_scroll_view(20.0).physics(always_scrollable())));
-        let painter = tester.custom_paint();
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 5.0));
-        assert_paints(&tester.painted(painter), vec![circle()]);
-        assert!(paints(&tester.painted(painter), vec![circle(), circle()]).is_err());
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, -5.0));
-        assert_paints(&tester.painted(painter), vec![circle(), circle()]);
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(sized_scroll_view(20.0).physics(always_scrollable())));
+            let painter = custom_paint(tester);
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
+            assert_paints(&painted(tester, painter), vec![circle()]);
+            assert!(paints(&painted(tester, painter), vec![circle(), circle()]).is_err());
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, -5.0), 2);
+            assert_paints(&painted(tester, painter), vec![circle(), circle()]);
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert!(does_not_overscroll(&painted(tester, painter)));
+        });
     }
 
     /// "Overscroll ignored from alternate axis".
     #[test]
     fn an_indicator_ignores_overscrolls_along_the_other_axis() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(ScrollConfiguration::new(
-            behavior::<0>(),
-            GlowingOverscrollIndicator::new(AxisDirection::Right, Color::new(0xFF0000FF))
-                .child(sized_scroll_view(20.0).physics(always_scrollable())),
-        )));
-        let painter = tester.custom_paint();
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 5.0));
-        assert!(does_not_overscroll(&tester.painted(painter)));
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, -5.0));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(ScrollConfiguration::new(
+                behavior::<0>(),
+                GlowingOverscrollIndicator::new(AxisDirection::Right, Color::new(0xFF0000FF))
+                    .child(sized_scroll_view(20.0).physics(always_scrollable())),
+            )));
+            let painter = custom_paint(tester);
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
+            assert!(does_not_overscroll(&painted(tester, painter)));
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, -5.0), 2);
+            assert!(does_not_overscroll(&painted(tester, painter)));
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert!(does_not_overscroll(&painted(tester, painter)));
+        });
     }
 
     /// "Overscroll horizontally".
     #[test]
     fn a_horizontal_glow_is_rotated_a_quarter_turn() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(sized_scroll_view(20.0)
-            .scroll_direction(Axis::Horizontal)
-            .physics(always_scrollable())));
-        let painter = tester.custom_paint();
-        let quarter = std::f64::consts::PI / 2.0;
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(5.0, 0.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![Paints::Rotate(Some(quarter)), circle(), Paints::SaveRestore],
-        );
-        assert!(paints(&tester.painted(painter), vec![circle(), circle()]).is_err());
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(-5.0, 0.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![
-                Paints::Rotate(Some(quarter)),
-                circle(),
-                Paints::Rotate(Some(quarter)),
-                circle(),
-            ],
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(sized_scroll_view(20.0)
+                .scroll_direction(Axis::Horizontal)
+                .physics(always_scrollable())));
+            let painter = custom_paint(tester);
+            let quarter = std::f64::consts::PI / 2.0;
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(5.0, 0.0), 1);
+            assert_paints(
+                &painted(tester, painter),
+                vec![Paints::Rotate(Some(quarter)), circle(), Paints::SaveRestore],
+            );
+            assert!(paints(&painted(tester, painter), vec![circle(), circle()]).is_err());
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(-5.0, 0.0), 2);
+            assert_paints(
+                &painted(tester, painter),
+                vec![
+                    Paints::Rotate(Some(quarter)),
+                    circle(),
+                    Paints::Rotate(Some(quarter)),
+                    circle(),
+                ],
+            );
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        assert!(does_not_overscroll(&tester.painted(painter)));
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert!(does_not_overscroll(&painted(tester, painter)));
+        });
     }
 
     /// "Nested overscrolls do not throw exceptions".
     #[test]
     fn nested_overscrolls_do_not_throw_exceptions() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(PageView::new().children([ListView::new()
-            .children([Container::new()
-                .width(2000.0)
-                .height(2000.0)
-                .color(Color::new(0xFF00FF00))
-                .into_widget()])
-            .into_widget()])));
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(PageView::new().children([ListView::new()
+                .children([Container::new()
+                    .width(2000.0)
+                    .height(2000.0)
+                    .color(Color::new(0xFF00FF00))
+                    .into_widget()])
+                .into_widget()])));
 
-        tester.drag_from(Offset::new(100.0, 100.0), Offset::new(0.0, 2000.0));
-        tester.settle();
+            tester.drag_from(Offset::new(100.0, 100.0), Offset::new(0.0, 2000.0), 1);
+            tester.pump_and_settle();
+        });
     }
 
     /// "Changing settings".
     #[test]
     fn a_new_behavior_glows_in_its_own_color() {
-        let mut tester = WidgetTester::new();
-        let quarter = std::f64::consts::PI / 2.0;
-        tester.pump_widget(ltr(ScrollConfiguration::new(
-            behavior::<0xFF00FF00>(),
-            sized_scroll_view(20.0)
-                .scroll_direction(Axis::Horizontal)
-                .physics(always_scrollable())
-                .reverse(true),
-        )));
-        let painter = tester.custom_paint();
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(5.0, 0.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![
-                Paints::Rotate(Some(quarter)),
-                Paints::Circle {
-                    x: None,
-                    color: Some(0x0A00FF00),
-                },
-            ],
-        );
-        assert!(paints(&tester.painted(painter), vec![circle(), circle()]).is_err());
+        test_widgets(|tester| {
+            let quarter = std::f64::consts::PI / 2.0;
+            tester.pump_widget(ltr(ScrollConfiguration::new(
+                behavior::<0xFF00FF00>(),
+                sized_scroll_view(20.0)
+                    .scroll_direction(Axis::Horizontal)
+                    .physics(always_scrollable())
+                    .reverse(true),
+            )));
+            let painter = custom_paint(tester);
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(5.0, 0.0), 1);
+            assert_paints(
+                &painted(tester, painter),
+                vec![
+                    Paints::Rotate(Some(quarter)),
+                    Paints::Circle {
+                        x: None,
+                        color: Some(0x0A00FF00),
+                    },
+                ],
+            );
+            assert!(paints(&painted(tester, painter), vec![circle(), circle()]).is_err());
 
-        tester.pump_and_settle(Duration::from_secs(1));
-        tester.pump_widget(ltr(ScrollConfiguration::new(
-            behavior::<0xFF0000FF>(),
-            sized_scroll_view(20.0)
-                .scroll_direction(Axis::Horizontal)
-                .physics(always_scrollable()),
-        )));
-        let painter = tester.custom_paint();
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(5.0, 0.0));
-        assert_paints(
-            &tester.painted(painter),
-            vec![
-                Paints::Rotate(Some(quarter)),
-                Paints::Circle {
-                    x: None,
-                    color: Some(0x0A0000FF),
-                },
-                Paints::SaveRestore,
-            ],
-        );
-        assert!(paints(&tester.painted(painter), vec![circle(), circle()]).is_err());
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            tester.pump_widget(ltr(ScrollConfiguration::new(
+                behavior::<0xFF0000FF>(),
+                sized_scroll_view(20.0)
+                    .scroll_direction(Axis::Horizontal)
+                    .physics(always_scrollable()),
+            )));
+            let painter = custom_paint(tester);
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(5.0, 0.0), 2);
+            assert_paints(
+                &painted(tester, painter),
+                vec![
+                    Paints::Rotate(Some(quarter)),
+                    Paints::Circle {
+                        x: None,
+                        color: Some(0x0A0000FF),
+                    },
+                    Paints::SaveRestore,
+                ],
+            );
+            assert!(paints(&painted(tester, painter), vec![circle(), circle()]).is_err());
+        });
     }
 
     /// A `CustomScrollView` centered on its second sliver of `Text`s: the first sliver's second
@@ -2871,61 +2502,68 @@ mod tests {
     /// "CustomScrollView overscroll indicator works if there is sliver before center".
     #[test]
     fn a_glow_over_slivers_before_the_center_starts_at_the_edge() {
-        let mut tester = WidgetTester::new();
-        let first_sliver_1 = GlobalKey::new();
-        tester.pump_widget(ltr(ScrollConfiguration::new(
-            behavior::<0xFF0000FF>(),
-            centered_scroll_view(&first_sliver_1),
-        )));
+        test_widgets(|tester| {
+            let first_sliver_1 = GlobalKey::new();
+            tester.pump_widget(ltr(ScrollConfiguration::new(
+                behavior::<0xFF0000FF>(),
+                centered_scroll_view(&first_sliver_1),
+            )));
 
-        assert!(!tester.is_onstage(&first_sliver_1));
+            assert!(!is_onstage(tester, &first_sliver_1));
 
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 300.0));
-        assert!(tester.is_onstage(&first_sliver_1));
-        let painter = tester.custom_paint();
-        // The scroll offset and paint extend should cancel out each other.
-        assert_paints(
-            &tester.painted(painter),
-            vec![
-                Paints::Save,
-                Paints::Translate(None, Some(0.0)),
-                Paints::Scale(None, None),
-                circle(),
-            ],
-        );
+            slow_drag(
+                tester,
+                Offset::new(200.0, 200.0),
+                Offset::new(0.0, 300.0),
+                1,
+            );
+            assert!(is_onstage(tester, &first_sliver_1));
+            let painter = custom_paint(tester);
+            // The scroll offset and paint extend should cancel out each other.
+            assert_paints(
+                &painted(tester, painter),
+                vec![
+                    Paints::Save,
+                    Paints::Translate(None, Some(0.0)),
+                    Paints::Scale(None, None),
+                    circle(),
+                ],
+            );
+        });
     }
 
     /// "CustomScrollView overscroll indicator works well with [CustomScrollView.center] and
     /// [OverscrollIndicatorNotification.paintOffset]".
     #[test]
     fn a_glow_over_slivers_before_the_center_honors_the_paint_offset() {
-        let mut tester = WidgetTester::new();
-        let first_sliver_1 = GlobalKey::new();
-        tester.pump_widget(ltr(ScrollConfiguration::new(
-            behavior::<0xFF0000FF>(),
-            paint_offset_listener(
-                centered_scroll_view(&first_sliver_1),
-                |leading| leading,
-                50.0,
-            ),
-        )));
+        test_widgets(|tester| {
+            let first_sliver_1 = GlobalKey::new();
+            tester.pump_widget(ltr(ScrollConfiguration::new(
+                behavior::<0xFF0000FF>(),
+                paint_offset_listener(
+                    centered_scroll_view(&first_sliver_1),
+                    |leading| leading,
+                    50.0,
+                ),
+            )));
 
-        assert!(!tester.is_onstage(&first_sliver_1));
+            assert!(!is_onstage(tester, &first_sliver_1));
 
-        // offset will be magnified ten times
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 5.0));
-        assert!(tester.is_onstage(&first_sliver_1));
-        let painter = tester.custom_paint();
-        // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
-        assert_paints(
-            &tester.painted(painter),
-            vec![
-                Paints::Save,
-                Paints::Translate(None, Some(50.0)),
-                Paints::Scale(None, None),
-                circle(),
-            ],
-        );
+            // offset will be magnified ten times
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
+            assert!(is_onstage(tester, &first_sliver_1));
+            let painter = custom_paint(tester);
+            // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
+            assert_paints(
+                &painted(tester, painter),
+                vec![
+                    Paints::Save,
+                    Paints::Translate(None, Some(50.0)),
+                    Paints::Scale(None, None),
+                    circle(),
+                ],
+            );
+        });
     }
 
     fn translated_glow(y: f64) -> Vec<Paints<'static>> {
@@ -2950,118 +2588,122 @@ mod tests {
     /// "The OverscrollIndicator should not overflow the scrollable view edge".
     #[test]
     fn a_glow_moves_with_the_content_but_never_past_the_edge() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(paint_offset_listener(
-            sized_scroll_view(2000.0).into_widget(),
-            // both the leading and trailing indicator have a 50.0 pixels offset.
-            |_leading| true,
-            50.0,
-        )));
-        let painter = tester.custom_paint();
-        let start = Offset::new(200.0, 200.0);
-        tester.slow_drag(start, Offset::new(0.0, 5.0));
-        assert_paints(&tester.painted(painter), translated_glow(50.0));
-        // Reverse scroll (30 pixels), and the offset < notification.paintOffset.
-        tester.drag_from(start, Offset::new(0.0, -30.0));
-        tester.pump(Duration::ZERO);
-        // The OverscrollIndicator should move with the CustomScrollView.
-        assert_paints(&tester.painted(painter), translated_glow(50.0 - 30.0));
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(paint_offset_listener(
+                sized_scroll_view(2000.0).into_widget(),
+                // both the leading and trailing indicator have a 50.0 pixels offset.
+                |_leading| true,
+                50.0,
+            )));
+            let painter = custom_paint(tester);
+            let start = Offset::new(200.0, 200.0);
+            slow_drag(tester, start, Offset::new(0.0, 5.0), 1);
+            assert_paints(&painted(tester, painter), translated_glow(50.0));
+            // Reverse scroll (30 pixels), and the offset < notification.paintOffset.
+            tester.drag_from(start, Offset::new(0.0, -30.0), 2);
+            tester.pump();
+            // The OverscrollIndicator should move with the CustomScrollView.
+            assert_paints(&painted(tester, painter), translated_glow(50.0 - 30.0));
 
-        // Reverse scroll (30+20 pixels) and offset == notification.paintOffset.
-        tester.drag_from(start, Offset::new(0.0, -20.0));
-        tester.pump(Duration::ZERO);
-        assert_paints(&tester.painted(painter), translated_glow(50.0 - 50.0));
+            // Reverse scroll (30+20 pixels) and offset == notification.paintOffset.
+            tester.drag_from(start, Offset::new(0.0, -20.0), 3);
+            tester.pump();
+            assert_paints(&painted(tester, painter), translated_glow(50.0 - 50.0));
 
-        // Reverse scroll (30+20+10 pixels) and offset > notification.paintOffset.
-        tester.drag_from(start, Offset::new(0.0, -10.0));
-        tester.pump(Duration::ZERO);
-        // The OverscrollIndicator should not overflow the CustomScrollView's edge.
-        assert_paints(&tester.painted(painter), translated_glow(50.0 - 50.0));
+            // Reverse scroll (30+20+10 pixels) and offset > notification.paintOffset.
+            tester.drag_from(start, Offset::new(0.0, -10.0), 4);
+            tester.pump();
+            // The OverscrollIndicator should not overflow the CustomScrollView's edge.
+            assert_paints(&painted(tester, painter), translated_glow(50.0 - 50.0));
 
-        tester.settle(); // Finish the leading indicator.
+            tester.pump_and_settle(); // Finish the leading indicator.
 
-        // trigger the trailing indicator
-        tester.slow_drag(start, Offset::new(0.0, -200.0));
-        assert_paints(&tester.painted(painter), flipped_translated_glow(50.0));
+            // trigger the trailing indicator
+            slow_drag(tester, start, Offset::new(0.0, -200.0), 5);
+            assert_paints(&painted(tester, painter), flipped_translated_glow(50.0));
 
-        // Reverse scroll (30 pixels), and the offset < notification.paintOffset.
-        tester.drag_from(start, Offset::new(0.0, 30.0));
-        tester.pump(Duration::ZERO);
-        // The OverscrollIndicator should move with the CustomScrollView.
-        assert_paints(
-            &tester.painted(painter),
-            flipped_translated_glow(50.0 - 30.0),
-        );
+            // Reverse scroll (30 pixels), and the offset < notification.paintOffset.
+            tester.drag_from(start, Offset::new(0.0, 30.0), 6);
+            tester.pump();
+            // The OverscrollIndicator should move with the CustomScrollView.
+            assert_paints(
+                &painted(tester, painter),
+                flipped_translated_glow(50.0 - 30.0),
+            );
 
-        // Reverse scroll (30+20 pixels) and offset == notification.paintOffset.
-        tester.drag_from(start, Offset::new(0.0, 20.0));
-        tester.pump(Duration::ZERO);
-        assert_paints(
-            &tester.painted(painter),
-            flipped_translated_glow(50.0 - 50.0),
-        );
+            // Reverse scroll (30+20 pixels) and offset == notification.paintOffset.
+            tester.drag_from(start, Offset::new(0.0, 20.0), 7);
+            tester.pump();
+            assert_paints(
+                &painted(tester, painter),
+                flipped_translated_glow(50.0 - 50.0),
+            );
 
-        // Reverse scroll (30+20+10 pixels) and offset > notification.paintOffset.
-        tester.drag_from(start, Offset::new(0.0, 10.0));
-        tester.pump(Duration::ZERO);
-        // The OverscrollIndicator should not overflow the CustomScrollView's edge.
-        assert_paints(
-            &tester.painted(painter),
-            flipped_translated_glow(50.0 - 50.0),
-        );
+            // Reverse scroll (30+20+10 pixels) and offset > notification.paintOffset.
+            tester.drag_from(start, Offset::new(0.0, 10.0), 8);
+            tester.pump();
+            // The OverscrollIndicator should not overflow the CustomScrollView's edge.
+            assert_paints(
+                &painted(tester, painter),
+                flipped_translated_glow(50.0 - 50.0),
+            );
+        });
     }
 
     /// "[OverscrollIndicatorNotification.paintOffset] test": "Leading".
     #[test]
     fn the_leading_glow_draws_at_the_paint_offset_a_listener_sets() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(paint_offset_listener(
-            sized_scroll_view(2000.0).into_widget(),
-            |leading| leading,
-            50.0,
-        )));
-        let painter = tester.custom_paint();
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, 5.0));
-        // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
-        assert_paints(&tester.painted(painter), translated_glow(50.0));
-        // Reverse scroll direction.
-        tester.drag_from(Offset::new(200.0, 200.0), Offset::new(0.0, -30.0));
-        tester.pump(Duration::ZERO);
-        // The OverscrollIndicator should move with the CustomScrollView.
-        assert_paints(&tester.painted(painter), translated_glow(50.0 - 30.0));
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(paint_offset_listener(
+                sized_scroll_view(2000.0).into_widget(),
+                |leading| leading,
+                50.0,
+            )));
+            let painter = custom_paint(tester);
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
+            // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
+            assert_paints(&painted(tester, painter), translated_glow(50.0));
+            // Reverse scroll direction.
+            tester.drag_from(Offset::new(200.0, 200.0), Offset::new(0.0, -30.0), 2);
+            tester.pump();
+            // The OverscrollIndicator should move with the CustomScrollView.
+            assert_paints(&painted(tester, painter), translated_glow(50.0 - 30.0));
+        });
     }
 
     /// "[OverscrollIndicatorNotification.paintOffset] test": "Trailing".
     #[test]
     fn the_trailing_glow_draws_at_the_paint_offset_a_listener_sets() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(paint_offset_listener(
-            sized_scroll_view(2000.0).into_widget(),
-            |leading| !leading,
-            50.0,
-        )));
-        let painter = tester.custom_paint();
-        tester.drag_from(Offset::new(200.0, 200.0), Offset::new(200.0, -10000.0));
-        tester.pump(Duration::ZERO);
-        tester.slow_drag(Offset::new(200.0, 200.0), Offset::new(0.0, -5.0));
-        // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
-        assert_paints(&tester.painted(painter), flipped_translated_glow(50.0));
-        // Reverse scroll direction.
-        tester.drag_from(Offset::new(200.0, 200.0), Offset::new(0.0, 30.0));
-        tester.pump(Duration::ZERO);
-        // The OverscrollIndicator should move with the CustomScrollView.
-        assert_paints(
-            &tester.painted(painter),
-            flipped_translated_glow(50.0 - 30.0),
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(paint_offset_listener(
+                sized_scroll_view(2000.0).into_widget(),
+                |leading| !leading,
+                50.0,
+            )));
+            let painter = custom_paint(tester);
+            tester.drag_from(Offset::new(200.0, 200.0), Offset::new(200.0, -10000.0), 1);
+            tester.pump();
+            slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, -5.0), 2);
+            // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
+            assert_paints(&painted(tester, painter), flipped_translated_glow(50.0));
+            // Reverse scroll direction.
+            tester.drag_from(Offset::new(200.0, 200.0), Offset::new(0.0, 30.0), 3);
+            tester.pump();
+            // The OverscrollIndicator should move with the CustomScrollView.
+            assert_paints(
+                &painted(tester, painter),
+                flipped_translated_glow(50.0 - 30.0),
+            );
+        });
     }
 
     /// "StretchingOverscrollIndicator does not crash when child is null".
     #[test]
     fn a_stretching_indicator_with_no_child_builds() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(ltr(StretchingOverscrollIndicator::new(AxisDirection::Down)));
-        assert_eq!(tester.count::<StretchEffect>(), 1);
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(StretchingOverscrollIndicator::new(AxisDirection::Down)));
+            assert_eq!(tester.find_onstage_by_type::<StretchEffect>().len(), 1);
+        });
     }
 
     fn list_of_items(count: i32, height: f64) -> WidgetRef {
@@ -3077,118 +2719,120 @@ mod tests {
     /// "StretchingOverscrollIndicator does not crash when disposed mid stretch animation".
     #[test]
     fn a_stretching_indicator_disposed_mid_animation_leaves_nothing_running() {
-        let mut tester = WidgetTester::new();
-        tester
-            .pump_widget(ltr(StretchingOverscrollIndicator::new(AxisDirection::Down)
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(StretchingOverscrollIndicator::new(AxisDirection::Down)
                 .child(list_of_items(20, 100.0))));
 
-        // Fling at the top edge to overscroll, which starts the stretch
-        // animation via `StretchController::animate`.
-        tester.fling_from(tester.view_center(), Offset::new(0.0, 300.0), 1000.0);
-        tester.pump(Duration::ZERO); // Start the fling.
-        tester.pump(Duration::from_millis(100)); // Let the animation begin.
-        assert_ne!(
-            tester.stretch_strength(),
-            0.0,
-            "the fling stretches the list"
-        );
+            // Fling at the top edge to overscroll, which starts the stretch
+            // animation via `StretchController::animate`.
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, 300.0), 1000.0, 1);
+            tester.pump(); // Start the fling.
+            tester.pump_by(Duration::from_millis(100)); // Let the animation begin.
+            assert_ne!(
+                stretch_strength(tester),
+                0.0,
+                "the fling stretches the list"
+            );
 
-        // Tear down the widget before the animation completes. This disposes the
-        // stretch controller (and its AnimationController) while the animation's
-        // completion callback is still pending.
-        tester.pump_widget(SizedBox::new().into_widget());
-        tester.settle();
-        assert_eq!(tester.count::<StretchEffect>(), 0);
+            // Tear down the widget before the animation completes. This disposes the
+            // stretch controller (and its AnimationController) while the animation's
+            // completion callback is still pending.
+            tester.pump_widget(SizedBox::new().into_widget());
+            tester.pump_and_settle();
+            assert_eq!(tester.find_onstage_by_type::<StretchEffect>().len(), 0);
+        });
     }
 
     /// The `AnimationController` each stretch release animates with is freed once the next
     /// release or the animation's end replaces it, as Dart's collector frees it.
     #[test]
     fn a_stretch_controller_frees_each_release_animation_it_replaces() {
-        let mut tester = WidgetTester::new();
-        tester
-            .pump_widget(ltr(StretchingOverscrollIndicator::new(AxisDirection::Down)
+        test_widgets(|tester| {
+            tester.pump_widget(ltr(StretchingOverscrollIndicator::new(AxisDirection::Down)
                 .child(list_of_items(20, 100.0))));
-        let release_controller = |tester: &WidgetTester| {
-            let elements = tester.elements();
-            let mut app = tester.cell.borrow_mut();
-            let state = elements
-                .into_iter()
-                .find_map(|element| {
-                    element.state_handle::<StretchingOverscrollIndicatorState>(&app)
-                })
-                .expect("a mounted StretchingOverscrollIndicator");
-            let stretch = state.stretch_controller(&mut app);
-            app.get(stretch).controller.handle()
-        };
+            let release_controller = |tester: &WidgetTester| {
+                let elements = tester.elements();
+                let mut app = tester.cell.borrow_mut();
+                let state = elements
+                    .into_iter()
+                    .find_map(|element| {
+                        element.state_handle::<StretchingOverscrollIndicatorState>(&app)
+                    })
+                    .expect("a mounted StretchingOverscrollIndicator");
+                let stretch = state.stretch_controller(&mut app);
+                app.get(stretch).controller.handle()
+            };
 
-        tester.fling_from(tester.view_center(), Offset::new(0.0, 300.0), 1000.0);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(100));
-        let first = release_controller(&tester).expect("the fling animates the release");
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, 300.0), 1000.0, 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100));
+            let first = release_controller(tester).expect("the fling animates the release");
 
-        // A second fling replaces the release animation before it ends.
-        tester.fling_from(tester.view_center(), Offset::new(0.0, 300.0), 1000.0);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(100));
-        let second = release_controller(&tester).expect("the fling animates the release");
-        assert_ne!(first, second);
-        tester.cell.checkpoint();
-        assert!(
-            !tester.cell.borrow().contains(first),
-            "the replaced release's"
-        );
+            // A second fling replaces the release animation before it ends.
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, 300.0), 1000.0, 2);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100));
+            let second = release_controller(tester).expect("the fling animates the release");
+            assert_ne!(first, second);
+            tester.cell.checkpoint();
+            assert!(
+                !tester.cell.borrow().contains(first),
+                "the replaced release's"
+            );
 
-        tester.settle();
-        assert!(release_controller(&tester).is_none());
-        tester.cell.checkpoint();
-        assert!(
-            !tester.cell.borrow().contains(second),
-            "the finished release's"
-        );
+            tester.pump_and_settle();
+            assert!(release_controller(tester).is_none());
+            tester.cell.checkpoint();
+            assert!(
+                !tester.cell.borrow().contains(second),
+                "the finished release's"
+            );
+        });
     }
 
     /// "GlowingOverscrollIndicator does not crash at zero area".
     #[test]
     fn a_glowing_indicator_lays_out_at_zero_area() {
-        let mut tester = WidgetTester::new();
-        let key = GlobalKey::new();
-        tester.pump_widget(ltr(Center::new().child(
-            SizedBox::shrink().child(
-                GlowingOverscrollIndicator::new(AxisDirection::Down, Color::new(0xFF112233))
-                    .key(key.clone().into()),
-            ),
-        )));
-        let app = tester.cell.borrow();
-        let size = key
-            .current_context(&app)
-            .and_then(|context| context.find_render_object(&app))
-            .and_then(|object| object.as_box())
-            .expect("the indicator is laid out")
-            .size(&app);
-        assert_eq!(size, Size::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(ltr(Center::new().child(
+                SizedBox::shrink().child(
+                    GlowingOverscrollIndicator::new(AxisDirection::Down, Color::new(0xFF112233))
+                        .key(key.clone().into()),
+                ),
+            )));
+            let app = tester.cell.borrow();
+            let size = key
+                .current_context(&app)
+                .and_then(|context| context.find_render_object(&app))
+                .and_then(|object| object.as_box())
+                .expect("the indicator is laid out")
+                .size(&app);
+            assert_eq!(size, Size::ZERO);
+        });
     }
 
     /// "StretchingOverscrollIndicator does not crash at zero area".
     #[test]
     fn a_stretching_indicator_lays_out_at_zero_area() {
-        let mut tester = WidgetTester::new();
-        let key = GlobalKey::new();
-        tester.pump_widget(ltr(Center::new().child(
-            SizedBox::shrink().child(
-                StretchingOverscrollIndicator::new(AxisDirection::Down)
-                    .key(key.clone().into())
-                    .child(ListView::new()),
-            ),
-        )));
-        let app = tester.cell.borrow();
-        let size = key
-            .current_context(&app)
-            .and_then(|context| context.find_render_object(&app))
-            .and_then(|object| object.as_box())
-            .expect("the indicator is laid out")
-            .size(&app);
-        assert_eq!(size, Size::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(ltr(Center::new().child(
+                SizedBox::shrink().child(
+                    StretchingOverscrollIndicator::new(AxisDirection::Down)
+                        .key(key.clone().into())
+                        .child(ListView::new()),
+                ),
+            )));
+            let app = tester.cell.borrow();
+            let size = key
+                .current_context(&app)
+                .and_then(|context| context.find_render_object(&app))
+                .and_then(|object| object.as_box())
+                .expect("the indicator is laid out")
+                .size(&app);
+            assert_eq!(size, Size::ZERO);
+        });
     }
 
     // ---- overscroll_stretch_indicator_test.dart ----
@@ -3212,9 +2856,9 @@ mod tests {
 
         fn origins(&self, tester: &WidgetTester) -> [Offset; 3] {
             [
-                tester.origin_of(&self.box1),
-                tester.origin_of(&self.box2),
-                tester.origin_of(&self.box3),
+                origin_of(tester, &self.box1),
+                origin_of(tester, &self.box2),
+                origin_of(tester, &self.box3),
             ]
         }
 
@@ -3312,7 +2956,7 @@ mod tests {
         Directionality::new(
             options.text_direction,
             MediaQuery::new(
-                MediaQueryData::new().size(VIEW_SIZE),
+                MediaQueryData::new().size(WidgetTester::SIZE),
                 ScrollConfiguration::new(
                     no_overscroll_behavior(),
                     StretchingOverscrollIndicator::new(axis_direction).child(scroll_view),
@@ -3325,65 +2969,77 @@ mod tests {
     }
 
     fn assert_one_stretching_indicator(tester: &WidgetTester) {
-        assert_eq!(tester.count::<StretchingOverscrollIndicator>(), 1);
-        assert_eq!(tester.count::<GlowingOverscrollIndicator>(), 0);
+        assert_eq!(
+            tester
+                .find_onstage_by_type::<StretchingOverscrollIndicator>()
+                .len(),
+            1
+        );
+        assert_eq!(
+            tester
+                .find_onstage_by_type::<GlowingOverscrollIndicator>()
+                .len(),
+            0
+        );
     }
 
     /// "Stretch overscroll will do nothing when axes do not match".
     #[test]
     fn a_stretch_on_the_other_axis_does_nothing() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(ltr(MediaQuery::new(
-            MediaQueryData::new().size(VIEW_SIZE),
-            ScrollConfiguration::new(
-                no_overscroll_behavior(),
-                StretchingOverscrollIndicator::new(AxisDirection::Right).child(
-                    CustomScrollView::new()
-                        .controller(boxes.controller.erase())
-                        .slivers([
-                            SliverToBoxAdapter::new()
-                                .child(
-                                    Container::new()
-                                        .color(Color::new(0xD0FF0000))
-                                        .key(boxes.box1.clone().into())
-                                        .height(250.0),
-                                )
-                                .into_widget(),
-                            SliverToBoxAdapter::new()
-                                .child(
-                                    Container::new()
-                                        .color(Color::new(0xFFFFFF00))
-                                        .key(boxes.box2.clone().into())
-                                        .height(250.0)
-                                        .width(300.0),
-                                )
-                                .into_widget(),
-                        ]),
-                ),
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(ltr(MediaQuery::new(
+                MediaQueryData::new().size(WidgetTester::SIZE),
+                ScrollConfiguration::new(
+                    no_overscroll_behavior(),
+                    StretchingOverscrollIndicator::new(AxisDirection::Right).child(
+                        CustomScrollView::new()
+                            .controller(boxes.controller.erase())
+                            .slivers([
+                                SliverToBoxAdapter::new()
+                                    .child(
+                                        Container::new()
+                                            .color(Color::new(0xD0FF0000))
+                                            .key(boxes.box1.clone().into())
+                                            .height(250.0),
+                                    )
+                                    .into_widget(),
+                                SliverToBoxAdapter::new()
+                                    .child(
+                                        Container::new()
+                                            .color(Color::new(0xFFFFFF00))
+                                            .key(boxes.box2.clone().into())
+                                            .height(250.0)
+                                            .width(300.0),
+                                    )
+                                    .into_widget(),
+                            ]),
+                    ),
+                )
+                .into_widget(),
             )
-            .into_widget(),
-        )
-        .into_widget()));
+            .into_widget()));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(tester.origin_of(&boxes.box1), Offset::ZERO);
-        assert_eq!(tester.origin_of(&boxes.box2), Offset::new(0.0, 250.0));
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(origin_of(tester, &boxes.box1), Offset::ZERO);
+            assert_eq!(origin_of(tester, &boxes.box2), Offset::new(0.0, 250.0));
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll the start, no stretching occurs.
-        tester.move_by(&mut gesture, Offset::new(0.0, 200.0));
-        tester.settle();
-        assert_eq!(tester.origin_of(&boxes.box1), Offset::ZERO);
-        assert_eq!(tester.origin_of(&boxes.box2).dy(), 250.0);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll the start, no stretching occurs.
+            move_by(tester, &mut gesture, Offset::new(0.0, 200.0));
+            tester.pump_and_settle();
+            assert_eq!(origin_of(tester, &boxes.box1), Offset::ZERO);
+            assert_eq!(origin_of(tester, &boxes.box2).dy(), 250.0);
 
-        tester.up(gesture);
-        tester.settle();
+            tester.up(&gesture);
+            tester.pump_and_settle();
 
-        // Overscroll released
-        assert_eq!(tester.origin_of(&boxes.box1), Offset::ZERO);
-        assert_eq!(tester.origin_of(&boxes.box2), Offset::new(0.0, 250.0));
+            // Overscroll released
+            assert_eq!(origin_of(tester, &boxes.box1), Offset::ZERO);
+            assert_eq!(origin_of(tester, &boxes.box2), Offset::new(0.0, 250.0));
+        });
     }
 
     /// [`near`] for both coordinates: the stretch is an f32 `Matrix4`.
@@ -3397,151 +3053,157 @@ mod tests {
     /// "Stretch overscroll vertically".
     #[test]
     fn a_vertical_stretch_pulls_the_boxes_apart_at_either_end_and_releases() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(&boxes, BuildTest::default()));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(&boxes, BuildTest::default()));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 250.0),
-                Offset::new(0.0, 500.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 250.0),
+                    Offset::new(0.0, 500.0)
+                ]
+            );
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll the start
-        tester.move_by(&mut gesture, Offset::new(0.0, 200.0));
-        tester.settle();
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1, Offset::ZERO);
-        assert!(box2.dy() > 255.0, "{box2:?}");
-        assert!(box3.dy() > 510.0, "{box3:?}");
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll the start
+            move_by(tester, &mut gesture, Offset::new(0.0, 200.0));
+            tester.pump_and_settle();
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1, Offset::ZERO);
+            assert!(box2.dy() > 255.0, "{box2:?}");
+            assert!(box3.dy() > 510.0, "{box3:?}");
 
-        tester.up(gesture);
-        tester.settle();
+            tester.up(&gesture);
+            tester.pump_and_settle();
 
-        // Stretch released back to the start
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 250.0),
-                Offset::new(0.0, 500.0)
-            ]
-        );
+            // Stretch released back to the start
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 250.0),
+                    Offset::new(0.0, 500.0)
+                ]
+            );
 
-        // Jump to end of the list
-        boxes.jump_to_max(&tester);
-        tester.settle();
-        assert_eq!(boxes.offset(&tester), 150.0);
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), -150.0);
-        assert_eq!(box2.dy(), 100.0);
-        assert_eq!(box3.dy(), 350.0);
+            // Jump to end of the list
+            boxes.jump_to_max(tester);
+            tester.pump_and_settle();
+            assert_eq!(boxes.offset(tester), 150.0);
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), -150.0);
+            assert_eq!(box2.dy(), 100.0);
+            assert_eq!(box3.dy(), 350.0);
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll the end
-        tester.move_by(&mut gesture, Offset::new(0.0, -200.0));
-        tester.settle();
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert!(box1.dy() < -165.0, "{box1:?}");
-        assert!(box2.dy() < 90.0, "{box2:?}");
-        assert!(box3.dy() < 350.0, "{box3:?}");
+            let mut gesture = TestPointer::touch(2);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll the end
+            move_by(tester, &mut gesture, Offset::new(0.0, -200.0));
+            tester.pump_and_settle();
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert!(box1.dy() < -165.0, "{box1:?}");
+            assert!(box2.dy() < 90.0, "{box2:?}");
+            assert!(box3.dy() < 350.0, "{box3:?}");
 
-        tester.up(gesture);
-        tester.settle();
+            tester.up(&gesture);
+            tester.pump_and_settle();
 
-        // Stretch released back
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), -150.0);
-        assert_eq!(box2.dy(), 100.0);
-        assert_eq!(box3.dy(), 350.0);
+            // Stretch released back
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), -150.0);
+            assert_eq!(box2.dy(), 100.0);
+            assert_eq!(box3.dy(), 350.0);
+        });
     }
 
     /// "Stretch overscroll works in reverse - vertical".
     #[test]
     fn a_reversed_vertical_stretch_pulls_the_boxes_up() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(
-            &boxes,
-            BuildTest {
-                reverse: true,
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(
+                &boxes,
+                BuildTest {
+                    reverse: true,
+                    ..BuildTest::default()
+                },
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::new(0.0, 350.0),
-                Offset::new(0.0, 100.0),
-                Offset::new(0.0, -150.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::new(0.0, 350.0),
+                    Offset::new(0.0, 100.0),
+                    Offset::new(0.0, -150.0)
+                ]
+            );
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll
-        tester.move_by(&mut gesture, Offset::new(0.0, -200.0));
-        tester.settle();
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert!(box1.dy() < 350.0, "{box1:?}");
-        assert!(box2.dy() < 100.0, "{box2:?}");
-        assert!(box3.dy() < -150.0, "{box3:?}");
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll
+            move_by(tester, &mut gesture, Offset::new(0.0, -200.0));
+            tester.pump_and_settle();
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert!(box1.dy() < 350.0, "{box1:?}");
+            assert!(box2.dy() < 100.0, "{box2:?}");
+            assert!(box3.dy() < -150.0, "{box3:?}");
+        });
     }
 
     /// "Stretch overscroll works in reverse - horizontal".
     #[test]
     fn a_reversed_horizontal_stretch_pulls_the_boxes_left() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(
-            &boxes,
-            BuildTest {
-                axis: Axis::Horizontal,
-                reverse: true,
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(
+                &boxes,
+                BuildTest {
+                    axis: Axis::Horizontal,
+                    reverse: true,
+                    ..BuildTest::default()
+                },
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::new(500.0, 0.0),
-                Offset::new(200.0, 0.0),
-                Offset::new(-100.0, 0.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::new(500.0, 0.0),
+                    Offset::new(200.0, 0.0),
+                    Offset::new(-100.0, 0.0)
+                ]
+            );
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll
-        tester.move_by(&mut gesture, Offset::new(-200.0, 0.0));
-        tester.settle();
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert!(box1.dx() < 500.0, "{box1:?}");
-        assert!(box2.dx() < 200.0, "{box2:?}");
-        assert!(box3.dx() < -100.0, "{box3:?}");
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll
+            move_by(tester, &mut gesture, Offset::new(-200.0, 0.0));
+            tester.pump_and_settle();
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert!(box1.dx() < 500.0, "{box1:?}");
+            assert!(box2.dx() < 200.0, "{box2:?}");
+            assert!(box3.dx() < -100.0, "{box3:?}");
+        });
     }
 
     /// The horizontal stretch at both ends that "Stretch overscroll horizontally" and
     /// "Stretch overscroll works in reverse - horizontal - RTL" share.
-    fn horizontal_stretch_at_both_ends(options: BuildTest) {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
+    fn horizontal_stretch_at_both_ends(tester: &mut WidgetTester, options: BuildTest) {
+        let boxes = Boxes::new(tester);
         tester.pump_widget(build_test(&boxes, options));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
+        assert_one_stretching_indicator(tester);
+        assert_eq!(boxes.offset(tester), 0.0);
         assert_eq!(
-            boxes.origins(&tester),
+            boxes.origins(tester),
             [
                 Offset::ZERO,
                 Offset::new(300.0, 0.0),
@@ -3549,21 +3211,22 @@ mod tests {
             ]
         );
 
-        let mut gesture = tester.start_gesture(tester.view_center());
+        let mut gesture = TestPointer::touch(2);
+        tester.down(&mut gesture, VIEW_CENTER);
         // Overscroll the start
-        tester.move_by(&mut gesture, Offset::new(200.0, 0.0));
-        tester.settle();
-        let [box1, box2, box3] = boxes.origins(&tester);
+        move_by(tester, &mut gesture, Offset::new(200.0, 0.0));
+        tester.pump_and_settle();
+        let [box1, box2, box3] = boxes.origins(tester);
         assert_eq!(box1, Offset::ZERO);
         assert!(box2.dx() > 305.0, "{box2:?}");
         assert!(box3.dx() > 610.0, "{box3:?}");
 
-        tester.up(gesture);
-        tester.settle();
+        tester.up(&gesture);
+        tester.pump_and_settle();
 
         // Stretch released back to the start
         assert_eq!(
-            boxes.origins(&tester),
+            boxes.origins(tester),
             [
                 Offset::ZERO,
                 Offset::new(300.0, 0.0),
@@ -3572,28 +3235,29 @@ mod tests {
         );
 
         // Jump to end of the list
-        boxes.jump_to_max(&tester);
-        tester.settle();
-        assert_eq!(boxes.offset(&tester), 100.0);
-        let [box1, box2, box3] = boxes.origins(&tester);
+        boxes.jump_to_max(tester);
+        tester.pump_and_settle();
+        assert_eq!(boxes.offset(tester), 100.0);
+        let [box1, box2, box3] = boxes.origins(tester);
         assert_eq!(box1.dx(), -100.0);
         assert_eq!(box2.dx(), 200.0);
         assert_eq!(box3.dx(), 500.0);
 
-        let mut gesture = tester.start_gesture(tester.view_center());
+        let mut gesture = TestPointer::touch(3);
+        tester.down(&mut gesture, VIEW_CENTER);
         // Overscroll the end
-        tester.move_by(&mut gesture, Offset::new(-200.0, 0.0));
-        tester.settle();
-        let [box1, box2, box3] = boxes.origins(&tester);
+        move_by(tester, &mut gesture, Offset::new(-200.0, 0.0));
+        tester.pump_and_settle();
+        let [box1, box2, box3] = boxes.origins(tester);
         assert!(box1.dx() < -116.0, "{box1:?}");
         assert!(box2.dx() < 190.0, "{box2:?}");
         assert!(box3.dx() < 500.0, "{box3:?}");
 
-        tester.up(gesture);
-        tester.settle();
+        tester.up(&gesture);
+        tester.pump_and_settle();
 
         // Stretch released back
-        let [box1, box2, box3] = boxes.origins(&tester);
+        let [box1, box2, box3] = boxes.origins(tester);
         assert_eq!(box1.dx(), -100.0);
         assert_eq!(box2.dx(), 200.0);
         assert_eq!(box3.dx(), 500.0);
@@ -3602,79 +3266,93 @@ mod tests {
     /// "Stretch overscroll works in reverse - horizontal - RTL".
     #[test]
     fn a_reversed_right_to_left_stretch_pulls_the_boxes_apart_at_either_end() {
-        horizontal_stretch_at_both_ends(BuildTest {
-            axis: Axis::Horizontal,
-            reverse: true,
-            text_direction: TextDirection::Rtl,
-            ..BuildTest::default()
+        test_widgets(|tester| {
+            horizontal_stretch_at_both_ends(
+                tester,
+                BuildTest {
+                    axis: Axis::Horizontal,
+                    reverse: true,
+                    text_direction: TextDirection::Rtl,
+                    ..BuildTest::default()
+                },
+            )
         });
     }
 
     /// "Stretch overscroll horizontally".
     #[test]
     fn a_horizontal_stretch_pulls_the_boxes_apart_at_either_end_and_releases() {
-        horizontal_stretch_at_both_ends(BuildTest {
-            axis: Axis::Horizontal,
-            ..BuildTest::default()
+        test_widgets(|tester| {
+            horizontal_stretch_at_both_ends(
+                tester,
+                BuildTest {
+                    axis: Axis::Horizontal,
+                    ..BuildTest::default()
+                },
+            )
         });
     }
 
     /// "Stretch overscroll only uses image filter during stretch effect".
     #[test]
     fn a_stretch_filters_its_child_only_while_it_stretches() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(
-            &boxes,
-            BuildTest {
-                axis: Axis::Horizontal,
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(
+                &boxes,
+                BuildTest {
+                    axis: Axis::Horizontal,
+                    ..BuildTest::default()
+                },
+            ));
 
-        assert!(!tester.has_image_filter_layer());
+            assert!(!has_image_filter_layer(tester));
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll
-        tester.move_by(&mut gesture, Offset::new(200.0, 0.0));
-        tester.settle();
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll
+            move_by(tester, &mut gesture, Offset::new(200.0, 0.0));
+            tester.pump_and_settle();
 
-        assert!(tester.has_image_filter_layer());
+            assert!(has_image_filter_layer(tester));
+        });
     }
 
     /// "Stretch overscroll horizontally RTL".
     #[test]
     fn a_right_to_left_stretch_pulls_the_boxes_left() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(
-            &boxes,
-            BuildTest {
-                axis: Axis::Horizontal,
-                text_direction: TextDirection::Rtl,
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(
+                &boxes,
+                BuildTest {
+                    axis: Axis::Horizontal,
+                    text_direction: TextDirection::Rtl,
+                    ..BuildTest::default()
+                },
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::new(500.0, 0.0),
-                Offset::new(200.0, 0.0),
-                Offset::new(-100.0, 0.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::new(500.0, 0.0),
+                    Offset::new(200.0, 0.0),
+                    Offset::new(-100.0, 0.0)
+                ]
+            );
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll
-        tester.move_by(&mut gesture, Offset::new(-200.0, 0.0));
-        tester.settle();
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert!(box1.dx() < 500.0, "{box1:?}");
-        assert!(box2.dx() < 200.0, "{box2:?}");
-        assert!(box3.dx() < -100.0, "{box3:?}");
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll
+            move_by(tester, &mut gesture, Offset::new(-200.0, 0.0));
+            tester.pump_and_settle();
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert!(box1.dx() < 500.0, "{box1:?}");
+            assert!(box2.dx() < 200.0, "{box2:?}");
+            assert!(box3.dx() < -100.0, "{box3:?}");
+        });
     }
 
     /// A listener that counts the confirmations and disallows them while `disallow` is set.
@@ -3699,138 +3377,144 @@ mod tests {
     /// "Disallow stretching overscroll".
     #[test]
     fn a_disallowed_stretch_leaves_the_boxes_in_place() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        let indicator_notification = Rc::new(Cell::new(0));
-        tester.pump_widget(counting_listener(
-            build_test(&boxes, BuildTest::default()),
-            &indicator_notification,
-            &Rc::new(Cell::new(true)),
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            let indicator_notification = Rc::new(Cell::new(0));
+            tester.pump_widget(counting_listener(
+                build_test(&boxes, BuildTest::default()),
+                &indicator_notification,
+                &Rc::new(Cell::new(true)),
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(indicator_notification.get(), 0);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 250.0),
-                Offset::new(0.0, 500.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(indicator_notification.get(), 0);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 250.0),
+                    Offset::new(0.0, 500.0)
+                ]
+            );
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll the start, should not stretch
-        tester.move_by(&mut gesture, Offset::new(0.0, 200.0));
-        tester.settle();
-        assert_eq!(indicator_notification.get(), 1);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 250.0),
-                Offset::new(0.0, 500.0)
-            ]
-        );
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll the start, should not stretch
+            move_by(tester, &mut gesture, Offset::new(0.0, 200.0));
+            tester.pump_and_settle();
+            assert_eq!(indicator_notification.get(), 1);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 250.0),
+                    Offset::new(0.0, 500.0)
+                ]
+            );
 
-        tester.up(gesture);
-        tester.settle();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+        });
     }
 
     /// "Disallow stretching overscroll during a fling".
     #[test]
     fn a_disallowed_stretch_does_not_absorb_a_fling() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        let indicator_notification = Rc::new(Cell::new(0));
-        tester.pump_widget(counting_listener(
-            build_test(&boxes, BuildTest::default()),
-            &indicator_notification,
-            &Rc::new(Cell::new(true)),
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            let indicator_notification = Rc::new(Cell::new(0));
+            tester.pump_widget(counting_listener(
+                build_test(&boxes, BuildTest::default()),
+                &indicator_notification,
+                &Rc::new(Cell::new(true)),
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(indicator_notification.get(), 0);
+            assert_one_stretching_indicator(tester);
+            assert_eq!(indicator_notification.get(), 0);
 
-        boxes.jump_to_max(&tester);
-        tester.pump(Duration::ZERO);
+            boxes.jump_to_max(tester);
+            tester.pump();
 
-        {
-            let mut app = tester.cell.borrow_mut();
-            let position = boxes.controller.as_controller().position(&app);
-            let drag = position.drag(&mut app, DragStartDetails::default(), Listener::new(|_| {}));
-            drag.update(
-                &mut app,
-                DragUpdateDetails::new(
-                    Offset::ZERO,
-                    None,
-                    None,
-                    Offset::new(0.0, -5000.0),
-                    Some(-5000.0),
-                    None,
-                ),
-            );
-            drag.end(
-                &mut app,
-                DragEndDetails::new(
-                    Offset::ZERO,
-                    None,
-                    Velocity {
-                        pixels_per_second: Offset::new(0.0, -5000.0),
-                    },
-                    Some(-5000.0),
-                ),
-            );
-        }
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(16));
+            {
+                let mut app = tester.cell.borrow_mut();
+                let position = boxes.controller.as_controller().position(&app);
+                let drag =
+                    position.drag(&mut app, DragStartDetails::default(), Listener::new(|_| {}));
+                drag.update(
+                    &mut app,
+                    DragUpdateDetails::new(
+                        Offset::ZERO,
+                        None,
+                        None,
+                        Offset::new(0.0, -5000.0),
+                        Some(-5000.0),
+                        None,
+                    ),
+                );
+                drag.end(
+                    &mut app,
+                    DragEndDetails::new(
+                        Offset::ZERO,
+                        None,
+                        Velocity {
+                            pixels_per_second: Offset::new(0.0, -5000.0),
+                        },
+                        Some(-5000.0),
+                    ),
+                );
+            }
+            tester.pump();
+            tester.pump_by(Duration::from_millis(16));
 
-        assert_eq!(indicator_notification.get(), 1);
-        assert_eq!(tester.stretch_strength(), 0.0);
+            assert_eq!(indicator_notification.get(), 1);
+            assert_eq!(stretch_strength(tester), 0.0);
+        });
     }
 
     /// "Disallowed stretch does not persist into a new scroll sequence".
     #[test]
     fn a_disallowed_stretch_is_allowed_again_in_the_next_scroll() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        let indicator_notification = Rc::new(Cell::new(0));
-        let disallow_stretch = Rc::new(Cell::new(true));
-        tester.pump_widget(counting_listener(
-            build_test(&boxes, BuildTest::default()),
-            &indicator_notification,
-            &disallow_stretch,
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            let indicator_notification = Rc::new(Cell::new(0));
+            let disallow_stretch = Rc::new(Cell::new(true));
+            tester.pump_widget(counting_listener(
+                build_test(&boxes, BuildTest::default()),
+                &indicator_notification,
+                &disallow_stretch,
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(indicator_notification.get(), 0);
+            assert_one_stretching_indicator(tester);
+            assert_eq!(indicator_notification.get(), 0);
 
-        let mut disallowed_gesture = tester.start_gesture(tester.view_center());
-        tester.move_by(&mut disallowed_gesture, Offset::new(0.0, 200.0));
-        tester.settle();
-        tester.up(disallowed_gesture);
-        tester.settle();
+            let mut disallowed_gesture = TestPointer::touch(1);
+            tester.down(&mut disallowed_gesture, VIEW_CENTER);
+            move_by(tester, &mut disallowed_gesture, Offset::new(0.0, 200.0));
+            tester.pump_and_settle();
+            tester.up(&disallowed_gesture);
+            tester.pump_and_settle();
 
-        assert_eq!(indicator_notification.get(), 1);
-        assert_eq!(tester.stretch_strength(), 0.0);
+            assert_eq!(indicator_notification.get(), 1);
+            assert_eq!(stretch_strength(tester), 0.0);
 
-        disallow_stretch.set(false);
-        {
-            let mut app = tester.cell.borrow_mut();
-            let controller = boxes.controller.as_controller();
-            let max = controller.position(&app).max_scroll_extent(&app);
-            controller.jump_to(&mut app, max / 2.0);
-        }
-        tester.pump(Duration::ZERO);
+            disallow_stretch.set(false);
+            {
+                let mut app = tester.cell.borrow_mut();
+                let controller = boxes.controller.as_controller();
+                let max = controller.position(&app).max_scroll_extent(&app);
+                controller.jump_to(&mut app, max / 2.0);
+            }
+            tester.pump();
 
-        tester.fling_from(tester.view_center(), Offset::new(0.0, -50.0), 10000.0);
-        tester.pump(Duration::from_millis(100));
-        tester.pump(Duration::from_millis(100));
-        tester.pump(Duration::from_millis(100));
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, -50.0), 10000.0, 2);
+            tester.pump_by(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
-        assert_eq!(indicator_notification.get(), 2);
-        assert_ne!(tester.stretch_strength(), 0.0);
+            assert_eq!(indicator_notification.get(), 2);
+            assert_ne!(stretch_strength(tester), 0.0);
+        });
     }
 
     /// The `Text('Index $index')` items the bounds tests list, `Index 1` under `index_1`.
@@ -3861,7 +3545,7 @@ mod tests {
             indicator = indicator.clip_behavior(clip_behavior);
         }
         ltr(MediaQuery::new(
-            MediaQueryData::new().size(VIEW_SIZE),
+            MediaQueryData::new().size(WidgetTester::SIZE),
             ScrollConfiguration::new(
                 no_overscroll_behavior(),
                 Column::new().children([
@@ -3879,79 +3563,85 @@ mod tests {
     /// "Stretch does not overflow bounds of container".
     #[test]
     fn a_stretched_list_stays_in_its_container() {
-        let mut tester = WidgetTester::new();
-        let index_1 = GlobalKey::new();
-        tester.pump_widget(list_over_box(&index_1, None));
+        test_widgets(|tester| {
+            let index_1 = GlobalKey::new();
+            tester.pump_widget(list_over_box(&index_1, None));
 
-        assert!(tester.is_onstage(&index_1));
-        assert_eq!(tester.center_of(&index_1).dy(), 51.0);
+            assert!(is_onstage(tester, &index_1));
+            assert_eq!(tester.center_of(&index_1).dy(), 51.0);
 
-        let mut gesture = tester.start_gesture(tester.center_of(&index_1));
-        // Overscroll the start.
-        tester.move_by(&mut gesture, Offset::new(0.0, 200.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        assert!(tester.center_of(&index_1).dy() > 0.0);
-        // In place of Flutter's golden, which shows the text not overlapping the red area below
-        // the list: the stretch clips to the list's 300 pixels.
-        assert_eq!(
-            tester.first_clip_rect(),
-            Rect::from_ltwh(0.0, 0.0, 800.0, 300.0)
-        );
-        assert_eq!(tester.first_clip_behavior(), Clip::HardEdge);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, tester.center_of(&index_1));
+            // Overscroll the start.
+            move_by(tester, &mut gesture, Offset::new(0.0, 200.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            assert!(tester.center_of(&index_1).dy() > 0.0);
+            // In place of Flutter's golden, which shows the text not overlapping the red area below
+            // the list: the stretch clips to the list's 300 pixels.
+            assert_eq!(
+                first_clip_rect(tester),
+                Rect::from_ltwh(0.0, 0.0, 800.0, 300.0)
+            );
+            assert_eq!(first_clip_behavior(tester), Clip::HardEdge);
 
-        tester.up(gesture);
-        tester.settle();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+        });
     }
 
     /// "Clip behavior is updated as needed".
     #[test]
     fn a_stretch_clips_only_while_it_stretches_a_viewport_smaller_than_the_screen() {
-        let mut tester = WidgetTester::new();
-        let index_1 = GlobalKey::new();
-        tester.pump_widget(list_over_box(&index_1, None));
+        test_widgets(|tester| {
+            let index_1 = GlobalKey::new();
+            tester.pump_widget(list_over_box(&index_1, None));
 
-        assert!(tester.is_onstage(&index_1));
-        assert_eq!(tester.center_of(&index_1).dy(), 51.0);
-        // Currently not clipping
-        assert_eq!(tester.first_clip_behavior(), Clip::None);
+            assert!(is_onstage(tester, &index_1));
+            assert_eq!(tester.center_of(&index_1).dy(), 51.0);
+            // Currently not clipping
+            assert_eq!(first_clip_behavior(tester), Clip::None);
 
-        let mut gesture = tester.start_gesture(tester.center_of(&index_1));
-        // Overscroll the start.
-        tester.move_by(&mut gesture, Offset::new(0.0, 200.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        assert!(tester.center_of(&index_1).dy() > 0.0);
-        // Now clipping
-        assert_eq!(tester.first_clip_behavior(), Clip::HardEdge);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, tester.center_of(&index_1));
+            // Overscroll the start.
+            move_by(tester, &mut gesture, Offset::new(0.0, 200.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            assert!(tester.center_of(&index_1).dy() > 0.0);
+            // Now clipping
+            assert_eq!(first_clip_behavior(tester), Clip::HardEdge);
 
-        tester.up(gesture);
-        tester.settle();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+        });
     }
 
     /// "clipBehavior parameter updates overscroll clipping behavior".
     #[test]
     fn a_stretch_clips_with_the_clip_behavior_it_is_given() {
-        let mut tester = WidgetTester::new();
-        let index_1 = GlobalKey::new();
-        tester.pump_widget(list_over_box(&index_1, Some(Clip::None)));
+        test_widgets(|tester| {
+            let index_1 = GlobalKey::new();
+            tester.pump_widget(list_over_box(&index_1, Some(Clip::None)));
 
-        assert!(tester.is_onstage(&index_1));
-        assert_eq!(tester.center_of(&index_1).dy(), 51.0);
-        // Currently not clipping
-        assert_eq!(tester.first_clip_behavior(), Clip::None);
+            assert!(is_onstage(tester, &index_1));
+            assert_eq!(tester.center_of(&index_1).dy(), 51.0);
+            // Currently not clipping
+            assert_eq!(first_clip_behavior(tester), Clip::None);
 
-        let mut gesture = tester.start_gesture(tester.center_of(&index_1));
-        // Overscroll the start.
-        tester.move_by(&mut gesture, Offset::new(0.0, 200.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        assert!(tester.center_of(&index_1).dy() > 0.0);
-        // Now clipping
-        assert_eq!(tester.first_clip_behavior(), Clip::None);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, tester.center_of(&index_1));
+            // Overscroll the start.
+            move_by(tester, &mut gesture, Offset::new(0.0, 200.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            assert!(tester.center_of(&index_1).dy() > 0.0);
+            // Now clipping
+            assert_eq!(first_clip_behavior(tester), Clip::None);
 
-        tester.up(gesture);
-        tester.settle();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+        });
     }
 
     /// The stretch limit tests' tree: the 300-pixel list alone, under a default
@@ -3972,388 +3662,404 @@ mod tests {
     /// "Stretch limit".
     #[test]
     fn a_stretch_stops_at_its_limit() {
-        let mut tester = WidgetTester::new();
-        let index_1 = GlobalKey::new();
-        tester.pump_widget(list_alone(&index_1));
-        const MAX_STRETCH_LOCATION: f64 = 52.63178407049861;
+        test_widgets(|tester| {
+            let index_1 = GlobalKey::new();
+            tester.pump_widget(list_alone(&index_1));
+            const MAX_STRETCH_LOCATION: f64 = 52.63178407049861;
 
-        assert!(tester.is_onstage(&index_1));
-        assert_eq!(tester.center_of(&index_1).dy(), 51.0);
+            assert!(is_onstage(tester, &index_1));
+            assert_eq!(tester.center_of(&index_1).dy(), 51.0);
 
-        let mut pointer = tester.start_gesture(tester.center_of(&index_1));
-        // Overscroll beyond the limit (the viewport is 600.0).
-        tester.move_by(&mut pointer, Offset::new(0.0, 610.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        assert_near(
-            tester.center_of(&index_1),
-            Offset::new(400.0, MAX_STRETCH_LOCATION),
-        );
+            let mut pointer = TestPointer::touch(1);
+            tester.down(&mut pointer, tester.center_of(&index_1));
+            // Overscroll beyond the limit (the viewport is 600.0).
+            move_by(tester, &mut pointer, Offset::new(0.0, 610.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            assert_near(
+                tester.center_of(&index_1),
+                Offset::new(400.0, MAX_STRETCH_LOCATION),
+            );
 
-        let mut pointer = tester.start_gesture(tester.center_of(&index_1));
-        // Overscroll way way beyond the limit
-        tester.move_by(&mut pointer, Offset::new(0.0, 1000.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        assert_near(
-            tester.center_of(&index_1),
-            Offset::new(400.0, MAX_STRETCH_LOCATION),
-        );
+            let mut pointer = TestPointer::touch(2);
+            tester.down(&mut pointer, tester.center_of(&index_1));
+            // Overscroll way way beyond the limit
+            move_by(tester, &mut pointer, Offset::new(0.0, 1000.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            assert_near(
+                tester.center_of(&index_1),
+                Offset::new(400.0, MAX_STRETCH_LOCATION),
+            );
 
-        tester.up(pointer);
-        tester.settle();
+            tester.up(&pointer);
+            tester.pump_and_settle();
+        });
     }
 
     /// "Multiple pointers will not exceed stretch limit".
     #[test]
     fn more_pointers_do_not_stretch_past_the_limit() {
-        let mut tester = WidgetTester::new();
-        let index_1 = GlobalKey::new();
-        tester.pump_widget(list_alone(&index_1));
-        assert!(tester.is_onstage(&index_1));
-        assert_eq!(tester.center_of(&index_1).dy(), 51.0);
+        test_widgets(|tester| {
+            let index_1 = GlobalKey::new();
+            tester.pump_widget(list_alone(&index_1));
+            assert!(is_onstage(tester, &index_1));
+            assert_eq!(tester.center_of(&index_1).dy(), 51.0);
 
-        let mut pointer1 = tester.start_gesture(tester.center_of(&index_1));
-        // Overscroll the start.
-        tester.move_by(&mut pointer1, Offset::new(0.0, 210.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        let mut last_stretched_location = tester.center_of(&index_1).dy();
-        assert!(last_stretched_location > 51.0);
+            let mut pointer1 = TestPointer::touch(1);
+            tester.down(&mut pointer1, tester.center_of(&index_1));
+            // Overscroll the start.
+            move_by(tester, &mut pointer1, Offset::new(0.0, 210.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            let mut last_stretched_location = tester.center_of(&index_1).dy();
+            assert!(last_stretched_location > 51.0);
 
-        let mut pointer2 = tester.start_gesture(tester.center_of(&index_1));
-        // Add overscroll from an additional pointer
-        tester.move_by(&mut pointer2, Offset::new(0.0, 210.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        assert!(tester.center_of(&index_1).dy() > last_stretched_location);
-        last_stretched_location = tester.center_of(&index_1).dy();
+            let mut pointer2 = TestPointer::touch(2);
+            tester.down(&mut pointer2, tester.center_of(&index_1));
+            // Add overscroll from an additional pointer
+            move_by(tester, &mut pointer2, Offset::new(0.0, 210.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            assert!(tester.center_of(&index_1).dy() > last_stretched_location);
+            last_stretched_location = tester.center_of(&index_1).dy();
 
-        let mut pointer3 = tester.start_gesture(tester.center_of(&index_1));
-        // Add overscroll from an additional pointer, exceeding the max stretch (600)
-        tester.move_by(&mut pointer3, Offset::new(0.0, 210.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        assert!(tester.center_of(&index_1).dy() > last_stretched_location);
-        last_stretched_location = tester.center_of(&index_1).dy();
+            let mut pointer3 = TestPointer::touch(3);
+            tester.down(&mut pointer3, tester.center_of(&index_1));
+            // Add overscroll from an additional pointer, exceeding the max stretch (600)
+            move_by(tester, &mut pointer3, Offset::new(0.0, 210.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            assert!(tester.center_of(&index_1).dy() > last_stretched_location);
+            last_stretched_location = tester.center_of(&index_1).dy();
 
-        let mut pointer4 = tester.start_gesture(tester.center_of(&index_1));
-        // Since we have maxed out the overscroll, it should not have stretched
-        // further, regardless of the number of pointers.
-        tester.move_by(&mut pointer4, Offset::new(0.0, 210.0));
-        tester.settle();
-        assert!(tester.is_onstage(&index_1));
-        assert_eq!(tester.center_of(&index_1).dy(), last_stretched_location);
+            let mut pointer4 = TestPointer::touch(4);
+            tester.down(&mut pointer4, tester.center_of(&index_1));
+            // Since we have maxed out the overscroll, it should not have stretched
+            // further, regardless of the number of pointers.
+            move_by(tester, &mut pointer4, Offset::new(0.0, 210.0));
+            tester.pump_and_settle();
+            assert!(is_onstage(tester, &index_1));
+            assert_eq!(tester.center_of(&index_1).dy(), last_stretched_location);
 
-        tester.up(pointer1);
-        tester.up(pointer2);
-        tester.up(pointer3);
-        tester.up(pointer4);
-        tester.settle();
+            tester.up(&pointer1);
+            tester.up(&pointer2);
+            tester.up(&pointer3);
+            tester.up(&pointer4);
+            tester.pump_and_settle();
+        });
     }
 
     /// "Stretch overscroll vertically, change direction mid scroll".
     #[test]
     fn a_vertical_stretch_turns_to_the_other_end_when_the_drag_does() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(
-            &boxes,
-            BuildTest {
-                // Setting the `box_height` to 100.0 will make the boxes fit in the
-                // scrollable viewport.
-                box_height: 100.0,
-                // To make the scroll view in the test still scrollable, we need to add
-                // the `AlwaysScrollableScrollPhysics`.
-                physics: Some(always_scrollable()),
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(
+                &boxes,
+                BuildTest {
+                    // Setting the `box_height` to 100.0 will make the boxes fit in the
+                    // scrollable viewport.
+                    box_height: 100.0,
+                    // To make the scroll view in the test still scrollable, we need to add
+                    // the `AlwaysScrollableScrollPhysics`.
+                    physics: Some(always_scrollable()),
+                    ..BuildTest::default()
+                },
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 100.0),
-                Offset::new(0.0, 200.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 100.0),
+                    Offset::new(0.0, 200.0)
+                ]
+            );
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll the start
-        tester.move_by(&mut gesture, Offset::new(0.0, 600.0));
-        tester.settle();
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll the start
+            move_by(tester, &mut gesture, Offset::new(0.0, 600.0));
+            tester.pump_and_settle();
 
-        // The boxes should now be at different locations because of the scaling.
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1, Offset::ZERO);
-        assert!(box2.dy() > 103.0, "{box2:?}");
-        assert!(box3.dy() > 206.0, "{box3:?}");
+            // The boxes should now be at different locations because of the scaling.
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1, Offset::ZERO);
+            assert!(box2.dy() > 103.0, "{box2:?}");
+            assert!(box3.dy() > 206.0, "{box3:?}");
 
-        // Move the pointer up a miniscule amount to trigger a directional change.
-        tester.move_by(&mut gesture, Offset::new(0.0, -20.0));
-        tester.settle();
+            // Move the pointer up a miniscule amount to trigger a directional change.
+            move_by(tester, &mut gesture, Offset::new(0.0, -20.0));
+            tester.pump_and_settle();
 
-        // The boxes should remain roughly at the same locations, since the pointer
-        // didn't move far.
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1, Offset::ZERO);
-        assert!(box2.dy() > 103.0, "{box2:?}");
-        assert!(box3.dy() > 206.0, "{box3:?}");
+            // The boxes should remain roughly at the same locations, since the pointer
+            // didn't move far.
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1, Offset::ZERO);
+            assert!(box2.dy() > 103.0, "{box2:?}");
+            assert!(box3.dy() > 206.0, "{box3:?}");
 
-        // Now make the pointer overscroll to the end
-        tester.move_by(&mut gesture, Offset::new(0.0, -1200.0));
-        tester.settle();
+            // Now make the pointer overscroll to the end
+            move_by(tester, &mut gesture, Offset::new(0.0, -1200.0));
+            tester.pump_and_settle();
 
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert!(box1.dy() < -19.0, "{box1:?}");
-        assert!(box2.dy() < 85.0, "{box2:?}");
-        assert!(box3.dy() < 188.0, "{box3:?}");
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert!(box1.dy() < -19.0, "{box1:?}");
+            assert!(box2.dy() < 85.0, "{box2:?}");
+            assert!(box3.dy() < 188.0, "{box3:?}");
 
-        // Release the pointer
-        tester.up(gesture);
-        tester.settle();
+            // Release the pointer
+            tester.up(&gesture);
+            tester.pump_and_settle();
 
-        // Now the boxes should be back to their original locations.
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 100.0),
-                Offset::new(0.0, 200.0)
-            ]
-        );
+            // Now the boxes should be back to their original locations.
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 100.0),
+                    Offset::new(0.0, 200.0)
+                ]
+            );
+        });
     }
 
     /// "Stretch overscroll horizontally, change direction mid scroll".
     #[test]
     fn a_horizontal_stretch_turns_to_the_other_end_when_the_drag_does() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(
-            &boxes,
-            BuildTest {
-                // Setting the `box_width` to 100.0 will make the boxes fit in the
-                // scrollable viewport.
-                box_width: 100.0,
-                // To make the scroll view in the test still scrollable, we need to add
-                // the `AlwaysScrollableScrollPhysics`.
-                physics: Some(always_scrollable()),
-                axis: Axis::Horizontal,
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(
+                &boxes,
+                BuildTest {
+                    // Setting the `box_width` to 100.0 will make the boxes fit in the
+                    // scrollable viewport.
+                    box_width: 100.0,
+                    // To make the scroll view in the test still scrollable, we need to add
+                    // the `AlwaysScrollableScrollPhysics`.
+                    physics: Some(always_scrollable()),
+                    axis: Axis::Horizontal,
+                    ..BuildTest::default()
+                },
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(100.0, 0.0),
-                Offset::new(200.0, 0.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(100.0, 0.0),
+                    Offset::new(200.0, 0.0)
+                ]
+            );
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll the start
-        tester.move_by(&mut gesture, Offset::new(600.0, 0.0));
-        tester.settle();
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll the start
+            move_by(tester, &mut gesture, Offset::new(600.0, 0.0));
+            tester.pump_and_settle();
 
-        // The boxes should now be at different locations because of the scaling.
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1, Offset::ZERO);
-        assert!(box2.dx() > 102.0, "{box2:?}");
-        assert!(box3.dx() > 205.0, "{box3:?}");
+            // The boxes should now be at different locations because of the scaling.
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1, Offset::ZERO);
+            assert!(box2.dx() > 102.0, "{box2:?}");
+            assert!(box3.dx() > 205.0, "{box3:?}");
 
-        // Move the pointer up a miniscule amount to trigger a directional change.
-        tester.move_by(&mut gesture, Offset::new(-20.0, 0.0));
-        tester.settle();
+            // Move the pointer up a miniscule amount to trigger a directional change.
+            move_by(tester, &mut gesture, Offset::new(-20.0, 0.0));
+            tester.pump_and_settle();
 
-        // The boxes should remain roughly at the same locations, since the pointer
-        // didn't move far.
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1, Offset::ZERO);
-        assert!(box2.dx() > 102.0, "{box2:?}");
-        assert!(box3.dx() > 205.0, "{box3:?}");
+            // The boxes should remain roughly at the same locations, since the pointer
+            // didn't move far.
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1, Offset::ZERO);
+            assert!(box2.dx() > 102.0, "{box2:?}");
+            assert!(box3.dx() > 205.0, "{box3:?}");
 
-        // Now make the pointer overscroll to the end
-        tester.move_by(&mut gesture, Offset::new(-1200.0, 0.0));
-        tester.settle();
+            // Now make the pointer overscroll to the end
+            move_by(tester, &mut gesture, Offset::new(-1200.0, 0.0));
+            tester.pump_and_settle();
 
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert!(box1.dx() < -19.0, "{box1:?}");
-        assert!(box2.dx() < 85.0, "{box2:?}");
-        assert!(box3.dx() < 188.0, "{box3:?}");
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert!(box1.dx() < -19.0, "{box1:?}");
+            assert!(box2.dx() < 85.0, "{box2:?}");
+            assert!(box3.dx() < 188.0, "{box3:?}");
 
-        // Release the pointer
-        tester.up(gesture);
-        tester.settle();
+            // Release the pointer
+            tester.up(&gesture);
+            tester.pump_and_settle();
 
-        // Now the boxes should be back to their original locations.
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(100.0, 0.0),
-                Offset::new(200.0, 0.0)
-            ]
-        );
+            // Now the boxes should be back to their original locations.
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(100.0, 0.0),
+                    Offset::new(200.0, 0.0)
+                ]
+            );
+        });
     }
 
     /// "Fling toward the trailing edge causes stretch toward the leading edge".
     #[test]
     fn a_fling_into_the_trailing_edge_stretches_toward_the_leading_edge() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(&boxes, BuildTest::default()));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(&boxes, BuildTest::default()));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 250.0),
-                Offset::new(0.0, 500.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 250.0),
+                    Offset::new(0.0, 500.0)
+                ]
+            );
 
-        tester.fling_from(tester.view_center(), Offset::new(0.0, -50.0), 10000.0);
-        tester.pump(Duration::from_millis(100));
-        tester.pump(Duration::from_millis(100));
-        tester.pump(Duration::from_millis(100));
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, -50.0), 10000.0, 1);
+            tester.pump_by(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
-        // The boxes should now be at different locations because of the scaling.
-        assert_eq!(boxes.offset(&tester), 150.0);
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert!(box1.dy() < -160.0, "{box1:?}");
-        assert!(box2.dy() < 93.0, "{box2:?}");
-        assert!(box3.dy() < 347.0, "{box3:?}");
+            // The boxes should now be at different locations because of the scaling.
+            assert_eq!(boxes.offset(tester), 150.0);
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert!(box1.dy() < -160.0, "{box1:?}");
+            assert!(box2.dy() < 93.0, "{box2:?}");
+            assert!(box3.dy() < 347.0, "{box3:?}");
 
-        tester.settle();
+            tester.pump_and_settle();
 
-        // The boxes should now be at their final position.
-        assert_eq!(boxes.offset(&tester), 150.0);
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), -150.0);
-        assert_eq!(box2.dy(), 100.0);
-        assert_eq!(box3.dy(), 350.0);
+            // The boxes should now be at their final position.
+            assert_eq!(boxes.offset(tester), 150.0);
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), -150.0);
+            assert_eq!(box2.dy(), 100.0);
+            assert_eq!(box3.dy(), 350.0);
+        });
     }
 
     /// "Fling toward the leading edge causes stretch toward the trailing edge".
     #[test]
     fn a_fling_into_the_leading_edge_stretches_toward_the_trailing_edge() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(&boxes, BuildTest::default()));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(&boxes, BuildTest::default()));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 250.0),
-                Offset::new(0.0, 500.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 250.0),
+                    Offset::new(0.0, 500.0)
+                ]
+            );
 
-        // We fling to the trailing edge and let it settle.
-        tester.fling_from(tester.view_center(), Offset::new(0.0, -50.0), 10000.0);
-        tester.settle();
+            // We fling to the trailing edge and let it settle.
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, -50.0), 10000.0, 1);
+            tester.pump_and_settle();
 
-        // We are now at the trailing edge
-        assert_eq!(boxes.offset(&tester), 150.0);
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), -150.0);
-        assert_eq!(box2.dy(), 100.0);
-        assert_eq!(box3.dy(), 350.0);
+            // We are now at the trailing edge
+            assert_eq!(boxes.offset(tester), 150.0);
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), -150.0);
+            assert_eq!(box2.dy(), 100.0);
+            assert_eq!(box3.dy(), 350.0);
 
-        // Now fling to the leading edge
-        tester.fling_from(tester.view_center(), Offset::new(0.0, 50.0), 10000.0);
-        tester.pump(Duration::from_millis(100));
-        tester.pump(Duration::from_millis(100));
-        tester.pump(Duration::from_millis(100));
-        tester.pump(Duration::from_millis(100));
+            // Now fling to the leading edge
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, 50.0), 10000.0, 2);
+            tester.pump_by(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
-        // The boxes should now be at different locations because of the scaling.
-        assert_eq!(boxes.offset(&tester), 0.0);
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), 0.0);
-        assert!(box2.dy() > 250.9, "{box2:?}");
-        assert!(box3.dy() > 500.9, "{box3:?}");
+            // The boxes should now be at different locations because of the scaling.
+            assert_eq!(boxes.offset(tester), 0.0);
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), 0.0);
+            assert!(box2.dy() > 250.9, "{box2:?}");
+            assert!(box3.dy() > 500.9, "{box3:?}");
 
-        tester.settle();
+            tester.pump_and_settle();
 
-        // The boxes should now be at their final position.
-        assert_eq!(boxes.offset(&tester), 0.0);
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), 0.0);
-        assert_eq!(box2.dy(), 250.0);
-        assert_eq!(box3.dy(), 500.0);
+            // The boxes should now be at their final position.
+            assert_eq!(boxes.offset(tester), 0.0);
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), 0.0);
+            assert_eq!(box2.dy(), 250.0);
+            assert_eq!(box3.dy(), 500.0);
+        });
     }
 
     /// "changing scroll direction during recede animation will not change the stretch
     /// direction".
     #[test]
     fn turning_the_drag_while_the_stretch_recedes_keeps_its_direction() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(
-            &boxes,
-            BuildTest {
-                box_height: 205.0,
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(
+                &boxes,
+                BuildTest {
+                    box_height: 205.0,
+                    ..BuildTest::default()
+                },
+            ));
 
-        assert_one_stretching_indicator(&tester);
+            assert_one_stretching_indicator(tester);
 
-        // Fling to the trailing edge
-        tester.fling_from(tester.view_center(), Offset::new(0.0, -50.0), 10000.0);
-        tester.settle();
+            // Fling to the trailing edge
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, -50.0), 10000.0, 1);
+            tester.pump_and_settle();
 
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), -15.0);
-        assert_eq!(box2.dy(), 190.0);
-        assert_eq!(box3.dy(), 395.0);
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), -15.0);
+            assert_eq!(box2.dy(), 190.0);
+            assert_eq!(box3.dy(), 395.0);
 
-        let mut gesture = tester.start_gesture(tester.view_center());
-        // Overscroll to the trailing edge
-        tester.move_by(&mut gesture, Offset::new(0.0, -200.0));
-        tester.settle();
+            let mut gesture = TestPointer::touch(2);
+            tester.down(&mut gesture, VIEW_CENTER);
+            // Overscroll to the trailing edge
+            move_by(tester, &mut gesture, Offset::new(0.0, -200.0));
+            tester.pump_and_settle();
 
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert!(box1.dy() < -25.0, "{box1:?}");
-        assert!(box2.dy() < 185.0, "{box2:?}");
-        assert!(box3.dy() < 392.0, "{box3:?}");
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert!(box1.dy() < -25.0, "{box1:?}");
+            assert!(box2.dy() < 185.0, "{box2:?}");
+            assert!(box3.dy() < 392.0, "{box3:?}");
 
-        // This will trigger the recede animation
-        // The y offset of the boxes should be increasing, since the boxes were stretched
-        // toward the leading edge.
-        tester.move_by(&mut gesture, Offset::new(0.0, 150.0));
-        tester.pump(Duration::from_millis(100));
+            // This will trigger the recede animation
+            // The y offset of the boxes should be increasing, since the boxes were stretched
+            // toward the leading edge.
+            move_by(tester, &mut gesture, Offset::new(0.0, 150.0));
+            tester.pump_by(Duration::from_millis(100));
 
-        // Explicitly check that the stretch strength is not 0.0, since this would probably
-        // mean that the stretch direction is wrong.
-        assert_ne!(tester.stretch_strength(), 0.0);
+            // Explicitly check that the stretch strength is not 0.0, since this would probably
+            // mean that the stretch direction is wrong.
+            assert_ne!(stretch_strength(tester), 0.0);
 
-        tester.up(gesture);
-        tester.pump(Duration::from_millis(100));
+            tester.up(&gesture);
+            tester.pump_by(Duration::from_millis(100));
 
-        // At this point, the stretchStrength should be close to 0.
-        assert!(tester.stretch_strength().abs() < 0.01);
+            // At this point, the stretchStrength should be close to 0.
+            assert!(stretch_strength(tester).abs() < 0.01);
 
-        tester.settle();
+            tester.pump_and_settle();
 
-        // The recede animation is done now, we should now be at the leading edge.
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), 0.0);
-        assert_eq!(box2.dy(), 205.0);
-        assert_eq!(box3.dy(), 410.0);
+            // The recede animation is done now, we should now be at the leading edge.
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), 0.0);
+            assert_eq!(box2.dy(), 205.0);
+            assert_eq!(box3.dy(), 410.0);
+        });
     }
 
     /// The overscroll stretch tests' `_HighFrictionClampingScrollPhysics`.
@@ -4394,126 +4100,129 @@ mod tests {
     /// "Stretching animation completes after fling under scroll physics with high friction".
     #[test]
     fn a_stretch_settles_after_a_fling_under_high_friction() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        let overscroll_velocity: Rc<Cell<Option<f64>>> = Rc::default();
-        let tree = NotificationListener::<OverscrollNotification>::new(build_test(
-            &boxes,
-            BuildTest {
-                physics: Some(Rc::new(HighFrictionClampingScrollPhysics { parent: None })),
-                ..BuildTest::default()
-            },
-        ))
-        .on_notification({
-            let overscroll_velocity = Rc::clone(&overscroll_velocity);
-            move |_app, notification| {
-                overscroll_velocity.set(Some(notification.velocity));
-                false
-            }
-        })
-        .into_widget();
-        tester.pump_widget(tree);
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            let overscroll_velocity: Rc<Cell<Option<f64>>> = Rc::default();
+            let tree = NotificationListener::<OverscrollNotification>::new(build_test(
+                &boxes,
+                BuildTest {
+                    physics: Some(Rc::new(HighFrictionClampingScrollPhysics { parent: None })),
+                    ..BuildTest::default()
+                },
+            ))
+            .on_notification({
+                let overscroll_velocity = Rc::clone(&overscroll_velocity);
+                move |_app, notification| {
+                    overscroll_velocity.set(Some(notification.velocity));
+                    false
+                }
+            })
+            .into_widget();
+            tester.pump_widget(tree);
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 250.0),
-                Offset::new(0.0, 500.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 250.0),
+                    Offset::new(0.0, 500.0)
+                ]
+            );
 
-        // We fling to the trailing edge and let it settle.
-        tester.fling_from(tester.view_center(), Offset::new(0.0, -50.0), 10000.0);
-        tester.pump_and_settle(Duration::from_millis(300));
+            // We fling to the trailing edge and let it settle.
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, -50.0), 10000.0, 1);
+            tester.pump_and_settle_by(Duration::from_millis(300));
 
-        // We are now at the trailing edge
-        assert!(overscroll_velocity.get().expect("an overscroll") < 25.0);
-        assert_eq!(boxes.offset(&tester), 150.0);
-        let [box1, box2, box3] = boxes.origins(&tester);
-        assert_eq!(box1.dy(), -150.0);
-        assert_eq!(box2.dy(), 100.0);
-        assert_eq!(box3.dy(), 350.0);
+            // We are now at the trailing edge
+            assert!(overscroll_velocity.get().expect("an overscroll") < 25.0);
+            assert_eq!(boxes.offset(tester), 150.0);
+            let [box1, box2, box3] = boxes.origins(tester);
+            assert_eq!(box1.dy(), -150.0);
+            assert_eq!(box2.dy(), 100.0);
+            assert_eq!(box3.dy(), 350.0);
+        });
     }
 
     /// "Fling overscroll triggers stretching animation correctly".
     #[test]
     fn a_short_fling_into_the_edge_keeps_stretching_after_it_ends() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(&boxes, BuildTest::default()));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(&boxes, BuildTest::default()));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::ZERO,
-                Offset::new(0.0, 250.0),
-                Offset::new(0.0, 500.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::ZERO,
+                    Offset::new(0.0, 250.0),
+                    Offset::new(0.0, 500.0)
+                ]
+            );
 
-        // Simulates a fast and short user fling.
-        tester.fling_from(tester.view_center(), Offset::new(0.0, 50.0), 1000.0);
+            // Simulates a fast and short user fling.
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, 50.0), 1000.0, 1);
 
-        // Records the current stretch strength of the StretchEffect widget
-        // before pumping additional frames, so it can be compared later
-        // to verify that the stretch increases after the fling.
-        let progress_strength = tester.stretch_strength();
+            // Records the current stretch strength of the StretchEffect widget
+            // before pumping additional frames, so it can be compared later
+            // to verify that the stretch increases after the fling.
+            let progress_strength = stretch_strength(tester);
 
-        tester.pump_frames(Duration::from_millis(50));
+            pump_frames(tester, Duration::from_millis(50));
 
-        // Verifies that the stretchStrength has increased compared to the
-        // previously recorded value, ensuring the fling triggers stretching.
-        assert!(tester.stretch_strength() > progress_strength);
+            // Verifies that the stretchStrength has increased compared to the
+            // previously recorded value, ensuring the fling triggers stretching.
+            assert!(stretch_strength(tester) > progress_strength);
 
-        tester.settle();
-        assert_eq!(tester.stretch_strength().abs(), 0.0);
+            tester.pump_and_settle();
+            assert_eq!(stretch_strength(tester).abs(), 0.0);
+        });
     }
 
     /// "Fling overscroll triggers stretching animation correctly in reverse".
     #[test]
     fn a_short_fling_into_the_reversed_edge_keeps_stretching_after_it_ends() {
-        let mut tester = WidgetTester::new();
-        let boxes = Boxes::new(&tester);
-        tester.pump_widget(build_test(
-            &boxes,
-            BuildTest {
-                reverse: true,
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let boxes = Boxes::new(tester);
+            tester.pump_widget(build_test(
+                &boxes,
+                BuildTest {
+                    reverse: true,
+                    ..BuildTest::default()
+                },
+            ));
 
-        assert_one_stretching_indicator(&tester);
-        assert_eq!(boxes.offset(&tester), 0.0);
-        assert_eq!(
-            boxes.origins(&tester),
-            [
-                Offset::new(0.0, 350.0),
-                Offset::new(0.0, 100.0),
-                Offset::new(0.0, -150.0)
-            ]
-        );
+            assert_one_stretching_indicator(tester);
+            assert_eq!(boxes.offset(tester), 0.0);
+            assert_eq!(
+                boxes.origins(tester),
+                [
+                    Offset::new(0.0, 350.0),
+                    Offset::new(0.0, 100.0),
+                    Offset::new(0.0, -150.0)
+                ]
+            );
 
-        // Simulates a fast and short user fling.
-        tester.fling_from(tester.view_center(), Offset::new(0.0, -50.0), 1000.0);
+            // Simulates a fast and short user fling.
+            tester.fling_from(VIEW_CENTER, Offset::new(0.0, -50.0), 1000.0, 1);
 
-        // Records the current stretch strength of the StretchEffect widget
-        // before pumping additional frames, so it can be compared later
-        // to verify that the stretch increases after the fling.
-        let progress_strength = tester.stretch_strength();
+            // Records the current stretch strength of the StretchEffect widget
+            // before pumping additional frames, so it can be compared later
+            // to verify that the stretch increases after the fling.
+            let progress_strength = stretch_strength(tester);
 
-        tester.pump_frames(Duration::from_millis(50));
+            pump_frames(tester, Duration::from_millis(50));
 
-        // Verifies that the stretchStrength has increased compared to the
-        // previously recorded value, ensuring the fling triggers stretching.
-        assert!(tester.stretch_strength() < progress_strength);
+            // Verifies that the stretchStrength has increased compared to the
+            // previously recorded value, ensuring the fling triggers stretching.
+            assert!(stretch_strength(tester) < progress_strength);
 
-        tester.settle();
-        assert_eq!(tester.stretch_strength().abs(), 0.0);
+            tester.pump_and_settle();
+            assert_eq!(stretch_strength(tester).abs(), 0.0);
+        });
     }
 
     // ---- the notification itself ----

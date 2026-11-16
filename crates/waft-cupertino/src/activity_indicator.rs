@@ -501,15 +501,15 @@ impl CustomPainter for CupertinoLinearActivityIndicatorPainter {
 #[cfg(test)]
 mod tests {
     use waft_embedder::valo::Op;
-    use waft_foundation::AppCell;
     use waft_painting::AlignmentGeometry;
     use waft_rendering::{
         AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject,
     };
     use waft_widgets::{Align, GlobalKey};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{build, pump, test_cell};
 
     /// The first descendant render object of type `T`, from `node` down.
     fn find<T: RenderObject>(app: &App, node: AnyRenderObject) -> Option<RenderHandle<T>> {
@@ -567,110 +567,116 @@ mod tests {
     }
 
     /// Mounts `child` where it may take its own size; the view's root is tight.
-    fn loosely<K>(cell: &AppCell, child: impl IntoWidget<K>) {
-        build(
-            cell,
+    fn loosely<K>(tester: &mut WidgetTester, child: impl IntoWidget<K>) {
+        tester.pump_widget(
             Align::new()
                 .alignment(AlignmentGeometry::TOP_LEFT)
-                .child(child)
-                .into_widget(),
+                .child(child),
         );
     }
 
     #[test]
     fn a_spinning_indicator_paints_its_eight_ticks_and_rotates_the_alpha_table() {
-        let cell = test_cell();
-        let global_key = GlobalKey::new();
-        loosely(
-            &cell,
-            CupertinoActivityIndicator::new().key(key_of(&global_key)),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let global_key = GlobalKey::new();
+            loosely(
+                tester,
+                CupertinoActivityIndicator::new().key(key_of(&global_key)),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let (painter, size) = painter_of(&mut app, &global_key);
-        assert_eq!(size, Size::new(20.0, 20.0), "the radius doubled");
-        assert_eq!(
-            drawn_alphas(&mut app, &*painter, size),
-            K_ALPHA_VALUES.to_vec()
-        );
+            let (painter, size) = painter_of(&mut app, &global_key);
+            assert_eq!(size, Size::new(20.0, 20.0), "the radius doubled");
+            assert_eq!(
+                drawn_alphas(&mut app, &*painter, size),
+                K_ALPHA_VALUES.to_vec()
+            );
 
-        pump(&mut app, Duration::from_millis(500));
-        let state = global_key
-            .current_state::<CupertinoActivityIndicatorState>(&app)
-            .expect("the indicator mounted");
-        assert_eq!(
-            state.controller(&app).value(&app),
-            0.5,
-            "half of the one-second period"
-        );
-        assert_eq!(
-            drawn_alphas(&mut app, &*painter, size),
-            vec![72, 97, 122, 147, 47, 47, 47, 47],
-            "the same painter, its table rotated by four ticks"
-        );
+            drop(app);
+            tester.pump_by(Duration::from_millis(500));
+            let mut app = tester.cell.borrow_mut();
+            let state = global_key
+                .current_state::<CupertinoActivityIndicatorState>(&app)
+                .expect("the indicator mounted");
+            assert_eq!(
+                state.controller(&app).value(&app),
+                0.5,
+                "half of the one-second period"
+            );
+            assert_eq!(
+                drawn_alphas(&mut app, &*painter, size),
+                vec![72, 97, 122, 147, 47, 47, 47, 47],
+                "the same painter, its table rotated by four ticks"
+            );
+        });
     }
 
     #[test]
     fn an_indicator_that_is_not_animating_never_advances() {
-        let cell = test_cell();
-        let global_key = GlobalKey::new();
-        loosely(
-            &cell,
-            CupertinoActivityIndicator::new()
-                .animating(false)
-                .key(key_of(&global_key)),
-        );
-        let mut app = cell.borrow_mut();
-        let state = global_key
-            .current_state::<CupertinoActivityIndicatorState>(&app)
-            .expect("the indicator mounted");
-        let controller = state.controller(&app);
-        assert!(!controller.is_animating(&mut app));
+        test_widgets(|tester| {
+            let global_key = GlobalKey::new();
+            loosely(
+                tester,
+                CupertinoActivityIndicator::new()
+                    .animating(false)
+                    .key(key_of(&global_key)),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let state = global_key
+                .current_state::<CupertinoActivityIndicatorState>(&app)
+                .expect("the indicator mounted");
+            let controller = state.controller(&app);
+            assert!(!controller.is_animating(&mut app));
 
-        let (painter, size) = painter_of(&mut app, &global_key);
-        pump(&mut app, Duration::from_millis(500));
-        assert_eq!(controller.value(&app), 0.0);
-        assert_eq!(
-            drawn_alphas(&mut app, &*painter, size),
-            K_ALPHA_VALUES.to_vec()
-        );
+            let (painter, size) = painter_of(&mut app, &global_key);
+            drop(app);
+            tester.pump_by(Duration::from_millis(500));
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(controller.value(&app), 0.0);
+            assert_eq!(
+                drawn_alphas(&mut app, &*painter, size),
+                K_ALPHA_VALUES.to_vec()
+            );
+        });
     }
 
     #[test]
     fn a_partially_revealed_indicator_draws_a_fraction_of_its_ticks() {
-        let cell = test_cell();
-        let global_key = GlobalKey::new();
-        let indicator = CupertinoActivityIndicator::partially_revealed().progress(0.5);
-        assert!(!indicator.animating);
-        loosely(&cell, indicator.key(key_of(&global_key)));
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let global_key = GlobalKey::new();
+            let indicator = CupertinoActivityIndicator::partially_revealed().progress(0.5);
+            assert!(!indicator.animating);
+            loosely(tester, indicator.key(key_of(&global_key)));
+            let mut app = tester.cell.borrow_mut();
 
-        let (painter, size) = painter_of(&mut app, &global_key);
-        assert_eq!(
-            drawn_alphas(&mut app, &*painter, size),
-            vec![PARTIALLY_REVEALED_ALPHA; 4]
-        );
+            let (painter, size) = painter_of(&mut app, &global_key);
+            assert_eq!(
+                drawn_alphas(&mut app, &*painter, size),
+                vec![PARTIALLY_REVEALED_ALPHA; 4]
+            );
+        });
     }
 
     #[test]
     fn the_linear_indicator_fills_its_track_up_to_the_progress() {
-        let cell = test_cell();
-        let global_key = GlobalKey::new();
-        loosely(
-            &cell,
-            SizedBox::new()
-                .width(200.0)
-                .height(10.0)
-                .child(CupertinoLinearActivityIndicator::new(0.25).key(key_of(&global_key))),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let global_key = GlobalKey::new();
+            loosely(
+                tester,
+                SizedBox::new()
+                    .width(200.0)
+                    .height(10.0)
+                    .child(CupertinoLinearActivityIndicator::new(0.25).key(key_of(&global_key))),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let (painter, size) = painter_of(&mut app, &global_key);
-        assert_eq!(size, Size::new(200.0, 10.0));
-        assert_eq!(
-            drawn(&mut app, &*painter, size, |_, bounds| bounds.width),
-            vec![200.0, 50.0],
-            "the track, then a quarter of it"
-        );
+            let (painter, size) = painter_of(&mut app, &global_key);
+            assert_eq!(size, Size::new(200.0, 10.0));
+            assert_eq!(
+                drawn(&mut app, &*painter, size, |_, bounds| bounds.width),
+                vec![200.0, 50.0],
+                "the track, then a quarter of it"
+            );
+        });
     }
 }

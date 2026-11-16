@@ -633,7 +633,6 @@ impl StatelessWidget for CheckboxListTile {
 #[allow(deprecated)]
 pub(crate) mod tests {
     use std::cell::{Cell, RefCell};
-    use std::time::Duration;
     use waft_painting::ShapeBorder;
     use waft_widgets::AnyFocusNode;
 
@@ -652,6 +651,8 @@ pub(crate) mod tests {
         WidgetStateMouseCursor, WidgetStateProperty,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::checkbox::tests::{
         Paints, assert_paints, checkbox_center, checkbox_size, hover, ignore, press,
@@ -663,9 +664,8 @@ pub(crate) mod tests {
     use crate::list_tile_theme::ListTileThemeData;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{AhemText, WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{pump_app, tester};
+    use crate::tooltip::tests::pump_app;
 
     /// Dart's `wrap(child:)`: `MediaQuery(Directionality(ltr, Material(child)))`, under the
     /// default theme.
@@ -789,13 +789,13 @@ pub(crate) mod tests {
     /// UniqueKey())`): `tile(is_three_line, subtitle)` twice in a `ListView`, the first with
     /// thirteen lines of subtitle; answers the two tiles' rects and their controls' (`C`).
     pub(crate) fn is_three_line_rects<C: 'static, W: 'static>(
+        tester: &mut WidgetTester,
         platform: TargetPlatform,
         (theme_data_is_three_line, theme_is_three_line, is_three_line): IsThreeLineFrame,
         tile: fn(Option<bool>, &str) -> WidgetRef,
     ) -> [Rect; 4] {
-        let mut tester = tester();
-        pump_in_material(
-            &mut tester,
+        crate::list_tile::tests::pump_unique_app(
+            tester,
             |app| {
                 let mut theme = ThemeData::builder().platform(platform);
                 if let Some(is_three_line) = theme_data_is_three_line {
@@ -813,14 +813,14 @@ pub(crate) mod tests {
                 if let Some(is_three_line) = theme_is_three_line {
                     theme = theme.data(ListTileThemeData::new().is_three_line(is_three_line));
                 }
-                theme.into_widget()
+                Material::new().child(theme).into_widget()
             },
         );
         [
-            rect_of::<W>(&tester, 0),
-            rect_of::<C>(&tester, 0),
-            rect_of::<W>(&tester, 1),
-            rect_of::<C>(&tester, 1),
+            rect_of::<W>(tester, 0),
+            rect_of::<C>(tester, 0),
+            rect_of::<W>(tester, 1),
+            rect_of::<C>(tester, 1),
         ]
     }
 
@@ -851,13 +851,13 @@ pub(crate) mod tests {
     /// home: Directionality(text_direction, Material(ListTileTheme(data:,
     /// Container(alignment: topLeft, child: tile)))))`.
     pub(crate) fn spacing_frame(
+        tester: &mut WidgetTester,
         theme: fn(&App) -> ThemeData,
         text_direction: TextDirection,
         data: ListTileThemeData,
         tile: WidgetRef,
-    ) -> WidgetTester {
-        let mut tester = tester();
-        pump_app(&mut tester, theme, |_app| {
+    ) {
+        pump_app(tester, theme, |_app| {
             Directionality::new(
                 text_direction,
                 Material::new().child(
@@ -871,7 +871,6 @@ pub(crate) mod tests {
             )
             .into_widget()
         });
-        tester
     }
 
     /// Where the `title` starts (LTR) or ends (RTL).
@@ -919,6 +918,7 @@ pub(crate) mod tests {
     /// for a tile `make(title_alignment, secondary)` with the control `C` leading: the expected
     /// offsets of each alignment given the tile's and the control's heights.
     pub(crate) fn check_title_alignment<C: 'static>(
+        tester: &mut WidgetTester,
         make: impl Fn(Option<ListTileTitleAlignment>, WidgetRef, bool) -> WidgetRef,
         with_subtitle: bool,
     ) {
@@ -926,7 +926,6 @@ pub(crate) mod tests {
         // The default vertical padding for material 3 is 8.0.
         const MIN_VERTICAL_PADDING: f64 = 8.0;
         let secondary_key = GlobalKey::new();
-        let mut tester = tester();
         let frame = |tester: &mut WidgetTester, title_alignment| {
             let secondary = SizedBox::new()
                 .key(secondary_key.clone().into())
@@ -944,9 +943,9 @@ pub(crate) mod tests {
             title_alignment_offsets::<C>(tester, &secondary_key)
         };
 
-        let offsets = frame(&mut tester, None);
-        let tile_height = list_tile_size(&tester).height();
-        let control_height = rect_of::<C>(&tester, 0).height();
+        let offsets = frame(tester, None);
+        let tile_height = list_tile_size(tester).height();
+        let control_height = rect_of::<C>(tester, 0).height();
         // Leading and trailing widgets are centered vertically in the tile.
         let center = (
             tile_height / 2.0 - control_height / 2.0,
@@ -954,7 +953,7 @@ pub(crate) mod tests {
         );
         assert_eq!(offsets, center);
         assert_eq!(
-            frame(&mut tester, Some(ListTileTitleAlignment::ThreeLine)),
+            frame(tester, Some(ListTileTitleAlignment::ThreeLine)),
             center
         );
         let title_height = if with_subtitle {
@@ -965,23 +964,20 @@ pub(crate) mod tests {
             ((tile_height - control_height) / 2.0, center.1)
         };
         assert_eq!(
-            frame(&mut tester, Some(ListTileTitleAlignment::TitleHeight)),
+            frame(tester, Some(ListTileTitleAlignment::TitleHeight)),
             title_height
         );
         // Leading and trailing widgets are placed minVerticalPadding below the top of the
         // title widget.
         assert_eq!(
-            frame(&mut tester, Some(ListTileTitleAlignment::Top)),
+            frame(tester, Some(ListTileTitleAlignment::Top)),
             (MIN_VERTICAL_PADDING, MIN_VERTICAL_PADDING)
         );
-        assert_eq!(
-            frame(&mut tester, Some(ListTileTitleAlignment::Center)),
-            center
-        );
+        assert_eq!(frame(tester, Some(ListTileTitleAlignment::Center)), center);
         // Leading and trailing widgets are placed minVerticalPadding above the bottom of the
         // subtitle widget.
         assert_eq!(
-            frame(&mut tester, Some(ListTileTitleAlignment::Bottom)),
+            frame(tester, Some(ListTileTitleAlignment::Bottom)),
             (
                 tile_height - MIN_VERTICAL_PADDING - control_height,
                 tile_height - MIN_VERTICAL_PADDING - SECONDARY_HEIGHT
@@ -1023,22 +1019,21 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log = Rc::new(RefCell::new(Vec::new()));
             let on_changed: ValueChanged<Option<bool>> = {
                 let log = Rc::clone(&log);
                 Rc::new(move |_app, value| log.borrow_mut().push(Some(value)))
             };
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 CheckboxListTile::new(Some(true), Some(on_changed))
                     .title(Text::new("Hello"))
                     .into_widget()
             });
-            let hello = text_center(&tester, "Hello");
+            let hello = text_center(tester, "Hello");
             tester.tap(hello, 1);
             log.borrow_mut().push(None);
-            let checkbox = checkbox_center(&tester);
+            let checkbox = checkbox_center(tester);
             tester.tap(checkbox, 2);
             assert_eq!(*log.borrow(), [Some(Some(false)), None, Some(Some(false))]);
         });
@@ -1046,16 +1041,15 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_forwards_states_controller_to_list_tile() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = WidgetStatesController::new(&mut tester.cell.borrow_mut(), None);
-            pump_in_material(&mut tester, m3, |_app| {
+            pump_in_material(tester, m3, |_app| {
                 CheckboxListTile::new(Some(true), ignore())
                     .title(Text::new("Checkbox"))
                     .states_controller(controller.clone())
                     .into_widget()
             });
-            let forwarded = tester.widget(nth::<ListTile>(&tester, 0), |tile: &ListTile| {
+            let forwarded = tester.widget(nth::<ListTile>(tester, 0), |tile: &ListTile| {
                 tile.states_controller.clone()
             });
             assert_eq!(forwarded, Some(controller));
@@ -1063,17 +1057,16 @@ pub(crate) mod tests {
     }
 
     fn check_color_case(theme: fn(&App) -> ThemeData, check_box_border_color: Color) {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for check_color in [None, Some(Color::new(0xFF000000))] {
-                pump_in_material(&mut tester, theme, |_app| {
+                pump_in_material(tester, theme, |_app| {
                     let mut tile = CheckboxListTile::new(Some(true), ignore());
                     tile.check_color = check_color;
                     tile.into_widget()
                 });
                 tester.pump_and_settle();
                 assert_paints(
-                    &tester,
+                    tester,
                     &[
                         Paints::Rrect(check_box_border_color),
                         Paints::Path(check_color.unwrap_or(Color::new(0xFFFFFFFF))),
@@ -1085,23 +1078,26 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_checkbox_list_tile_check_color_test() {
-        check_color_case(m2, Color::new(0xff2196f3));
+        test_widgets(|_| {
+            check_color_case(m2, Color::new(0xff2196f3));
+        });
     }
 
     #[test]
     fn material3_checkbox_list_tile_check_color_test() {
-        check_color_case(m3, Color::new(0xff6750a4));
+        test_widgets(|_| {
+            check_color_case(m3, Color::new(0xff6750a4));
+        });
     }
 
     #[test]
     fn checkbox_list_tile_active_color_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (active_color, expected) in [
                 (None, Color::new(0xFF000000)),
                 (Some(Color::new(0xFFFFFFFF)), Color::new(0xFFFFFFFF)),
             ] {
-                pump_wrapped(&mut tester, |app| {
+                pump_wrapped(tester, |app| {
                     let theme = ThemeData::builder()
                         .checkbox_theme(fill_when_selected(Some(Color::new(0xFF000000))))
                         .build(app);
@@ -1110,47 +1106,45 @@ pub(crate) mod tests {
                     crate::theme::Theme::new(theme, tile).into_widget()
                 });
                 tester.pump_and_settle();
-                assert_paints(&tester, &[Paints::Rrect(expected)]);
+                assert_paints(tester, &[Paints::Rrect(expected)]);
             }
         });
     }
 
     #[test]
     fn checkbox_list_tile_can_autofocus_unless_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child_key = GlobalKey::new();
             for (on_changed, focused) in [(ignore(), true), (None, false)] {
                 let key = child_key.clone();
-                pump_wrapped(&mut tester, move |_app| {
+                pump_wrapped(tester, move |_app| {
                     CheckboxListTile::new(Some(true), on_changed)
                         .title(Text::new("Hello").key(key.into()))
                         .autofocus(true)
                         .into_widget()
                 });
-                tester.pump(Duration::ZERO);
-                let node = focus_of(&tester, &child_key);
-                assert_eq!(has_primary_focus(&tester, node), focused);
+                tester.pump();
+                let node = focus_of(tester, &child_key);
+                assert_eq!(has_primary_focus(tester, node), focused);
             }
         });
     }
 
     #[test]
     fn checkbox_list_tile_content_padding_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         CheckboxListTile::new(Some(false), None)
-                            .title(AhemText::new("Title"))
+                            .title(Text::new("Title"))
                             .content_padding(EdgeInsets::from_ltrb(10.0, 18.0, 4.0, 2.0)),
                     )
                     .into_widget()
             });
-            let padding_rect = rect_of::<waft_widgets::SafeArea>(&tester, 0);
-            let checkbox_rect = rect_of::<Checkbox>(&tester, 0);
-            let title_rect = text_rect(&tester, "Title");
+            let padding_rect = rect_of::<waft_widgets::SafeArea>(tester, 0);
+            let checkbox_rect = rect_of::<Checkbox>(tester, 0);
+            let title_rect = text_rect(tester, "Title");
             let taller = if checkbox_rect.height() > title_rect.height() {
                 checkbox_rect
             } else {
@@ -1173,8 +1167,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_tristate_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(Some(false)));
             let tristate = Rc::new(Cell::new(false));
             let host = {
@@ -1183,7 +1176,7 @@ pub(crate) mod tests {
                     tile.title(Text::new("Title")).tristate(tristate.get())
                 })
             };
-            pump_wrapped(&mut tester, |_app| host);
+            pump_wrapped(tester, |_app| host);
             let shown = |tester: &WidgetTester| {
                 tester.widget(nth::<Checkbox>(tester, 0), |checkbox: &Checkbox| {
                     checkbox.value
@@ -1199,32 +1192,32 @@ pub(crate) mod tests {
                 tester.tap(at, 1);
                 tester.pump_and_settle();
             };
-            assert_eq!(shown(&tester), Some(false));
+            assert_eq!(shown(tester), Some(false));
 
             // Tap the checkbox when tristate is disabled.
             for expected in [Some(true), Some(false)] {
-                tap_checkbox(&mut tester);
+                tap_checkbox(tester);
                 assert_eq!(value.get(), expected);
             }
             // Tap the listTile when tristate is disabled.
             for expected in [Some(true), Some(false)] {
-                tap_tile(&mut tester);
+                tap_tile(tester);
                 assert_eq!(value.get(), expected);
             }
 
             // Enable tristate: Dart's flag is read by the next build, which a tap triggers.
             tristate.set(true);
             tester.pump_and_settle();
-            assert_eq!(shown(&tester), Some(false));
+            assert_eq!(shown(tester), Some(false));
 
             // Tap the checkbox when tristate is enabled.
             for expected in [Some(true), None, Some(false)] {
-                tap_checkbox(&mut tester);
+                tap_checkbox(tester);
                 assert_eq!(value.get(), expected);
             }
             // Tap the listTile when tristate is enabled.
             for expected in [Some(true), None, Some(false)] {
-                tap_tile(&mut tester);
+                tap_tile(tester);
                 assert_eq!(value.get(), expected);
             }
         });
@@ -1232,25 +1225,23 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_shape() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_wrapped(tester, |_app| {
                 CheckboxListTile::new(Some(false), None)
                     .title(Text::new("Title"))
                     .shape(ShapeBorderRef::new(right_rounded_border()))
                     .into_widget()
             });
             let shape: ShapeBorderRef = ShapeBorderRef::new(right_rounded_border());
-            assert!(ink_well_custom_border(&tester).as_deref() == Some(&*shape));
+            assert!(ink_well_custom_border(tester).as_deref() == Some(&*shape));
         });
     }
 
     #[test]
     fn checkbox_list_tile_respects_tile_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tile_color = Colors::RED.shade500();
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         CheckboxListTile::new(Some(false), None)
@@ -1259,16 +1250,15 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(&tester).contains(&tile_color.to_argb32()));
+            assert!(ink_rect_colors(tester).contains(&tile_color.to_argb32()));
         });
     }
 
     #[test]
     fn checkbox_list_tile_respects_selected_tile_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_tile_color = Colors::GREEN.shade500();
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         CheckboxListTile::new(Some(false), None)
@@ -1278,21 +1268,20 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(&tester).contains(&selected_tile_color.to_argb32()));
+            assert!(ink_rect_colors(tester).contains(&selected_tile_color.to_argb32()));
         });
     }
 
     #[test]
     fn checkbox_list_tile_selected_item_text_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/pull/76908
-            let mut tester = tester();
             const ACTIVE_COLOR: Color = Color::new(0xff00ff00);
             for (active_color, fill_color) in
                 [(None, Some(ACTIVE_COLOR)), (Some(ACTIVE_COLOR), None)]
             {
                 pump_app(
-                    &mut tester,
+                    tester,
                     move |app| {
                         ThemeData::builder()
                             .checkbox_theme(fill_when_selected(fill_color))
@@ -1315,8 +1304,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_checkbox_shape_and_side() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border = || {
                 RoundedRectangleBorder::new(
                     BorderSide::NONE,
@@ -1344,7 +1332,7 @@ pub(crate) mod tests {
                 ),
             ];
             for (side, inner) in frames {
-                pump_in_material(&mut tester, m3, move |_app| {
+                pump_in_material(tester, m3, move |_app| {
                     Center::new()
                         .child(
                             CheckboxListTile::new(Some(false), ignore())
@@ -1355,7 +1343,7 @@ pub(crate) mod tests {
                 });
                 let side_any: AnyBorderSide = side.into();
                 tester.widget(
-                    nth::<CheckboxListTile>(&tester, 0),
+                    nth::<CheckboxListTile>(tester, 0),
                     |tile: &CheckboxListTile| {
                         assert!(tile.side.as_ref() == Some(&side_any));
                         let shape: &dyn ShapeBorder =
@@ -1363,13 +1351,13 @@ pub(crate) mod tests {
                         assert!(shape == &border() as &dyn ShapeBorder);
                     },
                 );
-                tester.widget(nth::<Checkbox>(&tester, 0), |checkbox: &Checkbox| {
+                tester.widget(nth::<Checkbox>(tester, 0), |checkbox: &Checkbox| {
                     assert!(checkbox.side.as_ref() == Some(&side_any));
                     let shape: &dyn ShapeBorder = checkbox.shape.as_deref().expect("a shape");
                     assert!(shape == &border() as &dyn ShapeBorder);
                 });
                 assert_paints(
-                    &tester,
+                    tester,
                     &[Paints::RingAt(
                         side.color,
                         rrect(11.0, 11.0, 29.0, 29.0, 5.0),
@@ -1382,9 +1370,8 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_visual_density() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_wrapped(tester, |_app| {
                 Center::new()
                     .child(
                         CheckboxListTile::new(Some(false), ignore())
@@ -1395,7 +1382,7 @@ pub(crate) mod tests {
             });
             tester.pump_and_settle();
             assert_eq!(
-                rect_of::<CheckboxListTile>(&tester, 0).size(),
+                rect_of::<CheckboxListTile>(tester, 0).size(),
                 Size::new(800.0, 56.0)
             );
         });
@@ -1403,11 +1390,10 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_focus_node() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child_key = GlobalKey::new();
             let key = child_key.clone();
-            pump_wrapped(&mut tester, move |_app| {
+            pump_wrapped(tester, move |_app| {
                 Center::new()
                     .child(
                         CheckboxListTile::new(Some(false), ignore())
@@ -1415,41 +1401,41 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            tester.pump(Duration::ZERO);
-            let tile_node = focus_of(&tester, &child_key);
+            tester.pump();
+            let tile_node = focus_of(tester, &child_key);
             tile_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO); // Let the focus take effect.
-            let node = focus_of(&tester, &child_key);
-            assert!(has_primary_focus(&tester, node));
-            assert!(has_primary_focus(&tester, tile_node));
+            tester.pump(); // Let the focus take effect.
+            let node = focus_of(tester, &child_key);
+            assert!(has_primary_focus(tester, node));
+            assert!(has_primary_focus(tester, tile_node));
         });
     }
 
     /// Dart's "onFocusChange callback" case for a tile `make(focus_node, on_focus_change)`.
     pub(crate) fn check_on_focus_change(
+        tester: &mut WidgetTester,
         make: impl FnOnce(FocusNodeRef, ValueChanged<bool>) -> WidgetRef,
     ) {
-        let mut tester = tester();
-        let node = new_focus_node(&tester);
+        let node = new_focus_node(tester);
         let got_focus = Rc::new(Cell::new(false));
         let tile = make(node.clone(), record_focus(&got_focus));
-        pump_in_material(&mut tester, m3, |_app| tile);
+        pump_in_material(tester, m3, |_app| tile);
 
         node.request_focus(&mut tester.cell.borrow_mut(), None);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         assert!(got_focus.get());
         assert!(node.has_focus(&mut tester.cell.borrow_mut()));
 
         node.unfocus(&mut tester.cell.borrow_mut(), UnfocusDisposition::Scope);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         assert!(!got_focus.get());
         assert!(!node.has_focus(&mut tester.cell.borrow_mut()));
     }
 
     #[test]
     fn checkbox_list_tile_on_focus_change_callback() {
-        with_main_thread_stack(|| {
-            check_on_focus_change(|node, on_focus_change| {
+        test_widgets(|tester| {
+            check_on_focus_change(tester, |node, on_focus_change| {
                 CheckboxListTile::new(Some(true), ignore())
                     .focus_node(node)
                     .on_focus_change(on_focus_change)
@@ -1460,8 +1446,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_can_be_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(Some(false)));
             let enabled = Rc::new(Cell::new(true));
             let host = {
@@ -1485,25 +1470,25 @@ pub(crate) mod tests {
                 })
                 .into_widget()
             };
-            pump_wrapped(&mut tester, |_app| host);
+            pump_wrapped(tester, |_app| host);
             let shown = |tester: &WidgetTester| {
                 tester.widget(nth::<Checkbox>(tester, 0), |checkbox: &Checkbox| {
                     checkbox.value
                 })
             };
             // verify initial values
-            assert_eq!(shown(&tester), Some(false));
+            assert_eq!(shown(tester), Some(false));
             assert!(enabled.get());
 
             // Tap the checkbox to disable CheckboxListTile
-            let at = checkbox_center(&tester);
+            let at = checkbox_center(tester);
             tester.tap(at, 1);
             tester.pump_and_settle();
-            assert_eq!(shown(&tester), Some(true));
+            assert_eq!(shown(tester), Some(true));
             assert!(!enabled.get());
             tester.tap(at, 2);
             tester.pump_and_settle();
-            assert_eq!(shown(&tester), Some(true));
+            assert_eq!(shown(tester), Some(true));
         });
     }
 
@@ -1533,24 +1518,23 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test Checkbox() constructor
             pump_in_forbidden_region(
-                &mut tester,
+                tester,
                 CheckboxListTile::new(Some(true), ignore())
                     .mouse_cursor(MouseCursorRef::from(SystemMouseCursors::TEXT))
                     .into_widget(),
             );
-            let mut gesture = WidgetTester::mouse(1, 0);
-            let center = checkbox_center(&tester);
+            let mut gesture = TestPointer::mouse(1, 0);
+            let center = checkbox_center(tester);
             tester.add_pointer(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.move_to(&mut gesture, center, false);
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
 
             // Test default cursor
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 CheckboxListTile::new(Some(true), ignore()).into_widget()
             });
             let expected: MouseCursorRef = if K_IS_WEB {
@@ -1562,16 +1546,16 @@ pub(crate) mod tests {
 
             // Test default cursor when disabled
             pump_in_forbidden_region(
-                &mut tester,
+                tester,
                 CheckboxListTile::new(Some(true), None).into_widget(),
             );
-            let center = checkbox_center(&tester);
+            let center = checkbox_center(tester);
             tester.move_to(&mut gesture, center, false);
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
 
             // Test cursor when tristate
             pump_in_forbidden_region(
-                &mut tester,
+                tester,
                 CheckboxListTile::new(None, None)
                     .tristate(true)
                     .mouse_cursor(selected_grab_mouse_cursor())
@@ -1586,8 +1570,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_fill_color_in_enabled_disabled_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const ACTIVE_ENABLED_FILL_COLOR: Color = Color::new(0xFF000001);
             const ACTIVE_DISABLED_FILL_COLOR: Color = Color::new(0xFF000002);
             let fill_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
@@ -1601,21 +1584,20 @@ pub(crate) mod tests {
                 (false, ACTIVE_DISABLED_FILL_COLOR),
             ] {
                 let fill_color = Rc::clone(&fill_color);
-                pump_wrapped(&mut tester, move |_app| {
+                pump_wrapped(tester, move |_app| {
                     CheckboxListTile::new(Some(true), if enabled { ignore() } else { None })
                         .fill_color(fill_color)
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert_paints(&tester, &[Paints::Rrect(expected)]);
+                assert_paints(tester, &[Paints::Rrect(expected)]);
             }
         });
     }
 
     #[test]
     fn checkbox_list_tile_respects_fill_color_in_hovered_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const HOVERED_FILL_COLOR: Color = Color::new(0xFF000001);
             let fill_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
@@ -1624,7 +1606,7 @@ pub(crate) mod tests {
                 }
                 Some(Colors::TRANSPARENT)
             });
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 CheckboxListTile::new(Some(true), ignore())
                     .fill_color(fill_color)
                     .into_widget()
@@ -1632,17 +1614,16 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_paints(&tester, &[Paints::Rrect(HOVERED_FILL_COLOR)]);
+            assert_paints(tester, &[Paints::Rrect(HOVERED_FILL_COLOR)]);
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn checkbox_list_tile_respects_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = Rc::new(Cell::new(Some(true)));
             let orange = Colors::ORANGE.shade500();
@@ -1659,19 +1640,19 @@ pub(crate) mod tests {
             let unhovered = [Paints::Rrect(
                 m3(&tester.cell.borrow()).color_scheme.primary,
             )];
-            frame(&mut tester, true);
-            assert_paints(&tester, &[Paints::StrokeWidth(2.0)]);
-            assert_paints(&tester, &unhovered);
+            frame(tester, true);
+            assert_paints(tester, &[Paints::StrokeWidth(2.0)]);
+            assert_paints(tester, &unhovered);
 
             // Start hovering
-            let gesture = hover(&mut tester);
-            frame(&mut tester, true);
-            assert_paints(&tester, &[Paints::Circle(orange), Paints::StrokeWidth(2.0)]);
+            let gesture = hover(tester);
+            frame(tester, true);
+            assert_paints(tester, &[Paints::Circle(orange), Paints::StrokeWidth(2.0)]);
 
             // Check what happens when disabled.
-            frame(&mut tester, false);
-            crate::checkbox::tests::assert_does_not_paint(&tester, &[Paints::Circle(orange)]);
-            assert_paints(&tester, &[Paints::StrokeWidth(2.0)]);
+            frame(tester, false);
+            crate::checkbox::tests::assert_does_not_paint(tester, &[Paints::Circle(orange)]);
+            assert_paints(tester, &[Paints::StrokeWidth(2.0)]);
             tester.send(&gesture, PointerChange::Remove);
         });
     }
@@ -1690,10 +1671,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_checkbox_list_tile_respects_overlay_color_in_active_pressed_hovered_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::radio::tests::{Paints, assert_paints, circle};
 
-            let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const FILL_COLOR: Color = Color::new(0xFF000000);
             const ACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000001);
@@ -1745,25 +1725,25 @@ pub(crate) mod tests {
             .into_iter()
             .enumerate()
             {
-                frame(&mut tester, active, use_overlay);
-                presses.push(press(&mut tester, pointer as i64 + 2));
+                frame(tester, active, use_overlay);
+                presses.push(press(tester, pointer as i64 + 2));
                 tester.pump_and_settle();
                 assert_paints(
-                    &tester,
-                    checkbox_material(&tester),
+                    tester,
+                    checkbox_material(tester),
                     &[any_circle(), circle(expected).radius(SPLASH_RADIUS)],
                 );
             }
 
             // Start hovering
             tester.pump_widget(Container::new().into_widget());
-            frame(&mut tester, false, true);
+            frame(tester, false, true);
             tester.pump_and_settle();
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
-                checkbox_material(&tester),
+                tester,
+                checkbox_material(tester),
                 &[circle(HOVER_OVERLAY_COLOR).radius(SPLASH_RADIUS)],
             );
 
@@ -1778,8 +1758,7 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_checkbox_list_tile_respects_overlay_color_in_active_pressed_hovered_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const FILL_COLOR: Color = Color::new(0xFF000000);
             const ACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000001);
@@ -1826,20 +1805,20 @@ pub(crate) mod tests {
             .into_iter()
             .enumerate()
             {
-                frame(&mut tester, active, use_overlay);
-                presses.push(press(&mut tester, pointer as i64 + 2));
+                frame(tester, active, use_overlay);
+                presses.push(press(tester, pointer as i64 + 2));
                 tester.pump_and_settle();
-                assert_paints(&tester, &[Paints::CircleRadius(expected, SPLASH_RADIUS)]);
+                assert_paints(tester, &[Paints::CircleRadius(expected, SPLASH_RADIUS)]);
             }
 
             // Start hovering
             tester.pump_widget(Container::new().into_widget());
-            frame(&mut tester, false, true);
+            frame(tester, false, true);
             tester.pump_and_settle();
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
+                tester,
                 &[Paints::CircleRadius(HOVER_OVERLAY_COLOR, SPLASH_RADIUS)],
             );
 
@@ -1854,48 +1833,45 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_splash_radius() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const SPLASH_RADIUS: f64 = 30.0;
             let orange = Colors::ORANGE.shade500();
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 CheckboxListTile::new(Some(false), ignore())
                     .hover_color(orange)
                     .splash_radius(SPLASH_RADIUS)
                     .into_widget()
             });
             tester.pump_and_settle();
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_paints(&tester, &[Paints::CircleRadius(orange, SPLASH_RADIUS)]);
+            assert_paints(tester, &[Paints::CircleRadius(orange, SPLASH_RADIUS)]);
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn checkbox_list_tile_respects_material_tap_target_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_wrapped(&mut tester, |_app| {
+        test_widgets(|tester| {
+            pump_wrapped(tester, |_app| {
                 CheckboxListTile::new(Some(true), ignore()).into_widget()
             });
             // default test
-            assert_eq!(checkbox_size(&tester), Size::new(40.0, 40.0));
+            assert_eq!(checkbox_size(tester), Size::new(40.0, 40.0));
 
-            pump_wrapped(&mut tester, |_app| {
+            pump_wrapped(tester, |_app| {
                 CheckboxListTile::new(Some(true), ignore())
                     .material_tap_target_size(MaterialTapTargetSize::Padded)
                     .into_widget()
             });
-            assert_eq!(checkbox_size(&tester), Size::new(48.0, 48.0));
+            assert_eq!(checkbox_size(tester), Size::new(48.0, 48.0));
         });
     }
 
     #[test]
     fn material3_checkbox_list_tile_respects_is_error() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = m3(&tester.cell.borrow()).color_scheme.clone();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = Rc::new(Cell::new(Some(true)));
@@ -1903,20 +1879,18 @@ pub(crate) mod tests {
 
             // Default color
             tester.pump_widget(Container::new().into_widget());
-            pump_in_material(&mut tester, m3, |_app| {
-                Center::new().child(host).into_widget()
-            });
+            pump_in_material(tester, m3, |_app| Center::new().child(host).into_widget());
             tester.pump_and_settle();
             assert_paints(
-                &tester,
+                tester,
                 &[Paints::Rrect(colors.error), Paints::Path(colors.on_error)],
             );
 
             // Start hovering
-            let gesture = hover(&mut tester);
+            let gesture = hover(tester);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
+                tester,
                 &[
                     Paints::Circle(colors.error.with_opacity(0.08)),
                     Paints::Rrect(colors.error),
@@ -1928,8 +1902,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_adaptive_shows_the_correct_checkbox_platform_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for (platform, cupertino) in [
                 (TargetPlatform::IOS, 1),
                 (TargetPlatform::MacOS, 1),
@@ -1939,7 +1912,7 @@ pub(crate) mod tests {
                 (TargetPlatform::Windows, 0),
             ] {
                 pump_in_material(
-                    &mut tester,
+                    tester,
                     move |app| ThemeData::builder().platform(platform).build(app),
                     |_app| {
                         Center::new()
@@ -1961,10 +1934,9 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_enable_feedback() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for enable_feedback in [false, true] {
-                pump_wrapped(&mut tester, |_app| {
+                pump_wrapped(tester, |_app| {
                     Center::new()
                         .child(
                             CheckboxListTile::new(Some(false), ignore())
@@ -1972,15 +1944,17 @@ pub(crate) mod tests {
                         )
                         .into_widget()
                 });
-                assert_eq!(ink_well_enable_feedback(&tester), enable_feedback);
+                assert_eq!(ink_well_enable_feedback(tester), enable_feedback);
             }
         });
     }
 
     /// Dart's "control widget should not request focus on traversal" case for two tiles
     /// `make(title)`.
-    pub(crate) fn check_control_is_skipped_by_traversal(make: impl Fn(WidgetRef) -> WidgetRef) {
-        let mut tester = tester();
+    pub(crate) fn check_control_is_skipped_by_traversal(
+        tester: &mut WidgetTester,
+        make: impl Fn(WidgetRef) -> WidgetRef,
+    ) {
         let first_child_key = GlobalKey::new();
         let second_child_key = GlobalKey::new();
         let first = make(
@@ -1993,30 +1967,30 @@ pub(crate) mod tests {
                 .key(second_child_key.clone().into())
                 .into_widget(),
         );
-        pump_in_material(&mut tester, m3, |_app| {
+        pump_in_material(tester, m3, |_app| {
             Column::new().children([first, second]).into_widget()
         });
-        tester.pump(Duration::ZERO);
-        let first_node = focus_of(&tester, &first_child_key);
+        tester.pump();
+        let first_node = focus_of(tester, &first_child_key);
         first_node.request_focus(&mut tester.cell.borrow_mut(), None);
-        tester.pump(Duration::ZERO);
-        assert!(has_primary_focus(&tester, first_node));
+        tester.pump();
+        assert!(has_primary_focus(tester, first_node));
         first_node.next_focus(&mut tester.cell.borrow_mut());
-        tester.pump(Duration::ZERO);
+        tester.pump();
         assert!(!has_primary_focus(
-            &tester,
-            focus_of(&tester, &first_child_key)
+            tester,
+            focus_of(tester, &first_child_key)
         ));
         assert!(has_primary_focus(
-            &tester,
-            focus_of(&tester, &second_child_key)
+            tester,
+            focus_of(tester, &second_child_key)
         ));
     }
 
     #[test]
     fn checkbox_list_tile_control_widget_should_not_request_focus_on_traversal() {
-        with_main_thread_stack(|| {
-            check_control_is_skipped_by_traversal(|title| {
+        test_widgets(|tester| {
+            check_control_is_skipped_by_traversal(tester, |title| {
                 CheckboxListTile::new(Some(true), ignore())
                     .title(title)
                     .into_widget()
@@ -2027,22 +2001,22 @@ pub(crate) mod tests {
     /// Dart's "uses ListTileTheme controlAffinity" case: where the control `C` of
     /// `make()` sits under each affinity.
     pub(crate) fn control_top_left_under<C: 'static>(
+        tester: &mut WidgetTester,
         make: impl Fn() -> WidgetRef,
         control_affinity: ListTileControlAffinity,
     ) -> Offset {
-        let mut tester = tester();
         let tile = make();
-        pump_in_material(&mut tester, m3, |_app| {
+        pump_in_material(tester, m3, |_app| {
             ListTileTheme::new(tile)
                 .data(ListTileThemeData::new().control_affinity(control_affinity))
                 .into_widget()
         });
-        rect_of::<C>(&tester, 0).top_left()
+        rect_of::<C>(tester, 0).top_left()
     }
 
     #[test]
     fn checkbox_list_tile_uses_list_tile_theme_control_affinity() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let make = || CheckboxListTile::new(Some(false), ignore()).into_widget();
             for (control_affinity, expected) in [
                 (ListTileControlAffinity::Trailing, Offset::new(736.0, 8.0)),
@@ -2050,7 +2024,7 @@ pub(crate) mod tests {
                 (ListTileControlAffinity::Platform, Offset::new(736.0, 8.0)),
             ] {
                 assert_eq!(
-                    control_top_left_under::<Checkbox>(make, control_affinity),
+                    control_top_left_under::<Checkbox>(tester, make, control_affinity),
                     expected
                 );
             }
@@ -2059,12 +2033,11 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_renders_with_default_scale() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_in_material(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_in_material(tester, m3, |_app| {
                 CheckboxListTile::new(Some(false), None).into_widget()
             });
-            let checkbox = nth::<Checkbox>(&tester, 0);
+            let checkbox = nth::<Checkbox>(tester, 0);
             let app = tester.cell.borrow();
             assert!(!tester.ancestors(checkbox).into_iter().any(|ancestor| {
                 waft_widgets::downcast_widget::<Transform>(&**ancestor.widget(&app)).is_some()
@@ -2074,15 +2047,14 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_respects_checkbox_scale_factor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const SCALE: f64 = 1.5;
-            pump_in_material(&mut tester, m3, |_app| {
+            pump_in_material(tester, m3, |_app| {
                 CheckboxListTile::new(Some(false), None)
                     .checkbox_scale_factor(SCALE)
                     .into_widget()
             });
-            let transform = tester.ancestor_of_type::<Transform>(nth::<Checkbox>(&tester, 0));
+            let transform = tester.ancestor_of_type::<Transform>(nth::<Checkbox>(tester, 0));
             let matrix = tester.widget(transform, |transform: &Transform| transform.transform);
             assert_eq!(matrix, Matrix4::scale(SCALE as f32, SCALE as f32));
         });
@@ -2090,26 +2062,27 @@ pub(crate) mod tests {
 
     fn three_line_tile(is_three_line: Option<bool>, subtitle: &str) -> WidgetRef {
         let mut tile = CheckboxListTile::new(Some(false), None)
-            .title(AhemText::new("A"))
-            .subtitle(AhemText::new(subtitle));
+            .title(Text::new("A"))
+            .subtitle(Text::new(subtitle));
         tile.is_three_line = is_three_line;
         tile.into_widget()
     }
 
     fn adaptive_three_line_tile(is_three_line: Option<bool>, subtitle: &str) -> WidgetRef {
         let mut tile = CheckboxListTile::adaptive(Some(false), None)
-            .title(AhemText::new("A"))
-            .subtitle(AhemText::new(subtitle));
+            .title(Text::new("A"))
+            .subtitle(Text::new(subtitle));
         tile.is_three_line = is_three_line;
         tile.into_widget()
     }
 
     #[test]
     fn checkbox_list_tile_is_three_line() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (frame, three_line) in IS_THREE_LINE_FRAMES {
                 assert_eq!(
                     is_three_line_rects::<Checkbox, CheckboxListTile>(
+                        tester,
                         TargetPlatform::Android,
                         frame,
                         three_line_tile
@@ -2128,10 +2101,11 @@ pub(crate) mod tests {
 
     #[test]
     fn checkbox_list_tile_adaptive_is_three_line() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (frame, three_line) in IS_THREE_LINE_FRAMES {
                 assert_eq!(
                     is_three_line_rects::<Checkbox, CheckboxListTile>(
+                        tester,
                         TargetPlatform::IOS,
                         frame,
                         adaptive_three_line_tile
@@ -2166,22 +2140,21 @@ pub(crate) mod tests {
 
     #[test]
     fn title_alignment_position_with_title_widget() {
-        with_main_thread_stack(|| {
-            check_title_alignment::<Checkbox>(title_alignment_tile, false);
+        test_widgets(|tester| {
+            check_title_alignment::<Checkbox>(tester, title_alignment_tile, false);
         });
     }
 
     #[test]
     fn title_alignment_position_with_title_and_subtitle_widgets() {
-        with_main_thread_stack(|| {
-            check_title_alignment::<Checkbox>(title_alignment_tile, true);
+        test_widgets(|tester| {
+            check_title_alignment::<Checkbox>(tester, title_alignment_tile, true);
         });
     }
 
     /// Dart's "does not crash at zero area" case for `tile`.
-    pub(crate) fn check_zero_area<W: 'static>(tile: WidgetRef) {
-        let mut tester = tester();
-        pump_app(&mut tester, m3, |app| {
+    pub(crate) fn check_zero_area<W: 'static>(tester: &mut WidgetTester, tile: WidgetRef) {
+        pump_app(tester, m3, |app| {
             let theme = m3(app);
             Center::new()
                 .child(
@@ -2190,13 +2163,14 @@ pub(crate) mod tests {
                 )
                 .into_widget()
         });
-        assert_eq!(rect_of::<W>(&tester, 0).size(), Size::ZERO);
+        assert_eq!(rect_of::<W>(tester, 0).size(), Size::ZERO);
     }
 
     #[test]
     fn checkbox_list_tile_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             check_zero_area::<CheckboxListTile>(
+                tester,
                 CheckboxListTile::new(Some(true), ignore())
                     .title(Text::new("X"))
                     .into_widget(),
@@ -2207,12 +2181,13 @@ pub(crate) mod tests {
     fn leading_title_tile() -> CheckboxListTile {
         CheckboxListTile::new(Some(true), ignore())
             .control_affinity(ListTileControlAffinity::Leading)
-            .title(AhemText::new("title"))
+            .title(Text::new("title"))
     }
 
     /// Dart's "horizontalTitleGap = 0.0" case for `make(gap)`, whose title starts (LTR) and
     /// ends (RTL) at the given edges.
     pub(crate) fn check_horizontal_title_gap_0(
+        tester: &mut WidgetTester,
         [ltr_edge, rtl_edge]: [f64; 2],
         make: impl Fn(Option<f64>) -> WidgetRef,
     ) {
@@ -2223,17 +2198,17 @@ pub(crate) mod tests {
             for (theme_gap, widget_gap) in THEME_AND_WIDGET_FRAMES {
                 let mut data = ListTileThemeData::new();
                 data.horizontal_title_gap = theme_gap;
-                let tester = spacing_frame(m3, text_direction, data, make(widget_gap));
-                assert_eq!(list_tile_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(title_edge(&tester, text_direction), edge);
+                spacing_frame(tester, m3, text_direction, data, make(widget_gap));
+                assert_eq!(list_tile_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(title_edge(tester, text_direction), edge);
             }
         }
     }
 
     #[test]
     fn checkbox_list_tile_horizontal_title_gap_0() {
-        with_main_thread_stack(|| {
-            check_horizontal_title_gap_0([56.0, 744.0], |gap| {
+        test_widgets(|tester| {
+            check_horizontal_title_gap_0(tester, [56.0, 744.0], |gap| {
                 let mut tile = leading_title_tile();
                 tile.horizontal_title_gap = gap;
                 tile.into_widget()
@@ -2243,6 +2218,7 @@ pub(crate) mod tests {
 
     /// Dart's "horizontalTitleGap = (default) && ListTile minLeadingWidth = (default)" case.
     pub(crate) fn check_default_horizontal_title_gap(
+        tester: &mut WidgetTester,
         [ltr_edge, rtl_edge]: [f64; 2],
         make: impl Fn() -> WidgetRef,
     ) {
@@ -2251,16 +2227,16 @@ pub(crate) mod tests {
             (TextDirection::Ltr, ltr_edge),
             (TextDirection::Rtl, rtl_edge),
         ] {
-            let tester = spacing_frame(m3, text_direction, ListTileThemeData::new(), make());
-            assert_eq!(list_tile_size(&tester), Size::new(800.0, 56.0));
-            assert_eq!(title_edge(&tester, text_direction), edge);
+            spacing_frame(tester, m3, text_direction, ListTileThemeData::new(), make());
+            assert_eq!(list_tile_size(tester), Size::new(800.0, 56.0));
+            assert_eq!(title_edge(tester, text_direction), edge);
         }
     }
 
     #[test]
     fn checkbox_list_tile_default_horizontal_title_gap_and_min_leading_width() {
-        with_main_thread_stack(|| {
-            check_default_horizontal_title_gap([72.0, 728.0], || {
+        test_widgets(|tester| {
+            check_default_horizontal_title_gap(tester, [72.0, 728.0], || {
                 leading_title_tile().into_widget()
             });
         });
@@ -2269,18 +2245,25 @@ pub(crate) mod tests {
     /// Dart's "horizontalTitleGap with visualDensity" case: twice the same frame, the title
     /// starting at `edge`.
     pub(crate) fn check_horizontal_title_gap_with_visual_density(
+        tester: &mut WidgetTester,
         edge: f64,
         make: impl Fn() -> WidgetRef,
     ) {
-        let mut tester = spacing_frame(m3, TextDirection::Ltr, ListTileThemeData::new(), make());
-        assert_eq!(list_tile_size(&tester), Size::new(800.0, 56.0));
-        assert_eq!(title_edge(&tester, TextDirection::Ltr), edge);
+        spacing_frame(
+            tester,
+            m3,
+            TextDirection::Ltr,
+            ListTileThemeData::new(),
+            make(),
+        );
+        assert_eq!(list_tile_size(tester), Size::new(800.0, 56.0));
+        assert_eq!(title_edge(tester, TextDirection::Ltr), edge);
 
         // Pump another frame of the same widget to ensure the underlying render
         // object did not cache the original horizontalTitleGap calculation based on the
         // visualDensity
         let tile = make();
-        pump_app(&mut tester, m3, |_app| {
+        pump_app(tester, m3, |_app| {
             Directionality::new(
                 TextDirection::Ltr,
                 Material::new().child(
@@ -2294,14 +2277,14 @@ pub(crate) mod tests {
             )
             .into_widget()
         });
-        assert_eq!(list_tile_size(&tester), Size::new(800.0, 56.0));
-        assert_eq!(title_edge(&tester, TextDirection::Ltr), edge);
+        assert_eq!(list_tile_size(tester), Size::new(800.0, 56.0));
+        assert_eq!(title_edge(tester, TextDirection::Ltr), edge);
     }
 
     #[test]
     fn checkbox_list_tile_horizontal_title_gap_with_visual_density() {
-        with_main_thread_stack(|| {
-            check_horizontal_title_gap_with_visual_density(58.0, || {
+        test_widgets(|tester| {
+            check_horizontal_title_gap_with_visual_density(tester, 58.0, || {
                 leading_title_tile()
                     .visual_density(VisualDensity::new(VisualDensity::MINIMUM_DENSITY, 0.0))
                     .horizontal_title_gap(10.0)
@@ -2313,6 +2296,7 @@ pub(crate) mod tests {
     /// Dart's "minVerticalPadding = 80.0" case under `theme`, with the tile `height` it
     /// expects.
     pub(crate) fn check_min_vertical_padding_80(
+        tester: &mut WidgetTester,
         theme: fn(&App) -> ThemeData,
         height: f64,
         make: impl Fn(Option<f64>) -> WidgetRef,
@@ -2321,14 +2305,14 @@ pub(crate) mod tests {
             for (theme_padding, widget_padding) in theme_and_widget_frames(80.0) {
                 let mut data = ListTileThemeData::new();
                 data.min_vertical_padding = theme_padding;
-                let tester = spacing_frame(theme, text_direction, data, make(widget_padding));
-                assert_eq!(list_tile_size(&tester), Size::new(800.0, height));
+                spacing_frame(tester, theme, text_direction, data, make(widget_padding));
+                assert_eq!(list_tile_size(tester), Size::new(800.0, height));
             }
         }
     }
 
     fn min_vertical_padding_tile(padding: Option<f64>) -> WidgetRef {
-        let mut tile = CheckboxListTile::new(Some(true), ignore()).title(AhemText::new("title"));
+        let mut tile = CheckboxListTile::new(Some(true), ignore()).title(Text::new("title"));
         tile.min_vertical_padding = padding;
         tile.into_widget()
     }
@@ -2336,38 +2320,41 @@ pub(crate) mod tests {
     #[test]
     fn checkbox_list_tile_min_vertical_padding_80_material_3() {
         // 80 + 80 + 24(Title) = 184
-        with_main_thread_stack(|| {
-            check_min_vertical_padding_80(m3, 184.0, min_vertical_padding_tile);
+        test_widgets(|tester| {
+            check_min_vertical_padding_80(tester, m3, 184.0, min_vertical_padding_tile);
         });
     }
 
     #[test]
     fn checkbox_list_tile_min_vertical_padding_80_material_2() {
         // 80 + 80 + 16(Title) = 176
-        with_main_thread_stack(|| {
-            check_min_vertical_padding_80(m2, 176.0, min_vertical_padding_tile);
+        test_widgets(|tester| {
+            check_min_vertical_padding_80(tester, m2, 176.0, min_vertical_padding_tile);
         });
     }
 
     /// Dart's "minLeadingWidth = 60.0" case.
-    pub(crate) fn check_min_leading_width_60(make: impl Fn(Option<f64>) -> WidgetRef) {
+    pub(crate) fn check_min_leading_width_60(
+        tester: &mut WidgetTester,
+        make: impl Fn(Option<f64>) -> WidgetRef,
+    ) {
         // 92.0 = 16.0(Default contentPadding) + 16.0(Default horizontalTitleGap) + 60.0
         // 708.0 = 800.0 - (16.0(Default contentPadding) + 16.0(Default horizontalTitleGap) + 60.0)
         for (text_direction, edge) in [(TextDirection::Ltr, 92.0), (TextDirection::Rtl, 708.0)] {
             for (theme_width, widget_width) in theme_and_widget_frames(60.0) {
                 let mut data = ListTileThemeData::new();
                 data.min_leading_width = theme_width;
-                let tester = spacing_frame(m3, text_direction, data, make(widget_width));
-                assert_eq!(list_tile_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(title_edge(&tester, text_direction), edge);
+                spacing_frame(tester, m3, text_direction, data, make(widget_width));
+                assert_eq!(list_tile_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(title_edge(tester, text_direction), edge);
             }
         }
     }
 
     #[test]
     fn checkbox_list_tile_min_leading_width_60() {
-        with_main_thread_stack(|| {
-            check_min_leading_width_60(|width| {
+        test_widgets(|tester| {
+            check_min_leading_width_60(tester, |width| {
                 let mut tile = leading_title_tile();
                 tile.min_leading_width = width;
                 tile.into_widget()
@@ -2376,22 +2363,26 @@ pub(crate) mod tests {
     }
 
     /// Dart's "minTileHeight" case.
-    pub(crate) fn check_min_tile_height(make: impl Fn(Option<f64>) -> WidgetRef) {
+    pub(crate) fn check_min_tile_height(
+        tester: &mut WidgetTester,
+        make: impl Fn(Option<f64>) -> WidgetRef,
+    ) {
         for (min_tile_height, height) in [(None, 56.0), (Some(30.0), 30.0), (Some(60.0), 60.0)] {
-            let tester = spacing_frame(
+            spacing_frame(
+                tester,
                 m3,
                 TextDirection::Ltr,
                 ListTileThemeData::new(),
                 make(min_tile_height),
             );
-            assert_eq!(list_tile_size(&tester), Size::new(800.0, height));
+            assert_eq!(list_tile_size(tester), Size::new(800.0, height));
         }
     }
 
     #[test]
     fn checkbox_list_tile_min_tile_height() {
-        with_main_thread_stack(|| {
-            check_min_tile_height(|min_tile_height| {
+        test_widgets(|tester| {
+            check_min_tile_height(tester, |min_tile_height| {
                 let mut tile = CheckboxListTile::new(Some(true), ignore());
                 tile.min_tile_height = min_tile_height;
                 tile.into_widget()

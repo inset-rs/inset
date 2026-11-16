@@ -193,9 +193,12 @@ pub struct App {
 }
 
 /// A debug flag an [`App`] keeps: a marker type per Dart `debug…` bool, declared in the crate
-/// that reads it (`waft_painting::DebugDisableShadows`), so this crate needs to know none of
+/// that reads it (`waft_rendering::DebugPaintSizeEnabled`), so this crate needs to know none of
 /// them. Each crate keeps Dart's name as a function over the app.
-pub trait DebugFlag: 'static {}
+pub trait DebugFlag: 'static {
+    /// The flag's value until it is set: Dart's initializer, `false` for most.
+    const DEFAULT: bool = false;
+}
 
 /// What hears one kind of what the system asks of the app, and what it asked before there was a
 /// handler, which waits for one, as a launch's requests do.
@@ -524,12 +527,13 @@ impl App {
     }
 
     /// Whether the debug flag `F` is on for this app: Dart's library-level `debug…` bools, kept
-    /// per app as its clock is, so two tests, or two apps, never share one. Off until set.
+    /// per app as its clock is, so two tests, or two apps, never share one. [`DebugFlag::DEFAULT`]
+    /// until set.
     pub fn debug_flag<F: DebugFlag>(&self) -> bool {
         self.debug_flags
             .get(&std::any::TypeId::of::<F>())
             .copied()
-            .unwrap_or(false)
+            .unwrap_or(F::DEFAULT)
     }
 
     /// Turns the debug flag `F` on or off for this app; see [`debug_flag`](Self::debug_flag).

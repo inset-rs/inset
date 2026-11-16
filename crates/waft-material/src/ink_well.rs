@@ -2301,16 +2301,14 @@ mod tests {
         RepaintBoundary, Row, SizedBox, WidgetStatesController,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::material::RenderInkFeatures;
     use crate::no_splash::NoSplash;
-    use crate::test_support::{Drawn, PaintInspection, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection};
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
 
     type Log = Rc<RefCell<Vec<String>>>;
 
@@ -2412,8 +2410,8 @@ mod tests {
         FocusManager::instance(&mut app).set_highlight_strategy(&mut app, strategy);
     }
 
-    fn hover(tester: &mut WidgetTester, at: Offset) -> crate::test_support::TestPointer {
-        let mut mouse = WidgetTester::mouse(1, 0);
+    fn hover(tester: &mut WidgetTester, at: Offset) -> TestPointer {
+        let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, at, false);
         tester.pump_and_settle();
@@ -2426,8 +2424,7 @@ mod tests {
 
     #[test]
     fn ink_well_gestures_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log: Log = Rc::default();
             tester.pump_widget(ltr(Material::new().child(
                 Center::new().child(
@@ -2442,7 +2439,7 @@ mod tests {
             )));
 
             tester.tap(center_of_view(), 1);
-            tester.pump(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
             assert_eq!(take(&log), ["tap-down", "tap-up", "tap"]);
 
             tester.long_press(center_of_view(), 4);
@@ -2451,17 +2448,17 @@ mod tests {
                 ["tap-down", "tap-cancel", "long-press", "long-press-up"]
             );
 
-            let mut gesture = WidgetTester::touch(5);
+            let mut gesture = TestPointer::touch(5);
             tester.down(&mut gesture, center_of_view());
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
             assert_eq!(*log.borrow(), ["tap-down"]);
             tester.up(&gesture);
-            tester.pump(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
             assert_eq!(take(&log), ["tap-down", "tap-up", "tap"]);
 
-            let mut gesture = WidgetTester::touch(6);
+            let mut gesture = TestPointer::touch(6);
             tester.down(&mut gesture, center_of_view());
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
             tester.move_to(
                 &mut gesture,
                 center_of_view() + Offset::new(0.0, 200.0),
@@ -2475,8 +2472,7 @@ mod tests {
     #[test]
     fn ink_well_only_on_tap_down_enables_gestures() {
         // Regression test for https://github.com/flutter/flutter/issues/96030
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let down_tapped = Rc::new(Cell::new(false));
             tester.pump_widget(ltr(Material::new().child(Center::new().child(
                 InkWell::new().on_tap_down({
@@ -2493,8 +2489,7 @@ mod tests {
     /// ink well, where the focused `Shortcuts` would invoke them.
     #[test]
     fn ink_well_invokes_activation_actions_when_expected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log: Log = Rc::default();
             let inner: Rc<Cell<Option<BuildContext>>> = Rc::default();
             tester.pump_widget(ltr(Material::new().child(
@@ -2513,22 +2508,21 @@ mod tests {
             )));
             let context = inner.get().expect("built");
             Actions::invoke(&mut tester.cell.borrow_mut(), context, &ActivateIntent);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(take(&log), ["tap"]);
             Actions::invoke(
                 &mut tester.cell.borrow_mut(),
                 context,
                 &ButtonActivateIntent,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(take(&log), ["tap"]);
         });
     }
 
     #[test]
     fn ink_well_on_long_press_up_callback_is_triggered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let was_called = Rc::new(Cell::new(false));
             tester.pump_widget(material_ltr(
                 InkWell::new()
@@ -2540,9 +2534,9 @@ mod tests {
                     .child(SizedBox::new().width(100.0).height(100.0))
                     .into_widget(),
             ));
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(50.0, 50.0));
-            tester.pump(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
             tester.up(&gesture);
             tester.pump_and_settle();
             assert!(was_called.get());
@@ -2551,15 +2545,14 @@ mod tests {
 
     #[test]
     fn long_press_and_tap_on_disabled_should_not_throw() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_ltr(
                 Center::new().child(InkWell::new()).into_widget(),
             ));
             tester.tap(center_of_view(), 1);
-            tester.pump(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
             tester.long_press(center_of_view(), 1);
-            tester.pump(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
         });
     }
 
@@ -2599,11 +2592,10 @@ mod tests {
 
     #[test]
     fn ink_well_changes_color_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_ltr(centered_square(colored_ink_well())));
-            hover(&mut tester, center_of_view());
-            assert!(rects(&ink_drawn(&tester)).contains(&(0xff00ff00, CENTER_RECT)));
+            hover(tester, center_of_view());
+            assert!(rects(&ink_drawn(tester)).contains(&(0xff00ff00, CENTER_RECT)));
         });
     }
 
@@ -2611,52 +2603,48 @@ mod tests {
     fn ink_well_changes_color_on_hover_with_overlay_color() {
         // Same test as 'ink well changes color on hover' except that the
         // hover color is specified with the overlayColor parameter.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_ltr(centered_square(overlay_ink_well())));
-            hover(&mut tester, center_of_view());
-            assert!(rects(&ink_drawn(&tester)).contains(&(0xff00ff00, CENTER_RECT)));
+            hover(tester, center_of_view());
+            assert!(rects(&ink_drawn(tester)).contains(&(0xff00ff00, CENTER_RECT)));
         });
     }
 
     #[test]
     fn ink_response_changes_color_on_focus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             tester.pump_widget(material_ltr(centered_square(
                 colored_ink_well().focus_node(focus_node.clone()),
             )));
             tester.pump_and_settle();
-            assert!(rects(&ink_drawn(&tester)).is_empty());
+            assert!(rects(&ink_drawn(tester)).is_empty());
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert!(rects(&ink_drawn(&tester)).contains(&(0xff0000ff, CENTER_RECT)));
+            assert!(rects(&ink_drawn(tester)).contains(&(0xff0000ff, CENTER_RECT)));
         });
     }
 
     #[test]
     fn ink_response_changes_color_on_focus_with_overlay_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             tester.pump_widget(material_ltr(centered_square(
                 overlay_ink_well().focus_node(focus_node.clone()),
             )));
             tester.pump_and_settle();
-            assert!(rects(&ink_drawn(&tester)).is_empty());
+            assert!(rects(&ink_drawn(tester)).is_empty());
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert!(rects(&ink_drawn(&tester)).contains(&(0xff0000ff, CENTER_RECT)));
+            assert!(rects(&ink_drawn(tester)).contains(&(0xff0000ff, CENTER_RECT)));
         });
     }
 
     #[test]
     fn ink_well_changes_color_on_pressed_with_overlay_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pressed_color = Color::new(0xffdd00ff);
             tester.pump_widget(material_ltr(top_left_square(
                 InkWell::new()
@@ -2672,13 +2660,13 @@ mod tests {
                     .on_tap(Listener::new(|_app| {})),
             )));
             tester.pump_and_settle();
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, TOP_LEFT_RECT.center());
             assert!(
-                highlights(&tester).contains(&(pressed_color.with_alpha(0).value(), TOP_LEFT_RECT))
+                highlights(tester).contains(&(pressed_color.with_alpha(0).value(), TOP_LEFT_RECT))
             );
             tester.pump_and_settle(); // Let the press highlight animation finish.
-            assert!(rects(&ink_drawn(&tester)).contains(&(pressed_color.value(), TOP_LEFT_RECT)));
+            assert!(rects(&ink_drawn(tester)).contains(&(pressed_color.value(), TOP_LEFT_RECT)));
             tester.up(&gesture);
         });
     }
@@ -2722,47 +2710,44 @@ mod tests {
 
     #[test]
     fn ink_well_overlay_color_resolution_respects_selected_when_focused() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
-            let widget = selected_boilerplate(&tester, Some(focus_node.clone()));
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
+            let widget = selected_boilerplate(tester, Some(focus_node.clone()));
             tester.pump_widget(widget);
             tester.pump_and_settle();
-            assert!(rects(&ink_drawn(&tester)).is_empty());
+            assert!(rects(&ink_drawn(tester)).is_empty());
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert!(rects(&ink_drawn(&tester)).contains(&(SELECTED_FOCUSED_COLOR, TOP_LEFT_RECT)));
+            assert!(rects(&ink_drawn(tester)).contains(&(SELECTED_FOCUSED_COLOR, TOP_LEFT_RECT)));
         });
     }
 
     #[test]
     fn ink_well_overlay_color_resolution_respects_selected_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let widget = selected_boilerplate(&tester, None);
+        test_widgets(|tester| {
+            let widget = selected_boilerplate(tester, None);
             tester.pump_widget(widget);
             tester.pump_and_settle();
-            hover(&mut tester, TOP_LEFT_RECT.center());
-            assert!(rects(&ink_drawn(&tester)).contains(&(SELECTED_HOVERED_COLOR, TOP_LEFT_RECT)));
+            hover(tester, TOP_LEFT_RECT.center());
+            assert!(rects(&ink_drawn(tester)).contains(&(SELECTED_HOVERED_COLOR, TOP_LEFT_RECT)));
         });
     }
 
     #[test]
     fn ink_well_overlay_color_resolution_respects_selected_when_pressed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let widget = selected_boilerplate(&tester, None);
+        test_widgets(|tester| {
+            let widget = selected_boilerplate(tester, None);
             tester.pump_widget(widget);
             tester.pump_and_settle();
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, TOP_LEFT_RECT.center());
-            assert!(highlights(&tester).contains(&(
+            assert!(highlights(tester).contains(&(
                 Color::new(SELECTED_PRESSED_COLOR).with_alpha(0).value(),
                 TOP_LEFT_RECT
             )));
             tester.pump_and_settle(); // Let the press highlight animation finish.
-            assert!(rects(&ink_drawn(&tester)).contains(&(SELECTED_PRESSED_COLOR, TOP_LEFT_RECT)));
+            assert!(rects(&ink_drawn(tester)).contains(&(SELECTED_PRESSED_COLOR, TOP_LEFT_RECT)));
             tester.up(&gesture);
         });
     }
@@ -2775,19 +2760,18 @@ mod tests {
         Theme::new(data, child).into_widget()
     }
 
-    fn assert_splash_color(ink_well: InkWell) {
-        let mut tester = tester();
-        set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTouch);
-        let widget = m2(&tester, material_ltr(centered_square(ink_well)));
+    fn assert_splash_color(tester: &mut WidgetTester, ink_well: InkWell) {
+        set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTouch);
+        let widget = m2(tester, material_ltr(centered_square(ink_well)));
         tester.pump_widget(widget);
         tester.pump_and_settle();
-        let mut gesture = WidgetTester::touch(1);
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, center_of_view());
-        tester.pump(Duration::from_millis(200)); // unconfirmed splash is well underway
+        tester.pump_by(Duration::from_millis(200)); // unconfirmed splash is well underway
         // The splash starts at radius 0 on this frame; valo records no empty circle, so one
         // more frame grows it to where it is drawn.
-        tester.pump(Duration::from_millis(16));
-        let circles = paths(&ink_drawn(&tester));
+        tester.pump_by(Duration::from_millis(16));
+        let circles = paths(&ink_drawn(tester));
         assert!(
             circles.iter().any(|(color, bounds)| *color == 0xffff0000
                 && bounds.center() == Offset::new(50.0, 50.0)),
@@ -2798,13 +2782,14 @@ mod tests {
 
     #[test]
     fn ink_response_splash_color_matches_splash_color_parameter() {
-        with_main_thread_stack(|| assert_splash_color(colored_ink_well()));
+        test_widgets(|tester| assert_splash_color(tester, colored_ink_well()));
     }
 
     #[test]
     fn ink_response_splash_color_matches_resolved_overlay_color_for_pressed() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_splash_color(
+                tester,
                 InkWell::new()
                     .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
                         |states| {
@@ -2830,10 +2815,9 @@ mod tests {
 
     #[test]
     fn ink_response_uses_radius_for_focus_highlight() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             tester.pump_widget(material_ltr(
                 Center::new()
                     .child(
@@ -2848,10 +2832,10 @@ mod tests {
                     .into_widget(),
             ));
             tester.pump_and_settle();
-            assert!(paths(&ink_drawn(&tester)).is_empty());
+            assert!(paths(&ink_drawn(tester)).is_empty());
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            let circles = paths(&ink_drawn(&tester));
+            let circles = paths(&ink_drawn(tester));
             assert_eq!(circles.len(), 1);
             let (color, bounds) = circles[0];
             assert_eq!(color, 0xff0000ff);
@@ -2861,10 +2845,9 @@ mod tests {
 
     #[test]
     fn ink_well_uses_border_radius_for_focus_highlight() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             tester.pump_widget(material_ltr(centered_square(
                 InkWell::new()
                     .focus_node(focus_node.clone())
@@ -2873,18 +2856,17 @@ mod tests {
                     .on_tap(Listener::new(|_app| {})),
             )));
             tester.pump_and_settle();
-            assert!(paths(&ink_drawn(&tester)).is_empty());
+            assert!(paths(&ink_drawn(tester)).is_empty());
 
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert_eq!(paths(&ink_drawn(&tester)), [(0xff0000ff, CENTER_RECT)]);
+            assert_eq!(paths(&ink_drawn(tester)), [(0xff0000ff, CENTER_RECT)]);
         });
     }
 
     #[test]
     fn ink_well_uses_border_radius_for_hover_highlight() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_ltr(centered_square(
                 InkWell::new()
                     .border_radius(BorderRadius::all(waft_embedder::Radius::circular(10.0)))
@@ -2892,30 +2874,29 @@ mod tests {
                     .on_tap(Listener::new(|_app| {})),
             )));
             tester.pump_and_settle();
-            assert!(paths(&ink_drawn(&tester)).is_empty());
+            assert!(paths(&ink_drawn(tester)).is_empty());
 
             // Hover the ink well.
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, center_of_view());
             tester.pump_and_settle();
-            assert_eq!(paths(&ink_drawn(&tester)), [(0xff00ff00, CENTER_RECT)]);
+            assert_eq!(paths(&ink_drawn(tester)), [(0xff00ff00, CENTER_RECT)]);
         });
     }
 
     #[test]
     fn ink_response_does_not_change_color_on_focus_when_on_touch_device() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTouch);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTouch);
+            let focus_node = focus_node(tester);
             tester.pump_widget(material_ltr(centered_square(
                 colored_ink_well().focus_node(focus_node.clone()),
             )));
             tester.pump_and_settle();
-            assert!(rects(&ink_drawn(&tester)).is_empty());
+            assert!(rects(&ink_drawn(tester)).is_empty());
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert!(rects(&ink_drawn(&tester)).is_empty());
+            assert!(rects(&ink_drawn(tester)).is_empty());
         });
     }
 
@@ -2929,9 +2910,8 @@ mod tests {
 
     #[test]
     fn ink_well_mouse_cursor_changes_cursor_on_hover() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_services::SystemMouseCursors;
-            let mut tester = tester();
             let in_region = |child: WidgetRef| {
                 material_ltr(
                     MouseRegion::new()
@@ -2948,12 +2928,12 @@ mod tests {
             // Dart adds the mouse before the first frame; here it is added over the first tree,
             // so the tracker has the view's render tree to hit test.
             tester.pump_widget(in_region(SizedBox::shrink().into_widget()));
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::new(1.0, 1.0));
 
             // Test argument works
             expect(
-                &mut tester,
+                tester,
                 InkWell::new()
                     .mouse_cursor(SystemMouseCursors::CELL.into())
                     .on_tap(Listener::new(|_app| {}))
@@ -2962,24 +2942,24 @@ mod tests {
             );
             // Test default of InkWell()
             expect(
-                &mut tester,
+                tester,
                 InkWell::new()
                     .on_tap(Listener::new(|_app| {}))
                     .into_widget(),
                 basic.clone(),
             );
             // Test disabled
-            expect(&mut tester, InkWell::new().into_widget(), basic.clone());
+            expect(tester, InkWell::new().into_widget(), basic.clone());
             // Test default of InkResponse()
             expect(
-                &mut tester,
+                tester,
                 InkResponse::new()
                     .on_tap(Listener::new(|_app| {}))
                     .into_widget(),
                 basic.clone(),
             );
             // Test disabled
-            expect(&mut tester, InkResponse::new().into_widget(), basic);
+            expect(tester, InkResponse::new().into_widget(), basic);
         });
     }
 
@@ -3003,6 +2983,7 @@ mod tests {
             .on(TargetPlatform::Android)
             .with_haptics(Rc::clone(&feedback) as Rc<dyn waft_embedder::Haptics>);
         let mut tester = WidgetTester::with_platform(platform);
+        let tester = &mut tester;
         tester.pump_widget(material_ltr(
             Center::new()
                 .child(
@@ -3015,27 +2996,29 @@ mod tests {
                 .into_widget(),
         ));
         tester.tap(center_of_view(), 1);
-        tester.pump(Duration::from_secs(1));
+        tester.pump_by(Duration::from_secs(1));
         assert!(feedback.haptics.borrow().is_empty());
         tester.long_press(center_of_view(), 1);
-        tester.pump(Duration::from_secs(1));
+        tester.pump_by(Duration::from_secs(1));
         feedback.haptics.borrow().len()
     }
 
     #[test]
     fn feedback_enabled_by_default() {
-        with_main_thread_stack(|| assert_eq!(feedback_case(true), 1));
+        test_widgets(|_| assert_eq!(feedback_case(true), 1));
     }
 
     #[test]
     fn feedback_disabled() {
-        with_main_thread_stack(|| assert_eq!(feedback_case(false), 0));
+        test_widgets(|_| assert_eq!(feedback_case(false), 0));
     }
 
-    fn focus_case(navigation_mode: Option<waft_widgets::NavigationMode>) -> bool {
-        let mut tester = tester();
-        set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTouch);
-        let focus_node = focus_node(&tester);
+    fn focus_case(
+        tester: &mut WidgetTester,
+        navigation_mode: Option<waft_widgets::NavigationMode>,
+    ) -> bool {
+        set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTouch);
+        let focus_node = focus_node(tester);
         let frame = |ink_well: InkWell| {
             let child = ltr(ink_well
                 .focus_node(focus_node.clone())
@@ -3067,20 +3050,22 @@ mod tests {
 
     #[test]
     fn ink_response_does_not_focus_when_disabled() {
-        with_main_thread_stack(|| assert!(!focus_case(None)));
+        test_widgets(|tester| assert!(!focus_case(tester, None)));
     }
 
     #[test]
     fn ink_response_accepts_focus_when_disabled_in_directional_navigation_mode() {
-        with_main_thread_stack(|| {
-            assert!(focus_case(Some(waft_widgets::NavigationMode::Directional)))
+        test_widgets(|tester| {
+            assert!(focus_case(
+                tester,
+                Some(waft_widgets::NavigationMode::Directional)
+            ))
         });
     }
 
     #[test]
     fn when_ink_wells_are_nested_only_the_inner_one_is_triggered_by_tap_splash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let inner_key = GlobalKey::new();
             let padded_ink_well = |key: Option<&GlobalKey>, child: WidgetRef| {
                 let mut ink_well = InkWell::new()
@@ -3102,7 +3087,7 @@ mod tests {
                 ),
             );
             let widget = m2(
-                &tester,
+                tester,
                 material_ltr(Center::new().child(tree).into_widget()),
             );
             tester.pump_widget(widget);
@@ -3110,48 +3095,47 @@ mod tests {
             let circles = |tester: &WidgetTester| paths(&ink_drawn(tester)).len();
 
             // Press
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, inner);
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(16)); // valo records no circle of radius 0
-            assert_eq!(circles(&tester), 1);
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(16)); // valo records no circle of radius 0
+            assert_eq!(circles(tester), 1);
 
             // Up
             tester.up(&gesture);
             tester.pump_and_settle();
-            assert!(ink_drawn(&tester).is_empty());
+            assert!(ink_drawn(tester).is_empty());
 
             // Press again
             tester.down(&mut gesture, inner);
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(16)); // valo records no circle of radius 0
-            assert_eq!(circles(&tester), 1);
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(16)); // valo records no circle of radius 0
+            assert_eq!(circles(tester), 1);
 
             // Cancel
             tester.cancel(&gesture);
             tester.pump_and_settle();
-            assert!(ink_drawn(&tester).is_empty());
+            assert!(ink_drawn(tester).is_empty());
 
             // Press again
             tester.down(&mut gesture, inner);
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(16)); // valo records no circle of radius 0
-            assert_eq!(circles(&tester), 1);
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(16)); // valo records no circle of radius 0
+            assert_eq!(circles(tester), 1);
 
             // Use a second pointer to press
-            let mut gesture2 = WidgetTester::touch(2);
+            let mut gesture2 = TestPointer::touch(2);
             tester.down(&mut gesture2, inner);
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(16)); // valo records no circle of radius 0
-            assert_eq!(circles(&tester), 1);
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(16)); // valo records no circle of radius 0
+            assert_eq!(circles(tester), 1);
             tester.up(&gesture2);
         });
     }
 
     #[test]
     fn disabled_and_hovered_inkwell_responds_to_mouse_exit() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let on_hover_count = Rc::new(Cell::new(0));
             let hover_value = Rc::new(Cell::new(None));
             let build_frame = |enabled: bool| {
@@ -3170,7 +3154,7 @@ mod tests {
             };
 
             tester.pump_widget(build_frame(true));
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
 
             tester.move_to(&mut mouse, center_of_view(), false);
@@ -3210,8 +3194,7 @@ mod tests {
 
     #[test]
     fn hovered_ink_well_draws_a_transparent_highlight_when_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_frame = |enabled: bool| {
                 let mut ink_well = InkWell::new()
                     .on_hover(Rc::new(|_app, _value| {}))
@@ -3224,20 +3207,19 @@ mod tests {
 
             tester.pump_widget(build_frame(true));
             // Hover the enabled InkWell.
-            hover(&mut tester, center_of_view());
-            assert!(rects(&ink_drawn(&tester)).contains(&(0xff00ff00, CENTER_RECT)));
+            hover(tester, center_of_view());
+            assert!(rects(&ink_drawn(tester)).contains(&(0xff00ff00, CENTER_RECT)));
 
             // Disable the hovered InkWell.
             tester.pump_widget(build_frame(false));
             tester.pump_and_settle();
-            assert!(highlights(&tester).contains(&(0x0000ff00, CENTER_RECT)));
+            assert!(highlights(tester).contains(&(0x0000ff00, CENTER_RECT)));
         });
     }
 
     #[test]
     fn ink_well_disposes_states_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let tap_count = Rc::new(Cell::new(0));
             let build_frame = |states_controller: Option<Ref<MaterialStatesController>>| {
                 let mut ink_well = InkWell::new()
@@ -3292,8 +3274,7 @@ mod tests {
     #[test]
     fn ink_well_overlay_color_opacity_fades_from_0xff_when_hover_ends() {
         // Regression test for https://github.com/flutter/flutter/issues/110266
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_ltr(centered_square(
                 InkWell::new()
                     .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
@@ -3308,25 +3289,24 @@ mod tests {
                     .on_long_press_up(Listener::new(|_app| {}))
                     .on_hover(Rc::new(|_app, _hover| {})),
             )));
-            let mut mouse = hover(&mut tester, center_of_view());
+            let mut mouse = hover(tester, center_of_view());
             tester.move_to(&mut mouse, Offset::new(10.0, 10.0), false); // fade out the overlay
-            tester.pump(Duration::ZERO); // trigger the fade out animation
+            tester.pump(); // trigger the fade out animation
             // Fadeout begins with the MaterialStates.hovered overlay color
-            assert!(rects(&ink_drawn(&tester)).contains(&(0xff00ff00, CENTER_RECT)));
+            assert!(rects(&ink_drawn(tester)).contains(&(0xff00ff00, CENTER_RECT)));
             // 50ms fadeout is 50% complete, overlay color alpha goes from 0xff to 0x80
-            tester.pump(Duration::from_millis(25));
+            tester.pump_by(Duration::from_millis(25));
             assert!(
-                rects(&ink_drawn(&tester)).contains(&(0x8000ff00, CENTER_RECT)),
+                rects(&ink_drawn(tester)).contains(&(0x8000ff00, CENTER_RECT)),
                 "{:?}",
-                ink_drawn(&tester)
+                ink_drawn(tester)
             );
         });
     }
 
     #[test]
     fn ink_well_secondary_tap_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log: Log = Rc::default();
             tester.pump_widget(ltr(Material::new().child(
                 Center::new().child(
@@ -3338,7 +3318,7 @@ mod tests {
                 ),
             )));
 
-            let mut mouse = WidgetTester::mouse(1, K_SECONDARY_BUTTON);
+            let mut mouse = TestPointer::mouse(1, K_SECONDARY_BUTTON);
             tester.down(&mut mouse, center_of_view());
             tester.up(&mouse);
             assert_eq!(
@@ -3346,7 +3326,7 @@ mod tests {
                 ["secondary-tap-down", "secondary-tap-up", "secondary-tap"]
             );
 
-            let mut mouse = WidgetTester::mouse(2, K_SECONDARY_BUTTON);
+            let mut mouse = TestPointer::mouse(2, K_SECONDARY_BUTTON);
             tester.down(&mut mouse, center_of_view());
             tester.move_to(&mut mouse, Offset::new(100.0, 100.0), true);
             tester.up(&mouse);
@@ -3357,25 +3337,23 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/124328.
     #[test]
     fn ink_well_secondary_tap_should_not_draw_a_splash_when_no_secondary_callbacks_are_defined() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ltr(Material::new().child(
                 Center::new().child(InkWell::new().on_tap(Listener::new(|_app| {}))),
             )));
-            let mut mouse = WidgetTester::mouse(1, K_SECONDARY_BUTTON);
+            let mut mouse = TestPointer::mouse(1, K_SECONDARY_BUTTON);
             tester.down(&mut mouse, center_of_view());
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
             // No splash should be painted.
-            assert!(paths(&ink_drawn(&tester)).is_empty());
+            assert!(paths(&ink_drawn(tester)).is_empty());
             tester.up(&mouse);
         });
     }
 
     #[test]
     fn ink_well_tertiary_tap_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log: Log = Rc::default();
             tester.pump_widget(ltr(Material::new().child(
                 Center::new().child(
@@ -3386,12 +3364,12 @@ mod tests {
                 ),
             )));
 
-            let mut mouse = WidgetTester::mouse(1, K_TERTIARY_BUTTON);
+            let mut mouse = TestPointer::mouse(1, K_TERTIARY_BUTTON);
             tester.down(&mut mouse, center_of_view());
             tester.up(&mouse);
             assert_eq!(take(&log), ["tertiary-tap-down", "tertiary-tap-up"]);
 
-            let mut mouse = WidgetTester::mouse(2, K_TERTIARY_BUTTON);
+            let mut mouse = TestPointer::mouse(2, K_TERTIARY_BUTTON);
             tester.down(&mut mouse, center_of_view());
             tester.move_to(&mut mouse, Offset::new(100.0, 100.0), true);
             tester.up(&mouse);
@@ -3401,8 +3379,7 @@ mod tests {
 
     #[test]
     fn ink_well_tertiary_tap_highlights_only_when_a_tertiary_callback_is_defined() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log: Rc<RefCell<Vec<bool>>> = Rc::default();
             let build_frame = |with_tertiary_tap_down: bool, with_tertiary_tap_up: bool| {
                 let mut ink_well = InkWell::new()
@@ -3428,21 +3405,21 @@ mod tests {
                 [(false, true), (true, false), (true, true)]
             {
                 tester.pump_widget(build_frame(with_tertiary_tap_down, with_tertiary_tap_up));
-                let mut mouse = WidgetTester::mouse(1, K_TERTIARY_BUTTON);
+                let mut mouse = TestPointer::mouse(1, K_TERTIARY_BUTTON);
                 tester.down(&mut mouse, center_of_view());
-                tester.pump(Duration::from_millis(200));
+                tester.pump_by(Duration::from_millis(200));
                 assert_eq!(std::mem::take(&mut *log.borrow_mut()), [true]);
 
                 tester.up(&mouse);
-                tester.pump(Duration::from_millis(200));
+                tester.pump_by(Duration::from_millis(200));
                 assert_eq!(std::mem::take(&mut *log.borrow_mut()), [false]);
             }
 
             // Without a tertiary callback, a tertiary button press is ignored.
             tester.pump_widget(build_frame(false, false));
-            let mut mouse = WidgetTester::mouse(1, K_TERTIARY_BUTTON);
+            let mut mouse = TestPointer::mouse(1, K_TERTIARY_BUTTON);
             tester.down(&mut mouse, center_of_view());
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
             assert!(log.borrow().is_empty());
             tester.up(&mouse);
         });
@@ -3450,8 +3427,7 @@ mod tests {
 
     #[test]
     fn try_out_hover_duration_property() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let log: Log = Rc::default();
             tester.pump_widget(ltr(Material::new().child(
                 Center::new().child(
@@ -3461,7 +3437,7 @@ mod tests {
                 ),
             )));
             tester.tap(center_of_view(), 1);
-            tester.pump(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
             assert_eq!(take(&log), ["tap"]);
         });
     }
@@ -3470,8 +3446,7 @@ mod tests {
     #[test]
     fn ink_well_activation_action_does_not_end_immediately() {
         // Regression test for https://github.com/flutter/flutter/issues/132377.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             let inner: Rc<Cell<Option<BuildContext>>> = Rc::default();
             tester.pump_widget(ltr(Material::new().child(
@@ -3499,7 +3474,7 @@ mod tests {
             );
 
             // The InkWell is in pressed state.
-            tester.pump(Duration::from_millis(99));
+            tester.pump_by(Duration::from_millis(99));
             assert!(
                 tester
                     .cell
@@ -3521,8 +3496,7 @@ mod tests {
         });
     }
 
-    fn zero_area_size(response: WidgetRef) -> waft_embedder::Size {
-        let mut tester = tester();
+    fn zero_area_size(tester: &mut WidgetTester, response: WidgetRef) -> waft_embedder::Size {
         let key = GlobalKey::new();
         tester.pump_widget(material_ltr(
             Center::new()
@@ -3538,9 +3512,9 @@ mod tests {
 
     #[test]
     fn ink_response_does_not_crash_in_zero_area() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                zero_area_size(InkResponse::new().into_widget()),
+                zero_area_size(tester, InkResponse::new().into_widget()),
                 waft_embedder::Size::ZERO
             )
         });
@@ -3548,9 +3522,9 @@ mod tests {
 
     #[test]
     fn ink_well_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                zero_area_size(InkWell::new().into_widget()),
+                zero_area_size(tester, InkWell::new().into_widget()),
                 waft_embedder::Size::ZERO
             )
         });
@@ -3700,10 +3674,9 @@ mod tests {
 
     #[test]
     fn ink_well_custom_border_clips_for_focus_highlight() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             tester.pump_widget(material_ltr(top_left_mouse_square(
                 InkWell::new()
                     .focus_node(focus_node.clone())
@@ -3713,13 +3686,13 @@ mod tests {
                     .on_tap(Listener::new(|_app| {})),
             )));
             tester.pump_and_settle();
-            let ops = ink_ops(&tester);
+            let ops = ink_ops(tester);
             assert_eq!(clip_paths(&ops).len(), 0);
             assert_eq!(rrects(&ops).len(), 0);
 
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            let ops = ink_ops(&tester);
+            let ops = ink_ops(tester);
             assert_eq!(clip_paths(&ops).len(), 1);
             assert_eq!(rrects(&ops).len(), 1);
 
@@ -3739,8 +3712,7 @@ mod tests {
 
     #[test]
     fn ink_well_custom_border_clips_for_hover_highlight() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_ltr(top_left_mouse_square(
                 InkWell::new()
                     .border_radius(BorderRadius::all(waft_embedder::Radius::circular(10.0)))
@@ -3749,15 +3721,15 @@ mod tests {
                     .on_tap(Listener::new(|_app| {})),
             )));
             tester.pump_and_settle();
-            let ops = ink_ops(&tester);
+            let ops = ink_ops(tester);
             assert_eq!(clip_paths(&ops).len(), 0);
             assert_eq!(rrects(&ops).len(), 0);
 
             // Hover the ink well.
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, TOP_LEFT_RECT.center());
             tester.pump_and_settle();
-            let ops = ink_ops(&tester);
+            let ops = ink_ops(tester);
             assert_eq!(clip_paths(&ops).len(), 1);
             assert_eq!(rrects(&ops).len(), 1);
 
@@ -3771,10 +3743,9 @@ mod tests {
 
     #[test]
     fn ink_response_radius_can_be_updated() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             let boilerplate = |radius: f64| {
                 material_ltr(centered_square(
                     InkResponse::new()
@@ -3787,24 +3758,23 @@ mod tests {
 
             tester.pump_widget(boilerplate(10.0));
             tester.pump_and_settle();
-            assert_eq!(circles(&ink_ops(&tester)).len(), 0);
+            assert_eq!(circles(&ink_ops(tester)).len(), 0);
 
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert_eq!(circles(&ink_ops(&tester)), [(0xff0000ff, 10.0)]);
+            assert_eq!(circles(&ink_ops(tester)), [(0xff0000ff, 10.0)]);
 
             tester.pump_widget(boilerplate(20.0));
             tester.pump_and_settle();
-            assert_eq!(circles(&ink_ops(&tester)), [(0xff0000ff, 20.0)]);
+            assert_eq!(circles(&ink_ops(tester)), [(0xff0000ff, 20.0)]);
         });
     }
 
     #[test]
     fn ink_response_highlight_shape_can_be_updated() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             let boilerplate = |shape: BoxShape| {
                 material_ltr(centered_square(
                     InkResponse::new()
@@ -3818,19 +3788,19 @@ mod tests {
 
             tester.pump_widget(boilerplate(BoxShape::Circle));
             tester.pump_and_settle();
-            let ops = ink_ops(&tester);
+            let ops = ink_ops(tester);
             assert_eq!(circles(&ops).len(), 0);
             assert_eq!(rrects(&ops).len(), 0);
 
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            let ops = ink_ops(&tester);
+            let ops = ink_ops(tester);
             assert_eq!(circles(&ops).len(), 1);
             assert_eq!(rrects(&ops).len(), 0);
 
             tester.pump_widget(boilerplate(BoxShape::Rectangle));
             tester.pump_and_settle();
-            let ops = ink_ops(&tester);
+            let ops = ink_ops(tester);
             assert_eq!(circles(&ops).len(), 0);
             assert_eq!(rrects(&ops).len(), 1);
         });
@@ -3838,10 +3808,9 @@ mod tests {
 
     #[test]
     fn ink_well_border_radius_can_be_updated() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             let boilerplate = |radius: f64| {
                 material_ltr(centered_square(
                     InkWell::new()
@@ -3854,19 +3823,19 @@ mod tests {
 
             tester.pump_widget(boilerplate(10.0));
             tester.pump_and_settle();
-            assert_eq!(rrects(&ink_ops(&tester)).len(), 0);
+            assert_eq!(rrects(&ink_ops(tester)).len(), 0);
 
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
             assert_eq!(
-                rrects(&ink_ops(&tester)),
+                rrects(&ink_ops(tester)),
                 [(0xff0000ff, CENTER_RECT, [[10.0; 2]; 4])]
             );
 
             tester.pump_widget(boilerplate(30.0));
             tester.pump_and_settle();
             assert_eq!(
-                rrects(&ink_ops(&tester)),
+                rrects(&ink_ops(tester)),
                 [(0xff0000ff, CENTER_RECT, [[30.0; 2]; 4])]
             );
         });
@@ -3874,10 +3843,9 @@ mod tests {
 
     #[test]
     fn ink_well_custom_border_can_be_updated() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            set_highlight_strategy(tester, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_node = focus_node(tester);
             let boilerplate = |radius: f64| {
                 material_ltr(top_left_mouse_square(
                     InkWell::new()
@@ -3890,17 +3858,17 @@ mod tests {
 
             tester.pump_widget(boilerplate(20.0));
             tester.pump_and_settle();
-            assert_eq!(clip_paths(&ink_ops(&tester)).len(), 0);
+            assert_eq!(clip_paths(&ink_ops(tester)).len(), 0);
 
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            let clips = clip_paths(&ink_ops(&tester));
+            let clips = clip_paths(&ink_ops(tester));
             assert_eq!(clips.len(), 1);
             assert_eq!(clips_covering_rrect(&clips, TOP_LEFT_RECT, 20.0), 1);
 
             tester.pump_widget(boilerplate(40.0));
             tester.pump_and_settle();
-            let clips = clip_paths(&ink_ops(&tester));
+            let clips = clip_paths(&ink_ops(tester));
             assert!(clips_covering_rrect(&clips, TOP_LEFT_RECT, 40.0) >= 1);
         });
     }
@@ -3908,9 +3876,8 @@ mod tests {
     #[test]
     fn ink_well_splash_custom_border_can_be_updated() {
         // Regression test for https://github.com/flutter/flutter/issues/121626.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let boilerplate = |tester: &WidgetTester, radius: f64| {
                 m2(
                     tester,
@@ -3923,26 +3890,26 @@ mod tests {
                 )
             };
 
-            let widget = boilerplate(&tester, 20.0);
+            let widget = boilerplate(tester, 20.0);
             tester.pump_widget(widget);
             tester.pump_and_settle();
-            assert_eq!(clip_paths(&ink_ops(&tester)).len(), 0);
+            assert_eq!(clip_paths(&ink_ops(tester)).len(), 0);
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, TOP_LEFT_RECT.center());
-            tester.pump(Duration::from_millis(200)); // Unconfirmed splash is well underway.
-            let clips = clip_paths(&ink_ops(&tester));
+            tester.pump_by(Duration::from_millis(200)); // Unconfirmed splash is well underway.
+            let clips = clip_paths(&ink_ops(tester));
             assert_eq!(clips.len(), 2); // Splash and highlight.
 
             // Check that the splash and the highlight are correctly clipped.
             assert!(clips_covering_rrect(&clips, TOP_LEFT_RECT, 20.0) >= 2);
 
-            let widget = boilerplate(&tester, 40.0);
+            let widget = boilerplate(tester, 40.0);
             tester.pump_widget(widget);
             tester.pump_and_settle();
 
             // Check that the splash and the highlight are correctly clipped.
-            let clips = clip_paths(&ink_ops(&tester));
+            let clips = clip_paths(&ink_ops(tester));
             assert!(clips_covering_rrect(&clips, TOP_LEFT_RECT, 40.0) >= 2);
 
             tester.up(&gesture);
@@ -3967,8 +3934,8 @@ mod tests {
     /// The draws a pump of `duration` leaves, after the frame valo needs to see a splash that
     /// starts at radius 0 on the frame Dart's case reads.
     fn pump_splash(tester: &mut WidgetTester, duration: Duration) {
-        tester.pump(duration);
-        tester.pump(Duration::from_millis(16)); // valo records no circle of radius 0
+        tester.pump_by(duration);
+        tester.pump_by(Duration::from_millis(16)); // valo records no circle of radius 0
     }
 
     fn circle_count(tester: &WidgetTester) -> usize {
@@ -3997,12 +3964,11 @@ mod tests {
 
     #[test]
     fn reparenting_parent_should_allow_both_inkwells_to_show_splash_afterwards() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let middle_key = GlobalKey::new();
             let inner_key = GlobalKey::new();
             let widget = m2_top_left(
-                &tester,
+                tester,
                 200.0,
                 100.0,
                 Row::new()
@@ -4018,15 +3984,15 @@ mod tests {
             tester.pump_widget(widget);
 
             // Press
-            let mut gesture1 = WidgetTester::touch(1);
+            let mut gesture1 = TestPointer::touch(1);
             let inner = tester.center_of(&inner_key);
             tester.down(&mut gesture1, inner);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
 
             // Reparent parent
             let widget = m2_top_left(
-                &tester,
+                tester,
                 200.0,
                 100.0,
                 Row::new()
@@ -4041,20 +4007,20 @@ mod tests {
             // Up
             tester.up(&gesture1);
             tester.pump_and_settle();
-            assert!(ink_ops(&tester).is_empty(), "{:?}", ink_ops(&tester));
+            assert!(ink_ops(tester).is_empty(), "{:?}", ink_ops(tester));
 
             // Press the previous parent
             let middle = tester.center_of(&middle_key);
             tester.down(&mut gesture1, middle);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
 
             // Use a second pointer to press the previous child
-            let mut gesture2 = WidgetTester::touch(2);
+            let mut gesture2 = TestPointer::touch(2);
             let inner = tester.center_of(&inner_key);
             tester.down(&mut gesture2, inner);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 2);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 2);
 
             // Finish gesture to release resources.
             tester.up(&gesture1);
@@ -4065,8 +4031,7 @@ mod tests {
 
     #[test]
     fn parent_inkwell_does_not_block_child_inkwells_from_splashes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let middle_key = GlobalKey::new();
             let inner_key = GlobalKey::new();
             let tree = padded_ink_well(
@@ -4080,24 +4045,24 @@ mod tests {
                 )),
             );
             let widget = m2(
-                &tester,
+                tester,
                 material_ltr(Center::new().child(tree).into_widget()),
             );
             tester.pump_widget(widget);
 
             // Press middle
-            let mut gesture1 = WidgetTester::touch(1);
-            let middle = top_left_of(&tester, &middle_key) + Offset::new(1.0, 1.0);
+            let mut gesture1 = TestPointer::touch(1);
+            let middle = top_left_of(tester, &middle_key) + Offset::new(1.0, 1.0);
             tester.down(&mut gesture1, middle);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
 
             // Press inner
-            let mut gesture2 = WidgetTester::touch(2);
+            let mut gesture2 = TestPointer::touch(2);
             let inner = tester.center_of(&inner_key);
             tester.down(&mut gesture2, inner);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 2);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 2);
 
             // Finish gesture to release resources.
             tester.up(&gesture1);
@@ -4108,8 +4073,7 @@ mod tests {
 
     #[test]
     fn parent_inkwell_can_count_the_number_of_pressed_children_to_prevent_splash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let parent_key = GlobalKey::new();
             let left_key = GlobalKey::new();
             let right_key = GlobalKey::new();
@@ -4130,52 +4094,52 @@ mod tests {
                         Row::new().children([child_well(&left_key), child_well(&right_key)]),
                     ),
                 ));
-            let widget = m2(&tester, material_ltr(centered_square(parent)));
+            let widget = m2(tester, material_ltr(centered_square(parent)));
             tester.pump_widget(widget);
 
-            let parent_position = top_left_of(&tester, &parent_key) + Offset::new(1.0, 1.0);
+            let parent_position = top_left_of(tester, &parent_key) + Offset::new(1.0, 1.0);
 
             // Press left child
-            let mut gesture1 = WidgetTester::touch(1);
+            let mut gesture1 = TestPointer::touch(1);
             let left = tester.center_of(&left_key);
             tester.down(&mut gesture1, left);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
 
             // Press right child
-            let mut gesture2 = WidgetTester::touch(2);
+            let mut gesture2 = TestPointer::touch(2);
             let right = tester.center_of(&right_key);
             tester.down(&mut gesture2, right);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 2);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 2);
 
             // Press parent
-            let mut gesture3 = WidgetTester::touch(3);
+            let mut gesture3 = TestPointer::touch(3);
             tester.down(&mut gesture3, parent_position);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 2);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 2);
             tester.up(&gesture3);
 
             // Release left child
             tester.up(&gesture1);
             tester.pump_and_settle();
-            assert_eq!(circle_count(&tester), 1);
+            assert_eq!(circle_count(tester), 1);
 
             // Press parent
             tester.down(&mut gesture3, parent_position);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
             tester.up(&gesture3);
 
             // Release right child
             tester.up(&gesture2);
             tester.pump_and_settle();
-            assert_eq!(circle_count(&tester), 0);
+            assert_eq!(circle_count(tester), 0);
 
             // Press parent
             tester.down(&mut gesture3, parent_position);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
             tester.up(&gesture3);
         });
     }
@@ -4183,8 +4147,7 @@ mod tests {
     #[test]
     fn when_ink_wells_are_reparented_the_old_parent_can_display_splash_while_the_new_parent_can_not()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let inner_key = GlobalKey::new();
             let left_key = GlobalKey::new();
             let right_key = GlobalKey::new();
@@ -4229,25 +4192,25 @@ mod tests {
                     )
                 };
 
-            let widget = double_ink_well_row(&tester, 110.0, 90.0, Some(inner()), None);
+            let widget = double_ink_well_row(tester, 110.0, 90.0, Some(inner()), None);
             tester.pump_widget(widget);
 
             // Press inner
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(100.0, 50.0));
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
 
             // Switch side
-            let widget = double_ink_well_row(&tester, 90.0, 110.0, None, Some(inner()));
+            let widget = double_ink_well_row(tester, 90.0, 110.0, None, Some(inner()));
             tester.pump_widget(widget);
-            assert_eq!(circle_count(&tester), 0);
+            assert_eq!(circle_count(tester), 0);
 
             // A second pointer presses inner
-            let mut gesture2 = WidgetTester::touch(2);
+            let mut gesture2 = TestPointer::touch(2);
             tester.down(&mut gesture2, Offset::new(100.0, 50.0));
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
 
             tester.up(&gesture);
             tester.up(&gesture2);
@@ -4255,13 +4218,13 @@ mod tests {
 
             // Press inner
             tester.down(&mut gesture, Offset::new(100.0, 50.0));
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
 
             // Press left
             tester.down(&mut gesture2, Offset::new(50.0, 50.0));
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 2);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 2);
 
             tester.up(&gesture);
             tester.up(&gesture2);
@@ -4270,8 +4233,7 @@ mod tests {
 
     #[test]
     fn ink_wells_splash_starts_before_tap_is_confirmed_and_disappears_after_tap_is_canceled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let inner_key = GlobalKey::new();
             let tree = GestureDetector::new()
                 .on_horizontal_drag_start(Rc::new(|_app, _details| {}))
@@ -4286,38 +4248,37 @@ mod tests {
                         ),
                     ),
                 ));
-            let widget = m2(&tester, material_ltr(tree.into_widget()));
+            let widget = m2(tester, material_ltr(tree.into_widget()));
             tester.pump_widget(widget);
 
             // Press
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             let inner = tester.center_of(&inner_key);
             tester.down(&mut gesture, inner);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
 
             // Scroll upward
             let moved = inner + Offset::new(0.0, -100.0);
             tester.move_to(&mut gesture, moved, true);
             tester.pump_and_settle();
-            assert!(ink_ops(&tester).is_empty(), "{:?}", ink_ops(&tester));
+            assert!(ink_ops(tester).is_empty(), "{:?}", ink_ops(tester));
 
             // Up
             tester.up(&gesture);
             tester.pump_and_settle();
-            assert!(ink_ops(&tester).is_empty(), "{:?}", ink_ops(&tester));
+            assert!(ink_ops(tester).is_empty(), "{:?}", ink_ops(tester));
 
             // Press again
             tester.down(&mut gesture, inner);
-            pump_splash(&mut tester, Duration::from_millis(200));
-            assert_eq!(circle_count(&tester), 1);
+            pump_splash(tester, Duration::from_millis(200));
+            assert_eq!(circle_count(tester), 1);
         });
     }
 
     #[test]
     fn the_ink_well_widget_on_overlay_portal_does_not_throw() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = {
                 let mut app = tester.cell.borrow_mut();
                 let controller = OverlayPortalController::new(&mut app, None);
@@ -4374,10 +4335,10 @@ mod tests {
                 let render = tester.render_box_of(ink_well);
                 tester.global_rect(render).center()
             };
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
-            tester.pump(Duration::ZERO); // start gesture
-            tester.pump(Duration::from_secs(2));
+            tester.pump(); // start gesture
+            tester.pump_by(Duration::from_secs(2));
 
             tester.up(&gesture);
             overlay_entry.remove(&mut tester.cell.borrow_mut());

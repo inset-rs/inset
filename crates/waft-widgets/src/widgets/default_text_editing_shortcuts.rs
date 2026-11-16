@@ -783,7 +783,7 @@ mod tests {
     use crate::framework::{AnyElement, downcast_widget};
     use crate::widgets::basic::SizedBox;
     use crate::widgets::focus_manager::tests::{
-        app_with_view_whose_host_edits, app_with_view_whose_host_provides_edit_commands, mount,
+        tester_whose_host_edits, tester_whose_host_provides_edit_commands,
     };
 
     /// How the copy shortcut of a platform's table is described.
@@ -871,12 +871,9 @@ mod tests {
 
     #[test]
     fn the_widget_wraps_its_child_in_the_platform_table_and_the_disabling_table() {
-        let cell = app_with_view_whose_host_edits();
-        mount(
-            &cell,
-            DefaultTextEditingShortcuts::new(SizedBox::shrink()).into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        let tester = &mut tester_whose_host_edits();
+        tester.pump_widget(DefaultTextEditingShortcuts::new(SizedBox::shrink()).into_widget());
+        let mut app = tester.cell.borrow_mut();
         let shortcuts = mounted_shortcuts(&mut app);
         let labels: Vec<&str> = shortcuts.iter().map(|(label, _)| label.as_str()).collect();
         assert_eq!(
@@ -892,12 +889,9 @@ mod tests {
 
     #[test]
     fn a_host_that_provides_edit_commands_gets_the_cut_copy_and_paste_keys_and_no_other() {
-        let cell = app_with_view_whose_host_provides_edit_commands();
-        mount(
-            &cell,
-            DefaultTextEditingShortcuts::new(SizedBox::shrink()).into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        let tester = &mut tester_whose_host_provides_edit_commands();
+        tester.pump_widget(DefaultTextEditingShortcuts::new(SizedBox::shrink()).into_widget());
+        let mut app = tester.cell.borrow_mut();
         let shortcuts = mounted_shortcuts(&mut app);
         let (label, disabling) = &shortcuts[1];
         assert_eq!(label, "<Web Disabling Text Editing Shortcuts>");

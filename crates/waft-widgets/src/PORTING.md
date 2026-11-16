@@ -348,6 +348,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/app.rs → app.dart
 
+- Change: `WidgetsApp.showPerformanceOverlayOverride` and `debugAllowBannerOverride` are kept per `App`, read with `WidgetsApp::show_performance_overlay_override(app)` and `debug_allow_banner_override(app)` and set with their `set_` twins, not in statics.
+  Reason: language — Dart's statics are isolate-global, and an `App` is Waft's isolate.
+  Affect: setting one changes only the app it is passed to, so a test that sets it needs no reset.
+
 - Change: `WidgetsApp`'s cross-argument constructor asserts run when the widget is turned into a `WidgetRef` (`into_widget`).
   Reason: language — the arguments arrive through fluent setters, so they are only complete once the chain ends (basic.rs's assert entry).
   Affect: a contradictory configuration panics where the app widget is handed to the tree, not on its first build.

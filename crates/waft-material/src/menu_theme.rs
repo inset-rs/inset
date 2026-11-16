@@ -202,7 +202,6 @@ impl InheritedWidget for MenuTheme {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::rc::Rc;
-    use std::time::Duration;
 
     use waft_embedder::{Color, Rect};
     use waft_painting::{
@@ -215,6 +214,8 @@ pub(crate) mod tests {
         IconData, Text, WidgetState, WidgetStateProperty, WidgetStatePropertyAll, WidgetStates,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::button_style::ButtonStyle;
     use crate::colors::Colors;
@@ -222,10 +223,10 @@ pub(crate) mod tests {
     use crate::material::Material;
     use crate::menu_anchor::{MenuBar, MenuItemButton, MenuPanel, SubmenuButton};
     use crate::menu_bar_theme::{MenuBarTheme, MenuBarThemeData};
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, tester};
+    use crate::tooltip::tests::m2;
 
     /// The labels of the menus these tests build: Dart's `TestMenu` of `menu_theme_test.dart`
     /// and `menu_bar_theme_test.dart`.
@@ -523,32 +524,31 @@ pub(crate) mod tests {
     // menu_theme_test.dart 'theme is honored'.
     #[test]
     fn a_menu_theme_styles_the_submenus_and_a_menu_bar_theme_the_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_themed_bar(
-                &mut tester,
+                tester,
                 MenuBarThemeData::new().style(green_menu_style()),
                 MenuThemeData::new().style(red_stadium_menu_style()),
                 || MenuBar::new(theme_test_menus(ThemeTestMenus::default())).into_widget(),
             );
 
             // Open a test menu.
-            tap_text(&mut tester, test_menu::MAIN_MENU_1);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, test_menu::MAIN_MENU_1);
+            tester.pump();
             assert_eq!(
-                rect(&tester, menu_panels(&tester, Axis::Horizontal)[0]),
+                rect(tester, menu_panels(tester, Axis::Horizontal)[0]),
                 Rect::from_ltrb(234.0, 0.0, 566.0, 48.0)
             );
-            panel_material(&tester, Axis::Horizontal, |material| {
+            panel_material(tester, Axis::Horizontal, |material| {
                 assert_eq!(material.elevation, 20.0);
                 assert_eq!(material.color, Some(Colors::GREEN.primary()));
             });
 
             assert_eq!(
-                rect(&tester, only(menu_panels(&tester, Axis::Vertical))),
+                rect(tester, only(menu_panels(tester, Axis::Vertical))),
                 Rect::from_ltrb(336.0, 48.0, 570.0, 212.0)
             );
-            panel_material(&tester, Axis::Vertical, |material| {
+            panel_material(tester, Axis::Vertical, |material| {
                 assert_eq!(material.elevation, 15.0);
                 assert_eq!(material.color, Some(Colors::RED.primary()));
             });
@@ -558,20 +558,19 @@ pub(crate) mod tests {
     // menu_theme_test.dart 'Constructor parameters override theme parameters'.
     #[test]
     fn a_menu_bars_and_its_buttons_own_styles_override_the_themes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_themed_bar(
-                &mut tester,
+                tester,
                 MenuBarThemeData::new().style(green_menu_style()),
                 MenuThemeData::new().style(red_stadium_menu_style()),
                 overriding_bar,
             );
 
             // Open a test menu.
-            tap_text(&mut tester, test_menu::MAIN_MENU_1);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, test_menu::MAIN_MENU_1);
+            tester.pump();
 
-            assert_constructor_parameters_override_theme_parameters(&tester);
+            assert_constructor_parameters_override_theme_parameters(tester);
         });
     }
 
@@ -596,9 +595,8 @@ pub(crate) mod tests {
     // menu_theme_test.dart 'SubmenuButton.submenuIcon updates default arrow icon'.
     #[test]
     fn a_menu_themes_submenu_icon_resolves_against_the_buttons_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use test_menu::*;
-            let mut tester = tester();
             let controller = waft_widgets::MenuController::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyMenuController>();
             let disabled_icon = Icons::close_fullscreen();
@@ -667,47 +665,47 @@ pub(crate) mod tests {
                 tester.pump_widget(root);
             };
 
-            build_menu(&mut tester, None, true);
-            tap_text(&mut tester, SUB_MENU_00);
-            tester.pump(Duration::ZERO);
+            build_menu(tester, None, true);
+            tap_text(tester, SUB_MENU_00);
+            tester.pump();
 
-            assert_eq!(count_icon(&tester, &Icons::arrow_right()), 1);
+            assert_eq!(count_icon(tester, &Icons::arrow_right()), 1);
 
             controller.close(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            build_menu(&mut tester, Some(Rc::clone(&submenu_icon)), true);
+            build_menu(tester, Some(Rc::clone(&submenu_icon)), true);
             tester.pump_and_settle();
 
-            tap_text(&mut tester, SUB_MENU_00);
-            tester.pump(Duration::ZERO);
-            assert_eq!(count_icon(&tester, &default_icon), 1);
+            tap_text(tester, SUB_MENU_00);
+            tester.pump();
+            assert_eq!(count_icon(tester, &default_icon), 1);
 
-            send_arrow_down(&mut tester);
-            tester.pump(Duration::ZERO);
-            assert_eq!(count_icon(&tester, &focused_icon), 1);
+            send_arrow_down(tester);
+            tester.pump();
+            assert_eq!(count_icon(tester, &focused_icon), 1);
 
             controller.close(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            tap_text(&mut tester, SUB_MENU_00);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, SUB_MENU_00);
+            tester.pump();
             // Dart's `hoverOver`: a new mouse moved over the text, then a settle.
-            let at = rect(&tester, only(tester.find_text(SUB_SUB_MENU_110))).center();
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let at = rect(tester, only(tester.find_text(SUB_SUB_MENU_110))).center();
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
-            tester.pump(Duration::ZERO);
-            assert_eq!(count_icon(&tester, &hovered_icon), 1);
+            tester.pump();
+            assert_eq!(count_icon(tester, &hovered_icon), 1);
 
             controller.close(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            build_menu(&mut tester, Some(submenu_icon), false);
-            tap_text(&mut tester, SUB_MENU_00);
-            tester.pump(Duration::ZERO);
-            assert_eq!(count_icon(&tester, &disabled_icon), 1);
+            build_menu(tester, Some(submenu_icon), false);
+            tap_text(tester, SUB_MENU_00);
+            tester.pump();
+            assert_eq!(count_icon(tester, &disabled_icon), 1);
         });
     }
 }

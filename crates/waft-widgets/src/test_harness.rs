@@ -485,36 +485,6 @@ pub(crate) fn mount_scroll_harness(app: &mut App) -> ScrollHarness {
 
 // ---- the binding harness: a real `WidgetsBinding`, for trees that use a `GlobalKey` ----
 
-/// An [`App`] whose platform has one [`VIEW_WIDTH`] x [`VIEW_HEIGHT`] view, for a tree that
-/// needs the `WidgetsBinding` (a `GlobalKey` lookup, a post-frame callback, a timer).
-pub(crate) fn binding_cell() -> Rc<AppCell> {
-    let platform = TestPlatform::new()
-        .on(waft_embedder::TargetPlatform::MacOS)
-        .with_view(Rc::new(TestView::default()));
-    AppCell::with_platform(Rc::new(platform))
-}
-
-/// The one view [`binding_cell`]'s platform gives the app.
-pub(crate) fn platform_view(app: &App) -> waft_embedder::ViewRef {
-    app.platform()
-        .views()
-        .into_iter()
-        .next()
-        .expect("an app from binding_cell")
-}
-
-/// Mounts `child` under the platform's view and runs the first frame.
-pub(crate) fn binding_mount(cell: &AppCell, child: WidgetRef) {
-    {
-        let mut app = cell.borrow_mut();
-        let view = platform_view(&app);
-        crate::binding::run_widget(&mut app, View::new(view, child).into_widget());
-    }
-    // `run_app` attaches the root widget on the next timer turn, as Dart's `Timer.run` does.
-    cell.elapse(std::time::Duration::ZERO);
-    binding_pump(&mut cell.borrow_mut(), std::time::Duration::ZERO);
-}
-
 /// Flutter's `WidgetTester.pump`, as a host refreshes the screen every view is on: one frame at
 /// `at` of the views that asked for one; none when none asked.
 pub(crate) fn binding_pump(app: &mut App, at: std::time::Duration) {

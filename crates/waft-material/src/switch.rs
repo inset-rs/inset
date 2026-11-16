@@ -2702,13 +2702,16 @@ pub(crate) mod tests {
         UnfocusDisposition,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::icons::Icons;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{TestPointer, WidgetTester, with_main_thread_stack};
     use crate::theme_data::AdaptationRef;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester, tester_on};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// One recorded op, reduced to what Dart's `paints` matchers compare.
     #[derive(Clone, Debug, PartialEq)]
@@ -2900,7 +2903,7 @@ pub(crate) mod tests {
     /// `Theme.of`, as in Dart.)
     #[test]
     fn an_adaptive_switch_given_its_colors_does_not_depend_on_high_contrast() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let built_child = |tester: &WidgetTester| -> WidgetRef {
                 let element = *tester.find_by_type::<Switch>().first().expect("a switch");
                 let app = tester.cell.borrow();
@@ -2918,7 +2921,8 @@ pub(crate) mod tests {
                 );
                 pump_app(tester, m3, move |_app| home);
             };
-            let mut tester = tester_on(TargetPlatform::IOS);
+            let mut tester = WidgetTester::on(TargetPlatform::IOS);
+            let tester = &mut tester;
             let switch = Switch::adaptive(true, ignore())
                 .track_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
                     Colors::RED.primary(),
@@ -2927,17 +2931,17 @@ pub(crate) mod tests {
                     Colors::BLUE.primary(),
                 )))
                 .into_widget();
-            pump(&mut tester, false, &switch);
-            let built = built_child(&tester);
-            pump(&mut tester, true, &switch);
-            assert!(waft_widgets::same_widget(&built, &built_child(&tester)));
+            pump(tester, false, &switch);
+            let built = built_child(tester);
+            pump(tester, true, &switch);
+            assert!(waft_widgets::same_widget(&built, &built_child(tester)));
 
             // Without colours of its own, the switch resolves the Cupertino defaults.
             let switch = Switch::adaptive(true, ignore()).into_widget();
-            pump(&mut tester, false, &switch);
-            let built = built_child(&tester);
-            pump(&mut tester, true, &switch);
-            assert!(!waft_widgets::same_widget(&built, &built_child(&tester)));
+            pump(tester, false, &switch);
+            let built = built_child(tester);
+            pump(tester, true, &switch);
+            assert!(!waft_widgets::same_widget(&built, &built_child(tester)));
         });
     }
 
@@ -2989,14 +2993,14 @@ pub(crate) mod tests {
     /// Dart's `tester.press(find.byType(Switch))`: a pointer down at the centre, kept down.
     pub(crate) fn press(tester: &mut WidgetTester) -> TestPointer {
         let at = center(tester);
-        let mut touch = WidgetTester::touch(2);
+        let mut touch = TestPointer::touch(2);
         tester.down(&mut touch, at);
         touch
     }
 
     /// Dart's `createGesture(kind: mouse)`, `addPointer()` and `moveTo(center)`.
     pub(crate) fn hover(tester: &mut WidgetTester) -> TestPointer {
-        let mut mouse = WidgetTester::mouse(1, 0);
+        let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         let at = center(tester);
         tester.move_to(&mut mouse, at, false);
@@ -3036,11 +3040,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_tap_toggles_the_switch() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = shared(false);
             pump_host(
-                &mut tester,
+                tester,
                 m3,
                 TextDirection::Ltr,
                 &value,
@@ -3050,14 +3053,14 @@ pub(crate) mod tests {
                 },
             );
             assert!(!value.get());
-            tap(&mut tester);
+            tap(tester);
             assert!(value.get());
         });
     }
 
     #[test]
     fn the_switch_size_follows_the_theme_material_tap_target_size() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // switch width = trackWidth - 2 * trackRadius + _kSwitchMinSize
             // M2 width = 33 - 2 * 7 + 40
             // M3 width = 52 - 2 * 16 + 40
@@ -3073,18 +3076,17 @@ pub(crate) mod tests {
                     (MaterialTapTargetSize::Padded, padded),
                     (MaterialTapTargetSize::ShrinkWrap, shrink_wrapped),
                 ] {
-                    let mut tester = tester();
-                    pump_switch(
-                        &mut tester,
-                        move |app| {
-                            theme(app)
-                                .copy_with()
-                                .material_tap_target_size(size)
-                                .build()
-                        },
-                        Switch::new(true, ignore()).drag_start_behavior(DragStartBehavior::Down),
-                    );
-                    assert_eq!(switch_rect(&tester).size(), expected, "{size:?}");
+                    let data = theme(&tester.cell.borrow())
+                        .copy_with()
+                        .material_tap_target_size(size)
+                        .build();
+                    let switch =
+                        Switch::new(true, ignore()).drag_start_behavior(DragStartBehavior::Down);
+                    tester.pump_widget(Theme::new(
+                        data,
+                        in_material(TextDirection::Ltr, switch.into_widget()),
+                    ));
+                    assert_eq!(switch_rect(tester).size(), expected, "{size:?}");
                 }
             }
         });
@@ -3092,11 +3094,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_drag_toggles_the_switch_toward_its_direction() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = shared(false);
             pump_host(
-                &mut tester,
+                tester,
                 m3,
                 TextDirection::Ltr,
                 &value,
@@ -3106,26 +3107,25 @@ pub(crate) mod tests {
                 },
             );
             assert!(!value.get());
-            drag(&mut tester, -30.0);
+            drag(tester, -30.0);
             assert!(!value.get());
-            drag(&mut tester, 30.0);
+            drag(tester, 30.0);
             assert!(value.get());
-            tester.pump(Duration::ZERO);
-            drag(&mut tester, 30.0);
+            tester.pump();
+            drag(tester, 30.0);
             assert!(value.get());
-            tester.pump(Duration::ZERO);
-            drag(&mut tester, -30.0);
+            tester.pump();
+            drag(tester, -30.0);
             assert!(!value.get());
         });
     }
 
     #[test]
     fn a_drag_toggles_the_switch_with_either_drag_start_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = shared(false);
             pump_host(
-                &mut tester,
+                tester,
                 m3,
                 TextDirection::Ltr,
                 &value,
@@ -3135,33 +3135,26 @@ pub(crate) mod tests {
                 },
             );
             assert!(!value.get());
-            drag(&mut tester, -30.0);
+            drag(tester, -30.0);
             assert!(!value.get());
-            drag(&mut tester, 30.0);
+            drag(tester, 30.0);
             assert!(value.get());
-            tester.pump(Duration::ZERO);
-            drag(&mut tester, 30.0);
+            tester.pump();
+            drag(tester, 30.0);
             assert!(value.get());
-            tester.pump(Duration::ZERO);
-            drag(&mut tester, -30.0);
+            tester.pump();
+            drag(tester, -30.0);
             assert!(!value.get());
 
-            pump_host(
-                &mut tester,
-                m3,
-                TextDirection::Ltr,
-                &value,
-                true,
-                Switch::new,
-            );
+            pump_host(tester, m3, TextDirection::Ltr, &value, true, Switch::new);
             tester.pump_and_settle();
-            let start = center(&tester);
+            let start = center(tester);
             for (dx, before_up, after_up) in [
                 (20.0, false, true),
                 (20.0, true, true),
                 (-20.0, true, false),
             ] {
-                let mut gesture = WidgetTester::touch(3);
+                let mut gesture = TestPointer::touch(3);
                 tester.down(&mut gesture, start);
                 // We have to execute the drag in two frames because the first update will
                 // just set the start position.
@@ -3170,18 +3163,17 @@ pub(crate) mod tests {
                 assert_eq!(value.get(), before_up, "{dx}");
                 tester.up(&gesture);
                 assert_eq!(value.get(), after_up, "{dx}");
-                tester.pump(Duration::ZERO);
+                tester.pump();
             }
         });
     }
 
     #[test]
     fn a_right_to_left_switch_turns_on_toward_the_left() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = shared(false);
             pump_host(
-                &mut tester,
+                tester,
                 m3,
                 TextDirection::Rtl,
                 &value,
@@ -3190,26 +3182,25 @@ pub(crate) mod tests {
                     Switch::new(value, on_changed).drag_start_behavior(DragStartBehavior::Down)
                 },
             );
-            drag(&mut tester, 30.0);
+            drag(tester, 30.0);
             assert!(!value.get());
-            drag(&mut tester, -30.0);
+            drag(tester, -30.0);
             assert!(value.get());
-            tester.pump(Duration::ZERO);
-            drag(&mut tester, -30.0);
+            tester.pump();
+            drag(tester, -30.0);
             assert!(value.get());
-            tester.pump(Duration::ZERO);
-            drag(&mut tester, 30.0);
+            tester.pump();
+            drag(tester, 30.0);
             assert!(!value.get());
         });
     }
 
     #[test]
     fn an_m2_switch_has_its_default_colors_when_enabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = shared(false);
             pump_host(
-                &mut tester,
+                tester,
                 m2,
                 TextDirection::Rtl,
                 &value,
@@ -3218,16 +3209,16 @@ pub(crate) mod tests {
                     Switch::new(value, on_changed).drag_start_behavior(DragStartBehavior::Down)
                 },
             );
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(0x52000000, M2_TRACK));
             assert_eq!(
                 colors(&painted),
                 m2_sequence(0x52000000, &[], c(Colors::GREY.shade50())),
                 "Inactive enabled switch should match these colors"
             );
-            drag(&mut tester, -30.0);
-            tester.pump(Duration::ZERO);
-            let painted = drawn(&tester);
+            drag(tester, -30.0);
+            tester.pump();
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
             assert_eq!(
                 colors(&painted),
@@ -3241,13 +3232,12 @@ pub(crate) mod tests {
     /// `Switch.adaptive` on the test's Android platform.
     #[test]
     fn an_m3_switch_has_its_default_colors_when_enabled() {
-        with_main_thread_stack(|| {
-            for adaptive in [false, true] {
-                let mut tester = tester();
+        for adaptive in [false, true] {
+            test_widgets(|tester| {
                 let colors_ = colors_of(&tester.cell.borrow(), m3);
                 let value = shared(false);
                 pump_host(
-                    &mut tester,
+                    tester,
                     m3,
                     TextDirection::Rtl,
                     &value,
@@ -3262,7 +3252,7 @@ pub(crate) mod tests {
                     },
                 );
                 assert_eq!(
-                    drawn(&tester),
+                    drawn(tester),
                     [
                         Drawn::Fill(c(colors_.surface_container_highest()), M3_TRACK),
                         Drawn::Stroke(c(colors_.outline()), 2.0, M3_OUTLINE),
@@ -3270,49 +3260,47 @@ pub(crate) mod tests {
                     ],
                     "Inactive enabled switch should match these colors"
                 );
-                drag(&mut tester, -30.0);
-                tester.pump(Duration::ZERO);
-                let painted = drawn(&tester);
+                drag(tester, -30.0);
+                tester.pump();
+                let painted = drawn(tester);
                 assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
                 assert_eq!(
                     colors(&painted),
                     [c(colors_.primary), c(colors_.on_primary)],
                     "Active enabled switch should match these colors"
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn an_m2_switch_has_its_default_colors_when_disabled() {
-        with_main_thread_stack(|| {
-            for value in [false, true] {
-                let mut tester = tester();
+        for value in [false, true] {
+            test_widgets(|tester| {
                 let home = Directionality::new(
                     TextDirection::Rtl,
                     Material::new().child(Center::new().child(Switch::new(value, None))),
                 )
                 .into_widget();
-                pump_app(&mut tester, m2, move |_app| home);
-                let painted = drawn(&tester);
+                pump_app(tester, m2, move |_app| home);
+                let painted = drawn(tester);
                 assert_eq!(painted[0], Drawn::Fill(c(Colors::BLACK12), M2_TRACK));
                 assert_eq!(
                     colors(&painted),
                     m2_sequence(c(Colors::BLACK12), &[], c(Colors::GREY.shade400())),
                     "value {value}"
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn an_m3_switch_has_its_default_colors_when_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors_ = colors_of(&tester.cell.borrow(), m3);
             let home = in_material(TextDirection::Rtl, Switch::new(false, None).into_widget());
-            pump_app(&mut tester, m3, move |_app| home);
-            let painted = drawn(&tester);
+            pump_app(tester, m3, move |_app| home);
+            let painted = drawn(tester);
             assert_eq!(
                 painted,
                 [
@@ -3332,10 +3320,11 @@ pub(crate) mod tests {
                 "Inactive disabled switch should match these colors"
             );
 
-            let mut tester = crate::tooltip::tests::tester();
             let home = in_material(TextDirection::Rtl, Switch::new(true, None).into_widget());
-            pump_app(&mut tester, m3, move |_app| home);
-            let painted = drawn(&tester);
+            pump_app(tester, m3, move |_app| home);
+            // Dart runs the active switch as a case of its own, on a tree that has not animated.
+            tester.pump_and_settle();
+            let painted = drawn(tester);
             assert_eq!(
                 painted[0],
                 Drawn::Fill(c(with_opacity(colors_.on_surface, 0.12)), M3_TRACK)
@@ -3370,16 +3359,15 @@ pub(crate) mod tests {
 
     #[test]
     fn the_default_overlay_resolves_the_focused_then_the_hovered_state() {
-        with_main_thread_stack(|| {
-            for (theme, use_material3) in [(m2 as fn(&App) -> ThemeData, false), (m3, true)] {
-                let mut tester = tester();
+        for (theme, use_material3) in [(m2 as fn(&App) -> ThemeData, false), (m3, true)] {
+            test_widgets(|tester| {
                 let data = theme(&tester.cell.borrow());
                 tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-                let node = focus_node(&tester);
+                let node = focus_node(tester);
                 let home = Scaffold::new()
                     .body(Switch::new(true, ignore()).focus_node(node.clone()))
                     .into_widget();
-                pump_app(&mut tester, theme, move |_app| home);
+                pump_app(tester, theme, move |_app| home);
 
                 // Focused.
                 node.request_focus(&mut tester.cell.borrow_mut(), None);
@@ -3398,31 +3386,30 @@ pub(crate) mod tests {
                     K_RADIAL_REACTION_RADIUS
                 };
                 assert_eq!(
-                    circles(&drawn(&tester), radius),
+                    circles(&drawn(tester), radius),
                     [c(focused)],
                     "M3 {use_material3}"
                 );
 
                 // On both hovered and focused, the overlay color should show hovered overlay color.
-                hover(&mut tester);
+                hover(tester);
                 tester.pump_and_settle();
                 assert_eq!(
-                    circles(&drawn(&tester), radius),
+                    circles(&drawn(tester), radius),
                     [c(hovered)],
                     "M3 {use_material3}"
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     #[allow(deprecated)]
     fn an_m2_switch_takes_the_colors_it_is_given() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = shared(false);
             pump_host(
-                &mut tester,
+                tester,
                 m2,
                 TextDirection::Rtl,
                 &value,
@@ -3436,7 +3423,7 @@ pub(crate) mod tests {
                         .inactive_track_color(Colors::BLUE.shade500())
                 },
             );
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(
                 painted[0],
                 Drawn::Fill(c(Colors::BLUE.shade500()), M2_TRACK)
@@ -3449,9 +3436,9 @@ pub(crate) mod tests {
                     c(Colors::YELLOW.shade500())
                 )
             );
-            drag(&mut tester, -30.0);
-            tester.pump(Duration::ZERO);
-            let painted = drawn(&tester);
+            drag(tester, -30.0);
+            tester.pump();
+            let painted = drawn(tester);
             assert_eq!(
                 painted[0],
                 Drawn::Fill(c(Colors::GREEN.shade500()), M2_TRACK)
@@ -3466,12 +3453,11 @@ pub(crate) mod tests {
     #[test]
     #[allow(deprecated)]
     fn an_m3_switch_takes_the_colors_it_is_given() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors_ = colors_of(&tester.cell.borrow(), m3);
             let value = shared(false);
             pump_host(
-                &mut tester,
+                tester,
                 m3,
                 TextDirection::Rtl,
                 &value,
@@ -3485,7 +3471,7 @@ pub(crate) mod tests {
                         .inactive_track_color(Colors::BLUE.shade500())
                 },
             );
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(
                 painted[0],
                 Drawn::Fill(c(Colors::BLUE.shade500()), M3_TRACK)
@@ -3494,9 +3480,9 @@ pub(crate) mod tests {
                 matches!(painted[1], Drawn::Stroke(color, ..) if color == c(colors_.outline()))
             );
             assert_eq!(painted[2].color(), Some(c(Colors::YELLOW.shade500())));
-            drag(&mut tester, -30.0);
-            tester.pump(Duration::ZERO);
-            let painted = drawn(&tester);
+            drag(tester, -30.0);
+            tester.pump();
+            let painted = drawn(tester);
             assert_eq!(
                 painted[0],
                 Drawn::Fill(c(Colors::GREEN.shade500()), M3_TRACK)
@@ -3510,11 +3496,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_drag_ends_after_its_animation_completes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = shared(false);
             pump_host(
-                &mut tester,
+                tester,
                 m3,
                 TextDirection::Ltr,
                 &value,
@@ -3524,25 +3509,24 @@ pub(crate) mod tests {
                 },
             );
             assert!(!value.get());
-            let switch_rect = switch_rect(&tester);
-            let mut gesture = WidgetTester::touch(1);
+            let switch_rect = switch_rect(tester);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, switch_rect.center_left());
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let to = gesture.position + Offset::new(switch_rect.width(), 0.0);
             tester.move_to(&mut gesture, to, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(200));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
             assert!(value.get());
-            assert!(!has_running_animations(&tester));
+            assert!(!has_running_animations(tester));
         });
     }
 
     #[test]
     fn a_vetoed_drag_animates_the_thumb_back() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(false));
             let home = {
                 let value = Rc::clone(&value);
@@ -3564,103 +3548,102 @@ pub(crate) mod tests {
                     .into_widget(),
                 )
             };
-            pump_app(&mut tester, m3, move |_app| home);
+            pump_app(tester, m3, move |_app| home);
             let slop = waft_gestures::K_TOUCH_SLOP;
 
             // Move a little to the right, not past the middle.
-            let start = center(&tester);
-            let mut gesture = WidgetTester::touch(1);
+            let start = center(tester);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, start);
             tester.move_to(&mut gesture, start + Offset::new(slop + 0.1, 0.0), true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let at = gesture.position + Offset::new(-slop + 5.1, 0.0);
             tester.move_to(&mut gesture, at, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(!value.get());
-            assert!(position(&tester) < 0.5);
-            tester.pump(Duration::ZERO);
+            assert!(position(tester) < 0.5);
+            tester.pump();
             tester.pump_and_settle();
             assert!(!value.get());
-            assert_eq!(position(&tester), 0.0);
+            assert_eq!(position(tester), 0.0);
 
             // Move past the middle.
-            let mut gesture = WidgetTester::touch(2);
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, start);
             tester.move_to(&mut gesture, start + Offset::new(slop + 0.1, 0.0), true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(value.get());
-            assert!(position(&tester) > 0.5);
-            tester.pump(Duration::ZERO);
+            assert!(position(tester) > 0.5);
+            tester.pump();
             tester.pump_and_settle();
             assert!(value.get());
-            assert_eq!(position(&tester), 1.0);
+            assert_eq!(position(tester), 1.0);
 
             // Now move back to the left, the revert animation should play.
-            let mut gesture = WidgetTester::touch(3);
+            let mut gesture = TestPointer::touch(3);
             tester.down(&mut gesture, start);
             tester.move_to(&mut gesture, start + Offset::new(-slop - 0.1, 0.0), true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(value.get());
-            assert!(position(&tester) < 0.5);
-            tester.pump(Duration::ZERO);
+            assert!(position(tester) < 0.5);
+            tester.pump();
             tester.pump_and_settle();
             assert!(value.get());
-            assert_eq!(position(&tester), 1.0);
+            assert_eq!(position(tester), 1.0);
         });
     }
 
     #[test]
     #[allow(deprecated)]
     fn an_adaptive_switch_is_a_material_switch_that_toggles_on_every_platform() {
-        with_main_thread_stack(|| {
+        test_widgets_variant(TargetPlatformVariant::new(ALL_PLATFORMS), |tester| {
+            let platform = tester.target_platform();
             const ACTIVE_TRACK_COLOR: Color = Color::new(0xffff1200);
             const INACTIVE_TRACK_COLOR: Color = Color::new(0xffff12ff);
             const THUMB_COLOR: Color = Color::new(0xffffff00);
             const FOCUS_COLOR: Color = Color::new(0xff00ff00);
-            for platform in ALL_PLATFORMS {
-                let mut tester = tester_on(platform);
-                let value = shared(false);
-                let home = host(&value, true, |value, on_changed| {
-                    Switch::adaptive(value, on_changed)
-                        .active_color(ACTIVE_TRACK_COLOR)
-                        .inactive_track_color(INACTIVE_TRACK_COLOR)
-                        .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
-                            THUMB_COLOR,
-                        )))
-                        .focus_color(FOCUS_COLOR)
-                });
-                let home = Material::new()
-                    .child(Center::new().child(home))
-                    .into_widget();
-                pump_app(&mut tester, adaptive_on(platform), move |_app| home);
-                assert_eq!(tester.find_by_type::<Switch>().len(), 1, "on {platform:?}");
-                assert!(
-                    tester
-                        .find_by_type::<waft_cupertino::CupertinoSwitch>()
-                        .is_empty()
+
+            let value = shared(false);
+            let home = host(&value, true, |value, on_changed| {
+                Switch::adaptive(value, on_changed)
+                    .active_color(ACTIVE_TRACK_COLOR)
+                    .inactive_track_color(INACTIVE_TRACK_COLOR)
+                    .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+                        THUMB_COLOR,
+                    )))
+                    .focus_color(FOCUS_COLOR)
+            });
+            let home = Material::new()
+                .child(Center::new().child(home))
+                .into_widget();
+            pump_app(tester, adaptive_on(platform), move |_app| home);
+            assert_eq!(tester.find_by_type::<Switch>().len(), 1, "on {platform:?}");
+            assert!(
+                tester
+                    .find_by_type::<waft_cupertino::CupertinoSwitch>()
+                    .is_empty()
+            );
+            tester.widget(switch_element(tester), |switch: &Switch| {
+                assert_eq!(switch.active_color, Some(ACTIVE_TRACK_COLOR));
+                assert_eq!(switch.inactive_track_color, Some(INACTIVE_TRACK_COLOR));
+                assert_eq!(
+                    switch
+                        .thumb_color
+                        .as_ref()
+                        .and_then(|color| color.resolve(&WidgetStates::new())),
+                    Some(THUMB_COLOR)
                 );
-                tester.widget(switch_element(&tester), |switch: &Switch| {
-                    assert_eq!(switch.active_color, Some(ACTIVE_TRACK_COLOR));
-                    assert_eq!(switch.inactive_track_color, Some(INACTIVE_TRACK_COLOR));
-                    assert_eq!(
-                        switch
-                            .thumb_color
-                            .as_ref()
-                            .and_then(|color| color.resolve(&WidgetStates::new())),
-                        Some(THUMB_COLOR)
-                    );
-                    assert_eq!(switch.focus_color, Some(FOCUS_COLOR));
-                });
-                assert!(!value.get(), "on {platform:?}");
-                tap(&mut tester);
-                assert!(value.get(), "on {platform:?}");
-            }
+                assert_eq!(switch.focus_color, Some(FOCUS_COLOR));
+            });
+            assert!(!value.get(), "on {platform:?}");
+            tap(tester);
+            assert!(value.get(), "on {platform:?}");
         });
     }
 
@@ -3739,7 +3722,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_adaptive_cupertino_switch_shows_the_default_mouse_cursor() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let platform_cursor: MouseCursorRef = if K_IS_WEB {
                 SystemMouseCursors::CLICK.into()
             } else {
@@ -3747,22 +3730,23 @@ pub(crate) mod tests {
             };
             // One tester for both platforms, as in Dart: on macOS the size is read on the first
             // frame of the theme animation from iOS, which still has iOS's padded tap target.
-            let mut tester = tester_on(TargetPlatform::IOS);
+            let mut tester = WidgetTester::on(TargetPlatform::IOS);
+            let tester = &mut tester;
             for platform in CUPERTINO_PLATFORMS {
                 AdaptiveSwitch {
                     off: true,
                     ..AdaptiveSwitch::default()
                 }
-                .pump(&mut tester, platform);
-                assert_eq!(switch_rect(&tester).size(), Size::new(60.0, 48.0));
-                let mut mouse = WidgetTester::mouse(1, 0);
-                let at = center(&tester);
+                .pump(tester, platform);
+                assert_eq!(switch_rect(tester).size(), Size::new(60.0, 48.0));
+                let mut mouse = TestPointer::mouse(1, 0);
+                let at = center(tester);
                 tester.add_pointer(&mut mouse, at);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 tester.move_to(&mut mouse, at, false);
                 assert_eq!(Some(tester.active_cursor(1)), Some(platform_cursor.clone()));
 
-                AdaptiveSwitch::default().pump(&mut tester, platform);
+                AdaptiveSwitch::default().pump(tester, platform);
                 assert_eq!(Some(tester.active_cursor(1)), Some(platform_cursor.clone()));
 
                 // Test disabled switch.
@@ -3771,21 +3755,21 @@ pub(crate) mod tests {
                     off: true,
                     ..AdaptiveSwitch::default()
                 }
-                .pump(&mut tester, platform);
+                .pump(tester, platform);
                 assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
                 tester.send(&mouse, PointerChange::Remove);
-                tester.pump(Duration::ZERO);
+                tester.pump();
             }
         });
     }
 
     #[test]
     fn an_adaptive_cupertino_switch_has_its_default_thumb_and_track_colors_and_size() {
-        with_main_thread_stack(|| {
-            const THUMB_COLOR: u32 = 0xffffffff;
-            const INACTIVE_TRACK_COLOR: u32 = 0x28787880; // Default inactive track color.
-            const ACTIVE_TRACK_COLOR: u32 = 0xff34c759; // Default active track color.
-            for platform in CUPERTINO_PLATFORMS {
+        for platform in CUPERTINO_PLATFORMS {
+            test_widgets(|_| {
+                const THUMB_COLOR: u32 = 0xffffffff;
+                const INACTIVE_TRACK_COLOR: u32 = 0x28787880; // Default inactive track color.
+                const ACTIVE_TRACK_COLOR: u32 = 0xff34c759; // Default active track color.
                 // Switches have same sizes on both platform but they are more compact on macOS.
                 let (track, inactive_thumb, active_thumb) = if platform == TargetPlatform::IOS {
                     (
@@ -3806,21 +3790,22 @@ pub(crate) mod tests {
                     (true, true, 0.5),
                     (true, false, 0.5),
                 ] {
-                    let mut tester = tester_on(platform);
+                    let mut tester = WidgetTester::on(platform);
+                    let tester = &mut tester;
                     AdaptiveSwitch {
                         disabled,
                         off,
                         ..AdaptiveSwitch::default()
                     }
-                    .pump(&mut tester, platform);
-                    tester.pump(Duration::ZERO);
+                    .pump(tester, platform);
+                    tester.pump();
                     let (track_color, thumb) = if off {
                         (INACTIVE_TRACK_COLOR, inactive_thumb)
                     } else {
                         (ACTIVE_TRACK_COLOR, active_thumb)
                     };
                     assert_eq!(
-                        drawn(&tester),
+                        drawn(tester),
                         [
                             Drawn::Fill(track_color, track),
                             Drawn::Clip,
@@ -3831,29 +3816,30 @@ pub(crate) mod tests {
                         ],
                         "{platform:?}, disabled {disabled}, off {off}"
                     );
-                    assert_eq!(opacity(&tester), expected_opacity);
+                    assert_eq!(opacity(tester), expected_opacity);
                 }
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn an_adaptive_cupertino_switch_ignores_the_switch_themes() {
-        with_main_thread_stack(|| {
-            const DEFAULT_THUMB_COLOR: u32 = 0xffffffff;
-            const DEFAULT_INACTIVE_TRACK_COLOR: u32 = 0x28787880;
-            const DEFAULT_ACTIVE_TRACK_COLOR: u32 = 0xff34c759;
-            let updated_thumb_color = Colors::RED.primary();
-            let updated_track_color = Colors::GREEN.primary();
-            let theme = SwitchThemeData::new()
-                .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
-                    updated_thumb_color,
-                )))
-                .track_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
-                    updated_track_color,
-                )));
-            // Dart's two cases: the theme in `ThemeData.switchTheme`, and in a `SwitchTheme`.
-            for overall in [true, false] {
+        for overall in [true, false] {
+            test_widgets(|tester| {
+                const DEFAULT_THUMB_COLOR: u32 = 0xffffffff;
+                const DEFAULT_INACTIVE_TRACK_COLOR: u32 = 0x28787880;
+                const DEFAULT_ACTIVE_TRACK_COLOR: u32 = 0xff34c759;
+                let updated_thumb_color = Colors::RED.primary();
+                let updated_track_color = Colors::GREEN.primary();
+                let theme = SwitchThemeData::new()
+                    .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+                        updated_thumb_color,
+                    )))
+                    .track_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+                        updated_track_color,
+                    )));
+                // Dart's two cases: the theme in `ThemeData.switchTheme`, and in a `SwitchTheme`.
+
                 let with_theme = |switch: AdaptiveSwitch| {
                     if overall {
                         AdaptiveSwitch {
@@ -3873,15 +3859,16 @@ pub(crate) mod tests {
                         (false, true, DEFAULT_INACTIVE_TRACK_COLOR),
                         (true, true, DEFAULT_INACTIVE_TRACK_COLOR),
                     ] {
-                        let mut tester = tester_on(platform);
+                        let mut tester = WidgetTester::on(platform);
+                        let tester = &mut tester;
                         with_theme(AdaptiveSwitch {
                             disabled,
                             off,
                             ..AdaptiveSwitch::default()
                         })
-                        .pump(&mut tester, platform);
+                        .pump(tester, platform);
                         assert_eq!(
-                            colors(&drawn(&tester)),
+                            colors(&drawn(tester)),
                             [
                                 &[track][..],
                                 &CUPERTINO_SHADOWS_AND_BORDER[..],
@@ -3893,20 +3880,20 @@ pub(crate) mod tests {
                     }
                 }
 
-                let mut tester = tester_on(TargetPlatform::Android);
-                with_theme(AdaptiveSwitch::default()).pump(&mut tester, TargetPlatform::Android);
+                with_theme(AdaptiveSwitch::default()).pump(tester, TargetPlatform::Android);
                 assert_eq!(
-                    colors(&drawn(&tester)),
+                    colors(&drawn(tester)),
                     [c(updated_track_color), c(updated_thumb_color)],
                     "Switch.adaptive is affected by SwitchTheme on other platforms"
                 );
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn an_adaptation_overrides_the_adaptive_switch_theme_on_ios_and_macos_only() {
-        with_main_thread_stack(|| {
+        test_widgets_variant(TargetPlatformVariant::new(ALL_PLATFORMS), |tester| {
+            let platform = tester.target_platform();
             let switch_theme_data = SwitchThemeData::new()
                 .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
                     Colors::YELLOW.primary(),
@@ -3914,58 +3901,57 @@ pub(crate) mod tests {
                 .track_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
                     Colors::BROWN.primary(),
                 )));
-            for platform in ALL_PLATFORMS {
-                let mut tester = tester_on(platform);
-                AdaptiveSwitch {
-                    switch_theme_data: Some(switch_theme_data.clone()),
-                    switch_theme_adaptation: true,
-                    ..AdaptiveSwitch::default()
-                }
-                .pump(&mut tester, platform);
-                let painted = colors(&drawn(&tester));
-                if CUPERTINO_PLATFORMS.contains(&platform) {
-                    assert_eq!(
-                        painted,
-                        [
-                            &[c(Colors::DEEP_PURPLE.primary())][..],
-                            &CUPERTINO_SHADOWS_AND_BORDER[..],
-                            &[c(Colors::LIGHT_GREEN.primary())][..]
-                        ]
-                        .concat(),
-                        "{platform:?}"
-                    );
-                } else {
-                    // Other platforms should not be affected by the adaptive switch theme.
-                    assert_eq!(
-                        painted,
-                        [c(Colors::BROWN.primary()), c(Colors::YELLOW.primary())],
-                        "{platform:?}"
-                    );
-                }
+
+            AdaptiveSwitch {
+                switch_theme_data: Some(switch_theme_data.clone()),
+                switch_theme_adaptation: true,
+                ..AdaptiveSwitch::default()
+            }
+            .pump(tester, platform);
+            let painted = colors(&drawn(tester));
+            if CUPERTINO_PLATFORMS.contains(&platform) {
+                assert_eq!(
+                    painted,
+                    [
+                        &[c(Colors::DEEP_PURPLE.primary())][..],
+                        &CUPERTINO_SHADOWS_AND_BORDER[..],
+                        &[c(Colors::LIGHT_GREEN.primary())][..]
+                    ]
+                    .concat(),
+                    "{platform:?}"
+                );
+            } else {
+                // Other platforms should not be affected by the adaptive switch theme.
+                assert_eq!(
+                    painted,
+                    [c(Colors::BROWN.primary()), c(Colors::YELLOW.primary())],
+                    "{platform:?}"
+                );
             }
         });
     }
 
     #[test]
     fn an_adaptive_cupertino_switch_has_its_default_focus_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             for (focus_color, ring) in [
                 (None, 0xcc6ef28f),
                 (Some(Colors::RED.primary()), c(Colors::RED.primary())),
             ] {
-                let mut tester = tester_on(TargetPlatform::MacOS);
+                let mut tester = WidgetTester::on(TargetPlatform::MacOS);
+                let tester = &mut tester;
                 tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-                let node = focus_node(&tester);
+                let node = focus_node(tester);
                 AdaptiveSwitch {
                     autofocus: true,
                     focus_node: Some(node.clone()),
                     focus_color,
                     ..AdaptiveSwitch::default()
                 }
-                .pump(&mut tester, TargetPlatform::MacOS);
+                .pump(tester, TargetPlatform::MacOS);
                 tester.pump_and_settle();
                 assert!(node.has_primary_focus(&tester.cell.borrow()));
-                let painted = drawn(&tester);
+                let painted = drawn(tester);
                 assert_eq!(painted[0].color(), Some(0xff34c759)); // Track color
                 assert!(
                     matches!(painted[1], Drawn::Stroke(color, width, _) if color == ring && width == 3.5),
@@ -3979,18 +3965,17 @@ pub(crate) mod tests {
 
     #[test]
     fn an_m3_switch_is_focusable_and_has_its_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors_ = colors_of(&tester.cell.borrow(), m3);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let node = focus_node(&tester);
+            let node = focus_node(tester);
             let value = shared(true);
             let orange = Colors::ORANGE.shade500();
             for enabled in [true, true, false] {
                 if !enabled {
                     value.set(false);
                 }
-                pump_host(&mut tester, m3, TextDirection::Ltr, &value, enabled, {
+                pump_host(tester, m3, TextDirection::Ltr, &value, enabled, {
                     let node = node.clone();
                     move |value, on_changed| {
                         Switch::new(value, on_changed)
@@ -4000,7 +3985,7 @@ pub(crate) mod tests {
                     }
                 });
                 tester.pump_and_settle();
-                let painted = drawn(&tester);
+                let painted = drawn(tester);
                 if !enabled {
                     // Check what happens when disabled: inactive disabled switch.
                     assert!(!node.has_primary_focus(&tester.cell.borrow()));
@@ -4041,12 +4026,11 @@ pub(crate) mod tests {
 
     #[test]
     fn the_splash_radius_sizes_the_focus_circle() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             const SPLASH_RADIUS: f64 = 30.0;
             pump_switch(
-                &mut tester,
+                tester,
                 m3,
                 Switch::new(true, ignore())
                     .focus_color(Colors::ORANGE.shade500())
@@ -4055,7 +4039,7 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             assert_eq!(
-                circles(&drawn(&tester), SPLASH_RADIUS),
+                circles(&drawn(tester), SPLASH_RADIUS),
                 [c(Colors::ORANGE.shade500())]
             );
         });
@@ -4063,23 +4047,22 @@ pub(crate) mod tests {
 
     #[test]
     fn an_m2_switch_can_be_hovered_and_has_its_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = shared(true);
             let orange = Colors::ORANGE.shade500();
             let make = move |value, on_changed| Switch::new(value, on_changed).hover_color(orange);
-            pump_host(&mut tester, m2, TextDirection::Ltr, &value, true, make);
+            pump_host(tester, m2, TextDirection::Ltr, &value, true, make);
             tester.pump_and_settle();
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
             assert_eq!(colors(&painted), m2_sequence(0x802196f3, &[], 0xff2196f3));
 
             // Start hovering
-            hover(&mut tester);
-            pump_host(&mut tester, m2, TextDirection::Ltr, &value, true, make);
+            hover(tester);
+            pump_host(tester, m2, TextDirection::Ltr, &value, true, make);
             tester.pump_and_settle();
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
             assert_eq!(
                 colors(&painted),
@@ -4087,9 +4070,9 @@ pub(crate) mod tests {
             );
 
             // Check what happens when disabled.
-            pump_host(&mut tester, m2, TextDirection::Ltr, &value, false, make);
+            pump_host(tester, m2, TextDirection::Ltr, &value, false, make);
             tester.pump_and_settle();
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(0x1f000000, M2_TRACK));
             assert_eq!(colors(&painted), m2_sequence(0x1f000000, &[], 0xffbdbdbd));
         });
@@ -4097,8 +4080,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_m3_switch_can_be_hovered_and_has_its_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors_ = colors_of(&tester.cell.borrow(), m3);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = shared(true);
@@ -4106,9 +4088,9 @@ pub(crate) mod tests {
             let make = move |value, on_changed| Switch::new(value, on_changed).hover_color(orange);
 
             // active enabled switch
-            pump_host(&mut tester, m3, TextDirection::Ltr, &value, true, make);
+            pump_host(tester, m3, TextDirection::Ltr, &value, true, make);
             tester.pump_and_settle();
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
             assert_eq!(
                 colors(&painted),
@@ -4116,17 +4098,17 @@ pub(crate) mod tests {
             );
 
             // Start hovering
-            hover(&mut tester);
-            pump_host(&mut tester, m3, TextDirection::Ltr, &value, true, make);
+            hover(tester);
+            pump_host(tester, m3, TextDirection::Ltr, &value, true, make);
             tester.pump_and_settle();
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
             assert_eq!(circles(&painted, 20.0), [c(orange)]);
 
             // Check what happens for disabled active switch
-            pump_host(&mut tester, m3, TextDirection::Ltr, &value, false, make);
+            pump_host(tester, m3, TextDirection::Ltr, &value, false, make);
             tester.pump_and_settle();
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(
                 painted[0],
                 Drawn::Fill(c(with_opacity(colors_.on_surface, 0.12)), M3_TRACK)
@@ -4140,12 +4122,11 @@ pub(crate) mod tests {
 
     #[test]
     fn the_enter_and_space_keys_toggle_the_switch() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = shared(true);
             pump_host(
-                &mut tester,
+                tester,
                 m3,
                 TextDirection::Ltr,
                 &value,
@@ -4175,8 +4156,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_hovered_switch_shows_its_mouse_cursor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pump = |tester: &mut WidgetTester, switch: Switch| {
                 let home = Scaffold::new()
                     .body(
@@ -4193,30 +4173,30 @@ pub(crate) mod tests {
             };
             // Test Switch.adaptive() constructor
             pump(
-                &mut tester,
+                tester,
                 Switch::adaptive(true, ignore()).mouse_cursor(SystemMouseCursors::TEXT),
             );
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let at = center(&tester);
+            let mut mouse = TestPointer::mouse(1, 0);
+            let at = center(tester);
             tester.add_pointer(&mut mouse, at);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
 
             // Test Switch() constructor
             pump(
-                &mut tester,
+                tester,
                 Switch::new(true, ignore()).mouse_cursor(SystemMouseCursors::TEXT),
             );
-            let at = center(&tester);
+            let at = center(tester);
             tester.move_to(&mut mouse, at, false);
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
 
             // Test default cursor
-            pump(&mut tester, Switch::new(true, ignore()));
+            pump(tester, Switch::new(true, ignore()));
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::CLICK.into());
 
             // Test default cursor when disabled
-            pump(&mut tester, Switch::new(true, None));
+            pump(tester, Switch::new(true, None));
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
 
             tester.pump_and_settle();
@@ -4225,7 +4205,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_m3_thumb_color_resolves_in_the_selected_and_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ACTIVE_ENABLED: Color = Color::new(0xFF000001);
             const ACTIVE_DISABLED: Color = Color::new(0xFF000002);
             const INACTIVE_ENABLED: Color = Color::new(0xFF000003);
@@ -4243,7 +4223,6 @@ pub(crate) mod tests {
                     INACTIVE_ENABLED
                 })
             });
-            let mut tester = tester();
             let colors_ = colors_of(&tester.cell.borrow(), m3);
             for (enabled, active, track, thumb) in [
                 (
@@ -4272,9 +4251,9 @@ pub(crate) mod tests {
                         .thumb_color(Rc::clone(&thumb_color))
                         .into_widget(),
                 );
-                pump_app(&mut tester, m3, move |_app| home);
+                pump_app(tester, m3, move |_app| home);
                 tester.pump_and_settle();
-                let painted = drawn(&tester);
+                let painted = drawn(tester);
                 assert_eq!(
                     painted[0],
                     Drawn::Fill(c(track), M3_TRACK),
@@ -4287,13 +4266,12 @@ pub(crate) mod tests {
 
     #[test]
     fn an_m3_thumb_color_resolves_in_the_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const HOVERED: Color = Color::new(0xFF000001);
             const FOCUSED: Color = Color::new(0xFF000002);
-            let mut tester = tester();
             let colors_ = colors_of(&tester.cell.borrow(), m3);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let node = focus_node(&tester);
+            let node = focus_node(tester);
             let home = in_material(
                 TextDirection::Rtl,
                 Switch::new(true, ignore())
@@ -4312,10 +4290,10 @@ pub(crate) mod tests {
                     ))
                     .into_widget(),
             );
-            pump_app(&mut tester, m3, move |_app| home);
+            pump_app(tester, m3, move |_app| home);
             tester.pump_and_settle();
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
             assert_eq!(
                 circles(&painted, 20.0),
@@ -4324,9 +4302,9 @@ pub(crate) mod tests {
             assert_eq!(painted.last().and_then(Drawn::color), Some(c(FOCUSED)));
 
             // Start hovering
-            hover(&mut tester);
+            hover(tester);
             tester.pump_and_settle();
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(c(colors_.primary), M3_TRACK));
             assert_eq!(
                 circles(&painted, 20.0),
@@ -4338,7 +4316,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_overlay_color_resolves_in_the_pressed_focused_and_hovered_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ACTIVE_THUMB: Color = Color::new(0xFF000000);
             const INACTIVE_THUMB: Color = Color::new(0xFF000010);
             const ACTIVE_PRESSED_OVERLAY: Color = Color::new(0xFF000001);
@@ -4348,9 +4326,8 @@ pub(crate) mod tests {
             const HOVER: Color = Color::new(0xFF000005);
             const FOCUS: Color = Color::new(0xFF000006);
             const SPLASH_RADIUS: f64 = 24.0;
-            let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let node = focus_node(&tester);
+            let node = focus_node(tester);
             let pump =
                 |tester: &mut WidgetTester, active: bool, focused: bool, use_overlay: bool| {
                     let mut switch = Switch::new(active, ignore())
@@ -4405,11 +4382,11 @@ pub(crate) mod tests {
                 (false, true, INACTIVE_PRESSED_OVERLAY),
                 (true, true, ACTIVE_PRESSED_OVERLAY),
             ] {
-                pump(&mut tester, active, false, use_overlay);
-                let touch = press(&mut tester);
+                pump(tester, active, false, use_overlay);
+                let touch = press(tester);
                 tester.pump_and_settle();
                 assert_eq!(
-                    circles(&drawn(&tester), SPLASH_RADIUS),
+                    circles(&drawn(tester), SPLASH_RADIUS),
                     [c(expected)],
                     "active {active}, overlay {use_overlay}"
                 );
@@ -4417,58 +4394,57 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
             }
 
-            pump(&mut tester, false, true, true);
+            pump(tester, false, true, true);
             tester.pump_and_settle();
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            assert_eq!(circles(&drawn(&tester), SPLASH_RADIUS), [c(FOCUS_OVERLAY)]);
+            assert_eq!(circles(&drawn(tester), SPLASH_RADIUS), [c(FOCUS_OVERLAY)]);
 
             // Start hovering
-            hover(&mut tester);
+            hover(tester);
             tester.pump_and_settle();
-            assert_eq!(circles(&drawn(&tester), SPLASH_RADIUS), [c(HOVER_OVERLAY)]);
+            assert_eq!(circles(&drawn(tester), SPLASH_RADIUS), [c(HOVER_OVERLAY)]);
         });
     }
 
     #[test]
     fn an_m3_switch_animates_for_300_milliseconds_and_its_thumb_bounces() {
-        with_main_thread_stack(|| {
-            for bounce in [false, true] {
-                let mut tester = tester();
+        for bounce in [false, true] {
+            test_widgets(|tester| {
                 let value = shared(false);
                 let direction = if bounce {
                     TextDirection::Ltr
                 } else {
                     TextDirection::Rtl
                 };
-                pump_host(&mut tester, m3, direction, &value, true, Switch::new);
+                pump_host(tester, m3, direction, &value, true, Switch::new);
                 assert!(!value.get());
-                let switch_rect = switch_rect(&tester);
-                let mut gesture = WidgetTester::touch(1);
+                let switch_rect = switch_rect(tester);
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, switch_rect.center_left());
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 tester.up(&gesture);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 if bounce {
                     // The value on y axis is greater than 1 when t > 0.375
                     // 300 * 0.375 = 112.5
-                    tester.pump(Duration::from_millis(113));
-                    assert!(has_running_animations(&tester));
-                    assert!(position(&tester) > 1.0, "{}", position(&tester));
+                    tester.pump_by(Duration::from_millis(113));
+                    assert!(has_running_animations(tester));
+                    assert!(position(tester) > 1.0, "{}", position(tester));
                 } else {
-                    tester.pump(Duration::from_millis(200)); // M2 animation duration
-                    assert!(has_running_animations(&tester));
-                    tester.pump(Duration::from_millis(101));
-                    assert!(!has_running_animations(&tester));
+                    tester.pump_by(Duration::from_millis(200)); // M2 animation duration
+                    assert!(has_running_animations(tester));
+                    tester.pump_by(Duration::from_millis(101));
+                    assert!(!has_running_animations(tester));
                 }
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn an_m3_thumb_shows_its_pressed_color() {
-        with_main_thread_stack(|| {
-            for platform in MOBILE.into_iter().chain([TargetPlatform::IOS]) {
-                let colors_ = colors_of(&tester_on(platform).cell.borrow(), m3);
+        for platform in MOBILE.into_iter().chain([TargetPlatform::IOS]) {
+            test_widgets(|_| {
+                let colors_ = colors_of(&WidgetTester::on(platform).cell.borrow(), m3);
                 for (enabled, value, track, outline, thumb) in [
                     (
                         true,
@@ -4505,19 +4481,20 @@ pub(crate) mod tests {
                         ),
                     ),
                 ] {
-                    let mut tester = tester_on(platform);
+                    let mut tester = WidgetTester::on(platform);
+                    let tester = &mut tester;
                     let shared = shared(value);
                     pump_host(
-                        &mut tester,
+                        tester,
                         m3,
                         TextDirection::Ltr,
                         &shared,
                         enabled,
                         Switch::new,
                     );
-                    let _touch = press(&mut tester);
+                    let _touch = press(tester);
                     tester.pump_and_settle();
-                    let painted = drawn(&tester);
+                    let painted = drawn(tester);
                     let case = format!("{platform:?}, enabled {enabled}, value {value}");
                     assert_eq!(painted[0].color(), Some(c(track)), "{case}");
                     match outline {
@@ -4538,13 +4515,13 @@ pub(crate) mod tests {
                     }
                     assert_eq!(painted.last(), Some(&thumb), "{case}");
                 }
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn the_track_outline_color_and_width_resolve_in_the_selected_and_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
                 let disabled = states.contains(&WidgetState::Disabled);
                 let selected = states.contains(&WidgetState::Selected);
@@ -4565,7 +4542,6 @@ pub(crate) mod tests {
                     (false, false) => 3.0,
                 })
             });
-            let mut tester = tester();
             for (enabled, active, expected_color, expected_width) in [
                 (false, false, 0xFF000004, 4.0),
                 (false, true, 0xFF000002, 2.0),
@@ -4579,9 +4555,9 @@ pub(crate) mod tests {
                         .track_outline_width(Rc::clone(&width))
                         .into_widget(),
                 );
-                pump_app(&mut tester, m3, move |_app| home);
+                pump_app(tester, m3, move |_app| home);
                 tester.pump_and_settle();
-                let painted = drawn(&tester);
+                let painted = drawn(tester);
                 assert!(matches!(painted[0], Drawn::Fill(..)), "{:?}", painted[0]);
                 assert!(
                     matches!(painted[1], Drawn::Stroke(color, width, _)
@@ -4595,10 +4571,9 @@ pub(crate) mod tests {
 
     #[test]
     fn the_track_outline_resolves_in_the_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let node = focus_node(&tester);
+            let node = focus_node(tester);
             let home = in_material(
                 TextDirection::Rtl,
                 Switch::new(true, ignore())
@@ -4628,19 +4603,19 @@ pub(crate) mod tests {
                     ))
                     .into_widget(),
             );
-            pump_app(&mut tester, m3, move |_app| home);
+            pump_app(tester, m3, move |_app| home);
             tester.pump_and_settle();
             assert!(node.has_primary_focus(&tester.cell.borrow()));
             assert!(matches!(
-                drawn(&tester)[1],
+                drawn(tester)[1],
                 Drawn::Stroke(0xFF000002, 6.0, _)
             ));
 
             // Start hovering
-            hover(&mut tester);
+            hover(tester);
             tester.pump_and_settle();
             assert!(matches!(
-                drawn(&tester)[1],
+                drawn(tester)[1],
                 Drawn::Stroke(0xFF000001, 4.0, _)
             ));
         });
@@ -4648,8 +4623,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_m3_thumb_shows_the_icon_for_its_side_only() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
             let theme = |app: &App| {
                 ThemeData::builder()
@@ -4679,9 +4653,9 @@ pub(crate) mod tests {
                         )),
                     )
                     .into_widget();
-                    pump_app(&mut tester, theme, move |_app| home);
+                    pump_app(tester, theme, move |_app| home);
                     tester.pump_and_settle();
-                    drawn(&tester)
+                    drawn(tester)
                         .into_iter()
                         .filter_map(|drawn| match drawn {
                             Drawn::Glyphs(left, top) => Some((left, top)),
@@ -4709,11 +4683,12 @@ pub(crate) mod tests {
 
     #[test]
     fn an_adaptive_cupertino_switch_is_focusable_and_has_its_focus_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             const FOCUS_COLOR: u32 = 0xffff0000;
-            let mut tester = tester_on(TargetPlatform::IOS);
+            let mut tester = WidgetTester::on(TargetPlatform::IOS);
+            let tester = &mut tester;
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let node = focus_node(&tester);
+            let node = focus_node(tester);
             let value = shared(true);
             let pump = |tester: &mut WidgetTester, enabled: bool| {
                 let home = Material::new()
@@ -4733,9 +4708,9 @@ pub(crate) mod tests {
             };
             let thumb = [0x26000000, 0x0f000000, 0x0a000000, 0xffffffff];
 
-            pump(&mut tester, true);
+            pump(tester, true);
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(
                 colors(&painted),
                 [&[0xff34c759, FOCUS_COLOR][..], &thumb[..]].concat()
@@ -4744,9 +4719,9 @@ pub(crate) mod tests {
 
             // Check the false value.
             value.set(false);
-            pump(&mut tester, true);
+            pump(tester, true);
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(
                 colors(&painted),
                 [&[0x28787880, FOCUS_COLOR][..], &thumb[..]].concat()
@@ -4754,9 +4729,9 @@ pub(crate) mod tests {
             assert_eq!(painted[2], Drawn::Clip);
 
             // Check what happens when disabled.
-            pump(&mut tester, false);
+            pump(tester, false);
             assert!(!node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(colors(&painted), [&[0x28787880][..], &thumb[..]].concat());
             assert_eq!(painted[1], Drawn::Clip);
         });
@@ -4764,9 +4739,8 @@ pub(crate) mod tests {
 
     #[test]
     fn on_focus_change_hears_focus_arrive_and_leave() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let node = focus_node(&tester);
+        test_widgets(|tester| {
+            let node = focus_node(tester);
             let focused = Rc::new(Cell::new(false));
             let switch = {
                 let focused = Rc::clone(&focused);
@@ -4774,15 +4748,15 @@ pub(crate) mod tests {
                     .focus_node(node.clone())
                     .on_focus_change(move |_app, value| focused.set(value))
             };
-            pump_switch(&mut tester, m3, switch);
+            pump_switch(tester, m3, switch);
 
             node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(focused.get());
             assert!(node.has_focus(&mut tester.cell.borrow_mut()));
 
             node.unfocus(&mut tester.cell.borrow_mut(), UnfocusDisposition::Scope);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(!focused.get());
             assert!(!node.has_focus(&mut tester.cell.borrow_mut()));
         });
@@ -4790,19 +4764,18 @@ pub(crate) mod tests {
 
     #[test]
     fn the_padding_is_respected() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (padding, expected) in [
                 (None, Size::new(60.0, 48.0)),
                 (Some(EdgeInsetsGeometry::ZERO), Size::new(52.0, 48.0)),
                 (Some(EdgeInsetsGeometry::all(4.0)), Size::new(60.0, 56.0)),
             ] {
-                let mut tester = tester();
                 let mut switch = Switch::new(true, ignore());
                 if let Some(padding) = padding {
                     switch = switch.padding(padding);
                 }
-                pump_switch(&mut tester, m3, switch);
-                assert_eq!(switch_rect(&tester).size(), expected, "{padding:?}");
+                pump_switch(tester, m3, switch);
+                assert_eq!(switch_rect(tester).size(), expected, "{padding:?}");
             }
         });
     }
@@ -4810,15 +4783,14 @@ pub(crate) mod tests {
     #[test]
     #[allow(deprecated)]
     fn the_active_thumb_color_wins_over_the_active_color() {
-        with_main_thread_stack(|| {
-            const ACTIVE_COLOR: Color = Color::new(0xffff0000);
-            const ACTIVE_THUMB_COLOR: Color = Color::new(0xff00ff00);
-            const ACTIVE_TRACK_COLOR: Color = Color::new(0xff0000ff);
-            for (theme, use_material3) in [(m2 as fn(&App) -> ThemeData, false), (m3, true)] {
-                let mut tester = tester();
+        for (theme, use_material3) in [(m2 as fn(&App) -> ThemeData, false), (m3, true)] {
+            test_widgets(|tester| {
+                const ACTIVE_COLOR: Color = Color::new(0xffff0000);
+                const ACTIVE_THUMB_COLOR: Color = Color::new(0xff00ff00);
+                const ACTIVE_TRACK_COLOR: Color = Color::new(0xff0000ff);
                 let value = shared(true);
                 pump_host(
-                    &mut tester,
+                    tester,
                     theme,
                     TextDirection::Rtl,
                     &value,
@@ -4831,10 +4803,10 @@ pub(crate) mod tests {
                             .active_track_color(ACTIVE_TRACK_COLOR)
                     },
                 );
-                tester.widget(switch_element(&tester), |switch: &Switch| {
+                tester.widget(switch_element(tester), |switch: &Switch| {
                     assert_eq!(switch.active_thumb_color, Some(ACTIVE_THUMB_COLOR));
                 });
-                let painted = drawn(&tester);
+                let painted = drawn(tester);
                 if use_material3 {
                     assert_eq!(painted[0], Drawn::Fill(c(ACTIVE_TRACK_COLOR), M3_TRACK));
                     assert_eq!(
@@ -4848,23 +4820,24 @@ pub(crate) mod tests {
                         m2_sequence(c(ACTIVE_TRACK_COLOR), &[], c(ACTIVE_THUMB_COLOR))
                     );
                 }
-            }
-        });
+            });
+        }
     }
 
     #[test]
     #[allow(deprecated)]
     fn an_adaptive_switch_takes_its_active_thumb_color_on_every_platform() {
-        with_main_thread_stack(|| {
-            const ACTIVE_COLOR: Color = Color::new(0xffff0000);
-            const ACTIVE_THUMB_COLOR: Color = Color::new(0xff00ff00);
-            const ACTIVE_TRACK_COLOR: Color = Color::new(0xff0000ff);
-            for use_material3 in [false, true] {
-                for platform in ALL_PLATFORMS {
-                    let mut tester = tester_on(platform);
+        for use_material3 in [false, true] {
+            for platform in ALL_PLATFORMS {
+                test_widgets(|_| {
+                    const ACTIVE_COLOR: Color = Color::new(0xffff0000);
+                    const ACTIVE_THUMB_COLOR: Color = Color::new(0xff00ff00);
+                    const ACTIVE_TRACK_COLOR: Color = Color::new(0xff0000ff);
+                    let mut tester = WidgetTester::on(platform);
+                    let tester = &mut tester;
                     let value = shared(true);
                     pump_host(
-                        &mut tester,
+                        tester,
                         move |app| {
                             ThemeData::builder()
                                 .platform(platform)
@@ -4918,7 +4891,7 @@ pub(crate) mod tests {
                             m2_sequence(c(ACTIVE_TRACK_COLOR), &[], c(ACTIVE_THUMB_COLOR)),
                         )
                     };
-                    let painted = drawn(&tester);
+                    let painted = drawn(tester);
                     let case = format!("M3 {use_material3}, {platform:?}");
                     assert_eq!(
                         painted[0],
@@ -4926,16 +4899,16 @@ pub(crate) mod tests {
                         "{case}"
                     );
                     assert_eq!(colors(&painted), sequence, "{case}");
-                }
+                });
             }
-        });
+        }
     }
 
     /// Not a Dart case: `Switch.adaptive(applyCupertinoTheme:)` and the Cupertino override
     /// theme's `applyThemeToAll` give the track the Cupertino primary colour on iOS.
     #[test]
     fn an_adaptive_cupertino_switch_applies_the_cupertino_theme_where_asked() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             const PRIMARY: Color = Color::new(0xffffc107);
             for (apply_to_all, apply, expected) in [
                 (false, None, 0xff34c759),
@@ -4943,13 +4916,14 @@ pub(crate) mod tests {
                 (true, None, c(PRIMARY)),
                 (true, Some(false), 0xff34c759),
             ] {
-                let mut tester = tester_on(TargetPlatform::IOS);
+                let mut tester = WidgetTester::on(TargetPlatform::IOS);
+                let tester = &mut tester;
                 let mut switch = Switch::adaptive(true, ignore());
                 if let Some(apply) = apply {
                     switch = switch.apply_cupertino_theme(apply);
                 }
                 pump_switch(
-                    &mut tester,
+                    tester,
                     move |app| {
                         ThemeData::builder()
                             .platform(TargetPlatform::IOS)
@@ -4963,7 +4937,7 @@ pub(crate) mod tests {
                     switch,
                 );
                 assert_eq!(
-                    drawn(&tester)[0].color(),
+                    drawn(tester)[0].color(),
                     Some(expected),
                     "apply to all {apply_to_all}, apply {apply:?}"
                 );
@@ -4973,17 +4947,16 @@ pub(crate) mod tests {
 
     #[test]
     fn a_switch_that_disappears_while_a_pointer_is_down_does_not_crash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_switch(&mut tester, m3, Switch::new(true, ignore()));
-            let at = center(&tester);
+        test_widgets(|tester| {
+            pump_switch(tester, m3, Switch::new(true, ignore()));
+            let at = center(tester);
             // Put a pointer down on the screen.
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, at);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // While the pointer is down, the widget disappears.
             let home = in_material(TextDirection::Ltr, Container::new().into_widget());
-            pump_app(&mut tester, m3, move |_app| home);
+            pump_app(tester, m3, move |_app| home);
             assert!(tester.find_by_type::<Switch>().is_empty());
             // Release pointer after widget disappeared.
             tester.up(&gesture);
@@ -5028,85 +5001,82 @@ pub(crate) mod tests {
 
     #[test]
     fn a_switch_first_painted_while_its_press_reaction_reverses_does_not_panic() {
-        with_main_thread_stack(|| {
-            for platform in ALL_PLATFORMS {
-                let mut tester = tester_on(platform);
-                let (value, visible) = (shared(false), shared(false));
-                let slot = Rc::new(RefCell::new(None));
-                let home = first_painted_host(&value, &visible, &slot, true);
-                pump_app(&mut tester, adaptive_on(platform), move |_app| home);
+        test_widgets_variant(TargetPlatformVariant::new(ALL_PLATFORMS), |tester| {
+            let platform = tester.target_platform();
 
-                // Press and hold so that the press reaction starts.
-                let at = center(&tester);
-                let mut gesture = WidgetTester::touch(1);
-                tester.down(&mut gesture, at);
-                tester.pump(waft_gestures::K_PRESS_TIMEOUT);
-                tester.pump(Duration::from_millis(50));
+            let (value, visible) = (shared(false), shared(false));
+            let slot = Rc::new(RefCell::new(None));
+            let home = first_painted_host(&value, &visible, &slot, true);
+            pump_app(tester, adaptive_on(platform), move |_app| home);
 
-                // Releasing the pointer reverses the press reaction and toggles the switch,
-                // which makes it visible.
-                tester.up(&gesture);
-                let state = state(&tester);
-                {
-                    let app = tester.cell.borrow();
-                    assert_eq!(
-                        state.reaction(&app).status(&app),
-                        AnimationStatus::Reverse,
-                        "{platform:?}"
-                    );
-                }
-                assert!(value.get());
+            // Press and hold so that the press reaction starts.
+            let at = center(tester);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, at);
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
+            tester.pump_by(Duration::from_millis(50));
 
-                // Paint the switch for the first time.
-                tester.pump(Duration::ZERO);
-                drawn(&tester);
+            // Releasing the pointer reverses the press reaction and toggles the switch,
+            // which makes it visible.
+            tester.up(&gesture);
+            let state = state(tester);
+            {
+                let app = tester.cell.borrow();
+                assert_eq!(
+                    state.reaction(&app).status(&app),
+                    AnimationStatus::Reverse,
+                    "{platform:?}"
+                );
             }
+            assert!(value.get());
+
+            // Paint the switch for the first time.
+            tester.pump();
+            drawn(tester);
         });
     }
 
     #[test]
     fn a_switch_first_painted_during_its_toggle_animation_does_not_panic() {
-        with_main_thread_stack(|| {
-            for platform in ALL_PLATFORMS {
-                let mut tester = tester_on(platform);
-                let (value, visible) = (shared(false), shared(false));
-                let slot: Rc<RefCell<Option<StateSetter>>> = Rc::new(RefCell::new(None));
-                let home = first_painted_host(&value, &visible, &slot, false);
-                pump_app(&mut tester, adaptive_on(platform), move |_app| home);
-                let set_state = slot.borrow().clone().expect("the builder ran");
+        test_widgets_variant(TargetPlatformVariant::new(ALL_PLATFORMS), |tester| {
+            let platform = tester.target_platform();
 
-                // Start the toggle animation while the switch has never been painted.
-                {
-                    let value = Rc::clone(&value);
-                    set_state(&mut tester.cell.borrow_mut(), &mut move |_app| {
-                        value.set(true)
-                    });
-                }
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::ZERO); // First tick of the toggle animation.
-                tester.pump(Duration::from_millis(50));
-                let position = position(&tester);
-                assert!(position > 0.0 && position < 1.0, "{platform:?}: {position}");
+            let (value, visible) = (shared(false), shared(false));
+            let slot: Rc<RefCell<Option<StateSetter>>> = Rc::new(RefCell::new(None));
+            let home = first_painted_host(&value, &visible, &slot, false);
+            pump_app(tester, adaptive_on(platform), move |_app| home);
+            let set_state = slot.borrow().clone().expect("the builder ran");
 
-                // Paint the switch for the first time, in the middle of the toggle animation.
-                {
-                    let visible = Rc::clone(&visible);
-                    set_state(&mut tester.cell.borrow_mut(), &mut move |_app| {
-                        visible.set(true)
-                    });
-                }
-                tester.pump(Duration::ZERO);
-                drawn(&tester);
+            // Start the toggle animation while the switch has never been painted.
+            {
+                let value = Rc::clone(&value);
+                set_state(&mut tester.cell.borrow_mut(), &mut move |_app| {
+                    value.set(true)
+                });
             }
+            tester.pump();
+            tester.pump(); // First tick of the toggle animation.
+            tester.pump_by(Duration::from_millis(50));
+            let position = position(tester);
+            assert!(position > 0.0 && position < 1.0, "{platform:?}: {position}");
+
+            // Paint the switch for the first time, in the middle of the toggle animation.
+            {
+                let visible = Rc::clone(&visible);
+                set_state(&mut tester.cell.borrow_mut(), &mut move |_app| {
+                    visible.set(true)
+                });
+            }
+            tester.pump();
+            drawn(tester);
         });
     }
 
     #[test]
     fn an_m2_switch_is_focusable_and_has_its_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let node = focus_node(&tester);
+            let node = focus_node(tester);
             let value = shared(true);
             let orange = Colors::ORANGE.shade500();
             let pump = |tester: &mut WidgetTester, enabled: bool| {
@@ -5122,9 +5092,9 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
             };
 
-            pump(&mut tester, true);
+            pump(tester, true);
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(0x802196f3, M2_TRACK));
             assert_eq!(
                 colors(&painted),
@@ -5133,9 +5103,9 @@ pub(crate) mod tests {
 
             // Check the false value.
             value.set(false);
-            pump(&mut tester, true);
+            pump(tester, true);
             assert!(node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(0x52000000, M2_TRACK));
             assert_eq!(
                 colors(&painted),
@@ -5143,9 +5113,9 @@ pub(crate) mod tests {
             );
 
             // Check what happens when disabled.
-            pump(&mut tester, false);
+            pump(tester, false);
             assert!(!node.has_primary_focus(&tester.cell.borrow()));
-            let painted = drawn(&tester);
+            let painted = drawn(tester);
             assert_eq!(painted[0], Drawn::Fill(0x1f000000, M2_TRACK));
             assert_eq!(colors(&painted), m2_sequence(0x1f000000, &[], 0xffbdbdbd));
         });
@@ -5154,8 +5124,7 @@ pub(crate) mod tests {
     /// Regression test for https://github.com/flutter/flutter/issues/61247.
     #[test]
     fn a_material_switch_keeps_its_render_object_when_disabled_mid_animation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (value, enabled) = (shared(true), shared(true));
             let slot: Rc<RefCell<Option<StateSetter>>> = Rc::new(RefCell::new(None));
             let home = {
@@ -5177,8 +5146,8 @@ pub(crate) mod tests {
                 .into_widget()
             };
             let home = Directionality::new(TextDirection::Ltr, home).into_widget();
-            pump_app(&mut tester, m3, move |_app| home);
-            let old_switch_state = state(&tester);
+            pump_app(tester, m3, move |_app| home);
+            let old_switch_state = state(tester);
             let set_state = slot.borrow().clone().expect("the builder ran");
 
             {
@@ -5187,7 +5156,7 @@ pub(crate) mod tests {
                     value.set(false)
                 });
             }
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Disable the switch when the implicit animation begins.
             {
                 let enabled = Rc::clone(&enabled);
@@ -5195,9 +5164,9 @@ pub(crate) mod tests {
                     enabled.set(false)
                 });
             }
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            let updated_switch_state = state(&tester);
+            let updated_switch_state = state(tester);
             let app = tester.cell.borrow();
             assert!(!updated_switch_state.is_interactive(&app));
             assert_eq!(updated_switch_state, old_switch_state);
@@ -5209,7 +5178,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_m2_thumb_color_resolves_in_the_selected_and_disabled_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const ACTIVE_ENABLED: Color = Color::new(0xFF000001);
             const ACTIVE_DISABLED: Color = Color::new(0xFF000002);
             const INACTIVE_ENABLED: Color = Color::new(0xFF000003);
@@ -5227,7 +5196,6 @@ pub(crate) mod tests {
                     INACTIVE_ENABLED
                 })
             });
-            let mut tester = tester();
             for (index, (enabled, active, track, thumb, reason)) in [
                 (
                     false,
@@ -5267,11 +5235,11 @@ pub(crate) mod tests {
                         .thumb_color(Rc::clone(&thumb_color))
                         .into_widget(),
                 );
-                pump_app(&mut tester, m2, move |_app| home);
+                pump_app(tester, m2, move |_app| home);
                 if index > 0 {
                     tester.pump_and_settle();
                 }
-                let painted = drawn(&tester);
+                let painted = drawn(tester);
                 assert_eq!(painted[0], Drawn::Fill(track, M2_TRACK), "{reason}");
                 assert_eq!(
                     colors(&painted),
@@ -5284,14 +5252,13 @@ pub(crate) mod tests {
 
     #[test]
     fn an_m2_thumb_color_resolves_in_the_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const HOVERED: Color = Color::new(0xFF000001);
             const FOCUSED: Color = Color::new(0xFF000002);
-            let mut tester = tester();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-            let node = focus_node(&tester);
+            let node = focus_node(tester);
             pump_switch(
-                &mut tester,
+                tester,
                 m2,
                 Switch::new(true, ignore())
                     .focus_node(node.clone())
@@ -5321,12 +5288,12 @@ pub(crate) mod tests {
                     m2_sequence(0x802196f3, &reactions, c(thumb))
                 );
             };
-            assert_painted(&tester, FOCUSED);
+            assert_painted(tester, FOCUSED);
 
             // Start hovering
-            hover(&mut tester);
+            hover(tester);
             tester.pump_and_settle();
-            assert_painted(&tester, HOVERED);
+            assert_painted(tester, HOVERED);
         });
     }
 
@@ -5334,25 +5301,27 @@ pub(crate) mod tests {
     /// twin.
     #[test]
     fn the_track_color_resolves_in_the_selected_and_disabled_states() {
-        with_main_thread_stack(|| {
-            const ACTIVE_ENABLED: Color = Color::new(0xFF000001);
-            const ACTIVE_DISABLED: Color = Color::new(0xFF000002);
-            const INACTIVE_ENABLED: Color = Color::new(0xFF000003);
-            const INACTIVE_DISABLED: Color = Color::new(0xFF000004);
-            let track_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
-                Some(if states.contains(&WidgetState::Disabled) {
-                    if states.contains(&WidgetState::Selected) {
-                        ACTIVE_DISABLED
-                    } else {
-                        INACTIVE_DISABLED
-                    }
-                } else if states.contains(&WidgetState::Selected) {
-                    ACTIVE_ENABLED
-                } else {
-                    INACTIVE_ENABLED
-                })
-            });
-            for (theme, use_material3) in [(m2 as fn(&App) -> ThemeData, false), (m3, true)] {
+        for (theme, use_material3) in [(m2 as fn(&App) -> ThemeData, false), (m3, true)] {
+            test_widgets(|tester| {
+                const ACTIVE_ENABLED: Color = Color::new(0xFF000001);
+                const ACTIVE_DISABLED: Color = Color::new(0xFF000002);
+                const INACTIVE_ENABLED: Color = Color::new(0xFF000003);
+                const INACTIVE_DISABLED: Color = Color::new(0xFF000004);
+                let track_color =
+                    <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
+                        Some(if states.contains(&WidgetState::Disabled) {
+                            if states.contains(&WidgetState::Selected) {
+                                ACTIVE_DISABLED
+                            } else {
+                                INACTIVE_DISABLED
+                            }
+                        } else if states.contains(&WidgetState::Selected) {
+                            ACTIVE_ENABLED
+                        } else {
+                            INACTIVE_ENABLED
+                        })
+                    });
+
                 let (direction, track, last) = if use_material3 {
                     (
                         TextDirection::Rtl,
@@ -5366,7 +5335,6 @@ pub(crate) mod tests {
                         (false, false, INACTIVE_DISABLED, "Inactive disabled switch"),
                     )
                 };
-                let mut tester = tester();
                 for (index, (enabled, active, expected, reason)) in [
                     (
                         false,
@@ -5387,31 +5355,30 @@ pub(crate) mod tests {
                             .track_color(Rc::clone(&track_color))
                             .into_widget(),
                     );
-                    pump_app(&mut tester, theme, move |_app| home);
+                    pump_app(tester, theme, move |_app| home);
                     if index > 0 {
                         tester.pump_and_settle();
                     }
                     assert_eq!(
-                        drawn(&tester)[0],
+                        drawn(tester)[0],
                         Drawn::Fill(c(expected), track),
                         "M3 {use_material3}: {reason}"
                     );
                 }
-            }
-        });
+            });
+        }
     }
 
     /// Dart's 'Material2 - Switch track color resolves in hovered/focused states' and its
     /// Material 3 twin.
     #[test]
     fn the_track_color_resolves_in_the_hovered_and_focused_states() {
-        with_main_thread_stack(|| {
-            const HOVERED: Color = Color::new(0xFF000001);
-            const FOCUSED: Color = Color::new(0xFF000002);
-            for (theme, track) in [(m2 as fn(&App) -> ThemeData, M2_TRACK), (m3, M3_TRACK)] {
-                let mut tester = tester();
+        for (theme, track) in [(m2 as fn(&App) -> ThemeData, M2_TRACK), (m3, M3_TRACK)] {
+            test_widgets(|tester| {
+                const HOVERED: Color = Color::new(0xFF000001);
+                const FOCUSED: Color = Color::new(0xFF000002);
                 tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
-                let node = focus_node(&tester);
+                let node = focus_node(tester);
                 let home = in_material(
                     TextDirection::Rtl,
                     Switch::new(true, ignore())
@@ -5430,27 +5397,26 @@ pub(crate) mod tests {
                         ))
                         .into_widget(),
                 );
-                pump_app(&mut tester, theme, move |_app| home);
+                pump_app(tester, theme, move |_app| home);
                 tester.pump_and_settle();
                 assert!(node.has_primary_focus(&tester.cell.borrow()));
-                assert_eq!(drawn(&tester)[0], Drawn::Fill(c(FOCUSED), track));
+                assert_eq!(drawn(tester)[0], Drawn::Fill(c(FOCUSED), track));
 
                 // Start hovering
-                hover(&mut tester);
+                hover(tester);
                 tester.pump_and_settle();
-                assert_eq!(drawn(&tester)[0], Drawn::Fill(c(HOVERED), track));
-            }
-        });
+                assert_eq!(drawn(tester)[0], Drawn::Fill(c(HOVERED), track));
+            });
+        }
     }
 
     /// Dart's 'Material2 - Switch thumb color is blended against surface color' and its
     /// Material 3 twin.
     #[test]
     fn the_thumb_color_is_blended_against_the_surface_color() {
-        with_main_thread_stack(|| {
-            let active_disabled_thumb_color = with_opacity(Colors::BLUE.primary(), 0.60);
-            for (theme, use_material3) in [(m2 as fn(&App) -> ThemeData, false), (m3, true)] {
-                let mut tester = tester();
+        for (theme, use_material3) in [(m2 as fn(&App) -> ThemeData, false), (m3, true)] {
+            test_widgets(|tester| {
+                let active_disabled_thumb_color = with_opacity(Colors::BLUE.primary(), 0.60);
                 let colors_ = colors_of(&tester.cell.borrow(), theme);
                 let home = in_material(
                     TextDirection::Rtl,
@@ -5466,12 +5432,12 @@ pub(crate) mod tests {
                         ))
                         .into_widget(),
                 );
-                pump_app(&mut tester, theme, move |_app| home);
+                pump_app(tester, theme, move |_app| home);
                 let expected_thumb_color = c(Color::alpha_blend(
                     active_disabled_thumb_color,
                     colors_.surface,
                 ));
-                let painted = drawn(&tester);
+                let painted = drawn(tester);
                 let reason =
                     "Active disabled thumb color should be blended on top of surface color";
                 if use_material3 {
@@ -5497,14 +5463,13 @@ pub(crate) mod tests {
                         "{reason}"
                     );
                 }
-            }
-        });
+            });
+        }
     }
 
     #[test]
     fn a_disabled_switch_shows_its_tooltip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const LONG_PRESS_TOOLTIP: &str = "long press tooltip";
             const TAP_TOOLTIP: &str = "tap tooltip";
             let frame = |tester: &mut WidgetTester, tooltip: crate::tooltip::Tooltip| {
@@ -5519,43 +5484,43 @@ pub(crate) mod tests {
                 tester.global_rect(tester.render_box_of(tooltip)).center()
             };
             frame(
-                &mut tester,
+                tester,
                 crate::tooltip::Tooltip::new().message(LONG_PRESS_TOOLTIP),
             );
 
             // Default tooltip shows up after long pressed.
             assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
 
-            let center = tooltip_center(&tester);
+            let center = tooltip_center(tester);
             tester.tap(center, 1);
-            tester.pump(Duration::from_millis(10));
+            tester.pump_by(Duration::from_millis(10));
             assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
 
-            let mut gesture_long_press = WidgetTester::touch(2);
+            let mut gesture_long_press = TestPointer::touch(2);
             tester.down(&mut gesture_long_press, center);
-            tester.pump(Duration::ZERO);
-            tester.pump(waft_gestures::K_LONG_PRESS_TIMEOUT);
+            tester.pump();
+            tester.pump_by(waft_gestures::K_LONG_PRESS_TIMEOUT);
             tester.up(&gesture_long_press);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(tester.find_text(LONG_PRESS_TOOLTIP).len(), 1);
 
             // Tooltip shows up after tapping when set triggerMode to TooltipTriggerMode.tap.
             frame(
-                &mut tester,
+                tester,
                 crate::tooltip::Tooltip::new()
                     .trigger_mode(waft_widgets::TooltipTriggerMode::Tap)
                     .message(TAP_TOOLTIP),
             );
 
-            tester.pump(Duration::from_secs(24 * 60 * 60));
+            tester.pump_by(Duration::from_secs(24 * 60 * 60));
             tester.pump_and_settle();
             assert!(tester.find_text(TAP_TOOLTIP).is_empty());
             assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
 
-            let center = tooltip_center(&tester);
+            let center = tooltip_center(tester);
             tester.tap(center, 3);
-            tester.pump(Duration::from_millis(10));
+            tester.pump_by(Duration::from_millis(10));
             assert_eq!(tester.find_text(TAP_TOOLTIP).len(), 1);
         });
     }

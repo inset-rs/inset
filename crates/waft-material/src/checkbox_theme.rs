@@ -455,17 +455,17 @@ mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{FocusHighlightStrategy, SizedBox, WidgetState};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::checkbox::Checkbox;
     use crate::checkbox::tests::{
-        Paints, assert_paints, checkbox_center, checkbox_size, ignore, press, tester,
+        Paints, assert_paints, checkbox_center, checkbox_size, ignore, press,
     };
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{
-        WidgetTester, is_same_color_as, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{is_same_color_as, material_app};
     use crate::theme_data::ThemeData;
     use waft_painting::ShapeBorder;
 
@@ -535,9 +535,9 @@ mod tests {
     }
 
     /// Dart's `_pointGestureToCheckbox`.
-    fn point_gesture_to_checkbox(tester: &mut WidgetTester) -> crate::test_support::TestPointer {
+    fn point_gesture_to_checkbox(tester: &mut WidgetTester) -> TestPointer {
         let center = checkbox_center(tester);
-        let mut gesture = WidgetTester::mouse(1, 0);
+        let mut gesture = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut gesture, Offset::ZERO);
         tester.move_to(&mut gesture, center, false);
         gesture
@@ -559,8 +559,7 @@ mod tests {
 
     #[test]
     fn checkbox_is_themeable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
             const DEFAULT_FILL_COLOR: Color = Color::new(0xfffffff0);
@@ -612,19 +611,19 @@ mod tests {
             };
 
             // Checkbox.
-            frame(&mut tester, false, false);
-            assert_paints(&tester, &[Paints::Rrect(DEFAULT_FILL_COLOR)]);
+            frame(tester, false, false);
+            assert_paints(tester, &[Paints::Rrect(DEFAULT_FILL_COLOR)]);
             // Size from MaterialTapTargetSize.shrinkWrap with added VisualDensity.
             assert_eq!(
-                checkbox_size(&tester),
+                checkbox_size(tester),
                 Size::new(40.0, 40.0) + VISUAL_DENSITY.base_size_adjustment()
             );
 
             // Selected checkbox.
-            frame(&mut tester, true, false);
-            assert_paints(&tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
+            frame(tester, true, false);
+            assert_paints(tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
             assert_paints(
-                &tester,
+                tester,
                 &[
                     Paints::Rrect(SELECTED_FILL_COLOR),
                     Paints::Path(DEFAULT_CHECK_COLOR),
@@ -632,20 +631,20 @@ mod tests {
             );
 
             // Checkbox with hover.
-            frame(&mut tester, false, false);
-            let gesture = point_gesture_to_checkbox(&mut tester);
+            frame(tester, false, false);
+            let gesture = point_gesture_to_checkbox(tester);
             tester.pump_and_settle();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
-            assert_paints(&tester, &[Paints::Circle(HOVER_OVERLAY_COLOR)]);
+            assert_paints(tester, &[Paints::Circle(HOVER_OVERLAY_COLOR)]);
 
             // Checkbox with focus.
-            frame(&mut tester, true, true);
+            frame(tester, true, true);
             assert_paints(
-                &tester,
+                tester,
                 &[Paints::CircleRadius(FOCUS_OVERLAY_COLOR, SPLASH_RADIUS)],
             );
             assert_paints(
-                &tester,
+                tester,
                 &[
                     Paints::Rrect(SELECTED_FILL_COLOR),
                     Paints::Path(FOCUSED_CHECK_COLOR),
@@ -657,8 +656,7 @@ mod tests {
 
     #[test]
     fn checkbox_properties_are_taken_over_the_theme_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
             const THEME_DEFAULT_FILL_COLOR: Color = Color::new(0xfffffff0);
@@ -723,19 +721,19 @@ mod tests {
             };
 
             // Checkbox.
-            frame(&mut tester, false, false);
-            assert_paints(&tester, &[Paints::Rrect(DEFAULT_FILL_COLOR)]);
+            frame(tester, false, false);
+            assert_paints(tester, &[Paints::Rrect(DEFAULT_FILL_COLOR)]);
             // Size from MaterialTapTargetSize.shrinkWrap with added VisualDensity.
             assert_eq!(
-                checkbox_size(&tester),
+                checkbox_size(tester),
                 Size::new(40.0, 40.0) + VISUAL_DENSITY.base_size_adjustment()
             );
 
             // Selected checkbox.
-            frame(&mut tester, true, false);
-            assert_paints(&tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
+            frame(tester, true, false);
+            assert_paints(tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
             assert_paints(
-                &tester,
+                tester,
                 &[
                     Paints::Rrect(SELECTED_FILL_COLOR),
                     Paints::Path(CHECK_COLOR),
@@ -743,23 +741,22 @@ mod tests {
             );
 
             // Checkbox with hover.
-            frame(&mut tester, false, false);
-            let gesture = point_gesture_to_checkbox(&mut tester);
+            frame(tester, false, false);
+            let gesture = point_gesture_to_checkbox(tester);
             tester.pump_and_settle();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
-            assert_paints(&tester, &[Paints::Circle(HOVER_COLOR)]);
+            assert_paints(tester, &[Paints::Circle(HOVER_COLOR)]);
 
             // Checkbox with focus.
-            frame(&mut tester, false, true);
-            assert_paints(&tester, &[Paints::CircleRadius(FOCUS_COLOR, SPLASH_RADIUS)]);
+            frame(tester, false, true);
+            assert_paints(tester, &[Paints::CircleRadius(FOCUS_COLOR, SPLASH_RADIUS)]);
             tester.send(&gesture, PointerChange::Remove);
         });
     }
 
     #[test]
     fn checkbox_active_color_property_is_taken_over_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const THEME_SELECTED_FILL_COLOR: Color = Color::new(0xfffffff1);
             const THEME_DEFAULT_FILL_COLOR: Color = Color::new(0xfffffff0);
             const SELECTED_FILL_COLOR: Color = Color::new(0xfffffff6);
@@ -781,19 +778,18 @@ mod tests {
             };
 
             // Unselected checkbox.
-            frame(&mut tester, false);
-            assert_paints(&tester, &[Paints::Rrect(THEME_DEFAULT_FILL_COLOR)]);
+            frame(tester, false);
+            assert_paints(tester, &[Paints::Rrect(THEME_DEFAULT_FILL_COLOR)]);
 
             // Selected checkbox.
-            frame(&mut tester, true);
-            assert_paints(&tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
+            frame(tester, true);
+            assert_paints(tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
         });
     }
 
     #[test]
     fn checkbox_theme_overlay_color_resolves_in_active_pressed_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const ACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000001);
             const INACTIVE_PRESSED_OVERLAY_COLOR: Color = Color::new(0xFF000002);
             const SPLASH_RADIUS: f64 = 24.0;
@@ -810,14 +806,14 @@ mod tests {
                 .splash_radius(SPLASH_RADIUS);
 
             pump_themed(
-                &mut tester,
+                tester,
                 checkbox_theme.clone(),
                 Checkbox::new(Some(false), ignore()).into_widget(),
             );
-            let gesture1 = press(&mut tester, 1);
+            let gesture1 = press(tester, 1);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
+                tester,
                 &[Paints::CircleRadius(
                     INACTIVE_PRESSED_OVERLAY_COLOR,
                     SPLASH_RADIUS,
@@ -825,14 +821,14 @@ mod tests {
             );
 
             pump_themed(
-                &mut tester,
+                tester,
                 checkbox_theme,
                 Checkbox::new(Some(true), ignore()).into_widget(),
             );
-            let gesture2 = press(&mut tester, 2);
+            let gesture2 = press(tester, 2);
             tester.pump_and_settle();
             assert_paints(
-                &tester,
+                tester,
                 &[Paints::CircleRadius(
                     ACTIVE_PRESSED_OVERLAY_COLOR,
                     SPLASH_RADIUS,
@@ -848,14 +844,13 @@ mod tests {
 
     #[test]
     fn local_checkbox_theme_can_override_global_checkbox_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const GLOBAL_THEME_FILL_COLOR: Color = Color::new(0xfffffff1);
             const GLOBAL_THEME_CHECK_COLOR: Color = Color::new(0xff000000);
             const LOCAL_THEME_FILL_COLOR: Color = Color::new(0xffff0000);
             const LOCAL_THEME_CHECK_COLOR: Color = Color::new(0xffffffff);
             pump_themed(
-                &mut tester,
+                tester,
                 CheckboxThemeData::new()
                     .check_color(all_colors(GLOBAL_THEME_CHECK_COLOR))
                     .fill_color(all_colors(GLOBAL_THEME_FILL_COLOR)),
@@ -868,9 +863,9 @@ mod tests {
                 .into_widget(),
             );
             tester.pump_and_settle();
-            assert_paints(&tester, &[Paints::Rrect(LOCAL_THEME_FILL_COLOR)]);
+            assert_paints(tester, &[Paints::Rrect(LOCAL_THEME_FILL_COLOR)]);
             assert_paints(
-                &tester,
+                tester,
                 &[
                     Paints::Rrect(LOCAL_THEME_FILL_COLOR),
                     Paints::Path(LOCAL_THEME_CHECK_COLOR),
@@ -1058,8 +1053,7 @@ mod tests {
 
     #[test]
     fn widget_state_border_side_properly_lerp_in_checkbox_theme_data_side() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Dart's `late ColorScheme colorScheme`, which both themes' side closures read.
             let primary = Rc::new(Cell::new(Colors::TRANSPARENT));
             let frame = |tester: &mut WidgetTester, seed_color: Color| {
@@ -1081,13 +1075,13 @@ mod tests {
                 );
             };
 
-            frame(&mut tester, Colors::RED.primary());
+            frame(tester, Colors::RED.primary());
             tester.pump_and_settle();
-            assert_paints(&tester, &[Paints::Ring(primary.get())]);
+            assert_paints(tester, &[Paints::Ring(primary.get())]);
 
-            frame(&mut tester, Colors::BLUE.primary());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
-            assert_paints(&tester, &[Paints::Ring(primary.get())]);
+            frame(tester, Colors::BLUE.primary());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
+            assert_paints(tester, &[Paints::Ring(primary.get())]);
         });
     }
 

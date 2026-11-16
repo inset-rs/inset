@@ -389,6 +389,8 @@ mod tests {
     };
     use waft_widgets::{AnyElement, Flexible, Icon, IconData, IconTheme, RichText, Text};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::icons::Icons;
     use crate::ink_decoration::Ink;
@@ -397,9 +399,8 @@ mod tests {
     use crate::navigation_bar::NavigationIndicator;
     use crate::navigation_rail::{NavigationRail, NavigationRailDestination};
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::tester;
 
     /// Dart's `_destinations()`.
     fn destinations() -> Vec<NavigationRailDestination> {
@@ -534,48 +535,47 @@ mod tests {
     #[test]
     fn material3_default_values_are_used_when_no_navigation_rail_or_navigation_rail_theme_data_properties_are_specified()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             // Material 3 defaults
             pump(
-                &mut tester,
+                tester,
                 ThemeData::new,
                 NavigationRail::new(destinations(), Some(0)).into_widget(),
             );
 
             assert_eq!(
-                rail_material(&tester, |material| material.color),
+                rail_material(tester, |material| material.color),
                 Some(theme.color_scheme.surface)
             );
-            assert_eq!(rail_material(&tester, |material| material.elevation), 0.0);
-            assert_eq!(destination_size(&tester).width(), 80.0);
-            assert_eq!(selected_icon_theme(&tester).size, Some(24.0));
+            assert_eq!(rail_material(tester, |material| material.elevation), 0.0);
+            assert_eq!(destination_size(tester).width(), 80.0);
+            assert_eq!(selected_icon_theme(tester).size, Some(24.0));
             assert_eq!(
-                selected_icon_theme(&tester).color,
+                selected_icon_theme(tester).color,
                 Some(theme.color_scheme.on_secondary_container().into())
             );
-            assert_eq!(selected_icon_theme(&tester).opacity, None);
-            assert_eq!(unselected_icon_theme(&tester).size, Some(24.0));
+            assert_eq!(selected_icon_theme(tester).opacity, None);
+            assert_eq!(unselected_icon_theme(tester).size, Some(24.0));
             assert_eq!(
-                unselected_icon_theme(&tester).color,
+                unselected_icon_theme(tester).color,
                 Some(theme.color_scheme.on_surface_variant().into())
             );
-            assert_eq!(unselected_icon_theme(&tester).opacity, None);
-            assert_eq!(selected_label_style(&tester).font_size, Some(14.0));
-            assert_eq!(unselected_label_style(&tester).font_size, Some(14.0));
+            assert_eq!(unselected_icon_theme(tester).opacity, None);
+            assert_eq!(selected_label_style(tester).font_size, Some(14.0));
+            assert_eq!(unselected_label_style(tester).font_size, Some(14.0));
             assert_eq!(
-                destinations_alignment(&tester),
+                destinations_alignment(tester),
                 AlignmentGeometry::TOP_CENTER
             );
-            assert_eq!(label_type(&tester), NavigationRailLabelType::None);
+            assert_eq!(label_type(tester), NavigationRailLabelType::None);
             assert!(!tester.find_by_type::<NavigationIndicator>().is_empty());
             assert_eq!(
-                indicator_decoration(&tester, |decoration| decoration.color.clone()),
+                indicator_decoration(tester, |decoration| decoration.color.clone()),
                 Some(theme.color_scheme.secondary_container().into())
             );
             let stadium = StadiumBorder::new(BorderSide::NONE);
-            assert!(indicator_decoration(&tester, |decoration| {
+            assert!(indicator_decoration(tester, |decoration| {
                 &*decoration.shape == &stadium as &dyn ShapeBorder
             }));
             let ink_response = tester.find_by_type::<InkResponse>()[0];
@@ -592,12 +592,11 @@ mod tests {
     )]
     fn material2_default_values_are_used_when_no_navigation_rail_or_navigation_rail_theme_data_properties_are_specified()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // This test can be removed when `useMaterial3` is deprecated.
-            let mut tester = tester();
             let theme = ThemeData::new(&tester.cell.borrow());
             pump(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::light(app, None)
                         .copy_with()
@@ -608,30 +607,30 @@ mod tests {
             );
 
             assert_eq!(
-                rail_material(&tester, |material| material.color),
+                rail_material(tester, |material| material.color),
                 Some(theme.color_scheme.surface)
             );
-            assert_eq!(rail_material(&tester, |material| material.elevation), 0.0);
-            assert_eq!(destination_size(&tester).width(), 72.0);
-            assert_eq!(selected_icon_theme(&tester).size, Some(24.0));
+            assert_eq!(rail_material(tester, |material| material.elevation), 0.0);
+            assert_eq!(destination_size(tester).width(), 72.0);
+            assert_eq!(selected_icon_theme(tester).size, Some(24.0));
             assert_eq!(
-                selected_icon_theme(&tester).color,
+                selected_icon_theme(tester).color,
                 Some(theme.color_scheme.primary.into())
             );
-            assert_eq!(selected_icon_theme(&tester).opacity, Some(1.0));
-            assert_eq!(unselected_icon_theme(&tester).size, Some(24.0));
+            assert_eq!(selected_icon_theme(tester).opacity, Some(1.0));
+            assert_eq!(unselected_icon_theme(tester).size, Some(24.0));
             assert_eq!(
-                unselected_icon_theme(&tester).color,
+                unselected_icon_theme(tester).color,
                 Some(theme.color_scheme.on_surface.into())
             );
-            assert_eq!(unselected_icon_theme(&tester).opacity, Some(0.64));
-            assert_eq!(selected_label_style(&tester).font_size, Some(14.0));
-            assert_eq!(unselected_label_style(&tester).font_size, Some(14.0));
+            assert_eq!(unselected_icon_theme(tester).opacity, Some(0.64));
+            assert_eq!(selected_label_style(tester).font_size, Some(14.0));
+            assert_eq!(unselected_label_style(tester).font_size, Some(14.0));
             assert_eq!(
-                destinations_alignment(&tester),
+                destinations_alignment(tester),
                 AlignmentGeometry::TOP_CENTER
             );
-            assert_eq!(label_type(&tester), NavigationRailLabelType::None);
+            assert_eq!(label_type(tester), NavigationRailLabelType::None);
             assert!(tester.find_by_type::<NavigationIndicator>().is_empty());
         });
     }
@@ -639,7 +638,7 @@ mod tests {
     #[test]
     fn navigation_rail_theme_data_values_are_used_when_no_navigation_rail_properties_are_specified()
     {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Color::new(0x00000001);
             let elevation = 7.0;
             let selected_icon_size = 25.0;
@@ -656,9 +655,8 @@ mod tests {
             let indicator_color = Color::new(0x00000004);
             let indicator_shape = RoundedRectangleBorder::default();
 
-            let mut tester = tester();
             pump(
-                &mut tester,
+                tester,
                 ThemeData::new,
                 NavigationRailTheme::new(
                     NavigationRailThemeData::new()
@@ -693,53 +691,53 @@ mod tests {
             );
 
             assert_eq!(
-                rail_material(&tester, |material| material.color),
+                rail_material(tester, |material| material.color),
                 Some(background_color)
             );
             assert_eq!(
-                rail_material(&tester, |material| material.elevation),
+                rail_material(tester, |material| material.elevation),
                 elevation
             );
-            assert_eq!(selected_icon_theme(&tester).size, Some(selected_icon_size));
+            assert_eq!(selected_icon_theme(tester).size, Some(selected_icon_size));
             assert_eq!(
-                selected_icon_theme(&tester).color,
+                selected_icon_theme(tester).color,
                 Some(selected_icon_color.into())
             );
             assert_eq!(
-                selected_icon_theme(&tester).opacity,
+                selected_icon_theme(tester).opacity,
                 Some(selected_icon_opacity)
             );
             assert_eq!(
-                unselected_icon_theme(&tester).size,
+                unselected_icon_theme(tester).size,
                 Some(unselected_icon_size)
             );
             assert_eq!(
-                unselected_icon_theme(&tester).color,
+                unselected_icon_theme(tester).color,
                 Some(unselected_icon_color.into())
             );
             assert_eq!(
-                unselected_icon_theme(&tester).opacity,
+                unselected_icon_theme(tester).opacity,
                 Some(unselected_icon_opacity)
             );
             assert_eq!(
-                selected_label_style(&tester).font_size,
+                selected_label_style(tester).font_size,
                 Some(selected_label_font_size)
             );
             assert_eq!(
-                unselected_label_style(&tester).font_size,
+                unselected_label_style(tester).font_size,
                 Some(unselected_label_font_size)
             );
             assert_eq!(
-                destinations_alignment(&tester),
+                destinations_alignment(tester),
                 AlignmentGeometry::Alignment(Alignment::CENTER)
             );
-            assert_eq!(label_type(&tester), label_type_value);
+            assert_eq!(label_type(tester), label_type_value);
             assert!(!tester.find_by_type::<NavigationIndicator>().is_empty());
             assert_eq!(
-                indicator_decoration(&tester, |decoration| decoration.color.clone()),
+                indicator_decoration(tester, |decoration| decoration.color.clone()),
                 Some(indicator_color.into())
             );
-            assert!(indicator_decoration(&tester, |decoration| {
+            assert!(indicator_decoration(tester, |decoration| {
                 &*decoration.shape == &indicator_shape as &dyn ShapeBorder
             }));
         });
@@ -748,7 +746,7 @@ mod tests {
     #[test]
     fn navigation_rail_values_take_priority_over_navigation_rail_theme_data_values_when_both_properties_are_specified()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Color::new(0x00000001);
             let elevation = 7.0;
             let selected_icon_size = 25.0;
@@ -764,9 +762,8 @@ mod tests {
             let use_indicator = true;
             let indicator_color = Color::new(0x00000004);
 
-            let mut tester = tester();
             pump(
-                &mut tester,
+                tester,
                 ThemeData::new,
                 NavigationRailTheme::new(
                     NavigationRailThemeData::new()
@@ -820,50 +817,50 @@ mod tests {
             );
 
             assert_eq!(
-                rail_material(&tester, |material| material.color),
+                rail_material(tester, |material| material.color),
                 Some(background_color)
             );
             assert_eq!(
-                rail_material(&tester, |material| material.elevation),
+                rail_material(tester, |material| material.elevation),
                 elevation
             );
-            assert_eq!(selected_icon_theme(&tester).size, Some(selected_icon_size));
+            assert_eq!(selected_icon_theme(tester).size, Some(selected_icon_size));
             assert_eq!(
-                selected_icon_theme(&tester).color,
+                selected_icon_theme(tester).color,
                 Some(selected_icon_color.into())
             );
             assert_eq!(
-                selected_icon_theme(&tester).opacity,
+                selected_icon_theme(tester).opacity,
                 Some(selected_icon_opacity)
             );
             assert_eq!(
-                unselected_icon_theme(&tester).size,
+                unselected_icon_theme(tester).size,
                 Some(unselected_icon_size)
             );
             assert_eq!(
-                unselected_icon_theme(&tester).color,
+                unselected_icon_theme(tester).color,
                 Some(unselected_icon_color.into())
             );
             assert_eq!(
-                unselected_icon_theme(&tester).opacity,
+                unselected_icon_theme(tester).opacity,
                 Some(unselected_icon_opacity)
             );
             assert_eq!(
-                selected_label_style(&tester).font_size,
+                selected_label_style(tester).font_size,
                 Some(selected_label_font_size)
             );
             assert_eq!(
-                unselected_label_style(&tester).font_size,
+                unselected_label_style(tester).font_size,
                 Some(unselected_label_font_size)
             );
             assert_eq!(
-                destinations_alignment(&tester),
+                destinations_alignment(tester),
                 AlignmentGeometry::Alignment(Alignment::CENTER)
             );
-            assert_eq!(label_type(&tester), label_type_value);
+            assert_eq!(label_type(tester), label_type_value);
             assert!(!tester.find_by_type::<NavigationIndicator>().is_empty());
             assert_eq!(
-                indicator_decoration(&tester, |decoration| decoration.color.clone()),
+                indicator_decoration(tester, |decoration| decoration.color.clone()),
                 Some(indicator_color.into())
             );
         });
@@ -922,9 +919,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_navigation_rail_theme() {
-        with_main_thread_stack(|| {
-            let cell = crate::test_support::test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.navigation_rail_theme, NavigationRailThemeData::new());
 

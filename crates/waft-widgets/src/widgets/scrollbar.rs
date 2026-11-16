@@ -3837,15 +3837,14 @@ impl BaseTapLeaf for TrackTapGestureRecognizer {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{Size, TextDirection};
-    use waft_foundation::AppCell;
+    use waft_embedder::TextDirection;
     use waft_foundation::OptionRetained;
     use waft_gestures::HitTestResult;
     use waft_painting::EdgeInsets;
     use waft_rendering::{BoxHitTestEntry, RenderCustomPaint, RendererBinding};
 
     use super::*;
-    use crate::test_harness::{VIEW_HEIGHT, VIEW_WIDTH, binding_cell, binding_mount, binding_pump};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Directionality, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
@@ -3853,12 +3852,14 @@ mod tests {
 
     const ITEM_EXTENT: f64 = 50.0;
     const ITEM_COUNT: usize = 40;
+    const VIEW_WIDTH: f64 = WidgetTester::SIZE.width();
+    const VIEW_HEIGHT: f64 = WidgetTester::SIZE.height();
 
     /// A scrollbar with a global key around a `ListView` of 40 fixed-height boxes, both on the
     /// same controller: the shape every scrollbar test mounts.
-    fn mount(cell: &AppCell) -> (GlobalKey, Handle<ScrollController>) {
+    fn mount(tester: &mut WidgetTester) -> (GlobalKey, Handle<ScrollController>) {
         let key = GlobalKey::new();
-        let controller = ScrollController::default(&mut cell.borrow_mut());
+        let controller = tester.update(ScrollController::default);
         let list = ListView::new()
             .controller(controller.erase())
             .children((0..ITEM_COUNT).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
@@ -3867,18 +3868,15 @@ mod tests {
             .controller(controller.erase());
         let tree: WidgetRef = MediaQuery::new(
             MediaQueryData::new()
-                .size(Size::new(VIEW_WIDTH, VIEW_HEIGHT))
+                .size(WidgetTester::SIZE)
                 .padding(EdgeInsets::ZERO),
             scrollbar,
         )
         .into_widget();
-        binding_mount(
-            cell,
-            Directionality::new(TextDirection::Ltr, tree).into_widget(),
-        );
+        tester.pump_widget(Directionality::new(TextDirection::Ltr, tree));
         // The metrics notification is dispatched from a microtask after layout, so the
         // painter only knows the metrics from the second frame on.
-        binding_pump(&mut cell.borrow_mut(), Duration::from_millis(16));
+        tester.pump_by(Duration::from_millis(16));
         (key, controller.handle())
     }
 
@@ -3889,42 +3887,48 @@ mod tests {
         RawScrollbarState::scrollbar_painter(state, app)
     }
 
+    /// Scrolls `controller` to 10 and pumps three 100ms frames.
+    fn scroll_a_little(tester: &mut WidgetTester, controller: Handle<ScrollController>) {
+        tester.update(|app| controller.jump_to(app, 10.0));
+        for _ in 1..4 {
+            tester.pump_by(Duration::from_millis(100));
+        }
+    }
+
     #[test]
     fn a_raw_scrollbar_paints_a_thumb_whose_extent_follows_the_metrics_and_fades_after_the_timer() {
-        let cell = binding_cell();
-        let (key, controller) = mount(&cell);
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let (key, controller) = mount(tester);
+            scroll_a_little(tester, controller);
 
-        controller.jump_to(&mut app, 10.0);
-        for step in 1..4 {
-            binding_pump(&mut app, Duration::from_millis(16 + step * 100));
-        }
+            let painter = tester.update(|app| painter(app, &key));
+            {
+                let app = tester.cell.borrow();
+                let thumb = app.get(painter).thumb_rect.expect("the thumb is painted");
+                let content = ITEM_EXTENT * ITEM_COUNT as f64;
+                assert!(
+                    (thumb.height() - VIEW_HEIGHT * (VIEW_HEIGHT / content)).abs() < 0.5,
+                    "the thumb extent is the visible fraction of the track: {thumb:?}"
+                );
+                assert!(
+                    painter.fadeout_opacity_animation(&app).value(&app) > 0.0,
+                    "a scroll fades the thumb in"
+                );
+            }
 
-        let painter = painter(&mut app, &key);
-        let thumb = app.get(painter).thumb_rect.expect("the thumb is painted");
-        let content = ITEM_EXTENT * ITEM_COUNT as f64;
-        assert!(
-            (thumb.height() - VIEW_HEIGHT * (VIEW_HEIGHT / content)).abs() < 0.5,
-            "the thumb extent is the visible fraction of the track: {thumb:?}"
-        );
-        assert!(
-            painter.fadeout_opacity_animation(&app).value(&app) > 0.0,
-            "a scroll fades the thumb in"
-        );
-
-        // The fade-out timer starts when the scroll ends, and the reverse animation runs for
-        // the fade duration after it fires.
-        drop(app);
-        cell.elapse(K_SCROLLBAR_TIME_TO_FADE + Duration::from_millis(1));
-        let mut app = cell.borrow_mut();
-        for step in 0..8 {
-            binding_pump(&mut app, Duration::from_millis(700 + step * 60));
-        }
-        assert_eq!(
-            painter.fadeout_opacity_animation(&app).value(&app),
-            0.0,
-            "the thumb has faded out"
-        );
+            // The fade-out timer starts when the scroll ends, and the reverse animation runs for
+            // the fade duration after it fires.
+            tester.pump_by(K_SCROLLBAR_TIME_TO_FADE + Duration::from_millis(1));
+            for _ in 0..8 {
+                tester.pump_by(Duration::from_millis(60));
+            }
+            let app = tester.cell.borrow();
+            assert_eq!(
+                painter.fadeout_opacity_animation(&app).value(&app),
+                0.0,
+                "the thumb has faded out"
+            );
+        });
     }
 
     /// Dart's collector frees the fade controller, its `CurvedAnimation` and the painter
@@ -3932,154 +3936,141 @@ mod tests {
     /// the state that keeps them is freed.
     #[test]
     fn a_disposed_raw_scrollbar_frees_its_fade_and_painter() {
-        let cell = binding_cell();
-        let (key, _controller) = mount(&cell);
-        let (fade, controller, painter) = {
-            let app = cell.borrow();
-            let state = key
-                .current_state::<RawScrollbarState>(&app)
-                .expect("the scrollbar is mounted");
-            let data = RawScrollbarState::raw_scrollbar_state_data(state, &app);
-            (
-                data.fadeout_opacity_animation
-                    .handle()
-                    .expect("made in init_state"),
-                data.fadeout_animation_controller
-                    .handle()
-                    .expect("made in init_state"),
-                data.scrollbar_painter.handle().expect("made in init_state"),
-            )
-        };
+        test_widgets(|tester| {
+            let (key, _controller) = mount(tester);
+            let (fade, controller, painter) = {
+                let app = tester.cell.borrow();
+                let state = key
+                    .current_state::<RawScrollbarState>(&app)
+                    .expect("the scrollbar is mounted");
+                let data = RawScrollbarState::raw_scrollbar_state_data(state, &app);
+                (
+                    data.fadeout_opacity_animation
+                        .handle()
+                        .expect("made in init_state"),
+                    data.fadeout_animation_controller
+                        .handle()
+                        .expect("made in init_state"),
+                    data.scrollbar_painter.handle().expect("made in init_state"),
+                )
+            };
 
-        {
-            let mut app = cell.borrow_mut();
-            let view = crate::test_harness::platform_view(&app);
-            let root = crate::view::View::new(view, SizedBox::new()).into_widget();
-            crate::binding::WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
-            binding_pump(&mut app, Duration::from_millis(32));
-        }
-        cell.checkpoint();
-        let app = cell.borrow();
-        assert!(!app.contains(fade));
-        assert!(!app.contains(controller));
-        assert!(!app.contains(painter));
+            tester.pump_widget(SizedBox::new());
+            let app = tester.cell.borrow();
+            assert!(!app.contains(fade));
+            assert!(!app.contains(controller));
+            assert!(!app.contains(painter));
+        });
     }
 
     #[test]
     fn a_hit_on_the_painted_scrollbar_stops_at_the_custom_paint() {
-        let cell = binding_cell();
-        let (key, controller) = mount(&cell);
-        let mut app = cell.borrow_mut();
-        controller.jump_to(&mut app, 10.0);
-        for step in 1..4 {
-            binding_pump(&mut app, Duration::from_millis(16 + step * 100));
-        }
-        let painter = painter(&mut app, &key);
-        let thumb = app.get(painter).thumb_rect.expect("the thumb is painted");
+        test_widgets(|tester| {
+            let (key, controller) = mount(tester);
+            scroll_a_little(tester, controller);
+            let mut app = tester.cell.borrow_mut();
+            let painter = painter(&mut app, &key);
+            let thumb = app.get(painter).thumb_rect.expect("the thumb is painted");
 
-        // The boxes a hit test through the view walks, innermost first.
-        let boxes_at = |app: &mut App, position: Offset| -> Vec<AnyRenderBox> {
-            let mut result = HitTestResult::new();
-            let views = RendererBinding::instance(app).render_views(app);
-            let [view] = views.as_slice() else {
-                panic!("the View widget registered one render view: {views:?}");
+            // The boxes a hit test through the view walks, innermost first.
+            let boxes_at = |app: &mut App, position: Offset| -> Vec<AnyRenderBox> {
+                let mut result = HitTestResult::new();
+                let views = RendererBinding::instance(app).render_views(app);
+                let [view] = views.as_slice() else {
+                    panic!("the View widget registered one render view: {views:?}");
+                };
+                view.hit_test(app, &mut result, position);
+                result
+                    .path()
+                    .iter()
+                    .filter_map(|entry| {
+                        let target: &dyn Any = entry.target();
+                        target
+                            .downcast_ref::<BoxHitTestEntry>()
+                            .map(BoxHitTestEntry::target)
+                    })
+                    .collect()
             };
-            view.hit_test(app, &mut result, position);
-            result
-                .path()
-                .iter()
-                .filter_map(|entry| {
-                    let target: &dyn Any = entry.target();
-                    target
-                        .downcast_ref::<BoxHitTestEntry>()
-                        .map(BoxHitTestEntry::target)
-                })
-                .collect()
-        };
-        let is_custom_paint = |app: &App, hit: &AnyRenderBox| {
-            hit.as_object().downcast::<RenderCustomPaint>(app).is_some()
-        };
+            let is_custom_paint = |app: &App, hit: &AnyRenderBox| {
+                hit.as_object().downcast::<RenderCustomPaint>(app).is_some()
+            };
 
-        let on_thumb = boxes_at(&mut app, thumb.center());
-        assert!(
-            is_custom_paint(&app, &on_thumb[0]),
-            "the painter absorbs the hit, so nothing below its CustomPaint is hit: {on_thumb:?}"
-        );
-        let beside_thumb = boxes_at(&mut app, Offset::new(20.0, thumb.center().dy()));
-        assert!(
-            !is_custom_paint(&app, &beside_thumb[0]) && beside_thumb.len() > on_thumb.len(),
-            "a hit off the track goes on to the scrollable underneath: {beside_thumb:?}"
-        );
+            let on_thumb = boxes_at(&mut app, thumb.center());
+            assert!(
+                is_custom_paint(&app, &on_thumb[0]),
+                "the painter absorbs the hit, so nothing below its CustomPaint is hit: {on_thumb:?}"
+            );
+            let beside_thumb = boxes_at(&mut app, Offset::new(20.0, thumb.center().dy()));
+            assert!(
+                !is_custom_paint(&app, &beside_thumb[0]) && beside_thumb.len() > on_thumb.len(),
+                "a hit off the track goes on to the scrollable underneath: {beside_thumb:?}"
+            );
+        });
     }
 
     #[test]
     fn dragging_the_raw_scrollbar_thumb_moves_the_scroll_position() {
-        let cell = binding_cell();
-        let (key, controller) = mount(&cell);
-        let mut app = cell.borrow_mut();
-        let state = key
-            .current_state::<RawScrollbarState>(&app)
-            .expect("the scrollbar is mounted");
-        assert_eq!(
-            state.get_scrollbar_direction(&app),
-            Some(Axis::Vertical),
-            "the metrics notification tells the scrollbar its axis"
-        );
+        test_widgets(|tester| {
+            let (key, controller) = mount(tester);
+            let mut app = tester.cell.borrow_mut();
+            let state = key
+                .current_state::<RawScrollbarState>(&app)
+                .expect("the scrollbar is mounted");
+            assert_eq!(
+                state.get_scrollbar_direction(&app),
+                Some(Axis::Vertical),
+                "the metrics notification tells the scrollbar its axis"
+            );
 
-        state.handle_thumb_press(&mut app);
-        state.handle_thumb_press_start(&mut app, Offset::new(VIEW_WIDTH - 3.0, 5.0));
-        state.handle_thumb_press_update(&mut app, Offset::new(VIEW_WIDTH - 3.0, 25.0));
+            state.handle_thumb_press(&mut app);
+            state.handle_thumb_press_start(&mut app, Offset::new(VIEW_WIDTH - 3.0, 5.0));
+            state.handle_thumb_press_update(&mut app, Offset::new(VIEW_WIDTH - 3.0, 25.0));
 
-        let content = ITEM_EXTENT * ITEM_COUNT as f64;
-        let scrollable = content - VIEW_HEIGHT;
-        let thumb_extent = VIEW_HEIGHT * (VIEW_HEIGHT / content);
-        let expected = 20.0 * scrollable / (VIEW_HEIGHT - thumb_extent);
-        assert!(
-            (controller.offset(&app) - expected).abs() < 0.5,
-            "a 20 pixel thumb drag scrolls the track fraction: {}",
-            controller.offset(&app)
-        );
+            let content = ITEM_EXTENT * ITEM_COUNT as f64;
+            let scrollable = content - VIEW_HEIGHT;
+            let thumb_extent = VIEW_HEIGHT * (VIEW_HEIGHT / content);
+            let expected = 20.0 * scrollable / (VIEW_HEIGHT - thumb_extent);
+            assert!(
+                (controller.offset(&app) - expected).abs() < 0.5,
+                "a 20 pixel thumb drag scrolls the track fraction: {}",
+                controller.offset(&app)
+            );
 
-        state.handle_thumb_press_end(
-            &mut app,
-            Offset::new(VIEW_WIDTH - 3.0, 25.0),
-            Velocity::ZERO,
-        );
-        assert!(
-            app.get(state).raw_scrollbar_state.thumb_drag.is_none(),
-            "the drag is released"
-        );
+            state.handle_thumb_press_end(
+                &mut app,
+                Offset::new(VIEW_WIDTH - 3.0, 25.0),
+                Velocity::ZERO,
+            );
+            assert!(
+                app.get(state).raw_scrollbar_state.thumb_drag.is_none(),
+                "the drag is released"
+            );
+        });
     }
 
     #[test]
     fn a_raw_scrollbar_hides_its_thumb_when_the_child_cannot_scroll() {
-        let cell = binding_cell();
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let controller = ScrollController::default(&mut app);
-        let list = ListView::new()
-            .controller(controller.erase())
-            .children([SizedBox::new().height(ITEM_EXTENT).into_widget()]);
-        let scrollbar = RawScrollbar::new(list)
-            .key(key.clone().into())
-            .controller(controller.erase());
-        let tree: WidgetRef = MediaQuery::new(
-            MediaQueryData::new().size(Size::new(VIEW_WIDTH, VIEW_HEIGHT)),
-            scrollbar,
-        )
-        .into_widget();
-        drop(app);
-        binding_mount(
-            &cell,
-            Directionality::new(TextDirection::Ltr, tree).into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let controller = tester.update(ScrollController::default);
+            let list = ListView::new()
+                .controller(controller.erase())
+                .children([SizedBox::new().height(ITEM_EXTENT).into_widget()]);
+            let scrollbar = RawScrollbar::new(list)
+                .key(key.clone().into())
+                .controller(controller.erase());
+            let tree: WidgetRef =
+                MediaQuery::new(MediaQueryData::new().size(WidgetTester::SIZE), scrollbar)
+                    .into_widget();
+            tester.pump_widget(Directionality::new(TextDirection::Ltr, tree));
 
-        let painter = painter(&mut app, &key);
-        assert_eq!(
-            painter.fadeout_opacity_animation(&app).value(&app),
-            0.0,
-            "a scroll view with nothing to scroll never fades the thumb in"
-        );
+            let painter = tester.update(|app| painter(app, &key));
+            let app = tester.cell.borrow();
+            assert_eq!(
+                painter.fadeout_opacity_animation(&app).value(&app),
+                0.0,
+                "a scroll view with nothing to scroll never fades the thumb in"
+            );
+        });
     }
 }

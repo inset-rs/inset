@@ -2180,12 +2180,10 @@ impl State for CupertinoDraggableScrollableSheetState {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use waft_foundation::AppCell;
 
-    use waft_embedder::{
-        Locale, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, TextDirection,
-    };
-    use waft_gestures::GestureBinding;
+    use waft_embedder::{Locale, PointerChange, TextDirection};
+    use waft_test::{assert_no_new_objects, object_snapshot};
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
     use waft_widgets::{
         Builder, DefaultWidgetsLocalizations, Directionality, Localizations, SingleChildScrollView,
     };
@@ -2193,12 +2191,10 @@ mod tests {
     use super::*;
     use crate::localizations::DefaultCupertinoLocalizations;
     use crate::route::CupertinoPageRoute;
-    use crate::test_support::{build, pump, test_cell};
-    use waft_test::{assert_no_new_objects, object_snapshot};
 
-    /// The test view is 800x600 physical at 2x.
-    const VIEW_WIDTH: f64 = 400.0;
-    const VIEW_HEIGHT: f64 = 300.0;
+    /// The tester's view, in logical pixels.
+    const VIEW_WIDTH: f64 = 800.0;
+    const VIEW_HEIGHT: f64 = 600.0;
 
     /// The top of a fully open sheet: [`K_TOP_GAP_RATIO`] of the view height.
     const SHEET_TOP: f64 = VIEW_HEIGHT * K_TOP_GAP_RATIO;
@@ -2235,72 +2231,55 @@ mod tests {
         })
     }
 
-    /// Sends one pointer packet; the test view is 2x, so logical coordinates double.
-    fn send(app: &mut App, change: PointerChange, x: f64, y: f64, at: Duration) {
-        send_from(app, change, x, y, y, at);
-    }
-
-    /// Sends one pointer packet carrying the vertical movement from `previous_y`.
-    fn send_from(
-        app: &mut App,
-        change: PointerChange,
-        x: f64,
-        y: f64,
-        previous_y: f64,
-        at: Duration,
+    /// Moves `finger` to `to`, the move stamped `time_stamp` as a host stamps it.
+    fn move_finger(
+        tester: &mut WidgetTester,
+        finger: &mut TestPointer,
+        to: Offset,
+        time_stamp: Duration,
     ) {
-        GestureBinding::instance(app).handle_pointer_data_packet(
-            app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Touch,
-                time_stamp: at,
-                pointer_identifier: 1,
-                physical_x: x * 2.0,
-                physical_y: y * 2.0,
-                physical_delta_y: (y - previous_y) * 2.0,
-                ..PointerData::default()
-            }]),
-        );
-        app.drain_microtasks();
+        let delta = to - finger.position;
+        finger.position = to;
+        tester.send_at(finger, PointerChange::Move, delta, time_stamp);
     }
 
-    /// Runs frames until every route transition has settled.
-    fn settle(app: &mut App, from: Duration) -> Duration {
-        let mut at = from;
-        for _ in 0..60 {
-            at += Duration::from_millis(20);
-            pump(app, at);
+    /// Lifts `finger` where it is, stamped `time_stamp`.
+    fn lift_finger(tester: &mut WidgetTester, finger: &TestPointer, time_stamp: Duration) {
+        tester.send_at(finger, PointerChange::Up, Offset::ZERO, time_stamp);
+    }
+
+    /// A vertical drag of `steps` moves of `step` each from `start`, one every 60 milliseconds
+    /// with a frame after each; the finger stays down.
+    fn drag_down(tester: &mut WidgetTester, start: Offset, step: f64, steps: u32) -> TestPointer {
+        let mut finger = TestPointer::touch(1);
+        tester.down(&mut finger, start);
+        for n in 1..=steps {
+            let to = start + Offset::new(0.0, step * f64::from(n));
+            move_finger(tester, &mut finger, to, Duration::from_millis(60) * n);
+            tester.pump_by(Duration::from_millis(60));
         }
-        at
+        finger
     }
 
     /// The top-left corner the keyed widget paints at, in the view's coordinate system.
-    fn top_left(key: &GlobalKey, app: &mut App) -> Offset {
-        let context = key.current_context(app).expect("the widget is mounted");
-        context
-            .find_render_object(app)
-            .expect("the widget has a render object")
+    fn top_left(key: &GlobalKey, tester: &WidgetTester) -> Offset {
+        let render = tester
+            .render_object(key)
             .as_box()
-            .expect("the widget is a box")
-            .local_to_global(app, Offset::ZERO, None)
+            .expect("the widget is a box");
+        render.local_to_global(&tester.cell.borrow(), Offset::ZERO, None)
     }
 
     /// An app showing one settled `CupertinoPageRoute` whose content reports to `probe`.
-    fn app_with_page(probe: &Rc<Probe>, key: &GlobalKey) -> (Rc<AppCell>, Duration) {
-        let cell = test_cell();
+    fn app_with_page(tester: &mut WidgetTester, probe: &Rc<Probe>, key: &GlobalKey) {
         let navigator_key = GlobalKey::new();
         let builder = page(probe, key);
-        build(
-            &cell,
-            navigator(&navigator_key, move |navigator| {
-                navigator.on_generate_route(move |app, _settings| {
-                    Some(CupertinoPageRoute::new(app, Rc::clone(&builder)).into_erased())
-                })
-            }),
-        );
-        let at = settle(&mut cell.borrow_mut(), Duration::ZERO);
-        (cell, at)
+        tester.pump_widget(navigator(&navigator_key, move |navigator| {
+            navigator.on_generate_route(move |app, _settings| {
+                Some(CupertinoPageRoute::new(app, Rc::clone(&builder)).into_erased())
+            })
+        }));
+        tester.pump_and_settle();
     }
 
     fn navigator(key: &GlobalKey, configure: impl FnOnce(Navigator) -> Navigator) -> WidgetRef {
@@ -2318,21 +2297,19 @@ mod tests {
 
     /// The whole scenario: a page, a sheet shown over it, and both settled.
     struct Sheet {
-        cell: Rc<AppCell>,
         page: Rc<Probe>,
         page_key: GlobalKey,
         sheet: Rc<Probe>,
         sheet_key: GlobalKey,
         popped: CompleterFuture<RouteResult>,
-        at: Duration,
     }
 
-    /// Pushes a sheet over a page and runs `steps` frames of the push transition.
-    fn show_sheet(show_drag_handle: bool) -> Sheet {
+    /// Pushes a sheet over a settled page; the push has not run a frame yet.
+    fn show_sheet(tester: &mut WidgetTester, show_drag_handle: bool) -> Sheet {
         let page_probe: Rc<Probe> = Rc::default();
         let page_key = GlobalKey::new();
-        let (cell, at) = app_with_page(&page_probe, &page_key);
-        let mut app = cell.borrow_mut();
+        app_with_page(tester, &page_probe, &page_key);
+        let mut app = tester.cell.borrow_mut();
 
         let sheet_probe: Rc<Probe> = Rc::default();
         let sheet_key = GlobalKey::new();
@@ -2351,13 +2328,11 @@ mod tests {
         );
         drop(app);
         Sheet {
-            cell,
             page: page_probe,
             page_key,
             sheet: sheet_probe,
             sheet_key,
             popped,
-            at,
         }
     }
 
@@ -2374,121 +2349,106 @@ mod tests {
     /// make once they hand it on.
     #[test]
     fn a_frame_of_a_sheet_push_leaves_no_new_arena_objects() {
-        let Sheet { cell, at, .. } = show_sheet(false);
-        let mut at = at;
-        {
-            let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            show_sheet(tester, false);
             for _ in 0..3 {
-                at += Duration::from_millis(20);
-                pump(&mut app, at);
+                tester.pump_by(Duration::from_millis(20));
             }
-        }
-        cell.checkpoint();
-        let snapshot = object_snapshot(&cell.borrow());
-        pump(&mut cell.borrow_mut(), at + Duration::from_millis(20));
-        cell.checkpoint();
-        assert_no_new_objects(&cell.borrow(), &snapshot);
+            let snapshot = object_snapshot(&tester.cell.borrow());
+            tester.pump_by(Duration::from_millis(20));
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
+        });
     }
 
     #[test]
     fn show_cupertino_sheet_slides_a_sheet_route_up_from_the_bottom() {
-        let Sheet {
-            cell,
-            sheet,
-            sheet_key,
-            at,
-            ..
-        } = show_sheet(false);
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let Sheet {
+                sheet, sheet_key, ..
+            } = show_sheet(tester, false);
 
-        let mut at = at;
-        for _ in 0..4 {
-            at += Duration::from_millis(20);
-            pump(&mut app, at);
-        }
-        let mid = top_left(&sheet_key, &mut app).dy();
-        assert!(
-            mid > SHEET_TOP && mid < VIEW_HEIGHT,
-            "the sheet is part way up from the bottom, at {mid}"
-        );
+            for _ in 0..4 {
+                tester.pump_by(Duration::from_millis(20));
+            }
+            let mid = top_left(&sheet_key, tester).dy();
+            assert!(
+                mid > SHEET_TOP && mid < VIEW_HEIGHT,
+                "the sheet is part way up from the bottom, at {mid}"
+            );
 
-        settle(&mut app, at);
-        assert_eq!(
-            top_left(&sheet_key, &mut app).dy(),
-            SHEET_TOP,
-            "the sheet stops below the top of the screen"
-        );
-        let sheet_route = route_of_sheet(&mut app, &sheet)
-            .downcast::<CupertinoSheetRoute>(&app)
-            .expect("show_cupertino_sheet pushes a CupertinoSheetRoute");
-        let animation = TransitionRoute::animation(sheet_route, &app).expect("an installed route");
-        assert_eq!(animation.value(&app), 1.0);
-        assert!(!TransitionRoute::opaque(sheet_route, &app));
-        assert_eq!(
-            TransitionRoute::transition_duration(sheet_route, &mut app),
-            Duration::from_millis(500)
-        );
+            tester.pump_and_settle();
+            assert_eq!(
+                top_left(&sheet_key, tester).dy(),
+                SHEET_TOP,
+                "the sheet stops below the top of the screen"
+            );
+            let mut app = tester.cell.borrow_mut();
+            let sheet_route = route_of_sheet(&mut app, &sheet)
+                .downcast::<CupertinoSheetRoute>(&app)
+                .expect("show_cupertino_sheet pushes a CupertinoSheetRoute");
+            let animation =
+                TransitionRoute::animation(sheet_route, &app).expect("an installed route");
+            assert_eq!(animation.value(&app), 1.0);
+            assert!(!TransitionRoute::opaque(sheet_route, &app));
+            assert_eq!(
+                TransitionRoute::transition_duration(sheet_route, &mut app),
+                Duration::from_millis(500)
+            );
+        });
     }
 
     #[test]
     fn the_route_below_slides_down_and_scales_behind_the_sheet() {
-        let Sheet {
-            cell, page_key, at, ..
-        } = show_sheet(false);
-        let mut app = cell.borrow_mut();
-        settle(&mut app, at);
+        test_widgets(|tester| {
+            let Sheet { page_key, .. } = show_sheet(tester, false);
+            tester.pump_and_settle();
 
-        let offset = top_left(&page_key, &mut app);
-        let expected_top = VIEW_HEIGHT * 0.07;
-        assert!(
-            (offset.dy() - expected_top).abs() < 0.5,
-            "the page below slid down by the top-down tween, to {}",
-            offset.dy()
-        );
-        let expected_left = VIEW_WIDTH * K_SHEET_SCALE_FACTOR / 2.0;
-        assert!(
-            (offset.dx() - expected_left).abs() < 0.5,
-            "the page below scaled down about its top centre, to {}",
-            offset.dx()
-        );
+            let offset = top_left(&page_key, tester);
+            let expected_top = VIEW_HEIGHT * 0.07;
+            assert!(
+                (offset.dy() - expected_top).abs() < 0.5,
+                "the page below slid down by the top-down tween, to {}",
+                offset.dy()
+            );
+            let expected_left = VIEW_WIDTH * K_SHEET_SCALE_FACTOR / 2.0;
+            assert!(
+                (offset.dx() - expected_left).abs() < 0.5,
+                "the page below scaled down about its top centre, to {}",
+                offset.dx()
+            );
+        });
     }
 
     #[test]
     fn has_parent_sheet_is_true_inside_the_sheet_and_false_outside() {
-        let Sheet {
-            cell,
-            page,
-            sheet,
-            at,
-            ..
-        } = show_sheet(false);
-        let mut app = cell.borrow_mut();
-        settle(&mut app, at);
+        test_widgets(|tester| {
+            let Sheet { page, sheet, .. } = show_sheet(tester, false);
+            tester.pump_and_settle();
 
-        assert_eq!(
-            page.has_parent_sheet.get(),
-            Some(false),
-            "the page below is not in a sheet"
-        );
-        assert_eq!(
-            sheet.has_parent_sheet.get(),
-            Some(true),
-            "the sheet content is in a sheet"
-        );
+            assert_eq!(
+                page.has_parent_sheet.get(),
+                Some(false),
+                "the page below is not in a sheet"
+            );
+            assert_eq!(
+                sheet.has_parent_sheet.get(),
+                Some(true),
+                "the sheet content is in a sheet"
+            );
+        });
     }
 
     #[test]
     fn a_drag_handle_pads_the_sheet_content() {
-        let Sheet {
-            cell, sheet, at, ..
-        } = show_sheet(true);
-        let mut app = cell.borrow_mut();
-        settle(&mut app, at);
-        assert_eq!(
-            sheet.top_padding.get(),
-            Some(15.0),
-            "the drag handle reserves the top padding of the sheet content"
-        );
+        test_widgets(|tester| {
+            let Sheet { sheet, .. } = show_sheet(tester, true);
+            tester.pump_and_settle();
+            assert_eq!(
+                sheet.top_padding.get(),
+                Some(15.0),
+                "the drag handle reserves the top padding of the sheet content"
+            );
+        });
     }
 
     /// How many drag handles are painted under `root`: decorated boxes whose shape is filled
@@ -2514,245 +2474,201 @@ mod tests {
     fn show_cupertino_sheet_forwards_show_drag_handle_to_the_sheet_route() {
         // Regression test for https://github.com/flutter/flutter/issues/187693.
         for use_nested_navigation in [false, true] {
-            let page_probe: Rc<Probe> = Rc::default();
-            let page_key = GlobalKey::new();
-            let (cell, at) = app_with_page(&page_probe, &page_key);
-            let mut app = cell.borrow_mut();
-            let context = page_probe.context.get().expect("the page built");
-            let sheet_probe: Rc<Probe> = Rc::default();
-            let sheet_key = GlobalKey::new();
-            let builder = page(&sheet_probe, &sheet_key);
-            show_cupertino_sheet(
-                &mut app,
-                context,
-                None,
-                Some(Rc::new(move |app, context, _controller| {
-                    builder(app, context)
-                })),
-                use_nested_navigation,
-                true,
-                None,
-                None,
-                true,
-            );
-            settle(&mut app, at);
+            test_widgets(|tester| {
+                let page_probe: Rc<Probe> = Rc::default();
+                let page_key = GlobalKey::new();
+                app_with_page(tester, &page_probe, &page_key);
+                let mut app = tester.cell.borrow_mut();
+                let context = page_probe.context.get().expect("the page built");
+                let sheet_probe: Rc<Probe> = Rc::default();
+                let sheet_key = GlobalKey::new();
+                let builder = page(&sheet_probe, &sheet_key);
+                show_cupertino_sheet(
+                    &mut app,
+                    context,
+                    None,
+                    Some(Rc::new(move |app, context, _controller| {
+                        builder(app, context)
+                    })),
+                    use_nested_navigation,
+                    true,
+                    None,
+                    None,
+                    true,
+                );
+                drop(app);
+                tester.pump_and_settle();
+                let app = tester.cell.borrow();
 
-            assert!(
-                sheet_probe.context.get().is_some(),
-                "the sheet content built (nested navigation {use_nested_navigation})"
-            );
-            let root = context
-                .find_ancestor_render_object_of_type::<waft_rendering::RenderView>(&app)
-                .expect("the page is under the view")
-                .as_object();
-            assert_eq!(
-                drag_handle_count(&app, root),
-                1,
-                "one drag handle (nested navigation {use_nested_navigation})"
-            );
+                assert!(
+                    sheet_probe.context.get().is_some(),
+                    "the sheet content built (nested navigation {use_nested_navigation})"
+                );
+                let root = context
+                    .find_ancestor_render_object_of_type::<waft_rendering::RenderView>(&app)
+                    .expect("the page is under the view")
+                    .as_object();
+                assert_eq!(
+                    drag_handle_count(&app, root),
+                    1,
+                    "one drag handle (nested navigation {use_nested_navigation})"
+                );
+            });
         }
     }
 
     #[test]
     fn a_covered_sheet_does_not_reveal_the_root_route_through_its_top_gap() {
-        let page_probe: Rc<Probe> = Rc::default();
-        let page_key = GlobalKey::new();
-        let (cell, at) = app_with_page(&page_probe, &page_key);
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let page_probe: Rc<Probe> = Rc::default();
+            let page_key = GlobalKey::new();
+            app_with_page(tester, &page_probe, &page_key);
+            let mut app = tester.cell.borrow_mut();
 
-        let second_probe: Rc<Probe> = Rc::default();
-        let second_key = GlobalKey::new();
-        let context = page_probe.context.get().expect("the page built");
-        let second =
-            CupertinoSheetRoute::new(&mut app).builder(&mut app, page(&second_probe, &second_key));
-        Navigator::of(&mut app, context, false).push(&mut app, second.clone().into_erased());
-        let at = settle(&mut app, at);
+            let second_probe: Rc<Probe> = Rc::default();
+            let second_key = GlobalKey::new();
+            let context = page_probe.context.get().expect("the page built");
+            let second = CupertinoSheetRoute::new(&mut app)
+                .builder(&mut app, page(&second_probe, &second_key));
+            Navigator::of(&mut app, context, false).push(&mut app, second.clone().into_erased());
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
 
-        let third_probe: Rc<Probe> = Rc::default();
-        let third_key = GlobalKey::new();
-        let context = second_probe.context.get().expect("the second sheet built");
-        let third =
-            CupertinoSheetRoute::new(&mut app).builder(&mut app, page(&third_probe, &third_key));
-        Navigator::of(&mut app, context, false).push(&mut app, third.clone().into_erased());
-        settle(&mut app, at);
+            let third_probe: Rc<Probe> = Rc::default();
+            let third_key = GlobalKey::new();
+            let context = second_probe.context.get().expect("the second sheet built");
+            let third = CupertinoSheetRoute::new(&mut app)
+                .builder(&mut app, page(&third_probe, &third_key));
+            Navigator::of(&mut app, context, false).push(&mut app, third.clone().into_erased());
+            drop(app);
+            tester.pump_and_settle();
 
-        let page1_top = top_left(&page_key, &mut app).dy();
-        let page2_top = top_left(&second_key, &mut app).dy();
-        let page3_top = top_left(&third_key, &mut app).dy();
-        // Sheet 2 moves up above Page 1 so that the root route (Page 1) is completely hidden
-        // behind Sheet 2.
-        assert!(page2_top <= page1_top, "{page2_top} <= {page1_top}");
-        // Sheet 3 is stacked on top of Sheet 2, with Sheet 2 peeking out above Sheet 3.
-        assert!(page2_top <= page3_top, "{page2_top} <= {page3_top}");
+            let page1_top = top_left(&page_key, tester).dy();
+            let page2_top = top_left(&second_key, tester).dy();
+            let page3_top = top_left(&third_key, tester).dy();
+            // Sheet 2 moves up above Page 1 so that the root route (Page 1) is completely hidden
+            // behind Sheet 2.
+            assert!(page2_top <= page1_top, "{page2_top} <= {page1_top}");
+            // Sheet 3 is stacked on top of Sheet 2, with Sheet 2 peeking out above Sheet 3.
+            assert!(page2_top <= page3_top, "{page2_top} <= {page3_top}");
+        });
     }
 
     #[test]
     fn pop_sheet_pops_the_sheet() {
-        let Sheet {
-            cell,
-            sheet,
-            popped,
-            at,
-            ..
-        } = show_sheet(false);
-        let mut app = cell.borrow_mut();
-        let at = settle(&mut app, at);
-        assert!(!popped.is_completed());
+        test_widgets(|tester| {
+            let Sheet { sheet, popped, .. } = show_sheet(tester, false);
+            tester.pump_and_settle();
+            assert!(!popped.is_completed());
 
-        let context = sheet.context.get().expect("the sheet built");
-        CupertinoSheetRoute::pop_sheet(&mut app, context);
-        settle(&mut app, at);
-        assert!(popped.is_completed(), "pop_sheet popped the sheet");
+            let context = sheet.context.get().expect("the sheet built");
+            tester.update(|app| CupertinoSheetRoute::pop_sheet(app, context));
+            tester.pump_and_settle();
+            assert!(popped.is_completed(), "pop_sheet popped the sheet");
+        });
     }
 
     #[test]
     fn a_drag_past_the_dismiss_threshold_pops_the_sheet() {
-        let Sheet {
-            cell, popped, at, ..
-        } = show_sheet(false);
-        let mut app = cell.borrow_mut();
-        let at = settle(&mut app, at);
+        test_widgets(|tester| {
+            let Sheet { popped, .. } = show_sheet(tester, false);
+            tester.pump_and_settle();
 
-        send(&mut app, PointerChange::Down, 200.0, 50.0, Duration::ZERO);
-        for step in 1_u64..=5 {
-            send_from(
-                &mut app,
-                PointerChange::Move,
-                200.0,
-                50.0 + 40.0 * step as f64,
-                50.0 + 40.0 * (step - 1) as f64,
-                Duration::from_millis(step * 60),
-            );
-            pump(&mut app, at + Duration::from_millis(step * 60));
-        }
-        send(
-            &mut app,
-            PointerChange::Up,
-            200.0,
-            250.0,
-            Duration::from_millis(300),
-        );
-        settle(&mut app, at + Duration::from_millis(300));
+            let finger = drag_down(tester, Offset::new(400.0, 100.0), 80.0, 5);
+            lift_finger(tester, &finger, Duration::from_millis(300));
+            tester.pump_and_settle();
 
-        assert!(popped.is_completed(), "the drag dismissed the sheet");
+            assert!(popped.is_completed(), "the drag dismissed the sheet");
+        });
     }
 
     #[test]
     fn a_short_drag_snaps_the_sheet_back() {
-        let Sheet {
-            cell,
-            sheet_key,
-            popped,
-            at,
-            ..
-        } = show_sheet(false);
-        let mut app = cell.borrow_mut();
-        let at = settle(&mut app, at);
+        test_widgets(|tester| {
+            let Sheet {
+                sheet_key, popped, ..
+            } = show_sheet(tester, false);
+            tester.pump_and_settle();
 
-        send(&mut app, PointerChange::Down, 200.0, 50.0, Duration::ZERO);
-        for step in 1_u64..=4 {
-            send_from(
-                &mut app,
-                PointerChange::Move,
-                200.0,
-                50.0 + 10.0 * step as f64,
-                50.0 + 10.0 * (step - 1) as f64,
-                Duration::from_millis(step * 60),
+            let finger = drag_down(tester, Offset::new(400.0, 100.0), 20.0, 4);
+            let dragged = top_left(&sheet_key, tester).dy();
+            assert!(
+                dragged > SHEET_TOP,
+                "the drag moved the sheet down, to {dragged}"
             );
-            pump(&mut app, at + Duration::from_millis(step * 60));
-        }
-        let dragged = top_left(&sheet_key, &mut app).dy();
-        assert!(
-            dragged > SHEET_TOP,
-            "the drag moved the sheet down, to {dragged}"
-        );
-        send(
-            &mut app,
-            PointerChange::Up,
-            200.0,
-            90.0,
-            Duration::from_millis(240),
-        );
-        settle(&mut app, at + Duration::from_millis(240));
+            lift_finger(tester, &finger, Duration::from_millis(240));
+            tester.pump_and_settle();
 
-        assert!(
-            !popped.is_completed(),
-            "the short drag did not pop the sheet"
-        );
-        assert_eq!(
-            top_left(&sheet_key, &mut app).dy(),
-            SHEET_TOP,
-            "the sheet snapped back open"
-        );
+            assert!(
+                !popped.is_completed(),
+                "the short drag did not pop the sheet"
+            );
+            assert_eq!(
+                top_left(&sheet_key, tester).dy(),
+                SHEET_TOP,
+                "the sheet snapped back open"
+            );
+        });
     }
     #[test]
     fn a_drag_can_end_while_a_relayout_of_the_sheet_is_pending() {
-        // Regression test for https://github.com/flutter/flutter/issues/194681.
-        let Sheet {
-            cell,
-            sheet_key,
-            popped,
-            at,
-            ..
-        } = show_sheet(false);
-        let mut app = cell.borrow_mut();
-        let at = settle(&mut app, at);
-        let initial_position = top_left(&sheet_key, &mut app).dy();
+        test_widgets(|tester| {
+            // Regression test for https://github.com/flutter/flutter/issues/194681.
+            let Sheet {
+                sheet_key, popped, ..
+            } = show_sheet(tester, false);
+            tester.pump_and_settle();
+            let initial_position = top_left(&sheet_key, tester).dy();
 
-        send(&mut app, PointerChange::Down, 100.0, 200.0, Duration::ZERO);
-        send_from(
-            &mut app,
-            PointerChange::Move,
-            100.0,
-            300.0,
-            200.0,
-            Duration::from_millis(20),
-        );
-        pump(&mut app, at + Duration::from_millis(20));
+            let mut finger = TestPointer::touch(1);
+            tester.down(&mut finger, Offset::new(200.0, 400.0));
+            move_finger(
+                tester,
+                &mut finger,
+                Offset::new(200.0, 600.0),
+                Duration::from_millis(20),
+            );
+            tester.pump_by(Duration::from_millis(20));
+            let mut app = tester.cell.borrow_mut();
 
-        // The sheet measures the drag against the height of the box the drag gesture
-        // detector renders. Mark it dirty so the drag ends before the next layout.
-        let detector = sheet_key
-            .current_context(&app)
-            .expect("the sheet content is mounted")
-            .find_ancestor_state_of_type::<CupertinoDragGestureDetectorState>(&app)
-            .expect("the sheet content is under the drag gesture detector");
-        detector
-            .context(&app)
-            .find_render_object(&app)
-            .expect("the detector has a render object")
-            .mark_needs_layout(&mut app);
+            // The sheet measures the drag against the height of the box the drag gesture
+            // detector renders. Mark it dirty so the drag ends before the next layout.
+            let detector = sheet_key
+                .current_context(&app)
+                .expect("the sheet content is mounted")
+                .find_ancestor_state_of_type::<CupertinoDragGestureDetectorState>(&app)
+                .expect("the sheet content is under the drag gesture detector");
+            detector
+                .context(&app)
+                .find_render_object(&app)
+                .expect("the detector has a render object")
+                .mark_needs_layout(&mut app);
+            drop(app);
 
-        send(
-            &mut app,
-            PointerChange::Up,
-            100.0,
-            300.0,
-            Duration::from_millis(40),
-        );
-        settle(&mut app, at + Duration::from_millis(40));
+            lift_finger(tester, &finger, Duration::from_millis(40));
+            tester.pump_and_settle();
 
-        assert!(!popped.is_completed(), "the sheet is still up");
-        assert_eq!(top_left(&sheet_key, &mut app).dy(), initial_position);
+            assert!(!popped.is_completed(), "the sheet is still up");
+            assert_eq!(top_left(&sheet_key, tester).dy(), initial_position);
+        });
     }
 
     /// The whole scenario for a sheet whose content is a scroll view under the route's own
     /// controller: the view fills the sheet, the content is three views tall.
     struct ScrollableSheet {
-        cell: Rc<AppCell>,
         /// The scroll view, which is the sheet's own top.
         view_key: GlobalKey,
         /// The scrolled content, which moves as the list scrolls.
         content_key: GlobalKey,
         popped: CompleterFuture<RouteResult>,
-        at: Duration,
     }
 
-    fn show_scrollable_sheet() -> ScrollableSheet {
+    fn show_scrollable_sheet(tester: &mut WidgetTester) -> ScrollableSheet {
         let page_probe: Rc<Probe> = Rc::default();
         let page_key = GlobalKey::new();
-        let (cell, at) = app_with_page(&page_probe, &page_key);
-        let mut app = cell.borrow_mut();
+        app_with_page(tester, &page_probe, &page_key);
+        let mut app = tester.cell.borrow_mut();
 
         let view_key = GlobalKey::new();
         let content_key = GlobalKey::new();
@@ -2784,222 +2700,174 @@ mod tests {
             None,
             false,
         );
-        let at = settle(&mut app, at);
         drop(app);
+        tester.pump_and_settle();
         ScrollableSheet {
-            cell,
             view_key,
             content_key,
             popped,
-            at,
         }
     }
 
     #[test]
     fn a_scrollable_built_through_the_scrollable_builder_scrolls() {
-        let ScrollableSheet {
-            cell,
-            view_key,
-            content_key,
-            popped,
-            at,
-        } = show_scrollable_sheet();
-        let mut app = cell.borrow_mut();
-        assert_eq!(top_left(&view_key, &mut app).dy(), SHEET_TOP);
-        assert_eq!(top_left(&content_key, &mut app).dy(), SHEET_TOP);
+        test_widgets(|tester| {
+            let ScrollableSheet {
+                view_key,
+                content_key,
+                popped,
+            } = show_scrollable_sheet(tester);
+            assert_eq!(top_left(&view_key, tester).dy(), SHEET_TOP);
+            assert_eq!(top_left(&content_key, tester).dy(), SHEET_TOP);
 
-        // Dragging up scrolls the list; the sheet itself stays where it is.
-        send(&mut app, PointerChange::Down, 200.0, 150.0, Duration::ZERO);
-        for step in 1_u64..=4 {
-            send_from(
-                &mut app,
-                PointerChange::Move,
-                200.0,
-                150.0 - 20.0 * step as f64,
-                150.0 - 20.0 * (step - 1) as f64,
-                Duration::from_millis(step * 60),
+            // Dragging up scrolls the list; the sheet itself stays where it is.
+            let finger = drag_down(tester, Offset::new(400.0, 300.0), -40.0, 4);
+            lift_finger(tester, &finger, Duration::from_millis(240));
+            tester.pump_and_settle();
+
+            assert!(
+                !popped.is_completed(),
+                "the scroll did not dismiss the sheet"
             );
-            pump(&mut app, at + Duration::from_millis(step * 60));
-        }
-        send(
-            &mut app,
-            PointerChange::Up,
-            200.0,
-            70.0,
-            Duration::from_millis(240),
-        );
-        settle(&mut app, at + Duration::from_millis(240));
-
-        assert!(
-            !popped.is_completed(),
-            "the scroll did not dismiss the sheet"
-        );
-        assert_eq!(
-            top_left(&view_key, &mut app).dy(),
-            SHEET_TOP,
-            "the sheet stayed open"
-        );
-        let scrolled = top_left(&content_key, &mut app).dy();
-        assert!(
-            scrolled < SHEET_TOP,
-            "the list scrolled its content up, to {scrolled}"
-        );
+            assert_eq!(
+                top_left(&view_key, tester).dy(),
+                SHEET_TOP,
+                "the sheet stayed open"
+            );
+            let scrolled = top_left(&content_key, tester).dy();
+            assert!(
+                scrolled < SHEET_TOP,
+                "the list scrolled its content up, to {scrolled}"
+            );
+        });
     }
 
     #[test]
     fn a_downward_drag_at_the_top_of_the_scrollable_dismisses_the_sheet() {
-        let ScrollableSheet {
-            cell,
-            view_key,
-            popped,
-            at,
-            ..
-        } = show_scrollable_sheet();
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let ScrollableSheet {
+                view_key, popped, ..
+            } = show_scrollable_sheet(tester);
 
-        send(&mut app, PointerChange::Down, 200.0, 50.0, Duration::ZERO);
-        for step in 1_u64..=5 {
-            send_from(
-                &mut app,
-                PointerChange::Move,
-                200.0,
-                50.0 + 40.0 * step as f64,
-                50.0 + 40.0 * (step - 1) as f64,
-                Duration::from_millis(step * 60),
+            let finger = drag_down(tester, Offset::new(400.0, 100.0), 80.0, 5);
+            let dragged = top_left(&view_key, tester).dy();
+            assert!(
+                dragged > SHEET_TOP,
+                "the drag at the top of the list moved the sheet down, to {dragged}"
             );
-            pump(&mut app, at + Duration::from_millis(step * 60));
-        }
-        let dragged = top_left(&view_key, &mut app).dy();
-        assert!(
-            dragged > SHEET_TOP,
-            "the drag at the top of the list moved the sheet down, to {dragged}"
-        );
-        send(
-            &mut app,
-            PointerChange::Up,
-            200.0,
-            250.0,
-            Duration::from_millis(300),
-        );
-        settle(&mut app, at + Duration::from_millis(300));
+            lift_finger(tester, &finger, Duration::from_millis(300));
+            tester.pump_and_settle();
 
-        assert!(
-            popped.is_completed(),
-            "the drag handed over to the sheet's dismiss gesture"
-        );
+            assert!(
+                popped.is_completed(),
+                "the drag handed over to the sheet's dismiss gesture"
+            );
+        });
     }
 
     #[test]
     fn a_drag_can_end_while_a_relayout_of_the_sheet_content_is_pending() {
-        // Regression test for https://github.com/flutter/flutter/issues/194681.
-        let ScrollableSheet {
-            cell,
-            view_key,
-            popped,
-            at,
-            ..
-        } = show_scrollable_sheet();
-        let mut app = cell.borrow_mut();
-        let initial_position = top_left(&view_key, &mut app).dy();
+        test_widgets(|tester| {
+            // Regression test for https://github.com/flutter/flutter/issues/194681.
+            let ScrollableSheet {
+                view_key, popped, ..
+            } = show_scrollable_sheet(tester);
+            let initial_position = top_left(&view_key, tester).dy();
 
-        // Drag the sheet down while its content is scrolled to the top, with a small drag
-        // first to win the gesture arena.
-        send(&mut app, PointerChange::Down, 100.0, 150.0, Duration::ZERO);
-        send_from(
-            &mut app,
-            PointerChange::Move,
-            100.0,
-            180.0,
-            150.0,
-            Duration::from_millis(100),
-        );
-        send_from(
-            &mut app,
-            PointerChange::Move,
-            100.0,
-            230.0,
-            180.0,
-            Duration::from_millis(200),
-        );
-        pump(&mut app, at + Duration::from_millis(200));
-        let dragged = top_left(&view_key, &mut app).dy();
-        assert!(
-            dragged > initial_position,
-            "the drag moved the sheet down, to {dragged}"
-        );
+            // Drag the sheet down while its content is scrolled to the top, with a small drag
+            // first to win the gesture arena.
+            let mut finger = TestPointer::touch(1);
+            tester.down(&mut finger, Offset::new(200.0, 300.0));
+            move_finger(
+                tester,
+                &mut finger,
+                Offset::new(200.0, 360.0),
+                Duration::from_millis(100),
+            );
+            move_finger(
+                tester,
+                &mut finger,
+                Offset::new(200.0, 460.0),
+                Duration::from_millis(200),
+            );
+            tester.pump_by(Duration::from_millis(200));
+            let dragged = top_left(&view_key, tester).dy();
+            assert!(
+                dragged > initial_position,
+                "the drag moved the sheet down, to {dragged}"
+            );
 
-        // The sheet measures the drag against the height of its content. Mark the content
-        // dirty so the drag ends before the next layout.
-        view_key
-            .current_context(&app)
-            .expect("the scroll view is mounted")
-            .find_render_object(&app)
-            .expect("the scroll view has a render object")
-            .mark_needs_layout(&mut app);
+            // The sheet measures the drag against the height of its content. Mark the content
+            // dirty so the drag ends before the next layout.
+            let content = tester.render_object(&view_key);
+            tester.update(|app| content.mark_needs_layout(app));
 
-        send(
-            &mut app,
-            PointerChange::Up,
-            100.0,
-            230.0,
-            Duration::from_millis(300),
-        );
-        settle(&mut app, at + Duration::from_millis(300));
+            lift_finger(tester, &finger, Duration::from_millis(300));
+            tester.pump_and_settle();
 
-        assert!(!popped.is_completed(), "the sheet is still up");
-        assert_eq!(top_left(&view_key, &mut app).dy(), initial_position);
+            assert!(!popped.is_completed(), "the sheet is still up");
+            assert_eq!(top_left(&view_key, tester).dy(), initial_position);
+        });
     }
 
     #[test]
     fn a_nested_navigation_sheets_inner_route_pops_back_to_the_root() {
-        let page_probe: Rc<Probe> = Rc::default();
-        let page_key = GlobalKey::new();
-        let (cell, at) = app_with_page(&page_probe, &page_key);
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let page_probe: Rc<Probe> = Rc::default();
+            let page_key = GlobalKey::new();
+            app_with_page(tester, &page_probe, &page_key);
+            let mut app = tester.cell.borrow_mut();
 
-        let sheet_probe: Rc<Probe> = Rc::default();
-        let sheet_key = GlobalKey::new();
-        let inner_probe: Rc<Probe> = Rc::default();
-        let inner_key = GlobalKey::new();
-        let context = page_probe.context.get().expect("the page built");
-        let sheet_popped = show_cupertino_sheet(
-            &mut app,
-            context,
-            Some(page(&sheet_probe, &sheet_key)),
-            None,
-            true,
-            true,
-            None,
-            None,
-            false,
-        );
-        let at = settle(&mut app, at);
-        assert_eq!(
-            sheet_probe.has_parent_sheet.get(),
-            Some(true),
-            "the nested navigator's initial route is inside the sheet"
-        );
+            let sheet_probe: Rc<Probe> = Rc::default();
+            let sheet_key = GlobalKey::new();
+            let inner_probe: Rc<Probe> = Rc::default();
+            let inner_key = GlobalKey::new();
+            let context = page_probe.context.get().expect("the page built");
+            let sheet_popped = show_cupertino_sheet(
+                &mut app,
+                context,
+                Some(page(&sheet_probe, &sheet_key)),
+                None,
+                true,
+                true,
+                None,
+                None,
+                false,
+            );
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                sheet_probe.has_parent_sheet.get(),
+                Some(true),
+                "the nested navigator's initial route is inside the sheet"
+            );
 
-        // The sheet's content sits under the nested navigator, so a push from it stays
-        // inside the sheet.
-        let sheet_context = sheet_probe.context.get().expect("the sheet built");
-        let inner_builder = page(&inner_probe, &inner_key);
-        let inner_route = CupertinoPageRoute::new(&mut app, inner_builder);
-        let nested = Navigator::of(&mut app, sheet_context, false);
-        nested.push(&mut app, inner_route.clone().into_erased());
-        let at = settle(&mut app, at);
-        assert!(inner_route.is_active(&app), "the inner route was pushed");
-        assert!(!sheet_popped.is_completed(), "the sheet is still up");
+            // The sheet's content sits under the nested navigator, so a push from it stays
+            // inside the sheet.
+            let sheet_context = sheet_probe.context.get().expect("the sheet built");
+            let inner_builder = page(&inner_probe, &inner_key);
+            let inner_route = CupertinoPageRoute::new(&mut app, inner_builder);
+            let nested = Navigator::of(&mut app, sheet_context, false);
+            nested.push(&mut app, inner_route.clone().into_erased());
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert!(inner_route.is_active(&app), "the inner route was pushed");
+            assert!(!sheet_popped.is_completed(), "the sheet is still up");
 
-        let inner_context = inner_probe.context.get().expect("the inner route built");
-        let nested = Navigator::of(&mut app, inner_context, false);
-        nested.pop(&mut app, None);
-        settle(&mut app, at);
+            let inner_context = inner_probe.context.get().expect("the inner route built");
+            let nested = Navigator::of(&mut app, inner_context, false);
+            nested.pop(&mut app, None);
+            drop(app);
+            tester.pump_and_settle();
+            let app = tester.cell.borrow();
 
-        assert!(!inner_route.is_active(&app), "the inner route popped");
-        assert!(
-            !sheet_popped.is_completed(),
-            "popping the inner route left the sheet up"
-        );
+            assert!(!inner_route.is_active(&app), "the inner route popped");
+            assert!(
+                !sheet_popped.is_completed(),
+                "popping the inner route left the sheet up"
+            );
+        });
     }
 }

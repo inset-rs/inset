@@ -3947,28 +3947,16 @@ mod tests {
     use super::*;
     use crate::binding::WidgetsBinding;
     use crate::framework::GlobalKey;
-    use crate::test_harness::{binding_cell, binding_mount, binding_pump};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::view::View;
     use crate::widgets::basic::{Align, Builder, Directionality, SizedBox, Stack};
+    use crate::widgets::text::Text;
     use waft_rendering::RenderHandle;
 
     const DURATION: Duration = Duration::from_millis(100);
 
-    /// Rebuilds the mounted tree with a new root child and runs the frame that updates it.
-    fn rebuild(app: &mut App, child: WidgetRef, at: Duration) {
-        let view = crate::test_harness::platform_view(app);
-        let root = View::new(view, child).into_widget();
-        WidgetsBinding::instance(app).attach_root_widget(app, root);
-        binding_pump(app, at);
-    }
-
-    fn render_box_of(app: &mut App, key: &GlobalKey) -> waft_rendering::AnyRenderBox {
-        key.current_context(app)
-            .expect("the widget is mounted")
-            .find_render_object(app)
-            .expect("a mounted render object")
-            .as_box()
-            .expect("a box")
+    fn ms(milliseconds: u64) -> Duration {
+        Duration::from_millis(milliseconds)
     }
 
     fn positioned_tree(key: &GlobalKey, width: f64, on_end: Option<Listener>) -> WidgetRef {
@@ -3990,51 +3978,47 @@ mod tests {
 
     #[test]
     fn an_animated_positioned_animates_its_box_and_calls_on_end_once() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        let ends = Rc::new(Cell::new(0));
-        let counted = Rc::clone(&ends);
-        let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
-        binding_mount(&cell, positioned_tree(&key, 20.0, Some(on_end.clone())));
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            render_box_of(&mut app, &key).size(&app),
-            Size::new(20.0, 10.0),
-            "the first build does not animate"
-        );
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let ends = Rc::new(Cell::new(0));
+            let counted = Rc::clone(&ends);
+            let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
+            tester.pump_widget(positioned_tree(&key, 20.0, Some(on_end.clone())));
+            assert_eq!(
+                tester.size_of(&key),
+                Size::new(20.0, 10.0),
+                "the first build does not animate"
+            );
 
-        rebuild(
-            &mut app,
-            positioned_tree(&key, 40.0, Some(on_end)),
-            Duration::ZERO,
-        );
-        assert_eq!(
-            render_box_of(&mut app, &key).size(&app).width(),
-            20.0,
-            "the frame that starts the animation still shows the old width"
-        );
+            tester.pump_widget(positioned_tree(&key, 40.0, Some(on_end)));
+            assert_eq!(
+                tester.size_of(&key).width(),
+                20.0,
+                "the frame that starts the animation still shows the old width"
+            );
 
-        binding_pump(&mut app, Duration::from_millis(50));
-        let halfway = render_box_of(&mut app, &key).size(&app).width();
-        assert!(
-            (halfway - 30.0).abs() < 0.001,
-            "halfway between 20 and 40, not {halfway}"
-        );
-        assert_eq!(ends.get(), 0, "the animation is still running");
+            tester.pump_by(ms(50));
+            let halfway = tester.size_of(&key).width();
+            assert!(
+                (halfway - 30.0).abs() < 0.001,
+                "halfway between 20 and 40, not {halfway}"
+            );
+            assert_eq!(ends.get(), 0, "the animation is still running");
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        assert_eq!(render_box_of(&mut app, &key).size(&app).width(), 40.0);
-        assert_eq!(
-            ends.get(),
-            0,
-            "the controller completes on the first tick past the duration"
-        );
+            tester.pump_by(ms(50));
+            assert_eq!(tester.size_of(&key).width(), 40.0);
+            assert_eq!(
+                ends.get(),
+                0,
+                "the controller completes on the first tick past the duration"
+            );
 
-        binding_pump(&mut app, Duration::from_millis(150));
-        assert_eq!(ends.get(), 1);
+            tester.pump_by(ms(50));
+            assert_eq!(ends.get(), 1);
 
-        binding_pump(&mut app, Duration::from_millis(200));
-        assert_eq!(ends.get(), 1, "on_end fires once per animation");
+            tester.pump_by(ms(50));
+            assert_eq!(ends.get(), 1, "on_end fires once per animation");
+        });
     }
 
     fn opacity_tree(key: &GlobalKey, opacity: f64) -> WidgetRef {
@@ -4044,62 +4028,60 @@ mod tests {
             .into_widget()
     }
 
-    fn opacity_of(app: &mut App, key: &GlobalKey) -> f64 {
-        let render_object = key
-            .current_context(app)
-            .expect("the widget is mounted")
-            .find_render_object(app)
-            .expect("a mounted render object")
-            .downcast::<RenderAnimatedOpacity>(app)
+    fn opacity_of(tester: &WidgetTester, key: &GlobalKey) -> f64 {
+        let render_object = tester.render_object(key);
+        let app = tester.cell.borrow();
+        let render_object = render_object
+            .downcast::<RenderAnimatedOpacity>(&app)
             .expect("a RenderAnimatedOpacity");
-        RenderAnimatedOpacityMixin::opacity(render_object, app).value(app)
+        RenderAnimatedOpacityMixin::opacity(render_object, &app).value(&app)
     }
 
     #[test]
     fn an_animated_opacity_reaches_its_target_after_the_duration() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        binding_mount(&cell, opacity_tree(&key, 1.0));
-        let mut app = cell.borrow_mut();
-        assert_eq!(opacity_of(&mut app, &key), 1.0);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(opacity_tree(&key, 1.0));
+            assert_eq!(opacity_of(tester, &key), 1.0);
 
-        rebuild(&mut app, opacity_tree(&key, 0.0), Duration::ZERO);
-        assert_eq!(opacity_of(&mut app, &key), 1.0);
+            tester.pump_widget(opacity_tree(&key, 0.0));
+            assert_eq!(opacity_of(tester, &key), 1.0);
 
-        binding_pump(&mut app, Duration::from_millis(50));
-        let halfway = opacity_of(&mut app, &key);
-        assert!((halfway - 0.5).abs() < 0.001, "{halfway}");
+            tester.pump_by(ms(50));
+            let halfway = opacity_of(tester, &key);
+            assert!((halfway - 0.5).abs() < 0.001, "{halfway}");
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        assert_eq!(opacity_of(&mut app, &key), 0.0);
+            tester.pump_by(ms(50));
+            assert_eq!(opacity_of(tester, &key), 0.0);
+        });
     }
 
     #[test]
     fn a_new_target_mid_flight_retargets_from_the_value_on_screen() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        binding_mount(&cell, opacity_tree(&key, 0.0));
-        let mut app = cell.borrow_mut();
-        rebuild(&mut app, opacity_tree(&key, 1.0), Duration::ZERO);
-        binding_pump(&mut app, Duration::from_millis(50));
-        let midpoint = opacity_of(&mut app, &key);
-        assert!((midpoint - 0.5).abs() < 0.001, "{midpoint}");
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(opacity_tree(&key, 0.0));
+            tester.pump_widget(opacity_tree(&key, 1.0));
+            tester.pump_by(ms(50));
+            let midpoint = opacity_of(tester, &key);
+            assert!((midpoint - 0.5).abs() < 0.001, "{midpoint}");
 
-        rebuild(&mut app, opacity_tree(&key, 0.0), Duration::from_millis(50));
-        assert!(
-            (opacity_of(&mut app, &key) - midpoint).abs() < 0.001,
-            "the restarted animation still shows the value on screen"
-        );
+            tester.pump_widget(opacity_tree(&key, 0.0));
+            assert!(
+                (opacity_of(tester, &key) - midpoint).abs() < 0.001,
+                "the restarted animation still shows the value on screen"
+            );
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        let quarter = opacity_of(&mut app, &key);
-        assert!(
-            (quarter - 0.25).abs() < 0.001,
-            "the new tween runs from the value on screen, not from 1.0: {quarter}"
-        );
+            tester.pump_by(ms(50));
+            let quarter = opacity_of(tester, &key);
+            assert!(
+                (quarter - 0.25).abs() < 0.001,
+                "the new tween runs from the value on screen, not from 1.0: {quarter}"
+            );
 
-        binding_pump(&mut app, Duration::from_millis(150));
-        assert_eq!(opacity_of(&mut app, &key), 0.0);
+            tester.pump_by(ms(50));
+            assert_eq!(opacity_of(tester, &key), 0.0);
+        });
     }
 
     fn text_style_tree(font_size: f64, seen: &Rc<RefCell<Option<TextStyle>>>) -> WidgetRef {
@@ -4117,115 +4099,109 @@ mod tests {
 
     #[test]
     fn an_animated_default_text_style_interpolates_the_style() {
-        let cell = binding_cell();
-        let seen: Rc<RefCell<Option<TextStyle>>> = Rc::new(RefCell::new(None));
-        let font_size = || {
-            seen.borrow()
-                .as_ref()
-                .expect("the builder ran")
-                .font_size
-                .expect("a font size")
-        };
-        binding_mount(&cell, text_style_tree(10.0, &seen));
-        let mut app = cell.borrow_mut();
-        assert_eq!(font_size(), 10.0);
+        test_widgets(|tester| {
+            let seen: Rc<RefCell<Option<TextStyle>>> = Rc::new(RefCell::new(None));
+            let font_size = || {
+                seen.borrow()
+                    .as_ref()
+                    .expect("the builder ran")
+                    .font_size
+                    .expect("a font size")
+            };
+            tester.pump_widget(text_style_tree(10.0, &seen));
+            assert_eq!(font_size(), 10.0);
 
-        rebuild(&mut app, text_style_tree(20.0, &seen), Duration::ZERO);
-        assert_eq!(font_size(), 10.0);
+            tester.pump_widget(text_style_tree(20.0, &seen));
+            assert_eq!(font_size(), 10.0);
 
-        binding_pump(&mut app, Duration::from_millis(50));
-        let halfway = font_size();
-        assert!((halfway - 15.0).abs() < 0.001, "{halfway}");
+            tester.pump_by(ms(50));
+            let halfway = font_size();
+            assert!((halfway - 15.0).abs() < 0.001, "{halfway}");
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        assert_eq!(font_size(), 20.0);
+            tester.pump_by(ms(50));
+            assert_eq!(font_size(), 20.0);
+        });
     }
 
     #[test]
     fn a_target_that_did_not_change_leaves_the_controller_dismissed() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        binding_mount(&cell, opacity_tree(&key, 0.5));
-        let mut app = cell.borrow_mut();
-        rebuild(&mut app, opacity_tree(&key, 0.5), Duration::ZERO);
-        binding_pump(&mut app, Duration::from_millis(50));
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(opacity_tree(&key, 0.5));
+            tester.pump_widget(opacity_tree(&key, 0.5));
+            tester.pump_by(ms(50));
 
-        let state = key
-            .current_state::<AnimatedOpacityState>(&app)
-            .expect("the widget is mounted");
-        assert!(
-            state.controller(&app).is_dismissed(&app),
-            "an unchanged target does not start the controller"
-        );
-        assert_eq!(opacity_of(&mut app, &key), 0.5);
+            {
+                let app = tester.cell.borrow();
+                let state = key
+                    .current_state::<AnimatedOpacityState>(&app)
+                    .expect("the widget is mounted");
+                assert!(
+                    state.controller(&app).is_dismissed(&app),
+                    "an unchanged target does not start the controller"
+                );
+            }
+            assert_eq!(opacity_of(tester, &key), 0.5);
+        });
     }
 
     #[test]
     fn an_animated_positioned_directional_resolves_start_against_the_text_direction() {
-        let directional = |text_direction: TextDirection| {
-            Directionality::new(
-                text_direction,
-                Stack::new().children([AnimatedPositionedDirectional::new(
-                    SizedBox::expand(),
-                    DURATION,
+        test_widgets(|tester| {
+            let directional = |text_direction: TextDirection| {
+                Directionality::new(
+                    text_direction,
+                    Stack::new().children([AnimatedPositionedDirectional::new(
+                        SizedBox::expand(),
+                        DURATION,
+                    )
+                    .start(10.0)
+                    .top(0.0)
+                    .width(20.0)
+                    .height(10.0)
+                    .into_widget()]),
                 )
-                .start(10.0)
-                .top(0.0)
-                .width(20.0)
-                .height(10.0)
-                .into_widget()]),
-            )
-            .into_widget()
-        };
-        let cell = binding_cell();
-        binding_mount(&cell, directional(TextDirection::Ltr));
-        let mut app = cell.borrow_mut();
-        let positioned = |app: &mut App| {
-            let widget = WidgetsBinding::instance(app)
-                .root_element(app)
-                .expect("a mounted tree");
-            let mut element = widget;
-            loop {
-                let widget = element.widget(app).clone();
-                if let Some(positioned) = widget.as_any().downcast_ref::<Positioned>() {
-                    return (positioned.left, positioned.right);
-                }
-                element = element.children(app)[0];
-            }
-        };
-        assert_eq!(positioned(&mut app), (Some(10.0), None));
+            };
+            tester.pump_widget(directional(TextDirection::Ltr));
+            let positioned = |tester: &WidgetTester| {
+                let element = tester.find_by_type::<Positioned>()[0];
+                tester.widget(element, |positioned: &Positioned| {
+                    (positioned.left, positioned.right)
+                })
+            };
+            assert_eq!(positioned(tester), (Some(10.0), None));
 
-        rebuild(&mut app, directional(TextDirection::Rtl), Duration::ZERO);
-        assert_eq!(positioned(&mut app), (None, Some(10.0)));
+            tester.pump_widget(directional(TextDirection::Rtl));
+            assert_eq!(positioned(tester), (None, Some(10.0)));
+        });
     }
 
     #[test]
     fn unmounting_frees_the_arena_tweens_the_constructors_made() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        binding_mount(&cell, opacity_tree(&key, 0.5));
-        let mut app = cell.borrow_mut();
-        let state = key
-            .current_state::<AnimatedOpacityState>(&app)
-            .expect("the widget is mounted");
-        let tween = app
-            .get(state)
-            .opacity
-            .handle()
-            .expect("for_each_tween made the tween");
-        assert!(app.contains(tween));
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(opacity_tree(&key, 0.5));
+            let tween = {
+                let app = tester.cell.borrow();
+                let state = key
+                    .current_state::<AnimatedOpacityState>(&app)
+                    .expect("the widget is mounted");
+                let tween = app
+                    .get(state)
+                    .opacity
+                    .handle()
+                    .expect("for_each_tween made the tween");
+                assert!(app.contains(tween));
+                tween
+            };
 
-        rebuild(
-            &mut app,
-            SizedBox::square(Some(10.0)).into_widget(),
-            Duration::ZERO,
-        );
-        drop(app);
-        cell.checkpoint();
-        assert!(
-            !cell.borrow().contains(tween),
-            "the last keeper of the arena tween is gone"
-        );
+            tester.pump_widget(SizedBox::square(Some(10.0)));
+            tester.cell.checkpoint();
+            assert!(
+                !tester.cell.borrow().contains(tween),
+                "the last keeper of the arena tween is gone"
+            );
+        });
     }
 
     #[test]
@@ -4254,6 +4230,7 @@ mod tests {
         assert_eq!(halfway.max_height, 20.0);
     }
 
+    /// The container under a `Center`, so the view's tight constraints leave it its own size.
     fn container_tree(key: &GlobalKey, width: f64, on_end: Option<Listener>) -> WidgetRef {
         let mut container = AnimatedContainer::new(DURATION)
             .key(key.clone().into())
@@ -4262,51 +4239,49 @@ mod tests {
         if let Some(on_end) = on_end {
             container = container.on_end(on_end);
         }
-        container.into_widget()
+        crate::widgets::basic::Center::new()
+            .child(container)
+            .into_widget()
     }
 
     #[test]
     fn an_animated_container_animates_its_width_and_calls_on_end_once() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        let ends = Rc::new(Cell::new(0));
-        let counted = Rc::clone(&ends);
-        let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
-        binding_mount(&cell, container_tree(&key, 20.0, Some(on_end.clone())));
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            render_box_of(&mut app, &key).size(&app),
-            Size::new(20.0, 10.0),
-            "the first build does not animate"
-        );
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let ends = Rc::new(Cell::new(0));
+            let counted = Rc::clone(&ends);
+            let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
+            tester.pump_widget(container_tree(&key, 20.0, Some(on_end.clone())));
+            assert_eq!(
+                tester.size_of(&key),
+                Size::new(20.0, 10.0),
+                "the first build does not animate"
+            );
 
-        rebuild(
-            &mut app,
-            container_tree(&key, 40.0, Some(on_end)),
-            Duration::ZERO,
-        );
-        assert_eq!(
-            render_box_of(&mut app, &key).size(&app).width(),
-            20.0,
-            "the frame that starts the animation still shows the old width"
-        );
+            tester.pump_widget(container_tree(&key, 40.0, Some(on_end)));
+            assert_eq!(
+                tester.size_of(&key).width(),
+                20.0,
+                "the frame that starts the animation still shows the old width"
+            );
 
-        binding_pump(&mut app, Duration::from_millis(50));
-        let halfway = render_box_of(&mut app, &key).size(&app).width();
-        assert!(
-            (halfway - 30.0).abs() < 0.001,
-            "halfway between 20 and 40, not {halfway}"
-        );
-        assert_eq!(ends.get(), 0, "the animation is still running");
+            tester.pump_by(ms(50));
+            let halfway = tester.size_of(&key).width();
+            assert!(
+                (halfway - 30.0).abs() < 0.001,
+                "halfway between 20 and 40, not {halfway}"
+            );
+            assert_eq!(ends.get(), 0, "the animation is still running");
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        assert_eq!(render_box_of(&mut app, &key).size(&app).width(), 40.0);
+            tester.pump_by(ms(50));
+            assert_eq!(tester.size_of(&key).width(), 40.0);
 
-        binding_pump(&mut app, Duration::from_millis(150));
-        assert_eq!(ends.get(), 1);
+            tester.pump_by(ms(50));
+            assert_eq!(ends.get(), 1);
 
-        binding_pump(&mut app, Duration::from_millis(200));
-        assert_eq!(ends.get(), 1, "on_end fires once per animation");
+            tester.pump_by(ms(50));
+            assert_eq!(ends.get(), 1, "on_end fires once per animation");
+        });
     }
 
     /// A decoration with Dart's default `==`, identity, as a user's own decoration has.
@@ -4346,45 +4321,43 @@ mod tests {
 
     #[test]
     fn an_animated_container_given_its_own_decoration_again_does_not_animate() {
-        let decorated = |key: &GlobalKey, decoration: &DecorationRef| {
-            AnimatedContainer::new(DURATION)
-                .key(key.clone().into())
-                .decoration(decoration.clone())
-                .into_widget()
-        };
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        let decoration = DecorationRef::new(IdentityDecoration);
-        binding_mount(&cell, decorated(&key, &decoration));
-        let mut app = cell.borrow_mut();
-        let controller = |app: &App| {
-            key.current_state::<AnimatedContainerState>(app)
-                .expect("the widget is mounted")
-                .controller(app)
-        };
+        test_widgets(|tester| {
+            let decorated = |key: &GlobalKey, decoration: &DecorationRef| {
+                AnimatedContainer::new(DURATION)
+                    .key(key.clone().into())
+                    .decoration(decoration.clone())
+                    .into_widget()
+            };
+            let key = GlobalKey::new();
+            let decoration = DecorationRef::new(IdentityDecoration);
+            tester.pump_widget(decorated(&key, &decoration));
+            let controller = |tester: &WidgetTester| {
+                let app = tester.cell.borrow();
+                key.current_state::<AnimatedContainerState>(&app)
+                    .expect("the widget is mounted")
+                    .controller(&app)
+            };
 
-        rebuild(&mut app, decorated(&key, &decoration), Duration::ZERO);
-        assert!(
-            controller(&app).is_dismissed(&app),
-            "the same decoration is no new target"
-        );
+            tester.pump_widget(decorated(&key, &decoration));
+            assert!(
+                controller(tester).is_dismissed(&tester.cell.borrow()),
+                "the same decoration is no new target"
+            );
 
-        let another = DecorationRef::new(IdentityDecoration);
-        rebuild(
-            &mut app,
-            decorated(&key, &another),
-            Duration::from_millis(10),
-        );
-        let controller = controller(&app);
-        assert!(
-            controller.is_animating(&mut app),
-            "another decoration of the same type is, as Dart's identity `==` makes it"
-        );
+            let another = DecorationRef::new(IdentityDecoration);
+            tester.pump_widget(decorated(&key, &another));
+            let controller = controller(tester);
+            assert!(
+                controller.is_animating(&mut tester.cell.borrow_mut()),
+                "another decoration of the same type is, as Dart's identity `==` makes it"
+            );
+        });
     }
 
     /// The global offset of the widget the key is on.
-    fn offset_of(app: &mut App, key: &GlobalKey) -> Offset {
-        render_box_of(app, key).local_to_global(app, Offset::ZERO, None)
+    fn offset_of(tester: &WidgetTester, key: &GlobalKey) -> Offset {
+        let render = tester.render_object(key).as_box().expect("a box");
+        tester.global_rect(render).top_left()
     }
 
     fn padding_tree(key: &GlobalKey, text_direction: TextDirection, start: f64) -> WidgetRef {
@@ -4401,33 +4374,28 @@ mod tests {
 
     #[test]
     fn an_animated_padding_interpolates_a_directional_inset() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        binding_mount(&cell, padding_tree(&key, TextDirection::Ltr, 0.0));
-        let mut app = cell.borrow_mut();
-        assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(padding_tree(&key, TextDirection::Ltr, 0.0));
+            assert_eq!(offset_of(tester, &key), Offset::ZERO);
 
-        rebuild(
-            &mut app,
-            padding_tree(&key, TextDirection::Ltr, 40.0),
-            Duration::ZERO,
-        );
-        binding_pump(&mut app, Duration::from_millis(50));
-        let halfway = offset_of(&mut app, &key).dx();
-        assert!((halfway - 20.0).abs() < 0.001, "{halfway}");
+            tester.pump_widget(padding_tree(&key, TextDirection::Ltr, 40.0));
+            tester.pump_by(ms(50));
+            let halfway = offset_of(tester, &key).dx();
+            assert!((halfway - 20.0).abs() < 0.001, "{halfway}");
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        assert_eq!(offset_of(&mut app, &key).dx(), 40.0);
-
-        let cell = binding_cell();
-        drop(app);
-        binding_mount(&cell, padding_tree(&key, TextDirection::Rtl, 40.0));
-        let mut app = cell.borrow_mut();
-        assert_eq!(
-            offset_of(&mut app, &key),
-            Offset::ZERO,
-            "an rtl start is an inset on the right"
-        );
+            tester.pump_by(ms(50));
+            assert_eq!(offset_of(tester, &key).dx(), 40.0);
+        });
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(padding_tree(&key, TextDirection::Rtl, 40.0));
+            assert_eq!(
+                offset_of(tester, &key),
+                Offset::ZERO,
+                "an rtl start is an inset on the right"
+            );
+        });
     }
 
     fn align_tree(key: &GlobalKey, alignment: AlignmentGeometry) -> WidgetRef {
@@ -4438,22 +4406,18 @@ mod tests {
 
     #[test]
     fn an_animated_align_interpolates_the_alignment() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        binding_mount(&cell, align_tree(&key, AlignmentGeometry::TOP_LEFT));
-        let mut app = cell.borrow_mut();
-        assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(align_tree(&key, AlignmentGeometry::TOP_LEFT));
+            assert_eq!(offset_of(tester, &key), Offset::ZERO);
 
-        rebuild(
-            &mut app,
-            align_tree(&key, AlignmentGeometry::BOTTOM_RIGHT),
-            Duration::ZERO,
-        );
-        binding_pump(&mut app, Duration::from_millis(50));
-        assert_eq!(offset_of(&mut app, &key), Offset::new(145.0, 95.0));
+            tester.pump_widget(align_tree(&key, AlignmentGeometry::BOTTOM_RIGHT));
+            tester.pump_by(ms(50));
+            assert_eq!(offset_of(tester, &key), Offset::new(395.0, 295.0));
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        assert_eq!(offset_of(&mut app, &key), Offset::new(290.0, 190.0));
+            tester.pump_by(ms(50));
+            assert_eq!(offset_of(tester, &key), Offset::new(790.0, 590.0));
+        });
     }
 
     fn slide_tree(key: &GlobalKey, offset: Offset) -> WidgetRef {
@@ -4468,22 +4432,18 @@ mod tests {
 
     #[test]
     fn an_animated_slide_moves_the_child_by_a_fraction_of_its_size() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        binding_mount(&cell, slide_tree(&key, Offset::ZERO));
-        let mut app = cell.borrow_mut();
-        assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(slide_tree(&key, Offset::ZERO));
+            assert_eq!(offset_of(tester, &key), Offset::ZERO);
 
-        rebuild(
-            &mut app,
-            slide_tree(&key, Offset::new(2.0, 0.0)),
-            Duration::ZERO,
-        );
-        binding_pump(&mut app, Duration::from_millis(50));
-        assert_eq!(offset_of(&mut app, &key), Offset::new(10.0, 0.0));
+            tester.pump_widget(slide_tree(&key, Offset::new(2.0, 0.0)));
+            tester.pump_by(ms(50));
+            assert_eq!(offset_of(tester, &key), Offset::new(10.0, 0.0));
 
-        binding_pump(&mut app, Duration::from_millis(100));
-        assert_eq!(offset_of(&mut app, &key), Offset::new(20.0, 0.0));
+            tester.pump_by(ms(50));
+            assert_eq!(offset_of(tester, &key), Offset::new(20.0, 0.0));
+        });
     }
 
     #[test]
@@ -4644,14 +4604,12 @@ mod tests {
     }
 
     fn physical_model_of(
-        app: &mut App,
+        tester: &WidgetTester,
         key: &GlobalKey,
     ) -> RenderHandle<waft_rendering::RenderPhysicalModel> {
-        key.current_context(app)
-            .expect("the widget is mounted")
-            .find_render_object(app)
-            .expect("a mounted render object")
-            .downcast::<waft_rendering::RenderPhysicalModel>(app)
+        let render_object = tester.render_object(key);
+        render_object
+            .downcast::<waft_rendering::RenderPhysicalModel>(&tester.cell.borrow())
             .expect("a RenderPhysicalModel")
     }
 
@@ -4661,98 +4619,98 @@ mod tests {
     fn an_animated_physical_model_animates_its_elevation_and_colour() {
         use waft_rendering::RenderPhysicalModelBase;
         for animate_color in [true, false] {
-            let cell = binding_cell();
-            let key = GlobalKey::new();
-            let red = Color::new(0xFFFF0000);
-            let blue = Color::new(0xFF0000FF);
-            binding_mount(&cell, physical_model_tree(&key, 0.0, red, animate_color));
-            let mut app = cell.borrow_mut();
-            assert_eq!(physical_model_of(&mut app, &key).elevation(&app), 0.0);
-
-            rebuild(
-                &mut app,
-                physical_model_tree(&key, 8.0, blue, animate_color),
-                Duration::ZERO,
-            );
-            binding_pump(&mut app, Duration::from_millis(50));
-            let model = physical_model_of(&mut app, &key);
-            let halfway = model.elevation(&app);
-            assert!((halfway - 4.0).abs() < 0.001, "{halfway}");
-            let color = model.color(&app);
-            if animate_color {
+            test_widgets(|tester| {
+                let key = GlobalKey::new();
+                let red = Color::new(0xFFFF0000);
+                let blue = Color::new(0xFF0000FF);
+                tester.pump_widget(physical_model_tree(&key, 0.0, red, animate_color));
                 assert_eq!(
-                    color,
-                    Color::lerp(Some(red), Some(blue), 0.5).expect("two colours")
+                    physical_model_of(tester, &key).elevation(&tester.cell.borrow()),
+                    0.0
                 );
-            } else {
-                assert_eq!(color, blue);
-            }
 
-            binding_pump(&mut app, Duration::from_millis(100));
-            let model = physical_model_of(&mut app, &key);
-            assert_eq!(model.elevation(&app), 8.0);
-            assert_eq!(model.color(&app), blue);
+                tester.pump_widget(physical_model_tree(&key, 8.0, blue, animate_color));
+                tester.pump_by(ms(50));
+                let model = physical_model_of(tester, &key);
+                let app = tester.cell.borrow();
+                let halfway = model.elevation(&app);
+                assert!((halfway - 4.0).abs() < 0.001, "{halfway}");
+                let color = model.color(&app);
+                if animate_color {
+                    assert_eq!(
+                        color,
+                        Color::lerp(Some(red), Some(blue), 0.5).expect("two colours")
+                    );
+                } else {
+                    assert_eq!(color, blue);
+                }
+                drop(app);
+
+                tester.pump_by(ms(50));
+                let model = physical_model_of(tester, &key);
+                let app = tester.cell.borrow();
+                assert_eq!(model.elevation(&app), 8.0);
+                assert_eq!(model.color(&app), blue);
+            });
         }
     }
 
     /// `implicit_animations_test.dart`: "AnimatedPhysicalModel onEnd callback test".
     #[test]
     fn an_animated_physical_model_calls_on_end_once_its_animation_ends() {
-        let cell = binding_cell();
-        let key = GlobalKey::new();
-        let ends = Rc::new(Cell::new(0));
-        let counted = Rc::clone(&ends);
-        let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
-        let tree = |elevation: f64| {
-            AnimatedPhysicalModel::new(
-                SizedBox::square(Some(10.0)),
-                Color::new(0xFF0000FF),
-                Color::new(0xFF000000),
-                DURATION,
-            )
-            .key(key.clone().into())
-            .elevation(elevation)
-            .on_end(on_end.clone())
-            .into_widget()
-        };
-        binding_mount(&cell, tree(0.0));
-        let mut app = cell.borrow_mut();
-        rebuild(&mut app, tree(4.0), Duration::ZERO);
-        binding_pump(&mut app, Duration::from_millis(50));
-        assert_eq!(ends.get(), 0);
-        binding_pump(&mut app, Duration::from_millis(100));
-        binding_pump(&mut app, Duration::from_millis(150));
-        assert_eq!(ends.get(), 1);
-        binding_pump(&mut app, Duration::from_millis(200));
-        assert_eq!(ends.get(), 1);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let ends = Rc::new(Cell::new(0));
+            let counted = Rc::clone(&ends);
+            let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
+            let tree = |elevation: f64| {
+                AnimatedPhysicalModel::new(
+                    SizedBox::square(Some(10.0)),
+                    Color::new(0xFF0000FF),
+                    Color::new(0xFF000000),
+                    DURATION,
+                )
+                .key(key.clone().into())
+                .elevation(elevation)
+                .on_end(on_end.clone())
+                .into_widget()
+            };
+            tester.pump_widget(tree(0.0));
+            tester.pump_widget(tree(4.0));
+            tester.pump_by(ms(50));
+            assert_eq!(ends.get(), 0);
+            tester.pump_by(ms(50));
+            tester.pump_by(ms(50));
+            assert_eq!(ends.get(), 1);
+            tester.pump_by(ms(50));
+            assert_eq!(ends.get(), 1);
+        });
     }
 
     /// `implicit_animations_test.dart`: "AnimatedPhysicalModel does not crash at zero area".
     #[test]
-    fn an_animated_physical_model_in_a_view_of_no_area_takes_no_space() {
-        let key = GlobalKey::new();
-        let platform = waft_test::TestPlatform::new()
-            .on(waft_embedder::TargetPlatform::MacOS)
-            .with_view(Rc::new(waft_test::TestView::new(0.0, 0.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        binding_mount(
-            &cell,
-            Directionality::new(
+    fn an_animated_physical_model_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            let physical_model_color = Color::new(0xFF009688);
+            let physical_model_shadow_color = Color::new(0xFF64FFDA);
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
-                crate::widgets::basic::Center::new().child(
+                crate::widgets::basic::Center::new().child(SizedBox::shrink().child(
                     AnimatedPhysicalModel::new(
-                        SizedBox::shrink(),
-                        Color::new(0xAABBCC00),
-                        Color::new(0xFF000000),
-                        DURATION,
-                    )
-                    .key(key.clone().into()),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(render_box_of(&mut app, &key).size(&app), Size::ZERO);
+                        Text::new("X"),
+                        physical_model_color,
+                        physical_model_shadow_color,
+                        Duration::from_millis(300),
+                    ),
+                )),
+            ));
+            tester.pump_and_settle();
+            let element = tester.find_by_type::<AnimatedPhysicalModel>()[0];
+            assert_eq!(
+                tester.global_rect(tester.render_box_of(element)).size(),
+                Size::ZERO
+            );
+        });
     }
 
     /// A shape border target is unchanged when it equals the tween's end by Dart's `==`.

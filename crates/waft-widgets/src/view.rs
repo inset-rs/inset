@@ -1167,9 +1167,8 @@ mod tests {
     use crate::framework::{
         BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
     };
-    use crate::test_harness::{
-        binding_cell, binding_mount, binding_pump, binding_pump_view, pump_every_view,
-    };
+    use crate::test_harness::{binding_pump, binding_pump_view, pump_every_view};
+    use crate::testing::test_widgets;
     use crate::widgets::basic::SizedBox;
     use crate::widgets::ticker_provider::{
         SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData,
@@ -1179,39 +1178,39 @@ mod tests {
     /// its view when a render object in it needs layout or paint.
     #[test]
     fn a_dirty_render_object_under_a_view_schedules_a_frame() {
-        let cell = binding_cell();
-        let app = cell.borrow();
-        let key = GlobalKey::new();
-        drop(app);
-        binding_mount(
-            &cell,
-            SizedBox::new()
-                .key(key.clone().into())
-                .width(10.0)
-                .height(10.0)
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        for _ in 0..5 {
-            binding_pump(&mut app, std::time::Duration::from_millis(16));
-        }
-        assert!(
-            !SchedulerBinding::has_scheduled_frame(&mut app),
-            "the tree is idle before the probe"
-        );
-        let render_object = key
-            .current_context(&app)
-            .expect("mounted")
-            .find_render_object(&app)
-            .expect("a render object");
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(
+                SizedBox::new()
+                    .key(key.clone().into())
+                    .width(10.0)
+                    .height(10.0),
+            );
+            tester.pump_by(Duration::from_millis(16));
+            for _ in 0..4 {
+                tester.pump();
+            }
+            let mut app = tester.cell.borrow_mut();
+            assert!(
+                !SchedulerBinding::has_scheduled_frame(&mut app),
+                "the tree is idle before the probe"
+            );
+            let render_object = key
+                .current_context(&app)
+                .expect("mounted")
+                .find_render_object(&app)
+                .expect("a render object");
 
-        render_object.mark_needs_paint(&mut app);
-        assert!(SchedulerBinding::has_scheduled_frame(&mut app));
+            render_object.mark_needs_paint(&mut app);
+            assert!(SchedulerBinding::has_scheduled_frame(&mut app));
 
-        binding_pump(&mut app, std::time::Duration::from_millis(32));
-        assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
-        render_object.mark_needs_layout(&mut app);
-        assert!(SchedulerBinding::has_scheduled_frame(&mut app));
+            drop(app);
+            tester.pump_by(Duration::from_millis(16));
+            let mut app = tester.cell.borrow_mut();
+            assert!(!SchedulerBinding::has_scheduled_frame(&mut app));
+            render_object.mark_needs_layout(&mut app);
+            assert!(SchedulerBinding::has_scheduled_frame(&mut app));
+        });
     }
 
     /// Flutter view_test.dart: platform focus parks on the root and restores the view's history.
@@ -1221,14 +1220,9 @@ mod tests {
         use waft_embedder::{
             ViewFocusDirection as Direction, ViewFocusEvent, ViewFocusState as State,
         };
-        let cell = binding_cell();
-        let (first, last) = {
-            let mut app = cell.borrow_mut();
-            (FocusNode::new(&mut app), FocusNode::new(&mut app))
-        };
-        binding_mount(
-            &cell,
-            crate::Directionality::new(
+        test_widgets(|tester| {
+            let (first, last) = tester.update(|app| (FocusNode::new(app), FocusNode::new(app)));
+            tester.pump_widget(crate::Directionality::new(
                 waft_embedder::TextDirection::Ltr,
                 Row::new().children(vec![
                     Focus::new(SizedBox::new().width(20.0).height(20.0))
@@ -1238,43 +1232,43 @@ mod tests {
                         .focus_node(last.erase())
                         .into_widget(),
                 ]),
-            )
-            .into_widget(),
-        );
-        let event = |state, direction| {
-            let mut app = cell.borrow_mut();
-            let view_id = crate::test_harness::platform_view(&app).id();
-            WidgetsBinding::instance(&mut app).handle_view_focus_changed(
-                &mut app,
-                ViewFocusEvent {
-                    view_id,
-                    state,
-                    direction,
-                },
-            );
-            drop(app);
-            cell.checkpoint();
-        };
-        event(State::Focused, Direction::Forward);
-        assert!(first.has_primary_focus(&cell.borrow()));
-        event(State::Unfocused, Direction::Undefined);
-        {
-            let mut app = cell.borrow_mut();
-            assert!(
-                FocusManager::instance(&mut app)
-                    .root_scope(&app)
-                    .handle()
-                    .has_primary_focus(&app)
-            );
-        }
-        event(State::Focused, Direction::Undefined);
-        assert!(first.has_primary_focus(&cell.borrow()));
-        event(State::Unfocused, Direction::Undefined);
-        event(State::Focused, Direction::Backward);
-        assert!(last.has_primary_focus(&cell.borrow()));
-        event(State::Unfocused, Direction::Undefined);
-        event(State::Focused, Direction::Undefined);
-        assert!(last.has_primary_focus(&cell.borrow()));
+            ));
+            let cell = Rc::clone(&tester.cell);
+            let view_id = waft_embedder::View::id(&**tester.view());
+            let event = |state, direction| {
+                let mut app = cell.borrow_mut();
+                WidgetsBinding::instance(&mut app).handle_view_focus_changed(
+                    &mut app,
+                    ViewFocusEvent {
+                        view_id,
+                        state,
+                        direction,
+                    },
+                );
+                drop(app);
+                cell.checkpoint();
+            };
+            event(State::Focused, Direction::Forward);
+            assert!(first.has_primary_focus(&cell.borrow()));
+            event(State::Unfocused, Direction::Undefined);
+            {
+                let mut app = cell.borrow_mut();
+                assert!(
+                    FocusManager::instance(&mut app)
+                        .root_scope(&app)
+                        .handle()
+                        .has_primary_focus(&app)
+                );
+            }
+            event(State::Focused, Direction::Undefined);
+            assert!(first.has_primary_focus(&cell.borrow()));
+            event(State::Unfocused, Direction::Undefined);
+            event(State::Focused, Direction::Backward);
+            assert!(last.has_primary_focus(&cell.borrow()));
+            event(State::Unfocused, Direction::Undefined);
+            event(State::Focused, Direction::Undefined);
+            assert!(last.has_primary_focus(&cell.borrow()));
+        });
     }
 
     const FIRST: ViewId = ViewId(1);

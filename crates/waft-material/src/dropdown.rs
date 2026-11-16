@@ -3501,14 +3501,16 @@ mod tests {
         StatefulBuilder,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::material_localizations::DefaultMaterialLocalizations;
     use crate::page::MaterialPageRoute;
-    use crate::test_support::{
-        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, tester, tester_on};
+    use crate::tooltip::tests::m2;
     use waft_widgets::AnyFocusNode;
 
     const MENU_ITEMS: [&str; 4] = ["one", "two", "three", "four"];
@@ -3968,8 +3970,8 @@ mod tests {
 
     /// `pump()` then `pump(1s)`: finish the menu animation.
     fn settle_menu(tester: &mut WidgetTester) {
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_secs(1));
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
     }
 
     /// Dart's `checkSelectedItemTextGeometry`: the two paragraphs of the selected item's text,
@@ -3995,8 +3997,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_control_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (value, did_change_value) = value_log();
             *value.borrow_mut() = Some("one".to_owned());
             let build = |value: &Rc<RefCell<Option<String>>>| {
@@ -4005,24 +4006,24 @@ mod tests {
                     .on_changed(Rc::clone(&did_change_value))
             };
 
-            pump_frame(&mut tester, &build(&value));
+            pump_frame(tester, &build(&value));
 
-            tap_text(&mut tester, "one");
-            settle_menu(&mut tester);
+            tap_text(tester, "one");
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("one"));
 
-            tap_last_text(&mut tester, "three");
-            settle_menu(&mut tester);
+            tap_last_text(tester, "three");
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("three"));
 
-            tap_first_text_anywhere(&mut tester, "three");
-            settle_menu(&mut tester);
+            tap_first_text_anywhere(tester, "three");
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("three"));
 
-            pump_frame(&mut tester, &build(&value));
+            pump_frame(tester, &build(&value));
 
-            tap_last_text(&mut tester, "two");
-            settle_menu(&mut tester);
+            tap_last_text(tester, "two");
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("two"));
         });
     }
@@ -4171,8 +4172,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_with_no_app() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (value, did_change_value) = value_log();
             *value.borrow_mut() = Some("one".to_owned());
             let build = |tester: &WidgetTester| {
@@ -4211,26 +4211,26 @@ mod tests {
                 .into_widget()
             };
 
-            let root = build(&tester);
+            let root = build(tester);
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "one");
-            settle_menu(&mut tester);
+            tap_text(tester, "one");
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("one"));
 
-            tap_last_text(&mut tester, "three");
-            settle_menu(&mut tester);
+            tap_last_text(tester, "three");
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("three"));
 
-            tap_first_text_anywhere(&mut tester, "three");
-            settle_menu(&mut tester);
+            tap_first_text_anywhere(tester, "three");
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("three"));
 
-            let root = build(&tester);
+            let root = build(tester);
             tester.pump_widget(root);
 
-            tap_last_text(&mut tester, "two");
-            settle_menu(&mut tester);
+            tap_last_text(tester, "two");
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("two"));
         });
     }
@@ -4265,8 +4265,7 @@ mod tests {
 
     #[test]
     fn dropdown_form_field_uses_form_field_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let value: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
             let saved = Rc::clone(&value);
@@ -4308,12 +4307,12 @@ mod tests {
 
             // Initial value of null displays hint
             assert_eq!(*value.borrow(), None);
-            assert_eq!(indexed_stack_index(&tester), Some(4));
-            tap_first_text_anywhere(&mut tester, "Select Value");
+            assert_eq!(indexed_stack_index(tester), Some(4));
+            tap_first_text_anywhere(tester, "Select Value");
             tester.pump_and_settle();
-            tap_last_text(&mut tester, "three");
+            tap_last_text(tester, "three");
             tester.pump_and_settle();
-            assert_eq!(indexed_stack_index(&tester), Some(2));
+            assert_eq!(indexed_stack_index(tester), Some(2));
             // Changes only made to FormField state until form saved
             assert_eq!(*value.borrow(), None);
             let form = form_key
@@ -4333,8 +4332,7 @@ mod tests {
 
     #[test]
     fn dropdown_form_field_only_uses_initial_value_parameter_when_first_built_and_when_reset() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 StatefulBuilder::new(move |_app, _context, set_state| {
@@ -4354,17 +4352,17 @@ mod tests {
                 .into_widget(),
             );
             tester.pump_widget(root);
-            let state = form_field_state(&tester);
+            let state = form_field_state(tester);
             assert_eq!(
                 state.value(&tester.cell.borrow()).map(String::as_str),
                 Some("one")
             );
 
             // Open the dropdown menu.
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
 
-            tap_last_text(&mut tester, "three");
+            tap_last_text(tester, "three");
             tester.pump_and_settle();
 
             // The value should update to selected, not the initial value.
@@ -4375,7 +4373,7 @@ mod tests {
             );
 
             state.reset(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Reset to the initial value.
             assert_eq!(tester.find_onstage_text("one").len(), 1);
@@ -4388,11 +4386,10 @@ mod tests {
 
     #[test]
     fn dropdown_in_list_view() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/12053
             // Positions a DropdownButton at the left and right edges of the screen,
             // forcing it to be sized down to the viewport width
-            let mut tester = tester();
             let item_key = key("item");
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
@@ -4412,22 +4409,21 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            tap_text(&mut tester, "foo");
-            tester.pump(Duration::ZERO);
-            let item_boxes: Vec<AnyRenderBox> = all_by_key(&tester, &item_key)
+            tap_text(tester, "foo");
+            tester.pump();
+            let item_boxes: Vec<AnyRenderBox> = all_by_key(tester, &item_key)
                 .into_iter()
                 .map(|element| tester.render_box_of(element))
                 .collect();
-            assert_eq!(global_top_left(&tester, item_boxes[0]).dx(), 0.0);
-            assert_eq!(global_top_left(&tester, item_boxes[1]).dx(), 16.0);
-            assert_eq!(size_of(&tester, item_boxes[1]).width(), 800.0 - 16.0 * 2.0);
+            assert_eq!(global_top_left(tester, item_boxes[0]).dx(), 0.0);
+            assert_eq!(global_top_left(tester, item_boxes[1]).dx(), 16.0);
+            assert_eq!(size_of(tester, item_boxes[1]).width(), 800.0 - 16.0 * 2.0);
         });
     }
 
     #[test]
     fn dropdown_screen_edges() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(Some(4)));
             let set_value = Rc::clone(&value);
             let handle_changed: ValueChanged<Option<i32>> =
@@ -4452,25 +4448,24 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "4");
-            settle_menu(&mut tester);
+            tap_text(tester, "4");
+            settle_menu(tester);
 
             // We should have two copies of item 5, one in the menu and one in the
             // button itself.
             assert_eq!(tester.find_text("5").len(), 2);
 
             assert_eq!(value.get(), Some(4));
-            tap_key(&mut tester, &button_key);
+            tap_key(tester, &button_key);
             assert_eq!(value.get(), Some(4));
             // this waits for the route's completer to complete, which calls handleChanged
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(value.get(), Some(4));
         });
     }
 
     fn dropdown_button_aligns_selected_menu_item(text_direction: TextDirection) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let build = frame()
                 .button_key(&button_key)
@@ -4478,48 +4473,48 @@ mod tests {
                 .on_changed(on_changed())
                 .use_material3(false);
 
-            pump_frame(&mut tester, &build);
-            let button_box = key_box(&tester, &button_key);
-            let button_origin_before_tap = global_top_left(&tester, button_box);
+            pump_frame(tester, &build);
+            let button_box = key_box(tester, &button_key);
+            let button_origin_before_tap = global_top_left(tester, button_box);
 
-            tap_text(&mut tester, "two");
-            settle_menu(&mut tester);
+            tap_text(tester, "two");
+            settle_menu(tester);
 
             // Tapping the dropdown button should not cause it to move.
             assert_eq!(
-                global_top_left(&tester, button_box),
+                global_top_left(tester, button_box),
                 button_origin_before_tap
             );
 
             // The selected dropdown item is both in menu we just popped up, and in
             // the IndexedStack contained by the dropdown button. Both of them should
             // have the same origin and height as the dropdown button.
-            let item_boxes = boxes_of(&tester, "two");
+            let item_boxes = boxes_of(tester, "two");
             assert_eq!(item_boxes.len(), 2);
             for item_box in item_boxes {
                 match text_direction {
                     TextDirection::Rtl => {
                         assert_eq!(
-                            rect_of(&tester, button_box).bottom_right(),
-                            rect_of(&tester, item_box).bottom_right()
+                            rect_of(tester, button_box).bottom_right(),
+                            rect_of(tester, item_box).bottom_right()
                         );
                     }
                     TextDirection::Ltr => {
                         assert_eq!(
-                            global_top_left(&tester, button_box),
-                            global_top_left(&tester, item_box)
+                            global_top_left(tester, button_box),
+                            global_top_left(tester, item_box)
                         );
                     }
                 }
                 assert_eq!(
-                    size_of(&tester, button_box).height(),
-                    size_of(&tester, item_box).height()
+                    size_of(tester, button_box).height(),
+                    size_of(tester, item_box).height()
                 );
             }
 
             // The two RenderParagraph objects, for the 'two' items' Text children,
             // should have the same size and location.
-            check_selected_item_text_geometry(&tester, "two");
+            check_selected_item_text_geometry(tester, "two");
         });
     }
 
@@ -4535,24 +4530,23 @@ mod tests {
 
     #[test]
     fn arrow_icon_aligns_with_the_edge_of_button_when_expanded() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .expanded(true)
                     .on_changed(on_changed()),
             );
-            let button_box = key_box(&tester, &button_key);
+            let button_box = key_box(tester, &button_key);
             let arrow_icon = tester.render_box_of(tester.find_by_icon(&Icons::arrow_drop_down()));
 
             // Arrow icon should be aligned with far right of button when expanded
-            let button_size = size_of(&tester, button_box);
-            let arrow_size = size_of(&tester, arrow_icon);
+            let button_size = size_of(tester, button_box);
+            let arrow_size = size_of(tester, arrow_icon);
             assert_eq!(
-                global_top_left(&tester, arrow_icon).dx(),
+                global_top_left(tester, arrow_icon).dx(),
                 button_size
                     .center_right(Offset::new(-arrow_size.width(), 0.0))
                     .dx()
@@ -4562,8 +4556,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_icon_will_accept_widgets_as_icons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_key = GlobalKey::new();
             let custom_widget = Container::new()
                 .key(custom_key.clone().into())
@@ -4580,22 +4573,22 @@ mod tests {
                 .into_widget();
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame().icon(custom_widget).on_changed(on_changed()),
             );
 
             assert!(custom_key.current_context(&tester.cell.borrow()).is_some());
-            assert!(icons_showing(&tester, &Icons::arrow_drop_down()).is_empty());
+            assert!(icons_showing(tester, &Icons::arrow_drop_down()).is_empty());
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .icon(Icon::new(Some(Icons::assessment())).into_widget())
                     .on_changed(on_changed()),
             );
 
-            assert_eq!(icons_showing(&tester, &Icons::assessment()).len(), 1);
-            assert!(icons_showing(&tester, &Icons::arrow_drop_down()).is_empty());
+            assert_eq!(icons_showing(tester, &Icons::assessment()).len(), 1);
+            assert!(icons_showing(tester, &Icons::arrow_drop_down()).is_empty());
         });
     }
 
@@ -4612,43 +4605,35 @@ mod tests {
 
     #[test]
     fn dropdown_button_icon_should_have_default_size_and_colors_when_not_defined() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_key = GlobalKey::new();
             let custom_icon = Icon::new(Some(Icons::assessment()))
                 .key(icon_key.clone().into())
                 .into_widget();
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame().icon(custom_icon.clone()).on_changed(on_changed()),
             );
 
             // test for size
             assert_eq!(
-                size_of(&tester, icon_box(&tester, &icon_key)),
+                size_of(tester, icon_box(tester, &icon_key)),
                 Size::new(24.0, 24.0)
             );
 
             // test for enabled color
-            assert_eq!(
-                icon_color(&tester, &icon_key),
-                Some(Colors::GREY.shade700())
-            );
+            assert_eq!(icon_color(tester, &icon_key), Some(Colors::GREY.shade700()));
 
             // test for disabled color
-            pump_frame(&mut tester, &frame().icon(custom_icon));
-            assert_eq!(
-                icon_color(&tester, &icon_key),
-                Some(Colors::GREY.shade400())
-            );
+            pump_frame(tester, &frame().icon(custom_icon));
+            assert_eq!(icon_color(tester, &icon_key), Some(Colors::GREY.shade400()));
         });
     }
 
     #[test]
     fn dropdown_button_icon_should_have_the_passed_in_size_and_color_instead_of_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_key = GlobalKey::new();
             let custom_icon = Icon::new(Some(Icons::assessment()))
                 .key(icon_key.clone().into())
@@ -4658,21 +4643,21 @@ mod tests {
                 .icon_size(30.0)
                 .icon_colors(Colors::PINK.primary(), Colors::ORANGE.primary());
 
-            pump_frame(&mut tester, &build.clone().on_changed(on_changed()));
+            pump_frame(tester, &build.clone().on_changed(on_changed()));
 
             // test for size
             assert_eq!(
-                size_of(&tester, icon_box(&tester, &icon_key)),
+                size_of(tester, icon_box(tester, &icon_key)),
                 Size::new(30.0, 30.0)
             );
 
             // test for enabled color
-            assert_eq!(icon_color(&tester, &icon_key), Some(Colors::PINK.primary()));
+            assert_eq!(icon_color(tester, &icon_key), Some(Colors::PINK.primary()));
 
             // test for disabled color
-            pump_frame(&mut tester, &build);
+            pump_frame(tester, &build);
             assert_eq!(
-                icon_color(&tester, &icon_key),
+                icon_color(tester, &icon_key),
                 Some(Colors::ORANGE.primary())
             );
         });
@@ -4681,8 +4666,7 @@ mod tests {
     #[test]
     fn dropdown_button_should_use_its_own_size_and_color_properties_over_those_defined_by_the_theme()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_key = GlobalKey::new();
             let custom_icon = Icon::new(Some(Icons::assessment()))
                 .key(icon_key.clone().into())
@@ -4694,24 +4678,24 @@ mod tests {
                 .icon_size(30.0)
                 .icon_colors(Colors::PINK.primary(), Colors::ORANGE.primary());
 
-            pump_frame(&mut tester, &build.clone().on_changed(on_changed()));
+            pump_frame(tester, &build.clone().on_changed(on_changed()));
 
             // test for size
             assert_eq!(
-                size_of(&tester, icon_box(&tester, &icon_key)),
+                size_of(tester, icon_box(tester, &icon_key)),
                 Size::new(40.0, 40.0)
             );
 
             // test for enabled color
             assert_eq!(
-                icon_color(&tester, &icon_key),
+                icon_color(tester, &icon_key),
                 Some(Colors::YELLOW.primary())
             );
 
             // test for disabled color
-            pump_frame(&mut tester, &build);
+            pump_frame(tester, &build);
             assert_eq!(
-                icon_color(&tester, &icon_key),
+                icon_color(tester, &icon_key),
                 Some(Colors::YELLOW.primary())
             );
         });
@@ -4719,53 +4703,51 @@ mod tests {
 
     #[test]
     fn dropdown_button_with_is_dense_true_aligns_selected_menu_item() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .dense(true)
                     .on_changed(on_changed()),
             );
-            let button_box = key_box(&tester, &button_key);
+            let button_box = key_box(tester, &button_key);
 
-            tap_text(&mut tester, "two");
-            settle_menu(&mut tester);
+            tap_text(tester, "two");
+            settle_menu(tester);
 
             // The selected dropdown item is both in menu we just popped up, and in
             // the IndexedStack contained by the dropdown button. Both of them should
             // have the same vertical center as the button.
-            let item_boxes = boxes_of(&tester, "two");
+            let item_boxes = boxes_of(tester, "two");
             assert_eq!(item_boxes.len(), 2);
 
             // When isDense is true, the button's height is reduced. The menu items'
             // heights are not.
             let menu_item_height = item_boxes
                 .iter()
-                .map(|item_box| size_of(&tester, *item_box).height())
+                .map(|item_box| size_of(tester, *item_box).height())
                 .fold(f64::MIN, f64::max);
-            assert!(menu_item_height > size_of(&tester, button_box).height());
+            assert!(menu_item_height > size_of(tester, button_box).height());
 
             for item_box in item_boxes {
                 assert_eq!(
-                    rect_of(&tester, button_box).center().dy(),
-                    rect_of(&tester, item_box).center().dy()
+                    rect_of(tester, button_box).center().dy(),
+                    rect_of(tester, item_box).center().dy()
                 );
             }
 
             // The two RenderParagraph objects, for the 'two' items' Text children,
             // should have the same size and location.
-            check_selected_item_text_geometry(&tester, "two");
+            check_selected_item_text_geometry(tester, "two");
         });
     }
 
     #[test]
     fn dropdown_button_can_have_a_text_style_with_no_font_size_specified() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/33425
-            let mut tester = tester();
             let root = test_app(TextDirection::Ltr, None, || {
                 Material::new()
                     .child(
@@ -4806,12 +4788,11 @@ mod tests {
 
     #[test]
     fn dropdown_menu_scrolls_to_first_item_in_long_lists() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Open the dropdown menu
             let button_key = GlobalKey::new();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     // nothing selected
@@ -4819,13 +4800,13 @@ mod tests {
                     .items(Some(numbers(100)))
                     .on_changed(on_changed()),
             );
-            tap_key(&mut tester, &button_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &button_key);
+            tester.pump();
             tester.pump_and_settle(); // finish the menu animation
 
             // Find the first item in the scrollable dropdown list
-            let menu_item_container = scrollable_box(&tester);
-            let first_item = menu_item_box(&tester, "0");
+            let menu_item_container = scrollable_box(tester);
+            let first_item = menu_item_box(tester, "0");
 
             // List should be scrolled so that the first item is at the top. Menu items
             // are offset 8.0 from the top edge of the scrollable menu.
@@ -4835,54 +4816,52 @@ mod tests {
                     .local_to_global(&app, Offset::new(0.0, -8.0), None)
                     .dy()
             };
-            assert_eq!(first_top, rect_of(&tester, menu_item_container).top);
+            assert_eq!(first_top, rect_of(tester, menu_item_container).top);
         });
     }
 
     #[test]
     fn dropdown_menu_aligns_selected_item_with_button_in_long_lists() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Open the dropdown menu
             let button_key = GlobalKey::new();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .initial_value(Some("50"))
                     .items(Some(numbers(100)))
                     .on_changed(on_changed()),
             );
-            let button_box = key_box(&tester, &button_key);
-            tap_key(&mut tester, &button_key);
+            let button_box = key_box(tester, &button_key);
+            tap_key(tester, &button_key);
             tester.pump_and_settle(); // finish the menu animation
 
             // Find the selected item in the scrollable dropdown list
-            let selected_item = menu_item_box(&tester, "50");
+            let selected_item = menu_item_box(tester, "50");
 
             // List should be scrolled so that the selected item is in line with the button
             assert_eq!(
-                rect_of(&tester, selected_item).center().dy(),
-                rect_of(&tester, button_box).center().dy()
+                rect_of(tester, selected_item).center().dy(),
+                rect_of(tester, button_box).center().dy()
             );
         });
     }
 
     #[test]
     fn dropdown_menu_scrolls_to_last_item_in_long_lists() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .initial_value(Some("99"))
                     .items(Some(numbers(100)))
                     .on_changed(on_changed()),
             );
-            tap_key(&mut tester, &button_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &button_key);
+            tester.pump();
 
             let list_view = only(tester.find_by_type::<ListView>());
             {
@@ -4896,8 +4875,8 @@ mod tests {
             }
 
             // Find the selected item in the scrollable dropdown list
-            let menu_item_container = scrollable_box(&tester);
-            let selected_item = menu_item_box(&tester, "99");
+            let menu_item_container = scrollable_box(tester);
+            let selected_item = menu_item_box(tester, "99");
 
             // kMaterialListPadding.vertical is 8.
             let container_bottom = {
@@ -4909,14 +4888,13 @@ mod tests {
                     + size.height()
             };
             // Selected item should be aligned to the bottom of the dropdown menu.
-            assert_eq!(rect_of(&tester, selected_item).bottom, container_bottom);
+            assert_eq!(rect_of(tester, selected_item).bottom, container_bottom);
         });
     }
 
     #[test]
     fn size_of_dropdown_button_with_null_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let build = |value: Option<&str>| {
                 frame()
@@ -4925,26 +4903,25 @@ mod tests {
                     .on_changed(on_changed())
             };
 
-            pump_frame(&mut tester, &build(None));
-            let button_box_null_value = key_box(&tester, &button_key);
+            pump_frame(tester, &build(None));
+            let button_box_null_value = key_box(tester, &button_key);
 
-            pump_frame(&mut tester, &build(Some("three")));
-            let button_box = key_box(&tester, &button_key);
+            pump_frame(tester, &build(Some("three")));
+            let button_box = key_box(tester, &button_key);
 
             // A Dropdown button with a null value should be the same size as a
             // one with a non-null value.
             assert_eq!(
-                rect_of(&tester, button_box),
-                rect_of(&tester, button_box_null_value)
+                rect_of(tester, button_box),
+                rect_of(tester, button_box_null_value)
             );
         });
     }
 
     #[test]
     fn size_of_dropdown_button_with_no_items() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/26419
-            let mut tester = tester();
             let button_key = GlobalKey::new();
             let build = |items: Option<Vec<String>>| {
                 frame()
@@ -4953,28 +4930,27 @@ mod tests {
                     .on_changed(on_changed())
             };
 
-            pump_frame(&mut tester, &build(None));
-            let button_box_null_items = key_box(&tester, &button_key);
+            pump_frame(tester, &build(None));
+            let button_box_null_items = key_box(tester, &button_key);
 
-            pump_frame(&mut tester, &build(Some(Vec::new())));
-            let _button_box_empty_items = key_box(&tester, &button_key);
+            pump_frame(tester, &build(Some(Vec::new())));
+            let _button_box_empty_items = key_box(tester, &button_key);
 
-            pump_frame(&mut tester, &build(Some(strings(&MENU_ITEMS))));
-            let button_box = key_box(&tester, &button_key);
+            pump_frame(tester, &build(Some(strings(&MENU_ITEMS))));
+            let button_box = key_box(tester, &button_key);
 
             // A Dropdown button with a null value should be the same size as a
             // one with a non-null value.
             assert_eq!(
-                rect_of(&tester, button_box),
-                rect_of(&tester, button_box_null_items)
+                rect_of(tester, button_box),
+                rect_of(tester, button_box_null_items)
             );
         });
     }
 
     #[test]
     fn layout_of_a_dropdown_button_with_null_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let (value, set_value) = value_log();
             let build = |value: &Rc<RefCell<Option<String>>>| {
@@ -4984,25 +4960,24 @@ mod tests {
                     .on_changed(Rc::clone(&set_value))
             };
 
-            pump_frame(&mut tester, &build(&value));
+            pump_frame(tester, &build(&value));
 
             // Show the menu.
-            tap_key(&mut tester, &button_key);
-            settle_menu(&mut tester);
+            tap_key(tester, &button_key);
+            settle_menu(tester);
 
             // Tap on item 'one', which must appear over the button.
-            tap_key(&mut tester, &button_key);
-            settle_menu(&mut tester);
+            tap_key(tester, &button_key);
+            settle_menu(tester);
 
-            pump_frame(&mut tester, &build(&value));
+            pump_frame(tester, &build(&value));
             assert_eq!(value.borrow().as_deref(), Some("one"));
         });
     }
 
     #[test]
     fn size_of_dropdown_button_with_null_value_and_a_hint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             // The hint will define the dropdown's width
             let build = |value: Option<&str>| {
@@ -5012,40 +4987,38 @@ mod tests {
                     .hint(Text::new("onetwothree").into_widget())
             };
 
-            pump_frame(&mut tester, &build(None));
+            pump_frame(tester, &build(None));
             assert_eq!(tester.find_onstage_text("onetwothree").len(), 1);
-            let button_box_hint_value = key_box(&tester, &button_key);
+            let button_box_hint_value = key_box(tester, &button_key);
 
-            pump_frame(&mut tester, &build(Some("three")));
-            let button_box = key_box(&tester, &button_key);
+            pump_frame(tester, &build(Some("three")));
+            let button_box = key_box(tester, &button_key);
 
             // A Dropdown button with a null value and a hint should be the same size as a
             // one with a non-null value.
             assert_eq!(
-                rect_of(&tester, button_box),
-                rect_of(&tester, button_box_hint_value)
+                rect_of(tester, button_box),
+                rect_of(tester, button_box_hint_value)
             );
         });
     }
 
     #[test]
     fn dropdown_menus_must_fit_within_the_screen() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // In all of the tests that follow we're assuming that the dropdown menu
             // is horizontally aligned with the center of the dropdown button and padded
             // on the top, left, and right.
             let button_padding = EdgeInsets::only(16.0, 8.0, 24.0, 0.0);
 
             let mut pop_up_and_down = |frame: Frame| -> (Rect, Rect) {
-                pump_frame(&mut tester, &frame);
-                let button = the_button(&tester);
-                tap_box(&mut tester, button);
+                pump_frame(tester, &frame);
+                let button = the_button(tester);
+                tap_box(tester, button);
                 tester.pump_and_settle();
-                let menu_rect = menu_rect(&tester);
-                let button_rect =
-                    button_padding.inflate_rect(rect_of(&tester, the_button(&tester)));
-                tap_box(&mut tester, button);
+                let menu_rect = menu_rect(tester);
+                let button_rect = button_padding.inflate_rect(rect_of(tester, the_button(tester)));
+                tap_box(tester, button);
                 (menu_rect, button_rect)
             };
             let last = Some(*MENU_ITEMS.last().expect("items"));
@@ -5165,28 +5138,27 @@ mod tests {
 
     #[test]
     fn dropdown_menus_are_dismissed_on_screen_orientation_changes_but_not_on_keyboard_hide() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build = |size: Size| frame().on_changed(on_changed()).media_size(size);
-            pump_frame(&mut tester, &build(Size::new(800.0, 600.0)));
-            let button = the_button(&tester);
-            tap_box(&mut tester, button);
+            pump_frame(tester, &build(Size::new(800.0, 600.0)));
+            let button = the_button(tester);
+            tap_box(tester, button);
             tester.pump_and_settle();
             assert_eq!(tester.find_onstage_by_type::<ListView>().len(), 1);
 
             // Show a keyboard (simulate by shortening the height).
-            pump_frame(&mut tester, &build(Size::new(800.0, 300.0)));
-            tester.pump(Duration::ZERO);
+            pump_frame(tester, &build(Size::new(800.0, 300.0)));
+            tester.pump();
             assert_eq!(tester.find_by_type::<ListView>().len(), 1);
 
             // Hide a keyboard again (simulate by increasing the height).
-            pump_frame(&mut tester, &build(Size::new(800.0, 600.0)));
-            tester.pump(Duration::ZERO);
+            pump_frame(tester, &build(Size::new(800.0, 600.0)));
+            tester.pump();
             assert_eq!(tester.find_by_type::<ListView>().len(), 1);
 
             // Rotate the device (simulate by changing the aspect ratio).
-            pump_frame(&mut tester, &build(Size::new(600.0, 800.0)));
-            tester.pump(Duration::ZERO);
+            pump_frame(tester, &build(Size::new(600.0, 800.0)));
+            tester.pump();
             assert!(tester.find_by_type::<ListView>().is_empty());
         });
     }
@@ -5209,8 +5181,7 @@ mod tests {
 
     #[test]
     fn disabled_hint_displays_on_empty_items_or_on_changed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let build = |items: Option<Vec<String>>,
                          on_changed: Option<ValueChanged<Option<String>>>| {
@@ -5225,33 +5196,33 @@ mod tests {
             };
 
             // [disabledHint] should display when [items] is null
-            pump_frame(&mut tester, &build(None, Some(on_changed())));
-            assert_eq!(shows(&tester, "enabled"), 0);
-            assert_eq!(shows(&tester, "disabled"), 1);
+            pump_frame(tester, &build(None, Some(on_changed())));
+            assert_eq!(shows(tester, "enabled"), 0);
+            assert_eq!(shows(tester, "disabled"), 1);
 
             // [disabledHint] should display when [items] is an empty list.
-            pump_frame(&mut tester, &build(Some(Vec::new()), Some(on_changed())));
-            assert_eq!(shows(&tester, "enabled"), 0);
-            assert_eq!(shows(&tester, "disabled"), 1);
+            pump_frame(tester, &build(Some(Vec::new()), Some(on_changed())));
+            assert_eq!(shows(tester, "enabled"), 0);
+            assert_eq!(shows(tester, "disabled"), 1);
 
             // [disabledHint] should display when [onChanged] is null
-            pump_frame(&mut tester, &build(Some(strings(&MENU_ITEMS)), None));
-            assert_eq!(shows(&tester, "enabled"), 0);
-            assert_eq!(shows(&tester, "disabled"), 1);
-            let disabled_hint_box = key_box(&tester, &button_key);
+            pump_frame(tester, &build(Some(strings(&MENU_ITEMS)), None));
+            assert_eq!(shows(tester, "enabled"), 0);
+            assert_eq!(shows(tester, "disabled"), 1);
+            let disabled_hint_box = key_box(tester, &button_key);
 
             // A Dropdown button with a disabled hint should be the same size as a
             // one with a regular enabled hint.
             pump_frame(
-                &mut tester,
+                tester,
                 &build(Some(strings(&MENU_ITEMS)), Some(on_changed())),
             );
-            assert_eq!(shows(&tester, "disabled"), 0);
-            assert_eq!(shows(&tester, "enabled"), 1);
-            let enabled_hint_box = key_box(&tester, &button_key);
+            assert_eq!(shows(tester, "disabled"), 0);
+            assert_eq!(shows(tester, "enabled"), 1);
+            let enabled_hint_box = key_box(tester, &button_key);
             assert_eq!(
-                rect_of(&tester, enabled_hint_box),
-                rect_of(&tester, disabled_hint_box)
+                rect_of(tester, enabled_hint_box),
+                rect_of(tester, disabled_hint_box)
             );
         });
     }
@@ -5259,8 +5230,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/70177
     #[test]
     fn disabled_hint_behavior_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build = |on_changed: Option<ValueChanged<Option<String>>>,
                          value: Option<&str>,
                          hint: Option<&str>,
@@ -5275,45 +5245,44 @@ mod tests {
             };
 
             // The selected value should be displayed when the button is disabled.
-            pump_frame(&mut tester, &build(None, Some("two"), None, None));
+            pump_frame(tester, &build(None, Some("two"), None, None));
             // The dropdown icon and the selected menu item are vertically aligned.
-            assert_eq!(text_center_dy(&tester, "two"), icon_center_dy(&tester));
+            assert_eq!(text_center_dy(tester, "two"), icon_center_dy(tester));
 
             // If [value] is null, the button is enabled, hint is displayed.
             pump_frame(
-                &mut tester,
+                tester,
                 &build(Some(on_changed()), None, Some("hint"), Some("disabledHint")),
             );
-            assert_eq!(text_center_dy(&tester, "hint"), icon_center_dy(&tester));
+            assert_eq!(text_center_dy(tester, "hint"), icon_center_dy(tester));
 
             // If [value] is null, the button is disabled, [disabledHint] is displayed when [disabledHint] is non-null.
             pump_frame(
-                &mut tester,
+                tester,
                 &build(None, None, Some("hint"), Some("disabledHint")),
             );
             assert_eq!(
-                text_center_dy(&tester, "disabledHint"),
-                icon_center_dy(&tester)
+                text_center_dy(tester, "disabledHint"),
+                icon_center_dy(tester)
             );
 
             // If [value] is null, the button is disabled, [hint] is displayed when [disabledHint] is null.
-            pump_frame(&mut tester, &build(None, None, Some("hint"), None));
-            assert_eq!(text_center_dy(&tester, "hint"), icon_center_dy(&tester));
+            pump_frame(tester, &build(None, None, Some("hint"), None));
+            assert_eq!(text_center_dy(tester, "hint"), icon_center_dy(tester));
 
             // If [value], [hint] and [disabledHint] are null, the button is disabled, nothing displayed.
-            pump_frame(&mut tester, &build(None, None, None, None));
-            assert_eq!(indexed_stack_index(&tester), None);
+            pump_frame(tester, &build(None, None, None, None));
+            assert_eq!(indexed_stack_index(tester), None);
 
             // If [value], [hint] and [disabledHint] are null, the button is enabled, nothing displayed.
-            pump_frame(&mut tester, &build(Some(on_changed()), None, None, None));
-            assert_eq!(indexed_stack_index(&tester), None);
+            pump_frame(tester, &build(Some(on_changed()), None, None, None));
+            assert_eq!(indexed_stack_index(tester), None);
         });
     }
 
     #[test]
     fn dropdown_button_selected_item_color_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build =
                 |tester: &WidgetTester, on_changed: Option<ValueChanged<Option<String>>>| {
                     let mut field = DropdownButtonFormField::new(Some(items_of(&["one", "two"])))
@@ -5335,18 +5304,18 @@ mod tests {
                 };
 
             // The selected value should be displayed when the button is enabled.
-            let root = build(&tester, Some(on_changed()));
+            let root = build(tester, Some(on_changed()));
             tester.pump_widget(root);
             // The dropdown icon and the selected menu item are vertically aligned.
-            assert_eq!(text_center_dy(&tester, "two"), icon_center_dy(&tester));
+            assert_eq!(text_center_dy(tester, "two"), icon_center_dy(tester));
             // Selected item has a normal color from [DropdownButtonFormField.style]
             // when the button is enabled.
             assert_eq!(tester.text_color("two"), Colors::YELLOW.primary());
 
             // The selected value should be displayed when the button is disabled.
-            let root = build(&tester, None);
+            let root = build(tester, None);
             tester.pump_widget(root);
-            assert_eq!(text_center_dy(&tester, "two"), icon_center_dy(&tester));
+            assert_eq!(text_center_dy(tester, "two"), icon_center_dy(tester));
             // Selected item has a disabled color from [theme.disabledColor]
             // when the button is disable.
             assert_eq!(tester.text_color("two"), Colors::PINK.primary());
@@ -5356,8 +5325,7 @@ mod tests {
     #[test]
     fn dropdown_button_hint_displays_when_the_items_list_is_empty_items_is_null_and_disabled_hint_is_null()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let build = |items: Option<Vec<String>>| {
                 frame()
@@ -5368,12 +5336,12 @@ mod tests {
             };
 
             // [hint] should display when [items] is null and [disabledHint] is not defined
-            pump_frame(&mut tester, &build(None));
-            assert_eq!(shows(&tester, "hint used when disabled"), 1);
+            pump_frame(tester, &build(None));
+            assert_eq!(shows(tester, "hint used when disabled"), 1);
 
             // [hint] should display when [items] is an empty list and [disabledHint] is not defined.
-            pump_frame(&mut tester, &build(Some(Vec::new())));
-            assert_eq!(shows(&tester, "hint used when disabled"), 1);
+            pump_frame(tester, &build(Some(Vec::new())));
+            assert_eq!(shows(tester, "hint used when disabled"), 1);
         });
     }
 
@@ -5432,10 +5400,9 @@ mod tests {
 
     #[test]
     fn size_of_largest_widget_is_used_dropdown_button_when_selected_item_builder_is_non_null() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_frame(
-                &mut tester,
+                tester,
                 // To test the size constraints, the selected item should not be the
                 // largest item. This validates that the button sizes itself according
                 // to the largest item regardless of which one is selected.
@@ -5444,7 +5411,7 @@ mod tests {
                     .on_changed(on_changed()),
             );
 
-            let size = row_with_text(&tester, "25", true);
+            let size = row_with_text(tester, "25", true);
             // DropdownButton should be the height of the largest item
             assert_eq!(size.height(), 100.0);
             // DropdownButton should be width of largest item added to the icon size
@@ -5455,10 +5422,9 @@ mod tests {
     #[test]
     fn enabled_button_size_of_largest_widget_is_used_when_the_hint_is_smaller_than_the_largest_item()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_frame(
-                &mut tester,
+                tester,
                 &square_frame()
                     .initial_value(None)
                     // [hint] widget is smaller than largest selected item widget
@@ -5466,7 +5432,7 @@ mod tests {
                     .on_changed(on_changed()),
             );
 
-            let size = row_with_text(&tester, "hint", true);
+            let size = row_with_text(tester, "hint", true);
             assert_eq!(size.height(), 100.0);
             assert_eq!(size.width(), 100.0 + 24.0);
         });
@@ -5475,10 +5441,9 @@ mod tests {
     #[test]
     fn enabled_button_size_of_largest_widget_is_used_when_the_hint_is_larger_than_the_largest_item()
     {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_frame(
-                &mut tester,
+                tester,
                 &square_frame()
                     .initial_value(Some("25"))
                     // [hint] widget is larger than largest selected item widget
@@ -5486,7 +5451,7 @@ mod tests {
                     .on_changed(on_changed()),
             );
 
-            let size = row_with_text(&tester, "25", true);
+            let size = row_with_text(tester, "25", true);
             // DropdownButton should be the height of the largest item (hint inclusive)
             assert_eq!(size.height(), 125.0);
             // DropdownButton should be width of largest item (hint inclusive) added to the icon size
@@ -5497,14 +5462,13 @@ mod tests {
     #[test]
     fn disabled_button_size_of_largest_widget_is_used_when_the_hint_is_smaller_than_the_largest_item()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_frame(
-                &mut tester,
+                tester,
                 &square_frame().initial_value(None).hint(sized_hint(50.0)),
             );
 
-            let size = row_with_text(&tester, "hint", true);
+            let size = row_with_text(tester, "hint", true);
             assert_eq!(size.height(), 100.0);
             assert_eq!(size.width(), 100.0 + 24.0);
         });
@@ -5513,14 +5477,13 @@ mod tests {
     #[test]
     fn disabled_button_size_of_largest_widget_is_used_when_the_hint_is_larger_than_the_largest_item()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_frame(
-                &mut tester,
+                tester,
                 &square_frame().initial_value(None).hint(sized_hint(125.0)),
             );
 
-            let size = row_with_text(&tester, "25", false);
+            let size = row_with_text(tester, "25", false);
             assert_eq!(size.height(), 125.0);
             assert_eq!(size.width(), 125.0 + 24.0);
         });
@@ -5529,16 +5492,15 @@ mod tests {
     #[test]
     fn disabled_button_size_of_largest_widget_is_used_when_the_disabled_hint_is_smaller_than_the_largest_item()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_frame(
-                &mut tester,
+                tester,
                 &square_frame()
                     .initial_value(None)
                     .disabled_hint(sized_hint(50.0)),
             );
 
-            let size = row_with_text(&tester, "hint", true);
+            let size = row_with_text(tester, "hint", true);
             assert_eq!(size.height(), 100.0);
             assert_eq!(size.width(), 100.0 + 24.0);
         });
@@ -5547,16 +5509,15 @@ mod tests {
     #[test]
     fn disabled_button_size_of_largest_widget_is_used_when_the_disabled_hint_is_larger_than_the_largest_item()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_frame(
-                &mut tester,
+                tester,
                 &square_frame()
                     .initial_value(None)
                     .disabled_hint(sized_hint(125.0)),
             );
 
-            let size = row_with_text(&tester, "25", false);
+            let size = row_with_text(tester, "25", false);
             assert_eq!(size.height(), 125.0);
             assert_eq!(size.width(), 125.0 + 24.0);
         });
@@ -5564,11 +5525,10 @@ mod tests {
 
     #[test]
     fn menu_width_is_correct_when_set() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/133267.
-            let mut tester = tester();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .initial_value(Some("25"))
                     .items(Some(strings(&SQUARE_ITEMS)))
@@ -5577,10 +5537,10 @@ mod tests {
                     .on_changed(on_changed()),
             );
 
-            tap_text(&mut tester, "25");
+            tap_text(tester, "25");
             tester.pump_and_settle();
 
-            assert_eq!(menu_rect(&tester).width(), 200.0);
+            assert_eq!(menu_rect(tester).width(), 200.0);
         });
     }
 
@@ -5599,8 +5559,7 @@ mod tests {
     }
 
     fn menu_scroll_case(value: i32, alignment: AlignmentGeometry, expected: f64) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 Material::new()
@@ -5617,9 +5576,9 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(&mut tester, &value.to_string());
+            tap_text(tester, &value.to_string());
             tester.pump_and_settle();
-            assert_eq!(menu_scroll(&tester), expected);
+            assert_eq!(menu_scroll(tester), expected);
         });
     }
 
@@ -5645,9 +5604,8 @@ mod tests {
 
     #[test]
     fn dropdown_menu_respects_parent_size_limits() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/24417
-            let mut tester = tester();
             let selected_index = Rc::new(Cell::new(None));
             let set_index = Rc::clone(&selected_index);
             let on_changed: ValueChanged<Option<i32>> = Rc::new(move |_app, i| set_index.set(i));
@@ -5686,11 +5644,11 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "12");
+            tap_text(tester, "12");
             tester.pump_and_settle();
             assert_eq!(selected_index.get(), None);
 
-            tap_last_text(&mut tester, "13");
+            tap_last_text(tester, "13");
             tester.pump_and_settle();
             assert_eq!(selected_index.get(), Some(13));
         });
@@ -5709,8 +5667,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_will_accept_widgets_as_its_underline() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let decoration = bottom_border(Color::new(0xFFCCBB00), 4.0);
             let default_decoration = bottom_border(Color::new(0xFFBDBDBD), 0.0);
 
@@ -5739,26 +5696,25 @@ mod tests {
             };
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .underline(custom_underline)
                     .on_changed(on_changed()),
             );
-            assert_eq!(last_decoration(&tester), decoration);
+            assert_eq!(last_decoration(tester), decoration);
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame().button_key(&button_key).on_changed(on_changed()),
             );
-            assert_eq!(last_decoration(&tester), default_decoration);
+            assert_eq!(last_decoration(tester), default_decoration);
         });
     }
 
     #[test]
     fn dropdown_button_selected_item_builder_builds_custom_buttons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let items = ["One", "Two", "Three"];
             let selected_item = Rc::new(RefCell::new(Some(items[0].to_owned())));
             let root = material_app(
@@ -5800,12 +5756,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(shows(&tester, "One as an Arabic numeral: 1"), 1);
-            tap_text(&mut tester, "One as an Arabic numeral: 1");
+            assert_eq!(shows(tester, "One as an Arabic numeral: 1"), 1);
+            tap_text(tester, "One as an Arabic numeral: 1");
             tester.pump_and_settle();
-            tap_text(&mut tester, "Two");
+            tap_text(tester, "Two");
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "Two as an Arabic numeral: 2"), 1);
+            assert_eq!(shows(tester, "Two as an Arabic numeral: 2"), 1);
         });
     }
 
@@ -5813,8 +5769,7 @@ mod tests {
     /// elevation's three shadows, in `color`, or else the theme's canvas colour.
     fn check_dropdown_color(color: Option<Color>, is_form_field: bool) {
         use waft_embedder::valo::Op;
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let text = "foo";
             let items = || {
                 Some(vec![
@@ -5842,8 +5797,8 @@ mod tests {
                 Material::new().child(home).into_widget(),
             );
             tester.pump_widget(root);
-            tap_text(&mut tester, text);
-            tester.pump(Duration::ZERO);
+            tap_text(tester, text);
+            tester.pump();
 
             let menu = only(tester.find_by_type::<DropdownMenu<String>>());
             let custom_paint = only(
@@ -5888,9 +5843,8 @@ mod tests {
 
     #[test]
     fn dropdown_button_hint_displays_properly_when_selected_item_builder_is_defined() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/42340
-            let mut tester = tester();
             let items = ["1", "2", "3"];
             let selected_item: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
             let root = material_app(
@@ -5930,20 +5884,19 @@ mod tests {
             tester.pump_widget(root);
 
             // Initially shows the hint text
-            assert_eq!(shows(&tester, "Please select an item"), 1);
-            tap_first_text_anywhere(&mut tester, "Please select an item");
+            assert_eq!(shows(tester, "Please select an item"), 1);
+            tap_first_text_anywhere(tester, "Please select an item");
             tester.pump_and_settle();
-            tap_text(&mut tester, "1");
+            tap_text(tester, "1");
             tester.pump_and_settle();
             // Selecting an item should display its corresponding item builder
-            assert_eq!(shows(&tester, "You have selected: 1"), 1);
+            assert_eq!(shows(tester, "You have selected: 1"), 1);
         });
     }
 
     #[test]
     fn variable_size_and_oversized_menu_items() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let item_heights = [30.0, 40.0, 50.0, 60.0];
             let dropdown_value = Rc::new(Cell::new(Some(item_heights[0])));
             let value_key = |value: f64| -> KeyRef { ValueKey::new(value.to_bits()).into() };
@@ -6003,15 +5956,15 @@ mod tests {
             // and a dropdown arrow icon.
             tester.pump_widget(root);
             assert_eq!(tester.find_by_type::<Icon>().len(), 1);
-            assert_eq!(boxes(&tester, 30.0).len(), 1);
+            assert_eq!(boxes(tester, 30.0).len(), 1);
 
             // All menu items have a minimum height of 48. The centers of the
             // dropdown icon and the selected menu item are vertically aligned
             // and horizontally adjacent.
-            let item30 = boxes(&tester, 30.0)[0];
+            let item30 = boxes(tester, 30.0)[0];
             assert_eq!(item30.size(), Size::new(100.0, 48.0));
-            assert_eq!(item30.center().dy(), icon_rect(&tester).center().dy());
-            assert_eq!(item30.top_right().dx(), icon_rect(&tester).top_left().dx());
+            assert_eq!(item30.center().dy(), icon_rect(tester).center().dy());
+            assert_eq!(item30.top_right().dx(), icon_rect(tester).top_left().dx());
 
             // Show the popup menu.
             tester.tap(item30.center(), 1);
@@ -6020,62 +5973,61 @@ mod tests {
             // Each item appears twice, once in the menu and once
             // in the dropdown button's IndexedStack.
             for value in item_heights {
-                assert_eq!(boxes(&tester, value).len(), 2);
+                assert_eq!(boxes(tester, value).len(), 2);
             }
 
             // Verify that the items have the expected sizes. The width of the items
             // that appear in the menu is padded by 16 on the left and right.
-            assert_eq!(boxes(&tester, 30.0)[0].size(), Size::new(100.0, 48.0));
-            assert_eq!(boxes(&tester, 40.0)[0].size(), Size::new(100.0, 48.0));
-            assert_eq!(boxes(&tester, 50.0)[0].size(), Size::new(100.0, 50.0));
-            assert_eq!(boxes(&tester, 60.0)[0].size(), Size::new(100.0, 60.0));
-            assert_eq!(boxes(&tester, 30.0)[1].size(), Size::new(132.0, 48.0));
-            assert_eq!(boxes(&tester, 40.0)[1].size(), Size::new(132.0, 48.0));
-            assert_eq!(boxes(&tester, 50.0)[1].size(), Size::new(132.0, 50.0));
-            assert_eq!(boxes(&tester, 60.0)[1].size(), Size::new(132.0, 60.0));
+            assert_eq!(boxes(tester, 30.0)[0].size(), Size::new(100.0, 48.0));
+            assert_eq!(boxes(tester, 40.0)[0].size(), Size::new(100.0, 48.0));
+            assert_eq!(boxes(tester, 50.0)[0].size(), Size::new(100.0, 50.0));
+            assert_eq!(boxes(tester, 60.0)[0].size(), Size::new(100.0, 60.0));
+            assert_eq!(boxes(tester, 30.0)[1].size(), Size::new(132.0, 48.0));
+            assert_eq!(boxes(tester, 40.0)[1].size(), Size::new(132.0, 48.0));
+            assert_eq!(boxes(tester, 50.0)[1].size(), Size::new(132.0, 50.0));
+            assert_eq!(boxes(tester, 60.0)[1].size(), Size::new(132.0, 60.0));
 
             // The vertical center of the selectedItem (item30) should
             // line up with its button counterpart.
             assert_eq!(
-                boxes(&tester, 30.0)[0].center().dy(),
-                boxes(&tester, 30.0)[1].center().dy()
+                boxes(tester, 30.0)[0].center().dy(),
+                boxes(tester, 30.0)[1].center().dy()
             );
 
             // The menu items should be arranged in a column.
             assert_eq!(
-                boxes(&tester, 30.0)[1].bottom_left(),
-                boxes(&tester, 40.0)[1].top_left()
+                boxes(tester, 30.0)[1].bottom_left(),
+                boxes(tester, 40.0)[1].top_left()
             );
             assert_eq!(
-                boxes(&tester, 40.0)[1].bottom_left(),
-                boxes(&tester, 50.0)[1].top_left()
+                boxes(tester, 40.0)[1].bottom_left(),
+                boxes(tester, 50.0)[1].top_left()
             );
             assert_eq!(
-                boxes(&tester, 50.0)[1].bottom_left(),
-                boxes(&tester, 60.0)[1].top_left()
+                boxes(tester, 50.0)[1].bottom_left(),
+                boxes(tester, 60.0)[1].top_left()
             );
 
             // Dismiss the menu by selecting item40 and then show the menu again.
-            tester.tap(boxes(&tester, 40.0)[1].center(), 1);
+            tester.tap(boxes(tester, 40.0)[1].center(), 1);
             tester.pump_and_settle();
             assert_eq!(dropdown_value.get(), Some(40.0));
-            tester.tap(boxes(&tester, 40.0)[0].center(), 1);
+            tester.tap(boxes(tester, 40.0)[0].center(), 1);
             tester.pump_and_settle();
 
             // The vertical center of the selectedItem (item40) should
             // line up with its button counterpart.
             assert_eq!(
-                boxes(&tester, 40.0)[0].center().dy(),
-                boxes(&tester, 40.0)[1].center().dy()
+                boxes(tester, 40.0)[0].center().dy(),
+                boxes(tester, 40.0)[1].center().dy()
             );
         });
     }
 
     #[test]
     fn dropdown_button_menu_items_do_not_resize_when_its_route_is_popped() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/44877.
-            let mut tester = tester();
             let items = ["one", "two", "three"];
             let item = Rc::new(RefCell::new(Some(items[0].to_owned())));
             let text_scale = Rc::new(Cell::new(1.0));
@@ -6117,16 +6069,16 @@ mod tests {
             tester.pump_widget(root);
 
             // Verify that the first item is showing.
-            assert_eq!(shows(&tester, "one"), 1);
+            assert_eq!(shows(tester, "one"), 1);
 
             // Select a different item to trigger setState, which updates mediaQuery
             // and forces a performLayout on the popped _DropdownRoute. This operation
             // should not cause an exception.
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
-            tap_last_text(&mut tester, "two");
+            tap_last_text(tester, "two");
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "two"), 1);
+            assert_eq!(shows(tester, "two"), 1);
         });
     }
 
@@ -6158,14 +6110,13 @@ mod tests {
 
     #[test]
     fn dropdown_button_can_be_focused_and_has_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let button_key = GlobalKey::new();
-            let focus_node = focus_node(&tester);
+            let focus_node = focus_node(tester);
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .on_changed(on_changed())
@@ -6174,7 +6125,7 @@ mod tests {
                     .use_material3(false),
             );
             tester.pump_and_settle(); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node.handle()));
+            assert!(has_primary_focus(tester, focus_node.handle()));
             assert!(
                 tester
                     .ink_drawn()
@@ -6185,7 +6136,7 @@ mod tests {
             );
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .on_changed(on_changed())
@@ -6222,11 +6173,10 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_can_be_focused_and_has_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let button_key = GlobalKey::new();
-            let focus_node = focus_node(&tester);
+            let focus_node = focus_node(tester);
             let form_field = || {
                 frame()
                     .form_field(true)
@@ -6237,15 +6187,15 @@ mod tests {
 
             let mut first = form_field().autofocus(true);
             first.decoration = Some(InputDecoration::new().filled(true));
-            pump_frame(&mut tester, &first);
+            pump_frame(tester, &first);
 
-            tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node.handle()));
+            tester.pump(); // Pump a frame for autofocus to take effect.
+            assert!(has_primary_focus(tester, focus_node.handle()));
 
             // Default focus Color from InputDecorator defaults.
-            let theme = decorator_theme(&tester);
+            let theme = decorator_theme(tester);
             assert!(input_decorator_fills(
-                &tester,
+                tester,
                 theme.color_scheme.surface_container_highest()
             ));
 
@@ -6256,8 +6206,8 @@ mod tests {
                     .filled(true)
                     .focus_color(Color::new(0xff00ffff)),
             );
-            pump_frame(&mut tester, &second);
-            assert!(input_decorator_fills(&tester, Color::new(0xff00ffff)));
+            pump_frame(tester, &second);
+            assert!(input_decorator_fills(tester, Color::new(0xff00ffff)));
 
             // Focus color from focusColor property.
             let mut third = form_field().focus_color(Color::new(0xff00ff00));
@@ -6266,16 +6216,15 @@ mod tests {
                     .filled(true)
                     .focus_color(Color::new(0xff00ffff)),
             );
-            pump_frame(&mut tester, &third);
-            assert!(input_decorator_fills(&tester, Color::new(0xff00ff00)));
+            pump_frame(tester, &third);
+            assert!(input_decorator_fills(tester, Color::new(0xff00ff00)));
         });
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/166642.
     #[test]
     fn dropdown_button_form_field_can_replace_focus_node_properly() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let button_key = GlobalKey::new();
             let build_form_field = |focus_node: FocusNodeRef| {
@@ -6288,29 +6237,29 @@ mod tests {
                 frame.decoration = Some(InputDecoration::new().filled(true));
                 frame
             };
-            let mut node = focus_node(&tester);
+            let mut node = focus_node(tester);
 
-            pump_frame(&mut tester, &build_form_field(node.clone()));
-            let default_border_color = decorator_theme(&tester)
+            pump_frame(tester, &build_form_field(node.clone()));
+            let default_border_color = decorator_theme(tester)
                 .color_scheme
                 .surface_container_highest();
-            assert!(input_decorator_fills(&tester, default_border_color));
+            assert!(input_decorator_fills(tester, default_border_color));
 
             // Replace focusNode and request focus.
             node.dispose(&mut tester.cell.borrow_mut());
-            node = focus_node(&tester);
+            node = focus_node(tester);
             node.request_focus(&mut tester.cell.borrow_mut(), None);
 
-            pump_frame(&mut tester, &build_form_field(node.clone()));
-            tester.pump(Duration::ZERO); // Wait for requestFocus to take effect.
-            assert!(input_decorator_fills(&tester, Color::new(0xff00ff00)));
+            pump_frame(tester, &build_form_field(node.clone()));
+            tester.pump(); // Wait for requestFocus to take effect.
+            assert!(input_decorator_fills(tester, Color::new(0xff00ff00)));
 
             // Replace focusNode and request focus.
             node.dispose(&mut tester.cell.borrow_mut());
-            node = focus_node(&tester);
+            node = focus_node(tester);
             node.request_focus(&mut tester.cell.borrow_mut(), None);
 
-            pump_frame(&mut tester, &build_form_field(node.clone()));
+            pump_frame(tester, &build_form_field(node.clone()));
             {
                 let mut app = tester.cell.borrow_mut();
                 let manager = FocusManager::instance(&mut app);
@@ -6318,27 +6267,26 @@ mod tests {
                     primary_focus.unfocus(&mut app, waft_widgets::UnfocusDisposition::Scope);
                 }
             }
-            tester.pump(Duration::ZERO); // Wait for unfocus to take effect.
-            assert!(input_decorator_fills(&tester, default_border_color));
+            tester.pump(); // Wait for unfocus to take effect.
+            assert!(input_decorator_fills(tester, default_border_color));
         });
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/147069.
     #[test]
     fn dropdown_button_form_field_can_be_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let button_key = GlobalKey::new();
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .form_field(true)
                     .button_key(&button_key)
                     .on_changed(on_changed()),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Check inputDecorator.isHovering value because DropdownButtonFormField
             // delegates to the InputDecorator which manages hover overlay.
@@ -6348,35 +6296,34 @@ mod tests {
                     |decorator: &InputDecorator| decorator.is_hovering,
                 )
             };
-            assert!(!is_hovering(&tester));
+            assert!(!is_hovering(tester));
 
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
             let center = tester.center_of(&button_key);
             tester.move_to(&mut mouse, center, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(is_hovering(&tester));
+            assert!(is_hovering(tester));
         });
     }
 
     #[test]
     fn dropdown_button_wont_be_focused_if_not_enabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
-            let focus_node = focus_node(&tester);
+            let focus_node = focus_node(tester);
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .focus_node(focus_node.clone())
                     .autofocus(true)
                     .focus_color(Color::new(0xff00ff00)),
             );
-            tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect (although it shouldn't).
-            assert!(!has_primary_focus(&tester, focus_node.handle()));
+            tester.pump(); // Pump a frame for autofocus to take effect (although it shouldn't).
+            assert!(!has_primary_focus(tester, focus_node.handle()));
             let button = tester.render_object(&button_key);
             assert!(!tester.paints_rrect(
                 button,
@@ -6434,28 +6381,27 @@ mod tests {
     }
 
     fn dropdown_button_is_activated_with(activator: LogicalKeyboardKey) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let value = Rc::new(RefCell::new(Some("one".to_owned())));
-            let root = keyboard_app(&tester, focus_node.clone(), &value, |item| {
+            let root = keyboard_app(tester, focus_node.clone(), &value, |item| {
                 format!("{item}Text")
             });
 
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node.handle()));
+            tester.pump(); // Pump a frame for autofocus to take effect.
+            assert!(has_primary_focus(tester, focus_node.handle()));
 
-            press(&mut tester, activator);
-            settle_menu(&mut tester);
+            press(tester, activator);
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("one"));
 
-            press(&mut tester, LogicalKeyboardKey::TAB); // Focus 'two'
-            tester.pump(Duration::ZERO);
-            press(&mut tester, activator); // Select 'two'.
-            tester.pump(Duration::ZERO);
+            press(tester, LogicalKeyboardKey::TAB); // Focus 'two'
+            tester.pump();
+            press(tester, activator); // Select 'two'.
+            tester.pump();
 
-            settle_menu(&mut tester);
+            settle_menu(tester);
 
             assert_eq!(value.borrow().as_deref(), Some("two"));
         });
@@ -6474,8 +6420,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/77655.
     #[test]
     fn dropdown_button_selecting_a_null_valued_item_should_be_selected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let items: [(Option<&str>, &str); 3] =
                 [(None, "None"), (Some("one"), "One"), (Some("two"), "Two")];
             let selected_item = Rc::new(RefCell::new(Some("one".to_owned())));
@@ -6514,11 +6459,11 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "One");
+            tap_text(tester, "One");
             tester.pump_and_settle();
-            tap_last_text(&mut tester, "None");
+            tap_last_text(tester, "None");
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "None"), 1);
+            assert_eq!(shows(tester, "None"), 1);
         });
     }
 
@@ -6529,43 +6474,42 @@ mod tests {
 
     #[test]
     fn selected_element_is_focused_when_dropdown_is_opened() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let value = Rc::new(RefCell::new(Some("one".to_owned())));
-            let root = keyboard_app(&tester, focus_node.clone(), &value, |item| {
+            let root = keyboard_app(tester, focus_node.clone(), &value, |item| {
                 format!("Text {item}")
             });
             tester.pump_widget(root);
 
-            tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node.handle()));
+            tester.pump(); // Pump a frame for autofocus to take effect.
+            assert!(has_primary_focus(tester, focus_node.handle()));
 
-            press(&mut tester, LogicalKeyboardKey::ENTER);
-            settle_menu(&mut tester); // finish the menu open animation
+            press(tester, LogicalKeyboardKey::ENTER);
+            settle_menu(tester); // finish the menu open animation
             assert_eq!(value.borrow().as_deref(), Some("one"));
-            let one = *all_by_key(&tester, &key("one"))
+            let one = *all_by_key(tester, &key("one"))
                 .last()
                 .expect("the menu's 'one'");
-            let node = focus_of(&tester, one);
-            assert!(has_primary_focus(&tester, node));
+            let node = focus_of(tester, one);
+            assert!(has_primary_focus(tester, node));
 
-            press(&mut tester, LogicalKeyboardKey::TAB); // Focus 'two'
-            tester.pump(Duration::ZERO);
-            press(&mut tester, LogicalKeyboardKey::ENTER); // Select 'two' and close the dropdown.
+            press(tester, LogicalKeyboardKey::TAB); // Focus 'two'
+            tester.pump();
+            press(tester, LogicalKeyboardKey::ENTER); // Select 'two' and close the dropdown.
 
-            settle_menu(&mut tester); // finish the menu close animation
+            settle_menu(tester); // finish the menu close animation
 
             assert_eq!(value.borrow().as_deref(), Some("two"));
 
             // Now make sure that "two" is focused when we re-open the dropdown.
-            press(&mut tester, LogicalKeyboardKey::ENTER);
-            settle_menu(&mut tester); // finish the menu open animation
+            press(tester, LogicalKeyboardKey::ENTER);
+            settle_menu(tester); // finish the menu open animation
             assert_eq!(value.borrow().as_deref(), Some("two"));
-            let two = *all_by_key(&tester, &key("two"))
+            let two = *all_by_key(tester, &key("two"))
                 .last()
                 .expect("the menu's 'two'");
-            let node = focus_of(&tester, two);
+            let node = focus_of(tester, two);
             assert!(node.has_focus(&mut tester.cell.borrow_mut()));
         });
     }
@@ -6611,9 +6555,8 @@ mod tests {
     #[test]
     fn selected_element_is_correctly_focused_with_dropdown_that_more_items_than_fit_on_the_screen()
     {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let value = Rc::new(Cell::new(Some(1)));
             let int_key = |item: i32| -> KeyRef { ValueKey::new(item).into() };
             let state_value = Rc::clone(&value);
@@ -6654,43 +6597,42 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node.handle()));
+            tester.pump(); // Pump a frame for autofocus to take effect.
+            assert!(has_primary_focus(tester, focus_node.handle()));
 
-            press(&mut tester, LogicalKeyboardKey::ENTER);
-            settle_menu(&mut tester); // finish the menu open animation
+            press(tester, LogicalKeyboardKey::ENTER);
+            settle_menu(tester); // finish the menu open animation
             assert_eq!(value.get(), Some(1));
-            let one = *all_by_key(&tester, &int_key(1))
+            let one = *all_by_key(tester, &int_key(1))
                 .last()
                 .expect("the menu's 1");
-            let node = focus_of(&tester, one);
-            assert!(has_primary_focus(&tester, node));
+            let node = focus_of(tester, one);
+            assert!(has_primary_focus(tester, node));
 
             for _ in 0..41 {
-                press(&mut tester, LogicalKeyboardKey::TAB); // Move to the next one.
+                press(tester, LogicalKeyboardKey::TAB); // Move to the next one.
                 tester.pump_and_settle_by(Duration::from_millis(200)); // Wait for it to animate the menu.
             }
-            press(&mut tester, LogicalKeyboardKey::ENTER); // Select '42' and close the dropdown.
+            press(tester, LogicalKeyboardKey::ENTER); // Select '42' and close the dropdown.
             tester.pump_and_settle_by(Duration::from_secs(1)); // Finish the menu close animation
             assert_eq!(value.get(), Some(42));
 
             // Now make sure that "42" is focused when we re-open the dropdown.
-            press(&mut tester, LogicalKeyboardKey::ENTER);
-            settle_menu(&mut tester); // finish the menu open animation
+            press(tester, LogicalKeyboardKey::ENTER);
+            settle_menu(tester); // finish the menu open animation
             assert_eq!(value.get(), Some(42));
-            let forty_two = *all_by_key(&tester, &int_key(42))
+            let forty_two = *all_by_key(tester, &int_key(42))
                 .last()
                 .expect("the menu's 42");
-            let node = focus_of(&tester, forty_two);
+            let node = focus_of(tester, forty_two);
             assert!(node.has_focus(&mut tester.cell.borrow_mut()));
         });
     }
 
     #[test]
     fn having_a_focused_element_does_not_interrupt_scroll_when_flung_by_touch() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let value = Rc::new(Cell::new(Some(1)));
             let int_key = |item: i32| -> KeyRef { ValueKey::new(item).into() };
             let state_value = Rc::clone(&value);
@@ -6731,37 +6673,37 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node.handle()));
+            tester.pump(); // Pump a frame for autofocus to take effect.
+            assert!(has_primary_focus(tester, focus_node.handle()));
 
-            press(&mut tester, LogicalKeyboardKey::ENTER);
+            press(tester, LogicalKeyboardKey::ENTER);
             tester.pump_and_settle();
             assert_eq!(value.get(), Some(1));
             let one = *tester
                 .find_onstage_by_key(&int_key(1))
                 .last()
                 .expect("the menu's 1");
-            let node = focus_of(&tester, one);
-            assert!(has_primary_focus(&tester, node));
+            let node = focus_of(tester, one);
+            assert!(has_primary_focus(tester, node));
 
             // Move to an item very far down the menu.
             for _ in 0..90 {
-                press(&mut tester, LogicalKeyboardKey::TAB); // Move to the next one.
+                press(tester, LogicalKeyboardKey::TAB); // Move to the next one.
                 tester.pump_and_settle(); // Wait for it to animate the menu.
             }
             let ninety_one = *tester
                 .find_onstage_by_key(&int_key(91))
                 .last()
                 .expect("the menu's 91");
-            let node = focus_of(&tester, ninety_one);
-            assert!(has_primary_focus(&tester, node));
+            let node = focus_of(tester, ninety_one);
+            assert!(has_primary_focus(tester, node));
 
             // Scroll back to the top using touch, and make sure we end up there.
             let menu = tester.render_box_of(only(tester.find_by_type::<DropdownMenu<i32>>()));
-            let menu_rect = rect_of(&tester, menu);
+            let menu_rect = rect_of(tester, menu);
             let menu_rect = menu_rect.shift(menu_rect.top_left());
             for _ in 0..10 {
-                let center = rect_of(&tester, menu).center();
+                let center = rect_of(tester, menu).center();
                 tester.fling_from(center, Offset::new(0.0, menu_rect.height()), 10.0, 1);
             }
             tester.pump_and_settle();
@@ -6772,25 +6714,24 @@ mod tests {
             assert_eq!(ones.len(), 2);
             let last_one = tester.render_box_of(*ones.last().expect("two found"));
             assert_eq!(
-                rect_of(&tester, last_one),
+                rect_of(tester, last_one),
                 Rect::from_ltrb(372.0, 104.0, 436.0, 152.0)
             );
 
             // Scrolling to the top again has removed the one the focus was on from the
             // tree, causing it to lose focus.
-            let ninety_one = *all_by_key(&tester, &int_key(91))
+            let ninety_one = *all_by_key(tester, &int_key(91))
                 .last()
                 .expect("the menu's 91, offstage");
-            let node = focus_of(&tester, ninety_one);
-            assert!(!has_primary_focus(&tester, node));
+            let node = focus_of(tester, ninety_one);
+            assert!(!has_primary_focus(tester, node));
         });
     }
 
     #[test]
     fn dropdown_button_on_tap_callback_can_request_focus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             focus_node.add_listener(&mut tester.cell.borrow_mut(), Listener::new(|_app| {}));
             let value = Rc::new(Cell::new(Some(1)));
             let state_value = Rc::clone(&value);
@@ -6827,48 +6768,47 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(!has_primary_focus(&tester, focus_node.handle()));
+            tester.pump(); // Pump a frame for autofocus to take effect.
+            assert!(!has_primary_focus(tester, focus_node.handle()));
 
-            tap_text(&mut tester, "1");
+            tap_text(tester, "1");
             tester.pump_and_settle();
 
             // Close the dropdown menu.
             tester.tap(Offset::new(1.0, 1.0), 1);
             tester.pump_and_settle();
 
-            assert!(has_primary_focus(&tester, focus_node.handle()));
+            assert!(has_primary_focus(tester, focus_node.handle()));
         });
     }
 
     #[test]
     fn dropdown_button_changes_selected_item_with_arrow_keys() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let value = Rc::new(RefCell::new(Some("one".to_owned())));
-            let root = keyboard_app(&tester, focus_node.clone(), &value, |item| {
+            let root = keyboard_app(tester, focus_node.clone(), &value, |item| {
                 format!("{item}Text")
             });
 
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO); // Pump a frame for autofocus to take effect.
-            assert!(has_primary_focus(&tester, focus_node.handle()));
+            tester.pump(); // Pump a frame for autofocus to take effect.
+            assert!(has_primary_focus(tester, focus_node.handle()));
 
-            press(&mut tester, LogicalKeyboardKey::ENTER);
-            settle_menu(&mut tester);
+            press(tester, LogicalKeyboardKey::ENTER);
+            settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("one"));
 
-            press(&mut tester, LogicalKeyboardKey::ARROW_DOWN); // Focus 'two'.
-            tester.pump(Duration::ZERO);
-            press(&mut tester, LogicalKeyboardKey::ARROW_DOWN); // Focus 'three'.
-            tester.pump(Duration::ZERO);
-            press(&mut tester, LogicalKeyboardKey::ARROW_UP); // Back to 'two'.
-            tester.pump(Duration::ZERO);
-            press(&mut tester, LogicalKeyboardKey::ENTER); // Select 'two'.
-            tester.pump(Duration::ZERO);
+            press(tester, LogicalKeyboardKey::ARROW_DOWN); // Focus 'two'.
+            tester.pump();
+            press(tester, LogicalKeyboardKey::ARROW_DOWN); // Focus 'three'.
+            tester.pump();
+            press(tester, LogicalKeyboardKey::ARROW_UP); // Back to 'two'.
+            tester.pump();
+            press(tester, LogicalKeyboardKey::ENTER); // Select 'two'.
+            tester.pump();
 
-            settle_menu(&mut tester);
+            settle_menu(tester);
 
             assert_eq!(value.borrow().as_deref(), Some("two"));
         });
@@ -6876,15 +6816,14 @@ mod tests {
 
     #[test]
     fn dropdown_button_on_tap_callback_is_called_when_defined() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dropdown_button_tap_counter = Rc::new(Cell::new(0));
             let (value, set_value) = value_log();
             *value.borrow_mut() = Some("one".to_owned());
             let counter = Rc::clone(&dropdown_button_tap_counter);
             let on_tap = Listener::new(move |_app| counter.set(counter.get() + 1));
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .initial_value(Some("one"))
                     .on_changed(set_value)
@@ -6894,28 +6833,28 @@ mod tests {
             assert_eq!(dropdown_button_tap_counter.get(), 0);
 
             // Tap dropdown button.
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("one"));
             assert_eq!(dropdown_button_tap_counter.get(), 1); // Should update counter.
 
             // Tap dropdown menu item.
-            tap_last_text(&mut tester, "three");
+            tap_last_text(tester, "three");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("three"));
             assert_eq!(dropdown_button_tap_counter.get(), 1); // Should not change.
 
             // Tap dropdown button again.
-            tap_first_text_anywhere(&mut tester, "three");
+            tap_first_text_anywhere(tester, "three");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("three"));
             assert_eq!(dropdown_button_tap_counter.get(), 2); // Should update counter.
 
             // Tap dropdown menu item.
-            tap_last_text(&mut tester, "two");
+            tap_last_text(tester, "two");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("two"));
@@ -6925,8 +6864,7 @@ mod tests {
 
     #[test]
     fn dropdown_menu_item_on_tap_callback_is_called_when_defined() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let (value, set_value) = value_log();
             *value.borrow_mut() = Some("one".to_owned());
             let menu_item_tap_counters = Rc::new(RefCell::new(vec![0, 0, 0, 0]));
@@ -6954,7 +6892,7 @@ mod tests {
             tester.pump_widget(root);
 
             // Tap dropdown button.
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("one"));
@@ -6962,7 +6900,7 @@ mod tests {
             assert_eq!(*menu_item_tap_counters.borrow(), vec![0, 0, 0, 0]);
 
             // Tap dropdown menu item.
-            tap_last_text(&mut tester, "three");
+            tap_last_text(tester, "three");
             tester.pump_and_settle();
 
             // Should update the counter for the third item (second index).
@@ -6970,7 +6908,7 @@ mod tests {
             assert_eq!(*menu_item_tap_counters.borrow(), vec![0, 0, 1, 0]);
 
             // Tap dropdown button again.
-            tap_first_text_anywhere(&mut tester, "three");
+            tap_first_text_anywhere(tester, "three");
             tester.pump_and_settle();
 
             // Should not change.
@@ -6978,7 +6916,7 @@ mod tests {
             assert_eq!(*menu_item_tap_counters.borrow(), vec![0, 0, 1, 0]);
 
             // Tap dropdown menu item.
-            tap_last_text(&mut tester, "two");
+            tap_last_text(tester, "two");
             tester.pump_and_settle();
 
             // Should update the counter for the second item (first index).
@@ -6986,7 +6924,7 @@ mod tests {
             assert_eq!(*menu_item_tap_counters.borrow(), vec![0, 1, 1, 0]);
 
             // Tap dropdown button again.
-            tap_first_text_anywhere(&mut tester, "two");
+            tap_first_text_anywhere(tester, "two");
             tester.pump_and_settle();
 
             // Should not change.
@@ -6994,7 +6932,7 @@ mod tests {
             assert_eq!(*menu_item_tap_counters.borrow(), vec![0, 1, 1, 0]);
 
             // Tap the already selected menu item
-            tap_last_text(&mut tester, "two");
+            tap_last_text(tester, "two");
             tester.pump_and_settle();
 
             // Should update the counter for the second item (first index), even
@@ -7006,9 +6944,8 @@ mod tests {
 
     #[test]
     fn does_not_crash_when_option_is_selected_without_waiting_for_opening_animation_to_complete() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for b/171846624.
-            let mut tester = tester();
             let options = ["first", "second", "third"];
             let value = Rc::new(RefCell::new(Some(options[0].to_owned())));
             let root = material_app(
@@ -7030,33 +6967,32 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            assert_eq!(hit_testable_texts(&tester, "first").len(), 1);
-            assert_eq!(hit_testable_texts(&tester, "second").len(), 0);
-            assert_eq!(hit_testable_texts(&tester, "third").len(), 0);
+            assert_eq!(hit_testable_texts(tester, "first").len(), 1);
+            assert_eq!(hit_testable_texts(tester, "second").len(), 0);
+            assert_eq!(hit_testable_texts(tester, "third").len(), 0);
 
             // Open dropdown.
-            tap_hit_testable_text(&mut tester, "first");
-            tester.pump(Duration::ZERO);
+            tap_hit_testable_text(tester, "first");
+            tester.pump();
 
-            assert_eq!(hit_testable_texts(&tester, "third").len(), 1);
-            assert_eq!(hit_testable_texts(&tester, "first").len(), 1);
-            assert_eq!(hit_testable_texts(&tester, "second").len(), 1);
+            assert_eq!(hit_testable_texts(tester, "third").len(), 1);
+            assert_eq!(hit_testable_texts(tester, "first").len(), 1);
+            assert_eq!(hit_testable_texts(tester, "second").len(), 1);
 
             // Deliberately not waiting for opening animation to complete!
 
             // Select an option in dropdown.
-            tap_hit_testable_text(&mut tester, "third");
-            tester.pump(Duration::ZERO);
-            assert_eq!(hit_testable_texts(&tester, "third").len(), 1);
-            assert_eq!(hit_testable_texts(&tester, "first").len(), 0);
-            assert_eq!(hit_testable_texts(&tester, "second").len(), 0);
+            tap_hit_testable_text(tester, "third");
+            tester.pump();
+            assert_eq!(hit_testable_texts(tester, "third").len(), 1);
+            assert_eq!(hit_testable_texts(tester, "first").len(), 0);
+            assert_eq!(hit_testable_texts(tester, "second").len(), 0);
         });
     }
 
     #[test]
     fn dropdown_menu_should_persistently_show_a_scrollbar_if_it_is_scrollable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scrollbar_paints_rect = |tester: &WidgetTester| {
                 // The scrollbar's painter is on the first `CustomPaint` below it; the
                 // `Scrollbar`'s own render object is a repaint boundary.
@@ -7078,43 +7014,42 @@ mod tests {
                 scroll_controller.position(&app).max_scroll_extent(&app)
             };
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .initial_value(Some("0"))
                     // menu is short enough to fit onto the screen.
                     .items(Some(numbers(10)))
                     .on_changed(on_changed()),
             );
-            tap_text(&mut tester, "0");
+            tap_text(tester, "0");
             tester.pump_and_settle();
 
             // The scrollbar shouldn't show if the list fits into the screen.
-            assert_eq!(max_scroll_extent(&tester), 0.0);
-            assert!(!scrollbar_paints_rect(&tester));
+            assert_eq!(max_scroll_extent(tester), 0.0);
+            assert!(!scrollbar_paints_rect(tester));
 
-            tap_last_text(&mut tester, "0");
+            tap_last_text(tester, "0");
             tester.pump_and_settle();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .initial_value(Some("0"))
                     // menu is too long to fit onto the screen.
                     .items(Some(numbers(100)))
                     .on_changed(on_changed()),
             );
-            tap_text(&mut tester, "0");
+            tap_text(tester, "0");
             tester.pump_and_settle();
 
             // The scrollbar is shown when the list is longer than the height of the screen.
-            assert!(max_scroll_extent(&tester) > 0.0);
-            assert!(scrollbar_paints_rect(&tester));
+            assert!(max_scroll_extent(tester) > 0.0);
+            assert!(scrollbar_paints_rect(tester));
         });
     }
 
     #[test]
     fn dropdown_menus_maximum_height_should_be_influenced_by_dropdown_button_menu_max_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let list_view_height = |tester: &WidgetTester| {
                 size_of(
                     tester,
@@ -7128,12 +7063,12 @@ mod tests {
                     .items(Some(numbers(64)))
                     .on_changed(on_changed())
             };
-            pump_frame(&mut tester, &base());
-            tap_text(&mut tester, "0");
+            pump_frame(tester, &base());
+            tap_text(tester, "0");
             tester.pump_and_settle();
 
             let list_view = only(tester.find_by_type::<ListView>());
-            let mut menu_height = list_view_height(&tester);
+            let mut menu_height = list_view_height(tester);
             // The default maximum height should be one item height from the edge.
             // https://material.io/design/components/menus.html#usage
             let media_height = MediaQuery::of(&mut tester.cell.borrow_mut(), list_view)
@@ -7142,32 +7077,32 @@ mod tests {
             let default_menu_height = media_height - (2.0 * K_MIN_INTERACTIVE_DIMENSION);
             assert_eq!(menu_height, default_menu_height);
 
-            tap_last_text(&mut tester, "0");
+            tap_last_text(tester, "0");
             tester.pump_and_settle();
 
             // Set menuMaxHeight which is less than defaultMenuHeight
             pump_frame(
-                &mut tester,
+                tester,
                 &base().menu_max_height(7.0 * K_MIN_INTERACTIVE_DIMENSION),
             );
-            tap_text(&mut tester, "0");
+            tap_text(tester, "0");
             tester.pump_and_settle();
 
-            menu_height = list_view_height(&tester);
+            menu_height = list_view_height(tester);
 
             assert!(menu_height != default_menu_height);
             assert_eq!(menu_height, K_MIN_INTERACTIVE_DIMENSION * 7.0);
 
-            tap_last_text(&mut tester, "0");
+            tap_last_text(tester, "0");
             tester.pump_and_settle();
 
             // Set menuMaxHeight which is greater than defaultMenuHeight
-            pump_frame(&mut tester, &base().menu_max_height(media_height));
+            pump_frame(tester, &base().menu_max_height(media_height));
 
-            tap_text(&mut tester, "0");
+            tap_text(tester, "0");
             tester.pump_and_settle();
 
-            menu_height = list_view_height(&tester);
+            menu_height = list_view_height(tester);
             assert_eq!(menu_height, default_menu_height);
         });
     }
@@ -7175,11 +7110,10 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/89029
     #[test]
     fn menu_position_test_with_menu_max_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .initial_value(Some("6"))
@@ -7188,15 +7122,15 @@ mod tests {
                     .menu_max_height(2.0 * K_MIN_INTERACTIVE_DIMENSION),
             );
 
-            tap_text(&mut tester, "6");
+            tap_text(tester, "6");
             tester.pump_and_settle();
 
             let menu_box = tester.render_box_of(only(tester.find_by_type::<ListView>()));
-            let button_box = key_box(&tester, &button_key);
+            let button_box = key_box(tester, &button_key);
             // The menu's bottom should align with the drop-button's bottom.
             assert_eq!(
-                rect_of(&tester, menu_box).bottom,
-                rect_of(&tester, button_box).bottom
+                rect_of(tester, menu_box).bottom,
+                rect_of(tester, button_box).bottom
             );
         });
     }
@@ -7205,15 +7139,15 @@ mod tests {
     #[test]
     fn do_not_crash_if_used_in_very_short_screen() {
         use waft_embedder::valo::Op;
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             // The default item height is 48.0 pixels and needs two items padding since
             // the menu requires empty space surrounding the menu. Finally, the constraint height
             // is 47.0 pixels for the menu rendering.
-            let mut tester = WidgetTester::with_physical_size(
+            let mut tester = WidgetTester::with_view(
                 waft_test::TestPlatform::new().on(TargetPlatform::Android),
-                Size::new(1600.0, (48.0 * 3.0 - 1.0) * 2.0),
+                waft_test::TestView::with_pixel_ratio(800.0, 48.0 * 3.0 - 1.0, 1.0),
             );
-            tester.install_platform_fonts();
+            let tester = &mut tester;
 
             let item_key = key("item");
             let root = material_app(
@@ -7236,18 +7170,18 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "foo");
+            tap_text(tester, "foo");
             tester.pump_and_settle();
 
-            let item_boxes: Vec<AnyRenderBox> = all_by_key(&tester, &item_key)
+            let item_boxes: Vec<AnyRenderBox> = all_by_key(tester, &item_key)
                 .into_iter()
                 .map(|element| tester.render_box_of(element))
                 .collect();
-            assert_eq!(global_top_left(&tester, item_boxes[0]).dx(), 364.0);
-            assert_eq!(global_top_left(&tester, item_boxes[0]).dy(), 47.5);
+            assert_eq!(global_top_left(tester, item_boxes[0]).dx(), 364.0);
+            assert_eq!(global_top_left(tester, item_boxes[0]).dy(), 47.5);
 
-            assert_eq!(global_top_left(&tester, item_boxes[1]).dx(), 364.0);
-            assert_eq!(global_top_left(&tester, item_boxes[1]).dy(), 47.5);
+            assert_eq!(global_top_left(tester, item_boxes[1]).dx(), 364.0);
+            assert_eq!(global_top_left(tester, item_boxes[1]).dy(), 47.5);
 
             let menu = only(tester.find_by_type::<DropdownMenu<String>>());
             let custom_paint = *tester
@@ -7275,8 +7209,7 @@ mod tests {
 
     #[test]
     fn tapping_a_disabled_item_should_not_close_dropdown_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(RefCell::new(Some("first".to_owned())));
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
@@ -7306,22 +7239,21 @@ mod tests {
             tester.pump_widget(root);
 
             // Open dropdown.
-            tap_hit_testable_text(&mut tester, "first");
+            tap_hit_testable_text(tester, "first");
             tester.pump_and_settle();
 
             // Tap on a disabled item.
-            tap_hit_testable_text(&mut tester, "disabled");
+            tap_hit_testable_text(tester, "disabled");
             tester.pump_and_settle();
 
             // The dropdown should still be open, i.e., there should be one widget with 'second' text.
-            assert_eq!(hit_testable_texts(&tester, "second").len(), 1);
+            assert_eq!(hit_testable_texts(tester, "second").len(), 1);
         });
     }
 
     #[test]
     fn disabled_item_should_not_be_focusable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 crate::scaffold::Scaffold::new()
@@ -7341,11 +7273,11 @@ mod tests {
             tester.pump_widget(root);
 
             // Open dropdown.
-            tap_hit_testable_text(&mut tester, "enabled");
+            tap_hit_testable_text(tester, "enabled");
             tester.pump_and_settle();
 
             // The `FocusNode` of [disabledItem] should be `null` as enabled is false.
-            let disabled_item = *hit_testable_texts(&tester, "disabled")
+            let disabled_item = *hit_testable_texts(tester, "disabled")
                 .first()
                 .expect("the menu's disabled item");
             assert_eq!(
@@ -7358,8 +7290,7 @@ mod tests {
 
     #[test]
     fn alignment_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let build = |tester: &WidgetTester, button_alignment: Option<AlignmentGeometry>| {
                 let alignment = button_alignment.unwrap_or(AlignmentGeometry::CENTER_START);
@@ -7391,35 +7322,35 @@ mod tests {
                 render.local_to_global(&tester.cell.borrow(), offset, None)
             };
 
-            let root = build(&tester, None);
+            let root = build(tester, None);
             tester.pump_widget(root);
 
-            let button_box = key_box(&tester, &button_key);
+            let button_box = key_box(tester, &button_key);
             let mut selected_item_box =
                 tester.render_box_of(only(tester.find_onstage_text("enabled")));
             // Default to center-start aligned.
             assert_eq!(
                 local_to_global(
-                    &tester,
+                    tester,
                     button_box,
-                    Offset::new(0.0, size_of(&tester, button_box).height() / 2.0)
+                    Offset::new(0.0, size_of(tester, button_box).height() / 2.0)
                 ),
                 local_to_global(
-                    &tester,
+                    tester,
                     selected_item_box,
-                    Offset::new(0.0, size_of(&tester, selected_item_box).height() / 2.0)
+                    Offset::new(0.0, size_of(tester, selected_item_box).height() / 2.0)
                 )
             );
 
-            let root = build(&tester, Some(AlignmentGeometry::CENTER));
+            let root = build(tester, Some(AlignmentGeometry::CENTER));
             tester.pump_widget(root);
 
             selected_item_box = tester.render_box_of(only(tester.find_onstage_text("enabled")));
             // Should be center-center aligned, the icon size is 24.0 pixels.
-            let button_size = size_of(&tester, button_box);
-            let item_size = size_of(&tester, selected_item_box);
+            let button_size = size_of(tester, button_box);
+            let item_size = size_of(tester, selected_item_box);
             let expected = local_to_global(
-                &tester,
+                tester,
                 button_box,
                 Offset::new(
                     (button_size.width() - 24.0) / 2.0,
@@ -7427,7 +7358,7 @@ mod tests {
                 ),
             );
             let actual = local_to_global(
-                &tester,
+                tester,
                 selected_item_box,
                 Offset::new(item_size.width() / 2.0, item_size.height() / 2.0),
             );
@@ -7436,22 +7367,22 @@ mod tests {
             assert_near(actual.dy(), expected.dy());
 
             // Open dropdown.
-            tap_hit_testable_text(&mut tester, "enabled");
+            tap_hit_testable_text(tester, "enabled");
             tester.pump_and_settle();
 
             let selected_item_box_in_menu = tester.render_box_of(tester.find_text("enabled")[1]);
-            let menu_rect = menu_rect_any(&tester);
-            let in_menu_size = size_of(&tester, selected_item_box_in_menu);
+            let menu_rect = menu_rect_any(tester);
+            let in_menu_size = size_of(tester, selected_item_box_in_menu);
             let center = local_to_global(
-                &tester,
+                tester,
                 selected_item_box_in_menu,
                 Offset::new(in_menu_size.width() / 2.0, in_menu_size.height() / 2.0),
             );
 
             assert_near(center.dx(), menu_rect.top_center().dx());
-            let item_size = size_of(&tester, selected_item_box);
+            let item_size = size_of(tester, selected_item_box);
             let button_item_center = local_to_global(
-                &tester,
+                tester,
                 selected_item_box,
                 Offset::new(item_size.width() / 2.0, item_size.height() / 2.0),
             );
@@ -7478,12 +7409,11 @@ mod tests {
 
     #[test]
     fn dropdown_menu_item_has_expected_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let menu_key = GlobalKey::new();
             let item_key = key("testDropdownMenuItem");
             let root = one_item_app(
-                &tester,
+                tester,
                 DropdownButton::new(
                     Some(vec![
                         DropdownMenuItem::new(Text::new("TestDropdownMenuItem"))
@@ -7497,17 +7427,17 @@ mod tests {
             tester.pump_widget(root);
 
             // Open DropdownButton.
-            tap_key(&mut tester, &menu_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &menu_key);
+            tester.pump();
 
             // Find DropdownMenuItem.
             let item = tester.render_box_of(only(tester.find_onstage_by_key(&item_key)));
-            let on_menu_item = rect_of(&tester, item).center();
-            let off_menu_item = rect_of(&tester, item).bottom_right() + Offset::new(1.0, 1.0);
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let on_menu_item = rect_of(tester, item).center();
+            let off_menu_item = rect_of(tester, item).bottom_right() + Offset::new(1.0, 1.0);
+            let mut gesture = TestPointer::mouse(1, 0);
 
             tester.add_pointer(&mut gesture, on_menu_item);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let expected = if K_IS_WEB {
                 cursor(waft_services::SystemMouseCursors::CLICK)
@@ -7524,24 +7454,23 @@ mod tests {
 
     #[test]
     fn dropdown_button_changes_mouse_cursor_when_hovered_as_expected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let button = |on_changed: Option<ValueChanged<Option<String>>>| {
                 DropdownButton::new(Some(items_of(&["One", "Two", "Three", "Four"])), on_changed)
                     .key(key.clone().into())
             };
-            let root = one_item_app(&tester, button(Some(super::tests::on_changed())));
+            let root = one_item_app(tester, button(Some(super::tests::on_changed())));
             tester.pump_widget(root);
 
-            let button_rect = rect_of(&tester, key_box(&tester, &key));
+            let button_rect = rect_of(tester, key_box(tester, &key));
             let on_dropdown_button = button_rect.center();
             let off_dropdown_button = button_rect.bottom_right() + Offset::new(1.0, 1.0);
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
 
             tester.add_pointer(&mut gesture, on_dropdown_button);
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let expected = if K_IS_WEB {
                 cursor(waft_services::SystemMouseCursors::CLICK)
@@ -7554,7 +7483,7 @@ mod tests {
             assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::BASIC));
 
             // Test that mouse cursor doesn't change when button is disabled
-            let root = one_item_app(&tester, button(None));
+            let root = one_item_app(tester, button(None));
             tester.pump_widget(root);
 
             tester.move_to(&mut gesture, on_dropdown_button, false);
@@ -7566,11 +7495,10 @@ mod tests {
 
     #[test]
     fn dropdown_button_has_expected_mouse_cursor_when_explicitly_configured() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let menu_key = GlobalKey::new();
             let root = one_item_app(
-                &tester,
+                tester,
                 DropdownButton::new(Some(items_of(&["One"])), Some(on_changed()))
                     .key(menu_key.clone().into())
                     .mouse_cursor(cursor(waft_services::SystemMouseCursors::CELL))
@@ -7581,10 +7509,10 @@ mod tests {
             tester.pump_widget(root);
 
             let on_dropdown_button = tester.center_of(&menu_key);
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
 
             tester.add_pointer(&mut gesture, on_dropdown_button);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::CELL));
         });
@@ -7592,12 +7520,11 @@ mod tests {
 
     #[test]
     fn dropdown_menu_item_has_expected_mouse_cursor_when_explicitly_configured() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let menu_key = GlobalKey::new();
             let item_key = key("testDropdownMenuItem");
             let root = one_item_app(
-                &tester,
+                tester,
                 DropdownButton::new(
                     Some(vec![
                         DropdownMenuItem::new(Text::new("One"))
@@ -7611,18 +7538,18 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
 
             // Open DropdownButton.
-            tap_key(&mut tester, &menu_key);
+            tap_key(tester, &menu_key);
             tester.pump_and_settle();
 
             // Find DropdownMenuItem.
             let item = tester.render_box_of(only(tester.find_onstage_by_key(&item_key)));
-            let on_menu_item = rect_of(&tester, item).center();
+            let on_menu_item = rect_of(tester, item).center();
 
             tester.add_pointer(&mut gesture, on_menu_item);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::GRAB));
         });
@@ -7650,8 +7577,7 @@ mod tests {
 
     #[test]
     fn border_radius_property_works_properly() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let radius = 20.0;
             let root = material_app(
                 m2(&tester.cell.borrow()),
@@ -7672,11 +7598,11 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "One");
+            tap_text(tester, "One");
             tester.pump_and_settle();
 
             menu_painter_fills(
-                &tester,
+                tester,
                 waft_embedder::RRect::from_ltrbxy(0.0, 0.0, 144.0, 208.0, radius, radius),
             );
         });
@@ -7685,8 +7611,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/88574
     #[test]
     fn specifying_item_height_affects_popup_menu_items_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let item_height = 80.0;
             let keys: Vec<KeyRef> = ["One", "Two", "Free", "Four"]
                 .iter()
@@ -7715,12 +7640,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "One");
+            tap_text(tester, "One");
             tester.pump_and_settle();
 
             for key in &keys {
-                for element in all_by_key(&tester, key) {
-                    let height = size_of(&tester, tester.render_box_of(element)).height();
+                for element in all_by_key(tester, key) {
+                    let height = size_of(tester, tester.render_box_of(element)).height();
                     assert_eq!(height, item_height);
                 }
             }
@@ -7730,8 +7655,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/92438
     #[test]
     fn do_not_throw_due_to_the_double_precision() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 crate::scaffold::Scaffold::new()
@@ -7750,7 +7674,7 @@ mod tests {
             tester.pump_widget(root);
 
             // Opening the menu and settling does not panic.
-            tap_text(&mut tester, "One");
+            tap_text(tester, "One");
             tester.pump_and_settle();
         });
     }
@@ -7775,17 +7699,16 @@ mod tests {
 
     #[test]
     fn border_radius_property_works_properly_for_dropdown_button_form_field() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let radius = 20.0;
-            let root = border_radius_form_field_app(&tester, radius);
+            let root = border_radius_form_field_app(tester, radius);
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "One");
+            tap_text(tester, "One");
             tester.pump_and_settle();
 
             menu_painter_fills(
-                &tester,
+                tester,
                 waft_embedder::RRect::from_ltrbxy(0.0, 0.0, 800.0, 208.0, radius, radius),
             );
         });
@@ -7806,8 +7729,7 @@ mod tests {
     type HintAlignmentCase = (AlignmentGeometry, bool, fn(Rect) -> Offset, Offset);
 
     fn hint_alignment_case(enable_selected_item_builder: bool) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let hint_text = "hint";
             // Dart's `buildDropdownWithHint`.
             let build = |alignment: AlignmentGeometry, is_expanded: bool| {
@@ -7924,9 +7846,9 @@ mod tests {
                 ),
             ];
             for (alignment, is_expanded, corner, expected) in cases {
-                pump_frame(&mut tester, &build(alignment, is_expanded));
+                pump_frame(tester, &build(alignment, is_expanded));
                 assert_eq!(
-                    corner(hint_rect(&tester)),
+                    corner(hint_rect(tester)),
                     expected,
                     "{alignment:?} {is_expanded}"
                 );
@@ -7942,12 +7864,8 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_decoration_hint_text_is_the_fallback_value_for_hint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_frame(
-                &mut tester,
-                &decoration_hint_frame().on_changed(on_changed()),
-            );
+        test_widgets(|tester| {
+            pump_frame(tester, &decoration_hint_frame().on_changed(on_changed()));
 
             assert_eq!(tester.find_text("Decoration Hint text").len(), 1);
         });
@@ -7955,10 +7873,9 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_decoration_hint_text_does_not_override_hint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_frame(
-                &mut tester,
+                tester,
                 &decoration_hint_frame()
                     .hint(Text::new("Hint text").into_widget())
                     .on_changed(on_changed()),
@@ -7971,10 +7888,9 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_decoration_hint_text_is_the_fallback_value_for_disabled_hint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // The Dropdown is disabled because onChanged is not defined.
-            pump_frame(&mut tester, &decoration_hint_frame());
+            pump_frame(tester, &decoration_hint_frame());
 
             assert_eq!(tester.find_text("Decoration Hint text").len(), 1);
         });
@@ -7982,11 +7898,10 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_decoration_hint_text_does_not_override_disabled_hint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // The Dropdown is disabled because onChanged is not defined.
             pump_frame(
-                &mut tester,
+                tester,
                 &decoration_hint_frame()
                     .disabled_hint(Text::new("Disabled Hint text").into_widget()),
             );
@@ -7999,11 +7914,10 @@ mod tests {
     #[test]
     fn dropdown_button_form_field_decoration_hint_text_is_not_used_for_disabled_hint_if_hint_is_provided()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // The Dropdown is disabled because onChanged is not defined.
             pump_frame(
-                &mut tester,
+                tester,
                 &decoration_hint_frame().hint(Text::new("Hint text").into_widget()),
             );
 
@@ -8014,13 +7928,12 @@ mod tests {
 
     #[test]
     fn border_radius_property_clips_dropdown_menu() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let radius = 20.0;
-            let root = border_radius_form_field_app(&tester, radius);
+            let root = border_radius_form_field_app(tester, radius);
             tester.pump_widget(root);
 
-            tap_text(&mut tester, "One");
+            tap_text(tester, "One");
             tester.pump_and_settle();
 
             let render_clip = tester.first::<waft_rendering::RenderClipRRect>();
@@ -8033,26 +7946,25 @@ mod tests {
 
     #[test]
     fn size_of_dropdown_button_with_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pad_vertical = 5.0;
             let pad_horizontal = 10.0;
             let button_key = GlobalKey::new();
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame().button_key(&button_key).on_changed(on_changed()),
             );
-            let no_padding_size = size_of(&tester, key_box(&tester, &button_key));
+            let no_padding_size = size_of(tester, key_box(tester, &button_key));
 
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     .on_changed(on_changed())
                     .padding(EdgeInsetsGeometry::symmetric(pad_vertical, pad_horizontal)),
             );
-            let padded_size = size_of(&tester, key_box(&tester, &button_key));
+            let padded_size = size_of(tester, key_box(tester, &button_key));
 
             // dropdowns with padding should be that much larger than with no padding
             assert_eq!(
@@ -8067,8 +7979,7 @@ mod tests {
     }
 
     fn barrier_case(barrier_dismissible: Option<bool>, expected_second: usize) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut button = DropdownButton::new(
                 Some(vec![
                     DropdownMenuItem::new(Text::new("disabled")).enabled(false),
@@ -8088,14 +7999,14 @@ mod tests {
             tester.pump_widget(root);
 
             // Open dropdown.
-            tap_hit_testable_text(&mut tester, "first");
+            tap_hit_testable_text(tester, "first");
             tester.pump_and_settle();
 
             // Tap on the barrier.
             tester.tap(Offset::new(400.0, 400.0), 1);
             tester.pump_and_settle();
 
-            assert_eq!(shows(&tester, "second"), expected_second);
+            assert_eq!(shows(tester, "second"), expected_second);
         });
     }
 
@@ -8115,8 +8026,7 @@ mod tests {
     fn the_previous_selected_item_should_be_highlighted_when_reopening_dropdown(
         platform: TargetPlatform,
     ) {
-        with_main_thread_stack(move || {
-            let mut tester = tester_on(platform);
+        test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
             let selected_color = Colors::BLACK.with_values(Some(0.12), None, None, None, None);
             let current_value = Rc::new(RefCell::new("one".to_owned()));
             let root = material_app(
@@ -8147,21 +8057,21 @@ mod tests {
             tester.pump_widget(root);
 
             // Make sure the current value of dropdown is the first one of items list menuItems.
-            assert_eq!(shows(&tester, "one"), 1);
+            assert_eq!(shows(tester, "one"), 1);
 
             // Tap to open the dropdown.
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
 
             // Select the second item from the dropdown list.
-            tap_text(&mut tester, "two");
+            tap_text(tester, "two");
             tester.pump_and_settle();
 
             // Make sure the current item of dropdown is the second item of items list menuItems.
-            assert_eq!(shows(&tester, "two"), 1);
+            assert_eq!(shows(tester, "two"), 1);
 
             // Tap to reopen the dropdown.
-            tap_text(&mut tester, "two");
+            tap_text(tester, "two");
             tester.pump_and_settle();
 
             // Make sure the current selected item is highlighted with selectedColor.
@@ -8212,8 +8122,7 @@ mod tests {
     #[allow(deprecated)]
     fn dropdown_button_form_field_deprecated_value_parameter_can_still_be_used_to_set_the_initial_value()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 Material::new()
@@ -8226,7 +8135,7 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            let state = form_field_state(&tester);
+            let state = form_field_state(tester);
             assert_eq!(
                 state.value(&tester.cell.borrow()).map(String::as_str),
                 Some("one")
@@ -8245,56 +8154,52 @@ mod tests {
 
     #[test]
     fn dropdown_button_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = zero_area_app(
-                &tester,
+                tester,
                 DropdownButton::new(Some(items_of(&["a"])), Some(on_changed()))
                     .value(Some("a".to_owned()))
                     .into_widget(),
             );
             tester.pump_widget(root);
             let button = only(tester.find_by_type::<DropdownButton<String>>());
-            assert_eq!(size_of(&tester, tester.render_box_of(button)), Size::ZERO);
+            assert_eq!(size_of(tester, tester.render_box_of(button)), Size::ZERO);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = zero_area_app(
-                &tester,
+                tester,
                 DropdownButtonFormField::new(Some(items_of(&["a"])))
                     .on_changed(|_app, _value| {})
                     .into_widget(),
             );
             tester.pump_widget(root);
             let field = only(tester.find_by_type::<DropdownButtonFormField<String>>());
-            assert_eq!(size_of(&tester, tester.render_box_of(field)), Size::ZERO);
+            assert_eq!(size_of(tester, tester.render_box_of(field)), Size::ZERO);
         });
     }
 
     #[test]
     fn dropdown_menu_item_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = zero_area_app(
-                &tester,
+                tester,
                 DropdownMenuItem::new(Text::new("a"))
                     .value("a".to_owned())
                     .into_widget(),
             );
             tester.pump_widget(root);
             let item = only(tester.find_by_type::<DropdownMenuItem<String>>());
-            assert_eq!(size_of(&tester, tester.render_box_of(item)), Size::ZERO);
+            assert_eq!(size_of(tester, tester.render_box_of(item)), Size::ZERO);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_can_inherit_from_local_input_decoration_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let label_text = "Label";
             let label_color = Colors::GREEN.primary();
             let decoration = InputDecoration::new().label_text(label_text);
@@ -8338,11 +8243,10 @@ mod tests {
         expected = "The selectedItemBuilder must return a list of widgets with the same length as the items list.\nCurrently, selectedItemBuilder returns a list of length 1, but items has length 2."
     )]
     fn dropdown_button_selected_item_builder_length_must_match_items_length() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/92773
-            let mut tester = tester();
             let root = zero_area_app(
-                &tester,
+                tester,
                 DropdownButtonFormField::new(Some(items_of(&["a", "b"])))
                     .on_changed(|_app, _value| {})
                     .selected_item_builder(|_app, _context| vec![Text::new("a").into_widget()])
@@ -8513,8 +8417,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/87102
     #[test]
     fn label_position_test_show_hint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(None));
             let set_value = Rc::clone(&value);
             tester.pump_widget(label_field(
@@ -8525,16 +8428,16 @@ mod tests {
             ));
 
             assert_eq!(value.get(), None);
-            let hint_empty_label = label_top_left(&tester);
+            let hint_empty_label = label_top_left(tester);
 
             // Select a item.
-            tap_text(&mut tester, "Hint");
+            tap_text(tester, "Hint");
             tester.pump_and_settle();
-            tap_last_text(&mut tester, "One");
+            tap_last_text(tester, "One");
             tester.pump_and_settle();
 
             assert_eq!(value.get(), Some(1));
-            let one_value_label = label_top_left(&tester);
+            let one_value_label = label_top_left(tester);
 
             // The position of the label does not change.
             assert_eq!(hint_empty_label, one_value_label);
@@ -8542,10 +8445,9 @@ mod tests {
     }
 
     fn label_position_case(field: fn() -> DropdownButtonFormField<i32>, expected: Offset) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(label_field(field()));
-            assert_eq!(label_top_left(&tester), expected);
+            assert_eq!(label_top_left(tester), expected);
         });
     }
 
@@ -8631,8 +8533,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/82910
     #[test]
     fn null_value_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(Some(1)));
             let set_value = Rc::clone(&value);
             tester.pump_widget(label_field(
@@ -8647,16 +8548,16 @@ mod tests {
             ));
 
             assert_eq!(value.get(), Some(1));
-            let non_empty_label = label_top_left(&tester);
+            let non_empty_label = label_top_left(tester);
 
             // Switch to `null` value item from value 1.
-            tap_text(&mut tester, "One");
+            tap_text(tester, "One");
             tester.pump_and_settle();
-            tap_last_text(&mut tester, "None");
-            tester.pump(Duration::ZERO);
+            tap_last_text(tester, "None");
+            tester.pump();
 
             assert_eq!(value.get(), None);
-            let null_value_label = label_top_left(&tester);
+            let null_value_label = label_top_left(tester);
             // The position of the label does not change.
             assert_eq!(non_empty_label, null_value_label);
         });
@@ -8664,8 +8565,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_with_autovalidation_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let value = Rc::new(RefCell::new(Some("one".to_owned())));
             let validate_called = Rc::new(Cell::new(0));
             let state_value = Rc::clone(&value);
@@ -8707,10 +8607,10 @@ mod tests {
 
             assert_eq!(validate_called.get(), 1);
             assert_eq!(value.borrow().as_deref(), Some("one"));
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
-            tap_last_text(&mut tester, "three");
-            tester.pump(Duration::ZERO);
+            tap_last_text(tester, "three");
+            tester.pump();
             assert_eq!(validate_called.get(), 2);
             tester.pump_and_settle();
             assert_eq!(value.borrow().as_deref(), Some("three"));
@@ -8719,8 +8619,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_arrow_icon_aligns_with_the_edge_of_button_when_expanded() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
 
             // There shouldn't be overflow when expanded although list contains longer items.
@@ -8735,15 +8634,15 @@ mod tests {
             frame.is_expanded = true;
             frame.on_changed = Some(on_changed());
             frame.items = Some(items);
-            pump_form_frame(&mut tester, &frame);
-            let button_box = key_box(&tester, &button_key);
+            pump_form_frame(tester, &frame);
+            let button_box = key_box(tester, &button_key);
             let arrow_icon = tester.render_box_of(tester.find_by_icon(&Icons::arrow_drop_down()));
 
             // Arrow icon should be aligned with far right of button when expanded
-            let button_size = size_of(&tester, button_box);
-            let arrow_size = size_of(&tester, arrow_icon);
+            let button_size = size_of(tester, button_box);
+            let arrow_size = size_of(tester, arrow_icon);
             assert_eq!(
-                global_top_left(&tester, arrow_icon).dx(),
+                global_top_left(tester, arrow_icon).dx(),
                 button_size
                     .center_right(Offset::new(-arrow_size.width(), 0.0))
                     .dx()
@@ -8753,36 +8652,35 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_with_is_dense_true_aligns_selected_menu_item() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let mut frame = form_frame();
             frame.button_key = Some(button_key.clone());
             frame.on_changed = Some(on_changed());
-            pump_form_frame(&mut tester, &frame);
-            let button_box = key_box(&tester, &button_key);
+            pump_form_frame(tester, &frame);
+            let button_box = key_box(tester, &button_key);
 
-            tap_text(&mut tester, "two");
-            settle_menu(&mut tester);
+            tap_text(tester, "two");
+            settle_menu(tester);
 
             // The selected dropdown item is both in menu we just popped up, and in
             // the IndexedStack contained by the dropdown button. Both of them should
             // have the same vertical center as the button.
-            let item_boxes = boxes_of(&tester, "two");
+            let item_boxes = boxes_of(tester, "two");
             assert_eq!(item_boxes.len(), 2);
 
             // When isDense is true, the button's height is reduced. The menu items'
             // heights are not.
             let menu_item_height = item_boxes
                 .iter()
-                .map(|item_box| size_of(&tester, *item_box).height())
+                .map(|item_box| size_of(tester, *item_box).height())
                 .fold(f64::MIN, f64::max);
-            assert!(menu_item_height >= size_of(&tester, button_box).height());
+            assert!(menu_item_height >= size_of(tester, button_box).height());
 
             for item_box in item_boxes {
                 assert_eq!(
-                    rect_of(&tester, button_box).center().dy(),
-                    rect_of(&tester, item_box).center().dy()
+                    rect_of(tester, button_box).center().dy(),
+                    rect_of(tester, item_box).center().dy()
                 );
             }
         });
@@ -8867,8 +8765,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/159971.
     #[test]
     fn dropdown_button_form_field_does_not_clip_large_scale_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scale_factor = 3.0;
             tester.pump_widget(scaled_field(
                 DropdownButtonFormField::new(Some(keyed_items()))
@@ -8887,7 +8784,7 @@ mod tests {
             let label_height = line_height * scale_factor; // 24 * 3.0 = 72
             let decoration_vertical_padding = 16.0;
             assert_eq!(
-                dropdown_button_height(&tester),
+                dropdown_button_height(tester),
                 label_height + decoration_vertical_padding
             );
         });
@@ -8896,8 +8793,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/159971.
     #[test]
     fn dropdown_button_form_field_with_custom_text_style_does_not_clip_large_scale_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scale_factor = 3.0;
             let font_size = 22.0;
             let font_height = 1.5;
@@ -8913,7 +8809,7 @@ mod tests {
             let label_height = line_height * scale_factor; // 33 * 3.0 = 99
             let decoration_vertical_padding = 16.0;
             assert_eq!(
-                dropdown_button_height(&tester),
+                dropdown_button_height(tester),
                 label_height + decoration_vertical_padding
             );
         });
@@ -8921,9 +8817,8 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_is_dense_is_true_by_default() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/46844
-            let mut tester = tester();
             tester.pump_widget(form_test_app(
                 TextDirection::Ltr,
                 Material::new()
@@ -8937,14 +8832,13 @@ mod tests {
                     .into_widget(),
             ));
 
-            assert_eq!(dropdown_button_height(&tester), 48.0);
+            assert_eq!(dropdown_button_height(tester), 48.0);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_custom_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let item_key = GlobalKey::new();
             tester.pump_widget(form_test_app(
                 TextDirection::Ltr,
@@ -8984,8 +8878,7 @@ mod tests {
     #[test]
     fn dropdown_button_form_field_disabled_hint_displays_when_the_items_list_is_empty_when_items_is_null()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let build = |items: Option<Vec<String>>| {
                 let mut frame = form_frame();
@@ -8998,22 +8891,21 @@ mod tests {
             };
 
             // [disabledHint] should display when [items] is null
-            pump_form_frame(&mut tester, &build(None));
-            assert_eq!(shows(&tester, "enabled"), 0);
-            assert_eq!(shows(&tester, "disabled"), 1);
+            pump_form_frame(tester, &build(None));
+            assert_eq!(shows(tester, "enabled"), 0);
+            assert_eq!(shows(tester, "disabled"), 1);
 
             // [disabledHint] should display when [items] is an empty list.
-            pump_form_frame(&mut tester, &build(Some(Vec::new())));
-            assert_eq!(shows(&tester, "enabled"), 0);
-            assert_eq!(shows(&tester, "disabled"), 1);
+            pump_form_frame(tester, &build(Some(Vec::new())));
+            assert_eq!(shows(tester, "enabled"), 0);
+            assert_eq!(shows(tester, "disabled"), 1);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_hint_displays_when_the_items_list_is_empty_items_is_null_and_disabled_hint_is_null()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let build = |items: Option<Vec<String>>| {
                 let mut frame = form_frame();
@@ -9025,34 +8917,32 @@ mod tests {
             };
 
             // [hint] should display when [items] is null and [disabledHint] is not defined
-            pump_form_frame(&mut tester, &build(None));
-            assert_eq!(shows(&tester, "hint used when disabled"), 1);
+            pump_form_frame(tester, &build(None));
+            assert_eq!(shows(tester, "hint used when disabled"), 1);
 
             // [hint] should display when [items] is an empty list and [disabledHint] is not defined.
-            pump_form_frame(&mut tester, &build(Some(Vec::new())));
-            assert_eq!(shows(&tester, "hint used when disabled"), 1);
+            pump_form_frame(tester, &build(Some(Vec::new())));
+            assert_eq!(shows(tester, "hint used when disabled"), 1);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_disabled_hint_displays_when_on_changed_is_null() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut frame = form_frame();
             frame.button_key = Some(GlobalKey::new());
             frame.value = None;
             frame.hint = Some(Text::new("enabled").into_widget());
             frame.disabled_hint = Some(Text::new("disabled").into_widget());
-            pump_form_frame(&mut tester, &frame);
-            assert_eq!(shows(&tester, "enabled"), 0);
-            assert_eq!(shows(&tester, "disabled"), 1);
+            pump_form_frame(tester, &frame);
+            assert_eq!(shows(tester, "enabled"), 0);
+            assert_eq!(shows(tester, "disabled"), 1);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_disabled_hint_should_be_of_same_size_as_enabled_hint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let build = |items: Option<Vec<String>>| {
                 let mut frame = form_frame();
@@ -9064,22 +8954,21 @@ mod tests {
                 frame
             };
 
-            pump_form_frame(&mut tester, &build(None));
-            let disabled_hint_box = key_box(&tester, &button_key);
+            pump_form_frame(tester, &build(None));
+            let disabled_hint_box = key_box(tester, &button_key);
 
-            pump_form_frame(&mut tester, &build(Some(strings(&MENU_ITEMS))));
-            let enabled_hint_box = key_box(&tester, &button_key);
+            pump_form_frame(tester, &build(Some(strings(&MENU_ITEMS))));
+            let enabled_hint_box = key_box(tester, &button_key);
             assert_eq!(
-                rect_of(&tester, enabled_hint_box),
-                rect_of(&tester, disabled_hint_box)
+                rect_of(tester, enabled_hint_box),
+                rect_of(tester, disabled_hint_box)
             );
         });
     }
 
     #[test]
     fn dropdown_button_form_field_custom_icon_size_and_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_key = GlobalKey::new();
             let custom_icon = Icon::new(Some(Icons::assessment()))
                 .key(icon_key.clone().into())
@@ -9092,23 +8981,23 @@ mod tests {
 
             let mut enabled = frame.clone();
             enabled.on_changed = Some(on_changed());
-            pump_form_frame(&mut tester, &enabled);
+            pump_form_frame(tester, &enabled);
 
             // test for size
             assert_eq!(
-                size_of(&tester, icon_box(&tester, &icon_key)),
+                size_of(tester, icon_box(tester, &icon_key)),
                 Size::new(30.0, 30.0)
             );
 
             // test for enabled color
-            assert_eq!(icon_color(&tester, &icon_key), Some(Colors::PINK.primary()));
+            assert_eq!(icon_color(tester, &icon_key), Some(Colors::PINK.primary()));
 
             // test for disabled color
             let mut disabled = frame;
             disabled.items = None;
-            pump_form_frame(&mut tester, &disabled);
+            pump_form_frame(tester, &disabled);
             assert_eq!(
-                icon_color(&tester, &icon_key),
+                icon_color(tester, &icon_key),
                 Some(Colors::ORANGE.primary())
             );
         });
@@ -9157,25 +9046,23 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_default_elevation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key = GlobalKey::new();
             let mut frame = form_frame();
             frame.button_key = Some(button_key.clone());
             frame.on_changed = Some(on_changed());
-            pump_form_frame(&mut tester, &frame);
-            tap_key(&mut tester, &button_key);
+            pump_form_frame(tester, &frame);
+            tap_key(tester, &button_key);
             tester.pump_and_settle();
 
             // Verifying whether or not default elevation(i.e. 8) paints desired shadow
-            verify_painted_shadow(&tester, 8);
+            verify_painted_shadow(tester, 8);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_custom_elevation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button_key_one = GlobalKey::new();
             let button_key_two = GlobalKey::new();
 
@@ -9183,21 +9070,21 @@ mod tests {
             frame.button_key = Some(button_key_one.clone());
             frame.elevation = 16;
             frame.on_changed = Some(on_changed());
-            pump_form_frame(&mut tester, &frame);
-            tap_key(&mut tester, &button_key_one);
+            pump_form_frame(tester, &frame);
+            tap_key(tester, &button_key_one);
             tester.pump_and_settle();
 
-            verify_painted_shadow(&tester, 16);
-            tap_last_text(&mut tester, "one");
+            verify_painted_shadow(tester, 16);
+            tap_last_text(tester, "one");
             let mut frame = form_frame();
             frame.button_key = Some(button_key_two.clone());
             frame.elevation = 24;
             frame.on_changed = Some(on_changed());
-            pump_form_frame(&mut tester, &frame);
-            tap_key(&mut tester, &button_key_two);
+            pump_form_frame(tester, &frame);
+            tap_key(tester, &button_key_two);
             tester.pump_and_settle();
 
-            verify_painted_shadow(&tester, 24);
+            verify_painted_shadow(tester, 24);
         });
     }
 
@@ -9212,8 +9099,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_selected_item_builder_builds_custom_buttons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let items = ["One", "Two", "Three"];
             let selected_item = Rc::new(RefCell::new(Some(items[0].to_owned())));
             let root = material_app(
@@ -9251,19 +9137,18 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(shows(&tester, "One as an Arabic numeral: 1"), 1);
-            tap_text(&mut tester, "One as an Arabic numeral: 1");
+            assert_eq!(shows(tester, "One as an Arabic numeral: 1"), 1);
+            tap_text(tester, "One as an Arabic numeral: 1");
             tester.pump_and_settle();
-            tap_text(&mut tester, "Two");
+            tap_text(tester, "Two");
             tester.pump_and_settle();
-            assert_eq!(shows(&tester, "Two as an Arabic numeral: 2"), 1);
+            assert_eq!(shows(tester, "Two as an Arabic numeral: 2"), 1);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_on_tap_callback_is_called_when_defined() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dropdown_button_tap_counter = Rc::new(Cell::new(0));
             let (value, set_value) = value_log();
             *value.borrow_mut() = Some("one".to_owned());
@@ -9272,33 +9157,33 @@ mod tests {
             frame.value = Some("one".to_owned());
             frame.on_changed = Some(set_value);
             frame.on_tap = Some(Listener::new(move |_app| counter.set(counter.get() + 1)));
-            pump_form_frame(&mut tester, &frame);
+            pump_form_frame(tester, &frame);
 
             assert_eq!(dropdown_button_tap_counter.get(), 0);
 
             // Tap dropdown button.
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("one"));
             assert_eq!(dropdown_button_tap_counter.get(), 1); // Should update counter.
 
             // Tap dropdown menu item.
-            tap_last_text(&mut tester, "three");
+            tap_last_text(tester, "three");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("three"));
             assert_eq!(dropdown_button_tap_counter.get(), 1); // Should not change.
 
             // Tap dropdown button again.
-            tap_text(&mut tester, "three");
+            tap_text(tester, "three");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("three"));
             assert_eq!(dropdown_button_tap_counter.get(), 2); // Should update counter.
 
             // Tap dropdown menu item.
-            tap_last_text(&mut tester, "two");
+            tap_last_text(tester, "two");
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("two"));
@@ -9308,8 +9193,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_should_re_render_if_initial_value_parameter_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let current_value = Rc::new(RefCell::new("two".to_owned()));
             let state_value = Rc::clone(&current_value);
             let root = material_app(
@@ -9344,26 +9228,25 @@ mod tests {
 
             // Make sure the rendered text value matches the initial state value.
             assert_eq!(current_value.borrow().as_str(), "two");
-            assert_eq!(shows(&tester, "two"), 1);
+            assert_eq!(shows(tester, "two"), 1);
 
             // Tap the DropdownButtonFormField widget
-            tap_text(&mut tester, "two");
+            tap_text(tester, "two");
             tester.pump_and_settle();
 
             // Tap the first dropdown menu item.
-            tap_last_text(&mut tester, "one");
+            tap_last_text(tester, "one");
             tester.pump_and_settle();
 
             // Make sure the rendered text value matches the updated state value.
             assert_eq!(current_value.borrow().as_str(), "one");
-            assert_eq!(shows(&tester, "one"), 1);
+            assert_eq!(shows(tester, "one"), 1);
         });
     }
 
     #[test]
     fn autovalidate_mode_is_passed_to_super() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let validate_called = Rc::new(Cell::new(0));
             let validated = Rc::clone(&validate_called);
             let root = material_app(
@@ -9390,21 +9273,20 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_custom_button_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut frame = form_frame();
             frame.button_alignment = AlignmentGeometry::CENTER;
             frame.items = Some(strings(&["one"]));
             frame.value = Some("one".to_owned());
-            pump_form_frame(&mut tester, &frame);
+            pump_form_frame(tester, &frame);
 
             let button_box = tester.render_box_of(only(tester.find_by_type::<IndexedStack>()));
             let selected_item_box = tester.render_box_of(only(tester.find_onstage_text("one")));
 
             // Should be center-center aligned.
             assert_eq!(
-                rect_of(&tester, button_box).center(),
-                rect_of(&tester, selected_item_box).center()
+                rect_of(tester, button_box).center(),
+                rect_of(tester, selected_item_box).center()
             );
         });
     }
@@ -9431,14 +9313,13 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_on_changed_is_called_when_the_form_is_reset() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/123009.
-            let mut tester = tester();
             let form_key = GlobalKey::new();
             let (value, set_value) = value_log();
-            let root = reset_form(&tester, &form_key, Some(set_value));
+            let root = reset_form(tester, &form_key, Some(set_value));
             tester.pump_widget(root);
-            let state = form_field_state(&tester);
+            let state = form_field_state(tester);
 
             // Initial value is 'One'.
             assert_eq!(*value.borrow(), None);
@@ -9448,9 +9329,9 @@ mod tests {
             );
 
             // Select 'Two'.
-            tap_text(&mut tester, "One");
+            tap_text(tester, "One");
             tester.pump_and_settle();
-            tap_last_text(&mut tester, "Two");
+            tap_last_text(tester, "Two");
             tester.pump_and_settle();
             assert_eq!(value.borrow().as_deref(), Some("Two"));
             assert_eq!(
@@ -9473,11 +9354,10 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_with_on_changed_set_to_null_does_not_throw_on_form_reset() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/146335.
-            let mut tester = tester();
             let form_key = GlobalKey::new();
-            let root = reset_form(&tester, &form_key, None);
+            let root = reset_form(tester, &form_key, None);
             tester.pump_widget(root);
 
             // Reset the form: it does not panic.
@@ -9492,8 +9372,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/106659.
     #[test]
     fn error_visual_logic_is_delegated_to_input_decorator() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let form_key = GlobalKey::new();
             let validate_key = form_key.clone();
             let root = material_app(
@@ -9518,8 +9397,8 @@ mod tests {
             tester.pump_widget(root);
 
             let decorator = tester.render_box_of(only(tester.find_by_type::<InputDecorator>()));
-            tap_box(&mut tester, decorator);
-            tester.pump(Duration::ZERO);
+            tap_box(tester, decorator);
+            tester.pump();
 
             // Check InputDecorator state because DropdownButtonFormField delegates
             // visual logic to the InputDecorator.
@@ -9540,8 +9419,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/135292.
     #[test]
     fn widget_returned_by_error_builder_is_shown() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 Material::new()
@@ -9558,9 +9436,9 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(shows(&tester, "**Required**"), 1);
+            assert_eq!(shows(tester, "**Required**"), 1);
         });
     }
 
@@ -9574,8 +9452,7 @@ mod tests {
 
     #[test]
     fn is_valid_returns_false_when_force_error_text_is_set_and_changes_error_display() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key1 = GlobalKey::new();
             let field_key2 = GlobalKey::new();
             let root = material_app(
@@ -9604,8 +9481,8 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let field1 = form_field_state_of(&tester, &field_key1);
-            let field2 = form_field_state_of(&tester, &field_key2);
+            let field1 = form_field_state_of(tester, &field_key1);
+            let field2 = form_field_state_of(tester, &field_key2);
             assert!(field1.is_valid(&mut tester.cell.borrow_mut()));
             assert!(!field1.has_error(&tester.cell.borrow()));
             assert!(!field2.is_valid(&mut tester.cell.borrow_mut()));
@@ -9615,8 +9492,7 @@ mod tests {
 
     #[test]
     fn force_error_text_overrides_input_decoration_error_when_both_are_provided() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = material_app(
                 ThemeData::new(&tester.cell.borrow()),
                 MediaQuery::new(
@@ -9636,14 +9512,13 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(shows(&tester, "Forcing error"), 1);
-            assert_eq!(shows(&tester, "Decoration"), 0);
+            assert_eq!(shows(tester, "Forcing error"), 1);
+            assert_eq!(shows(tester, "Decoration"), 0);
         });
     }
 
     fn form_barrier_case(barrier_dismissible: Option<bool>, expected_second: usize) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut field = DropdownButtonFormField::new(Some(vec![
                 DropdownMenuItem::new(Text::new("disabled")).enabled(false),
                 DropdownMenuItem::new(Text::new("first")).value("first".to_owned()),
@@ -9661,14 +9536,14 @@ mod tests {
             tester.pump_widget(root);
 
             // Open dropdown.
-            tap_hit_testable_text(&mut tester, "first");
+            tap_hit_testable_text(tester, "first");
             tester.pump_and_settle();
 
             // Tap on the barrier.
             tester.tap(Offset::new(400.0, 400.0), 1);
             tester.pump_and_settle();
 
-            assert_eq!(shows(&tester, "second"), expected_second);
+            assert_eq!(shows(tester, "second"), expected_second);
         });
     }
 
@@ -9699,10 +9574,9 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/157074.
     #[test]
     fn dropdown_button_form_field_icon_is_aligned_with_label_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = one_two_field_app(
-                &tester,
+                tester,
                 DropdownButtonFormField::new(Some(items_of(&["One", "Two"])))
                     .decoration(InputDecoration::new().label_text("Label Text"))
                     .on_changed(|_app, _value| {}),
@@ -9711,32 +9585,31 @@ mod tests {
 
             let icon = *tester.find_by_type::<Icon>().last().expect("an icon");
             assert_eq!(
-                text_center_dy(&tester, "Label Text"),
-                center_dy_of(&tester, icon)
+                text_center_dy(tester, "Label Text"),
+                center_dy_of(tester, icon)
             );
         });
     }
 
     #[test]
     fn dropdown_form_field_has_expected_default_mouse_cursor_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = one_two_field_app(
-                &tester,
+                tester,
                 DropdownButtonFormField::new(Some(items_of(&["One", "Two"])))
                     .on_changed(|_app, _value| {}),
             );
             tester.pump_widget(root);
 
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
 
             assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::BASIC));
 
             let field = only(tester.find_by_type::<DropdownButtonFormField<String>>());
-            let center = rect_of(&tester, tester.render_box_of(field)).center();
+            let center = rect_of(tester, tester.render_box_of(field)).center();
             tester.move_to(&mut gesture, center, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let expected = if K_IS_WEB {
                 cursor(waft_services::SystemMouseCursors::CLICK)
@@ -9749,10 +9622,9 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_has_expected_mouse_cursor_when_explicitly_configured() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = one_two_field_app(
-                &tester,
+                tester,
                 DropdownButtonFormField::new(Some(items_of(&["One", "Two"])))
                     .mouse_cursor(cursor(waft_services::SystemMouseCursors::CELL))
                     .on_changed(|_app, _value| {}),
@@ -9760,8 +9632,8 @@ mod tests {
             tester.pump_widget(root);
 
             let field = only(tester.find_by_type::<DropdownButtonFormField<String>>());
-            let center = rect_of(&tester, tester.render_box_of(field)).center();
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let center = rect_of(tester, tester.render_box_of(field)).center();
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, center);
 
             assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::CELL));
@@ -9784,11 +9656,10 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_enabled_true_without_on_changed_updates_form_field_state_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let field_key = GlobalKey::new();
             let root = int_field_app(
-                &tester,
+                tester,
                 DropdownButtonFormField::new(Some(one_two_int_items()))
                     .key(field_key.clone().into())
                     .initial_value(Some(1))
@@ -9797,11 +9668,11 @@ mod tests {
             tester.pump_widget(root);
 
             // Open the menu,
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
 
             // Select the second item,
-            tap_last_text(&mut tester, "two");
+            tap_last_text(tester, "two");
             tester.pump_and_settle();
 
             // Menu should be closed and value updated.
@@ -9809,16 +9680,15 @@ mod tests {
                 .current_state::<DropdownButtonFormFieldState<i32>>(&tester.cell.borrow())
                 .expect("the field is mounted");
             assert_eq!(state.value(&tester.cell.borrow()).copied(), Some(2));
-            assert_eq!(shows(&tester, "two"), 1);
+            assert_eq!(shows(tester, "two"), 1);
         });
     }
 
     #[test]
     fn dropdown_button_form_field_enabled_false_with_on_changed_does_not_open_menu() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = int_field_app(
-                &tester,
+                tester,
                 DropdownButtonFormField::new(Some(one_two_int_items()))
                     .initial_value(Some(1))
                     .enabled(false)
@@ -9827,11 +9697,11 @@ mod tests {
             tester.pump_widget(root);
 
             // Attempt to open the menu.
-            tap_text(&mut tester, "one");
+            tap_text(tester, "one");
             tester.pump_and_settle();
 
             // Menu should not open, so 'two' should not be visible.
-            assert_eq!(shows(&tester, "two"), 0);
+            assert_eq!(shows(tester, "two"), 0);
         });
     }
 
@@ -9868,8 +9738,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_form_field_underline_is_at_the_bottom_of_the_expanded_height() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const CONTAINER_HEIGHT: f64 = 200.0;
 
             let root = material_app(
@@ -9890,10 +9759,10 @@ mod tests {
             tester.pump_widget(root);
 
             let decorator = tester.render_box_of(only(tester.find_by_type::<InputDecorator>()));
-            let width = size_of(&tester, decorator).width();
+            let width = size_of(tester, decorator).width();
 
             assert!(paints_line(
-                &tester,
+                tester,
                 decorator,
                 Offset::new(0.0, CONTAINER_HEIGHT - 0.5),
                 Offset::new(width, CONTAINER_HEIGHT - 0.5),
@@ -9905,9 +9774,8 @@ mod tests {
     /// leaves nothing in the arena.
     #[test]
     fn opening_and_closing_the_menu_leaves_nothing_behind() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_frame(&mut tester, &frame().on_changed(on_changed()));
+        test_widgets(|tester| {
+            pump_frame(tester, &frame().on_changed(on_changed()));
             tester.assert_leaves_nothing_behind(|tester| {
                 tap_text(tester, "two");
                 tester.pump_and_settle();
@@ -9921,8 +9789,7 @@ mod tests {
 
     #[test]
     fn dropdown_button_hint_is_selected_item() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             const HINT_PADDING_OFFSET: f64 = 8.0;
             let item_values = ["item0", "item1", "item2", "item3"];
             let selected_item = Rc::new(RefCell::new(Some("item0".to_owned())));
@@ -10004,26 +9871,25 @@ mod tests {
                 )
             };
 
-            let root = build_frame(&tester);
+            let root = build_frame(tester);
             tester.pump_widget(root);
             let hint = tester.render_box_of(only(tester.find_onstage_text("-item0-")));
-            assert_eq!(global_top_left(&tester, hint).dx(), 8.0);
+            assert_eq!(global_top_left(tester, hint).dx(), 8.0);
 
             // Show the popup menu.
             let hint = tester.render_box_of(tester.find_text("-item0-")[0]);
-            tap_box(&mut tester, hint);
+            tap_box(tester, hint);
             tester.pump_and_settle();
 
             let hint = tester.render_box_of(only(tester.find_onstage_text("-item0-")));
-            assert_eq!(global_top_left(&tester, hint).dx(), 8.0);
+            assert_eq!(global_top_left(tester, hint).dx(), 8.0);
         });
     }
 
     // button_theme_test.dart 'ButtonTheme alignedDropdown'.
     #[test]
     fn button_theme_aligned_dropdown() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let dropdown_key = GlobalKey::new();
 
             let build_frame =
@@ -10078,53 +9944,53 @@ mod tests {
                     .collect()
             };
 
-            let root = build_frame(&tester, false, TextDirection::Ltr);
+            let root = build_frame(tester, false, TextDirection::Ltr);
             tester.pump_widget(root);
-            tap_key(&mut tester, &dropdown_key);
+            tap_key(tester, &dropdown_key);
             tester.pump_and_settle();
 
             // 240 = 200.0 (button width) + _kUnalignedMenuMargin (20.0 left and right)
             assert_eq!(
-                size_of(&tester, key_box(&tester, &dropdown_key)).width(),
+                size_of(tester, key_box(tester, &dropdown_key)).width(),
                 200.0
             );
-            assert_eq!(width_of(&tester, only(menus(&tester))), 240.0);
+            assert_eq!(width_of(tester, only(menus(tester))), 240.0);
 
             // Dismiss the menu.
             tester.tap(Offset::ZERO, 1);
             tester.pump_and_settle();
-            assert!(menus(&tester).is_empty());
+            assert!(menus(tester).is_empty());
 
-            let root = build_frame(&tester, true, TextDirection::Ltr);
+            let root = build_frame(tester, true, TextDirection::Ltr);
             tester.pump_widget(root);
-            tap_key(&mut tester, &dropdown_key);
+            tap_key(tester, &dropdown_key);
             tester.pump_and_settle();
 
             // Aligneddropdown: true means the button and menu widths match
             assert_eq!(
-                size_of(&tester, key_box(&tester, &dropdown_key)).width(),
+                size_of(tester, key_box(tester, &dropdown_key)).width(),
                 200.0
             );
-            assert_eq!(width_of(&tester, only(menus(&tester))), 200.0);
+            assert_eq!(width_of(tester, only(menus(tester))), 200.0);
 
             // There are two 'foo' widgets: the selected menu item's label and the drop
             // down button's label. The should both appear at the same location.
-            let rects = foo_rects(&tester);
+            let rects = foo_rects(tester);
             assert_eq!(rects.len(), 2);
             assert_eq!(rects[0], rects[1]);
 
             // Dismiss the menu.
             tester.tap(Offset::ZERO, 1);
             tester.pump_and_settle();
-            assert!(menus(&tester).is_empty());
+            assert!(menus(tester).is_empty());
 
             // Same test as above except RTL
-            let root = build_frame(&tester, true, TextDirection::Rtl);
+            let root = build_frame(tester, true, TextDirection::Rtl);
             tester.pump_widget(root);
-            tap_key(&mut tester, &dropdown_key);
+            tap_key(tester, &dropdown_key);
             tester.pump_and_settle();
 
-            let rects = foo_rects(&tester);
+            let rects = foo_rects(tester);
             assert_eq!(rects.len(), 2);
             assert_eq!(rects[0], rects[1]);
         });
@@ -10132,8 +9998,7 @@ mod tests {
 
     #[test]
     fn button_theme_aligned_dropdown_does_not_affect_the_field_content_position() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_frame =
                 |tester: &WidgetTester, aligned_dropdown: bool, text_direction: TextDirection| {
                     material_app(
@@ -10166,15 +10031,15 @@ mod tests {
             };
 
             for text_direction in [TextDirection::Ltr, TextDirection::Rtl] {
-                let root = build_frame(&tester, false, text_direction);
+                let root = build_frame(tester, false, text_direction);
                 tester.pump_widget(root);
-                let content_rect_for_unaligned_dropdown = selected_value_rect(&tester);
+                let content_rect_for_unaligned_dropdown = selected_value_rect(tester);
 
                 // When alignedDropdown is true, the content should be at the same position.
-                let root = build_frame(&tester, true, text_direction);
+                let root = build_frame(tester, true, text_direction);
                 tester.pump_widget(root);
                 assert_eq!(
-                    selected_value_rect(&tester),
+                    selected_value_rect(tester),
                     content_rect_for_unaligned_dropdown,
                     "{text_direction:?}"
                 );
@@ -10185,8 +10050,7 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/195192.
     #[test]
     fn dropdown_button_form_field_decoration_is_disabled_when_the_field_is_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build = |tester: &WidgetTester, enabled: Option<bool>, with_on_changed: bool| {
                 let mut field =
                     DropdownButtonFormField::new(Some(one_two_int_items())).initial_value(Some(1));
@@ -10205,27 +10069,26 @@ mod tests {
                 )
             };
 
-            let root = build(&tester, None, true);
+            let root = build(tester, None, true);
             tester.pump_widget(root);
-            assert!(is_decoration_enabled(&tester));
+            assert!(is_decoration_enabled(tester));
 
-            let root = build(&tester, Some(false), true);
+            let root = build(tester, Some(false), true);
             tester.pump_widget(root);
-            assert!(!is_decoration_enabled(&tester));
+            assert!(!is_decoration_enabled(tester));
 
             // Without `enabled`, a null onChanged disables the field.
-            let root = build(&tester, None, false);
+            let root = build(tester, None, false);
             tester.pump_widget(root);
-            assert!(!is_decoration_enabled(&tester));
+            assert!(!is_decoration_enabled(tester));
         });
     }
 
     #[test]
     fn dropdown_button_form_field_with_on_changed_null_still_autovalidates() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = int_field_app(
-                &tester,
+                tester,
                 DropdownButtonFormField::new(Some(one_two_int_items()))
                     .initial_value(Some(1))
                     .autovalidate_mode(AutovalidateMode::Always)
@@ -10233,15 +10096,14 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(shows(&tester, "error text"), 1);
+            assert_eq!(shows(tester, "error text"), 1);
         });
     }
 
     #[test]
     fn dropdown_menu_can_position_correctly_inside_a_nested_navigator() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/66870
-            let mut tester = tester();
             let root = material_app(
                 m2(&tester.cell.borrow()),
                 crate::scaffold::Scaffold::new()
@@ -10283,19 +10145,18 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            tap_text(&mut tester, "First Item");
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "First Item");
+            tester.pump();
             let second_item = tester.render_box_of(tester.find_text("Second Item")[1]);
-            assert_eq!(global_top_left(&tester, second_item).dx(), 150.0);
-            assert_eq!(global_top_left(&tester, second_item).dy(), 176.0);
+            assert_eq!(global_top_left(tester, second_item).dx(), 150.0);
+            assert_eq!(global_top_left(tester, second_item).dy(), 176.0);
         });
     }
 
     // Regression test for https://github.com/flutter/flutter/issues/151460.
     #[test]
     fn dropdown_button_form_field_has_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let button_key = GlobalKey::new();
             let build = |decoration: InputDecoration| {
@@ -10308,20 +10169,20 @@ mod tests {
                 frame
             };
 
-            pump_frame(&mut tester, &build(InputDecoration::new().filled(true)));
-            tester.pump(Duration::ZERO);
+            pump_frame(tester, &build(InputDecoration::new().filled(true)));
+            tester.pump();
 
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             let center = tester.center_of(&button_key);
             tester.move_to(&mut gesture, center, false);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(15)); // Hover animation.
+            tester.pump();
+            tester.pump_by(Duration::from_millis(15)); // Hover animation.
 
             // Default hover color.
-            let theme = decorator_theme(&tester);
+            let theme = decorator_theme(tester);
             assert!(input_decorator_fills(
-                &tester,
+                tester,
                 Color::alpha_blend(
                     theme.hover_color,
                     theme.color_scheme.surface_container_highest()
@@ -10331,11 +10192,11 @@ mod tests {
             // Custom hover color.
             let hover_color = Color::new(0xaa00ff00);
             pump_frame(
-                &mut tester,
+                tester,
                 &build(InputDecoration::new().filled(true).hover_color(hover_color)),
             );
             assert!(input_decorator_fills(
-                &tester,
+                tester,
                 Color::alpha_blend(hover_color, theme.color_scheme.surface_container_highest())
             ));
         });
@@ -10344,13 +10205,14 @@ mod tests {
     fn conflicting_scrollbars_are_not_applied_by_scroll_behavior_to_dropdown(
         platform: TargetPlatform,
     ) {
-        with_main_thread_stack(move || {
+        test_widgets(|_| {
             // Regression test for https://github.com/flutter/flutter/issues/83819
-            let mut tester = tester_on(platform);
+            let mut tester = WidgetTester::on(platform);
+            let tester = &mut tester;
             // Open the dropdown menu
             let button_key = GlobalKey::new();
             pump_frame(
-                &mut tester,
+                tester,
                 &frame()
                     .button_key(&button_key)
                     // nothing selected
@@ -10358,8 +10220,8 @@ mod tests {
                     .items(Some(numbers(100)))
                     .on_changed(on_changed()),
             );
-            tap_key(&mut tester, &button_key);
-            tester.pump(Duration::ZERO);
+            tap_key(tester, &button_key);
+            tester.pump();
             tester.pump_and_settle(); // finish the menu animation
 
             // The inherited ScrollBehavior should not apply Scrollbars since they are

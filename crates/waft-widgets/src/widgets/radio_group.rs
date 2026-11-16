@@ -844,15 +844,14 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::time::Duration;
-    use waft_foundation::AppCell;
 
     use waft_embedder::{Rect, TextDirection};
     use waft_services::{HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey};
 
     use super::*;
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::actions::{Actions, VoidCallbackAction};
     use crate::widgets::basic::{Directionality, Positioned, SizedBox, Stack};
-    use crate::widgets::focus_manager::tests::{app_with_view, mount};
     use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf, primary_focus};
     use crate::widgets::focus_scope::Focus;
 
@@ -959,7 +958,6 @@ mod tests {
 
     /// The group's state, reached through a `GlobalKey`, plus what `on_changed` recorded.
     struct GroupHarness {
-        cell: Rc<AppCell>,
         state: Handle<RadioGroupState<u32>>,
         changes: Rc<RefCell<Vec<Option<u32>>>>,
     }
@@ -974,9 +972,12 @@ mod tests {
     }
 
     /// Three radios side by side in reading order, under a group with `group_value`.
-    fn mount_group(group_value: Option<u32>, enabled: [bool; 3]) -> GroupHarness {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
+    fn mount_group(
+        tester: &mut WidgetTester,
+        group_value: Option<u32>,
+        enabled: [bool; 3],
+    ) -> GroupHarness {
+        let mut app = tester.cell.borrow_mut();
         let changes: Rc<RefCell<Vec<Option<u32>>>> = Rc::default();
         let recorded = Rc::clone(&changes);
         let key = crate::framework::GlobalKey::new();
@@ -995,8 +996,7 @@ mod tests {
         }
         let void_callback_action = VoidCallbackAction::new(&mut app);
         drop(app);
-        mount(
-            &cell,
+        tester.pump_widget(
             Directionality::new(
                 TextDirection::Ltr,
                 Actions::new(
@@ -1009,16 +1009,12 @@ mod tests {
             )
             .into_widget(),
         );
-        let app = cell.borrow();
+        let app = tester.cell.borrow();
         let state = key
             .current_state::<RadioGroupState<u32>>(&app)
             .expect("the group is mounted");
         drop(app);
-        GroupHarness {
-            cell,
-            state,
-            changes,
-        }
+        GroupHarness { state, changes }
     }
 
     fn arrow_down(app: &mut App) -> bool {
@@ -1033,95 +1029,104 @@ mod tests {
 
     #[test]
     fn a_radio_group_registers_every_client_below_it() {
-        let harness = mount_group(None, [true, true, true]);
-        let values: Vec<u32> = harness
-            .state
-            .radios(&harness.cell.borrow())
-            .into_iter()
-            .map(|radio| radio.radio_value(&harness.cell.borrow()))
-            .collect();
-        assert_eq!(values, [0, 1, 2]);
-        assert_eq!(harness.state.group_value(&harness.cell.borrow()), None);
+        test_widgets(|tester| {
+            let harness = mount_group(tester, None, [true, true, true]);
+            let values: Vec<u32> = harness
+                .state
+                .radios(&tester.cell.borrow())
+                .into_iter()
+                .map(|radio| radio.radio_value(&tester.cell.borrow()))
+                .collect();
+            assert_eq!(values, [0, 1, 2]);
+            assert_eq!(harness.state.group_value(&tester.cell.borrow()), None);
+
+            // Reported selections reach the widget's callback.
+            let registry = harness.state.as_radio_group_registry();
+            registry.on_changed(&mut tester.cell.borrow_mut(), Some(2));
+            assert_eq!(*harness.changes.borrow(), [Some(2)]);
+        });
 
         // A disabled radio does not register.
-        let disabled = mount_group(Some(1), [true, false, true]);
-        let values: Vec<u32> = disabled
-            .state
-            .radios(&disabled.cell.borrow())
-            .into_iter()
-            .map(|radio| radio.radio_value(&disabled.cell.borrow()))
-            .collect();
-        assert_eq!(values, [0, 2]);
-        assert_eq!(disabled.state.group_value(&disabled.cell.borrow()), Some(1));
-
-        // Reported selections reach the widget's callback.
-        let registry = harness.state.as_radio_group_registry();
-        registry.on_changed(&mut harness.cell.borrow_mut(), Some(2));
-        assert_eq!(*harness.changes.borrow(), [Some(2)]);
-        drop(disabled);
+        test_widgets(|tester| {
+            let disabled = mount_group(tester, Some(1), [true, false, true]);
+            let values: Vec<u32> = disabled
+                .state
+                .radios(&tester.cell.borrow())
+                .into_iter()
+                .map(|radio| radio.radio_value(&tester.cell.borrow()))
+                .collect();
+            assert_eq!(values, [0, 2]);
+            assert_eq!(disabled.state.group_value(&tester.cell.borrow()), Some(1));
+        });
     }
 
     #[test]
     fn an_arrow_key_moves_the_selection_to_the_next_radio() {
-        let harness = mount_group(Some(0), [true, true, true]);
-        let first =
-            harness.state.radios(&harness.cell.borrow())[0].focus_node(&harness.cell.borrow());
-        first.request_focus(&mut harness.cell.borrow_mut(), None);
-        harness.cell.borrow_mut().drain_microtasks();
-        assert_eq!(primary_focus(&mut harness.cell.borrow_mut()), Some(first));
+        test_widgets(|tester| {
+            let harness = mount_group(tester, Some(0), [true, true, true]);
+            let first =
+                harness.state.radios(&tester.cell.borrow())[0].focus_node(&tester.cell.borrow());
+            first.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.cell.borrow_mut().drain_microtasks();
+            assert_eq!(primary_focus(&mut tester.cell.borrow_mut()), Some(first));
 
-        assert!(
-            arrow_down(&mut harness.cell.borrow_mut()),
-            "the group handled the key"
-        );
-        harness.cell.borrow_mut().drain_microtasks();
-        assert_eq!(*harness.changes.borrow(), [Some(1)]);
-        let second =
-            harness.state.radios(&harness.cell.borrow())[1].focus_node(&harness.cell.borrow());
-        assert_eq!(primary_focus(&mut harness.cell.borrow_mut()), Some(second));
+            assert!(
+                arrow_down(&mut tester.cell.borrow_mut()),
+                "the group handled the key"
+            );
+            tester.cell.borrow_mut().drain_microtasks();
+            assert_eq!(*harness.changes.borrow(), [Some(1)]);
+            let second =
+                harness.state.radios(&tester.cell.borrow())[1].focus_node(&tester.cell.borrow());
+            assert_eq!(primary_focus(&mut tester.cell.borrow_mut()), Some(second));
 
-        // The last radio wraps around to the first.
-        let third =
-            harness.state.radios(&harness.cell.borrow())[2].focus_node(&harness.cell.borrow());
-        third.request_focus(&mut harness.cell.borrow_mut(), None);
-        harness.cell.borrow_mut().drain_microtasks();
-        assert!(arrow_down(&mut harness.cell.borrow_mut()));
-        harness.cell.borrow_mut().drain_microtasks();
-        assert_eq!(*harness.changes.borrow(), [Some(1), Some(0)]);
+            // The last radio wraps around to the first.
+            let third =
+                harness.state.radios(&tester.cell.borrow())[2].focus_node(&tester.cell.borrow());
+            third.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.cell.borrow_mut().drain_microtasks();
+            assert!(arrow_down(&mut tester.cell.borrow_mut()));
+            tester.cell.borrow_mut().drain_microtasks();
+            assert_eq!(*harness.changes.borrow(), [Some(1), Some(0)]);
+        });
     }
 
     #[test]
     fn an_arrow_key_is_ignored_while_no_radio_has_focus() {
-        let harness = mount_group(Some(0), [true, true, true]);
-        assert!(
-            !arrow_down(&mut harness.cell.borrow_mut()),
-            "the manager ignores the event when the focus is elsewhere"
-        );
-        assert!(harness.changes.borrow().is_empty());
+        test_widgets(|tester| {
+            let harness = mount_group(tester, Some(0), [true, true, true]);
+            assert!(
+                !arrow_down(&mut tester.cell.borrow_mut()),
+                "the manager ignores the event when the focus is elsewhere"
+            );
+            assert!(harness.changes.borrow().is_empty());
+        });
     }
 
     #[test]
     fn the_traversal_policy_skips_the_unselected_radios() {
-        let harness = mount_group(Some(1), [true, true, true]);
-        let nodes: Vec<AnyFocusNode> = harness
-            .state
-            .radios(&harness.cell.borrow())
-            .into_iter()
-            .map(|radio| radio.focus_node(&harness.cell.borrow()))
-            .collect();
-        let policy = harness
-            .cell
-            .borrow()
-            .get(harness.state)
-            .policy
-            .handle()
-            .expect("created in init_state");
-        let sorted =
-            policy.sort_descendants(&mut harness.cell.borrow_mut(), nodes.clone(), nodes[0]);
-        assert_eq!(
-            sorted,
-            vec![nodes[0], nodes[1]],
-            "only the selected radio and the currently focused one stay"
-        );
+        test_widgets(|tester| {
+            let harness = mount_group(tester, Some(1), [true, true, true]);
+            let nodes: Vec<AnyFocusNode> = harness
+                .state
+                .radios(&tester.cell.borrow())
+                .into_iter()
+                .map(|radio| radio.focus_node(&tester.cell.borrow()))
+                .collect();
+            let policy = tester
+                .cell
+                .borrow()
+                .get(harness.state)
+                .policy
+                .handle()
+                .expect("created in init_state");
+            let sorted =
+                policy.sort_descendants(&mut tester.cell.borrow_mut(), nodes.clone(), nodes[0]);
+            assert_eq!(
+                sorted,
+                vec![nodes[0], nodes[1]],
+                "only the selected radio and the currently focused one stay"
+            );
+        });
     }
 }

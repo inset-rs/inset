@@ -640,37 +640,14 @@ impl StatelessWidget for CupertinoMagnifier {
 
 #[cfg(test)]
 mod tests {
-    use waft_painting::PaintingBinding;
-    use waft_scheduler::TickerProvider;
-    use waft_widgets::{
-        AnyElement, Center, GlobalKey, ListenableBuilder, SizedBox, WidgetsBinding, downcast_widget,
-    };
+    use waft_widgets::testing::{TestVSync, WidgetTester, test_widgets};
+    use waft_widgets::{Center, GlobalKey, ListenableBuilder, SizedBox};
 
     use super::*;
     use crate::app::CupertinoApp;
     use crate::colors::CupertinoColors;
     use crate::page_scaffold::CupertinoPageScaffold;
-    use crate::test_support::{build, pump, test_cell};
     use crate::theme::CupertinoThemeData;
-
-    /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
-    struct TestVSync;
-
-    impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
-            Ticker::new(app, on_tick, None)
-        }
-    }
-
-    /// What the shell does at start-up: the app-wide fonts, which the debug banner needs.
-    fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
-    }
 
     /// Dart's `basicOffset`: from the magnifier's top left to the point it magnifies.
     const BASIC_OFFSET: Offset = Offset::new(
@@ -680,38 +657,14 @@ mod tests {
     );
     const REASONABLE_TEXT_FIELD: Rect = Rect::from_ltrb(0.0, 100.0, 200.0, 200.0);
 
-    fn elements(app: &mut App) -> Vec<AnyElement> {
-        fn visit(app: &App, element: AnyElement, found: &mut Vec<AnyElement>) {
-            found.push(element);
-            for child in element.children(app) {
-                visit(app, child, found);
-            }
-        }
-        let mut found = Vec::new();
-        let root = WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("a mounted tree");
-        visit(app, root, &mut found);
-        found
-    }
-
-    /// The element of the first `W` in the mounted tree.
-    fn first_element_of<W: 'static>(app: &mut App) -> AnyElement {
-        elements(app)
-            .into_iter()
-            .find(|element| downcast_widget::<W>(&**element.widget(app)).is_some())
-            .expect("a mounted widget of that type")
-    }
-
     /// `tester.widget<W>(find.byType(W))`, read through `read`.
-    fn read_widget<W: 'static, R>(app: &mut App, read: impl FnOnce(&W) -> R) -> R {
-        let element = first_element_of::<W>(app);
-        let widget = element.widget(app).clone();
-        read(downcast_widget::<W>(&*widget).expect("a W"))
+    fn read_widget<W: 'static, R>(tester: &WidgetTester, read: impl FnOnce(&W) -> R) -> R {
+        let found = *tester.find_by_type::<W>().first().expect("a mounted W");
+        tester.widget(found, read)
     }
 
-    fn magnifier_position(app: &mut App) -> Offset {
-        read_widget::<AnimatedPositioned, _>(app, |positioned| {
+    fn magnifier_position(tester: &WidgetTester) -> Offset {
+        read_widget::<AnimatedPositioned, _>(tester, |positioned| {
             Offset::new(
                 positioned.left.unwrap_or(0.0),
                 positioned.top.unwrap_or(0.0),
@@ -719,49 +672,38 @@ mod tests {
         })
     }
 
-    /// Dart's `pumpAndSettle`, from `at`.
-    fn settle(app: &mut App, mut at: Duration) -> Duration {
-        for _ in 0..40 {
-            at += Duration::from_millis(20);
-            pump(app, at);
-        }
-        at
-    }
-
     /// Dart's `CupertinoApp(home: Placeholder())`; the home's context is the magnifier's.
-    fn mount_app(home: GlobalKey) -> Rc<waft_foundation::AppCell> {
-        let cell = test_cell();
-        install_fonts(&mut cell.borrow_mut());
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(SizedBox::new().key(home.into()))
-                .into_widget(),
-        );
-        cell
+    fn mount_app(tester: &mut WidgetTester, home: GlobalKey) {
+        tester.pump_widget(CupertinoApp::new().home(SizedBox::new().key(home.into())));
     }
 
     /// Dart's `showCupertinoMagnifier`: shows the magnifier and runs it to the end of its
-    /// entry animation. Returns the time of the last frame.
+    /// entry animation.
     fn show_cupertino_magnifier(
-        app: &mut App,
+        tester: &mut WidgetTester,
         context: BuildContext,
         magnifier_controller: Ref<MagnifierController>,
         magnifier_info: Ref<ValueNotifier<MagnifierInfo>>,
-    ) -> Duration {
+    ) {
         let shown_controller = magnifier_controller.clone();
-        magnifier_controller.show(
-            app,
-            context,
-            Rc::new(move |_app: &mut App, _context: BuildContext| {
-                CupertinoTextMagnifier::new(shown_controller.clone(), magnifier_info.clone())
-                    .into_widget()
-            }),
-            None,
-        );
-        pump(app, Duration::ZERO);
-        pump(app, Duration::from_secs(2));
-        Duration::from_secs(2)
+        tester.update(|app| {
+            magnifier_controller.show(
+                app,
+                context,
+                Rc::new(move |_app: &mut App, _context: BuildContext| {
+                    CupertinoTextMagnifier::new(shown_controller.clone(), magnifier_info.clone())
+                        .into_widget()
+                }),
+                None,
+            )
+        });
+        tester.pump();
+        tester.pump_by(Duration::from_secs(2));
+    }
+
+    /// Dart's `tearDown`: `magnifierController.removeFromOverlay()`.
+    fn tear_down(tester: &WidgetTester, magnifier_controller: &Ref<MagnifierController>) {
+        tester.update(|app| magnifier_controller.remove_from_overlay(app));
     }
 
     fn info(global_gesture_position: Offset) -> MagnifierInfo {
@@ -775,14 +717,11 @@ mod tests {
 
     #[test]
     fn magnifier_border_color_inherits_from_parent_cupertino_theme() {
-        let cell = test_cell();
-        install_fonts(&mut cell.borrow_mut());
-        let fake_text_field = GlobalKey::new();
-        let placeholder = GlobalKey::new();
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(
+        test_widgets(|tester| {
+            let fake_text_field = GlobalKey::new();
+            let placeholder = GlobalKey::new();
+            tester.pump_widget(
+                CupertinoApp::new().home(
                     SizedBox::square(Some(10.0))
                         .key(fake_text_field.clone().into())
                         .child(CupertinoTheme::new(
@@ -790,158 +729,185 @@ mod tests {
                                 .with_primary_color(CupertinoColors::ACTIVE_GREEN),
                             SizedBox::new().key(placeholder.clone().into()),
                         )),
-                )
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let context = placeholder.current_context(&app).expect("mounted");
-        let tap_point_render_box = fake_text_field
-            .current_context(&app)
-            .and_then(|context| context.find_render_object(&app))
-            .and_then(|render_object| render_object.as_box())
-            .expect("laid out");
-        let fake_text_field_rect = tap_point_render_box.local_to_global(&app, Offset::ZERO, None)
-            & tap_point_render_box.size(&app);
-        let magnifier = app.create(ValueNotifier::new(MagnifierInfo::new(
-            fake_text_field_rect.center(),
-            fake_text_field_rect,
-            fake_text_field_rect,
-            fake_text_field_rect,
-        )));
-        let magnifier_controller = MagnifierController::new(&mut app);
+                ),
+            );
+            let context = placeholder
+                .current_context(&tester.cell.borrow())
+                .expect("mounted");
+            let fake_text_field_rect = tester.global_rect(
+                tester
+                    .render_object(&fake_text_field)
+                    .as_box()
+                    .expect("laid out"),
+            );
+            let magnifier = tester.update(|app| {
+                app.create(ValueNotifier::new(MagnifierInfo::new(
+                    fake_text_field_rect.center(),
+                    fake_text_field_rect,
+                    fake_text_field_rect,
+                    fake_text_field_rect,
+                )))
+            });
+            let magnifier_controller = tester.update(MagnifierController::new);
 
-        show_cupertino_magnifier(
-            &mut app,
-            context,
-            magnifier_controller.clone(),
-            magnifier.clone(),
-        );
+            show_cupertino_magnifier(
+                tester,
+                context,
+                magnifier_controller.clone(),
+                magnifier.clone(),
+            );
 
-        // Magnifier border color should inherit from CupertinoTheme.of(context).primaryColor.
-        let magnifier_border_color =
-            read_widget::<CupertinoMagnifier, _>(&mut app, |magnifier| magnifier.border_side.color);
-        assert_eq!(
-            magnifier_border_color,
-            CupertinoColors::ACTIVE_GREEN.color()
-        );
-        magnifier_controller.remove_from_overlay(&mut app);
+            // Magnifier border color should inherit from CupertinoTheme.of(context).primaryColor.
+            let magnifier_border_color =
+                read_widget::<CupertinoMagnifier, _>(tester, |magnifier| {
+                    magnifier.border_side.color
+                });
+            assert_eq!(
+                magnifier_border_color,
+                CupertinoColors::ACTIVE_GREEN.color()
+            );
+            tear_down(tester, &magnifier_controller);
+        });
     }
 
     #[test]
     fn should_never_horizontally_be_outside_of_screen_padding() {
-        let home = GlobalKey::new();
-        let cell = mount_app(home.clone());
-        let mut app = cell.borrow_mut();
-        let context = home.current_context(&app).expect("mounted");
-        let width = MediaQuery::size_of(&mut app, context).width();
-        // The tap position is far out of the right side of the app.
-        let magnifier_info = app.create(ValueNotifier::new(info(Offset::new(width + 100.0, 0.0))));
-        let magnifier_controller = MagnifierController::new(&mut app);
+        test_widgets(|tester| {
+            let home = GlobalKey::new();
+            mount_app(tester, home.clone());
+            let context = home
+                .current_context(&tester.cell.borrow())
+                .expect("mounted");
+            let width = tester.update(|app| MediaQuery::size_of(app, context).width());
+            // The tap position is far out of the right side of the app.
+            let magnifier_info = tester.update(|app| {
+                app.create(ValueNotifier::new(info(Offset::new(width + 100.0, 0.0))))
+            });
+            let magnifier_controller = tester.update(MagnifierController::new);
 
-        show_cupertino_magnifier(
-            &mut app,
-            context,
-            magnifier_controller.clone(),
-            magnifier_info.clone(),
-        );
+            show_cupertino_magnifier(
+                tester,
+                context,
+                magnifier_controller.clone(),
+                magnifier_info.clone(),
+            );
 
-        // Should be less than the right edge, since we have padding.
-        assert!(magnifier_position(&mut app).dx() < width);
-        magnifier_controller.remove_from_overlay(&mut app);
+            // Should be less than the right edge, since we have padding.
+            assert!(magnifier_position(tester).dx() < width);
+            tear_down(tester, &magnifier_controller);
+        });
     }
 
     #[test]
     fn should_have_some_vertical_drag() {
-        let home = GlobalKey::new();
-        let cell = mount_app(home.clone());
-        let mut app = cell.borrow_mut();
-        let context = home.current_context(&app).expect("mounted");
-        let drag_position_below_text_field = REASONABLE_TEXT_FIELD.center().dy() + 30.0;
-        let width = MediaQuery::size_of(&mut app, context).width();
-        let magnifier_info = app.create(ValueNotifier::new(info(Offset::new(
-            width / 2.0,
-            drag_position_below_text_field,
-        ))));
-        let magnifier_controller = MagnifierController::new(&mut app);
+        test_widgets(|tester| {
+            let home = GlobalKey::new();
+            mount_app(tester, home.clone());
+            let context = home
+                .current_context(&tester.cell.borrow())
+                .expect("mounted");
+            let drag_position_below_text_field = REASONABLE_TEXT_FIELD.center().dy() + 30.0;
+            let width = tester.update(|app| MediaQuery::size_of(app, context).width());
+            let magnifier_info = tester.update(|app| {
+                app.create(ValueNotifier::new(info(Offset::new(
+                    width / 2.0,
+                    drag_position_below_text_field,
+                ))))
+            });
+            let magnifier_controller = tester.update(MagnifierController::new);
 
-        show_cupertino_magnifier(
-            &mut app,
-            context,
-            magnifier_controller.clone(),
-            magnifier_info.clone(),
-        );
+            show_cupertino_magnifier(
+                tester,
+                context,
+                magnifier_controller.clone(),
+                magnifier_info.clone(),
+            );
 
-        // The magnifier Y should be greater than the text field, since we "dragged" it down.
-        let magnified_y = magnifier_position(&mut app).dy() + BASIC_OFFSET.dy();
-        assert!(magnified_y > REASONABLE_TEXT_FIELD.center().dy());
-        assert!(magnified_y < drag_position_below_text_field);
-        magnifier_controller.remove_from_overlay(&mut app);
+            // The magnifier Y should be greater than the text field, since we "dragged" it down.
+            let magnified_y = magnifier_position(tester).dy() + BASIC_OFFSET.dy();
+            assert!(magnified_y > REASONABLE_TEXT_FIELD.center().dy());
+            assert!(magnified_y < drag_position_below_text_field);
+            tear_down(tester, &magnifier_controller);
+        });
     }
 
     /// Dart's 'status' group: shows the magnifier, then moves the gesture 100 below the line.
     fn shown_then_dragged_below(
-        app: &mut App,
+        tester: &mut WidgetTester,
         context: BuildContext,
-    ) -> (
-        Ref<MagnifierController>,
-        Ref<ValueNotifier<MagnifierInfo>>,
-        Duration,
-    ) {
-        let width = MediaQuery::size_of(app, context).width();
-        let magnifier_info = app.create(ValueNotifier::new(info(Offset::new(
-            width / 2.0,
-            REASONABLE_TEXT_FIELD.top,
-        ))));
-        let magnifier_controller = MagnifierController::new(app);
+    ) -> (Ref<MagnifierController>, Ref<ValueNotifier<MagnifierInfo>>) {
+        let width = tester.update(|app| MediaQuery::size_of(app, context).width());
+        let magnifier_info = tester.update(|app| {
+            app.create(ValueNotifier::new(info(Offset::new(
+                width / 2.0,
+                REASONABLE_TEXT_FIELD.top,
+            ))))
+        });
+        let magnifier_controller = tester.update(MagnifierController::new);
 
         // Show the magnifier initially, so that we get it in a not hidden state.
-        let at = show_cupertino_magnifier(
-            app,
+        show_cupertino_magnifier(
+            tester,
             context,
             magnifier_controller.clone(),
             magnifier_info.clone(),
         );
 
         // Move the gesture to one that should hide it.
-        let below = magnifier_info.value(app).global_gesture_position + Offset::new(0.0, 100.0);
-        magnifier_info.set_value(app, info(below));
-        let at = settle(app, at);
+        tester.update(|app| {
+            let below = magnifier_info.value(app).global_gesture_position + Offset::new(0.0, 100.0);
+            magnifier_info.set_value(app, info(below));
+        });
+        tester.pump_and_settle();
 
-        assert!(!magnifier_controller.shown(app));
-        assert!(magnifier_controller.overlay_entry(app).is_some());
-        (magnifier_controller, magnifier_info, at)
+        {
+            let app = tester.cell.borrow();
+            assert!(!magnifier_controller.shown(&app));
+            assert!(magnifier_controller.overlay_entry(&app).is_some());
+        }
+        (magnifier_controller, magnifier_info)
     }
 
     #[test]
     fn should_hide_if_gesture_is_far_below_the_text_field() {
-        let home = GlobalKey::new();
-        let cell = mount_app(home.clone());
-        let mut app = cell.borrow_mut();
-        let context = home.current_context(&app).expect("mounted");
-        let (magnifier_controller, _, _) = shown_then_dragged_below(&mut app, context);
-        magnifier_controller.remove_from_overlay(&mut app);
+        test_widgets(|tester| {
+            let home = GlobalKey::new();
+            mount_app(tester, home.clone());
+            let context = home
+                .current_context(&tester.cell.borrow())
+                .expect("mounted");
+            let (magnifier_controller, _) = shown_then_dragged_below(tester, context);
+            tear_down(tester, &magnifier_controller);
+        });
     }
 
     #[test]
     fn should_re_show_if_gesture_moves_back_up() {
-        let home = GlobalKey::new();
-        let cell = mount_app(home.clone());
-        let mut app = cell.borrow_mut();
-        let context = home.current_context(&app).expect("mounted");
-        let (magnifier_controller, magnifier_info, at) =
-            shown_then_dragged_below(&mut app, context);
+        test_widgets(|tester| {
+            let home = GlobalKey::new();
+            mount_app(tester, home.clone());
+            let context = home
+                .current_context(&tester.cell.borrow())
+                .expect("mounted");
+            let (magnifier_controller, magnifier_info) = shown_then_dragged_below(tester, context);
 
-        // Return the gesture to one that shows it.
-        let width = MediaQuery::size_of(&mut app, context).width();
-        magnifier_info.set_value(
-            &mut app,
-            info(Offset::new(width / 2.0, REASONABLE_TEXT_FIELD.top)),
-        );
-        settle(&mut app, at);
+            // Return the gesture to one that shows it.
+            let width = tester.update(|app| MediaQuery::size_of(app, context).width());
+            tester.update(|app| {
+                magnifier_info.set_value(
+                    app,
+                    info(Offset::new(width / 2.0, REASONABLE_TEXT_FIELD.top)),
+                )
+            });
+            tester.pump_and_settle();
 
-        assert!(magnifier_controller.shown(&app));
-        assert!(magnifier_controller.overlay_entry(&app).is_some());
-        magnifier_controller.remove_from_overlay(&mut app);
+            {
+                let app = tester.cell.borrow();
+                assert!(magnifier_controller.shown(&app));
+                assert!(magnifier_controller.overlay_entry(&app).is_some());
+            }
+            tear_down(tester, &magnifier_controller);
+        });
     }
 
     #[test]
@@ -956,146 +922,126 @@ mod tests {
         CupertinoPageScaffold::new(CupertinoMagnifier::new().magnification_scale(-1.0));
     }
 
-    fn mount_magnifier(magnifier: CupertinoMagnifier) -> Rc<waft_foundation::AppCell> {
-        let cell = test_cell();
-        install_fonts(&mut cell.borrow_mut());
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(CupertinoPageScaffold::new(magnifier))
-                .into_widget(),
-        );
-        cell
+    fn mount_magnifier(tester: &mut WidgetTester, magnifier: CupertinoMagnifier) {
+        tester.pump_widget(CupertinoApp::new().home(CupertinoPageScaffold::new(magnifier)));
     }
 
     #[test]
     fn cupertino_magnifier_magnification_scale_defaults_to_1() {
-        let cell = mount_magnifier(CupertinoMagnifier::new());
-        let mut app = cell.borrow_mut();
-        let scale = read_widget::<RawMagnifier, _>(&mut app, |raw| raw.magnification_scale);
-        assert_eq!(scale, 1.0);
+        test_widgets(|tester| {
+            mount_magnifier(tester, CupertinoMagnifier::new());
+            let scale = read_widget::<RawMagnifier, _>(tester, |raw| raw.magnification_scale);
+            assert_eq!(scale, 1.0);
+        });
     }
 
     #[test]
     fn magnification_scale_argument_is_passed_to_the_raw_magnifier() {
-        let cell = mount_magnifier(CupertinoMagnifier::new().magnification_scale(2.0));
-        let mut app = cell.borrow_mut();
-        let scale = read_widget::<RawMagnifier, _>(&mut app, |raw| raw.magnification_scale);
-        assert_eq!(scale, 2.0);
+        test_widgets(|tester| {
+            mount_magnifier(tester, CupertinoMagnifier::new().magnification_scale(2.0));
+            let scale = read_widget::<RawMagnifier, _>(tester, |raw| raw.magnification_scale);
+            assert_eq!(scale, 2.0);
+        });
     }
 
     #[test]
     fn cupertino_magnifier_focal_point_is_based_on_its_size() {
-        let focal_point_offset_for = |size: Size| {
-            let cell = mount_magnifier(CupertinoMagnifier::new().size(size));
-            let mut app = cell.borrow_mut();
-            read_widget::<RawMagnifier, _>(&mut app, |raw| raw.focal_point_offset)
-        };
+        test_widgets(|tester| {
+            let focal_point_offset_for = |tester: &mut WidgetTester, size: Size| {
+                mount_magnifier(tester, CupertinoMagnifier::new().size(size));
+                read_widget::<RawMagnifier, _>(tester, |raw| raw.focal_point_offset)
+            };
 
-        assert_eq!(
-            focal_point_offset_for(CupertinoMagnifier::K_DEFAULT_SIZE),
-            Offset::new(
-                0.0,
-                CupertinoMagnifier::K_DEFAULT_SIZE.height() / 2.0
-                    - CupertinoMagnifier::K_MAGNIFIER_ABOVE_FOCAL_POINT
-            )
-        );
-        assert_eq!(
-            focal_point_offset_for(Size::new(100.0, 200.0)),
-            Offset::new(
-                0.0,
-                100.0 - CupertinoMagnifier::K_MAGNIFIER_ABOVE_FOCAL_POINT
-            )
-        );
+            assert_eq!(
+                focal_point_offset_for(tester, CupertinoMagnifier::K_DEFAULT_SIZE),
+                Offset::new(
+                    0.0,
+                    CupertinoMagnifier::K_DEFAULT_SIZE.height() / 2.0
+                        - CupertinoMagnifier::K_MAGNIFIER_ABOVE_FOCAL_POINT
+                )
+            );
+            assert_eq!(
+                focal_point_offset_for(tester, Size::new(100.0, 200.0)),
+                Offset::new(
+                    0.0,
+                    100.0 - CupertinoMagnifier::K_MAGNIFIER_ABOVE_FOCAL_POINT
+                )
+            );
+        });
     }
 
     #[test]
     fn cupertino_magnifier_does_not_crash_at_zero_area() {
-        let cell = test_cell();
-        install_fonts(&mut cell.borrow_mut());
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(Center::new().child(
-                    SizedBox::shrink().child(CupertinoMagnifier::new().magnification_scale(2.0)),
-                ))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let size = first_element_of::<CupertinoMagnifier>(&mut app)
-            .find_render_object(&app)
-            .and_then(|render_object| render_object.as_box())
-            .expect("laid out")
-            .size(&app);
-        assert_eq!(size, Size::ZERO);
+        test_widgets(|tester| {
+            tester.pump_widget(CupertinoApp::new().home(Center::new().child(
+                SizedBox::shrink().child(CupertinoMagnifier::new().magnification_scale(2.0)),
+            )));
+            let magnifier = tester.find_by_type::<CupertinoMagnifier>()[0];
+            let size = tester.render_box_of(magnifier).size(&tester.cell.borrow());
+            assert_eq!(size, Size::ZERO);
+        });
     }
 
     #[test]
     fn cupertino_magnifier_keeps_magnifying_the_same_point_during_in_out_animation() {
-        let cell = test_cell();
-        install_fonts(&mut cell.borrow_mut());
-        let mut app = cell.borrow_mut();
-        let controller = AnimationController::new(
-            &mut app,
-            None,
-            None,
-            None,
-            0.0,
-            1.0,
-            AnimationBehavior::Normal,
-            TestVSync,
-        );
-        drop(app);
-        let built_with = controller.clone();
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(Center::new().child(
-                    // CupertinoMagnifier does not listen to the animation itself; its
-                    // owner (e.g. CupertinoTextMagnifier) rebuilds it on every tick.
-                    ListenableBuilder::new(
-                        Rc::new(controller.clone()),
-                        move |_app, _context, _child| {
-                            CupertinoMagnifier::new()
-                                .in_out_animation(built_with.erase())
-                                .into_widget()
-                        },
-                    ),
-                ))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        // The global position the lens is magnifying: lens center (which includes
-        // the in/out translation) plus the focal point offset.
-        let magnified_point = |app: &mut App| {
-            let element = first_element_of::<RawMagnifier>(app);
-            let render_box = element
-                .find_render_object(app)
-                .and_then(|render_object| render_object.as_box())
-                .expect("laid out");
-            let size = render_box.size(app);
-            let center = render_box.local_to_global(
-                app,
-                Offset::new(size.width() / 2.0, size.height() / 2.0),
-                None,
-            );
-            let focal_point_offset =
-                read_widget::<RawMagnifier, _>(app, |raw| raw.focal_point_offset);
-            center + focal_point_offset
-        };
+        test_widgets(|tester| {
+            let controller = tester.update(|app| {
+                AnimationController::new(
+                    app,
+                    None,
+                    None,
+                    None,
+                    0.0,
+                    1.0,
+                    AnimationBehavior::Normal,
+                    TestVSync,
+                )
+            });
+            let built_with = controller.clone();
+            tester.pump_widget(CupertinoApp::new().home(Center::new().child(
+                // CupertinoMagnifier does not listen to the animation itself; its
+                // owner (e.g. CupertinoTextMagnifier) rebuilds it on every tick.
+                ListenableBuilder::new(
+                    Rc::new(controller.clone()),
+                    move |_app, _context, _child| {
+                        CupertinoMagnifier::new()
+                            .in_out_animation(built_with.erase())
+                            .into_widget()
+                    },
+                ),
+            )));
+            // The global position the lens is magnifying: lens center (which includes
+            // the in/out translation) plus the focal point offset.
+            let magnified_point = |tester: &WidgetTester| {
+                let raw = tester.find_by_type::<RawMagnifier>()[0];
+                let render_box = tester.render_box_of(raw);
+                let center = {
+                    let app = tester.cell.borrow();
+                    let size = render_box.size(&app);
+                    render_box.local_to_global(
+                        &app,
+                        Offset::new(size.width() / 2.0, size.height() / 2.0),
+                        None,
+                    )
+                };
+                let focal_point_offset =
+                    read_widget::<RawMagnifier, _>(tester, |raw| raw.focal_point_offset);
+                center + focal_point_offset
+            };
 
-        controller.set_value(&mut app, 1.0);
-        pump(&mut app, Duration::from_millis(16));
-        let at_rest = magnified_point(&mut app);
-        for (frame, value) in [0.0, 0.25, 0.5, 0.75].into_iter().enumerate() {
-            controller.set_value(&mut app, value);
-            pump(&mut app, Duration::from_millis(32 + 16 * frame as u64));
-            let point = magnified_point(&mut app);
-            assert!(
-                (point.dx() - at_rest.dx()).abs() < 1e-10
-                    && (point.dy() - at_rest.dy()).abs() < 1e-10,
-                "value={value}: {point:?} is not {at_rest:?}"
-            );
-        }
+            tester.update(|app| controller.set_value(app, 1.0));
+            tester.pump();
+            let at_rest = magnified_point(tester);
+            for value in [0.0, 0.25, 0.5, 0.75] {
+                tester.update(|app| controller.set_value(app, value));
+                tester.pump();
+                let point = magnified_point(tester);
+                assert!(
+                    (point.dx() - at_rest.dx()).abs() < 1e-10
+                        && (point.dy() - at_rest.dy()).abs() < 1e-10,
+                    "value={value}: {point:?} is not {at_rest:?}"
+                );
+            }
+        });
     }
 }

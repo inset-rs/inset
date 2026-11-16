@@ -702,17 +702,16 @@ fn curves_identical(a: &Option<Rc<dyn Curve>>, b: &Option<Rc<dyn Curve>>) -> boo
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use waft_foundation::AppCell;
 
     use waft_embedder::{Size, TextDirection};
     use waft_rendering::{
-        AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderConstrainedBoxBase,
-        RenderHandle, RenderOffstage,
+        AnyRenderObject, BoxConstraints, RenderBox, RenderClipRect, RenderConstrainedBox,
+        RenderConstrainedBoxBase, RenderHandle, RenderOffstage, RendererBinding,
     };
 
     use super::*;
     use crate::framework::{LeafRenderObjectWidget, RenderObjectWidget};
-    use crate::test_harness::Harness;
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Directionality, SizedBox};
     use crate::widgets::page_storage::{PageStorageBucket, PageStorageKey};
 
@@ -763,11 +762,8 @@ mod tests {
         Expansible::new(header_builder(), body_builder(builds), controller)
     }
 
-    fn mount(app: &mut App, widget: Expansible) -> Harness {
-        Harness::mount(
-            app,
-            Directionality::new(TextDirection::Ltr, widget).into_widget(),
-        )
+    fn ltr(widget: Expansible) -> Directionality {
+        Directionality::new(TextDirection::Ltr, widget)
     }
 
     fn children(app: &App, object: AnyRenderObject) -> Vec<AnyRenderObject> {
@@ -780,211 +776,197 @@ mod tests {
         children(app, object).first().copied()
     }
 
-    /// The `Column` the default expansible builder returns.
-    fn column(harness: &Harness, app: &App) -> AnyRenderObject {
-        harness
-            .render_root(app)
-            .child(app)
+    /// The `Column` the default expansible builder returns: the view's render child.
+    fn column(tester: &WidgetTester) -> AnyRenderObject {
+        let mut app = tester.cell.borrow_mut();
+        let binding = RendererBinding::instance(&mut app);
+        binding.render_views(&app)[0]
+            .child(&app)
             .expect("a child")
             .as_object()
     }
 
     /// The `Column`'s second child: the `ClipRect` wrapping the body.
-    fn body_clip(harness: &Harness, app: &App) -> AnyRenderObject {
-        children(app, column(harness, app))[1]
+    fn body_clip(tester: &WidgetTester) -> AnyRenderObject {
+        let column = column(tester);
+        children(&tester.cell.borrow(), column)[1]
     }
 
-    fn body_height(harness: &Harness, app: &App) -> f64 {
-        body_clip(harness, app)
-            .as_box()
+    fn body_height(tester: &WidgetTester) -> f64 {
+        let clip = body_clip(tester);
+        clip.as_box()
             .expect("a box")
-            .size(app)
+            .size(&tester.cell.borrow())
             .height()
     }
 
     /// The `Align` under the body's `ClipRect`.
-    fn body_align(harness: &Harness, app: &App) -> AnyRenderObject {
-        only_child(app, body_clip(harness, app)).expect("the Align")
+    fn body_align(tester: &WidgetTester) -> AnyRenderObject {
+        let clip = body_clip(tester);
+        only_child(&tester.cell.borrow(), clip).expect("the Align")
     }
 
-    fn offstage(harness: &Harness, app: &App) -> bool {
-        only_child(app, body_align(harness, app))
+    fn offstage(tester: &WidgetTester) -> bool {
+        let align = body_align(tester);
+        let app = tester.cell.borrow();
+        only_child(&app, align)
             .expect("the Offstage")
-            .downcast::<RenderOffstage>(app)
+            .downcast::<RenderOffstage>(&app)
             .expect("a RenderOffstage")
-            .offstage(app)
+            .offstage(&app)
     }
 
-    /// Runs frames until the expansion animation settles.
-    fn settle(harness: &Harness, app: &mut App, from: Duration) -> Duration {
-        let mut at = from;
-        for _ in 0..20 {
-            at += Duration::from_millis(20);
-            crate::test_harness::pump_every_view(app, at);
-            harness.pump(app);
-        }
-        at
+    fn body_is_in_the_tree(tester: &WidgetTester) -> bool {
+        let align = body_align(tester);
+        only_child(&tester.cell.borrow(), align).is_some()
     }
 
     // expansible_test.dart 'Expansible expands and collapses'
     #[test]
     fn an_expansible_expands_and_collapses_through_its_controller() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let controller = ExpansibleController::new(&mut app);
-        let builds = Rc::new(Cell::new(0));
-        let harness = mount(&mut app, expansible(controller.clone(), &builds));
-        harness.pump(&mut app);
-        assert!(!controller.is_expanded(&app));
-        assert_eq!(body_height(&harness, &app), 0.0);
-        assert!(offstage(&harness, &app), "the body is hidden when closed");
+        test_widgets(|tester| {
+            let controller = tester.update(ExpansibleController::new);
+            let builds = Rc::new(Cell::new(0));
+            tester.pump_widget(ltr(expansible(controller.clone(), &builds)));
+            assert!(!controller.is_expanded(&tester.cell.borrow()));
+            assert_eq!(body_height(tester), 0.0);
+            assert!(offstage(tester), "the body is hidden when closed");
 
-        controller.expand(&mut app);
-        harness.pump(&mut app);
-        assert!(controller.is_expanded(&app));
-        assert!(!offstage(&harness, &app), "the body is on stage at once");
-        let at = settle(&harness, &mut app, Duration::ZERO);
-        assert_eq!(body_height(&harness, &app), 40.0);
+            tester.update(|app| controller.expand(app));
+            tester.pump();
+            assert!(controller.is_expanded(&tester.cell.borrow()));
+            assert!(!offstage(tester), "the body is on stage at once");
+            tester.pump_and_settle();
+            assert_eq!(body_height(tester), 40.0);
 
-        controller.collapse(&mut app);
-        harness.pump(&mut app);
-        settle(&harness, &mut app, at);
-        assert_eq!(body_height(&harness, &app), 0.0);
-        assert!(offstage(&harness, &app), "offstage again once dismissed");
+            tester.update(|app| controller.collapse(app));
+            tester.pump();
+            tester.pump_and_settle();
+            assert_eq!(body_height(tester), 0.0);
+            assert!(offstage(tester), "offstage again once dismissed");
 
-        controller.dispose(&mut app);
+            tester.update(|app| controller.dispose(app));
+        });
     }
 
     // expansible_test.dart 'Expansible maintainState'
     #[test]
     fn a_collapsed_expansible_removes_its_body_when_maintain_state_is_false() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let controller = ExpansibleController::new(&mut app);
-        let builds = Rc::new(Cell::new(0));
-        let harness = mount(
-            &mut app,
-            expansible(controller.clone(), &builds).maintain_state(false),
-        );
-        harness.pump(&mut app);
-        assert!(
-            only_child(&app, body_align(&harness, &app)).is_none(),
-            "the body is not in the tree while closed"
-        );
+        test_widgets(|tester| {
+            let controller = tester.update(ExpansibleController::new);
+            let builds = Rc::new(Cell::new(0));
+            tester.pump_widget(ltr(
+                expansible(controller.clone(), &builds).maintain_state(false)
+            ));
+            assert!(
+                !body_is_in_the_tree(tester),
+                "the body is not in the tree while closed"
+            );
 
-        controller.expand(&mut app);
-        harness.pump(&mut app);
-        assert!(
-            only_child(&app, body_align(&harness, &app)).is_some(),
-            "expanding puts it back"
-        );
-        assert!(!offstage(&harness, &app));
-        let _ = builds;
+            tester.update(|app| controller.expand(app));
+            tester.pump();
+            assert!(body_is_in_the_tree(tester), "expanding puts it back");
+            assert!(!offstage(tester));
 
-        controller.dispose(&mut app);
+            tester.update(|app| controller.dispose(app));
+        });
     }
 
     #[test]
     fn a_collapsed_expansible_keeps_its_body_when_maintain_state_is_true() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let controller = ExpansibleController::new(&mut app);
-        let builds = Rc::new(Cell::new(0));
-        let harness = mount(&mut app, expansible(controller.clone(), &builds));
-        harness.pump(&mut app);
-        assert_eq!(builds.get(), 1, "the body is built but offstage");
-        assert!(offstage(&harness, &app));
+        test_widgets(|tester| {
+            let controller = tester.update(ExpansibleController::new);
+            let builds = Rc::new(Cell::new(0));
+            tester.pump_widget(ltr(expansible(controller.clone(), &builds)));
+            assert_eq!(builds.get(), 1, "the body is built but offstage");
+            assert!(offstage(tester));
 
-        controller.dispose(&mut app);
+            tester.update(|app| controller.dispose(app));
+        });
     }
 
     // expansible_test.dart 'Expansible restores state from PageStorage'
     #[test]
     fn an_expansible_restores_its_expanded_state_from_page_storage() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let bucket = PageStorageBucket::new(&mut app);
-        let controller = ExpansibleController::new(&mut app);
-        let builds = Rc::new(Cell::new(0));
-        let page = |controller| {
-            PageStorage::new(
-                bucket.clone(),
-                Directionality::new(
-                    TextDirection::Ltr,
-                    expansible(controller, &builds).key(PageStorageKey::new("tile").into_key()),
-                ),
-            )
-            .into_widget()
-        };
-        let harness = Harness::mount(&mut app, page(controller.clone()));
-        harness.pump(&mut app);
-        controller.expand(&mut app);
-        harness.pump(&mut app);
-        settle(&harness, &mut app, Duration::ZERO);
-        assert_eq!(body_height(&harness, &app), 40.0);
+        test_widgets(|tester| {
+            let bucket = tester.update(PageStorageBucket::new);
+            let controller = tester.update(ExpansibleController::new);
+            let builds = Rc::new(Cell::new(0));
+            let page = |controller| {
+                PageStorage::new(
+                    bucket.clone(),
+                    Directionality::new(
+                        TextDirection::Ltr,
+                        expansible(controller, &builds).key(PageStorageKey::new("tile").into_key()),
+                    ),
+                )
+                .into_widget()
+            };
+            tester.pump_widget(page(controller.clone()));
+            tester.update(|app| controller.expand(app));
+            tester.pump();
+            tester.pump_and_settle();
+            assert_eq!(body_height(tester), 40.0);
 
-        // A fresh controller and state, as a tile scrolled out of view and back gets.
-        let replacement = ExpansibleController::new(&mut app);
-        harness.set_child(&mut app, SizedBox::new().into_widget());
-        harness.pump(&mut app);
-        harness.set_child(&mut app, page(replacement.clone()));
-        harness.pump(&mut app);
-        assert!(
-            replacement.is_expanded(&app),
-            "the bucket told the new state it was open"
-        );
-        assert_eq!(body_height(&harness, &app), 40.0);
+            // A fresh controller and state, as a tile scrolled out of view and back gets.
+            let replacement = tester.update(ExpansibleController::new);
+            tester.pump_widget(SizedBox::new());
+            tester.pump_widget(page(replacement.clone()));
+            assert!(
+                replacement.is_expanded(&tester.cell.borrow()),
+                "the bucket told the new state it was open"
+            );
+            assert_eq!(body_height(tester), 40.0);
 
-        controller.dispose(&mut app);
-        replacement.dispose(&mut app);
+            tester.update(|app| {
+                controller.dispose(app);
+                replacement.dispose(app);
+            });
+        });
     }
 
     // expansible_test.dart 'ExpansibleController.of'
     #[test]
     fn expansible_controller_of_finds_the_enclosing_expansible() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let controller = ExpansibleController::new(&mut app);
-        let found: Rc<Cell<Option<Handle<ExpansibleController>>>> = Rc::new(Cell::new(None));
-        let header: ExpansibleComponentBuilder = Rc::new({
-            let found = Rc::clone(&found);
-            move |app, context, _animation| {
-                found.set(Some(ExpansibleController::of(app, context)));
-                sized(100.0, 20.0).into_widget()
-            }
-        });
-        let builds = Rc::new(Cell::new(0));
-        let harness = mount(
-            &mut app,
-            Expansible::new(header, body_builder(&builds), controller.clone()),
-        );
-        harness.pump(&mut app);
-        assert_eq!(found.get(), Some(controller.handle()));
+        test_widgets(|tester| {
+            let controller = tester.update(ExpansibleController::new);
+            let found: Rc<Cell<Option<Handle<ExpansibleController>>>> = Rc::new(Cell::new(None));
+            let header: ExpansibleComponentBuilder = Rc::new({
+                let found = Rc::clone(&found);
+                move |app, context, _animation| {
+                    found.set(Some(ExpansibleController::of(app, context)));
+                    sized(100.0, 20.0).into_widget()
+                }
+            });
+            let builds = Rc::new(Cell::new(0));
+            tester.pump_widget(ltr(Expansible::new(
+                header,
+                body_builder(&builds),
+                controller.clone(),
+            )));
+            assert_eq!(found.get(), Some(controller.handle()));
 
-        controller.dispose(&mut app);
+            tester.update(|app| controller.dispose(app));
+        });
     }
 
     #[test]
     fn a_custom_expansible_builder_replaces_the_default_column() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let controller = ExpansibleController::new(&mut app);
-        let builds = Rc::new(Cell::new(0));
-        let widget = expansible(controller.clone(), &builds).expansible_builder(Rc::new(
-            |_app, _context, _header, body, _animation| body.clone(),
-        ));
-        let harness = mount(&mut app, widget);
-        harness.pump(&mut app);
-        // Only the body's `ClipRect` is left under the root.
-        assert_eq!(
-            column(&harness, &app)
-                .as_box()
-                .expect("a box")
-                .size(&app)
-                .height(),
-            0.0
-        );
+        test_widgets(|tester| {
+            let controller = tester.update(ExpansibleController::new);
+            let builds = Rc::new(Cell::new(0));
+            let widget = expansible(controller.clone(), &builds).expansible_builder(Rc::new(
+                |_app, _context, _header, body, _animation| body.clone(),
+            ));
+            tester.pump_widget(ltr(widget));
+            // Only the body's `ClipRect` is left under the view, whose tight constraints it fills.
+            let root = column(tester);
+            let app = tester.cell.borrow();
+            assert!(root.downcast::<RenderClipRect>(&app).is_some());
+            assert_eq!(root.as_box().expect("a box").size(&app).height(), 600.0);
+            drop(app);
 
-        controller.dispose(&mut app);
+            tester.update(|app| controller.dispose(app));
+        });
     }
 }

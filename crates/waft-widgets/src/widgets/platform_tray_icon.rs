@@ -325,12 +325,10 @@ mod tests {
     use std::time::Duration;
 
     use waft_embedder::{Offset, TargetPlatform};
-    use waft_foundation::AppCell;
-    use waft_test::{MockTrayIcons, TestPlatform, TestView};
+    use waft_test::{MockTrayIcons, TestPlatform};
 
     use super::*;
-    use crate::binding::run_app;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::WidgetTester;
     use crate::widgets::platform_menu_bar::{
         PlainPlatformMenuItem, PlatformMenuItemGroup, PlatformProvidedMenuItem,
         PlatformProvidedMenuItemType,
@@ -338,20 +336,19 @@ mod tests {
 
     type Heard = Rc<RefCell<Vec<&'static str>>>;
 
-    fn app_with_tray(tray: &MockTrayIcons) -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView::new(800.0, 600.0)))
-            .with_tray_icons(Rc::new(tray.clone()));
-        AppCell::with_platform(Rc::new(platform))
+    /// A tester on a Mac, whose tray is `tray`.
+    fn tester_with_tray(tray: &MockTrayIcons) -> WidgetTester {
+        WidgetTester::with_platform(
+            TestPlatform::new()
+                .on(TargetPlatform::MacOS)
+                .with_tray_icons(Rc::new(tray.clone())),
+        )
     }
 
-    /// Mounts `widget` as the app's content, and lets the icon the host answers arrive.
-    fn mount(cell: &AppCell, widget: WidgetRef) {
-        run_app(&mut cell.borrow_mut(), widget);
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-        cell.elapse(Duration::ZERO);
+    /// Pumps `widget`, and lets the icon the host answers arrive.
+    fn mount(tester: &mut WidgetTester, widget: WidgetRef) {
+        tester.pump_widget(widget);
+        tester.pump_by(Duration::ZERO);
     }
 
     fn image() -> IconImage {
@@ -387,17 +384,16 @@ mod tests {
     }
 
     /// Reports `event` of the icon `id` as the host does.
-    fn report(cell: &AppCell, id: u64, event: TrayIconEvent) {
-        {
-            let mut app = cell.borrow_mut();
+    fn report(tester: &mut WidgetTester, id: u64, event: TrayIconEvent) {
+        tester.update(|app| {
             let callback = app
                 .platform_callbacks()
                 .on_tray_icon_event
                 .clone()
                 .expect("the binding hears tray icon events");
-            callback(&mut app, id, event);
-        }
-        cell.elapse(Duration::ZERO);
+            callback(app, id, event);
+        });
+        tester.pump_by(Duration::ZERO);
     }
 
     fn the_menu() -> Vec<MenuEntry> {
@@ -423,18 +419,18 @@ mod tests {
     #[test]
     fn where_the_system_opens_the_menu_it_is_handed_the_menu_and_reports_the_choice() {
         let tray = MockTrayIcons::new().without_menus_at_icon();
-        let cell = app_with_tray(&tray);
+        let tester = &mut tester_with_tray(&tray);
         let heard = Heard::default();
-        mount(&cell, icon(&heard, "Notes").into_widget());
+        mount(tester, icon(&heard, "Notes").into_widget());
 
         let [shown] = &tray.icons()[..] else {
             panic!("one icon: {:?}", tray.icons());
         };
         assert_eq!(shown.tooltip.as_deref(), Some("Notes"));
         assert_eq!(shown.attached_menu, the_menu());
-        report(&cell, shown.id, TrayIconEvent::MenuSelected(1));
+        report(tester, shown.id, TrayIconEvent::MenuSelected(1));
         report(
-            &cell,
+            tester,
             shown.id,
             TrayIconEvent::ContextMenuRequested {
                 position: Offset::ZERO,
@@ -445,13 +441,13 @@ mod tests {
             "the system opens the menu itself"
         );
         report(
-            &cell,
+            tester,
             shown.id,
             TrayIconEvent::Activated {
                 position: Offset::ZERO,
             },
         );
-        report(&cell, shown.id, TrayIconEvent::DoubleClicked);
+        report(tester, shown.id, TrayIconEvent::DoubleClicked);
         assert_eq!(*heard.borrow(), ["Open", "activated", "double clicked"]);
     }
 
@@ -460,14 +456,14 @@ mod tests {
         let tray = MockTrayIcons::new()
             .without_attached_menus()
             .answering(Some(1));
-        let cell = app_with_tray(&tray);
+        let tester = &mut tester_with_tray(&tray);
         let heard = Heard::default();
-        mount(&cell, icon(&heard, "Notes").into_widget());
+        mount(tester, icon(&heard, "Notes").into_widget());
 
         let id = tray.icons()[0].id;
         assert!(heard.borrow().is_empty());
         report(
-            &cell,
+            tester,
             id,
             TrayIconEvent::ContextMenuRequested {
                 position: Offset::ZERO,
@@ -480,13 +476,13 @@ mod tests {
     #[test]
     fn the_icon_is_there_while_the_widget_is_and_follows_its_rebuilds() {
         let tray = MockTrayIcons::new();
-        let cell = app_with_tray(&tray);
+        let tester = &mut tester_with_tray(&tray);
         let heard = Heard::default();
-        mount(&cell, icon(&heard, "Notes").into_widget());
+        mount(tester, icon(&heard, "Notes").into_widget());
         let id = tray.icons()[0].id;
 
         mount(
-            &cell,
+            tester,
             icon(&heard, "Notes, 3 new")
                 .menus(vec![Rc::new(PlainPlatformMenuItem::new("Quit"))])
                 .into_widget(),
@@ -501,24 +497,24 @@ mod tests {
         };
         assert_eq!(item.label, "Quit");
 
-        mount(&cell, SizedBox::new().into_widget());
+        mount(tester, SizedBox::new().into_widget());
         assert!(tray.icons().is_empty(), "the icon goes with the widget");
     }
 
     #[test]
     fn several_icons_are_each_their_own() {
         let tray = MockTrayIcons::new();
-        let cell = app_with_tray(&tray);
+        let tester = &mut tester_with_tray(&tray);
         let (first, second) = (Heard::default(), Heard::default());
         mount(
-            &cell,
+            tester,
             icon(&first, "First")
                 .child(icon(&second, "Second"))
                 .into_widget(),
         );
         let icons = tray.icons();
         assert_eq!(icons.len(), 2);
-        report(&cell, icons[1].id, TrayIconEvent::MenuSelected(1));
+        report(tester, icons[1].id, TrayIconEvent::MenuSelected(1));
         assert!(first.borrow().is_empty());
         assert_eq!(*second.borrow(), ["Open"], "ids are each icon's own");
     }
@@ -526,8 +522,8 @@ mod tests {
     #[test]
     fn an_icon_the_system_refuses_shows_nowhere() {
         let tray = MockTrayIcons::new().refusing("no tray");
-        let cell = app_with_tray(&tray);
-        mount(&cell, icon(&Heard::default(), "Notes").into_widget());
+        let tester = &mut tester_with_tray(&tray);
+        mount(tester, icon(&Heard::default(), "Notes").into_widget());
         assert!(tray.icons().is_empty());
     }
 }

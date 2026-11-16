@@ -393,14 +393,15 @@ pub(crate) mod tests {
     use waft_painting::AlignmentGeometry;
     use waft_widgets::{Builder, Center, Container, SizedBox, Text};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// What a `Card`'s `Material` was given: Dart's `tester.widget<Material>(find.descendant(
     /// of: find.byType(Card), matching: find.byType(Material)))`.
@@ -453,13 +454,12 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_card_defaults_elevated_card() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let colors = colors_of(m3, &tester);
-            pump_app(&mut tester, m3, scaffold_with(Card::new()));
+        test_widgets(|tester| {
+            let colors = colors_of(m3, tester);
+            pump_app(tester, m3, scaffold_with(Card::new()));
 
-            let padding = card_padding(&tester);
-            let material = card_material(&tester);
+            let padding = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(material.clip_behavior, Clip::None);
             assert_eq!(material.elevation, 1.0);
@@ -474,13 +474,12 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_card_filled_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let colors = colors_of(m3, &tester);
-            pump_app(&mut tester, m3, scaffold_with(Card::filled()));
+        test_widgets(|tester| {
+            let colors = colors_of(m3, tester);
+            pump_app(tester, m3, scaffold_with(Card::filled()));
 
-            let padding = card_padding(&tester);
-            let material = card_material(&tester);
+            let padding = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(material.clip_behavior, Clip::None);
             assert_eq!(material.elevation, 0.0);
@@ -494,13 +493,12 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_card_outlined_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let colors = colors_of(m3, &tester);
-            pump_app(&mut tester, m3, scaffold_with(Card::outlined()));
+        test_widgets(|tester| {
+            let colors = colors_of(m3, tester);
+            pump_app(tester, m3, scaffold_with(Card::outlined()));
 
-            let padding = card_padding(&tester);
-            let material = card_material(&tester);
+            let padding = card_padding(tester);
+            let material = card_material(tester);
 
             assert_eq!(material.clip_behavior, Clip::None);
             assert_eq!(material.elevation, 0.0);
@@ -523,12 +521,11 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_card_variants_are_the_elevated_card() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for card in [Card::new(), Card::filled(), Card::outlined()] {
-                let mut tester = tester();
-                pump_app(&mut tester, m2, scaffold_with(card));
+                pump_app(tester, m2, scaffold_with(card));
 
-                let material = card_material(&tester);
+                let material = card_material(tester);
                 assert_eq!(material.elevation, 1.0);
                 assert_eq!(material.shape, rounded(4.0));
             }
@@ -537,7 +534,7 @@ pub(crate) mod tests {
 
     #[test]
     fn card_margin() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let contents_key = waft_widgets::GlobalKey::new();
             let contents = |key: &waft_widgets::GlobalKey| {
                 Container::new()
@@ -546,7 +543,6 @@ pub(crate) mod tests {
                     .width(100.0)
                     .height(100.0)
             };
-            let mut tester = tester();
 
             tester.pump_widget(
                 Container::new()
@@ -603,20 +599,18 @@ pub(crate) mod tests {
 
     #[test]
     fn card_clip_behavior_property_passes_through_to_the_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(Card::new().into_widget());
-            assert_eq!(card_material(&tester).clip_behavior, Clip::None);
+            assert_eq!(card_material(tester).clip_behavior, Clip::None);
 
             tester.pump_widget(Card::new().clip_behavior(Clip::AntiAlias).into_widget());
-            assert_eq!(card_material(&tester).clip_behavior, Clip::AntiAlias);
+            assert_eq!(card_material(tester).clip_behavior, Clip::AntiAlias);
         });
     }
 
     #[test]
     fn card_clip_behavior_property_defers_to_theme_when_null() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(
                 Builder::new(|app, context| {
                     let theme_data = Theme::of(app, context);
@@ -633,7 +627,7 @@ pub(crate) mod tests {
                 .into_widget(),
             );
             assert_eq!(
-                card_material(&tester).clip_behavior,
+                card_material(tester).clip_behavior,
                 Clip::AntiAliasWithSaveLayer
             );
         });
@@ -641,14 +635,13 @@ pub(crate) mod tests {
 
     #[test]
     fn card_shadow_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(Card::new().into_widget());
 
             let card = tester.find_by_type::<Card>()[0];
             assert_eq!(tester.widget(card, |card: &Card| card.shadow_color), None);
             assert_eq!(
-                card_material(&tester).shadow_color,
+                card_material(tester).shadow_color,
                 Some(Color::new(0xFF000000))
             );
 
@@ -660,11 +653,11 @@ pub(crate) mod tests {
 
             let card = tester.find_by_type::<Card>()[0];
             assert_eq!(
-                card_material(&tester).shadow_color,
+                card_material(tester).shadow_color,
                 tester.widget(card, |card: &Card| card.shadow_color)
             );
             assert_eq!(
-                card_material(&tester).shadow_color,
+                card_material(tester).shadow_color,
                 Some(Colors::RED.primary())
             );
         });
@@ -672,9 +665,8 @@ pub(crate) mod tests {
 
     #[test]
     fn card_renders_at_zero_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(
                         SizedBox::shrink()

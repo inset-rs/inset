@@ -154,10 +154,11 @@ impl InheritedWidget for OutlinedButtonTheme {
 #[cfg(test)]
 mod tests {
     #![allow(deprecated)]
+    use crate::drawer_theme::tests::assert_near;
 
     use std::time::Duration;
 
-    use waft_embedder::{Color, FontWeight, Radius, Size, TargetPlatform};
+    use waft_embedder::{Color, FontWeight, Radius, Size};
     use waft_foundation::Listener;
     use waft_painting::{
         AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder,
@@ -168,6 +169,8 @@ mod tests {
         Align, Builder, Center, Icon, Text, WidgetState, WidgetStateProperty, WidgetStates,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::button_style::ButtonStyle;
     use crate::button_style_button::IconAlignment;
@@ -177,16 +180,8 @@ mod tests {
     use crate::ink_well::InkWell;
     use crate::material::Material;
     use crate::outlined_button::OutlinedButton;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::{MaterialTapTargetSize, ThemeData};
-
-    /// A tester with the OS fonts, which a `Text` needs to lay out, and the Material icons.
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
-        tester
-    }
 
     fn pressed() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
@@ -230,8 +225,7 @@ mod tests {
         );
     }
 
-    fn no_theme_case(use_material3: bool) {
-        let mut tester = tester();
+    fn no_theme_case(tester: &mut WidgetTester, use_material3: bool) {
         let color_scheme = ColorScheme::light();
         let theme = ThemeData::from(color_scheme.clone())
             .use_material3(use_material3)
@@ -243,7 +237,7 @@ mod tests {
                 .into_widget(),
         ));
 
-        material(&tester, |material| {
+        material(tester, |material| {
             assert_eq!(material.animation_duration, Duration::from_millis(200));
             assert!(material.border_radius.is_none());
             assert_eq!(material.color, Some(Colors::TRANSPARENT));
@@ -283,17 +277,17 @@ mod tests {
             assert_eq!(text_style.font_size, Some(14.0));
             assert_eq!(text_style.font_weight, Some(FontWeight::W500));
         });
-        assert!(align_of_label(&tester) == AlignmentGeometry::CENTER);
+        assert!(align_of_label(tester) == AlignmentGeometry::CENTER);
     }
 
     #[test]
     fn material_3_without_an_outlined_button_theme_the_defaults_apply() {
-        with_main_thread_stack(|| no_theme_case(true));
+        test_widgets(|tester| no_theme_case(tester, true));
     }
 
     #[test]
     fn material_2_without_an_outlined_button_theme_the_defaults_apply() {
-        with_main_thread_stack(|| no_theme_case(false));
+        test_widgets(|tester| no_theme_case(tester, false));
     }
 
     // The group '[Theme, TextTheme, OutlinedButton style overrides]'.
@@ -460,17 +454,16 @@ mod tests {
         }
 
         fn case(button_style: Given, theme_style: Given, overall_style: Given) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let frame = build_frame(
-                    &tester,
+                    tester,
                     button_style.style(),
                     theme_style.style(),
                     overall_style.style(),
                 );
                 tester.pump_widget(frame);
                 tester.pump_and_settle(); // allow the animations to finish
-                check_button(&tester);
+                check_button(tester);
             });
         }
 
@@ -508,8 +501,7 @@ mod tests {
         }
     }
 
-    fn shadow_color_case(use_material3: bool) {
-        let mut tester = tester();
+    fn shadow_color_case(tester: &mut WidgetTester, use_material3: bool) {
         let color_scheme = ColorScheme::light();
         let shadow_color = Color::new(0xff000001);
         let overridden_color = Color::new(0xff000002);
@@ -558,10 +550,10 @@ mod tests {
             )
         };
         let mut pump = |overall: Option<Color>, theme: Option<Color>, button: Option<Color>| {
-            let frame = frame(&tester, overall, theme, button);
+            let frame = frame(tester, overall, theme, button);
             tester.pump_widget(frame);
             tester.pump_and_settle(); // theme animation
-            material(&tester, |material| material.shadow_color)
+            material(tester, |material| material.shadow_color)
         };
 
         assert_eq!(
@@ -594,18 +586,17 @@ mod tests {
 
     #[test]
     fn material_3_the_shadow_color_comes_from_the_button_then_its_theme_and_never_the_scheme() {
-        with_main_thread_stack(|| shadow_color_case(true));
+        test_widgets(|tester| shadow_color_case(tester, true));
     }
 
     #[test]
     fn material_2_the_shadow_color_comes_from_the_button_then_its_theme_then_the_theme() {
-        with_main_thread_stack(|| shadow_color_case(false));
+        test_widgets(|tester| shadow_color_case(tester, false));
     }
 
     #[test]
     fn the_icon_follows_the_themes_style_icon_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut case = |icon_alignment: Option<IconAlignment>| {
                 let mut style = ButtonStyle::new();
                 if let Some(icon_alignment) = icon_alignment {
@@ -618,11 +609,8 @@ mod tests {
                     theme,
                     Center::new()
                         .child(
-                            OutlinedButton::icon(
-                                pressed(),
-                                crate::test_support::ahem_text("button"),
-                            )
-                            .icon(Icon::new(Some(Icons::add()))),
+                            OutlinedButton::icon(pressed(), Text::new("button"))
+                                .icon(Icon::new(Some(Icons::add()))),
                         )
                         .into_widget(),
                 ));
@@ -642,15 +630,14 @@ mod tests {
             assert_eq!(button.left, icon.left - 16.0);
 
             let (button, icon) = case(Some(IconAlignment::End));
-            assert_eq!(button.right, icon.right + 24.0);
+            assert_near(button.right, icon.right + 24.0);
         });
     }
 
     #[test]
     fn the_icon_takes_the_themes_foreground_color_over_the_default_icon_color() {
         // Regression test for https://github.com/flutter/flutter/issues/162839.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xFFFFA500);
             let theme = ThemeData::builder()
                 .outlined_button_theme(

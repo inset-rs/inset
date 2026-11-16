@@ -885,22 +885,18 @@ mod tests {
     use std::cell::RefCell;
     use std::time::Duration;
 
-    use waft_embedder::{
-        HapticFeedbackType, Haptics, PointerChange, PointerData, PointerDataPacket,
-        PointerDeviceKind, Rect, TargetPlatform, TextDirection,
-    };
-    use waft_foundation::{AppCell, Completer};
-    use waft_gestures::GestureBinding;
-    use waft_test::{TestPlatform, TestView};
+    use waft_embedder::{HapticFeedbackType, Haptics, Rect, TargetPlatform, TextDirection};
+    use waft_foundation::Completer;
+    use waft_test::TestPlatform;
+    use waft_widgets::testing::{TestPointer, WidgetTester};
     use waft_widgets::{
-        AnyElement, BouncingScrollPhysics, Builder, Container, CustomScrollView, Directionality,
-        GlobalKey, MediaQuery, MediaQueryData, SliverList, Text, WidgetsBinding, downcast_widget,
+        BouncingScrollPhysics, Builder, Container, CustomScrollView, Directionality, GlobalKey,
+        MediaQuery, MediaQueryData, SliverList, Text,
     };
 
     use super::*;
     use crate::app::CupertinoApp;
     use crate::nav_bar::CupertinoSliverNavigationBar;
-    use crate::test_support::pump;
 
     /// Dart's `precisionErrorTolerance`, which `moreOrLessEquals` defaults to.
     const PRECISION_ERROR_TOLERANCE: f64 = 1e-10;
@@ -1058,45 +1054,35 @@ mod tests {
         }
     }
 
-    /// One case of the Dart file: an app on one platform with an 800x600 logical view, as
-    /// Flutter's test view is, and the tester's clock, pointer and finders.
+    /// One case of the Dart file: a tester on one platform whose host records its haptics,
+    /// the case's mock builder, and the pointer of its last `startGesture`.
     struct Tester {
-        cell: Rc<AppCell>,
+        tester: WidgetTester,
         platform: TargetPlatform,
-        now: Duration,
         items: Rc<Vec<GlobalKey>>,
         indicator: GlobalKey,
         haptics: Rc<RecordingHaptics>,
         mock: Rc<FakeBuilder>,
-        pointer: i64,
-        last_position: Offset,
+        /// The last pointer the case put down; Dart's `_getNextPointer` numbers them from one.
+        gesture: TestPointer,
     }
 
     impl Tester {
         fn new(platform: TargetPlatform) -> Tester {
             let haptics = Rc::new(RecordingHaptics::default());
-            let test_platform = TestPlatform::new()
-                .on(platform)
-                .with_view(Rc::new(TestView::with_pixel_ratio(800.0, 600.0, 1.0)))
-                .with_haptics(Rc::clone(&haptics) as Rc<dyn Haptics>);
-            let cell = AppCell::with_platform(Rc::new(test_platform));
-            {
-                let mut app = cell.borrow_mut();
-                let binding = waft_painting::PaintingBinding::instance(&mut app);
-                binding.install_fonts(&mut app, |fonts| {
-                    fonts.add_source(valo_system_fonts::SystemFonts::load());
-                });
-            }
+            let tester = WidgetTester::with_platform(
+                TestPlatform::new()
+                    .on(platform)
+                    .with_haptics(Rc::clone(&haptics) as Rc<dyn Haptics>),
+            );
             Tester {
-                cell,
+                tester,
                 platform,
-                now: Duration::ZERO,
                 items: Rc::new((0..TEST_LIST_LENGTH).map(|_| GlobalKey::new()).collect()),
                 indicator: GlobalKey::new(),
                 haptics,
                 mock: FakeBuilder::new(),
-                pointer: 0,
-                last_position: Offset::ZERO,
+                gesture: TestPointer::touch(0),
             }
         }
 
@@ -1130,16 +1116,7 @@ mod tests {
 
         /// `tester.pumpWidget`.
         fn pump_widget(&mut self, root: WidgetRef) {
-            {
-                let mut app = self.cell.borrow_mut();
-                let view = app.platform().views()[0].clone();
-                waft_widgets::run_widget(
-                    &mut app,
-                    waft_widgets::View::new(view, root).into_widget(),
-                );
-            }
-            self.cell.elapse(Duration::ZERO);
-            self.pump(Duration::ZERO);
+            self.tester.pump_widget(root);
         }
 
         /// A `CupertinoApp` whose home scrolls `slivers`.
@@ -1165,67 +1142,36 @@ mod tests {
             self.mock.refresh_task()
         }
 
+        /// `tester.pump()`.
+        fn pump(&mut self) {
+            self.tester.pump();
+        }
+
         /// `tester.pump(duration)`.
-        fn pump(&mut self, duration: Duration) {
-            self.now += duration;
-            self.cell.elapse(duration);
-            pump(&mut self.cell.borrow_mut(), self.now);
-            self.cell.checkpoint();
+        fn pump_by(&mut self, duration: Duration) {
+            self.tester.pump_by(duration);
         }
 
         fn complete_refresh(&self) {
             self.mock
                 .refresh_completer
-                .complete(&mut self.cell.borrow_mut(), ());
-            self.cell.checkpoint();
-        }
-
-        fn send(&mut self, change: PointerChange, position: Offset, time_stamp: Duration) {
-            let delta = match change {
-                PointerChange::Down => Offset::ZERO,
-                _ => position - self.last_position,
-            };
-            self.last_position = position;
-            {
-                let mut app = self.cell.borrow_mut();
-                GestureBinding::instance(&mut app).handle_pointer_data_packet(
-                    &mut app,
-                    PointerDataPacket::new(vec![PointerData {
-                        change,
-                        kind: PointerDeviceKind::Touch,
-                        time_stamp,
-                        pointer_identifier: self.pointer,
-                        buttons: if matches!(change, PointerChange::Down | PointerChange::Move) {
-                            1
-                        } else {
-                            0
-                        },
-                        physical_x: position.dx(),
-                        physical_y: position.dy(),
-                        physical_delta_x: delta.dx(),
-                        physical_delta_y: delta.dy(),
-                        ..PointerData::default()
-                    }]),
-                );
-                app.drain_microtasks();
-            }
-            self.cell.checkpoint();
+                .complete(&mut self.tester.cell.borrow_mut(), ());
+            self.tester.cell.checkpoint();
         }
 
         /// `tester.startGesture`: every event of a `TestGesture` is at time zero.
         fn start_gesture(&mut self, position: Offset) {
-            self.pointer += 1;
-            self.send(PointerChange::Down, position, Duration::ZERO);
+            self.gesture = TestPointer::touch(self.gesture.id + 1);
+            self.tester.down(&mut self.gesture, position);
         }
 
         fn move_by(&mut self, offset: Offset) {
-            let position = self.last_position + offset;
-            self.send(PointerChange::Move, position, Duration::ZERO);
+            let position = self.gesture.position + offset;
+            self.tester.move_to(&mut self.gesture, position, true);
         }
 
         fn up(&mut self) {
-            let position = self.last_position;
-            self.send(PointerChange::Up, position, Duration::ZERO);
+            self.tester.up(&self.gesture);
         }
 
         /// `tester.dragFrom` for a vertical `offset`.
@@ -1250,38 +1196,13 @@ mod tests {
 
         /// `tester.flingFrom`.
         fn fling_from(&mut self, start: Offset, offset: Offset, speed: f64) {
-            const K_MOVE_COUNT: i32 = 50;
-            let frame_interval = Duration::from_millis(16).as_micros() as f64;
-            let time_stamp_delta = 1_000_000.0 * offset.distance() / (K_MOVE_COUNT as f64 * speed);
-            let mut time_stamp = 0.0_f64;
-            let mut last_time_stamp = time_stamp;
-            self.pointer += 1;
-            self.send(PointerChange::Down, start, Duration::ZERO);
-            for i in 0..=K_MOVE_COUNT {
-                let location = start + offset * (i as f64 / K_MOVE_COUNT as f64);
-                self.send(
-                    PointerChange::Move,
-                    location,
-                    Duration::from_micros(time_stamp.round() as u64),
-                );
-                time_stamp += time_stamp_delta;
-                if time_stamp - last_time_stamp > frame_interval {
-                    self.pump(Duration::from_micros(
-                        (time_stamp - last_time_stamp).trunc() as u64,
-                    ));
-                    last_time_stamp = time_stamp;
-                }
-            }
-            let position = self.last_position;
-            self.send(
-                PointerChange::Up,
-                position,
-                Duration::from_micros(time_stamp.round() as u64),
-            );
+            self.gesture = TestPointer::touch(self.gesture.id + 1);
+            self.tester
+                .fling_from(start, offset, speed, self.gesture.id);
         }
 
         fn rect_of(&self, key: &GlobalKey) -> Option<Rect> {
-            let app = self.cell.borrow();
+            let app = self.tester.cell.borrow();
             let object = key
                 .current_context(&app)?
                 .find_render_object(&app)?
@@ -1309,49 +1230,31 @@ mod tests {
         /// `find.text('-1')` finds a widget.
         fn indicator_shown(&self) -> bool {
             self.indicator
-                .current_context(&self.cell.borrow_mut())
+                .current_context(&self.tester.cell.borrow())
                 .is_some()
-        }
-
-        fn elements(&self) -> Vec<AnyElement> {
-            let mut app = self.cell.borrow_mut();
-            let root = WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .expect("a mounted app");
-            let mut all = vec![root];
-            let mut visited = 0;
-            while visited < all.len() {
-                let element = all[visited];
-                element.visit_children(&app, &mut |child| all.push(child));
-                visited += 1;
-            }
-            all
         }
 
         /// `CupertinoSliverRefreshControl.state(tester.element(find.byType(LayoutBuilder)))`.
         fn state(&self) -> RefreshIndicatorMode {
-            let layout_builder = self
-                .elements()
-                .into_iter()
-                .find(|element| {
-                    downcast_widget::<LayoutBuilder>(&**element.widget(&self.cell.borrow()))
-                        .is_some()
-                })
+            let layout_builder = *self
+                .tester
+                .find_by_type::<LayoutBuilder>()
+                .first()
                 .expect("the refresh control's LayoutBuilder is mounted");
-            CupertinoSliverRefreshControl::state(&self.cell.borrow(), layout_builder)
+            CupertinoSliverRefreshControl::state(&self.tester.cell.borrow(), layout_builder)
         }
 
         /// `tester.widget<CupertinoActivityIndicator>(find.byType(..))`'s progress and radius.
         fn activity_indicator(&self) -> (f64, f64) {
-            let elements = self.elements();
-            let app = self.cell.borrow();
-            elements
-                .into_iter()
-                .find_map(|element| {
-                    downcast_widget::<CupertinoActivityIndicator>(&**element.widget(&app))
-                        .map(|indicator| (indicator.progress, indicator.radius))
+            let indicator = *self
+                .tester
+                .find_by_type::<CupertinoActivityIndicator>()
+                .first()
+                .expect("a CupertinoActivityIndicator is built");
+            self.tester
+                .widget(indicator, |indicator: &CupertinoActivityIndicator| {
+                    (indicator.progress, indicator.radius)
                 })
-                .expect("a CupertinoActivityIndicator is built")
         }
 
         fn invocations(&self) -> Vec<Invocation> {
@@ -1441,7 +1344,7 @@ mod tests {
 
             // Drag down but not enough to trigger the refresh.
             t.drag_item(0, Offset::new(0.0, 50.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             // The function is referenced once while passing into CupertinoSliverRefreshControl
             // and is called.
@@ -1471,7 +1374,7 @@ mod tests {
 
         // Drag down but not enough to trigger the refresh.
         t.drag_item(0, Offset::new(0.0, 50.0), K_DRAG_SLOP_DEFAULT);
-        t.pump(Duration::ZERO);
+        t.pump();
 
         assert!(t.invocations().is_empty());
         assert_eq!(t.item_rect(0).top_left(), Offset::ZERO);
@@ -1484,10 +1387,10 @@ mod tests {
 
             // Drag down but not enough to trigger the refresh.
             t.drag_item(0, Offset::new(0.0, 50.0), 0.0);
-            t.pump(Duration::ZERO);
-            t.pump(Duration::from_millis(20));
-            t.pump(Duration::from_millis(20));
-            t.pump(Duration::from_secs(3));
+            t.pump();
+            t.pump_by(Duration::from_millis(20));
+            t.pump_by(Duration::from_millis(20));
+            t.pump_by(Duration::from_secs(3));
 
             assert!(t.contains_all_in_order(&[
                 Some(matches_builder(Drag, exactly(50.0))),
@@ -1512,19 +1415,19 @@ mod tests {
 
             t.start_gesture(Offset::ZERO);
             t.move_by(Offset::new(0.0, 99.0));
-            t.pump(Duration::ZERO);
+            t.pump();
             if t.on_mac_os() {
                 t.move_by(Offset::new(0.0, -3.0));
             } else {
                 t.move_by(Offset::new(0.0, -30.0));
             }
-            t.pump(Duration::ZERO);
+            t.pump();
             if t.on_mac_os() {
                 t.move_by(Offset::new(0.0, 90.0));
             } else {
                 t.move_by(Offset::new(0.0, 50.0));
             }
-            t.pump(Duration::ZERO);
+            t.pump();
 
             let (dragged_back, armed) = if t.on_mac_os() {
                 (96.0, 112.51104)
@@ -1562,9 +1465,9 @@ mod tests {
             );
 
             t.drag_item(0, Offset::new(0.0, 150.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
             // Let it start snapping back.
-            t.pump(Duration::from_millis(50));
+            t.pump_by(Duration::from_millis(50));
 
             assert!(t.contains_all_in_order(&[
                 Some(matches_builder(Armed, exactly(150.0))),
@@ -1573,16 +1476,16 @@ mod tests {
             ]));
 
             // Reaches refresh state and sliver's at 60.0 in height after a while.
-            t.pump(Duration::from_secs(1));
+            t.pump_by(Duration::from_secs(1));
 
             assert!(t.contains(matches_builder(Refresh, exactly(60.0))));
 
             // Stays in that state forever until future completes.
-            t.pump(Duration::from_secs(1000));
+            t.pump_by(Duration::from_secs(1000));
             assert_eq!(t.item_rect(0).top_left(), Offset::new(0.0, 60.0));
 
             t.complete_refresh();
-            t.pump(Duration::ZERO);
+            t.pump();
 
             assert!(t.contains(matches_builder(Done, exactly(60.0))));
             assert_eq!(t.invocations().len(), 5);
@@ -1600,7 +1503,7 @@ mod tests {
             );
 
             t.drag_item(0, Offset::new(0.0, 150.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             assert!(t.contains(matches_builder(Armed, exactly(150.0))));
 
@@ -1609,7 +1512,7 @@ mod tests {
 
             // Hits the list.
             t.drag_item(0, Offset::new(0.0, -300.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             // Refresh indicator still being told to layout the same way.
             assert!(t.contains(matches_builder(Refresh, exactly(60.0))));
@@ -1631,8 +1534,8 @@ mod tests {
             // Scroll the top of the refresh indicator back to overscroll, it will
             // snap to the size of the refresh indicator and stay there.
             t.drag_item(1, Offset::new(0.0, 200.0), K_DRAG_SLOP_DEFAULT);
-            t.pump(Duration::ZERO);
-            t.pump(Duration::from_secs(2));
+            t.pump();
+            t.pump_by(Duration::from_secs(2));
             assert_eq!(t.indicator_rect(), Rect::from_ltrb(0.0, 0.0, 800.0, 60.0));
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 60.0, 800.0, 260.0));
         });
@@ -1649,25 +1552,25 @@ mod tests {
             );
 
             t.drag_item(0, Offset::new(0.0, 150.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
             assert!(t.contains(matches_builder(Armed, exactly(150.0))));
             assert_eq!(t.indicator_rect(), Rect::from_ltrb(0.0, 0.0, 800.0, 150.0));
             assert!(t.contains_refresh_task());
 
             // Rebuilds the sliver with a layout extent now.
-            t.pump(Duration::ZERO);
+            t.pump();
             // Let it snap back to occupy the indicator's final sliver space only.
-            t.pump(Duration::from_secs(2));
+            t.pump_by(Duration::from_secs(2));
 
             assert!(t.contains(matches_builder(Refresh, exactly(60.0))));
             assert_eq!(t.indicator_rect(), Rect::from_ltrb(0.0, 0.0, 800.0, 60.0));
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 60.0, 800.0, 260.0));
 
             t.complete_refresh();
-            t.pump(Duration::ZERO);
+            t.pump();
             assert!(t.contains(matches_builder(Done, exactly(60.0))));
 
-            t.pump(Duration::from_secs(5));
+            t.pump_by(Duration::from_secs(5));
             assert!(!t.indicator_shown());
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
         });
@@ -1684,26 +1587,26 @@ mod tests {
             );
 
             t.drag_item(0, Offset::new(0.0, 150.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
             assert!(t.contains(matches_builder(Armed, exactly(150.0))));
             assert_eq!(t.indicator_rect(), Rect::from_ltrb(0.0, 0.0, 800.0, 150.0));
             assert!(t.contains_refresh_task());
 
             // Rebuilds the sliver with a layout extent now.
-            t.pump(Duration::ZERO);
+            t.pump();
             // Let it snap back to occupy the indicator's final sliver space only.
-            t.pump(Duration::from_secs(2));
+            t.pump_by(Duration::from_secs(2));
             assert!(t.contains(matches_builder(Refresh, exactly(60.0))));
             assert_eq!(t.indicator_rect(), Rect::from_ltrb(0.0, 0.0, 800.0, 60.0));
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 60.0, 800.0, 260.0));
 
             t.complete_refresh();
-            t.pump(Duration::ZERO);
+            t.pump();
 
             assert!(t.contains(matches_builder(Done, exactly(60.0))));
 
             // Waiting for refresh control to reach approximately 5% of height
-            t.pump(Duration::from_millis(400));
+            t.pump_by(Duration::from_millis(400));
 
             let top = t.item_top(0);
             assert!(top > 0.0 && top < 6.0, "the first item's top: {top}");
@@ -1724,16 +1627,16 @@ mod tests {
             );
 
             t.drag_item(0, Offset::new(0.0, 150.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
             assert!(t.contains_refresh_task());
 
             t.complete_refresh();
-            t.pump(Duration::ZERO);
+            t.pump();
             // Still overscrolled here.
             assert!(t.contains(matches_builder(Done, exactly(150.0))));
 
             // Let it start going away but not fully.
-            t.pump(Duration::from_millis(100));
+            t.pump_by(Duration::from_millis(100));
             // The refresh indicator is still building.
             let retracting_dy = t.indicator_rect().bottom;
             assert!(retracting_dy > 0.0 && retracting_dy < 150.0);
@@ -1742,7 +1645,7 @@ mod tests {
             // Start another drag by an amount that would have been enough to
             // trigger another refresh if it were in the right state.
             t.drag_item(0, Offset::new(0.0, 150.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             // Instead, it's still in the done state because the sliver never
             // fully retracted.
@@ -1751,13 +1654,13 @@ mod tests {
             assert!(t.contains(matches_builder(Done, about_position(dragged_dy))));
 
             // Now let it fully go away.
-            t.pump(Duration::from_secs(5));
+            t.pump_by(Duration::from_secs(5));
             assert!(!t.indicator_shown());
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
 
             // Start another drag. It's now in drag mode.
             t.drag_item(0, Offset::new(0.0, 40.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
             assert!(t.contains(matches_builder(Drag, exactly(40.0))));
         });
     }
@@ -1775,20 +1678,20 @@ mod tests {
             t.start_gesture(Offset::ZERO);
             // Start a refresh.
             t.move_by(Offset::new(0.0, 150.0));
-            t.pump(Duration::ZERO);
+            t.pump();
             assert!(t.contains_refresh_task());
 
             // Complete the task while held down.
             t.complete_refresh();
-            t.pump(Duration::ZERO);
+            t.pump();
 
             // Still overscrolled here.
             assert!(t.contains(matches_builder(Done, exactly(150.0))));
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 150.0, 800.0, 350.0));
 
             t.up();
-            t.pump(Duration::ZERO);
-            t.pump(Duration::from_secs(5));
+            t.pump();
+            t.pump_by(Duration::from_secs(5));
             assert!(!t.indicator_shown());
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
         });
@@ -1838,18 +1741,18 @@ mod tests {
             t.pump_control(CupertinoSliverRefreshControl::new().builder(t.builder()));
 
             t.drag_item(0, Offset::new(0.0, 150.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             assert!(matches_builder(Armed, exactly(150.0)).matches(&t.invocations()[0]));
 
-            t.pump(Duration::from_millis(10));
+            t.pump_by(Duration::from_millis(10));
 
             assert!(
                 matches_builder(Done, between(0.0, 150.0))
                     .matches(t.invocations().last().expect("the builder was called"))
             );
 
-            t.pump(Duration::from_secs(5));
+            t.pump_by(Duration::from_secs(5));
             assert!(!t.indicator_shown());
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
         });
@@ -1872,10 +1775,10 @@ mod tests {
             t.pump_widget(CupertinoApp::new().home(list).into_widget());
 
             t.drag_from(Offset::new(100.0, 10.0), Offset::new(0.0, 50.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             t.drag_from(Offset::new(100.0, 10.0), Offset::new(0.0, 500.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
         });
     }
 
@@ -1899,7 +1802,7 @@ mod tests {
 
             // Drag down but not enough to trigger the refresh.
             t.drag_item(0, Offset::new(0.0, 50.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             assert!(matches_builder(Drag, exactly(50.0)).matches(&t.invocations()[0]));
             assert_eq!(t.invocations().len(), 1);
@@ -1925,11 +1828,11 @@ mod tests {
             t.pump_control(CupertinoSliverRefreshControl::new().builder(t.builder()));
 
             t.drag_item(0, Offset::new(0.0, 20.0), K_DRAG_SLOP_DEFAULT);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             assert_eq!(t.state(), Drag);
 
-            t.pump(Duration::from_secs(2));
+            t.pump_by(Duration::from_secs(2));
 
             assert_eq!(t.state(), Inactive);
         });
@@ -1946,7 +1849,7 @@ mod tests {
 
             t.start_gesture(Offset::ZERO);
             t.move_by(Offset::new(0.0, 79.0));
-            t.pump(Duration::ZERO);
+            t.pump();
             assert_eq!(t.state(), Drag);
             // Overscrolling, need to move more than 1px.
             if t.on_mac_os() {
@@ -1954,7 +1857,7 @@ mod tests {
             } else {
                 t.move_by(Offset::new(0.0, 3.0));
             }
-            t.pump(Duration::ZERO);
+            t.pump();
             assert_eq!(t.state(), Armed);
         });
     }
@@ -1973,12 +1876,12 @@ mod tests {
             t.start_gesture(Offset::ZERO);
             // Arm it.
             t.move_by(Offset::new(0.0, 90.0));
-            t.pump(Duration::ZERO);
+            t.pump();
             assert_eq!(t.state(), Armed);
 
             // Overscrolling, need to move more than -40.
             t.move_by(Offset::new(0.0, -80.0));
-            t.pump(Duration::ZERO);
+            t.pump();
             // Below 50 now.
             let expected = if t.on_mac_os() {
                 10.0
@@ -2000,12 +1903,12 @@ mod tests {
             );
 
             t.drag_item(0, Offset::new(0.0, 100.0), 0.0);
-            t.pump(Duration::ZERO);
+            t.pump();
             assert_eq!(t.state(), Armed);
             // The sliver scroll offset correction is applied on the next frame.
-            t.pump(Duration::ZERO);
+            t.pump();
 
-            t.pump(Duration::from_secs(2));
+            t.pump_by(Duration::from_secs(2));
             assert_eq!(t.state(), Refresh);
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 60.0, 800.0, 260.0));
 
@@ -2028,12 +1931,12 @@ mod tests {
 
             t.start_gesture(Offset::ZERO);
             t.move_by(Offset::new(0.0, 150.0));
-            t.pump(Duration::ZERO);
+            t.pump();
             assert_eq!(t.state(), Armed);
 
             t.complete_refresh();
             assert_eq!(t.state(), Done);
-            t.pump(Duration::ZERO);
+            t.pump();
 
             // Now back in overscroll mode.
             if t.on_mac_os() {
@@ -2041,7 +1944,7 @@ mod tests {
             } else {
                 t.move_by(Offset::new(0.0, -200.0));
             }
-            t.pump(Duration::ZERO);
+            t.pump();
             let expected = if t.on_mac_os() {
                 25.0
             } else {
@@ -2056,7 +1959,7 @@ mod tests {
             } else {
                 t.move_by(Offset::new(0.0, -35.0));
             }
-            t.pump(Duration::ZERO);
+            t.pump();
             let expected = if t.on_mac_os() {
                 9.0
             } else {
@@ -2078,10 +1981,10 @@ mod tests {
 
             t.start_gesture(Offset::ZERO);
             t.move_by(Offset::new(0.0, 150.0));
-            t.pump(Duration::ZERO);
+            t.pump();
             assert_eq!(t.state(), Armed);
             // Sliver scroll offset correction is applied one frame later.
-            t.pump(Duration::ZERO);
+            t.pump();
 
             t.move_by(Offset::new(0.0, -300.0));
             let indicator_destination_position = if t.on_mac_os() {
@@ -2089,7 +1992,7 @@ mod tests {
             } else {
                 -145.0332383665717
             };
-            t.pump(Duration::ZERO);
+            t.pump();
             // The refresh indicator is offscreen now.
             assert_about(
                 t.item_top(0),
@@ -2100,7 +2003,7 @@ mod tests {
 
             t.complete_refresh();
             // The sliver layout extent is removed on next frame.
-            t.pump(Duration::ZERO);
+            t.pump();
             assert_eq!(t.state(), Inactive);
             // Nothing moved.
             assert_about(
@@ -2108,7 +2011,7 @@ mod tests {
                 indicator_destination_position,
                 "the first item's top",
             );
-            t.pump(Duration::from_secs(2));
+            t.pump_by(Duration::from_secs(2));
             // Everything stayed as is.
             assert_about(
                 t.item_top(0),
@@ -2130,17 +2033,17 @@ mod tests {
             );
 
             t.drag_item(0, Offset::new(0.0, 150.0), K_DRAG_SLOP_DEFAULT);
-            t.pump(Duration::ZERO);
+            t.pump();
             assert_eq!(t.state(), Armed);
 
-            t.pump(Duration::ZERO);
-            t.pump(Duration::from_secs(5));
+            t.pump();
+            t.pump_by(Duration::from_secs(5));
             // In refresh mode but has no UI.
             assert_eq!(t.state(), Refresh);
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
 
             t.complete_refresh();
-            t.pump(Duration::ZERO);
+            t.pump();
             // Goes to inactive right away since the sliver is already collapsed.
             assert_eq!(t.state(), Inactive);
         });
@@ -2216,6 +2119,6 @@ mod tests {
             Offset::new(0.0, 500.0),
             K_DRAG_SLOP_DEFAULT,
         );
-        t.pump(Duration::ZERO);
+        t.pump();
     }
 }

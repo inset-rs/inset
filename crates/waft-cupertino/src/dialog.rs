@@ -4207,20 +4207,17 @@ impl RenderBox for RenderPriorityColumn {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use waft_foundation::AppCell;
 
-    use waft_embedder::{
-        Locale, PointerChange, PointerData, PointerDataPacket, Rect, TextDirection,
-    };
+    use waft_embedder::{Locale, Rect, TextDirection};
     use waft_painting::TextScaler;
     use waft_rendering::RenderDecoratedBox;
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
     use waft_widgets::{
         Builder, DefaultWidgetsLocalizations, GlobalKey, Localizations, MediaQueryData,
     };
 
     use super::*;
     use crate::localizations::DefaultCupertinoLocalizations;
-    use crate::test_support::{build, pump, test_cell};
 
     fn key_of(key: &GlobalKey) -> KeyRef {
         key.clone().into()
@@ -4269,9 +4266,8 @@ mod tests {
         origin & render_box.size(app)
     }
 
-    fn mount<K>(cell: &AppCell, child: impl IntoWidget<K>) {
-        build(
-            cell,
+    fn mount<K>(tester: &mut WidgetTester, child: impl IntoWidget<K>) {
+        tester.pump_widget(
             Localizations::new(
                 Locale::new("en"),
                 vec![
@@ -4279,15 +4275,14 @@ mod tests {
                     DefaultCupertinoLocalizations::delegate(),
                 ],
             )
-            .child(Directionality::new(TextDirection::Ltr, child))
-            .into_widget(),
+            .child(Directionality::new(TextDirection::Ltr, child)),
         );
     }
 
     /// Mounts under an ambient text scaler, which is what puts a dialog in accessibility mode.
-    fn mount_scaled<K>(cell: &AppCell, scale: f64, child: impl IntoWidget<K>) {
+    fn mount_scaled<K>(tester: &mut WidgetTester, scale: f64, child: impl IntoWidget<K>) {
         mount(
-            cell,
+            tester,
             MediaQuery::new(
                 MediaQueryData::new().text_scaler(TextScaler::linear(scale)),
                 child,
@@ -4328,271 +4323,267 @@ mod tests {
         colors
     }
 
-    /// Sends one pointer packet; the test view is 2x, so logical coordinates double.
-    fn send(app: &mut App, change: PointerChange, at: Offset, previous: Offset) {
-        GestureBinding::instance(app).handle_pointer_data_packet(
-            app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Touch,
-                time_stamp: Duration::ZERO,
-                pointer_identifier: 1,
-                physical_x: at.dx() * 2.0,
-                physical_y: at.dy() * 2.0,
-                physical_delta_x: (at.dx() - previous.dx()) * 2.0,
-                physical_delta_y: (at.dy() - previous.dy()) * 2.0,
-                ..PointerData::default()
-            }]),
-        );
-        app.drain_microtasks();
-    }
-
     #[test]
     fn an_alert_dialog_stacks_its_content_section_over_its_actions_at_the_dialog_width() {
-        let cell = test_cell();
-        let (dialog, title) = (GlobalKey::new(), GlobalKey::new());
-        mount(
-            &cell,
-            CupertinoAlertDialog::new()
-                .key(key_of(&dialog))
-                .title(slot(&title, 100.0, 30.0))
-                .content(SizedBox::new().width(100.0).height(20.0))
-                .actions([
-                    CupertinoDialogAction::new(SizedBox::new().width(40.0).height(20.0))
-                        .into_widget(),
-                ]),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let (dialog, title) = (GlobalKey::new(), GlobalKey::new());
+            mount(
+                tester,
+                CupertinoAlertDialog::new()
+                    .key(key_of(&dialog))
+                    .title(slot(&title, 100.0, 30.0))
+                    .content(SizedBox::new().width(100.0).height(20.0))
+                    .actions([CupertinoDialogAction::new(
+                        SizedBox::new().width(40.0).height(20.0),
+                    )
+                    .into_widget()]),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let node = root(&mut app, &dialog);
-        let actions = find::<RenderAlertDialogActionsLayout>(&app, node)
-            .expect("the actions section is laid out");
-        assert_eq!(
-            actions.size(&app).width(),
-            K_CUPERTINO_DIALOG_WIDTH,
-            "the dialog is 270 wide"
-        );
-        let actions_top = actions
-            .as_box()
-            .local_to_global(&app, Offset::ZERO, None)
-            .dy();
-        let title_rect = rect_of(&mut app, &title);
-        assert!(
-            actions_top >= title_rect.bottom,
-            "the actions sit below the title, {actions_top} vs {}",
-            title_rect.bottom
-        );
+            let node = root(&mut app, &dialog);
+            let actions = find::<RenderAlertDialogActionsLayout>(&app, node)
+                .expect("the actions section is laid out");
+            assert_eq!(
+                actions.size(&app).width(),
+                K_CUPERTINO_DIALOG_WIDTH,
+                "the dialog is 270 wide"
+            );
+            let actions_top = actions
+                .as_box()
+                .local_to_global(&app, Offset::ZERO, None)
+                .dy();
+            let title_rect = rect_of(&mut app, &title);
+            assert!(
+                actions_top >= title_rect.bottom,
+                "the actions sit below the title, {actions_top} vs {}",
+                title_rect.bottom
+            );
+        });
     }
 
     #[test]
     fn an_alert_dialog_in_accessibility_mode_is_wider() {
-        let cell = test_cell();
-        let dialog = GlobalKey::new();
-        mount_scaled(
-            &cell,
-            2.0,
-            CupertinoAlertDialog::new()
-                .key(key_of(&dialog))
-                .title(SizedBox::new().width(100.0).height(30.0))
-                .actions([
-                    CupertinoDialogAction::new(SizedBox::new().width(40.0).height(20.0))
-                        .into_widget(),
-                ]),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let dialog = GlobalKey::new();
+            mount_scaled(
+                tester,
+                2.0,
+                CupertinoAlertDialog::new()
+                    .key(key_of(&dialog))
+                    .title(SizedBox::new().width(100.0).height(30.0))
+                    .actions([CupertinoDialogAction::new(
+                        SizedBox::new().width(40.0).height(20.0),
+                    )
+                    .into_widget()]),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let node = root(&mut app, &dialog);
-        let actions = find::<RenderAlertDialogActionsLayout>(&app, node)
-            .expect("the actions section is laid out");
-        assert_eq!(
-            actions.size(&app).width(),
-            K_ACCESSIBILITY_CUPERTINO_DIALOG_WIDTH,
-            "an accessibility-mode dialog is 310 wide"
-        );
+            let node = root(&mut app, &dialog);
+            let actions = find::<RenderAlertDialogActionsLayout>(&app, node)
+                .expect("the actions section is laid out");
+            assert_eq!(
+                actions.size(&app).width(),
+                K_ACCESSIBILITY_CUPERTINO_DIALOG_WIDTH,
+                "an accessibility-mode dialog is 310 wide"
+            );
+        });
     }
 
     #[test]
     fn two_actions_sit_side_by_side_and_three_stack_vertically() {
-        let cell = test_cell();
-        let (first, second) = (GlobalKey::new(), GlobalKey::new());
-        mount(
-            &cell,
-            CupertinoAlertDialog::new()
-                .title(SizedBox::new().width(100.0).height(30.0))
-                .actions([
-                    CupertinoDialogAction::new(slot(&first, 40.0, 20.0)).into_widget(),
-                    CupertinoDialogAction::new(slot(&second, 40.0, 20.0)).into_widget(),
-                ]),
-        );
-        let mut app = cell.borrow_mut();
-        let (first_rect, second_rect) = (rect_of(&mut app, &first), rect_of(&mut app, &second));
-        assert_eq!(first_rect.top, second_rect.top, "two actions share a row");
-        assert!(
-            first_rect.left < second_rect.left,
-            "the first action is to the left"
-        );
+        test_widgets(|tester| {
+            let (first, second) = (GlobalKey::new(), GlobalKey::new());
+            mount(
+                tester,
+                CupertinoAlertDialog::new()
+                    .title(SizedBox::new().width(100.0).height(30.0))
+                    .actions([
+                        CupertinoDialogAction::new(slot(&first, 40.0, 20.0)).into_widget(),
+                        CupertinoDialogAction::new(slot(&second, 40.0, 20.0)).into_widget(),
+                    ]),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let (first_rect, second_rect) = (rect_of(&mut app, &first), rect_of(&mut app, &second));
+            assert_eq!(first_rect.top, second_rect.top, "two actions share a row");
+            assert!(
+                first_rect.left < second_rect.left,
+                "the first action is to the left"
+            );
+            drop(app);
 
-        let cell = crate::test_support::test_cell();
-
-        let (first, second, third) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
-        mount(
-            &cell,
-            CupertinoAlertDialog::new()
-                .title(SizedBox::new().width(100.0).height(30.0))
-                .actions([
-                    CupertinoDialogAction::new(slot(&first, 40.0, 20.0)).into_widget(),
-                    CupertinoDialogAction::new(slot(&second, 40.0, 20.0)).into_widget(),
-                    CupertinoDialogAction::new(slot(&third, 40.0, 20.0)).into_widget(),
-                ]),
-        );
-        let mut app = cell.borrow_mut();
-        let (first_rect, second_rect, third_rect) = (
-            rect_of(&mut app, &first),
-            rect_of(&mut app, &second),
-            rect_of(&mut app, &third),
-        );
-        assert!(
-            first_rect.top < second_rect.top && second_rect.top < third_rect.top,
-            "three actions stack"
-        );
+            let (first, second, third) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
+            mount(
+                tester,
+                CupertinoAlertDialog::new()
+                    .title(SizedBox::new().width(100.0).height(30.0))
+                    .actions([
+                        CupertinoDialogAction::new(slot(&first, 40.0, 20.0)).into_widget(),
+                        CupertinoDialogAction::new(slot(&second, 40.0, 20.0)).into_widget(),
+                        CupertinoDialogAction::new(slot(&third, 40.0, 20.0)).into_widget(),
+                    ]),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let (first_rect, second_rect, third_rect) = (
+                rect_of(&mut app, &first),
+                rect_of(&mut app, &second),
+                rect_of(&mut app, &third),
+            );
+            assert!(
+                first_rect.top < second_rect.top && second_rect.top < third_rect.top,
+                "three actions stack"
+            );
+        });
     }
 
     #[test]
     fn a_default_action_is_bold_and_a_destructive_action_is_red() {
-        let cell = test_cell();
-        let seen = Rc::new(RefCell::new(Vec::new()));
-        mount(
-            &cell,
-            CupertinoAlertDialog::new().actions([
-                CupertinoDialogAction::new(probe(&seen))
-                    .on_pressed(Listener::new(|_app| {}))
-                    .is_default_action(true)
-                    .into_widget(),
-                CupertinoDialogAction::new(probe(&seen))
-                    .on_pressed(Listener::new(|_app| {}))
-                    .is_destructive_action(true)
-                    .into_widget(),
-            ]),
-        );
-        let seen = seen.borrow();
-        assert_eq!(seen.len(), 2, "one style per action");
-        assert_eq!(seen[0].font_weight, Some(FontWeight::W600));
-        assert_eq!(seen[1].font_weight, Some(FontWeight::W400));
-        assert_eq!(
-            seen[1].color.as_ref().map(|color| color.color()),
-            Some(CupertinoColors::SYSTEM_RED.color()),
-            "a destructive action is red"
-        );
+        test_widgets(|tester| {
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            mount(
+                tester,
+                CupertinoAlertDialog::new().actions([
+                    CupertinoDialogAction::new(probe(&seen))
+                        .on_pressed(Listener::new(|_app| {}))
+                        .is_default_action(true)
+                        .into_widget(),
+                    CupertinoDialogAction::new(probe(&seen))
+                        .on_pressed(Listener::new(|_app| {}))
+                        .is_destructive_action(true)
+                        .into_widget(),
+                ]),
+            );
+            let seen = seen.borrow();
+            assert_eq!(seen.len(), 2, "one style per action");
+            assert_eq!(seen[0].font_weight, Some(FontWeight::W600));
+            assert_eq!(seen[1].font_weight, Some(FontWeight::W400));
+            assert_eq!(
+                seen[1].color.as_ref().map(|color| color.color()),
+                Some(CupertinoColors::SYSTEM_RED.color()),
+                "a destructive action is red"
+            );
+        });
     }
 
     #[test]
     fn holding_an_alert_dialog_action_paints_the_pressed_colour() {
-        let cell = test_cell();
-        let (dialog, action) = (GlobalKey::new(), GlobalKey::new());
-        mount(
-            &cell,
-            CupertinoAlertDialog::new()
-                .key(key_of(&dialog))
-                .title(SizedBox::new().width(100.0).height(30.0))
-                .actions([CupertinoDialogAction::new(slot(&action, 40.0, 20.0))
-                    .on_pressed(Listener::new(|_app| {}))
-                    .into_widget()]),
-        );
-        let mut app = cell.borrow_mut();
-        let pressed = K_DIALOG_PRESSED_COLOR.color();
-        assert!(
-            !decoration_colors(&mut app, &dialog).contains(&pressed),
-            "nothing is pressed yet"
-        );
+        test_widgets(|tester| {
+            let (dialog, action) = (GlobalKey::new(), GlobalKey::new());
+            mount(
+                tester,
+                CupertinoAlertDialog::new()
+                    .key(key_of(&dialog))
+                    .title(SizedBox::new().width(100.0).height(30.0))
+                    .actions([CupertinoDialogAction::new(slot(&action, 40.0, 20.0))
+                        .on_pressed(Listener::new(|_app| {}))
+                        .into_widget()]),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let pressed = K_DIALOG_PRESSED_COLOR.color();
+            assert!(
+                !decoration_colors(&mut app, &dialog).contains(&pressed),
+                "nothing is pressed yet"
+            );
 
-        let center = rect_of(&mut app, &action).center();
-        send(&mut app, PointerChange::Down, center, center);
-        let state = dialog
-            .current_state::<CupertinoAlertDialogState>(&app)
-            .expect("the dialog is mounted");
-        assert_eq!(app.get(state).pressed_index, Some(0));
-        pump(&mut app, Duration::ZERO);
-        assert!(
-            decoration_colors(&mut app, &dialog).contains(&pressed),
-            "the held action paints the pressed colour once the press rebuilds"
-        );
+            let center = rect_of(&mut app, &action).center();
+            drop(app);
+            let mut finger = TestPointer::touch(1);
+            tester.down(&mut finger, center);
+            let state = dialog
+                .current_state::<CupertinoAlertDialogState>(&tester.cell.borrow())
+                .expect("the dialog is mounted");
+            assert_eq!(tester.cell.borrow().get(state).pressed_index, Some(0));
+            tester.pump();
+            assert!(
+                decoration_colors(&mut tester.cell.borrow_mut(), &dialog).contains(&pressed),
+                "the held action paints the pressed colour once the press rebuilds"
+            );
 
-        send(&mut app, PointerChange::Up, center, center);
-        assert_eq!(app.get(state).pressed_index, None);
+            tester.up(&finger);
+            assert_eq!(tester.cell.borrow().get(state).pressed_index, None);
+        });
     }
 
     #[test]
     fn an_action_sheets_cancel_button_sits_below_the_main_sheet_with_a_gap() {
-        let cell = test_cell();
-        let (action, cancel) = (GlobalKey::new(), GlobalKey::new());
-        mount(
-            &cell,
-            CupertinoActionSheet::new()
-                .actions([CupertinoActionSheetAction::new(
-                    Listener::new(|_app| {}),
-                    SizedBox::new()
-                        .key(key_of(&action))
-                        .width(40.0)
-                        .height(20.0),
-                )
-                .into_widget()])
-                .cancel_button(CupertinoActionSheetAction::new(
-                    Listener::new(|_app| {}),
-                    SizedBox::new()
-                        .key(key_of(&cancel))
-                        .width(40.0)
-                        .height(20.0),
-                )),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let (action, cancel) = (GlobalKey::new(), GlobalKey::new());
+            mount(
+                tester,
+                CupertinoActionSheet::new()
+                    .actions([CupertinoActionSheetAction::new(
+                        Listener::new(|_app| {}),
+                        SizedBox::new()
+                            .key(key_of(&action))
+                            .width(40.0)
+                            .height(20.0),
+                    )
+                    .into_widget()])
+                    .cancel_button(CupertinoActionSheetAction::new(
+                        Listener::new(|_app| {}),
+                        SizedBox::new()
+                            .key(key_of(&cancel))
+                            .width(40.0)
+                            .height(20.0),
+                    )),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let action_rect = rect_of(&mut app, &action);
-        let cancel_rect = rect_of(&mut app, &cancel);
-        assert!(
-            cancel_rect.top > action_rect.bottom,
-            "the cancel button is below the sheet"
-        );
-        let node = root(&mut app, &action);
-        let main_sheet = find::<RenderPriorityColumn>(&app, node);
-        assert!(main_sheet.is_none(), "one action needs no priority column");
+            let action_rect = rect_of(&mut app, &action);
+            let cancel_rect = rect_of(&mut app, &cancel);
+            assert!(
+                cancel_rect.top > action_rect.bottom,
+                "the cancel button is below the sheet"
+            );
+            let node = root(&mut app, &action);
+            let main_sheet = find::<RenderPriorityColumn>(&app, node);
+            assert!(main_sheet.is_none(), "one action needs no priority column");
+        });
     }
 
     #[test]
     fn dragging_across_action_sheet_buttons_moves_the_pressed_index() {
-        let cell = test_cell();
-        let (sheet, first, second) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
-        mount(
-            &cell,
-            CupertinoActionSheet::new().key(key_of(&sheet)).actions([
-                CupertinoActionSheetAction::new(Listener::new(|_app| {}), slot(&first, 40.0, 20.0))
+        test_widgets(|tester| {
+            let (sheet, first, second) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
+            mount(
+                tester,
+                CupertinoActionSheet::new().key(key_of(&sheet)).actions([
+                    CupertinoActionSheetAction::new(
+                        Listener::new(|_app| {}),
+                        slot(&first, 40.0, 20.0),
+                    )
                     .into_widget(),
-                CupertinoActionSheetAction::new(
-                    Listener::new(|_app| {}),
-                    slot(&second, 40.0, 20.0),
-                )
-                .into_widget(),
-            ]),
-        );
-        let mut app = cell.borrow_mut();
+                    CupertinoActionSheetAction::new(
+                        Listener::new(|_app| {}),
+                        slot(&second, 40.0, 20.0),
+                    )
+                    .into_widget(),
+                ]),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let state = sheet
-            .current_state::<CupertinoActionSheetState>(&app)
-            .expect("the sheet is mounted");
-        let first_center = rect_of(&mut app, &first).center();
-        let second_center = rect_of(&mut app, &second).center();
+            let state = sheet
+                .current_state::<CupertinoActionSheetState>(&app)
+                .expect("the sheet is mounted");
+            let first_center = rect_of(&mut app, &first).center();
+            let second_center = rect_of(&mut app, &second).center();
+            drop(app);
+            let pressed_index =
+                |tester: &WidgetTester| tester.cell.borrow().get(state).pressed_index;
 
-        send(&mut app, PointerChange::Down, first_center, first_center);
-        assert_eq!(app.get(state).pressed_index, Some(0));
+            let mut finger = TestPointer::touch(1);
+            tester.down(&mut finger, first_center);
+            assert_eq!(pressed_index(tester), Some(0));
 
-        send(&mut app, PointerChange::Move, second_center, first_center);
-        assert_eq!(
-            app.get(state).pressed_index,
-            Some(1),
-            "the drag moved onto the second action"
-        );
+            tester.move_to(&mut finger, second_center, true);
+            assert_eq!(
+                pressed_index(tester),
+                Some(1),
+                "the drag moved onto the second action"
+            );
 
-        send(&mut app, PointerChange::Up, second_center, second_center);
-        assert_eq!(app.get(state).pressed_index, None);
+            tester.up(&finger);
+            assert_eq!(pressed_index(tester), None);
+        });
     }
 
     #[test]

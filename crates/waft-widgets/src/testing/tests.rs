@@ -73,13 +73,26 @@ fn text_is_set_in_flutter_test_whose_glyphs_are_squares_of_the_font_size() {
     });
 }
 
+// flutter_test's `_runTestBody` pumps `Container(key: UniqueKey(), child: _preTestMessage)`
+// before the case, so the case's first `pumpWidget` replaces a tree.
+#[test]
+fn a_case_starts_on_flutter_tests_pre_test_tree() {
+    test_widgets(|tester| {
+        assert_eq!(tester.find_text("Test starting...").len(), 1);
+        assert_eq!(tester.view().presented(), 1);
+        tester.pump_widget(SizedBox::new());
+        assert!(tester.find_text("Test starting...").is_empty());
+    });
+}
+
 #[test]
 fn pump_widget_runs_one_frame() {
     test_widgets(|tester| {
         let frames = counting_frames(tester);
+        let presented = tester.view().presented();
         tester.pump_widget(SizedBox::new());
         assert_eq!(frames.get(), 1);
-        assert_eq!(tester.view().presented(), 1);
+        assert_eq!(tester.view().presented(), presented + 1);
     });
 }
 
@@ -137,10 +150,24 @@ fn a_variant_runs_the_case_once_per_platform_in_order() {
         *ran.lock().unwrap(),
         [
             TargetPlatform::Android,
-            TargetPlatform::Fuchsia,
-            TargetPlatform::IOS
+            TargetPlatform::IOS,
+            TargetPlatform::Fuchsia
         ]
     );
+}
+
+/// flutter_test leaves the tree alone after a test that failed; a case that caught the panic of
+/// a build left the tree half built, so its tester ends without disposing it.
+#[test]
+fn a_case_that_caught_a_build_panic_ends_without_tearing_down() {
+    test_widgets(|tester| {
+        let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tester.pump_widget(crate::widgets::basic::Builder::new(|_, _| {
+                panic!("the build fails")
+            }));
+        }));
+        assert!(built.is_err());
+    });
 }
 
 #[test]

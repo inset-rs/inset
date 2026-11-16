@@ -469,19 +469,17 @@ impl InkFeatureLeaf for InkDecoration {
 mod tests {
     use std::time::Duration;
 
-    use waft_embedder::{Rect, Size, TargetPlatform, valo};
+    use waft_embedder::{Rect, Size, valo};
     use waft_widgets::Center;
+
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
     use crate::ink_well::InkWell;
-    use crate::test_support::{Drawn, PaintInspection, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
 
     fn size_of(tester: &WidgetTester, key: &GlobalKey) -> Size {
         tester
@@ -493,22 +491,20 @@ mod tests {
 
     #[test]
     fn the_ink_widget_expands_when_no_dimensions_are_set() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(
                 Material::new()
                     .child(Ink::new().key(key.clone().into()))
                     .into_widget(),
             );
-            assert_eq!(size_of(&tester, &key), Size::new(800.0, 600.0));
+            assert_eq!(size_of(tester, &key), Size::new(800.0, 600.0));
         });
     }
 
     #[test]
     fn the_ink_widget_fits_the_specified_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(
                 Material::new()
@@ -524,14 +520,13 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(200.0, 150.0));
+            assert_eq!(size_of(tester, &key), Size::new(200.0, 150.0));
         });
     }
 
     #[test]
     fn the_ink_widget_expands_on_a_unspecified_dimension() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(
                 Material::new()
@@ -542,7 +537,7 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(800.0, 150.0));
+            assert_eq!(size_of(tester, &key), Size::new(800.0, 150.0));
         });
     }
 
@@ -618,38 +613,37 @@ mod tests {
 
     #[test]
     fn material2_does_the_ink_widget_render_anything() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let blue = Colors::BLUE.primary();
             let red = Colors::RED.primary();
             let green = Colors::GREEN.primary();
             let ink_rect = Rect::from_ltrb(300.0, 200.0, 500.0, 400.0);
-            let widget = m2_ink_frame(&tester, Some(blue));
+            let widget = m2_ink_frame(tester, Some(blue));
             tester.pump_widget(widget);
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, WidgetTester::SIZE.center(Offset::ZERO));
-            tester.pump(Duration::ZERO); // start gesture
-            tester.pump(Duration::from_millis(200)); // wait for splash to be well under way
+            tester.pump(); // start gesture
+            tester.pump_by(Duration::from_millis(200)); // wait for splash to be well under way
 
             let box_ = tester.first::<crate::material::RenderInkFeatures>();
             assert!(
-                paints_rect_then_circle(&tester, blue, ink_rect, green),
+                paints_rect_then_circle(tester, blue, ink_rect, green),
                 "{:?}",
                 tester.ink_drawn()
             );
 
-            let widget = m2_ink_frame(&tester, Some(red));
+            let widget = m2_ink_frame(tester, Some(red));
             tester.pump_widget(widget);
             assert_eq!(tester.first::<crate::material::RenderInkFeatures>(), box_);
             assert!(
-                paints_rect_then_circle(&tester, red, ink_rect, green),
+                paints_rect_then_circle(tester, red, ink_rect, green),
                 "{:?}",
                 tester.ink_drawn()
             );
 
             // this is at a different depth in the tree so it's now a new InkWell
-            let widget = m2_ink_frame(&tester, None);
+            let widget = m2_ink_frame(tester, None);
             tester.pump_widget(widget);
             assert_eq!(tester.first::<crate::material::RenderInkFeatures>(), box_);
             let drawn = tester.ink_drawn();
@@ -662,8 +656,7 @@ mod tests {
 
     #[test]
     fn ink_with_is_visible_false_does_not_paint() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let test_color = Color::new(0xffff1234);
             let ink_widget = |is_visible: bool| {
                 Material::new()

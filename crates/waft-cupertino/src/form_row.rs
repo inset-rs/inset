@@ -193,8 +193,9 @@ mod tests {
     use waft_painting::AnyColor;
     use waft_widgets::{Builder, Directionality, SizedBox};
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
-    use crate::test_support::{build, test_cell};
     use crate::theme::CupertinoThemeData;
 
     /// Records the text style in force where a row places a slot, next to the theme's label
@@ -211,13 +212,9 @@ mod tests {
 
     #[test]
     fn a_form_row_styles_its_prefix_and_helper_with_the_theme_and_its_error_in_red() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let seen = Rc::new(RefCell::new(Vec::new()));
-        drop(app);
-        build(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 CupertinoTheme::new(
                     CupertinoThemeData::new(),
@@ -226,17 +223,16 @@ mod tests {
                         .helper(probe(&seen))
                         .error(probe(&seen)),
                 ),
-            )
-            .into_widget(),
-        );
-        let seen = seen.borrow();
-        assert_eq!(seen.len(), 3, "prefix, helper, error");
-        let (prefix, label) = &seen[0];
-        assert_eq!(prefix.color.as_ref(), Some(label));
-        let (helper, label) = &seen[1];
-        assert_eq!(helper.color.as_ref(), Some(label));
-        let (error, _) = &seen[2];
-        assert_eq!(error.color, Some(CupertinoColors::DESTRUCTIVE_RED));
-        assert_eq!(error.font_weight, Some(FontWeight::W500));
+            ));
+            let seen = seen.borrow();
+            assert_eq!(seen.len(), 3, "prefix, helper, error");
+            let (prefix, label) = &seen[0];
+            assert_eq!(prefix.color.as_ref(), Some(label));
+            let (helper, label) = &seen[1];
+            assert_eq!(helper.color.as_ref(), Some(label));
+            let (error, _) = &seen[2];
+            assert_eq!(error.color, Some(CupertinoColors::DESTRUCTIVE_RED));
+            assert_eq!(error.font_weight, Some(FontWeight::W500));
+        });
     }
 }

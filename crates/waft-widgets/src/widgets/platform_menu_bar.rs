@@ -1082,30 +1082,20 @@ impl PlatformProvidedMenuItemType {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use std::time::Duration;
 
-    use waft_foundation::AppCell;
     use waft_services::LogicalKeyboardKey;
-    use waft_test::{MockMenuBar, TestPlatform, TestView};
+    use waft_test::{MockMenuBar, TestPlatform};
 
     use super::*;
-    use crate::binding::run_app;
-    use crate::framework::IntoWidget;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::WidgetTester;
 
-    /// An app on a macOS host whose menu bar is `menu_bar`.
-    fn app_with_menu_bar(menu_bar: &MockMenuBar) -> Rc<AppCell> {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView::new(800.0, 600.0)))
-            .with_menu_bar(Rc::new(menu_bar.clone()));
-        AppCell::with_platform(Rc::new(platform))
-    }
-
-    fn mount(cell: &AppCell, widget: WidgetRef) {
-        run_app(&mut cell.borrow_mut(), widget);
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+    /// A tester on a macOS host whose menu bar is `menu_bar`.
+    fn tester_with_menu_bar(menu_bar: &MockMenuBar) -> WidgetTester {
+        WidgetTester::with_platform(
+            TestPlatform::new()
+                .on(TargetPlatform::MacOS)
+                .with_menu_bar(Rc::new(menu_bar.clone())),
+        )
     }
 
     /// A File menu with Open, which records its choice into `chosen`, a group holding Save,
@@ -1135,9 +1125,9 @@ mod tests {
     #[test]
     fn the_menu_bar_reaches_the_host_and_a_choice_reaches_its_item() {
         let menu_bar = MockMenuBar::new();
-        let cell = app_with_menu_bar(&menu_bar);
+        let tester = &mut tester_with_menu_bar(&menu_bar);
         let chosen = Rc::new(RefCell::new(Vec::new()));
-        mount(&cell, PlatformMenuBar::new(menus(&chosen)).into_widget());
+        tester.pump_widget(PlatformMenuBar::new(menus(&chosen)));
 
         let set = menu_bar.menus();
         let [
@@ -1178,41 +1168,38 @@ mod tests {
         assert_eq!(*item, ProvidedItem::Quit);
 
         let open_id = menu_bar.id_of(&["File", "Open"]).expect("Open has an id");
-        choose(&cell, open_id);
+        choose(tester, open_id);
         assert_eq!(*chosen.borrow(), ["Open"]);
     }
 
     /// Reports the choice of `id` as the host does, through the platform callback the delegate
     /// set.
-    fn choose(cell: &AppCell, id: MenuId) {
-        let mut app = cell.borrow_mut();
-        let callback = app
-            .platform_callbacks()
-            .on_menu_selected
-            .clone()
-            .expect("the default delegate hears choices");
-        callback(&mut app, id);
+    fn choose(tester: &WidgetTester, id: MenuId) {
+        tester.update(|app| {
+            let callback = app
+                .platform_callbacks()
+                .on_menu_selected
+                .clone()
+                .expect("the default delegate hears choices");
+            callback(app, id);
+        });
     }
 
     #[test]
     fn leading_trailing_and_doubled_dividers_are_stripped() {
         let menu_bar = MockMenuBar::new();
-        let cell = app_with_menu_bar(&menu_bar);
+        let tester = &mut tester_with_menu_bar(&menu_bar);
         let item = || -> PlatformMenuItemRef { Rc::new(PlainPlatformMenuItem::new("Item")) };
         let group =
             |members| -> PlatformMenuItemRef { Rc::new(PlatformMenuItemGroup::new(members)) };
-        mount(
-            &cell,
-            PlatformMenuBar::new(vec![Rc::new(PlatformMenu::new(
-                "Menu",
-                vec![
-                    group(vec![item()]),
-                    group(vec![item()]),
-                    group(vec![item()]),
-                ],
-            ))])
-            .into_widget(),
-        );
+        tester.pump_widget(PlatformMenuBar::new(vec![Rc::new(PlatformMenu::new(
+            "Menu",
+            vec![
+                group(vec![item()]),
+                group(vec![item()]),
+                group(vec![item()]),
+            ],
+        ))]));
         let [MenuEntry::Submenu { entries, .. }] = &menu_bar.menus()[..] else {
             panic!("one menu");
         };
@@ -1225,14 +1212,14 @@ mod tests {
 
     #[test]
     fn a_platform_without_a_menu_bar_shows_the_menus_nowhere() {
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::Windows)
-            .with_view(Rc::new(TestView::new(800.0, 600.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
+        let tester = &mut WidgetTester::on(TargetPlatform::Windows);
         let chosen = Rc::new(RefCell::new(Vec::new()));
-        mount(&cell, PlatformMenuBar::new(menus(&chosen)).into_widget());
+        tester.pump_widget(PlatformMenuBar::new(menus(&chosen)));
         assert!(
-            !PlatformProvidedMenuItem::has_menu(&cell.borrow(), PlatformProvidedMenuItemType::Quit),
+            !tester.update(|app| PlatformProvidedMenuItem::has_menu(
+                app,
+                PlatformProvidedMenuItemType::Quit
+            )),
             "Windows provides no Quit item"
         );
     }

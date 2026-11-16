@@ -4837,13 +4837,11 @@ fn widget_ref_eq(a: &Option<WidgetRef>, b: &Option<WidgetRef>) -> bool {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use waft_foundation::AppCell;
 
-    use waft_embedder::{Locale, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-    use waft_gestures::GestureBinding;
+    use waft_embedder::Locale;
     use waft_painting::EdgeInsets;
     use waft_rendering::{AnyRenderObject, RenderDecoratedBox, RenderParagraph};
-    use waft_scheduler::SchedulerBinding;
+    use waft_widgets::testing::{WidgetTester, test_widgets};
     use waft_widgets::{
         AnyElement, CustomScrollView, DefaultWidgetsLocalizations, FixedScrollMetrics,
         Localizations, MediaQueryData, NavigatorState, Notification, PreferredSize,
@@ -4853,31 +4851,13 @@ mod tests {
 
     use super::*;
     use crate::app::CupertinoApp;
-    use crate::icons::install_cupertino_icon_font;
     use crate::localizations::DefaultCupertinoLocalizations;
     use crate::page_scaffold::CupertinoPageScaffold;
     use crate::route::CupertinoPageRoute;
-    use crate::test_support::{build, pump, test_cell};
     use waft_test::{assert_no_new_objects, object_snapshot};
 
-    /// The test view is 800x600 physical at 2x.
-    const VIEW_WIDTH: f64 = 400.0;
-
-    /// What the shell does at start-up: the app-wide fonts, plus the icon font the chevron
-    /// shapes from.
-    fn app_with_fonts() -> Rc<AppCell> {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        let binding = waft_painting::PaintingBinding::instance(&mut app);
-        if !binding.has_fonts(&app) {
-            binding.install_fonts(&mut app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
-        install_cupertino_icon_font(&mut app);
-        drop(app);
-        cell
-    }
+    /// The tester's view width, in logical pixels.
+    const VIEW_WIDTH: f64 = 800.0;
 
     fn root_element(app: &mut App) -> AnyElement {
         WidgetsBinding::instance(app)
@@ -4954,19 +4934,13 @@ mod tests {
         object.local_to_global(app, Offset::ZERO, None) & object.size(app)
     }
 
-    /// Runs frames until every route transition has settled, on from the last frame's time.
-    fn settle(app: &mut App) -> Duration {
-        let mut at = SchedulerBinding::current_system_frame_time_stamp(app);
-        for _ in 0..60 {
-            at += Duration::from_millis(20);
-            pump(app, at);
-        }
-        at
-    }
-
     /// Mounts a bare navigation bar under the chrome it reads: a media query with `padding`,
     /// the Cupertino localizations, and a text direction.
-    fn mount_bar(cell: &AppCell, padding: EdgeInsets, bar: CupertinoNavigationBar) -> GlobalKey {
+    fn mount_bar(
+        tester: &mut WidgetTester,
+        padding: EdgeInsets,
+        bar: CupertinoNavigationBar,
+    ) -> GlobalKey {
         let key = GlobalKey::new();
         let bar = bar.key(key.clone().into());
         // A scaffold `Positioned`s the bar at the top, which leaves its height loose.
@@ -4977,8 +4951,7 @@ mod tests {
                 .child(bar),
         )
         .into_widget();
-        build(
-            cell,
+        tester.pump_widget(
             Localizations::new(
                 Locale::new("en"),
                 vec![
@@ -4986,47 +4959,27 @@ mod tests {
                     DefaultCupertinoLocalizations::delegate(),
                 ],
             )
-            .child(Directionality::new(TextDirection::Ltr, tree))
-            .into_widget(),
+            .child(Directionality::new(TextDirection::Ltr, tree)),
         );
         key
     }
 
-    /// An iOS app whose routes are built by `on_generate_route`, settled.
-    fn mount_app(configure: impl FnOnce(CupertinoApp) -> CupertinoApp) -> Rc<AppCell> {
-        let cell = app_with_fonts();
-        build(&cell, configure(CupertinoApp::new()).into_widget());
-        let mut app = cell.borrow_mut();
-        settle(&mut app);
-        drop(app);
-        cell
+    /// An app whose routes are built by `on_generate_route`, settled.
+    fn mount_app(tester: &mut WidgetTester, configure: impl FnOnce(CupertinoApp) -> CupertinoApp) {
+        tester.pump_widget(configure(CupertinoApp::new()));
+        tester.pump_and_settle();
     }
 
-    /// Sends one pointer packet; the test view is 2x, so logical coordinates double.
-    fn send(app: &mut App, change: PointerChange, at_point: Offset, at: Duration) {
-        GestureBinding::instance(app).handle_pointer_data_packet(
-            app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Touch,
-                time_stamp: at,
-                pointer_identifier: 1,
-                physical_x: at_point.dx() * 2.0,
-                physical_y: at_point.dy() * 2.0,
-                ..PointerData::default()
-            }]),
-        );
-        app.drain_microtasks();
-    }
-
-    fn tap(app: &mut App, at_point: Offset, at: Duration) {
-        send(app, PointerChange::Down, at_point, at);
-        send(
-            app,
-            PointerChange::Up,
-            at_point,
-            at + Duration::from_millis(20),
-        );
+    /// Pushes the app's `/second` route through its navigator.
+    fn push_second(tester: &mut WidgetTester) {
+        tester.update(|app| {
+            let root = root_element(app);
+            let navigator = elements(app, root)
+                .into_iter()
+                .find_map(|element| element.state_handle::<NavigatorState>(app))
+                .expect("the app has a navigator");
+            navigator.push_named(app, "/second", None);
+        });
     }
 
     /// A page whose scaffold carries `bar`.
@@ -5040,33 +4993,34 @@ mod tests {
 
     #[test]
     fn a_navigation_bar_centres_its_middle_and_reports_its_persistent_height() {
-        let cell = app_with_fonts();
-        let bar = CupertinoNavigationBar::new().middle(Text::new("Title"));
-        assert_eq!(
-            bar.preferred_size(),
-            Size::from_height(K_NAV_BAR_PERSISTENT_HEIGHT),
-            "a bar without a bottom or a large title prefers the persistent height"
-        );
-        let key = mount_bar(&cell, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0), bar);
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let bar = CupertinoNavigationBar::new().middle(Text::new("Title"));
+            assert_eq!(
+                bar.preferred_size(),
+                Size::from_height(K_NAV_BAR_PERSISTENT_HEIGHT),
+                "a bar without a bottom or a large title prefers the persistent height"
+            );
+            let key = mount_bar(tester, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0), bar);
+            let mut app = tester.cell.borrow_mut();
 
-        let middle = paragraph_of(&mut app, "Title").expect("the middle is shown");
-        let rect = global_rect(&mut app, middle.as_box());
-        assert!(
-            (rect.left + rect.width() / 2.0 - VIEW_WIDTH / 2.0).abs() < 0.5,
-            "the middle is horizontally centred: {rect:?}"
-        );
-        assert!(
-            rect.top >= 20.0,
-            "the middle sits below the status bar padding: {rect:?}"
-        );
+            let middle = paragraph_of(&mut app, "Title").expect("the middle is shown");
+            let rect = global_rect(&mut app, middle.as_box());
+            assert!(
+                (rect.left + rect.width() / 2.0 - VIEW_WIDTH / 2.0).abs() < 0.5,
+                "the middle is horizontally centred: {rect:?}"
+            );
+            assert!(
+                rect.top >= 20.0,
+                "the middle sits below the status bar padding: {rect:?}"
+            );
 
-        let bar_box = keyed_box(&mut app, &key);
-        assert_eq!(
-            bar_box.size(&app).height(),
-            K_NAV_BAR_PERSISTENT_HEIGHT + 20.0,
-            "the persistent bar takes the top padding on top of its own height"
-        );
+            let bar_box = keyed_box(&mut app, &key);
+            assert_eq!(
+                bar_box.size(&app).height(),
+                K_NAV_BAR_PERSISTENT_HEIGHT + 20.0,
+                "the persistent bar takes the top padding on top of its own height"
+            );
+        });
     }
 
     #[test]
@@ -5080,14 +5034,13 @@ mod tests {
 
     #[test]
     fn a_navigation_bar_fully_obstructs_only_when_its_background_is_opaque() {
-        let cell = test_cell();
-        let seen = Rc::new(Cell::new(None));
-        let probe = Rc::clone(&seen);
-        let opaque = CupertinoNavigationBar::new().background_color(Color::new(0xFF00FF00));
-        let translucent = CupertinoNavigationBar::new().background_color(Color::new(0x8000FF00));
-        build(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            let seen = Rc::new(Cell::new(None));
+            let probe = Rc::clone(&seen);
+            let opaque = CupertinoNavigationBar::new().background_color(Color::new(0xFF00FF00));
+            let translucent =
+                CupertinoNavigationBar::new().background_color(Color::new(0x8000FF00));
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Builder::new(move |app: &mut App, context: BuildContext| {
                     probe.set(Some((
@@ -5096,188 +5049,192 @@ mod tests {
                     )));
                     SizedBox::shrink().into_widget()
                 }),
-            )
-            .into_widget(),
-        );
-        assert_eq!(
-            seen.get().expect("the probe built"),
-            (true, false),
-            "only an opaque background fully obstructs"
-        );
+            ));
+            assert_eq!(
+                seen.get().expect("the probe built"),
+                (true, false),
+                "only an opaque background fully obstructs"
+            );
+        });
     }
 
     #[test]
     fn an_implied_back_label_reads_the_previous_route_title() {
-        let cell = mount_app(|cupertino_app| {
-            cupertino_app.on_generate_route(move |app, settings| {
-                let second = settings.name.as_deref() == Some("/second");
-                let route =
-                    CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
-                let route = route.title(app, if second { "Second" } else { "Start" }.to_string());
-                Some(route.clone().into_erased())
-            })
+        test_widgets(|tester| {
+            mount_app(tester, |cupertino_app| {
+                cupertino_app.on_generate_route(move |app, settings| {
+                    let second = settings.name.as_deref() == Some("/second");
+                    let route =
+                        CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
+                    let route =
+                        route.title(app, if second { "Second" } else { "Start" }.to_string());
+                    Some(route.clone().into_erased())
+                })
+            });
+            let mut app = tester.cell.borrow_mut();
+            let count =
+                |app: &mut App, text: &str| texts(app).iter().filter(|t| *t == text).count();
+            assert_eq!(count(&mut app, "Start"), 1, "the first route's middle");
+
+            drop(app);
+            push_second(tester);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+
+            assert_eq!(
+                count(&mut app, "Start"),
+                2,
+                "the previous route's title is read off the route as the back label: {:?}",
+                texts(&mut app)
+            );
         });
-        let mut app = cell.borrow_mut();
-        let count = |app: &mut App, text: &str| texts(app).iter().filter(|t| *t == text).count();
-        assert_eq!(count(&mut app, "Start"), 1, "the first route's middle");
-
-        let root = root_element(&mut app);
-        let navigator = elements(&app, root)
-            .into_iter()
-            .find_map(|element| element.state_handle::<NavigatorState>(&app))
-            .expect("the app has a navigator");
-        navigator.push_named(&mut app, "/second", None);
-        settle(&mut app);
-
-        assert_eq!(
-            count(&mut app, "Start"),
-            2,
-            "the previous route's title is read off the route as the back label: {:?}",
-            texts(&mut app)
-        );
     }
 
     #[test]
     fn a_second_route_implies_its_title_as_the_middle_and_a_back_chevron_that_pops() {
-        let cell = mount_app(|cupertino_app| {
-            cupertino_app.on_generate_route(move |app, settings| {
-                let second = settings.name.as_deref() == Some("/second");
-                let route = CupertinoPageRoute::new(
-                    app,
-                    scaffold_page(move || {
-                        CupertinoNavigationBar::new().previous_page_title("Home")
-                    }),
-                );
-                let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
-                Some(route.clone().into_erased())
-            })
+        test_widgets(|tester| {
+            mount_app(tester, |cupertino_app| {
+                cupertino_app.on_generate_route(move |app, settings| {
+                    let second = settings.name.as_deref() == Some("/second");
+                    let route = CupertinoPageRoute::new(
+                        app,
+                        scaffold_page(move || {
+                            CupertinoNavigationBar::new().previous_page_title("Home")
+                        }),
+                    );
+                    let route =
+                        route.title(app, if second { "Second" } else { "Home" }.to_string());
+                    Some(route.clone().into_erased())
+                })
+            });
+            let mut app = tester.cell.borrow_mut();
+
+            assert!(
+                texts(&mut app).iter().any(|text| text == "Home"),
+                "the first route's title is implied as the middle: {:?}",
+                texts(&mut app)
+            );
+
+            drop(app);
+            push_second(tester);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+
+            let shown = texts(&mut app);
+            assert!(
+                shown.iter().any(|text| text == "Second"),
+                "the pushed route's title is implied as the middle: {shown:?}"
+            );
+            assert!(
+                shown.iter().any(|text| text == "Home"),
+                "the previous page title is shown as the back label: {shown:?}"
+            );
+            let chevron = char::from_u32(CupertinoIcons::back().code_point)
+                .expect("a codepoint")
+                .to_string();
+            assert!(
+                shown.contains(&chevron),
+                "the back chevron is shown: {shown:?}"
+            );
+
+            let chevron_box = paragraph_of(&mut app, &chevron)
+                .expect("the back chevron is laid out")
+                .as_box();
+            let rect = global_rect(&mut app, chevron_box);
+            drop(app);
+            tester.tap(rect.center(), 1);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+
+            assert!(
+                !texts(&mut app).iter().any(|text| text == "Second"),
+                "tapping the back button popped the route"
+            );
         });
-        let mut app = cell.borrow_mut();
-
-        assert!(
-            texts(&mut app).iter().any(|text| text == "Home"),
-            "the first route's title is implied as the middle: {:?}",
-            texts(&mut app)
-        );
-
-        let root = root_element(&mut app);
-        let navigator = elements(&app, root)
-            .into_iter()
-            .find_map(|element| element.state_handle::<NavigatorState>(&app))
-            .expect("the app has a navigator");
-        navigator.push_named(&mut app, "/second", None);
-        settle(&mut app);
-
-        let shown = texts(&mut app);
-        assert!(
-            shown.iter().any(|text| text == "Second"),
-            "the pushed route's title is implied as the middle: {shown:?}"
-        );
-        assert!(
-            shown.iter().any(|text| text == "Home"),
-            "the previous page title is shown as the back label: {shown:?}"
-        );
-        let chevron = char::from_u32(CupertinoIcons::back().code_point)
-            .expect("a codepoint")
-            .to_string();
-        assert!(
-            shown.contains(&chevron),
-            "the back chevron is shown: {shown:?}"
-        );
-
-        let chevron_box = paragraph_of(&mut app, &chevron)
-            .expect("the back chevron is laid out")
-            .as_box();
-        let rect = global_rect(&mut app, chevron_box);
-        let at = Duration::from_millis(1500);
-        tap(&mut app, rect.center(), at);
-        settle(&mut app);
-
-        assert!(
-            !texts(&mut app).iter().any(|text| text == "Second"),
-            "tapping the back button popped the route"
-        );
     }
 
     #[test]
     fn automatically_imply_leading_and_middle_can_be_turned_off() {
-        let cell = mount_app(|cupertino_app| {
-            cupertino_app.on_generate_route(move |app, _settings| {
-                let route = CupertinoPageRoute::new(
-                    app,
-                    scaffold_page(|| {
-                        CupertinoNavigationBar::new()
-                            .automatically_imply_leading(false)
-                            .automatically_imply_middle(false)
-                    }),
-                );
-                Some(route.title(app, "Home".to_string()).into_erased())
-            })
+        test_widgets(|tester| {
+            mount_app(tester, |cupertino_app| {
+                cupertino_app.on_generate_route(move |app, _settings| {
+                    let route = CupertinoPageRoute::new(
+                        app,
+                        scaffold_page(|| {
+                            CupertinoNavigationBar::new()
+                                .automatically_imply_leading(false)
+                                .automatically_imply_middle(false)
+                        }),
+                    );
+                    Some(route.title(app, "Home".to_string()).into_erased())
+                })
+            });
+            let mut app = tester.cell.borrow_mut();
+            assert!(
+                !texts(&mut app).iter().any(|text| text == "Home"),
+                "automaticallyImplyMiddle false leaves the middle empty"
+            );
         });
-        let mut app = cell.borrow_mut();
-        assert!(
-            !texts(&mut app).iter().any(|text| text == "Home"),
-            "automaticallyImplyMiddle false leaves the middle empty"
-        );
     }
 
     #[test]
     fn a_scroll_update_notification_fades_the_bar_background_in() {
-        const SCAFFOLD: Color = Color::new(0xFF102030);
-        const BAR: Color = Color::new(0xFF405060);
+        test_widgets(|tester| {
+            const SCAFFOLD: Color = Color::new(0xFF102030);
+            const BAR: Color = Color::new(0xFF405060);
 
-        let cell = app_with_fonts();
-        let key = GlobalKey::new();
-        let bar_key = key.clone();
-        let inner = Rc::new(Cell::new(None));
-        let probe = Rc::clone(&inner);
-        let tree = MediaQuery::new(
-            MediaQueryData::new(),
-            ScrollNotificationObserver::new(CupertinoPageScaffoldBackgroundColor::new(
-                AnyColor::new(SCAFFOLD),
-                Align::new()
-                    .alignment(AlignmentGeometry::TOP_CENTER)
-                    .child(Builder::new(
-                        move |_app: &mut App, context: BuildContext| {
-                            probe.set(Some(context));
-                            CupertinoNavigationBar::new()
-                                .key(bar_key.clone().into())
-                                .background_color(BAR)
-                                .into_widget()
-                        },
-                    )),
-            )),
-        )
-        .into_widget();
-        build(
-            &cell,
-            Localizations::new(
-                Locale::new("en"),
-                vec![
-                    DefaultWidgetsLocalizations::delegate(),
-                    DefaultCupertinoLocalizations::delegate(),
-                ],
+            let key = GlobalKey::new();
+            let bar_key = key.clone();
+            let inner = Rc::new(Cell::new(None));
+            let probe = Rc::clone(&inner);
+            let tree = MediaQuery::new(
+                MediaQueryData::new(),
+                ScrollNotificationObserver::new(CupertinoPageScaffoldBackgroundColor::new(
+                    AnyColor::new(SCAFFOLD),
+                    Align::new()
+                        .alignment(AlignmentGeometry::TOP_CENTER)
+                        .child(Builder::new(
+                            move |_app: &mut App, context: BuildContext| {
+                                probe.set(Some(context));
+                                CupertinoNavigationBar::new()
+                                    .key(bar_key.clone().into())
+                                    .background_color(BAR)
+                                    .into_widget()
+                            },
+                        )),
+                )),
             )
-            .child(Directionality::new(TextDirection::Ltr, tree))
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+            .into_widget();
+            tester.pump_widget(
+                Localizations::new(
+                    Locale::new("en"),
+                    vec![
+                        DefaultWidgetsLocalizations::delegate(),
+                        DefaultCupertinoLocalizations::delegate(),
+                    ],
+                )
+                .child(Directionality::new(TextDirection::Ltr, tree)),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(
-            bar_background(&mut app, &key),
-            SCAFFOLD,
-            "with nothing scrolled under, the bar wears the scaffold's colour"
-        );
+            assert_eq!(
+                bar_background(&mut app, &key),
+                SCAFFOLD,
+                "with nothing scrolled under, the bar wears the scaffold's colour"
+            );
 
-        let context = inner.get().expect("the bar built");
-        notify_scrolled(&mut app, context, 40.0);
-        pump(&mut app, Duration::from_millis(20));
+            let context = inner.get().expect("the bar built");
+            notify_scrolled(&mut app, context, 40.0);
+            drop(app);
+            tester.pump_by(Duration::from_millis(20));
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(
-            bar_background(&mut app, &key),
-            BAR,
-            "past the animation extent the bar wears its own colour"
-        );
+            assert_eq!(
+                bar_background(&mut app, &key),
+                BAR,
+                "past the animation extent the bar wears its own colour"
+            );
+        });
     }
 
     /// The colour of the bar's own `DecoratedBox`, the one `wrap_with_background` builds.
@@ -5321,62 +5278,61 @@ mod tests {
 
     #[test]
     fn a_sliver_navigation_bar_shows_the_large_title_and_collapses_it_when_scrolled() {
-        let cell = app_with_fonts();
-        let mut app = cell.borrow_mut();
-        let controller = ScrollController::default(&mut app);
-        let scroll_view = CustomScrollView::new()
-            .controller(controller.clone().into_erased())
-            .slivers([
-                CupertinoSliverNavigationBar::new()
-                    .large_title(Text::new("Large"))
-                    .middle(Text::new("Middle"))
-                    .always_show_middle(false)
-                    .into_widget(),
-                SliverToBoxAdapter::new()
-                    .child(SizedBox::new().height(2000.0))
-                    .into_widget(),
-            ]);
-        let tree = MediaQuery::new(MediaQueryData::new(), scroll_view).into_widget();
-        drop(app);
-        build(
-            &cell,
-            Localizations::new(
-                Locale::new("en"),
-                vec![
-                    DefaultWidgetsLocalizations::delegate(),
-                    DefaultCupertinoLocalizations::delegate(),
-                ],
-            )
-            .child(Directionality::new(TextDirection::Ltr, tree))
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let scroll_view = CustomScrollView::new()
+                .controller(controller.clone().into_erased())
+                .slivers([
+                    CupertinoSliverNavigationBar::new()
+                        .large_title(Text::new("Large"))
+                        .middle(Text::new("Middle"))
+                        .always_show_middle(false)
+                        .into_widget(),
+                    SliverToBoxAdapter::new()
+                        .child(SizedBox::new().height(2000.0))
+                        .into_widget(),
+                ]);
+            let tree = MediaQuery::new(MediaQueryData::new(), scroll_view).into_widget();
+            tester.pump_widget(
+                Localizations::new(
+                    Locale::new("en"),
+                    vec![
+                        DefaultWidgetsLocalizations::delegate(),
+                        DefaultCupertinoLocalizations::delegate(),
+                    ],
+                )
+                .child(Directionality::new(TextDirection::Ltr, tree)),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let large = paragraph_of(&mut app, "Large").expect("the large title is built");
-        let expanded = global_rect(&mut app, large.as_box());
-        assert!(
-            expanded.top > K_NAV_BAR_PERSISTENT_HEIGHT,
-            "at scroll 0 the large title sits below the persistent bar: {expanded:?}"
-        );
-        assert_eq!(
-            large_title_opacity(&mut app),
-            1.0,
-            "the large title is fully visible at scroll 0"
-        );
+            let large = paragraph_of(&mut app, "Large").expect("the large title is built");
+            let expanded = global_rect(&mut app, large.as_box());
+            assert!(
+                expanded.top > K_NAV_BAR_PERSISTENT_HEIGHT,
+                "at scroll 0 the large title sits below the persistent bar: {expanded:?}"
+            );
+            assert_eq!(
+                large_title_opacity(&mut app),
+                1.0,
+                "the large title is fully visible at scroll 0"
+            );
 
-        controller.jump_to(&mut app, K_NAV_BAR_LARGE_TITLE_HEIGHT_EXTENSION + 20.0);
-        settle(&mut app);
+            controller.jump_to(&mut app, K_NAV_BAR_LARGE_TITLE_HEIGHT_EXTENSION + 20.0);
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(
-            large_title_opacity(&mut app),
-            0.0,
-            "past the extension the large title has faded out"
-        );
-        let middle = paragraph_of(&mut app, "Middle").expect("the middle is built");
-        assert!(
-            global_rect(&mut app, middle.as_box()).top < K_NAV_BAR_PERSISTENT_HEIGHT,
-            "the middle takes the persistent bar"
-        );
+            assert_eq!(
+                large_title_opacity(&mut app),
+                0.0,
+                "past the extension the large title has faded out"
+            );
+            let middle = paragraph_of(&mut app, "Middle").expect("the middle is built");
+            assert!(
+                global_rect(&mut app, middle.as_box()).top < K_NAV_BAR_PERSISTENT_HEIGHT,
+                "the middle takes the persistent bar"
+            );
+        });
     }
 
     /// The opacity the sliver bar's large title fades with.
@@ -5397,38 +5353,35 @@ mod tests {
 
     #[test]
     fn a_hero_flight_between_two_bars_builds_the_navigation_bar_transition() {
-        let cell = mount_app(|cupertino_app| {
-            cupertino_app.on_generate_route(move |app, settings| {
-                let second = settings.name.as_deref() == Some("/second");
-                let route =
-                    CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
-                let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
-                Some(route.clone().into_erased())
-            })
+        test_widgets(|tester| {
+            mount_app(tester, |cupertino_app| {
+                cupertino_app.on_generate_route(move |app, settings| {
+                    let second = settings.name.as_deref() == Some("/second");
+                    let route =
+                        CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
+                    let route =
+                        route.title(app, if second { "Second" } else { "Home" }.to_string());
+                    Some(route.clone().into_erased())
+                })
+            });
+            push_second(tester);
+            // Two frames: one to mount the incoming route, one for the hero controller to start the
+            // flight from the two mounted nav bars.
+            tester.pump_by(Duration::from_millis(20));
+            tester.pump_by(Duration::from_millis(120));
+            let mut app = tester.cell.borrow_mut();
+
+            assert!(
+                has_widget::<NavigationBarTransition>(&mut app),
+                "the flight shuttle is the navigation bar transition"
+            );
+            let shown = texts(&mut app);
+            assert!(
+                shown.iter().filter(|text| *text == "Home").count() >= 1
+                    && shown.iter().any(|text| text == "Second"),
+                "the transition carries both routes' components: {shown:?}"
+            );
         });
-        let mut app = cell.borrow_mut();
-
-        let root = root_element(&mut app);
-        let navigator = elements(&app, root)
-            .into_iter()
-            .find_map(|element| element.state_handle::<NavigatorState>(&app))
-            .expect("the app has a navigator");
-        navigator.push_named(&mut app, "/second", None);
-        // Two frames: one to mount the incoming route, one for the hero controller to start the
-        // flight from the two mounted nav bars.
-        pump(&mut app, Duration::from_millis(1220));
-        pump(&mut app, Duration::from_millis(1340));
-
-        assert!(
-            has_widget::<NavigationBarTransition>(&mut app),
-            "the flight shuttle is the navigation bar transition"
-        );
-        let shown = texts(&mut app);
-        assert!(
-            shown.iter().filter(|text| *text == "Home").count() >= 1
-                && shown.iter().any(|text| text == "Second"),
-            "the transition carries both routes' components: {shown:?}"
-        );
     }
 
     /// Not a Dart case: see [`a_frame_of_a_navigation_bar_transition_leaves_no_new_arena_objects`].
@@ -5436,137 +5389,125 @@ mod tests {
     /// it lives exactly as long as they do.
     #[test]
     fn a_navigation_bar_transition_frees_what_it_drove_with_the_components_it_drove() {
-        let cell = mount_app(|cupertino_app| {
-            cupertino_app.on_generate_route(move |app, settings| {
-                let second = settings.name.as_deref() == Some("/second");
-                let route =
-                    CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
-                let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
-                Some(route.clone().into_erased())
-            })
-        });
-        {
-            let mut app = cell.borrow_mut();
-            let root = root_element(&mut app);
-            let navigator = elements(&app, root)
-                .into_iter()
-                .find_map(|element| element.state_handle::<NavigatorState>(&app))
-                .expect("the app has a navigator");
-            navigator.push_named(&mut app, "/second", None);
-            pump(&mut app, Duration::from_millis(1220));
-            pump(&mut app, Duration::from_millis(1340));
-            pump(&mut app, Duration::from_millis(1360));
-        }
-        cell.checkpoint();
+        test_widgets(|tester| {
+            mount_app(tester, |cupertino_app| {
+                cupertino_app.on_generate_route(move |app, settings| {
+                    let second = settings.name.as_deref() == Some("/second");
+                    let route =
+                        CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
+                    let route =
+                        route.title(app, if second { "Second" } else { "Home" }.to_string());
+                    Some(route.clone().into_erased())
+                })
+            });
+            push_second(tester);
+            tester.pump_by(Duration::from_millis(20));
+            tester.pump_by(Duration::from_millis(120));
+            tester.pump_by(Duration::from_millis(20));
 
-        let driven: Vec<waft_foundation::HandleId> = {
-            let mut app = cell.borrow_mut();
-            let root = root_element(&mut app);
-            let transition = elements(&app, root)
-                .into_iter()
-                .find(|element| {
-                    downcast_widget::<NavigationBarTransition>(&**element.widget(&app)).is_some()
-                })
-                .expect("the flight shows the navigation bar transition");
-            elements(&app, transition)
-                .into_iter()
-                .filter_map(|element| {
-                    let widget = element.widget(&app);
-                    downcast_widget::<FadeTransition>(&**widget)
-                        .map(|fade| fade.opacity.id())
-                        .or_else(|| {
-                            downcast_widget::<PositionedTransition>(&**widget)
-                                .map(|positioned| positioned.rect.id())
-                        })
-                })
-                .collect()
-        };
-        assert!(!driven.is_empty(), "the components are animated");
-        {
-            let app = cell.borrow();
-            for id in &driven {
-                assert!(app.contains(*id), "{id:?} lives while its component does");
+            let driven: Vec<waft_foundation::HandleId> = {
+                let mut app = tester.cell.borrow_mut();
+                let root = root_element(&mut app);
+                let transition = elements(&app, root)
+                    .into_iter()
+                    .find(|element| {
+                        downcast_widget::<NavigationBarTransition>(&**element.widget(&app))
+                            .is_some()
+                    })
+                    .expect("the flight shows the navigation bar transition");
+                elements(&app, transition)
+                    .into_iter()
+                    .filter_map(|element| {
+                        let widget = element.widget(&app);
+                        downcast_widget::<FadeTransition>(&**widget)
+                            .map(|fade| fade.opacity.id())
+                            .or_else(|| {
+                                downcast_widget::<PositionedTransition>(&**widget)
+                                    .map(|positioned| positioned.rect.id())
+                            })
+                    })
+                    .collect()
+            };
+            assert!(!driven.is_empty(), "the components are animated");
+            {
+                let app = tester.cell.borrow();
+                for id in &driven {
+                    assert!(app.contains(*id), "{id:?} lives while its component does");
+                }
             }
-        }
 
-        // Far enough into the flight that no component's fade starts or ends in the frame
-        // measured, which would add or drop an opacity layer.
-        pump(&mut cell.borrow_mut(), Duration::from_millis(1500));
-        cell.checkpoint();
-        let snapshot = object_snapshot(&cell.borrow());
-        pump(&mut cell.borrow_mut(), Duration::from_millis(1520));
-        cell.checkpoint();
-        assert_no_new_objects(&cell.borrow(), &snapshot);
+            // Far enough into the flight that no component's fade starts or ends in the frame
+            // measured, which would add or drop an opacity layer.
+            tester.pump_by(Duration::from_millis(140));
+            let snapshot = object_snapshot(&tester.cell.borrow());
+            tester.pump_by(Duration::from_millis(20));
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
 
-        settle(&mut cell.borrow_mut());
-        cell.checkpoint();
-        let mut app = cell.borrow_mut();
-        assert!(
-            !has_widget::<NavigationBarTransition>(&mut app),
-            "the flight has ended"
-        );
-        for id in driven {
-            assert!(!app.contains(id), "{id:?} is freed with its component");
-        }
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+            assert!(
+                !has_widget::<NavigationBarTransition>(&mut app),
+                "the flight has ended"
+            );
+            for id in driven {
+                assert!(!app.contains(id), "{id:?} is freed with its component");
+            }
+        });
     }
 
     /// Not a Dart case: Dart's collector frees what each frame of a navigation bar transition
     /// builds and replaces; here the frame's replaced animations are freed at the checkpoint.
     #[test]
     fn a_frame_of_a_navigation_bar_transition_leaves_no_new_arena_objects() {
-        let cell = mount_app(|cupertino_app| {
-            cupertino_app.on_generate_route(move |app, settings| {
-                let second = settings.name.as_deref() == Some("/second");
-                let route =
-                    CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
-                let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
-                Some(route.into_erased())
-            })
+        test_widgets(|tester| {
+            mount_app(tester, |cupertino_app| {
+                cupertino_app.on_generate_route(move |app, settings| {
+                    let second = settings.name.as_deref() == Some("/second");
+                    let route =
+                        CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
+                    let route =
+                        route.title(app, if second { "Second" } else { "Home" }.to_string());
+                    Some(route.into_erased())
+                })
+            });
+            push_second(tester);
+            tester.pump_by(Duration::from_millis(20));
+            tester.pump_by(Duration::from_millis(120));
+            tester.pump_by(Duration::from_millis(20));
+            {
+                let mut app = tester.cell.borrow_mut();
+                assert!(
+                    has_widget::<NavigationBarTransition>(&mut app),
+                    "the flight is on"
+                );
+            }
+            // Far enough into the flight that no component's fade starts or ends in the frame
+            // measured, which would add or drop an opacity layer.
+            tester.pump_by(Duration::from_millis(140));
+            let snapshot = object_snapshot(&tester.cell.borrow());
+            tester.pump_by(Duration::from_millis(20));
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         });
-        {
-            let mut app = cell.borrow_mut();
-            let root = root_element(&mut app);
-            let navigator = elements(&app, root)
-                .into_iter()
-                .find_map(|element| element.state_handle::<NavigatorState>(&app))
-                .expect("the app has a navigator");
-            navigator.push_named(&mut app, "/second", None);
-            pump(&mut app, Duration::from_millis(1220));
-            pump(&mut app, Duration::from_millis(1340));
-            pump(&mut app, Duration::from_millis(1360));
-            assert!(
-                has_widget::<NavigationBarTransition>(&mut app),
-                "the flight is on"
-            );
-        }
-        // Far enough into the flight that no component's fade starts or ends in the frame
-        // measured, which would add or drop an opacity layer.
-        pump(&mut cell.borrow_mut(), Duration::from_millis(1500));
-        cell.checkpoint();
-        let snapshot = object_snapshot(&cell.borrow());
-        pump(&mut cell.borrow_mut(), Duration::from_millis(1520));
-        cell.checkpoint();
-        assert_no_new_objects(&cell.borrow(), &snapshot);
     }
 
     #[test]
     fn a_navigation_bar_bottom_adds_its_preferred_height() {
-        let bar = CupertinoNavigationBar::new().bottom(PreferredSizeWidgetRef::new(
-            PreferredSize::new(Size::from_height(30.0), SizedBox::shrink()),
-        ));
-        assert_eq!(
-            bar.preferred_size(),
-            Size::from_height(K_NAV_BAR_PERSISTENT_HEIGHT + 30.0)
-        );
-
-        let cell = test_cell();
-        let key = mount_bar(&cell, EdgeInsets::ZERO, bar);
-        let mut app = cell.borrow_mut();
-        let bar_box = keyed_box(&mut app, &key);
-        assert_eq!(
-            bar_box.size(&app).height(),
-            K_NAV_BAR_PERSISTENT_HEIGHT + 30.0,
-            "the bottom sits under the persistent bar"
-        );
+        test_widgets(|tester| {
+            let bar = CupertinoNavigationBar::new().bottom(PreferredSizeWidgetRef::new(
+                PreferredSize::new(Size::from_height(30.0), SizedBox::shrink()),
+            ));
+            assert_eq!(
+                bar.preferred_size(),
+                Size::from_height(K_NAV_BAR_PERSISTENT_HEIGHT + 30.0)
+            );
+            let key = mount_bar(tester, EdgeInsets::ZERO, bar);
+            let mut app = tester.cell.borrow_mut();
+            let bar_box = keyed_box(&mut app, &key);
+            assert_eq!(
+                bar_box.size(&app).height(),
+                K_NAV_BAR_PERSISTENT_HEIGHT + 30.0,
+                "the bottom sits under the persistent bar"
+            );
+        });
     }
 }
