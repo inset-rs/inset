@@ -15422,9 +15422,7 @@ pub(crate) mod tests {
                                 SizedBox::new()
                                     .width(35.0)
                                     .child(
-                                        InputDecorator::new(InputDecoration::new())
-                                            .key(unconstrained.clone().into())
-                                            .child(input_text()),
+                                        crate::TextField::new().key(unconstrained.clone().into()),
                                     )
                                     .into_widget(),
                                 SizedBox::new()
@@ -15432,11 +15430,7 @@ pub(crate) mod tests {
                                     // 48 is the height that this TextField would take when
                                     // laid out with no constraints.
                                     .height(48.0)
-                                    .child(
-                                        InputDecorator::new(InputDecoration::new())
-                                            .key(constrained.clone().into())
-                                            .child(input_text()),
-                                    )
+                                    .child(crate::TextField::new().key(constrained.clone().into()))
                                     .into_widget(),
                             ]),
                         ),
@@ -15447,7 +15441,7 @@ pub(crate) mod tests {
         }
 
         // input_decorator_test.dart 'given enough space, constrained and unconstrained heights
-        // result in the same size widget', on `InputDecorator`s around the `TextField`'s input.
+        // result in the same size widget'.
         #[test]
         fn constrained_and_unconstrained_heights_give_the_same_size_given_enough_space() {
             test_widgets(|tester| {
