@@ -1,6 +1,6 @@
 //! `TableView`'s row selection (`controls/dev/TableView/TableView_Selection.cpp`): the table's gestures and `SelectionChanged`, and the selection held where the application reaches it: `Select`, `Deselect`, `IsSelected`, `DeselectAll`, `SelectedIndex` and `SelectedItem` of `TableView.idl`, over the single-select `SelectionModel` the control keeps.
 //!
-//! The selection is resolved only while a `TableView` holds it: the table gives it the number of rows, whether its mode allows selection, and how a row maps to an item. Every change of the selected row notifies; the table raises `SelectionChanged` from the item reported last, and each row listens for its own index. A later editor who changes the model without notifying leaves rows showing the old selection.
+//! The selection is resolved only while a `TableView` holds it: the table gives it the number of rows, whether its mode allows selection, and how a row maps to an item. Every change of the selected row notifies, and nothing else does, for the table binds the selection while it builds and a listener above the table may rebuild; the table raises `SelectionChanged` from the item reported last, and each row listens for its own index. A later editor who changes the model without notifying leaves rows showing the old selection.
 
 use super::super::items_view::selection_model::SelectionModel;
 use super::source::ViewChange;
@@ -137,7 +137,7 @@ impl TableViewSelection {
 
     /// `UpdateSelectionModelSource`: the rows were reshaped, which clears the selection (`SelectionNode::OnSourceListChanged`, `Reset`).
     pub(crate) fn set_source(self: Handle<Self>, app: &mut App, row_count: usize) {
-        if app.get_mut(self).model.set_source(row_count) {
+        if app.get_mut(self).start_over(row_count) {
             self.notify_listeners(app);
         }
     }
@@ -186,7 +186,7 @@ impl TableViewSelection {
                     let removed = selection.model.on_items_removed(row, 1);
                     selection.model.on_items_added(row, 1) | removed
                 }
-                ViewChange::Reset => selection.model.set_source(row_count),
+                ViewChange::Reset => selection.start_over(row_count),
             };
         }
         debug_assert_eq!(app.get(self).model.item_count(), row_count);
@@ -225,6 +225,13 @@ impl TableViewSelection {
         }
         app.get_mut(self).last_raised_item = added;
         Some((removed, added))
+    }
+
+    /// `SelectionModel::Source`: the selection starts over on `row_count` rows. Answers whether a row was selected, the only change a listener can read: WinUI's model raises `SelectionChanged` whatever it cleared, and `TableView::PushSelectionProperties` republishes `SelectedIndex` and `SelectedItem` only when they differ.
+    fn start_over(&mut self, row_count: usize) -> bool {
+        let cleared = self.model.selected_index().is_some();
+        self.model.set_source(row_count);
+        cleared
     }
 
     fn can_select(self: Handle<Self>, app: &App) -> bool {
