@@ -3347,6 +3347,44 @@ pub(crate) mod tests {
         });
     }
 
+    // 'SegmentedButton clips border path when drawing segments': each segment clipped to the
+    // border, and the selected one's fill. The second segment's path, drawn at alpha 0, is a draw
+    // with no visible effect (PORTING.md, `## Skipped`).
+    #[test]
+    fn a_segmented_button_clips_each_segment_to_the_border() {
+        test_widgets(|tester| {
+            use waft_rendering::testing::{PaintCall, assert_paints};
+            pump_button(
+                tester,
+                m3,
+                SegmentedButton::new(
+                    vec![
+                        ButtonSegment::new(0).label(label("Option 1")),
+                        ButtonSegment::new(1).label(label("Option 2")),
+                    ],
+                    vec![0],
+                )
+                .on_selection_changed(|_app, _selected| {}),
+            );
+
+            let element = tester.find_by_type::<SegmentedButton<i32>>()[0];
+            let render = tester.render_box_of(element).as_object();
+            assert_paints(
+                &tester.painted_ops(render),
+                &[
+                    PaintCall::Save,
+                    // Clip the border.
+                    PaintCall::Clip,
+                    // Draw segment 0.
+                    PaintCall::path(Some(Color::new(0xffe8def8))),
+                    PaintCall::Save,
+                    // Clip the border.
+                    PaintCall::Clip,
+                ],
+            );
+        });
+    }
+
     // 'SegmentedButton dividers matches border rect size'
     #[test]
     fn a_segmented_button_divider_matches_the_border_rect_size() {

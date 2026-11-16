@@ -311,9 +311,11 @@ pub(crate) mod tests {
     use crate::material::Material;
     use crate::motion::Durations;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
+    use crate::test_support::{PaintInspection, material_app};
+
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};
+    use waft_rendering::testing::{PaintCall, paints};
 
     const LABEL: &str = "filter chip";
 
@@ -343,10 +345,11 @@ pub(crate) mod tests {
     pub(crate) fn expect_checkmark_color(tester: &WidgetTester, chip: AnyElement, color: Color) {
         let ops = tester.painted_ops_deep(tester.render_box_of(chip).as_object());
         assert!(
-            paints_calls(
+            paints(
                 &ops,
                 &[PaintCall::rrect(None), PaintCall::path(Some(color))]
-            ),
+            )
+            .is_ok(),
             "no check mark path of {color:?} after a rounded rect"
         );
     }

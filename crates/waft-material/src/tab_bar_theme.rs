@@ -2875,7 +2875,11 @@ mod tests {
 
         /// Whether the indicator's `CustomPaint` paints `rrect`.
         fn indicator_paints_rrect(tester: &WidgetTester, rrect: RRect) -> bool {
-            tester.paints_rrect(first_render_box::<TabBar>(tester).as_object(), rrect, None)
+            waft_rendering::testing::paints(
+                &tester.painted_ops(first_render_box::<TabBar>(tester).as_object()),
+                &[waft_rendering::testing::PaintCall::rrect_at(rrect, None)],
+            )
+            .is_ok()
         }
 
         fn indicator_rrect(left: f64, right: f64, bottom: f64) -> RRect {

@@ -931,7 +931,11 @@ pub(crate) mod tests {
         color: Option<Color>,
     ) -> bool {
         let badge = tester.find_by_type::<Badge>()[0];
-        tester.paints_rrect(tester.render_box_of(badge).as_object(), rrect, color)
+        waft_rendering::testing::paints(
+            &tester.painted_ops(tester.render_box_of(badge).as_object()),
+            &[waft_rendering::testing::PaintCall::rrect_at(rrect, color)],
+        )
+        .is_ok()
     }
 
     pub(crate) fn rect_of_text(tester: &WidgetTester, text: &str) -> Rect {

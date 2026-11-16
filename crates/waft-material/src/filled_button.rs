@@ -1679,13 +1679,15 @@ mod tests {
             ));
 
             let button = tester.render_box_of(tester.find_by_type::<FilledButton>()[0]);
-            assert!(tester.paints_drrect(
-                button.as_object(),
-                border_color,
-                // Outer and inner rect that give the outline a width of 10.
-                RRect::from_ltrbr(0.0, 0.0, 116.0, 36.0, Radius::circular(16.0)),
-                RRect::from_ltrbr(10.0, 10.0, 106.0, 26.0, Radius::circular(16.0 - 10.0)),
-            ));
+            waft_rendering::testing::assert_paints(
+                &tester.painted_ops(button.as_object()),
+                &[waft_rendering::testing::PaintCall::drrect_between(
+                    // Outer and inner rect that give the outline a width of 10.
+                    RRect::from_ltrbr(0.0, 0.0, 116.0, 36.0, Radius::circular(16.0)),
+                    RRect::from_ltrbr(10.0, 10.0, 106.0, 26.0, Radius::circular(16.0 - 10.0)),
+                    Some(border_color),
+                )],
+            );
         });
     }
 

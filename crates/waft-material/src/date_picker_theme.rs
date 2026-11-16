@@ -2055,8 +2055,7 @@ mod tests {
     use crate::ink_decoration::Ink;
     use crate::input_border::UnderlineInputBorder;
     use crate::material::Material;
-    use crate::test_support::{PaintCall, paints_calls};
-
+    use waft_rendering::testing::{PaintCall, assert_paints, paints};
     /// What Dart's `paints` reads from the first `_RenderInkFeatures`: it paints its subtree.
     fn ink_ops(tester: &WidgetTester) -> Vec<waft_embedder::valo::Op> {
         let ink_features = tester.first::<crate::material::RenderInkFeatures>();
@@ -2068,7 +2067,7 @@ mod tests {
     /// children inline and skips the layer's own shape): the calls are matched from any draw on,
     /// so the fills drawn before them do not stand in the way.
     fn paints_after_material_fills(ops: &[waft_embedder::valo::Op], calls: &[PaintCall]) -> bool {
-        (0..ops.len()).any(|start| paints_calls(&ops[start..], calls))
+        (0..ops.len()).any(|start| paints(&ops[start..], calls).is_ok())
     }
 
     fn tap_text(tester: &mut WidgetTester, text: &str) {
@@ -2432,10 +2431,10 @@ mod tests {
             let at = center_of(tester, text_of(tester, "25"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
-            assert!(paints_calls(
+            assert_paints(
                 &ink_ops(tester),
-                &[PaintCall::circle(resolved(&theme_data.day_overlay_color))]
-            ));
+                &[PaintCall::circle(resolved(&theme_data.day_overlay_color))],
+            );
 
             // Show the year selector.
             tap_text(tester, "January 2023");
@@ -2640,21 +2639,21 @@ mod tests {
         let at = center_of(tester, text_of(tester, "16"));
         tester.move_to(&mut mouse, at, false);
         tester.pump_and_settle();
-        assert!(paints_calls(
+        assert_paints(
             &ink_ops(tester),
-            &[PaintCall::circle(resolved(&theme_data.day_overlay_color))]
-        ));
+            &[PaintCall::circle(resolved(&theme_data.day_overlay_color))],
+        );
 
         // The range selection overlay color.
         let at = center_of(tester, text_of(tester, "18"));
         tester.move_to(&mut mouse, at, false);
         tester.pump_and_settle();
-        assert!(paints_calls(
+        assert_paints(
             &ink_ops(tester),
             &[PaintCall::circle(resolved(
-                &theme_data.range_selection_overlay_color
-            ))]
-        ));
+                &theme_data.range_selection_overlay_color,
+            ))],
+        );
     }
 
     #[test]
@@ -2808,27 +2807,27 @@ mod tests {
             let at = center_of(tester, text_of(tester, "20"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
-            assert!(paints_calls(
+            assert_paints(
                 &tester.nearest_material_ops(text_of(tester, "17")),
                 &[
                     PaintCall::circle(None), // Today decoration.
                     PaintCall::circle(None), // Selected day decoration.
                     PaintCall::circle(Some(hovered)),
-                ]
-            ));
+                ],
+            );
 
             // The pressed overlay color.
             tester.down(&mut mouse, at);
             tester.pump_and_settle();
-            assert!(paints_calls(
+            assert_paints(
                 &tester.nearest_material_ops(text_of(tester, "17")),
                 &[
                     PaintCall::circle(None), // Today decoration.
                     PaintCall::circle(None), // Selected day decoration.
                     PaintCall::circle(Some(hovered)),
                     PaintCall::circle(Some(pressed)),
-                ]
-            ));
+                ],
+            );
 
             remove_pointer(tester, &mouse);
             tester.pump_and_settle();
@@ -2840,14 +2839,14 @@ mod tests {
             }
 
             // The focused overlay color.
-            assert!(paints_calls(
+            assert_paints(
                 &tester.nearest_material_ops(text_of(tester, "17")),
                 &[
                     PaintCall::circle(None), // Today decoration.
                     PaintCall::circle(None), // Selected day decoration.
                     PaintCall::circle(Some(focused)),
-                ]
-            ));
+                ],
+            );
         });
     }
 
@@ -2929,21 +2928,18 @@ mod tests {
             let at = center_of(tester, text_of(tester, "18"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
-            assert!(paints_calls(
-                &ink_ops(tester),
-                &[PaintCall::circle(Some(hovered))]
-            ));
+            assert_paints(&ink_ops(tester), &[PaintCall::circle(Some(hovered))]);
 
             // The pressed overlay color.
             tester.down(&mut mouse, at);
             tester.pump_and_settle();
-            assert!(paints_calls(
+            assert_paints(
                 &ink_ops(tester),
                 &[
                     PaintCall::circle(Some(hovered)),
-                    PaintCall::circle(Some(pressed))
-                ]
-            ));
+                    PaintCall::circle(Some(pressed)),
+                ],
+            );
         });
     }
 

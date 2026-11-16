@@ -31,6 +31,7 @@ test-support = ["dep:waft-test"]
 [dev-dependencies]
 waft-test.workspace = true
 waft-embedder = { workspace = true, features = ["test-support"] }
+waft-rendering = { workspace = true, features = ["test-support"] }
 valo-system-fonts.workspace = true
 
 [lints]

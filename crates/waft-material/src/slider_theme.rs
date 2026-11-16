@@ -997,12 +997,13 @@ mod tests {
     use crate::scaffold::Scaffold;
     use crate::slider::Slider;
     use crate::slider::tests::{
-        active_cursor, default_theme, is_cursor, noop, paints, paints_circle, slider_rect,
-        slider_render,
+        active_cursor, default_theme, is_cursor, noop, overlay_render, paints_circle,
+        render_paints, slider_rect, slider_render,
     };
     use crate::slider_parts::{RectangularSliderTrackShape, SliderTrackShape};
-    use crate::test_support::{PaintCall, PaintInspection, is_same_color_as, material_app};
+    use crate::test_support::{PaintInspection, is_same_color_as, material_app};
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::{PaintCall, assert_paints};
 
     // 'SliderThemeData copyWith, ==, hashCode basics'.
     #[test]
@@ -1320,7 +1321,7 @@ mod tests {
             ));
 
             // Test Slider parameters.
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &[
@@ -1352,7 +1353,7 @@ mod tests {
         tester.pump_widget(app);
 
         let rrect = |color: Option<Color>| PaintCall::rrect(color);
-        assert!(paints(
+        assert!(render_paints(
             tester,
             slider_render(tester),
             &[
@@ -1507,7 +1508,7 @@ mod tests {
             // Test default track shape.
             let outer = Radius::circular(8.0);
             let inner = Radius::circular(2.0);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &[
@@ -1554,7 +1555,7 @@ mod tests {
             // Test default track shape.
             let active_track_corner_radius = Radius::circular(3.0);
             let inactive_track_corner_radius = Radius::circular(2.0);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &[
@@ -1604,7 +1605,7 @@ mod tests {
         let radius = Radius::circular(TRACK_HEIGHT / 2.0);
         let activated_radius = Radius::circular((TRACK_HEIGHT + 2.0) / 2.0);
         let render = slider_render(tester);
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &[
@@ -1629,7 +1630,7 @@ mod tests {
                 PaintCall::rrect(Some(secondary)),
             ]
         };
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &tracks(
@@ -1638,44 +1639,44 @@ mod tests {
                 colors.secondary_active_track
             )
         ));
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &[PaintCall::shadow(Some(colors.shadow))]
         ));
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &[PaintCall::circle(Some(colors.thumb))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::circle(Some(colors.disabled_thumb))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.disabled_active_track))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.disabled_inactive_track))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(
                 colors.disabled_secondary_active_track
             ))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::circle(Some(colors.active_tick_mark))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::circle(Some(colors.inactive_tick_mark))]
@@ -1684,7 +1685,7 @@ mod tests {
         // Test defaults colors for discrete slider.
         tester.pump_widget(build_app(Some(3), true));
         let render = slider_render(tester);
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &tracks(
@@ -1693,7 +1694,7 @@ mod tests {
                 colors.secondary_active_track
             )
         ));
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &[
@@ -1705,22 +1706,22 @@ mod tests {
                 PaintCall::circle(Some(colors.thumb)),
             ],
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::circle(Some(colors.disabled_thumb))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.disabled_active_track))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.disabled_inactive_track))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(
@@ -1732,7 +1733,7 @@ mod tests {
         tester.pump_widget(build_app(None, false));
         tester.pump_and_settle();
         let render = slider_render(tester);
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &tracks(
@@ -1741,7 +1742,7 @@ mod tests {
                 colors.disabled_secondary_active_track
             )
         ));
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &[
@@ -1749,22 +1750,22 @@ mod tests {
                 PaintCall::circle(Some(colors.disabled_thumb))
             ]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::circle(Some(colors.thumb))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.active_track))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.inactive_track))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.secondary_active_track))]
@@ -1773,7 +1774,7 @@ mod tests {
         // Test defaults colors for disabled discrete slider.
         tester.pump_widget(build_app(Some(3), false));
         let render = slider_render(tester);
-        assert!(paints(
+        assert!(render_paints(
             tester,
             render,
             &[
@@ -1785,22 +1786,22 @@ mod tests {
                 PaintCall::circle(Some(colors.disabled_thumb)),
             ],
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::circle(Some(colors.thumb))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.active_track))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.inactive_track))]
         ));
-        assert!(!paints(
+        assert!(!render_paints(
             tester,
             render,
             &[PaintCall::rrect(Some(colors.secondary_active_track))]
@@ -1921,7 +1922,7 @@ mod tests {
             let value_indicator_box = tester
                 .first::<crate::slider::RenderValueIndicator>()
                 .as_render_object(&tester.cell.borrow());
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 value_indicator_box,
                 &[
@@ -2014,7 +2015,7 @@ mod tests {
                     [rrect(inactive), rrect(active), rrect(secondary)]
                 };
             let painted = |tester: &WidgetTester, calls: &[PaintCall]| {
-                paints(tester, slider_render(tester), calls)
+                render_paints(tester, slider_render(tester), calls)
             };
             let not_painted = |tester: &WidgetTester, calls: &[PaintCall]| !painted(tester, calls);
             let no_disabled_tracks = |tester: &WidgetTester| {
@@ -2309,14 +2310,13 @@ mod tests {
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
             assert_eq!(value.get(), 2.0 / 3.0);
-            assert!(paints(
-                tester,
-                value_indicator_box(tester),
+            assert_paints(
+                &tester.painted_ops_deep(overlay_render(tester)),
                 &[
                     PaintCall::path(slider_theme.value_indicator_color),
-                    PaintCall::Paragraph
-                ]
-            ));
+                    PaintCall::Paragraph,
+                ],
+            );
             tester.up(&gesture);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
@@ -2334,37 +2334,24 @@ mod tests {
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
             assert_eq!(value.get(), 2.0 / 3.0);
-            // Dart reads this sequence off the `Overlay`, from the `Material`'s background
-            // through the indicator; here the slider's part off its render object, the
-            // indicator's off its own.
-            assert!(painted(
-                tester,
+            assert_paints(
+                &tester.painted_ops_deep(overlay_render(tester)),
                 &[
-                    rrect(Some(CUSTOM_COLOR2)),                     // Inactive track
-                    rrect(Some(CUSTOM_COLOR1)),                     // Active track
+                    rrect(Some(Color::new(0xfffafafa))),
+                    rrect(Some(CUSTOM_COLOR2)), // Inactive track
+                    rrect(Some(CUSTOM_COLOR1)), // Active track
                     circle(Some(CUSTOM_COLOR1.with_opacity(0.12))), // overlay
-                    circle(Some(CUSTOM_COLOR2)),                    // 1st tick mark
-                    circle(Some(CUSTOM_COLOR2)),                    // 2nd tick mark
-                    circle(Some(CUSTOM_COLOR2)),                    // 3rd tick mark
-                    circle(Some(CUSTOM_COLOR1)),                    // 4th tick mark
+                    circle(Some(CUSTOM_COLOR2)), // 1st tick mark
+                    circle(Some(CUSTOM_COLOR2)), // 2nd tick mark
+                    circle(Some(CUSTOM_COLOR2)), // 3rd tick mark
+                    circle(Some(CUSTOM_COLOR1)), // 4th tick mark
                     PaintCall::shadow(Some(Colors::BLACK)),
                     circle(Some(CUSTOM_COLOR1)), // thumb
-                ]
-            ));
-            assert!(paints(
-                tester,
-                value_indicator_box(tester),
-                &[PaintCall::path(slider_theme.value_indicator_color)] // indicator
-            ));
+                    PaintCall::path(slider_theme.value_indicator_color), // indicator
+                ],
+            );
             tester.up(&gesture);
         });
-    }
-
-    /// The render object that paints the slider's value indicator in the overlay.
-    fn value_indicator_box(tester: &WidgetTester) -> waft_rendering::AnyRenderObject {
-        tester
-            .first::<crate::slider::RenderValueIndicator>()
-            .as_render_object(&tester.cell.borrow())
     }
 
     // 'Slider can use theme overlay with material states'.
@@ -2517,7 +2504,7 @@ mod tests {
             let center = slider_rect(tester).center();
             let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &[
@@ -2541,13 +2528,12 @@ mod tests {
     }
 
     /// The body Dart's two 'Default value indicator color' cases share: a discrete slider at
-    /// 0.5 labelled '1' in a `Row`, pressed; `slider` is what the slider render object paints
-    /// before the indicator, `indicator` the indicator's path colour.
+    /// 0.5 labelled '1' in a `Row`, pressed; `overlay` is what the `Overlay` paints, from the
+    /// `Material`'s background through the indicator.
     fn default_value_indicator_color(
         tester: &mut WidgetTester,
         theme: fn(&WidgetTester) -> ThemeData,
-        slider: &[PaintCall],
-        indicator: Color,
+        overlay: &[PaintCall],
     ) {
         let theme = theme(tester);
         tester.pump_widget(material_app(
@@ -2574,15 +2560,7 @@ mod tests {
         tester.down(&mut gesture, center);
         // Wait for value indicator animation to finish.
         tester.pump_and_settle();
-        // Dart reads the sequence off the `Overlay`, from the `Material`'s background rrect
-        // through the indicator; here the tracks off the slider's render object and the
-        // indicator off its own.
-        assert!(paints(tester, slider_render(tester), slider));
-        assert!(paints(
-            tester,
-            value_indicator_box(tester),
-            &[PaintCall::path(Some(indicator))]
-        ));
+        assert_paints(&tester.painted_ops_deep(overlay_render(tester)), overlay);
 
         // Finish gesture to release resources.
         tester.up(&gesture);
@@ -2607,10 +2585,11 @@ mod tests {
                         .build(&tester.cell.borrow())
                 },
                 &[
+                    PaintCall::rrect(Some(Color::new(0xfffef7ff))),
                     PaintCall::rrect(Some(Color::new(0xffe6e0e9))),
                     PaintCall::rrect(Some(Color::new(0xff6750a4))),
+                    PaintCall::path(Some(Color::new(primary.value()))),
                 ],
-                Color::new(primary.value()),
             );
         });
     }
@@ -2628,11 +2607,12 @@ mod tests {
                         .build(&tester.cell.borrow())
                 },
                 &[
+                    PaintCall::rrect(Some(Color::new(0xfffafafa))),
                     PaintCall::rrect(Some(Color::new(0x3d2196f3))),
                     PaintCall::rrect(Some(Color::new(0xff2196f3))),
+                    // Test that the value indicator text is painted with the correct color.
+                    PaintCall::path(Some(Color::new(0xf55f5f5f))),
                 ],
-                // Test that the value indicator text is painted with the correct color.
-                Color::new(0xf55f5f5f),
             );
         });
     }
@@ -2657,6 +2637,13 @@ mod tests {
     }
 
     /// How many ops of `of`'s kind `render` records: Dart's `paintsExactlyCountTimes`.
+    /// The render object that paints the slider's value indicator in the overlay.
+    fn value_indicator_box(tester: &WidgetTester) -> waft_rendering::AnyRenderObject {
+        tester
+            .first::<crate::slider::RenderValueIndicator>()
+            .as_render_object(&tester.cell.borrow())
+    }
+
     fn count_ops(
         tester: &WidgetTester,
         render: waft_rendering::AnyRenderObject,
@@ -2770,7 +2757,7 @@ mod tests {
             .iter()
             .map(|rrect| PaintCall::rrect_at(*rrect, None))
             .collect();
-        paints(tester, slider_render(tester), &calls)
+        render_paints(tester, slider_render(tester), &calls)
     }
 
     // 'RoundedRectSliderTrackShape' 'Only draw active track if thumb center is higher than
@@ -2861,7 +2848,7 @@ mod tests {
             // Both track segments extend past the thumb center by half of the track
             // height, so the inactive track must be painted first for the rounded end
             // of the active track not to be covered by it.
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &[
@@ -2937,7 +2924,7 @@ mod tests {
 
             // The height equals to the default thumb height.
             assert_eq!(slider_render_box_size(tester), Size::new(800.0, 20.0));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &tracks((398.0, 8.0, 800.0, 12.0), (0.0, 7.0, 402.0, 13.0))
@@ -2957,7 +2944,7 @@ mod tests {
                 slider_render_box_size(tester),
                 Size::new(800.0 - START_PADDING - END_PADDING, 20.0)
             );
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &tracks((338.0, 8.0, 680.0, 12.0), (0.0, 7.0, 342.0, 13.0))
@@ -2979,7 +2966,7 @@ mod tests {
                 Size::new(800.0, TOP_PADDING + TRACK_HEIGHT + BOTTOM_PADDING)
             );
             assert_eq!(slider_render_box_size(tester), Size::new(800.0, 20.0));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 slider_render(tester),
                 &tracks((398.0, 8.0, 800.0, 12.0), (0.0, 7.0, 402.0, 13.0))
@@ -2998,7 +2985,7 @@ mod tests {
     ) -> bool {
         tester.painted_ops(render).iter().any(|op| match op {
             waft_embedder::valo::Op::DrawPath { path, paint, .. }
-                if crate::slider::tests::colors_match(paint.color, color) =>
+                if waft_rendering::testing::colors_match(paint.color, color) =>
             {
                 crate::slider::tests::circle_of(path).is_some_and(|circle| {
                     (circle.center().dx() - x).abs() < 1e-3

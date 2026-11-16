@@ -3162,7 +3162,7 @@ pub(crate) mod tests {
     // Each case but the last ends by hovering the two items and expecting each one's ink to
     // paint a rect of its overlay colour at alpha 0. The display list drops a draw with no
     // effect, as Flutter's engine does, and Dart's matcher sees it only through
-    // `TestRecordingCanvas`, so those expectations are Deferred and the cases end before the hover.
+    // `TestRecordingCanvas`, so those expectations are Skipped and the cases end before the hover.
 
     const FOCUSED_BACKGROUND_COLOR: Color = Color::new(0xffff0000);
     const FOCUSED_FOREGROUND_COLOR: Color = Color::new(0xff00ff00);

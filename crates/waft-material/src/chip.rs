@@ -3831,8 +3831,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::circle_avatar::CircleAvatar;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{PaintCall, PaintInspection, paints_calls};
+    use crate::test_support::PaintInspection;
+
     use crate::tooltip::tests::m3;
+    use waft_rendering::testing::{PaintCall, paints};
 
     /// Dart's `wrapForChip`: the basic requirements for a chip.
     pub(crate) fn wrap_for_chip(
@@ -3921,7 +3923,7 @@ pub(crate) mod tests {
     pub(crate) fn material_box_paints(tester: &WidgetTester, calls: &[PaintCall]) -> bool {
         let custom_paint = tester.descendants_of_type::<CustomPaint>(only::<RawChip>(tester))[0];
         let ops = tester.painted_ops_deep(tester.render_box_of(custom_paint).as_object());
-        paints_calls(&ops, calls)
+        paints(&ops, calls).is_ok()
     }
 
     pub(crate) fn material_of_raw_chip(tester: &WidgetTester) -> AnyElement {
@@ -5302,11 +5304,11 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::ink_well::{InkResponse, InkWell};
         use crate::material::RenderInkFeatures;
-        use crate::test_support::{CanvasCall, canvas_call_of};
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::m2;
         use waft_foundation::Listener;
         use waft_painting::TextScaler;
+        use waft_rendering::testing::CanvasMethod;
 
         /// Dart's `chipWithOptionalDeleteButton`.
         struct ChipWithOptionalDeleteButton {
@@ -5383,7 +5385,7 @@ pub(crate) mod tests {
                 .build()
                 .ops()
                 .iter()
-                .filter(|op| canvas_call_of(op) == CanvasCall::DrawCircle)
+                .filter(|op| CanvasMethod::of(op) == CanvasMethod::DrawCircle)
                 .filter_map(|op| match op {
                     waft_embedder::valo::Op::DrawPath { path, .. } => path.as_oval(),
                     _ => None,
@@ -6096,9 +6098,9 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::input_chip::InputChip;
         use crate::material::Material;
-        use crate::test_support::PaintCall;
         use crate::theme::Theme;
         use crate::theme_data::{MaterialTapTargetSize, ThemeData};
+        use waft_rendering::testing::PaintCall;
 
         fn theme_builder() -> crate::theme_data::ThemeDataBuilder {
             ThemeData::builder()
@@ -7220,9 +7222,11 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::ink_decoration::Ink;
         use crate::material::Material;
-        use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
+        use crate::test_support::{PaintInspection, material_app};
+
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::{m2, m3};
+        use waft_rendering::testing::{PaintCall, assert_paints, paints};
 
         /// Dart's `chipWithOptionalDeleteButton`.
         fn pump_chip_with_optional_delete_button(
@@ -7442,15 +7446,15 @@ pub(crate) mod tests {
                     .last()
                     .expect("the chip's Material");
                 let ops = tester.painted_ops_deep(ink_features.as_object());
-                assert!(paints_calls(
+                assert_paints(
                     &ops,
                     &[
                         // Background color is drawn first.
                         PaintCall::rrect(Some(background_color)),
                         // Highlight color is drawn on top of the background color.
                         PaintCall::rect(Some(Color::new(0x1f000000))),
-                    ]
-                ));
+                    ],
+                );
             });
         }
 
@@ -8084,7 +8088,7 @@ pub(crate) mod tests {
                     tester.painted_ops_deep(ink_features.as_object())
                 };
                 let paints_hover_rect =
-                    |ops: &[Op]| paints_calls(ops, &[PaintCall::rect(Some(theme.hover_color))]);
+                    |ops: &[Op]| paints(ops, &[PaintCall::rect(Some(theme.hover_color))]).is_ok();
                 // Dart's `paintsExactlyCountTimes(#clipPath, n)`. Valo records a `clipRect` as an
                 // axis-aligned path clip, which Dart counts as `#clipRect`, not `#clipPath`.
                 let clip_paths = |ops: &[Op]| {
@@ -8201,9 +8205,11 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::material::Material;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{PaintCall, material_app};
+        use crate::test_support::material_app;
+
         use crate::theme::Theme;
         use crate::theme_data::ThemeData;
+        use waft_rendering::testing::PaintCall;
 
         fn font_summary(style: &TextStyle) -> impl PartialEq + std::fmt::Debug {
             (
