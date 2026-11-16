@@ -27,6 +27,8 @@ waft-painting.workspace = true
 # The flex enums (`MainAxisAlignment`, `CrossAxisAlignment`) live here, as Flutter's do in
 # `rendering/`; waft-widgets re-exports the widget half only.
 waft-rendering.workspace = true
+# `LogicalKeyboardKey`, which a menu item's `SingleActivator` shortcut names.
+waft-services.workspace = true
 waft-shell.workspace = true
 waft-widgets.workspace = true
 
