@@ -1115,13 +1115,13 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use waft_painting::ShapeBorder;
 
-    use waft_embedder::{Offset, Radius, Rect, Size, TargetPlatform};
+    use waft_embedder::{Offset, Radius, Rect, Size};
     use waft_painting::{
         BorderRadius, BorderRadiusGeometry, BorderSide, BoxDecoration, CircleBorder, EdgeInsets,
         RoundedRectangleBorder, ShapeDecoration, StadiumBorder,
     };
     use waft_rendering::{AnyRenderBox, AnyRenderObject};
-    use waft_test::TestPlatform;
+
     use waft_widgets::{
         AnyElement, Center, Container, GlobalKey, Icon, IconData, MediaQuery, MediaQueryData,
         StatefulBuilder, Text, WidgetStatePropertyAll, WidgetsBinding,
@@ -1145,11 +1145,12 @@ mod tests {
 
     /// Dart's `widgetSetup(tester, viewWidth, viewHeight: viewHeight)`: a 2x view of that
     /// logical size.
-    fn tester_sized(view_width: f64, view_height: f64) -> WidgetTester {
-        WidgetTester::with_view(
-            TestPlatform::new().on(TargetPlatform::Android),
-            waft_test::TestView::with_pixel_ratio(view_width * 2.0, view_height * 2.0, 2.0),
-        )
+    fn widget_setup(tester: &WidgetTester, view_width: f64, view_height: f64) {
+        tester.view().set_device_pixel_ratio(2.0);
+        let dpi = tester.device_pixel_ratio();
+        tester
+            .view()
+            .set_physical_size(Size::new(view_width * dpi, view_height * dpi));
     }
 
     /// Dart's `_buildWidget(scaffoldKey, child)`: a `MaterialApp` whose home is a scaffold
@@ -1291,11 +1292,10 @@ mod tests {
     // 'Navigation drawer updates destinations when tapped'.
     #[test]
     fn navigation_drawer_updates_destinations_when_tapped() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let mutated_index = Rc::new(Cell::new(-1));
             let key = GlobalKey::new();
-            let mut tester = tester_sized(3000.0, 3000.0);
-            let tester = &mut tester;
+            widget_setup(tester, 3000.0, 3000.0);
             let mutated = Rc::clone(&mutated_index);
             pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(headline_and_two_destinations())
@@ -1507,10 +1507,9 @@ mod tests {
     // 'Navigation drawer is scrollable'.
     #[test]
     fn navigation_drawer_is_scrollable() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            let mut tester = tester_sized(500.0, 300.0);
-            let tester = &mut tester;
+            widget_setup(tester, 500.0, 300.0);
             pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(
                     (0..100).map(|i| destination(Icons::ac_unit(), &format!("Label{i}"))),
@@ -1546,11 +1545,10 @@ mod tests {
     // 'Safe Area test'.
     #[test]
     fn safe_area_test() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let view_height = 300.0;
-            let mut tester = tester_sized(500.0, view_height);
-            let tester = &mut tester;
+            widget_setup(tester, 500.0, view_height);
             let scaffold_key = key.clone();
             #[allow(deprecated)]
             let app = MaterialApp::new().use_inherited_media_query(true).home(
@@ -1657,10 +1655,9 @@ mod tests {
     // 'NavigationDrawer.tilePadding defaults to EdgeInsets.symmetric(horizontal: 12.0)'.
     #[test]
     fn navigation_drawer_tile_padding_defaults_to_symmetric_horizontal_12() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            let mut tester = tester_sized(3000.0, 3000.0);
-            let tester = &mut tester;
+            widget_setup(tester, 3000.0, 3000.0);
             pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new([destination(Icons::ac_unit(), "AC")])
                     .on_destination_selected(select_nothing())
@@ -1679,11 +1676,10 @@ mod tests {
     // 'Destinations respect their disabled state'.
     #[test]
     fn destinations_respect_their_disabled_state() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let selected_index = Rc::new(Cell::new(0));
-            let mut tester = tester_sized(800.0, 1000.0);
-            let tester = &mut tester;
+            widget_setup(tester, 800.0, 1000.0);
             let selected = Rc::clone(&selected_index);
             pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new([
@@ -1736,10 +1732,9 @@ mod tests {
     // 'NavigationDrawer can display header and footer'.
     #[test]
     fn navigation_drawer_can_display_header_and_footer() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            let mut tester = tester_sized(3000.0, 3000.0);
-            let tester = &mut tester;
+            widget_setup(tester, 3000.0, 3000.0);
             pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(
                     (0..10).map(|i| destination(Icons::home(), &format!("Item {i}"))),
@@ -1814,10 +1809,9 @@ mod tests {
     // 'NavigationDrawer ink effects are bounded within scrollable area when footer is present'.
     #[test]
     fn navigation_drawer_ink_effects_are_bounded_within_scrollable_area_when_footer_is_present() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            let mut tester = tester_sized(800.0, 400.0);
-            let tester = &mut tester;
+            widget_setup(tester, 800.0, 400.0);
             pump_drawer(tester, m3, &key, move |_app| {
                 NavigationDrawer::new(
                     (0..10).map(|i| destination(Icons::home(), &format!("Item {i}"))),

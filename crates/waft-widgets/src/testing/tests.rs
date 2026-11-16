@@ -326,3 +326,43 @@ fn pump_frames_pumps_until_the_duration_has_passed() {
         );
     });
 }
+
+#[test]
+fn a_view_metric_set_mid_case_reaches_the_framework_and_reset_puts_it_back() {
+    use std::cell::RefCell;
+
+    use waft_embedder::ViewPadding;
+
+    use crate::widgets::basic::Builder;
+    use crate::widgets::media_query::{MediaQuery, MediaQueryData};
+
+    test_widgets(|tester| {
+        let seen: Rc<RefCell<Option<MediaQueryData>>> = Rc::default();
+        let read = Rc::clone(&seen);
+        tester.pump_widget(Builder::new(move |app, context| {
+            *read.borrow_mut() = Some(MediaQuery::of(app, context));
+            SizedBox::new().into_widget()
+        }));
+        let data = || seen.borrow().clone().expect("built");
+        assert_eq!(data().size, Size::new(800.0, 600.0));
+
+        tester.view().set_physical_size(Size::new(1200.0, 2400.0));
+        tester.view().set_view_insets(ViewPadding {
+            bottom: 300.0,
+            ..ViewPadding::ZERO
+        });
+        tester.pump();
+        assert_eq!(data().size, Size::new(400.0, 800.0));
+        assert_eq!(data().view_insets.bottom, 100.0);
+
+        tester.view().set_device_pixel_ratio(1.0);
+        tester.pump();
+        assert_eq!(data().size, Size::new(1200.0, 2400.0));
+        assert_eq!(tester.device_pixel_ratio(), 1.0);
+
+        tester.view().reset();
+        tester.pump();
+        assert_eq!(data().size, Size::new(800.0, 600.0));
+        assert_eq!(data().view_insets.bottom, 0.0);
+    });
+}

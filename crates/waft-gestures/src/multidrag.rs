@@ -122,12 +122,13 @@ fn dispose_pointer_state<P: MultiDragPointerState>(this: Handle<P>, app: &mut Ap
 }
 
 fn move_pointer<P: MultiDragPointerState>(this: Handle<P>, app: &mut App, event: PointerMoveEvent) {
+    let now = app.clock();
     let state = app.get_mut(this).pointer_state_mut();
     debug_assert!(state.arena_entry.is_some());
     if !event.synthesized {
         state
             .velocity_tracker
-            .add_position(event.time_stamp, event.position);
+            .add_position(now, event.time_stamp, event.position);
     }
     if let Some(client) = state.client.clone() {
         debug_assert!(state.pending_delta.is_none());
@@ -166,11 +167,12 @@ fn start_pointer<P: MultiDragPointerState>(this: Handle<P>, app: &mut App, clien
 }
 
 fn end_pointer<P: MultiDragPointerState>(this: Handle<P>, app: &mut App, cancel: bool) {
+    let now = app.clock();
     let state = app.get_mut(this).pointer_state_mut();
     debug_assert!(state.arena_entry.is_some());
     if let Some(client) = state.client.take() {
         debug_assert!(state.pending_delta.is_none());
-        let velocity = state.velocity_tracker.get_velocity();
+        let velocity = state.velocity_tracker.get_velocity(now);
         if cancel {
             client.cancel(app);
         } else {

@@ -81,9 +81,15 @@ Pattern: [leaf-inheritance](../../../.agents/skills/porting-flutter/patterns/lea
 
 ## velocity_tracker.rs → velocity_tracker.dart
 
-- Change: `VelocityTracker` measures the time since the last sample with `Instant::now()`, not `GestureBinding.samplingClock`.
-  Reason: platform — the sampling clock ships with resampling, which is deferred, and nothing ties it to the app clock.
-  Affect: the 40ms "pointer stopped" rule follows wall time, so `App::elapse` does not move it in a test.
+- Change: each tracker's `add_position`, `get_velocity_estimate` and `get_velocity` take `now`, the App's clock (`App::clock`), which stands for `GestureBinding.samplingClock`; the recognizers pass `app.clock()`.
+  Reason: language — a recognizer holds its tracker in the `App`, so a tracker that read the clock from the `App` could not be reached mutably at the same time; Dart's binding is global.
+  Affect: the 40ms "pointer stopped" rule follows the App's clock: `App::elapse` moves it in a test, as FakeAsync moves Dart's, and in an app the shell catches the clock up with the platform's at each input.
+
+## velocity_tracker/tests.rs → test/gestures/velocity_tracker_test.dart, velocity_tracker/data.rs → test/gestures/velocity_tracker_data.dart
+
+- Change: 'Velocity control test' does not compare the two velocities' `hashCode`s.
+  Reason: language — `Velocity` holds `f64`s and so is not `Hash`.
+  Affect: the case does not check that two different velocities hash apart.
 
 ## Deferred
 

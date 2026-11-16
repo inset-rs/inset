@@ -44,10 +44,6 @@ fn flattened(pictures: &[Arc<Picture>]) -> Vec<Op> {
 /// Paints `render` at the origin into a layer of its own and collects the pictures under it,
 /// descending into pushed layers when `deep`.
 fn painted_pictures(app: &mut App, render: AnyRenderObject, deep: bool) -> Vec<Arc<Picture>> {
-    assert!(
-        !render.is_repaint_boundary(app),
-        "a repaint boundary would move its layer out of the scene"
-    );
     // A real painting context paints a child only once its compositing bits are current, where
     // Dart's `TestRecordingPaintingContext` paints after a layout-only frame.
     if let Some(owner) = render.owner(app) {
@@ -57,7 +53,9 @@ fn painted_pictures(app: &mut App, render: AnyRenderObject, deep: bool) -> Vec<A
     let container = layer.as_container_layer();
     let bounds = render.paint_bounds(app);
     let mut context = PaintingContext::new(container, bounds);
-    context.paint_child(app, render, Offset::ZERO);
+    // Dart's matcher calls the object's `paint` itself, which leaves a repaint boundary's own
+    // layer where it is.
+    render.paint(app, &mut context, Offset::ZERO);
     context.stop_recording_if_needed(app);
     let mut pictures = Vec::new();
     collect_pictures(app, container, deep, &mut pictures);

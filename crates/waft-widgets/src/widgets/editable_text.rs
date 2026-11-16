@@ -7567,102 +7567,59 @@ mod tests {
         });
     }
 
-    /// A phone's screen, whose bottom inset grows while its keyboard shows.
-    struct KeyboardView {
-        screen: waft_test::TestView,
-        keyboard_height: Cell<f64>,
-    }
-
-    impl waft_embedder::View for KeyboardView {
-        fn id(&self) -> waft_embedder::ViewId {
-            self.screen.id()
-        }
-
-        fn metrics(&self) -> waft_embedder::ViewMetrics {
-            waft_embedder::ViewMetrics {
-                view_insets: waft_embedder::ViewPadding {
-                    bottom: self.keyboard_height.get(),
-                    ..waft_embedder::ViewPadding::ZERO
-                },
-                ..self.screen.metrics()
-            }
-        }
-
-        fn present(&self, scene: std::sync::Arc<waft_embedder::Scene>) {
-            self.screen.present(scene);
-        }
-
-        fn host(&self) -> &dyn waft_embedder::ViewHost {
-            self.screen.host()
-        }
-    }
-
     /// The keyboard showing schedules `EditableText.updateForScroll` and
     /// `EditableText.showCaret` for after the next frame; the field leaving the tree in that
     /// frame disposes its state before they run.
     #[test]
     fn a_field_removed_before_its_keyboard_callbacks_run_does_not_crash() {
-        use crate::{ListenableBuilder, SizedBox, primary_focus, run_app};
-        use waft_embedder::TargetPlatform;
+        use crate::{ListenableBuilder, SizedBox, primary_focus};
+        use waft_embedder::ViewPadding;
         use waft_foundation::ValueNotifier;
-        use waft_test::{TestPlatform, TestView};
 
-        let view = Rc::new(KeyboardView {
-            screen: TestView::new(300.0, 600.0),
-            keyboard_height: Cell::new(0.0),
-        });
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::Android)
-            .with_view(Rc::clone(&view) as waft_embedder::ViewRef);
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let shown = {
-            let mut app = cell.borrow_mut();
-            install_fonts(&mut app);
-            let shown = app.create(ValueNotifier::new(true));
-            let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
-            let focus_node = FocusNode::new(&mut app);
-            let visible = shown.handle();
-            let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
-                if !*app.get(visible).value() {
-                    return SizedBox::shrink().into_widget();
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::new(300.0, 600.0));
+            tester.view().set_device_pixel_ratio(1.0);
+            let (shown, tree) = {
+                let mut app = tester.cell.borrow_mut();
+                let shown = app.create(ValueNotifier::new(true));
+                let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
+                let focus_node = FocusNode::new(&mut app);
+                let visible = shown.handle();
+                let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
+                    if !*app.get(visible).value() {
+                        return SizedBox::shrink().into_widget();
+                    }
+                    EditableText::new(
+                        controller.erase(),
+                        focus_node.erase(),
+                        TextStyle::new(),
+                        Color::from_argb(255, 0, 0, 0),
+                        Color::from_argb(255, 128, 128, 128),
+                    )
+                    .autofocus(true)
+                    .into_widget()
+                });
+                (shown, Directionality::new(TextDirection::Ltr, field))
+            };
+            tester.pump_widget(tree);
+            let pump = |tester: &mut WidgetTester| {
+                for _ in 0..5 {
+                    tester.pump_by(Duration::from_millis(20));
                 }
-                EditableText::new(
-                    controller.erase(),
-                    focus_node.erase(),
-                    TextStyle::new(),
-                    Color::from_argb(255, 0, 0, 0),
-                    Color::from_argb(255, 128, 128, 128),
-                )
-                .autofocus(true)
-                .into_widget()
-            });
-            run_app(
-                &mut app,
-                Directionality::new(TextDirection::Ltr, field).into_widget(),
+            };
+            pump(tester);
+            assert!(
+                primary_focus(&mut tester.cell.borrow_mut()).is_some(),
+                "the field took the focus and listens for the keyboard"
             );
-            shown
-        };
-        cell.elapse(Duration::ZERO);
-        let mut at = Duration::ZERO;
-        let mut pump = |cell: &AppCell| {
-            for _ in 0..5 {
-                at += Duration::from_millis(20);
-                crate::test_harness::pump_every_view(&mut cell.borrow_mut(), at);
-            }
-        };
-        pump(&cell);
-        assert!(
-            primary_focus(&mut cell.borrow_mut()).is_some(),
-            "the field took the focus and listens for the keyboard"
-        );
 
-        {
-            let mut app = cell.borrow_mut();
-            view.keyboard_height.set(250.0);
-            waft_rendering::RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
-            shown.set_value(&mut app, false);
-        }
-        pump(&cell);
+            tester.view().set_view_insets(ViewPadding {
+                bottom: 250.0,
+                ..ViewPadding::ZERO
+            });
+            shown.set_value(&mut tester.cell.borrow_mut(), false);
+            pump(tester);
+        });
     }
 
     /// An obscured `EditableText` a case pumped, and how to rebuild it as Dart's case does.

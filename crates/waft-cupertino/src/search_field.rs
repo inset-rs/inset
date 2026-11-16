@@ -931,7 +931,6 @@ mod tests {
     use waft_embedder::{
         Brightness, Color, FontWeight, Offset, TextAffinity, TextDirection, TextSelection,
     };
-    use waft_test::{TestPlatform, TestView};
     use waft_widgets::testing::{
         WidgetTester, assert_more_or_less_equals_within, expect, find, finds_nothing,
         finds_one_widget, test_widgets,
@@ -1510,26 +1509,25 @@ mod tests {
 
     #[test]
     fn does_not_crash_at_zero_area() {
-        let tester = &mut WidgetTester::with_view(
-            TestPlatform::new(),
-            TestView::with_pixel_ratio(0.0, 0.0, WidgetTester::DEVICE_PIXEL_RATIO),
-        );
-        let controller = controller_with(&mut tester.cell.borrow_mut(), "X");
-        tester.pump_widget(centered(
-            CupertinoSearchTextField::new().controller(controller.clone().into_erased()),
-        ));
-        assert_eq!(
-            tester.get_size(find::by_type::<CupertinoSearchTextField>()),
-            Size::ZERO
-        );
-        let mut app = tester.cell.borrow_mut();
-        let erased: TextEditingControllerRef = controller.clone().into_erased();
-        erased.set_selection(
-            &mut app,
-            TextSelection::collapsed(0, TextAffinity::Downstream),
-        );
-        drop(app);
-        tester.pump();
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let controller = controller_with(&mut tester.cell.borrow_mut(), "X");
+            tester.pump_widget(centered(
+                CupertinoSearchTextField::new().controller(controller.clone().into_erased()),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<CupertinoSearchTextField>()),
+                Size::ZERO
+            );
+            let mut app = tester.cell.borrow_mut();
+            let erased: TextEditingControllerRef = controller.clone().into_erased();
+            erased.set_selection(
+                &mut app,
+                TextSelection::collapsed(0, TextAffinity::Downstream),
+            );
+            drop(app);
+            tester.pump();
+        });
     }
 
     /// The fade the scroll-resizing tests watch, between the icons' height with their insets and

@@ -1695,12 +1695,8 @@ pub(crate) mod tests {
 
     #[test]
     fn tooltip_does_not_crash_at_zero_area() {
-        test_widgets(|_| {
-            let mut tester = WidgetTester::with_physical_size(
-                waft_test::TestPlatform::new().on(TargetPlatform::Android),
-                Size::ZERO,
-            );
-            let tester = &mut tester;
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
             let key = GlobalKey::new();
             let tooltip = Tooltip::new().key(key.clone().into()).message("X");
             pump_app(tester, m3, |_app| {

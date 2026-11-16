@@ -7142,15 +7142,14 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/76614
     #[test]
     fn do_not_crash_if_used_in_very_short_screen() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             // The default item height is 48.0 pixels and needs two items padding since
             // the menu requires empty space surrounding the menu. Finally, the constraint height
             // is 47.0 pixels for the menu rendering.
-            let mut tester = WidgetTester::with_view(
-                waft_test::TestPlatform::new().on(TargetPlatform::Android),
-                waft_test::TestView::with_pixel_ratio(800.0, 48.0 * 3.0 - 1.0, 1.0),
-            );
-            let tester = &mut tester;
+            tester
+                .view()
+                .set_physical_size(Size::new(800.0, 48.0 * 3.0 - 1.0));
+            tester.view().set_device_pixel_ratio(1.0);
 
             let item_key = key("item");
             let root = material_app(

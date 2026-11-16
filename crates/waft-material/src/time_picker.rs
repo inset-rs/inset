@@ -5216,11 +5216,9 @@ pub(crate) mod tests {
     }
 
     /// Dart's `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1`.
-    fn tester_of_size(size: Size) -> WidgetTester {
-        WidgetTester::with_view(
-            waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            waft_test::TestView::with_pixel_ratio(size.width(), size.height(), 1.0),
-        )
+    fn size_view(tester: &WidgetTester, size: Size) {
+        tester.view().set_physical_size(size);
+        tester.view().set_device_pixel_ratio(1.0);
     }
 
     fn theme_of(tester: &WidgetTester, material_type: MaterialType) -> ThemeData {
@@ -5299,7 +5297,7 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_dialog_size_dial_mode() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             const TIME_PICKER_PORTRAIT_SIZE: Size = Size::new(310.0, 468.0);
             const TIME_PICKER_LANDSCAPE_SIZE: Size = Size::new(524.0, 342.0);
             const TIME_PICKER_LANDSCAPE_SIZE_M2: Size = Size::new(508.0, 300.0);
@@ -5307,8 +5305,7 @@ pub(crate) mod tests {
 
             // portrait
             let size = Size::new(800.0, 800.5);
-            let mut tester = tester_of_size(size);
-            let tester = &mut tester;
+            size_view(tester, size);
             media_query_boilerplate(tester, size, Boilerplate::new(MaterialType::Material2));
 
             let width = TIME_PICKER_PORTRAIT_SIZE.width() + padding.horizontal();
@@ -5320,8 +5317,7 @@ pub(crate) mod tests {
 
             // landscape
             let size = Size::new(800.5, 800.0);
-            let mut tester = tester_of_size(size);
-            let tester = &mut tester;
+            size_view(tester, size);
             let mut boilerplate = Boilerplate::new(MaterialType::Material2);
             boilerplate.always_use_24_hour_format = true;
             media_query_boilerplate(tester, size, boilerplate);
@@ -5498,15 +5494,14 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_dialog_size_dial_mode() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             const TIME_PICKER_PORTRAIT_SIZE: Size = Size::new(310.0, 468.0);
             const TIME_PICKER_LANDSCAPE_SIZE: Size = Size::new(524.0, 342.0);
             let padding = EdgeInsets::all(24.0);
 
             // portrait
             let size = Size::new(800.0, 800.5);
-            let mut tester = tester_of_size(size);
-            let tester = &mut tester;
+            size_view(tester, size);
             media_query_boilerplate(tester, size, Boilerplate::new(MaterialType::Material3));
 
             let width = TIME_PICKER_PORTRAIT_SIZE.width() + padding.horizontal();
@@ -5518,8 +5513,7 @@ pub(crate) mod tests {
 
             // landscape
             let size = Size::new(800.5, 800.0);
-            let mut tester = tester_of_size(size);
-            let tester = &mut tester;
+            size_view(tester, size);
             let mut boilerplate = Boilerplate::new(MaterialType::Material3);
             boilerplate.always_use_24_hour_format = true;
             media_query_boilerplate(tester, size, boilerplate);
@@ -5879,11 +5873,10 @@ pub(crate) mod tests {
     #[test]
     fn when_change_orientation_should_reflect_in_render_objects() {
         for material_type in pickers() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 // portrait
                 let size = Size::new(800.0, 800.5);
-                let mut tester = tester_of_size(size);
-                let tester = &mut tester;
+                size_view(tester, size);
                 media_query_boilerplate(tester, size, Boilerplate::new(material_type));
                 assert_eq!(
                     day_period_input_padding_orientation(tester),
@@ -5892,8 +5885,7 @@ pub(crate) mod tests {
 
                 // landscape
                 let size = Size::new(800.5, 800.0);
-                let mut tester = tester_of_size(size);
-                let tester = &mut tester;
+                size_view(tester, size);
                 media_query_boilerplate(tester, size, Boilerplate::new(material_type));
                 assert_eq!(
                     day_period_input_padding_orientation(tester),
@@ -5906,11 +5898,10 @@ pub(crate) mod tests {
     #[test]
     fn setting_orientation_should_override_media_query_orientation() {
         for material_type in pickers() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 // portrait media query
                 let size = Size::new(800.0, 800.5);
-                let mut tester = tester_of_size(size);
-                let tester = &mut tester;
+                size_view(tester, size);
                 let mut boilerplate = Boilerplate::new(material_type);
                 boilerplate.orientation = Some(Orientation::Landscape);
                 media_query_boilerplate(tester, size, boilerplate);
@@ -7384,11 +7375,10 @@ pub(crate) mod tests {
     #[test]
     fn header_touch_regions_are_large_enough() {
         for material_type in pickers() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 // Ensure picker is displayed in portrait mode.
                 let size = Size::new(400.0, 800.0);
-                let mut tester = tester_of_size(size);
-                let tester = &mut tester;
+                size_view(tester, size);
                 media_query_boilerplate(tester, size, Boilerplate::new(material_type));
 
                 let day_period_control_size =
@@ -7413,25 +7403,24 @@ pub(crate) mod tests {
     #[test]
     fn time_picker_draws_without_overflows_at_various_view_sizes() {
         for material_type in pickers() {
-            test_widgets(|_| {
-                for size in [
-                    Size::new(100.0, 100.0),
-                    Size::new(300.0, 300.0),
-                    Size::new(800.0, 600.0),
-                ] {
-                    for entry_mode in [TimePickerEntryMode::Dial, TimePickerEntryMode::Input] {
-                        // Dart's layout asserts here too (the input mode's minimum height of 196
-                        // is below its constraints' minimum of 216); its test hides the assertion
-                        // with `isNot(throwsAssertionError)` on the exception object.
-                        if entry_mode == TimePickerEntryMode::Input && size.height() < 216.0 {
-                            continue;
-                        }
+            for size in [
+                Size::new(100.0, 100.0),
+                Size::new(300.0, 300.0),
+                Size::new(800.0, 600.0),
+            ] {
+                for entry_mode in [TimePickerEntryMode::Dial, TimePickerEntryMode::Input] {
+                    // Dart's layout asserts here too (the input mode's minimum height of 196
+                    // is below its constraints' minimum of 216); its test hides the assertion
+                    // with `isNot(throwsAssertionError)` on the exception object.
+                    if entry_mode == TimePickerEntryMode::Input && size.height() < 216.0 {
+                        continue;
+                    }
+                    test_widgets(|tester| {
                         // Dart sets `physicalSize = size` at flutter_test's device pixel ratio,
                         // a view of size / 3 logical pixels, whose layout asserts (hidden by
                         // `isNot(throwsAssertionError)`, which always holds) panic here: the
                         // sizes are the logical ones.
-                        let mut tester = tester_of_size(size);
-                        let tester = &mut tester;
+                        size_view(tester, size);
                         let mut boilerplate = Boilerplate::new(material_type);
                         boilerplate.entry_mode = entry_mode;
                         media_query_boilerplate(tester, size, boilerplate);
@@ -7441,12 +7430,11 @@ pub(crate) mod tests {
                             1,
                             "{material_type:?} {entry_mode:?} at {size:?}"
                         );
-                    }
+                    });
                 }
-            });
+            }
         }
     }
-
     #[test]
     fn hour_and_minute_fields_are_top_aligned_with_the_separator() {
         for material_type in pickers() {

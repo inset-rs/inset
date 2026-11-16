@@ -1777,11 +1777,8 @@ mod tests {
     use waft_foundation::{ChangeNotifier, Timer, UniqueKey, ValueNotifier};
     use waft_gestures::{GestureBinding, PointerEvent, PointerScrollEvent};
     use waft_painting::{AlignmentGeometry, Axis, BoxDecoration, EdgeInsetsGeometry};
-    use waft_rendering::{
-        AnyRenderObject, BoxConstraints, MainAxisSize, RenderHandle, RendererBinding,
-    };
+    use waft_rendering::{AnyRenderObject, BoxConstraints, MainAxisSize, RenderHandle};
     use waft_services::{KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey};
-    use waft_test::TestPlatform;
 
     use super::*;
     use crate::framework::StatelessWidget;
@@ -1803,6 +1800,7 @@ mod tests {
     use crate::widgets::focus_scope::Focus;
     use crate::widgets::focus_traversal::{NextFocusIntent, PreviousFocusIntent};
     use crate::widgets::gesture_detector::GestureDetector;
+    use crate::widgets::media_query::MediaQueryData;
     use crate::widgets::navigator::RouteSettingsRef;
     use crate::widgets::overlay::{Overlay, OverlayEntry, RenderTheater};
     use crate::widgets::pages::PageRouteBuilder;
@@ -1845,12 +1843,15 @@ mod tests {
             self.tester.cell.borrow_mut()
         }
 
-        /// What the host does when the view's size changes: `tester.binding.setSurfaceSize`.
-        fn resize(&self, width: f64, height: f64) {
-            let ratio = self.device_pixel_ratio();
-            self.view().resize(width * ratio, height * ratio);
-            let mut app = self.app();
-            RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
+        /// Dart's `changeSurfaceSize(tester, size)`: `tester.binding.setSurfaceSize(size)`,
+        /// which each case's own `App` resets.
+        fn change_surface_size(&self, size: Size) {
+            self.set_surface_size(Some(size));
+        }
+
+        /// Dart's `MediaQueryData.fromView(tester.view)`.
+        fn media_query_data(&self) -> MediaQueryData {
+            MediaQueryData::from_view(&self.tester.cell.borrow(), &**self.view(), None)
         }
 
         /// `tester.sendKeyDownEvent(key)` and `sendKeyUpEvent(key)`.
@@ -3939,26 +3940,32 @@ mod tests {
                     closed.set(true);
                 }) as VoidCallback
             };
-            let tree = || {
-                TestApp::new(
-                    Menu::new()
-                        .on_open(Rc::clone(&on_open))
-                        .on_close(Rc::clone(&on_close))
-                        .controller(controller.clone())
-                        .menu_panel(panel(texts(&["a"])))
-                        .child(AnchorButton::new("anchor")),
+            let media_query_data = tester.media_query_data();
+            let tree = |size: Size| -> WidgetRef {
+                MediaQuery::new(
+                    media_query_data.copy_with().size(size),
+                    TestApp::new(
+                        Menu::new()
+                            .on_open(Rc::clone(&on_open))
+                            .on_close(Rc::clone(&on_close))
+                            .controller(controller.clone())
+                            .menu_panel(panel(texts(&["a"])))
+                            .child(AnchorButton::new("anchor")),
+                    ),
                 )
+                .into_widget()
             };
 
-            tester.pump_widget(tree());
+            tester.pump_widget(tree(media_query_data.size));
             tester.tap(find::text("anchor"));
             tester.pump();
 
             assert!(opened.get());
             assert!(!closed.get());
 
-            tester.resize(200.0, 200.0);
-            tester.pump_widget(tree());
+            let small_size = Size::new(200.0, 200.0);
+            tester.change_surface_size(small_size);
+            tester.pump_widget(tree(small_size));
 
             assert!(!opened.get());
             assert!(closed.get());
@@ -4209,23 +4216,30 @@ mod tests {
             let mut tester = Tester::new(tester);
             let controller =
                 MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-            let tree = || {
-                TestApp::new(RawMenuAnchorGroup::new(
-                    Menu::new()
-                        .menu_panel(panel(Vec::new()))
-                        .child(AnchorButton::new("anchor")),
-                    controller.clone(),
-                ))
+            let media_query_data = tester.media_query_data();
+            let tree = |size: Size| {
+                let child: WidgetRef = MediaQuery::new(
+                    media_query_data.copy_with().size(size),
+                    RawMenuAnchorGroup::new(
+                        Menu::new()
+                            .menu_panel(panel(Vec::new()))
+                            .child(AnchorButton::new("anchor")),
+                        controller.clone(),
+                    ),
+                )
+                .into_widget();
+                TestApp::new(child)
             };
 
-            tester.pump_widget(tree());
+            tester.pump_widget(tree(media_query_data.size));
 
             tester.tap(find::text("anchor"));
             tester.pump();
 
-            tester.resize(200.0, 200.0);
+            let small_size = Size::new(200.0, 200.0);
+            tester.change_surface_size(small_size);
 
-            tester.pump_widget(tree());
+            tester.pump_widget(tree(small_size));
             tester.pump();
         });
     }
@@ -4290,39 +4304,43 @@ mod tests {
 
     #[test]
     fn an_anchor_of_zero_area_does_not_panic() {
-        // Dart's `tester.view.physicalSize = Size.zero`.
-        let tester = &mut WidgetTester::with_physical_size(TestPlatform::new(), Size::ZERO);
-        let mut tester = Tester::new(tester);
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            Center::new().child(RawMenuAnchor::new(
-                controller.clone(),
-                |_app, _context, _info| Text::new("X").into_widget(),
-            )),
-        ));
-        assert_eq!(
-            tester.get_size(find::by_type::<RawMenuAnchor>()),
-            Size::ZERO
-        );
-        controller.open(&mut tester.app(), None);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(RawMenuAnchor::new(
+                    controller.clone(),
+                    |_app, _context, _info| Text::new("X").into_widget(),
+                )),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<RawMenuAnchor>()),
+                Size::ZERO
+            );
+            controller.open(&mut tester.app(), None);
+        });
     }
 
     #[test]
     fn a_group_of_zero_area_does_not_panic() {
-        // Dart's `tester.view.physicalSize = Size.zero`.
-        let tester = &mut WidgetTester::with_physical_size(TestPlatform::new(), Size::ZERO);
-        let mut tester = Tester::new(tester);
-        let controller = MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            Center::new().child(RawMenuAnchorGroup::new(Text::new("X"), controller.clone())),
-        ));
-        assert_eq!(
-            tester.get_size(find::by_type::<RawMenuAnchorGroup>()),
-            Size::ZERO
-        );
-        controller.open(&mut tester.app(), None);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let mut tester = Tester::new(tester);
+            let controller =
+                MenuController::new(&mut tester.app()).into_erased::<AnyMenuController>();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(RawMenuAnchorGroup::new(Text::new("X"), controller.clone())),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<RawMenuAnchorGroup>()),
+                Size::ZERO
+            );
+            controller.open(&mut tester.app(), None);
+        });
     }
 
     /// Dart's `CustomMenuController extends MenuController`, which counts its opens and closes.
@@ -5030,33 +5048,36 @@ mod tests {
                     requests.set(requests.get() + 1);
                     hide_overlay(app);
                 });
-            let tree = || {
+            let media_query_data = tester.media_query_data();
+            let tree = |size: Size| -> WidgetRef {
                 let on_close_requested = Rc::clone(&on_close_requested);
-                TestApp::new(
-                    Menu::new()
-                        .on_close_requested(move |app, hide_overlay| {
-                            on_close_requested(app, hide_overlay)
-                        })
-                        .controller(controller.clone())
-                        .menu_panel(panel(texts(&["a"])))
-                        .child(AnchorButton::new("anchor")),
+                MediaQuery::new(
+                    media_query_data.copy_with().size(size),
+                    TestApp::new(
+                        Menu::new()
+                            .on_close_requested(move |app, hide_overlay| {
+                                on_close_requested(app, hide_overlay)
+                            })
+                            .controller(controller.clone())
+                            .menu_panel(panel(texts(&["a"])))
+                            .child(AnchorButton::new("anchor")),
+                    ),
                 )
+                .into_widget()
             };
 
-            tester.pump_widget(tree());
+            tester.pump_widget(tree(media_query_data.size));
             tester.pump();
 
             // Test menu resize before first open.
-            tester.resize(250.0, 250.0);
-            tester.pump_widget(tree());
+            tester.pump_widget(tree(Size::new(250.0, 250.0)));
             tester.tap(find::text("anchor"));
             tester.pump();
 
             assert_eq!(on_close_requested_called.get(), 0);
             expect(&tester, &find::text("a"), finds_one_widget());
 
-            tester.resize(200.0, 200.0);
-            tester.pump_widget(tree());
+            tester.pump_widget(tree(Size::new(200.0, 200.0)));
 
             assert_eq!(on_close_requested_called.get(), 1);
 
@@ -5065,8 +5086,7 @@ mod tests {
             assert!(!controller.is_open(&tester.app()));
 
             // Test menu resize after close.
-            tester.resize(300.0, 300.0);
-            tester.pump_widget(tree());
+            tester.pump_widget(tree(Size::new(300.0, 300.0)));
 
             assert_eq!(on_close_requested_called.get(), 1);
         });

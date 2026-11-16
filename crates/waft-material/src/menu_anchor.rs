@@ -8806,6 +8806,153 @@ mod tests {
                 });
             }
         }
+
+        // menu_anchor_test.dart 'Menu scrollbar does not inherit MediaQuery padding' (material_ui).
+        #[test]
+        fn a_menus_scrollbar_does_not_inherit_the_media_query_padding() {
+            test_widgets(|tester| {
+                use waft_rendering::testing::RecordedCall;
+                use waft_widgets::{Scrollable, ScrollableState, ScrollbarPainterRef};
+
+                use crate::scrollbar::Scrollbar;
+                use crate::text_button::TextButton;
+
+                tester.view().set_device_pixel_ratio(1.0);
+                tester.view().set_padding(waft_embedder::ViewPadding {
+                    left: 8.0,
+                    top: 16.0,
+                    right: 32.0,
+                    bottom: 24.0,
+                });
+                let menu_item_padding: Rc<Cell<Option<EdgeInsets>>> = Rc::default();
+                let controller: MenuControllerRef =
+                    MenuController::new(&mut tester.cell.borrow_mut()).into_erased();
+
+                let mut menu_children = vec![
+                    waft_widgets::Builder::new({
+                        let menu_item_padding = Rc::clone(&menu_item_padding);
+                        move |app, context| {
+                            menu_item_padding.set(Some(MediaQuery::padding_of(app, context)));
+                            MenuItemButton::new()
+                                .on_pressed(Listener::new(|_app| {}))
+                                .child(Text::new("Item 0"))
+                                .into_widget()
+                        }
+                    })
+                    .into_widget(),
+                ];
+                menu_children.extend((1..4).map(|i| {
+                    MenuItemButton::new()
+                        .on_pressed(Listener::new(|_app| {}))
+                        .child(Text::new(format!("Item {i}")))
+                        .into_widget()
+                }));
+                let anchor = MenuAnchor::new(menu_children)
+                    .controller(controller)
+                    .style(MenuStyle::new().maximum_size(Rc::new(
+                        waft_widgets::WidgetStatePropertyAll::new(Some(Size::from_height(100.0))),
+                    )))
+                    .builder(|_app, _context, controller, _child| {
+                        TextButton::new(
+                            Some(Listener::new(move |app| controller.open(app, None))),
+                            Some(Text::new("Open menu")),
+                        )
+                        .into_widget()
+                    });
+                tester.pump_widget(
+                    crate::app::MaterialApp::new()
+                        .home(Material::new().child(anchor))
+                        .into_widget(),
+                );
+
+                tester.tap(find::text("Open menu"));
+                tester.pump_and_settle();
+
+                let scrollbar_painter = tester.widget(
+                    find::descendant(
+                        find::by_type::<Scrollbar>(),
+                        find::by_widget_predicate(
+                            "a CustomPaint with a ScrollbarPainter",
+                            |_app, widget| {
+                                waft_widgets::downcast_widget::<waft_widgets::CustomPaint>(widget)
+                                    .and_then(|custom_paint| {
+                                        custom_paint.foreground_painter.as_ref()
+                                    })
+                                    .is_some_and(|painter| {
+                                        painter
+                                            .as_any()
+                                            .downcast_ref::<ScrollbarPainterRef>()
+                                            .is_some()
+                                    })
+                            },
+                        ),
+                    ),
+                    |custom_paint: &waft_widgets::CustomPaint| {
+                        custom_paint
+                            .foreground_painter
+                            .as_ref()
+                            .and_then(|painter| {
+                                painter
+                                    .as_any()
+                                    .downcast_ref::<ScrollbarPainterRef>()
+                                    .cloned()
+                            })
+                            .expect("a ScrollbarPainter")
+                    },
+                );
+                // The scrollbar ignores the view padding, but the menu children still
+                // observe it.
+                assert_eq!(
+                    scrollbar_painter.painter().padding(&tester.cell.borrow()),
+                    EdgeInsets::ZERO.into()
+                );
+                assert_eq!(
+                    menu_item_padding.get(),
+                    Some(EdgeInsets::from_ltrb(8.0, 16.0, 32.0, 24.0))
+                );
+
+                // The menu scrolls all the way to the bottom and the scrollbar thumb
+                // reaches the end of its track instead of stopping short of it.
+                let scrollable = tester.element(find::descendant(
+                    find::by_type::<Scrollbar>(),
+                    find::by_type::<Scrollable>(),
+                ));
+                let position = scrollable
+                    .state_handle::<ScrollableState>(&tester.cell.borrow())
+                    .expect("a Scrollable element holds a ScrollableState")
+                    .position(&tester.cell.borrow());
+                assert!(position.max_scroll_extent(&tester.cell.borrow()) > 0.0);
+                tester.drag(find::by_type::<Scrollbar>(), Offset::new(0.0, -200.0));
+                tester.pump_and_settle();
+                {
+                    let app = tester.cell.borrow();
+                    assert_eq!(position.pixels(&app), position.max_scroll_extent(&app));
+                }
+
+                // The thumb is painted at the very end of the track rather than stopping
+                // short of it by the height of the removed bottom padding.
+                let scrollbar_extent = tester.get_size(find::by_type::<Scrollbar>()).height();
+                let scrollbar = tester.render_object(find::by_type::<Scrollbar>());
+                waft_rendering::testing::assert_paints(
+                    &tester.painted_ops_deep(scrollbar),
+                    &[PaintCall::something(move |call| {
+                        // The thumb is a rect on Android and a rounded rect elsewhere. The
+                        // track shares the same shape but always starts at the top, so only
+                        // the thumb is considered here.
+                        let shape = match call {
+                            RecordedCall::Rect { rect, .. } => Some(*rect),
+                            RecordedCall::RRect { bounds, .. } => Some(*bounds),
+                            _ => None,
+                        };
+                        Ok(shape.is_some_and(|shape| {
+                            shape.top > 0.0
+                                && (shape.bottom - scrollbar_extent).abs()
+                                    <= f64::from(f32::EPSILON) * scrollbar_extent.max(1.0)
+                        }))
+                    })],
+                );
+            });
+        }
     }
 
     /// The 'Accelerators', 'MenuController' and 'MenuItemButton' groups.
@@ -9978,7 +10125,7 @@ mod tests {
         use waft_painting::{BoxDecoration, TextStyle};
         use waft_rendering::AnyRenderObject;
         use waft_services::{SystemMouseCursor, SystemMouseCursors};
-        use waft_test::TestPlatform;
+
         use waft_widgets::{
             Align, Center, DecoratedBox, Overlay, OverlayEntry, Positioned, RenderTheater,
             SizedBox, Stack, StatefulBuilder, UnfocusDisposition, WidgetStatePropertyAll,
@@ -10341,17 +10488,12 @@ mod tests {
         // menu_anchor_test.dart 'menu is positioned to avoid the software keyboard'.
         #[test]
         fn a_menu_is_positioned_to_avoid_the_software_keyboard() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/142921
                 // The menu should not extend into the area occupied by the software keyboard.
                 let screen_size = Size::new(600.0, 800.0);
-                // Dart's `changeSurfaceSize(tester, screenSize)`: the view's logical size, at the
-                // test view's device pixel ratio of 3.
-                let mut tester = WidgetTester::with_physical_size(
-                    TestPlatform::new().on(TargetPlatform::Android),
-                    Size::new(screen_size.width() * 3.0, screen_size.height() * 3.0),
-                );
-                let tester = &mut tester;
+                // Dart's `changeSurfaceSize(tester, screenSize)`.
+                tester.set_surface_size(Some(screen_size));
                 const KEYBOARD_HEIGHT: f64 = 200.0;
                 let controller = new_controller(tester);
 
@@ -11718,7 +11860,6 @@ mod tests {
     mod animations {
         use std::cell::Cell;
 
-        use waft_test::TestPlatform;
         use waft_widgets::{Center, Column, SizedBox};
 
         use super::*;
@@ -12986,12 +13127,8 @@ mod tests {
         // menu_anchor_test.dart 'MenuAnchor does not crash at zero area'.
         #[test]
         fn a_menu_anchor_in_a_view_of_zero_area_does_not_panic() {
-            test_widgets(|_| {
-                let mut tester = WidgetTester::with_physical_size(
-                    TestPlatform::new().on(waft_embedder::TargetPlatform::Android),
-                    Size::ZERO,
-                );
-                let tester = &mut tester;
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::ZERO);
                 let menu_controller = new_controller(tester);
                 pump_home(tester, |_app| {
                     Scaffold::new()

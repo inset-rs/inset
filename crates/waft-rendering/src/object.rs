@@ -2329,6 +2329,14 @@ impl AnyRenderObject {
         self.mark_needs_paint(app);
     }
 
+    /// Dart's `paint(context, offset)` called directly, as flutter_test's `paints` matcher calls
+    /// it on the object it reads: none of `_paintWithContext`'s bookkeeping, so what the object
+    /// records for its own frames is left as it was.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn paint(self, app: &mut App, context: &mut PaintingContext, offset: Offset) {
+        (self.vtable.paint)(app, self.id, context, offset);
+    }
+
     /// Flutter's `_paintWithContext`: the framework wrapper around the `paint` virtual.
     pub(crate) fn paint_with_context(
         self,

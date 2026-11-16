@@ -1366,7 +1366,6 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use waft_embedder::TargetPlatform;
     use waft_rendering::RenderBox as _;
     use waft_widgets::{Builder, Container};
 
@@ -2123,13 +2122,10 @@ mod tests {
     const WIDE_WINDOW_SIZE: Size = Size::new(1920.0, 1080.0);
     const NARROW_WINDOW_SIZE: Size = Size::new(1070.0, 1770.0);
 
-    /// A tester whose view is `size` physical pixels at a device pixel ratio of 1: Dart's
-    /// `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1.0`.
-    fn tester_of_size(size: Size) -> WidgetTester {
-        WidgetTester::with_view(
-            waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            waft_test::TestView::with_pixel_ratio(size.width(), size.height(), 1.0),
-        )
+    /// Dart's `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1.0`.
+    fn size_view(tester: &WidgetTester, size: Size) {
+        tester.view().set_physical_size(size);
+        tester.view().set_device_pixel_ratio(1.0);
     }
 
     fn themed(theme: DatePickerThemeData, use_material3: bool, tester: &WidgetTester) -> ThemeData {
@@ -2632,16 +2628,15 @@ mod tests {
 
     #[test]
     fn dividers_use_date_picker_theme_data_divider_color() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let theme_data = date_picker_theme();
-            let show_picker = |size: Size| {
-                let mut tester = tester_of_size(size);
-                let theme = themed(theme_data.clone(), true, &tester);
+            let show_picker = |tester: &mut WidgetTester, size: Size| {
+                size_view(tester, size);
+                let theme = themed(theme_data.clone(), true, tester);
                 tester.pump_widget(material_app(theme, centered_home(calendar_dialog())));
-                tester
             };
 
-            let tester = show_picker(WIDE_WINDOW_SIZE);
+            show_picker(tester, WIDE_WINDOW_SIZE);
             let vertical = tester.element(find::by_type::<VerticalDivider>().at(0));
             assert_eq!(
                 tester.widget(vertical, |divider: &VerticalDivider| divider.color),
@@ -2649,7 +2644,7 @@ mod tests {
             );
 
             // The portrait layout.
-            let tester = show_picker(NARROW_WINDOW_SIZE);
+            show_picker(tester, NARROW_WINDOW_SIZE);
             let horizontal = tester.element(find::by_type::<Divider>().at(0));
             assert_eq!(
                 tester.widget(horizontal, |divider: &Divider| divider.color),

@@ -3512,24 +3512,25 @@ mod tests {
 
     #[test]
     fn raw_tooltip_does_not_crash_at_zero_area() {
-        // Dart's `tester.view.physicalSize = Size.zero`.
-        let tester = &mut WidgetTester::with_physical_size(TestPlatform::new(), Size::ZERO);
-        let mut tester = Tester::new(tester);
-        let tooltip_key = GlobalKey::new();
-        let key = tooltip_key.clone();
-        tester.pump_widget(move || {
-            Center::new()
-                .child(
-                    RawTooltip::new(
-                        Some("TIP".into()),
-                        |_app, _context, _animation| Text::new("Y").into_widget(),
-                        Text::new("X"),
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let mut tester = Tester::new(tester);
+            let tooltip_key = GlobalKey::new();
+            let key = tooltip_key.clone();
+            tester.pump_widget(move || {
+                Center::new()
+                    .child(
+                        RawTooltip::new(
+                            Some("TIP".into()),
+                            |_app, _context, _animation| Text::new("Y").into_widget(),
+                            Text::new("X"),
+                        )
+                        .key(key.clone().into()),
                     )
-                    .key(key.clone().into()),
-                )
-                .into_widget()
+                    .into_widget()
+            });
+            assert_eq!(tester.get_size(&tooltip_key), Size::ZERO);
         });
-        assert_eq!(tester.get_size(&tooltip_key), Size::ZERO);
     }
 
     /// The tree of the `AnimationStyle` cases: `Center(RawTooltip(key:, animationStyle:,

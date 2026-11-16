@@ -14,7 +14,6 @@ indexmap.workspace = true
 waft-embedder.workspace = true
 waft-foundation.workspace = true
 waft-scheduler.workspace = true
-web-time.workspace = true
 
 [lints]
 workspace = true

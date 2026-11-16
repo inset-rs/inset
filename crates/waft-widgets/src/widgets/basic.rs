@@ -9547,7 +9547,7 @@ mod tests {
         GlobalKey, IntoWidget, State, StateData, StatefulWidget, downcast_widget,
     };
     use crate::test_harness::{Harness, padding_under_root};
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::testing::test_widgets;
 
     /// The render object directly under the test root, typed.
     fn render_object_under_root<T: RenderObject>(harness: &Harness, app: &App) -> RenderHandle<T> {
@@ -11750,11 +11750,6 @@ mod tests {
         assert_eq!(shape.size(&app), Size::ZERO);
     }
 
-    /// A tester whose view has no area: Dart's `tester.view.physicalSize = Size.zero`.
-    pub(crate) fn zero_area_tester() -> WidgetTester {
-        WidgetTester::with_physical_size(waft_test::TestPlatform::new(), Size::ZERO)
-    }
-
     fn keyed_size(app: &mut App, key: &GlobalKey) -> Size {
         key.current_context(app)
             .expect("mounted")
@@ -11769,24 +11764,29 @@ mod tests {
     /// "PhysicalShape does not crash at zero area", in a view of no area.
     #[test]
     fn a_physical_model_and_shape_in_a_view_of_no_area_take_no_space() {
-        let key = GlobalKey::new();
-        let tester = &mut zero_area_tester();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            Center::new().child(PhysicalModel::new(Color::new(0xAABBCC00)).key(key.clone().into())),
-        ));
-        assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let key = GlobalKey::new();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                Center::new()
+                    .child(PhysicalModel::new(Color::new(0xAABBCC00)).key(key.clone().into())),
+            ));
+            assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
+        });
 
-        let key = GlobalKey::new();
-        let tester = &mut zero_area_tester();
-        tester.pump_widget(Directionality::new(
-            TextDirection::Ltr,
-            Center::new().child(
-                PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
-                    .key(key.clone().into()),
-            ),
-        ));
-        assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            let key = GlobalKey::new();
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(
+                    PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
+                        .key(key.clone().into()),
+                ),
+            ));
+            assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
+        });
     }
 
     fn list_children(width: f64, height: f64) -> Vec<WidgetRef> {

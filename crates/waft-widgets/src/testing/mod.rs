@@ -5,7 +5,9 @@
 //! tester as this crate's own.
 //!
 //! The defaults are flutter_test's: an 800x600 logical view at a device pixel ratio of 3.0, on
-//! Android, with every font family FlutterTest, whose glyphs are squares of the font size. The
+//! Android, with every font family FlutterTest, whose glyphs are squares of the font size. A case
+//! changes the view's metrics through [`WidgetTester::view`], as Dart's sets `tester.view.*`, and
+//! the framework hears of each change at once. The
 //! frame rules are flutter_test's too: [`WidgetTester::pump_widget`] attaches the widget,
 //! schedules a frame and pumps once; [`WidgetTester::pump`] fires no timer, and
 //! [`WidgetTester::pump_by`] lets time pass first; either runs a frame only of the views that
