@@ -168,6 +168,23 @@ impl TableViewDemoState {
         self.set_state(app, |state| state.established_only = on);
     }
 
+    /// A connection arriving at the top of the items, as a live panel's do: the table places it and the selection stays on its row's item.
+    fn add_connection(self: Handle<Self>, app: &mut App) {
+        let source = self.source(app);
+        let arrived = source.item_count(app) as u32;
+        source.insert(
+            app,
+            0,
+            Connection {
+                process: "worker",
+                pid: 9000 + arrived,
+                state: ConnectionState::Established,
+                remote: "10.0.0.8:8443",
+                received: u64::from(arrived) * 1_000,
+            },
+        );
+    }
+
     fn caption(self: Handle<Self>, app: &App) -> String {
         let selection = app
             .get(self)
@@ -176,7 +193,7 @@ impl TableViewDemoState {
             .expect("made in `init_state`");
         match selection.selected_item(app) {
             Some(item) => {
-                let connection = &self.source(app).items(app)[item];
+                let connection = self.source(app).item(app, item);
                 format!("Selected: {} ({})", connection.process, connection.remote)
             }
             None => "Nothing selected".to_owned(),
@@ -249,6 +266,10 @@ impl State for TableViewDemoState {
                 sort.sort_by_column(app, &by_received, SortDirection::Descending);
             }),
         );
+        let add_button = Button::text(
+            "New connection",
+            waft_foundation::Listener::new(move |app| self.add_connection(app)),
+        );
         let filter = ToggleSwitch::new(established_only, move |app, on| {
             self.set_established_only(app, on)
         })
@@ -268,12 +289,16 @@ impl State for TableViewDemoState {
             vec![
                 example(
                     "Connections",
-                    "Drag a header's edge to resize its column, click a header to sort; PID and Received open on the largest. The process column stays while the rest scroll. A click or the arrow keys select a row.",
+                    "Drag a header's edge to resize its column, click a header to sort; PID and Received open on the largest. The process column stays while the rest scroll. A click or the arrow keys select a row, and the selection stays on its connection as new ones arrive.",
                     &resources,
                     column(
                         vec![
                             SizedBox::new().height(300.0).child(table).into_widget(),
-                            example_controls(vec![filter.into_widget(), sort_button.into_widget()]),
+                            example_controls(vec![
+                                filter.into_widget(),
+                                sort_button.into_widget(),
+                                add_button.into_widget(),
+                            ]),
                             label(self.caption(app), TextBlockStyle::Caption, secondary),
                         ],
                         8.0,

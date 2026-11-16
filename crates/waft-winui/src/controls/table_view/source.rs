@@ -1,6 +1,6 @@
 //! `TableViewSource` (`controls/dev/TableView/TableViewSource.cpp`) over the shaping engine it fronts (`controls/dev/ShapedItemsSource/ShapedItemsSource.cpp`, `controls/dev/TabularShaping/ShapingPipeline.cpp`): the application's items, one filter predicate, and sort axes in the order they were declared, projected as the view a `TableView` shows.
 //!
-//! The view is rebuilt from the items whenever a verb changes the shape: the filter runs first, over the items in source order, then a stable sort over the active axes, the first declared primary and each later one breaking ties within the earlier. A rebuild notifies once; a verb that changes nothing (clearing an absent filter) does not. A later editor who notifies without rebuilding, or rebuilds without notifying, leaves a `TableView` showing rows the view no longer holds.
+//! The view is rebuilt from the items whenever a verb changes the shape: the filter runs first, over the items in source order, then a stable sort over the active axes, the first declared primary and each later one breaking ties within the earlier. An item inserted, removed or replaced in place is spliced into the view where the engine's incremental path can place it exactly (`ShapedItemsSource::ApplyIncrementalChange`, `TryApplyIncrementalSortedChange`), and rebuilds it where it cannot. Every operation notifies once, with the [`ViewChange`]s it made in order, which a `TableView` reads to move its selection as `SelectionNode::OnSourceListChanged` does; a verb that changes nothing (clearing an absent filter) does not notify. A later editor who changes the view without recording the change leaves a `TableView`'s selection on the wrong row.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -22,6 +22,23 @@ type ItemPredicate<T> = Rc<dyn Fn(&T) -> bool>;
 /// Orders two items: a key selector's comparison, or a column's `CustomSortComparer`.
 pub(crate) type SortComparer<T> = Rc<dyn Fn(&T, &T) -> Ordering>;
 
+/// One change an operation made, in order: the items' indices shifting (`ItemInserted`, `ItemRemoved`), and the view's rows changing as its `IObservableVector` raises them (`RowInserted`, `RowRemoved`, `RowReplaced`, `Reset`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ViewChange {
+    /// An item was inserted at this index of the items; those at and after it moved up one.
+    ItemInserted(usize),
+    /// The item at this index of the items was removed; those after it moved down one.
+    ItemRemoved(usize),
+    /// A row was inserted at this index of the view.
+    RowInserted(usize),
+    /// The row at this index of the view was removed.
+    RowRemoved(usize),
+    /// The row at this index of the view shows a new item.
+    RowReplaced(usize),
+    /// The view was rebuilt.
+    Reset,
+}
+
 /// `TabularShapingHelpers::SortAxis`: one active sort axis. `token` names an axis a `TableView` installs for a column; the axes an application declares through [`TableViewSource::sort`] have none.
 struct SortAxis<T> {
     token: Option<HandleId>,
@@ -34,8 +51,8 @@ struct SortAxis<T> {
 /// The application makes one with [`TableViewSource::from`], hands it to one `TableView`, and disposes it after the view.
 pub struct TableViewSource<T> {
     notifier: ChangeNotifierData,
-    /// Shared, so a cell can be built from an item while the source is reachable through the `App`.
-    items: Rc<Vec<T>>,
+    /// Each shared, so a cell can be built from an item while the source is reachable through the `App`.
+    items: Vec<Rc<T>>,
     /// `ShapingPipeline::m_filters`'s single untokenized axis: `Filter` replaces it.
     filter: Option<ItemPredicate<T>>,
     /// `ShapingPipeline::m_sorts`, in declaration order, which is precedence order.
@@ -44,6 +61,8 @@ pub struct TableViewSource<T> {
     view: Vec<usize>,
     /// The `TableView` showing the source, for `SetOwningTableView`'s single-owner check.
     owner: Option<HandleId>,
+    /// What the last operation changed, for the listeners it notifies.
+    changes: Vec<ViewChange>,
 }
 
 impl<T: 'static> TableViewSource<T> {
@@ -51,11 +70,12 @@ impl<T: 'static> TableViewSource<T> {
     pub fn from(app: &mut App, items: Vec<T>) -> Ref<Self> {
         let mut source = Self {
             notifier: ChangeNotifierData::new(),
-            items: Rc::new(items),
+            items: items.into_iter().map(Rc::new).collect(),
             filter: None,
             sorts: Vec::new(),
             view: Vec::new(),
             owner: None,
+            changes: Vec::new(),
         };
         source.rebuild_view();
         app.create(source)
@@ -66,23 +86,54 @@ impl<T: 'static> TableViewSource<T> {
         ChangeNotifierData::dispose(app, self);
     }
 
-    /// The items, in source order.
-    pub fn items(self: Handle<Self>, app: &App) -> &[T] {
-        &app.get(self).items
+    /// How many items there are.
+    pub fn item_count(self: Handle<Self>, app: &App) -> usize {
+        app.get(self).items.len()
+    }
+
+    /// The item at `index`, in source order.
+    pub fn item(self: Handle<Self>, app: &App, index: usize) -> &T {
+        &app.get(self).items[index]
     }
 
     /// Replaces the items, as the collection the source wraps raising a reset: the filter and the sorts stay, the view is rebuilt from the new items, and a `TableView` showing the source clears its selection (`SelectionNode::OnSourceListChanged`, `Reset`).
     pub fn set_items(self: Handle<Self>, app: &mut App, items: Vec<T>) {
-        app.get_mut(self).items = Rc::new(items);
-        self.rebuild(app);
+        let source = app.get_mut(self);
+        source.items = items.into_iter().map(Rc::new).collect();
+        source.rebuild_view();
+        source.changes = vec![ViewChange::Reset];
+        self.notify_listeners(app);
     }
 
-    /// The items, kept while a cell is built from one.
-    pub(crate) fn shared_items(self: Handle<Self>, app: &App) -> Rc<Vec<T>> {
-        app.get(self).items.clone()
+    /// Inserts `item` at `index` of the items, as the collection raising `Add`: unshaped, the row is inserted at the same index; sorted, at its place among the rows, unless the filter leaves it out or an equal row makes source order decide where, when the view is rebuilt. A filter without a sort rebuilds the view.
+    pub fn insert(self: Handle<Self>, app: &mut App, index: usize, item: T) {
+        app.get_mut(self).insert_item(index, Rc::new(item));
+        self.notify_listeners(app);
     }
 
-    /// `View`: each row of the projection, as its index in [`items`](Self::items).
+    /// Removes the item at `index`, as the collection raising `Remove`: its row is removed, or the view rebuilt when it is filtered or sorted without that row.
+    pub fn remove(self: Handle<Self>, app: &mut App, index: usize) {
+        app.get_mut(self).remove_item(index);
+        self.notify_listeners(app);
+    }
+
+    /// Replaces the item at `index` with `item`, as the collection raising `Replace`: unshaped, its row shows the new item; sorted, the row is removed and the new item inserted at its place. A row replaced is no longer selected, as `SelectionNode` treats a replacement as a removal and an insertion.
+    pub fn replace(self: Handle<Self>, app: &mut App, index: usize, item: T) {
+        app.get_mut(self).replace_item(index, Rc::new(item));
+        self.notify_listeners(app);
+    }
+
+    /// The item at `index`, kept while a cell is built from it.
+    pub(crate) fn shared_item(self: Handle<Self>, app: &App, index: usize) -> Rc<T> {
+        app.get(self).items[index].clone()
+    }
+
+    /// What the operation now notifying changed, in order.
+    pub(crate) fn changes(self: Handle<Self>, app: &App) -> &[ViewChange] {
+        &app.get(self).changes
+    }
+
+    /// `View`: each row of the projection, as its index in the items.
     pub fn view(self: Handle<Self>, app: &App) -> &[usize] {
         &app.get(self).view
     }
@@ -174,7 +225,9 @@ impl<T: 'static> TableViewSource<T> {
     }
 
     fn rebuild(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).rebuild_view();
+        let source = app.get_mut(self);
+        source.rebuild_view();
+        source.changes = vec![ViewChange::Reset];
         self.notify_listeners(app);
     }
 }
@@ -220,27 +273,125 @@ impl<T> TableViewSource<T> {
 
     /// `ShapedItemsSource::RebuildFlat`: filter in source order, then a stable sort over the axes.
     fn rebuild_view(&mut self) {
-        let items = &self.items;
-        let mut view: Vec<usize> = match &self.filter {
-            Some(predicate) => (0..items.len()).filter(|&i| predicate(&items[i])).collect(),
-            None => (0..items.len()).collect(),
-        };
+        let mut view: Vec<usize> = (0..self.items.len())
+            .filter(|&index| self.passes_filter(index))
+            .collect();
         if !self.sorts.is_empty() {
-            let sorts = &self.sorts;
-            view.sort_by(|&a, &b| {
-                for axis in sorts {
-                    let order = (axis.compare)(&items[a], &items[b]);
-                    if order != Ordering::Equal {
-                        return match axis.direction {
-                            SortDirection::Descending => order.reverse(),
-                            _ => order,
-                        };
-                    }
-                }
-                Ordering::Equal
-            });
+            view.sort_by(|&a, &b| self.compare(a, b));
         }
         self.view = view;
+    }
+
+    /// `ShapingPipeline::PassesFilter`.
+    fn passes_filter(&self, index: usize) -> bool {
+        self.filter
+            .as_ref()
+            .is_none_or(|predicate| predicate(&self.items[index]))
+    }
+
+    /// `CompareKeysToRow`: two items on the active axes, each in its direction.
+    fn compare(&self, a: usize, b: usize) -> Ordering {
+        for axis in &self.sorts {
+            let order = (axis.compare)(&self.items[a], &self.items[b]);
+            if order != Ordering::Equal {
+                return match axis.direction {
+                    SortDirection::Descending => order.reverse(),
+                    _ => order,
+                };
+            }
+        }
+        Ordering::Equal
+    }
+
+    /// `ShapingPipeline::SortedInsertPlacementFor`: the row after every row that sorts at or before the item, and whether a row sorts equal to it, when source order decides its place.
+    fn sorted_insert_placement(&self, index: usize) -> (usize, bool) {
+        let placement = self
+            .view
+            .partition_point(|&row| self.compare(index, row) != Ordering::Less);
+        let tied =
+            placement > 0 && self.compare(index, self.view[placement - 1]) == Ordering::Equal;
+        (placement, tied)
+    }
+
+    /// Rebuilds the view in place of a splice the incremental path cannot make exactly.
+    fn refresh(&mut self) {
+        self.rebuild_view();
+        self.changes.push(ViewChange::Reset);
+    }
+
+    /// `ApplyIncrementalChange` for `Add`.
+    fn insert_item(&mut self, index: usize, item: Rc<T>) {
+        self.items.insert(index, item);
+        for row in &mut self.view {
+            if *row >= index {
+                *row += 1;
+            }
+        }
+        self.changes = vec![ViewChange::ItemInserted(index)];
+        if !self.sorts.is_empty() {
+            self.try_insert_sorted(index);
+        } else if self.filter.is_some() {
+            // The projection is source order among the kept items, which an insertion index does not give.
+            self.refresh();
+        } else {
+            self.view.insert(index, index);
+            self.changes.push(ViewChange::RowInserted(index));
+        }
+    }
+
+    /// `ApplyIncrementalChange` for `Remove`.
+    fn remove_item(&mut self, index: usize) {
+        let row = self.view.iter().position(|&row| row == index);
+        self.changes = vec![ViewChange::ItemRemoved(index)];
+        let spliced = match row {
+            Some(row) if self.filter.is_none() || !self.sorts.is_empty() => {
+                self.view.remove(row);
+                self.changes.push(ViewChange::RowRemoved(row));
+                true
+            }
+            _ => false,
+        };
+        self.items.remove(index);
+        for row in &mut self.view {
+            if *row > index {
+                *row -= 1;
+            }
+        }
+        if !spliced {
+            self.refresh();
+        }
+    }
+
+    /// `ApplyIncrementalChange` for `Replace`: unshaped the row is set; sorted it is removed and the new item inserted at its place (`TryApplyIncrementalSortedChange`).
+    fn replace_item(&mut self, index: usize, item: Rc<T>) {
+        self.items[index] = item;
+        self.changes = Vec::new();
+        let row = self.view.iter().position(|&row| row == index);
+        match row {
+            Some(row) if self.sorts.is_empty() && self.filter.is_none() => {
+                self.changes.push(ViewChange::RowReplaced(row));
+            }
+            Some(row) if !self.sorts.is_empty() => {
+                self.view.remove(row);
+                self.changes.push(ViewChange::RowRemoved(row));
+                self.try_insert_sorted(index);
+            }
+            _ => self.refresh(),
+        }
+    }
+
+    /// `TryApplyIncrementalSortedChange`'s `tryInsert`: a filtered-out item leaves the view as it is; an item that ties with a row is placed only when it is the last item, where source order puts it after every equal row, and the view is rebuilt otherwise.
+    fn try_insert_sorted(&mut self, index: usize) {
+        if !self.passes_filter(index) {
+            return;
+        }
+        let (placement, tied) = self.sorted_insert_placement(index);
+        if tied && index + 1 != self.items.len() {
+            self.refresh();
+            return;
+        }
+        self.view.insert(placement, index);
+        self.changes.push(ViewChange::RowInserted(placement));
     }
 }
 
@@ -282,7 +433,7 @@ mod tests {
         source
             .view(app)
             .iter()
-            .map(|&i| source.items(app)[i].0)
+            .map(|&i| source.item(app, i).0)
             .collect()
     }
 
@@ -372,5 +523,98 @@ mod tests {
         source.set_items(&mut app, vec![("Bo", 1), ("Ann", 2)]);
         assert_eq!(names(&app, &source), ["Bo", "Ann"]);
         assert_eq!(heard.get(), 2);
+    }
+
+    fn changes(app: &App, source: &Ref<TableViewSource<(&'static str, u32)>>) -> Vec<ViewChange> {
+        source.changes(app).to_vec()
+    }
+
+    // `ApplyIncrementalChange` on an unshaped projection: the row is spliced at the item's index.
+    #[test]
+    fn unshaped_changes_splice_the_row_at_the_items_index() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = people(&mut app);
+        source.insert(&mut app, 1, ("Bo", 50));
+        assert_eq!(names(&app, &source), ["Mina", "Bo", "Asha", "Diego", "Lea"]);
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::ItemInserted(1), ViewChange::RowInserted(1)]
+        );
+        source.replace(&mut app, 0, ("Ana", 20));
+        assert_eq!(changes(&app, &source), [ViewChange::RowReplaced(0)]);
+        source.remove(&mut app, 2);
+        assert_eq!(names(&app, &source), ["Ana", "Bo", "Diego", "Lea"]);
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::ItemRemoved(2), ViewChange::RowRemoved(2)]
+        );
+        assert_eq!(source.view(&app), [0, 1, 2, 3]);
+    }
+
+    // `TryApplyIncrementalSortedChange`: an item goes in at its sorted place, one the filter
+    // leaves out changes no row, and an item tying with a row is placed only when it is last.
+    #[test]
+    fn sorted_changes_place_the_item_or_rebuild_on_a_tie() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = people(&mut app);
+        source
+            .filter(&mut app, |p| p.1 < 40)
+            .sort(&mut app, |p| p.1, SortDirection::Ascending);
+        assert_eq!(names(&app, &source), ["Asha", "Lea", "Mina", "Diego"]);
+        source.insert(&mut app, 0, ("Bo", 27));
+        assert_eq!(names(&app, &source), ["Asha", "Lea", "Bo", "Mina", "Diego"]);
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::ItemInserted(0), ViewChange::RowInserted(2)]
+        );
+        source.insert(&mut app, 0, ("Old", 90));
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::ItemInserted(0)],
+            "filtered out"
+        );
+        let count = source.item_count(&app);
+        source.insert(&mut app, count, ("Zed", 25));
+        assert_eq!(
+            names(&app, &source),
+            ["Asha", "Lea", "Zed", "Bo", "Mina", "Diego"]
+        );
+        assert_eq!(
+            changes(&app, &source)[1],
+            ViewChange::RowInserted(2),
+            "a tie appended at the end"
+        );
+        source.insert(&mut app, 0, ("Ann", 25));
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::ItemInserted(0), ViewChange::Reset]
+        );
+        assert_eq!(
+            names(&app, &source),
+            ["Ann", "Asha", "Lea", "Zed", "Bo", "Mina", "Diego"]
+        );
+    }
+
+    #[test]
+    fn a_sorted_replace_moves_the_row_and_a_filter_alone_rebuilds() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = people(&mut app);
+        source.sort(&mut app, |p| p.0, SortDirection::Ascending);
+        source.replace(&mut app, 1, ("Zoe", 25));
+        assert_eq!(names(&app, &source), ["Diego", "Lea", "Mina", "Zoe"]);
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::RowRemoved(0), ViewChange::RowInserted(3)]
+        );
+        source.clear_sort(&mut app).filter(&mut app, |p| p.1 == 25);
+        source.remove(&mut app, 3);
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::ItemRemoved(3), ViewChange::Reset]
+        );
+        assert_eq!(names(&app, &source), ["Zoe"]);
     }
 }

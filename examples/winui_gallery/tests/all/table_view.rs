@@ -531,6 +531,94 @@ fn new_items_clear_the_selection() {
     assert_eq!(t.selection.selected_index(&f.cell.borrow()), None);
 }
 
+// MARK: Live items
+
+fn person(name: &'static str, age: u32) -> Person {
+    Person {
+        name,
+        role: "Analyst",
+        city: "Oslo",
+        age,
+    }
+}
+
+#[test]
+fn a_row_inserted_above_keeps_the_selection_on_its_item_without_an_event() {
+    let (mut f, t) = fixture(Setup::default());
+    tap_label(&mut f, "Diego");
+    let events = t.selection_changes.borrow().len();
+    t.source
+        .insert(&mut f.cell.borrow_mut(), 0, person("Bo", 50));
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        order(&f),
+        ["Mina", "Asha", "Diego", "Lea"],
+        "Bo is not among the names `order` reads"
+    );
+    assert!(label(&f, "Bo").is_some_and(|bo| bo.top < rect(&f, "Mina").top));
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(3));
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(3),
+        "Diego, moved down one"
+    );
+    assert_eq!(
+        t.selection_changes.borrow().len(),
+        events,
+        "a shift raises no SelectionChanged"
+    );
+}
+
+#[test]
+fn removing_or_replacing_the_selected_item_clears_the_selection() {
+    let (mut f, t) = fixture(Setup::default());
+    tap_label(&mut f, "Diego");
+    t.source.remove(&mut f.cell.borrow_mut(), 0);
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(1),
+        "Diego after Mina went"
+    );
+    t.source.remove(&mut f.cell.borrow_mut(), 1);
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), None);
+    assert_eq!(
+        t.selection_changes.borrow().last().unwrap().removed_items,
+        [1],
+        "the removed item, by the index it had"
+    );
+    tap_label(&mut f, "Asha");
+    t.source
+        .replace(&mut f.cell.borrow_mut(), 0, person("Asha", 30));
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        t.selection.selected_index(&f.cell.borrow()),
+        None,
+        "a replaced row is removed and inserted"
+    );
+}
+
+#[test]
+fn in_a_sorted_table_an_inserted_item_goes_to_its_place_and_the_selection_follows() {
+    let (mut f, t) = fixture(Setup::default());
+    f.tap("Name");
+    settle(&mut f);
+    tap_label(&mut f, "Lea");
+    t.source
+        .insert(&mut f.cell.borrow_mut(), 0, person("Bo", 50));
+    f.cell.checkpoint();
+    settle(&mut f);
+    let bo = rect(&f, "Bo").top;
+    assert!(rect(&f, "Asha").top < bo && bo < rect(&f, "Diego").top);
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(3));
+    assert_eq!(t.selection.selected_item(&f.cell.borrow()), Some(4), "Lea");
+}
+
 // MARK: Empty state
 
 #[test]
@@ -563,6 +651,14 @@ fn the_gallery_page_shows_a_table_and_an_empty_one() {
     assert!(
         backup < rect(&f, "music").top && backup < rect(&f, "browser").top,
         "the largest on top"
+    );
+    tap_label(&mut f, "mail");
+    f.tap("New connection");
+    settle(&mut f);
+    assert!(label(&f, "worker").is_some());
+    assert!(
+        label(&f, "Selected: mail (17.57.146.20:993)").is_some(),
+        "the selection stays on mail"
     );
     f.capture("table-view-gallery");
 }
