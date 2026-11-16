@@ -30,6 +30,8 @@ cargo waft build apk            # .apk for 64-bit ARM, signed with the debug key
 cargo waft build web            # static folder: index.html, app.js, app_bg.wasm, .br copies
 ```
 
+`-d` names a device as `cargo waft devices` lists it, as Flutter's `-d` does: by its id, else its whole name, else the start of its name, ignoring case and the kind of apostrophe. A physical device is taken before a simulator or an emulator the name also fits, two physical devices it fits are refused, and among simulators of one name the booted one is taken, else the newest runtime's. `ios` and `android` take each platform's own pick: the booted simulator or the newest iPhone; a device `adb` reaches, else the first emulator.
+
 `run` builds debug unless `--release`; `build` builds release unless `--debug`. Output lands under `target/waft/<target>/<profile>/`, so `cargo clean` removes it. In a workspace, pass `-p <package>`.
 
 ## Project shape
@@ -195,7 +197,7 @@ The CLI puts the `.app` together itself, as it does an iOS app: the executable i
 
 ## Source layout
 
-One module per platform, each with what `build` makes for it, what `run` does there and how it signs: `macos/`, `ios/`, `android`, `windows/`, `linux/`, `web/` and `wasm`. `main.rs` only reads the command and hands it to the platform's module; `packager.rs` holds what Windows and Linux share through cargo-packager, `apple.rs` what macOS and iOS share, and `devices.rs` what `run -d` can name.
+One module per platform, each with what `build` makes for it, what `run` does there and how it signs: `macos/`, `ios/`, `android/`, `windows/`, `linux/`, `web/` and `wasm`. `main.rs` only reads the command and hands it to the platform's module; `packager.rs` holds what Windows and Linux share through cargo-packager, `apple.rs` what macOS and iOS share, and `devices.rs` what `run -d` can name.
 
 ## Tools it fetches
 

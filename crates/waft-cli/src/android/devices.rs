@@ -204,8 +204,7 @@ fn process_id(adb: &Path, serial: &str, package: &str) -> Option<String> {
     None
 }
 
-/// Everything Android that `run -d` can name: the emulators the SDK knows, running or
-/// not, and the devices `adb` reaches that are not one of them.
+/// The emulators, each a device to run on once it runs, and the devices `adb` reaches.
 pub fn listed_devices() -> Result<Vec<crate::devices::Device>> {
     let attached = devices()?;
     let mut listed: Vec<crate::devices::Device> = emulators()?
@@ -213,15 +212,20 @@ pub fn listed_devices() -> Result<Vec<crate::devices::Device>> {
         .map(|avd| {
             let running = attached
                 .iter()
-                .any(|device| device.avd.as_deref() == Some(&avd));
+                .find(|device| device.avd.as_deref() == Some(&avd));
             crate::devices::Device {
                 name: avd.replace('_', " "),
-                id: avd,
+                id: avd.clone(),
+                detail: String::new(),
                 platform: "android emulator",
-                state: if running {
+                state: if running.is_some() {
                     "running".into()
                 } else {
                     String::new()
+                },
+                target: match running {
+                    Some(device) => Target::AndroidDevice(device.clone()),
+                    None => Target::AndroidEmulator(avd),
                 },
             }
         })
@@ -231,48 +235,53 @@ pub fn listed_devices() -> Result<Vec<crate::devices::Device>> {
             .into_iter()
             .filter(|device| device.avd.is_none())
             .map(|device| crate::devices::Device {
-                id: device.serial,
-                name: device.model,
+                id: device.serial.clone(),
+                name: device.model.clone(),
+                detail: String::new(),
                 platform: "android device",
-                state: device.state,
+                state: device.state.clone(),
+                target: Target::AndroidDevice(device),
             }),
     );
     Ok(listed)
 }
 
-/// `android` is a device `adb` reaches, else the first emulator to boot; a name is an
-/// emulator's AVD, running or not, or a device's serial.
-pub fn target_for(wanted: &str) -> Result<Option<Target>> {
-    let running = devices()?;
-    let ready = |device: &Device| device.state == "device";
-    if wanted == "android" {
-        if let Some(device) = running.iter().find(|device| ready(device)) {
-            return Ok(Some(Target::AndroidDevice(device.clone())));
-        }
-        if let Some(avd) = emulators()?.into_iter().next() {
-            return Ok(Some(Target::AndroidEmulator(avd)));
-        }
-        // An attached device that cannot be used is the likeliest thing the person meant.
-        if let Some(device) = running.first() {
-            bail!("{}", not_ready(device));
-        }
-        return Ok(None);
-    }
-    if let Some(device) = running
+/// What `-d android` picks: a device `adb` reaches and can build for, else the first emulator to
+/// boot. With neither, an attached device that cannot be used is the likeliest one meant, so it
+/// is refused, saying why.
+pub fn default_target(devices: &[crate::devices::Device]) -> Result<Option<Target>> {
+    let attached: Vec<&Device> = devices
         .iter()
-        .find(|d| d.serial.eq_ignore_ascii_case(wanted) || d.avd.as_deref() == Some(wanted))
-    {
-        // Named rather than picked, so say why it cannot be used instead of building first
-        // and failing at the install.
-        if !ready(device) {
-            bail!("{}", not_ready(device));
-        }
-        return Ok(Some(Target::AndroidDevice(device.clone())));
+        .filter_map(|device| match &device.target {
+            Target::AndroidDevice(device) => Some(device),
+            _ => None,
+        })
+        .collect();
+    if let Some(device) = attached.iter().find(|device| ready(device)) {
+        return Ok(Some(Target::AndroidDevice((*device).clone())));
     }
-    Ok(emulators()?
-        .into_iter()
-        .find(|avd| avd.eq_ignore_ascii_case(wanted))
-        .map(Target::AndroidEmulator))
+    if let Some(emulator) = devices
+        .iter()
+        .find(|device| matches!(device.target, Target::AndroidEmulator(_)))
+    {
+        return Ok(Some(emulator.target.clone()));
+    }
+    if let Some(device) = attached.first() {
+        bail!("{}", not_ready(device));
+    }
+    Ok(None)
+}
+
+/// Refuses a device `adb` lists but cannot build for, saying why, before anything is built.
+pub fn ensure_ready(device: &Device) -> Result<()> {
+    if !ready(device) {
+        bail!("{}", not_ready(device));
+    }
+    Ok(())
+}
+
+fn ready(device: &Device) -> bool {
+    device.state == "device"
 }
 
 /// Why a device `adb` lists cannot be built for, and what to do about it.

@@ -18,9 +18,7 @@ use std::process::Command;
 use anyhow::{Result, bail};
 use plist::{Dictionary, Value};
 
-pub use devices::{
-    IosDevice, Simulator, connected_iphones, listed_devices, pick_simulator, simulators,
-};
+pub use devices::{IosDevice, Simulator, default_simulator, listed_devices};
 pub use signing::ExportMethod;
 use signing::Signing;
 

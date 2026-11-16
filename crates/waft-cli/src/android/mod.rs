@@ -51,7 +51,7 @@ mod sdk;
 mod signing;
 mod xml;
 
-pub use devices::{Device, emulators, listed_devices, target_for};
+pub use devices::{Device, default_target, emulators, ensure_ready, listed_devices};
 pub use sdk::sdk;
 
 use library::AndroidLibrary;
