@@ -1,16 +1,13 @@
 //! Flutter counterpart: `widgets/text.dart`, plus the public `RichText` from `basic.dart`.
 //!
-//! [`Text`] builds only the
-//! [`RichText`] branch: selection (`SelectionContainer`, `_SelectableTextContainer`,
-//! `selectionColor`),
-//! `Locale`, `StrutStyle`, and `Semantics` wait, and so does [`RichText`]'s
-//! `SelectionRegistrar`.
+//! [`Text`] builds only the [`RichText`] branch: selection (`SelectionContainer.maybeOf`,
+//! `_SelectableTextContainer`, `selectionColor`), `Locale`, `StrutStyle`, and `Semantics` wait.
 
 use waft_embedder::{Color, FontWeight, TextAlign, TextDirection, TextHeightBehavior};
 use waft_foundation::App;
 use waft_painting::{InlineSpanRef, TextOverflow, TextScaler, TextSpan, TextStyle, TextWidthBasis};
 use waft_rendering::{
-    AnyRenderObject, AnySelectionRegistrar, RenderBox, RenderHandle, RenderParagraph,
+    AnyRenderObject, RenderBox, RenderHandle, RenderParagraph, SelectionRegistrarRef,
 };
 
 use crate::framework::{
@@ -956,8 +953,11 @@ pub struct RichText {
     pub text_width_basis: TextWidthBasis,
     /// Defines how to apply `TextStyle.height` over and under text.
     pub text_height_behavior: Option<TextHeightBehavior>,
-    /// A callback that is invoked to notify the selection registrar of the paragraph.
-    pub selection_registrar: Option<AnySelectionRegistrar>,
+    /// The [`SelectionRegistrar`](waft_rendering::SelectionRegistrar) this rich text is
+    /// subscribed to.
+    ///
+    /// If this is set, [`selection_color`](Self::selection_color) must be non-null.
+    pub selection_registrar: Option<SelectionRegistrarRef>,
     /// The color to use when painting the selection.
     pub selection_color: Option<Color>,
 }
@@ -1045,7 +1045,7 @@ impl RichText {
     }
 
     /// Dart `RichText(selectionRegistrar:)`.
-    pub fn selection_registrar(mut self, registrar: AnySelectionRegistrar) -> RichText {
+    pub fn selection_registrar(mut self, registrar: SelectionRegistrarRef) -> RichText {
         self.selection_registrar = Some(registrar);
         self
     }
@@ -1071,6 +1071,10 @@ impl RenderObjectWidget for RichText {
         self.key.as_ref()
     }
 
+    fn debug_check_constructor(&self) {
+        debug_assert!(self.selection_registrar.is_none() || self.selection_color.is_some());
+    }
+
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
         let text_direction = self
             .text_direction
@@ -1085,7 +1089,7 @@ impl RenderObjectWidget for RichText {
         render_object.set_text_width_basis(app, self.text_width_basis);
         render_object.set_text_height_behavior(app, self.text_height_behavior);
         render_object.set_device_pixel_ratio(app, device_pixel_ratio);
-        render_object.set_registrar(app, self.selection_registrar);
+        render_object.set_registrar(app, self.selection_registrar.clone());
         render_object.set_selection_color(app, self.selection_color);
         render_object.as_object()
     }
@@ -1110,7 +1114,7 @@ impl RenderObjectWidget for RichText {
         render_object.set_text_height_behavior(app, self.text_height_behavior);
         let device_pixel_ratio = Self::device_pixel_ratio(app, context);
         render_object.set_device_pixel_ratio(app, device_pixel_ratio);
-        render_object.set_registrar(app, self.selection_registrar);
+        render_object.set_registrar(app, self.selection_registrar.clone());
         render_object.set_selection_color(app, self.selection_color);
     }
 }

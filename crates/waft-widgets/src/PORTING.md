@@ -46,6 +46,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/animated_size.rs → animated_size.dart
 - widgets/lookup_boundary.rs → lookup_boundary.dart
 - widgets/default_selection_style.rs → default_selection_style.dart
+- widgets/selection_container.rs → selection_container.dart
 - widgets/overflow_bar.rs → overflow_bar.dart
 - widgets/bottom_navigation_bar_item.rs → bottom_navigation_bar_item.dart
 - widgets/date.rs → date.dart
@@ -748,16 +749,9 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — a tag is only compared with `==` and hashed, so one erased trait in `waft-foundation` serves it where Dart's `Object` needs no declaration.
   Affect: a tag is a shared trait object; two tags of different types never match, as two Dart objects of different classes do not.
 
-## selection_container.rs → selection_container.dart
-
-- Change: `SelectionContainer` holds its delegate as an erased arena object, `AnySelectionContainerDelegate`, whose `as_selection_registrar` hands the same object to `SelectionRegistrarScope`, and the state keeps its own notifier that relays the delegate's changes.
-  Reason: language — Dart's abstract delegate class is a trait, and an object that keeps fields and listeners lives in the arena.
-  Affect: a delegate is made in the arena and given to `SelectionContainer::new` as a `SelectionContainerDelegateRef`; the selectables below it receive the delegate as their registrar.
-
 ## Deferred
 
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
-- raw_tooltip.rs: `SelectionContainer.disabled` around the overlay child (the check is kept as `selection_container_maybe_of`, which answers `None`). Trigger: the raw_tooltip edit of step 17.
 - selection_container_test.dart: all seven cases build a `MultiSelectableSelectionContainerDelegate` (selectable_region.dart) or `Text`'s internal selection container (text.dart), neither ported yet. Trigger: `MultiSelectableSelectionContainerDelegate` and text.dart's selection container.
 - raw_tooltip.rs: the `SemanticsService.tooltip` announcement. Trigger: the semantics tree.
 - form.rs: `Form.onWillPop`, the `WillPopScope` it builds, and the deprecated `Form.onPopInvoked`. Trigger: `WillPopScope` (deferred; Flutter deprecates both).

@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::collections::HashSet;
-use std::convert::Infallible;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
@@ -41,6 +40,7 @@ use crate::widgets::debug::debug_check_has_overlay;
 use crate::widgets::feedback::Feedback;
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::overlay::{OverlayChildLayoutInfo, OverlayPortal, OverlayPortalController};
+use crate::widgets::selection_container::SelectionContainer;
 use crate::widgets::ticker_provider::{
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData,
 };
@@ -1344,17 +1344,12 @@ impl RawTooltipState {
         .bottom(bottom)
         .into_widget();
 
-        match selection_container_maybe_of(app, context) {
-            None => overlay_child,
-            Some(registrar) => match registrar {},
+        if SelectionContainer::maybe_of(app, context).is_none() {
+            overlay_child
+        } else {
+            SelectionContainer::disabled(overlay_child).into_widget()
         }
     }
-}
-
-/// Dart's `SelectionContainer.maybeOf(context)`. `SelectionContainer` is not ported, so no
-/// registrar exists and the overlay child is never wrapped in `SelectionContainer.disabled`.
-fn selection_container_maybe_of(_app: &mut App, _context: BuildContext) -> Option<Infallible> {
-    None
 }
 
 impl SingleTickerProviderStateMixin for RawTooltipState {

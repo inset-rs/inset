@@ -5,11 +5,12 @@
 //! as one selectable.
 
 use waft_embedder::{Matrix4, Rect, Size};
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listener, Ref};
+use waft_foundation::{App, Handle, HandleId, ListenableObject, Listener, Ref};
 use waft_rendering::{
-    AnyRenderObject, AnySelectable, AnySelectionRegistrar, SelectedContent, SelectedContentRange,
-    SelectionEvent, SelectionGeometry, SelectionHandler, SelectionRegistrant,
-    SelectionRegistrantData, SelectionRegistrar, SelectionResult,
+    AnyRenderObject, AnySelectable, AnySelectionRegistrar, LayerLink, Selectable, SelectedContent,
+    SelectedContentRange, SelectionEvent, SelectionGeometry, SelectionHandler, SelectionRegistrant,
+    SelectionRegistrantData, SelectionRegistrar, SelectionRegistrarRef, SelectionResult,
+    SelectionStatus,
 };
 
 use crate::framework::IntoWidget;
@@ -27,7 +28,7 @@ pub struct SelectionContainer {
     pub key: Option<KeyRef>,
 
     /// The registrar this container is registered to; the context's when `None`.
-    pub registrar: Option<AnySelectionRegistrar>,
+    pub registrar: Option<SelectionRegistrarRef>,
 
     /// The delegate for the events sent to this container; `None` disables selection.
     pub delegate: Option<SelectionContainerDelegateRef>,
@@ -36,7 +37,7 @@ pub struct SelectionContainer {
     pub child: WidgetRef,
 }
 
-/// A reference to a selection container delegate, which the widget and its state keep.
+/// A field that keeps a selection container delegate: the widget's.
 pub type SelectionContainerDelegateRef = waft_foundation::Retained<AnySelectionContainerDelegate>;
 
 impl SelectionContainer {
@@ -68,21 +69,27 @@ impl SelectionContainer {
     }
 
     /// Dart `SelectionContainer(registrar:)`.
-    pub fn registrar(mut self, registrar: AnySelectionRegistrar) -> Self {
+    pub fn registrar(mut self, registrar: SelectionRegistrarRef) -> Self {
         self.registrar = Some(registrar);
         self
     }
 
     /// The immediate ancestor [`SelectionRegistrar`] of `context`, `None` when there is no
     /// selection container above it or the immediate one is disabled.
-    pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<AnySelectionRegistrar> {
+    pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<SelectionRegistrarRef> {
         context
             .depend_on_inherited_widget_of_exact_type::<SelectionRegistrarScope>(app)
-            .and_then(|scope| scope.registrar)
+            .and_then(|scope| scope.registrar.clone())
     }
 
     fn is_disabled(&self) -> bool {
         self.delegate.is_none()
+    }
+
+    fn delegate_handle(&self) -> Option<AnySelectionContainerDelegate> {
+        self.delegate
+            .as_ref()
+            .map(SelectionContainerDelegateRef::handle)
     }
 }
 
@@ -104,50 +111,36 @@ impl StatefulWidget for SelectionContainer {
     fn create_state(&self) -> SelectionContainerState {
         SelectionContainerState {
             state: StateData::new(),
-            change_notifier: ChangeNotifierData::new(),
             selection_registrant: SelectionRegistrantData::new(),
-            delegate_listener: None,
+            listeners: Vec::new(),
         }
     }
 }
 
 /// The state of a [`SelectionContainer`]: Dart's `_SelectionContainerState`.
+///
+/// It is a [`Selectable`] whose listeners are the delegate's: adding one adds it to the delegate
+/// and remembers it, so a new delegate receives them all.
 pub struct SelectionContainerState {
     state: StateData<SelectionContainer>,
-    change_notifier: ChangeNotifierData,
     selection_registrant: SelectionRegistrantData,
-    delegate_listener: Option<Listener>,
+    listeners: Vec<Listener>,
 }
 
 const DISABLED_GEOMETRY: SelectionGeometry = SelectionGeometry {
     start_selection_point: None,
     end_selection_point: None,
-    status: waft_rendering::SelectionStatus::None,
+    status: SelectionStatus::None,
     selection_rects: Vec::new(),
     has_content: true,
 };
 
 impl SelectionContainerState {
-    fn is_disabled(self: Handle<Self>, app: &App) -> bool {
-        self.widget(app).is_disabled()
-    }
-
-    fn delegate(self: Handle<Self>, app: &App) -> Option<SelectionContainerDelegateRef> {
-        self.widget(app).delegate.clone()
-    }
-
-    fn delegate_handle(self: Handle<Self>, app: &App) -> Option<AnySelectionContainerDelegate> {
-        self.delegate(app).map(|delegate| delegate.handle())
-    }
-
-    fn container_box(self: Handle<Self>, app: &App) -> Option<AnyRenderObject> {
-        self.context(app).find_render_object(app)
-    }
-
-    /// The render box of the context, which must have been laid out.
-    fn render_box(self: Handle<Self>, app: &App) -> AnyRenderObject {
-        self.container_box(app)
-            .expect("The _selectionContainerContext must have a renderObject")
+    /// The enabled widget's delegate; Dart's `widget.delegate!`.
+    fn delegate(self: Handle<Self>, app: &App) -> AnySelectionContainerDelegate {
+        self.widget(app)
+            .delegate_handle()
+            .expect("an enabled selection container has a delegate")
     }
 }
 
@@ -156,151 +149,129 @@ impl State for SelectionContainerState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        if self.is_disabled(app) {
-            return;
+        let widget = self.widget(app);
+        if !widget.is_disabled() {
+            let registrar = widget.registrar.clone();
+            self.delegate(app)
+                .set_selection_container_context(app, Some(self.context(app)));
+            if let Some(registrar) = registrar {
+                self.set_registrar(app, Some(registrar));
+            }
         }
-        if let Some(delegate) = self.delegate_handle(app) {
-            delegate.set_selection_container_context(app, Some(self.context(app)));
-        }
-        if let Some(registrar) = self.widget(app).registrar {
-            self.set_registrar(app, Some(registrar));
-        }
-        self.attach_delegate_listener(app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &SelectionContainer) {
-        let new_widget = self.widget(app);
-        let new_delegate = new_widget.delegate.clone();
-        let new_disabled = new_widget.is_disabled();
-        let new_registrar = new_widget.registrar;
-        if old_widget.delegate != new_delegate {
-            if !old_widget.is_disabled()
-                && let Some(old_delegate) = &old_widget.delegate
-            {
+        let widget = self.widget(app);
+        let new_delegate = widget.delegate_handle();
+        let disabled = widget.is_disabled();
+        let registrar = widget.registrar.clone();
+        let old_delegate = old_widget.delegate_handle();
+        if old_delegate != new_delegate {
+            let listeners = app.get(self).listeners.clone();
+            if let Some(old_delegate) = old_delegate {
                 old_delegate.set_selection_container_context(app, None);
-            }
-            self.detach_delegate_listener(app);
-            if !new_disabled {
-                if let Some(new_delegate) = &new_delegate {
-                    new_delegate.set_selection_container_context(app, Some(self.context(app)));
+                for listener in &listeners {
+                    old_delegate.remove_listener(app, listener);
                 }
-                self.attach_delegate_listener(app);
             }
-            let old_value = old_widget
-                .delegate
-                .as_ref()
-                .map(|delegate| delegate.selection_geometry(app));
-            let new_value = new_delegate
-                .as_ref()
-                .map(|delegate| delegate.selection_geometry(app));
+            if let Some(new_delegate) = new_delegate {
+                new_delegate.set_selection_container_context(app, Some(self.context(app)));
+                for listener in &listeners {
+                    new_delegate.add_listener(app, listener.clone());
+                }
+            }
+            let old_value = old_delegate.map(|delegate| delegate.value(app));
+            let new_value = new_delegate.map(|delegate| delegate.value(app));
             if old_value != new_value {
-                self.notify_listeners(app);
+                for listener in &listeners {
+                    listener.call(app);
+                }
             }
         }
-        if new_disabled {
+        if disabled {
             self.set_registrar(app, None);
-        } else if let Some(registrar) = new_registrar {
+        } else if let Some(registrar) = registrar {
             self.set_registrar(app, Some(registrar));
         }
-        debug_assert!(!new_disabled || self.registrar(app).is_none());
+        debug_assert!(!disabled || self.registrar(app).is_none());
     }
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let registrar = widget.registrar;
         let disabled = widget.is_disabled();
-        if registrar.is_none() && !disabled {
-            let from_context = SelectionContainer::maybe_of(app, self.context(app));
-            self.set_registrar(app, from_context);
+        if widget.registrar.is_none() && !disabled {
+            let registrar = SelectionContainer::maybe_of(app, self.context(app));
+            self.set_registrar(app, registrar);
         }
         debug_assert!(!disabled || self.registrar(app).is_none());
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if !self.is_disabled(app)
-            && let Some(delegate) = self.delegate_handle(app)
-        {
+        if !self.widget(app).is_disabled() {
+            let delegate = self.delegate(app);
             delegate.set_selection_container_context(app, None);
+            for listener in app.get(self).listeners.clone() {
+                delegate.remove_listener(app, &listener);
+            }
         }
-        self.detach_delegate_listener(app);
         self.dispose_selection_registrant(app);
-        ChangeNotifierData::dispose(app, self);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let widget = self.widget(app);
-        if widget.is_disabled() {
-            return SelectionRegistrarScope::disabled(widget.child.clone()).into_widget();
+        match &widget.delegate {
+            None => SelectionRegistrarScope::disabled(widget.child.clone()).into_widget(),
+            Some(delegate) => {
+                SelectionRegistrarScope::new(delegate.erase(), widget.child.clone()).into_widget()
+            }
         }
-        let delegate = widget.delegate.as_ref().expect("not disabled");
-        SelectionRegistrarScope::new(delegate.as_selection_registrar(), widget.child.clone())
-            .into_widget()
     }
 }
 
-impl SelectionContainerState {
-    fn attach_delegate_listener(self: Handle<Self>, app: &mut App) {
-        let Some(delegate) = self.delegate_handle(app) else {
-            return;
-        };
-        let listener = Listener::new(move |app| self.notify_listeners(app));
-        delegate.add_listener(app, listener.clone());
-        app.get_mut(self).delegate_listener = Some(listener);
-    }
-
-    fn detach_delegate_listener(self: Handle<Self>, app: &mut App) {
-        if let Some(listener) = app.get_mut(self).delegate_listener.take()
-            && let Some(delegate) = self.delegate_handle(app)
-        {
-            delegate.remove_listener(app, &listener);
+impl ListenableObject for SelectionContainerState {
+    fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+        debug_assert!(!self.widget(app).is_disabled());
+        self.delegate(app).add_listener(app, listener.clone());
+        let listeners = &mut app.get_mut(self).listeners;
+        if !listeners.contains(&listener) {
+            listeners.push(listener);
         }
     }
 
-    fn value(self: Handle<Self>, app: &App) -> SelectionGeometry {
-        if self.is_disabled(app) {
-            return DISABLED_GEOMETRY;
+    fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+        if let Some(delegate) = self.widget(app).delegate_handle() {
+            delegate.remove_listener(app, listener);
         }
-        self.delegate_handle(app)
-            .expect("an enabled container has a delegate")
-            .selection_geometry(app)
-    }
-}
-
-impl ChangeNotifier for SelectionContainerState {
-    fn change_notifier_data(&self) -> &ChangeNotifierData {
-        &self.change_notifier
-    }
-
-    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
-        &mut self.change_notifier
+        app.get_mut(self)
+            .listeners
+            .retain(|registered| registered != listener);
     }
 }
 
 impl SelectionHandler for SelectionContainerState {
-    fn selection_geometry(self: Handle<Self>, app: &App) -> SelectionGeometry {
-        self.value(app)
+    fn value(self: Handle<Self>, app: &App) -> SelectionGeometry {
+        if self.widget(app).is_disabled() {
+            return DISABLED_GEOMETRY;
+        }
+        self.delegate(app).value(app)
     }
 
     fn push_handle_layers(
         self: Handle<Self>,
         app: &mut App,
-        start_handle: Option<Ref<waft_rendering::LayerLink>>,
-        end_handle: Option<Ref<waft_rendering::LayerLink>>,
+        start_handle: Option<Ref<LayerLink>>,
+        end_handle: Option<Ref<LayerLink>>,
     ) {
-        debug_assert!(!self.is_disabled(app));
-        self.delegate_handle(app)
-            .expect("an enabled container has a delegate")
+        self.delegate(app)
             .push_handle_layers(app, start_handle, end_handle);
     }
 
     fn selected_content(self: Handle<Self>, app: &App) -> Option<SelectedContent> {
-        debug_assert!(!self.is_disabled(app));
-        self.delegate_handle(app)?.selected_content(app)
+        self.delegate(app).selected_content(app)
     }
 
     fn selection(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
-        debug_assert!(!self.is_disabled(app));
-        self.delegate_handle(app)?.selection(app)
+        self.delegate(app).selection(app)
     }
 
     fn dispatch_selection_event(
@@ -308,38 +279,34 @@ impl SelectionHandler for SelectionContainerState {
         app: &mut App,
         event: &SelectionEvent,
     ) -> SelectionResult {
-        debug_assert!(!self.is_disabled(app));
-        self.delegate_handle(app)
-            .expect("an enabled container has a delegate")
-            .dispatch_selection_event(app, event)
+        self.delegate(app).dispatch_selection_event(app, event)
     }
 
     fn content_length(self: Handle<Self>, app: &App) -> usize {
-        self.delegate_handle(app)
-            .map_or(0, |delegate| delegate.content_length(app))
+        self.delegate(app).content_length(app)
     }
 }
 
-impl waft_rendering::Selectable for SelectionContainerState {
+impl Selectable for SelectionContainerState {
     fn get_transform_to(
         self: Handle<Self>,
         app: &App,
         ancestor: Option<AnyRenderObject>,
     ) -> Matrix4 {
-        debug_assert!(!self.is_disabled(app));
-        self.render_box(app).get_transform_to(app, ancestor)
+        debug_assert!(!self.widget(app).is_disabled());
+        container_render_object(app, self.context(app)).get_transform_to(app, ancestor)
     }
 
     fn size(self: Handle<Self>, app: &mut App) -> Size {
-        self.render_box(app)
-            .as_box()
-            .map(|box_| box_.size(app))
-            .unwrap_or(Size::ZERO)
+        container_render_box(app, self.context(app)).size(app)
     }
 
     fn bounding_boxes(self: Handle<Self>, app: &mut App) -> Vec<Rect> {
-        let box_ = self.render_box(app);
-        vec![box_.paint_bounds(app)]
+        vec![
+            container_render_box(app, self.context(app))
+                .as_object()
+                .paint_bounds(app),
+        ]
     }
 
     fn dispose_selectable(self: Handle<Self>, app: &mut App) {
@@ -360,19 +327,33 @@ impl SelectionRegistrant for SelectionContainerState {
     }
 }
 
+/// `context.findRenderObject()!`.
+fn container_render_object(app: &App, context: BuildContext) -> AnyRenderObject {
+    context
+        .find_render_object(app)
+        .expect("a selection container's context has a render object once it is built")
+}
+
+/// `context.findRenderObject()! as RenderBox`.
+fn container_render_box(app: &App, context: BuildContext) -> waft_rendering::AnyRenderBox {
+    container_render_object(app, context)
+        .as_box()
+        .expect("a selection container's render object is a box")
+}
+
 /// An inherited widget that hosts a [`SelectionRegistrar`] for its subtree.
 pub struct SelectionRegistrarScope {
     pub key: Option<KeyRef>,
 
     /// The registrar hosted by this scope; `None` disables selection for the subtree.
-    pub registrar: Option<AnySelectionRegistrar>,
+    pub registrar: Option<SelectionRegistrarRef>,
 
     pub child: WidgetRef,
 }
 
 impl SelectionRegistrarScope {
     /// Creates a scope that hosts `registrar`.
-    pub fn new<K>(registrar: AnySelectionRegistrar, child: impl IntoWidget<K>) -> Self {
+    pub fn new<K>(registrar: SelectionRegistrarRef, child: impl IntoWidget<K>) -> Self {
         SelectionRegistrarScope {
             key: None,
             registrar: Some(registrar),
@@ -433,9 +414,7 @@ impl SelectionContainerDelegateData {
 /// A delegate to handle selection events for a [`SelectionContainer`].
 ///
 /// The delegate also receives the selectables in the subtree through [`SelectionRegistrar`].
-pub trait SelectionContainerDelegate:
-    SelectionHandler + SelectionRegistrar + ChangeNotifier + Sized + 'static
-{
+pub trait SelectionContainerDelegate: SelectionHandler + SelectionRegistrar {
     /// Erases this delegate for a [`SelectionContainer`], as Dart's implicit upcast.
     fn as_selection_container_delegate(self: Handle<Self>) -> AnySelectionContainerDelegate {
         AnySelectionContainerDelegate {
@@ -456,53 +435,43 @@ pub trait SelectionContainerDelegate:
         app: &mut App,
     ) -> &mut SelectionContainerDelegateData;
 
-    /// The paint transform from `child` to this delegate's container.
+    /// Gets the paint transform from the [`Selectable`] child to the [`SelectionContainer`] of
+    /// this delegate; the container must have been laid out.
     fn get_transform_from(self: Handle<Self>, app: &App, child: AnySelectable) -> Matrix4 {
-        let context = self
-            .selection_container_delegate_data(app)
-            .selection_container_context
-            .expect("getTransformFrom cannot be called before SelectionContainer is laid out.");
-        let container = context
-            .find_render_object(app)
-            .expect("getTransformFrom cannot be called before SelectionContainer is laid out.");
+        let container = container_render_object(app, self.selection_container_context(app));
         child.get_transform_to(app, Some(container))
     }
 
-    /// The paint transform from this delegate's container to `ancestor`.
+    /// Gets the paint transform from the [`SelectionContainer`] of this delegate to `ancestor`;
+    /// the container must have been laid out.
     fn get_transform_to(
         self: Handle<Self>,
         app: &App,
         ancestor: Option<AnyRenderObject>,
     ) -> Matrix4 {
-        self.selection_container_box(app)
-            .expect("getTransformTo cannot be called before SelectionContainer is laid out.")
+        container_render_object(app, self.selection_container_context(app))
             .get_transform_to(app, ancestor)
     }
 
     /// Whether the [`SelectionContainer`] has undergone layout and has a size.
     fn has_size(self: Handle<Self>, app: &App) -> bool {
-        self.selection_container_box(app)
-            .and_then(|box_| box_.as_box())
-            .is_some_and(|box_| box_.has_size(app))
+        container_render_box(app, self.selection_container_context(app)).has_size(app)
     }
 
-    /// The size of the [`SelectionContainer`], which must have been laid out.
+    /// Gets the size of the [`SelectionContainer`] of this delegate; it must have been laid out.
     fn container_size(self: Handle<Self>, app: &App) -> Size {
         debug_assert!(
             self.has_size(app),
             "containerSize cannot be called before SelectionContainer is laid out."
         );
-        self.selection_container_box(app)
-            .and_then(|box_| box_.as_box())
-            .map(|box_| box_.size(app))
-            .unwrap_or(Size::ZERO)
+        container_render_box(app, self.selection_container_context(app)).size(app)
     }
 
-    /// The render object of the container context.
-    fn selection_container_box(self: Handle<Self>, app: &App) -> Option<AnyRenderObject> {
+    /// Dart's `_selectionContainerContext!`: the context of the container this delegate serves.
+    fn selection_container_context(self: Handle<Self>, app: &App) -> BuildContext {
         self.selection_container_delegate_data(app)
-            .selection_container_context?
-            .find_render_object(app)
+            .selection_container_context
+            .expect("the delegate's SelectionContainer has been built")
     }
 }
 
@@ -518,7 +487,7 @@ pub struct AnySelectionContainerDelegate {
 }
 
 struct SelectionContainerDelegateVTable {
-    selection_geometry: fn(&App, HandleId) -> SelectionGeometry,
+    value: fn(&App, HandleId) -> SelectionGeometry,
     push_handle_layers: waft_rendering::PushHandleLayers,
     selected_content: fn(&App, HandleId) -> Option<SelectedContent>,
     selection: fn(&App, HandleId) -> Option<SelectedContentRange>,
@@ -539,7 +508,7 @@ struct SelectionContainerDelegateVTable {
 impl SelectionContainerDelegateVTable {
     const fn of<A: SelectionContainerDelegate>() -> SelectionContainerDelegateVTable {
         SelectionContainerDelegateVTable {
-            selection_geometry: |app, id| A::selection_geometry(resolve(id), app),
+            value: |app, id| A::value(resolve(id), app),
             push_handle_layers: |app, id, start, end| {
                 A::push_handle_layers(resolve(id), app, start, end)
             },
@@ -552,10 +521,10 @@ impl SelectionContainerDelegateVTable {
             add: |app, id, selectable| A::add(resolve(id), app, selectable),
             remove: |app, id, selectable| A::remove(resolve(id), app, selectable),
             add_listener: |app, id, listener| {
-                waft_foundation::ListenableObject::add_listener(resolve::<A>(id), app, listener)
+                ListenableObject::add_listener(resolve::<A>(id), app, listener)
             },
             remove_listener: |app, id, listener| {
-                waft_foundation::ListenableObject::remove_listener(resolve::<A>(id), app, listener)
+                ListenableObject::remove_listener(resolve::<A>(id), app, listener)
             },
             set_selection_container_context: |app, id, context| {
                 A::selection_container_delegate_data_mut(resolve(id), app)
@@ -578,15 +547,15 @@ impl AnySelectionContainerDelegate {
         self.id
     }
 
-    pub fn selection_geometry(self, app: &App) -> SelectionGeometry {
-        (self.vtable.selection_geometry)(app, self.id)
+    pub fn value(self, app: &App) -> SelectionGeometry {
+        (self.vtable.value)(app, self.id)
     }
 
     pub fn push_handle_layers(
         self,
         app: &mut App,
-        start_handle: Option<Ref<waft_rendering::LayerLink>>,
-        end_handle: Option<Ref<waft_rendering::LayerLink>>,
+        start_handle: Option<Ref<LayerLink>>,
+        end_handle: Option<Ref<LayerLink>>,
     ) {
         (self.vtable.push_handle_layers)(app, self.id, start_handle, end_handle)
     }
@@ -663,3 +632,11 @@ impl std::fmt::Debug for AnySelectionContainerDelegate {
 waft_foundation::erased_handle!(
     AnySelectionContainerDelegate: SelectionContainerDelegate => SelectionContainerDelegate::as_selection_container_delegate
 );
+
+/// The delegate as the registrar its container hosts: Dart's implicit upcast of
+/// `SelectionContainerDelegate implements SelectionRegistrar`.
+impl From<AnySelectionContainerDelegate> for AnySelectionRegistrar {
+    fn from(delegate: AnySelectionContainerDelegate) -> AnySelectionRegistrar {
+        delegate.as_selection_registrar()
+    }
+}

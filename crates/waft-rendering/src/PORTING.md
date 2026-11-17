@@ -33,9 +33,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## selection.rs → selection.dart
 
-- Change: `SelectionEvent` is one enum with a variant per Dart subclass, and `SelectionRegistrar` and `Selectable` are traits whose abstract types are erased arena handles, `AnySelectionRegistrar` and `AnySelectable`.
-  Reason: language — Rust has no subclassing or class downcasts, so the event subclasses become enum variants and a registrar holds selectables of more than one kind through the erased handle.
-  Affect: callers match the event variant instead of downcasting `SelectableRegion`'s event class, and a registrar adds and removes `AnySelectable`s.
+- Change: `SelectionEvent` is one enum with a variant per Dart subclass, its `type` read with `ty()`.
+  Reason: language — Rust has no subclasses to downcast an event to.
+  Affect: a handler matches the event's variant where Dart casts it to `SelectionEdgeUpdateEvent` and the rest.
+
+- Change: a `SelectionRegistrar` holds its selectables as bare `AnySelectable`s, which keep nothing, while a selectable keeps its registrar (`SelectionRegistrarRef`).
+  Reason: language — a container's state is a selectable that keeps the registrar above it, and that registrar keeping the state back would be a ring of `Ref`s nothing frees.
+  Affect: a selectable must be removed from its registrar before it is freed, as `RenderParagraph` and `SelectionRegistrant` do; a registrar that still lists a freed selectable panics when it calls it.
 
 ## debug.rs → debug.dart
 
@@ -261,8 +265,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a subclass instance survives one hop (parent's `layout` or `layout_child` → the child's stored constraints → a `LayoutBuilder`'s builder); a render object that hands its own `constraints()` on to its child passes the plain value, where Dart passes the subclass object along. Nothing in Flutter's scaffold relies on more than one hop.
 
 ## Deferred
-- `paragraph_test.dart`'s "paints selection highlights outside fade layer and handles after text": Waft's `TextOverflow::Fade` clips without a shader, so there is no fade layer or `debugHasOverflowShader` to test. Trigger: the fade overflow shader.
-- `paragraph_test.dart`'s "can handle select all when contains widget span": `WidgetSpan` does not yet register its child with the paragraph's selection registrar. Trigger: widget-span selection in `Text`.
+- `paragraph_test.dart`'s "paints selection highlights outside fade layer and handles after text": the checks of the fade's `saveLayer` and shader rect. Trigger: the fade overflow shader.
 
 - box.rs: `AnyBoxConstraints`'s `Hash` (Dart's subclasses override `hashCode`). Trigger: the first map or set keyed by one.
 - `RenderImage`'s `color` / `colorBlendMode` and `invertColors`. Trigger: painting's colour filters.

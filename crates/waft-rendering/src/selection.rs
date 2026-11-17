@@ -8,8 +8,10 @@
 //! identity plus a vtable, so a registrar can hold selectables of more than one kind and a widget
 //! can hold a registrar without naming its concrete type.
 
-use waft_embedder::{Matrix4, Offset, Rect, Size, TextDirection, TextPosition, TextRange};
-use waft_foundation::{App, ChangeNotifier, Handle, HandleId, ListenableHandle, Listener, Ref};
+use waft_embedder::{Matrix4, Offset, Rect, Size, TextDirection};
+use waft_foundation::{
+    App, Handle, HandleId, ListenableHandle, ListenableObject, Listener, Ref, Retained,
+};
 
 use crate::layer::LayerLink;
 use crate::object::AnyRenderObject;
@@ -54,7 +56,7 @@ impl SelectedContentRange {
 }
 
 /// The selected content in a selectable or handler; only plain text so far.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct SelectedContent {
     /// The selected content in plain text format.
     pub plain_text: String,
@@ -72,10 +74,11 @@ impl SelectedContent {
 /// The abstract interface to handle [`SelectionEvent`]s.
 ///
 /// Extended by [`Selectable`] and by a widget's selection container delegate. This class returns
-/// a [`SelectionGeometry`] as its value and notifies its listeners when that geometry changes.
-pub trait SelectionHandler: Sized + 'static {
+/// a [`SelectionGeometry`] as its [`value`](Self::value) and notifies its listeners when that
+/// geometry changes, as Dart's `ValueListenable<SelectionGeometry>`.
+pub trait SelectionHandler: ListenableObject {
     /// The geometry of the current selection.
-    fn selection_geometry(self: Handle<Self>, app: &App) -> SelectionGeometry;
+    fn value(self: Handle<Self>, app: &App) -> SelectionGeometry;
 
     /// Marks this handler responsible for pushing [`LeaderLayer`](crate::LeaderLayer)s for the
     /// selection handles. `None` cleans up a layer it pushed before.
@@ -105,11 +108,10 @@ pub trait SelectionHandler: Sized + 'static {
 
 /// A mixin that can be selected by users under a `SelectionArea`.
 ///
-/// Receives selection events; [`selection_geometry`](SelectionHandler::selection_geometry) must
-/// reflect the current selection, and listeners are notified when it changes. The object draws
-/// the selection highlight itself. It registers with a [`SelectionRegistrar`] through
-/// [`SelectionRegistrant`].
-pub trait Selectable: SelectionHandler + ChangeNotifier {
+/// Receives selection events; [`value`](SelectionHandler::value) must reflect the current
+/// selection, and listeners are notified when it changes. The object draws the selection
+/// highlight itself. It registers with a [`SelectionRegistrar`] through [`SelectionRegistrant`].
+pub trait Selectable: SelectionHandler {
     /// Erases this selectable for a registrar, as Dart's implicit upcast.
     fn as_selectable(self: Handle<Self>) -> AnySelectable {
         AnySelectable {
@@ -147,7 +149,7 @@ pub struct AnySelectable {
 pub type PushHandleLayers = fn(&mut App, HandleId, Option<Ref<LayerLink>>, Option<Ref<LayerLink>>);
 
 struct SelectableVTable {
-    selection_geometry: fn(&App, HandleId) -> SelectionGeometry,
+    value: fn(&App, HandleId) -> SelectionGeometry,
     push_handle_layers: PushHandleLayers,
     selected_content: fn(&App, HandleId) -> Option<SelectedContent>,
     selection: fn(&App, HandleId) -> Option<SelectedContentRange>,
@@ -162,7 +164,7 @@ struct SelectableVTable {
 impl SelectableVTable {
     const fn of<A: Selectable>() -> SelectableVTable {
         SelectableVTable {
-            selection_geometry: |app, id| A::selection_geometry(resolve(id), app),
+            value: |app, id| A::value(resolve(id), app),
             push_handle_layers: |app, id, start, end| {
                 A::push_handle_layers(resolve(id), app, start, end)
             },
@@ -190,9 +192,9 @@ impl AnySelectable {
         self.id
     }
 
-    /// The current selection geometry.
-    pub fn selection_geometry(self, app: &App) -> SelectionGeometry {
-        (self.vtable.selection_geometry)(app, self.id)
+    /// See [`SelectionHandler::value`].
+    pub fn value(self, app: &App) -> SelectionGeometry {
+        (self.vtable.value)(app, self.id)
     }
 
     /// See [`SelectionHandler::push_handle_layers`].
@@ -263,9 +265,8 @@ waft_foundation::erased_handle!(AnySelectable: Selectable => Selectable::as_sele
 /// The fields of Dart's `SelectionRegistrant` mixin.
 #[derive(Debug, Default)]
 pub struct SelectionRegistrantData {
-    registrar: Option<AnySelectionRegistrar>,
-    subscribed: bool,
-    listener: Option<Listener>,
+    registrar: Option<SelectionRegistrarRef>,
+    subscribed_to_selection_registrar: bool,
 }
 
 impl SelectionRegistrantData {
@@ -291,61 +292,70 @@ pub trait SelectionRegistrant: Selectable {
 
     /// The registrar this mixin will be or is registered to.
     fn registrar(self: Handle<Self>, app: &App) -> Option<AnySelectionRegistrar> {
-        self.selection_registrant_data(app).registrar
+        self.selection_registrant_data(app)
+            .registrar
+            .as_ref()
+            .map(Retained::handle)
     }
 
     /// Dart `SelectionRegistrant.registrar =`.
-    fn set_registrar(self: Handle<Self>, app: &mut App, value: Option<AnySelectionRegistrar>) {
-        if value == self.registrar(app) {
+    fn set_registrar(self: Handle<Self>, app: &mut App, value: Option<SelectionRegistrarRef>) {
+        let registrar = self.registrar(app);
+        if value.as_ref().map(Retained::handle) == registrar {
             return;
         }
+        let listener = Listener::handle_method(self, Self::update_selection_registrar_subscription);
         if value.is_none() {
             // When registrar goes from non-null to null.
-            if let Some(listener) = self.selection_registrant_data_mut(app).listener.take() {
-                self.remove_listener_from(app, &listener);
-            }
-        } else if self.registrar(app).is_none() {
+            self.remove_listener_from(app, &listener);
+        } else if registrar.is_none() {
             // When registrar goes from null to non-null.
-            let this = self;
-            let listener = Listener::new(move |app| {
-                SelectionRegistrant::update_selection_registrar_subscription(this, app);
-            });
-            self.add_listener_to(app, listener.clone());
-            self.selection_registrant_data_mut(app).listener = Some(listener);
+            self.add_listener_to(app, listener);
         }
         self.remove_selection_registrar_subscription(app);
         self.selection_registrant_data_mut(app).registrar = value;
         self.update_selection_registrar_subscription(app);
     }
 
-    /// Subscribes to or unsubscribes from the registrar as the selection content comes and goes.
+    /// Dart's `_updateSelectionRegistrarSubscription`.
     fn update_selection_registrar_subscription(self: Handle<Self>, app: &mut App) {
         let Some(registrar) = self.registrar(app) else {
-            self.selection_registrant_data_mut(app).subscribed = false;
+            self.selection_registrant_data_mut(app)
+                .subscribed_to_selection_registrar = false;
             return;
         };
-        let has_content = self.selection_geometry(app).has_content;
-        let subscribed = self.selection_registrant_data(app).subscribed;
+        let has_content = self.value(app).has_content;
+        let subscribed = self
+            .selection_registrant_data(app)
+            .subscribed_to_selection_registrar;
         if subscribed && !has_content {
             registrar.remove(app, self.as_selectable());
-            self.selection_registrant_data_mut(app).subscribed = false;
+            self.selection_registrant_data_mut(app)
+                .subscribed_to_selection_registrar = false;
         } else if !subscribed && has_content {
             registrar.add(app, self.as_selectable());
-            self.selection_registrant_data_mut(app).subscribed = true;
+            self.selection_registrant_data_mut(app)
+                .subscribed_to_selection_registrar = true;
         }
     }
 
-    /// Removes this selectable from its registrar without clearing the field.
+    /// Dart's `_removeSelectionRegistrarSubscription`.
     fn remove_selection_registrar_subscription(self: Handle<Self>, app: &mut App) {
-        if let Some(registrar) = self.registrar(app)
-            && self.selection_registrant_data(app).subscribed
+        if self
+            .selection_registrant_data(app)
+            .subscribed_to_selection_registrar
         {
+            let registrar = self
+                .registrar(app)
+                .expect("a subscribed registrant has a registrar");
             registrar.remove(app, self.as_selectable());
-            self.selection_registrant_data_mut(app).subscribed = false;
+            self.selection_registrant_data_mut(app)
+                .subscribed_to_selection_registrar = false;
         }
     }
 
-    /// Dart `SelectionRegistrant.dispose`'s part: unsubscribe, then the owner disposes the rest.
+    /// Dart `SelectionRegistrant.dispose`'s own part; the mixer then runs the rest of its
+    /// `dispose`, as Dart's `super.dispose()`.
     fn dispose_selection_registrant(self: Handle<Self>, app: &mut App) {
         self.remove_selection_registrar_subscription(app);
     }
@@ -414,6 +424,12 @@ impl std::fmt::Debug for AnySelectionRegistrar {
     }
 }
 
+/// A field that keeps a registrar: a paragraph's, a registrant's, a widget's.
+///
+/// A registrar holds its selectables as bare [`AnySelectable`]s, never kept, so a selectable that
+/// keeps its registrar makes no cycle; a selectable removes itself before it is freed.
+pub type SelectionRegistrarRef = Retained<AnySelectionRegistrar>;
+
 waft_foundation::erased_handle!(AnySelectionRegistrar: SelectionRegistrar => SelectionRegistrar::as_selection_registrar);
 
 /// The status of a selection: whether there is one and whether it is collapsed.
@@ -443,25 +459,55 @@ pub struct SelectionGeometry {
 }
 
 impl SelectionGeometry {
-    /// Creates a selection geometry.
-    pub fn new(
-        start_selection_point: Option<SelectionPoint>,
-        end_selection_point: Option<SelectionPoint>,
-        selection_rects: Vec<Rect>,
-        status: SelectionStatus,
-        has_content: bool,
-    ) -> SelectionGeometry {
-        debug_assert!(
-            (start_selection_point.is_none() && end_selection_point.is_none())
-                || status != SelectionStatus::None
-        );
+    /// Creates a selection geometry with no selection points and no rects; the setters give
+    /// them, as Dart's optional arguments.
+    pub fn new(status: SelectionStatus, has_content: bool) -> SelectionGeometry {
         SelectionGeometry {
-            start_selection_point,
-            end_selection_point,
-            selection_rects,
+            start_selection_point: None,
+            end_selection_point: None,
             status,
+            selection_rects: Vec::new(),
             has_content,
         }
+    }
+
+    /// Dart `SelectionGeometry(startSelectionPoint:)`.
+    pub fn start_selection_point(mut self, value: Option<SelectionPoint>) -> SelectionGeometry {
+        self.start_selection_point = value;
+        self.debug_assert_points_have_selection();
+        self
+    }
+
+    /// Dart `SelectionGeometry(endSelectionPoint:)`.
+    pub fn end_selection_point(mut self, value: Option<SelectionPoint>) -> SelectionGeometry {
+        self.end_selection_point = value;
+        self.debug_assert_points_have_selection();
+        self
+    }
+
+    /// Dart `SelectionGeometry(selectionRects:)`.
+    pub fn selection_rects(mut self, value: Vec<Rect>) -> SelectionGeometry {
+        self.selection_rects = value;
+        self
+    }
+
+    /// Dart `SelectionGeometry(status:)`.
+    pub fn status(mut self, value: SelectionStatus) -> SelectionGeometry {
+        self.status = value;
+        self
+    }
+
+    /// Dart `SelectionGeometry(hasContent:)`.
+    pub fn has_content(mut self, value: bool) -> SelectionGeometry {
+        self.has_content = value;
+        self
+    }
+
+    fn debug_assert_points_have_selection(&self) {
+        debug_assert!(
+            (self.start_selection_point.is_none() && self.end_selection_point.is_none())
+                || self.status != SelectionStatus::None
+        );
     }
 
     /// Whether there is an ongoing selection.
@@ -469,22 +515,9 @@ impl SelectionGeometry {
         self.status != SelectionStatus::None
     }
 
-    /// A copy with the given values updated.
-    pub fn copy_with(
-        &self,
-        start_selection_point: Option<SelectionPoint>,
-        end_selection_point: Option<SelectionPoint>,
-        selection_rects: Option<Vec<Rect>>,
-        status: Option<SelectionStatus>,
-        has_content: Option<bool>,
-    ) -> SelectionGeometry {
-        SelectionGeometry {
-            start_selection_point: start_selection_point.or(self.start_selection_point),
-            end_selection_point: end_selection_point.or(self.end_selection_point),
-            selection_rects: selection_rects.unwrap_or_else(|| self.selection_rects.clone()),
-            status: status.unwrap_or(self.status),
-            has_content: has_content.unwrap_or(self.has_content),
-        }
+    /// A copy the setters then change, as Dart's `copyWith`.
+    pub fn copy_with(&self) -> SelectionGeometry {
+        self.clone()
     }
 }
 
@@ -615,7 +648,7 @@ pub enum SelectionExtendDirection {
 ///
 /// Dart's abstract `SelectionEvent` and its subclasses are one enum: the subclass is the variant,
 /// and [`SelectionEventType`] follows from it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum SelectionEvent {
     /// Updates the selection start edge.
     StartEdgeUpdate {
@@ -749,30 +782,6 @@ pub enum SelectionEventType {
     GranularlyExtendSelection,
     /// An event that extends the selection in a [`SelectionExtendDirection`].
     DirectionallyExtendSelection,
-}
-
-/// A boundary at a position, as the paragraph's selection code reads it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TextBoundaryRecord {
-    /// The start of the boundary.
-    pub boundary_start: TextPosition,
-    /// The end of the boundary.
-    pub boundary_end: TextPosition,
-}
-
-impl TextBoundaryRecord {
-    /// Creates a boundary record from its two ends.
-    pub fn new(boundary_start: TextPosition, boundary_end: TextPosition) -> TextBoundaryRecord {
-        TextBoundaryRecord {
-            boundary_start,
-            boundary_end,
-        }
-    }
-}
-
-/// The range a [`TextBoundaryRecord`] covers.
-pub fn text_boundary_range(record: &TextBoundaryRecord) -> TextRange {
-    TextRange::new(record.boundary_start.offset, record.boundary_end.offset)
 }
 
 #[cfg(test)]

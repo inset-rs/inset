@@ -1,7 +1,8 @@
-//! Flutter counterpart: `rendering/paragraph.dart` (`RenderParagraph`).
+//! Flutter counterpart: `rendering/paragraph.dart` (`RenderParagraph`, `_SelectableFragment`).
 //!
-//! Selection (`SelectionRegistrar` / `_SelectableFragment`), the fade overflow shader and
-//! semantics wait; see `PORTING.md`.
+//! A paragraph with a registrar splits its text at its placeholders into selectable fragments
+//! and registers each; a fragment is removed from the registrar before it is disposed, since the
+//! registrar does not keep it. The fade overflow shader and semantics wait; see `PORTING.md`.
 
 use std::any::{Any, TypeId};
 use std::fmt;
@@ -31,12 +32,38 @@ use crate::pipeline_owner::PipelineOwner;
 use crate::selection::{
     AnySelectable, AnySelectionRegistrar, Selectable, SelectedContent, SelectedContentRange,
     SelectionEvent, SelectionExtendDirection, SelectionGeometry, SelectionHandler, SelectionPoint,
-    SelectionRegistrant, SelectionRegistrantData, SelectionResult, SelectionStatus, SelectionUtils,
-    TextBoundaryRecord, TextGranularity, TextSelectionHandleType,
+    SelectionRegistrarRef, SelectionResult, SelectionStatus, SelectionUtils, TextGranularity,
+    TextSelectionHandleType,
 };
 use crate::text_boundary::WordBoundary;
 use crate::{RelayoutWhenSystemFontsChangeData, RelayoutWhenSystemFontsChangeMixin};
 use waft_services::{CharacterBoundary, DocumentBoundary, ParagraphBoundary, TextBoundary};
+
+/// The start and end positions for a text boundary.
+#[derive(Clone, Copy, Debug)]
+struct TextBoundaryRecord {
+    boundary_start: TextPosition,
+    boundary_end: TextPosition,
+}
+
+impl TextBoundaryRecord {
+    fn new(boundary_start: TextPosition, boundary_end: TextPosition) -> TextBoundaryRecord {
+        TextBoundaryRecord {
+            boundary_start,
+            boundary_end,
+        }
+    }
+}
+
+/// Signature for a function that determines the [`TextBoundaryRecord`] at the given
+/// [`TextPosition`].
+type TextBoundaryAtPosition =
+    fn(Handle<SelectableFragment>, &mut App, TextPosition) -> TextBoundaryRecord;
+
+/// Signature for a function that determines the [`TextBoundaryRecord`] at the given
+/// [`TextPosition`], for the given text.
+type TextBoundaryAtPositionInText =
+    fn(Handle<SelectableFragment>, &mut App, TextPosition, &str) -> TextBoundaryRecord;
 
 const K_ELLIPSIS: &str = "\u{2026}";
 
@@ -359,7 +386,7 @@ pub struct RenderParagraph {
     // Should be `None` if selection is not enabled, i.e. `registrar` is `None`. The paragraph
     // splits on [`PLACEHOLDER_CODE_UNIT`] and keeps each fragment here.
     last_selectable_fragments: Option<Vec<Ref<SelectableFragment>>>,
-    registrar: Option<AnySelectionRegistrar>,
+    registrar: Option<SelectionRegistrarRef>,
 }
 
 impl RenderParagraph {
@@ -782,16 +809,19 @@ impl RenderParagraph {
     /// The [`SelectionRegistrar`](crate::SelectionRegistrar) this paragraph is, or will be,
     /// registered to.
     pub fn registrar(self: RenderHandle<Self>, app: &App) -> Option<AnySelectionRegistrar> {
-        self.get(app).registrar
+        self.get(app)
+            .registrar
+            .as_ref()
+            .map(SelectionRegistrarRef::handle)
     }
 
     /// Sets [`registrar`](Self::registrar).
     pub fn set_registrar(
         self: RenderHandle<Self>,
         app: &mut App,
-        value: Option<AnySelectionRegistrar>,
+        value: Option<SelectionRegistrarRef>,
     ) {
-        if value == self.get(app).registrar {
+        if value.as_ref().map(SelectionRegistrarRef::handle) == self.registrar(app) {
             return;
         }
         self.remove_selection_registrar_subscription(app);
@@ -801,7 +831,7 @@ impl RenderParagraph {
     }
 
     fn update_selection_registrar_subscription(self: RenderHandle<Self>, app: &mut App) {
-        let Some(registrar) = self.get(app).registrar else {
+        let Some(registrar) = self.registrar(app) else {
             return;
         };
         if self.get(app).last_selectable_fragments.is_none() {
@@ -823,7 +853,7 @@ impl RenderParagraph {
 
     fn remove_selection_registrar_subscription(self: RenderHandle<Self>, app: &mut App) {
         let (Some(registrar), Some(fragments)) = (
-            self.get(app).registrar,
+            self.registrar(app),
             self.get(app).last_selectable_fragments.clone(),
         ) else {
             return;
@@ -1079,13 +1109,6 @@ impl RenderObject for RenderParagraph {
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
-        let fragments = self.get(app).last_selectable_fragments.clone();
-        if let Some(fragments) = fragments {
-            for fragment in fragments {
-                app.get_mut(&fragment).cached_rect = None;
-                app.get_mut(&fragment).cached_bounding_boxes = None;
-            }
-        }
         let constraints = self.constraints(app);
         let placeholder_dimensions = self.layout_inline_children(
             app,
@@ -1142,27 +1165,13 @@ impl RenderObject for RenderParagraph {
         self.layout_text_with_constraints(app, constraints);
 
         let needs_clipping = self.get(app).needs_clipping;
-        if needs_clipping {
-            let bounds = offset & self.size(app);
-            context.canvas().save();
-            context.canvas().clip_rect(bounds, ClipOp::Intersect, true);
-        }
-        let has_fragments = self
-            .get(app)
-            .last_selectable_fragments
-            .as_ref()
-            .is_some_and(|fragments| !fragments.is_empty());
-        if has_fragments {
+        if let Some(fragments) = self.get(app).last_selectable_fragments.clone() {
             if needs_clipping {
                 context.canvas().save();
-                let bounds = offset & self.size(app);
-                context.canvas().clip_rect(bounds, ClipOp::Intersect, true);
+                context
+                    .canvas()
+                    .clip_rect(offset & self.size(app), ClipOp::Intersect, true);
             }
-            let fragments = self
-                .get(app)
-                .last_selectable_fragments
-                .clone()
-                .unwrap_or_default();
             for fragment in fragments {
                 fragment.paint_selection(app, context, offset);
             }
@@ -1170,6 +1179,14 @@ impl RenderObject for RenderParagraph {
                 context.canvas().restore();
             }
         }
+
+        if needs_clipping {
+            // The fade shader's `saveLayer` waits on gradients; a fade clips meanwhile.
+            let bounds = offset & self.size(app);
+            context.canvas().save();
+            context.canvas().clip_rect(bounds, ClipOp::Intersect, true);
+        }
+
         let (painter, fonts) = self.painter_with_fonts(app);
         painter.paint(fonts, context.canvas(), offset);
 
@@ -1178,11 +1195,26 @@ impl RenderObject for RenderParagraph {
         if needs_clipping {
             context.canvas().restore();
         }
+
+        if let Some(fragments) = self.get(app).last_selectable_fragments.clone() {
+            for fragment in fragments {
+                fragment.paint_handles(app, context, offset);
+            }
+        }
     }
 }
 
 impl RenderBox for RenderParagraph {
     crate::render_box_accessors!();
+
+    fn mark_needs_layout(self: RenderHandle<Self>, app: &mut App) {
+        if let Some(fragments) = self.get(app).last_selectable_fragments.clone() {
+            for fragment in fragments {
+                fragment.did_change_paragraph_layout(app);
+            }
+        }
+        crate::box_::RenderBoxBase::mark_needs_layout(self, app);
+    }
 
     fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
         RenderInlineChildrenContainerDefaults::setup_parent_data(self, app, child);
@@ -1336,7 +1368,6 @@ impl RenderBox for RenderParagraph {
 /// run of text, each selectable separately.
 struct SelectableFragment {
     change_notifier: ChangeNotifierData,
-    selection_registrant: SelectionRegistrantData,
     range: TextRange,
     paragraph: RenderHandle<RenderParagraph>,
     full_text: String,
@@ -1348,19 +1379,6 @@ struct SelectableFragment {
     selection_geometry: SelectionGeometry,
     cached_bounding_boxes: Option<Vec<Rect>>,
     cached_rect: Option<Rect>,
-}
-
-/// Which text boundary a selection-edge update looks up at a position.
-#[derive(Clone, Copy)]
-enum BoundaryAtPosition {
-    Word,
-    Paragraph,
-}
-
-/// Which text boundary a selection-edge update looks up in a whole paragraph's text.
-#[derive(Clone, Copy)]
-enum BoundaryInText {
-    Paragraph,
 }
 
 #[allow(
@@ -1377,7 +1395,6 @@ impl SelectableFragment {
         debug_assert!(range.is_valid() && !range.is_collapsed() && range.is_normalized());
         SelectableFragment {
             change_notifier: ChangeNotifierData::new(),
-            selection_registrant: SelectionRegistrantData::new(),
             range,
             paragraph,
             full_text,
@@ -1386,13 +1403,7 @@ impl SelectableFragment {
             selectable_contains_origin_text_boundary: false,
             start_handle_layer_link: None,
             end_handle_layer_link: None,
-            selection_geometry: SelectionGeometry::new(
-                None,
-                None,
-                Vec::new(),
-                SelectionStatus::None,
-                true,
-            ),
+            selection_geometry: SelectionGeometry::new(SelectionStatus::None, true),
             cached_bounding_boxes: None,
             cached_rect: None,
         }
@@ -1412,7 +1423,7 @@ impl SelectableFragment {
             app.get(self).text_selection_start,
             app.get(self).text_selection_end,
         ) else {
-            return SelectionGeometry::new(None, None, Vec::new(), SelectionStatus::None, true);
+            return SelectionGeometry::new(SelectionStatus::None, true);
         };
         let paragraph = app.get(self).paragraph;
         let is_reversed = selection_start.offset > selection_end.offset;
@@ -1449,46 +1460,28 @@ impl SelectableFragment {
             )
         };
         let line_height = paragraph.preferred_line_height(app);
-        SelectionGeometry::new(
-            Some(SelectionPoint::new(
+        let status = if selection_collapsed {
+            SelectionStatus::Collapsed
+        } else {
+            SelectionStatus::Uncollapsed
+        };
+        SelectionGeometry::new(status, true)
+            .start_selection_point(Some(SelectionPoint::new(
                 start_offset_in_paragraph_coordinates,
                 line_height,
                 start_selection_handle_type,
-            )),
-            Some(SelectionPoint::new(
+            )))
+            .end_selection_point(Some(SelectionPoint::new(
                 end_offset_in_paragraph_coordinates,
                 line_height,
                 end_selection_handle_type,
-            )),
-            selection_rects,
-            if selection_collapsed {
-                SelectionStatus::Collapsed
-            } else {
-                SelectionStatus::Uncollapsed
-            },
-            true,
-        )
+            )))
+            .selection_rects(selection_rects)
     }
 
     fn did_change_selection(self: Handle<Self>, app: &mut App) {
         app.get(self).paragraph.mark_needs_paint(app);
         self.update_selection_geometry(app);
-    }
-
-    fn selected_content_inner(self: Handle<Self>, app: &App) -> Option<SelectedContent> {
-        let this = app.get(self);
-        let start = this.text_selection_start?;
-        let end = this.text_selection_end?;
-        let range = TextRange::new(start.offset.min(end.offset), start.offset.max(end.offset));
-        Some(SelectedContent::new(range.text_inside(&this.full_text)))
-    }
-
-    fn selection_inner(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
-        let this = app.get(self);
-        Some(SelectedContentRange::new(
-            this.text_selection_start?.offset,
-            this.text_selection_end?.offset,
-        ))
     }
 
     fn set_selection_position(
@@ -1609,11 +1602,11 @@ impl SelectableFragment {
         app: &mut App,
         global_position: Offset,
     ) -> SelectionResult {
-        let Some(local) = self.local_position(app, global_position) else {
-            return SelectionResult::None;
-        };
         let paragraph = app.get(self).paragraph;
-        let position = paragraph.get_position_for_offset(app, local);
+        let local_position = paragraph
+            .as_box()
+            .global_to_local(app, global_position, None);
+        let position = paragraph.get_position_for_offset(app, local_position);
         if self.position_is_within_current_selection(app, position)
             && app.get(self).text_selection_start != app.get(self).text_selection_end
         {
@@ -1638,10 +1631,10 @@ impl SelectableFragment {
         app: &mut App,
         global_position: Offset,
     ) -> SelectionResult {
-        let Some(local_position) = self.local_position(app, global_position) else {
-            return SelectionResult::None;
-        };
         let paragraph = app.get(self).paragraph;
+        let local_position = paragraph
+            .as_box()
+            .global_to_local(app, global_position, None);
         let position = paragraph.get_position_for_offset(app, local_position);
         let full_text = app.get(self).full_text.clone();
         let paragraph_boundary = self.get_paragraph_boundary_at_position(app, position, &full_text);
@@ -1789,9 +1782,7 @@ impl SelectableFragment {
         let mut current = Some(app.get(self).paragraph.as_object());
         while let Some(object) = current {
             if let Some(paragraph) = object.downcast::<RenderParagraph>(app) {
-                let transform = paragraph.as_object().get_transform_to(app, None);
-                let inverse = transform.invert()?;
-                let local = waft_painting::transform_point(&inverse, global_position);
+                let local = global_to_paragraph(app, paragraph, global_position);
                 if paragraph.as_object().paint_bounds(app).contains(local) {
                     return Some((paragraph, local));
                 }
@@ -1887,15 +1878,17 @@ impl SelectableFragment {
         rect
     }
 
-    fn local_position(self: Handle<Self>, app: &App, global_position: Offset) -> Option<Offset> {
-        let transform = app
-            .get(self)
-            .paragraph
-            .as_object()
-            .get_transform_to(app, None);
-        transform
-            .invert()
-            .map(|inverse| waft_painting::transform_point(&inverse, global_position))
+    /// Dart's `didChangeParagraphLayout`: forgets the rects measured from the old layout.
+    fn did_change_paragraph_layout(self: Handle<Self>, app: &mut App) {
+        let this = app.get_mut(self);
+        this.cached_rect = None;
+        this.cached_bounding_boxes = None;
+    }
+
+    /// `global_position` in this fragment's paragraph's coordinates.
+    fn local_position(self: Handle<Self>, app: &App, global_position: Offset) -> Offset {
+        let paragraph = app.get(self).paragraph;
+        global_to_paragraph(app, paragraph, global_position)
     }
 
     fn update_selection_edge(
@@ -1905,9 +1898,7 @@ impl SelectableFragment {
         is_end: bool,
     ) -> SelectionResult {
         self.set_selection_position(app, None, is_end);
-        let Some(local_position) = self.local_position(app, global_position) else {
-            return SelectionResult::None;
-        };
+        let local_position = self.local_position(app, global_position);
         let rect = self.rect(app);
         let range = app.get(self).range;
         if rect.is_empty() {
@@ -1940,14 +1931,12 @@ impl SelectableFragment {
         app: &mut App,
         global_position: Offset,
         is_end: bool,
-        get_text_boundary: BoundaryAtPosition,
+        get_text_boundary: TextBoundaryAtPosition,
     ) -> SelectionResult {
         let existing_selection_start = app.get(self).text_selection_start;
         let existing_selection_end = app.get(self).text_selection_end;
         self.set_selection_position(app, None, is_end);
-        let Some(local_position) = self.local_position(app, global_position) else {
-            return SelectionResult::None;
-        };
+        let local_position = self.local_position(app, global_position);
         let rect = self.rect(app);
         let range = app.get(self).range;
         if rect.is_empty() {
@@ -1965,7 +1954,7 @@ impl SelectableFragment {
         let paragraph = app.get(self).paragraph;
         let position = paragraph.get_position_for_offset(app, adjusted_offset);
         let mut text_boundary = if rect.contains(local_position) {
-            Some(self.text_boundary_at_position(app, get_text_boundary, position))
+            Some(get_text_boundary(self, app, position))
         } else {
             None
         };
@@ -2008,39 +1997,11 @@ impl SelectableFragment {
         SelectionUtils::get_result_based_on_rect(rect, local_position)
     }
 
-    fn text_boundary_at_position(
-        self: Handle<Self>,
-        app: &mut App,
-        kind: BoundaryAtPosition,
-        position: TextPosition,
-    ) -> TextBoundaryRecord {
-        match kind {
-            BoundaryAtPosition::Word => self.get_word_boundary_at_position(app, position),
-            BoundaryAtPosition::Paragraph => {
-                self.get_clamped_paragraph_boundary_at_position(app, position)
-            }
-        }
-    }
-
-    fn text_boundary_in_text(
-        self: Handle<Self>,
-        app: &mut App,
-        kind: BoundaryInText,
-        position: TextPosition,
-        text: &str,
-    ) -> TextBoundaryRecord {
-        match kind {
-            BoundaryInText::Paragraph => {
-                self.get_paragraph_boundary_at_position(app, position, text)
-            }
-        }
-    }
-
     fn update_selection_start_edge_by_text_boundary(
         self: Handle<Self>,
         app: &mut App,
         text_boundary: Option<TextBoundaryRecord>,
-        get_text_boundary: BoundaryAtPosition,
+        get_text_boundary: TextBoundaryAtPosition,
         position: TextPosition,
         existing_selection_start: Option<TextPosition>,
         existing_selection_end: Option<TextPosition>,
@@ -2071,8 +2032,7 @@ impl SelectableFragment {
                 } else {
                     text_boundary.boundary_end
                 });
-                let local_text_boundary =
-                    self.text_boundary_at_position(app, get_text_boundary, existing_end);
+                let local_text_boundary = get_text_boundary(self, app, existing_end);
                 debug_assert!(
                     local_text_boundary.boundary_start.offset >= range.start
                         && local_text_boundary.boundary_end.offset <= range.end
@@ -2116,8 +2076,7 @@ impl SelectableFragment {
             let should_swap_edges = !is_same_position
                 && (is_selection_inverted != (position.offset > existing_end.offset));
             if should_swap_edges {
-                let local_text_boundary =
-                    self.text_boundary_at_position(app, get_text_boundary, existing_end);
+                let local_text_boundary = get_text_boundary(self, app, existing_end);
                 debug_assert!(
                     local_text_boundary.boundary_start.offset >= range.start
                         && local_text_boundary.boundary_end.offset <= range.end
@@ -2140,7 +2099,7 @@ impl SelectableFragment {
         self: Handle<Self>,
         app: &mut App,
         text_boundary: Option<TextBoundaryRecord>,
-        get_text_boundary: BoundaryAtPosition,
+        get_text_boundary: TextBoundaryAtPosition,
         position: TextPosition,
         existing_selection_start: Option<TextPosition>,
         existing_selection_end: Option<TextPosition>,
@@ -2171,8 +2130,7 @@ impl SelectableFragment {
                 } else {
                     text_boundary.boundary_end
                 });
-                let local_text_boundary =
-                    self.text_boundary_at_position(app, get_text_boundary, existing_start);
+                let local_text_boundary = get_text_boundary(self, app, existing_start);
                 debug_assert!(
                     local_text_boundary.boundary_start.offset >= range.start
                         && local_text_boundary.boundary_end.offset <= range.end
@@ -2217,8 +2175,7 @@ impl SelectableFragment {
                 != (position.offset < existing_start.offset)
                 || is_same_position;
             if should_swap_edges {
-                let local_text_boundary =
-                    self.text_boundary_at_position(app, get_text_boundary, existing_start);
+                let local_text_boundary = get_text_boundary(self, app, existing_start);
                 debug_assert!(
                     local_text_boundary.boundary_start.offset >= range.start
                         && local_text_boundary.boundary_end.offset <= range.end
@@ -2240,7 +2197,7 @@ impl SelectableFragment {
     fn update_selection_start_edge_by_multi_selectable_text_boundary(
         self: Handle<Self>,
         app: &mut App,
-        get_text_boundary: BoundaryInText,
+        get_text_boundary: TextBoundaryAtPositionInText,
         paragraph_contains_position: bool,
         position: TextPosition,
         existing_selection_start: Option<TextPosition>,
@@ -2257,11 +2214,10 @@ impl SelectableFragment {
             let existing_end = existing_selection_end.unwrap();
             let forward_selection = existing_end.offset >= existing_start.offset;
             if paragraph_contains_position {
-                let boundary_at_position =
-                    self.text_boundary_in_text(app, get_text_boundary, position, &full_text);
-                let origin_text_boundary = self.text_boundary_in_text(
+                let boundary_at_position = get_text_boundary(self, app, position, &full_text);
+                let origin_text_boundary = get_text_boundary(
+                    self,
                     app,
-                    get_text_boundary,
                     if forward_selection {
                         TextPosition::with_affinity(existing_end.offset - 1, existing_end.affinity)
                     } else {
@@ -2336,9 +2292,9 @@ impl SelectableFragment {
                 }
             } else {
                 let clamped_position = self.clamp_text_position(app, position);
-                let origin_text_boundary = self.text_boundary_in_text(
+                let origin_text_boundary = get_text_boundary(
+                    self,
                     app,
-                    get_text_boundary,
                     if forward_selection {
                         TextPosition::with_affinity(existing_end.offset - 1, existing_end.affinity)
                     } else {
@@ -2379,8 +2335,7 @@ impl SelectableFragment {
                 return None;
             }
             if let Some(existing_end) = existing_selection_end {
-                let boundary_at_position =
-                    self.text_boundary_in_text(app, get_text_boundary, position, &full_text);
+                let boundary_at_position = get_text_boundary(self, app, position, &full_text);
                 let backward_selection = (existing_selection_start.is_none()
                     && existing_end.offset == range.start)
                     || (existing_selection_start == existing_selection_end
@@ -2433,7 +2388,7 @@ impl SelectableFragment {
     fn update_selection_end_edge_by_multi_selectable_text_boundary(
         self: Handle<Self>,
         app: &mut App,
-        get_text_boundary: BoundaryInText,
+        get_text_boundary: TextBoundaryAtPositionInText,
         paragraph_contains_position: bool,
         position: TextPosition,
         existing_selection_start: Option<TextPosition>,
@@ -2450,11 +2405,10 @@ impl SelectableFragment {
             let existing_end = existing_selection_end.unwrap();
             let forward_selection = existing_end.offset >= existing_start.offset;
             if paragraph_contains_position {
-                let boundary_at_position =
-                    self.text_boundary_in_text(app, get_text_boundary, position, &full_text);
-                let origin_text_boundary = self.text_boundary_in_text(
+                let boundary_at_position = get_text_boundary(self, app, position, &full_text);
+                let origin_text_boundary = get_text_boundary(
+                    self,
                     app,
-                    get_text_boundary,
                     if forward_selection {
                         existing_start
                     } else {
@@ -2532,9 +2486,9 @@ impl SelectableFragment {
                 }
             } else {
                 let clamped_position = self.clamp_text_position(app, position);
-                let origin_text_boundary = self.text_boundary_in_text(
+                let origin_text_boundary = get_text_boundary(
+                    self,
                     app,
-                    get_text_boundary,
                     if forward_selection {
                         existing_start
                     } else {
@@ -2578,8 +2532,7 @@ impl SelectableFragment {
                 return None;
             }
             if let Some(existing_start) = existing_selection_start {
-                let boundary_at_position =
-                    self.text_boundary_in_text(app, get_text_boundary, position, &full_text);
+                let boundary_at_position = get_text_boundary(self, app, position, &full_text);
                 let backward_selection = (existing_selection_end.is_none()
                     && existing_start.offset == range.end)
                     || (existing_selection_start == existing_selection_end
@@ -2634,14 +2587,12 @@ impl SelectableFragment {
         app: &mut App,
         global_position: Offset,
         is_end: bool,
-        get_text_boundary: BoundaryInText,
+        get_text_boundary: TextBoundaryAtPositionInText,
     ) -> SelectionResult {
         let existing_selection_start = app.get(self).text_selection_start;
         let existing_selection_end = app.get(self).text_selection_end;
         self.set_selection_position(app, None, is_end);
-        let Some(local_position) = self.local_position(app, global_position) else {
-            return SelectionResult::None;
-        };
+        let local_position = self.local_position(app, global_position);
         let rect = self.rect(app);
         let range = app.get(self).range;
         if rect.is_empty() {
@@ -2726,7 +2677,7 @@ impl SelectableFragment {
             self.update_selection_end_edge_by_text_boundary(
                 app,
                 text_boundary,
-                BoundaryAtPosition::Paragraph,
+                Self::get_clamped_paragraph_boundary_at_position,
                 position,
                 existing_selection_start,
                 existing_selection_end,
@@ -2735,7 +2686,7 @@ impl SelectableFragment {
             self.update_selection_start_edge_by_text_boundary(
                 app,
                 text_boundary,
-                BoundaryAtPosition::Paragraph,
+                Self::get_clamped_paragraph_boundary_at_position,
                 position,
                 existing_selection_start,
                 existing_selection_end,
@@ -2755,7 +2706,7 @@ impl SelectableFragment {
     fn update_selection_start_edge_at_placeholder(
         self: Handle<Self>,
         app: &mut App,
-        get_text_boundary: BoundaryInText,
+        get_text_boundary: TextBoundaryAtPositionInText,
         global_position: Offset,
         paragraph_contains_position: bool,
         position: TextPosition,
@@ -2782,9 +2733,7 @@ impl SelectableFragment {
                     existing_selection_end,
                 );
             }
-            let transform = origin_paragraph.as_object().get_transform_to(app, None);
-            let inverse = transform.invert()?;
-            let origin_local = waft_painting::transform_point(&inverse, global_position);
+            let origin_local = global_to_paragraph(app, origin_paragraph, global_position);
             let within_origin = origin_paragraph
                 .as_object()
                 .paint_bounds(app)
@@ -2792,20 +2741,11 @@ impl SelectableFragment {
             let origin_position = origin_paragraph.get_position_for_offset(app, origin_local);
             if within_origin {
                 let origin_text = origin_paragraph.text(app).to_plain_text(false, true);
-                let boundary = self.text_boundary_in_text(
-                    app,
-                    get_text_boundary,
-                    origin_position,
-                    &origin_text,
-                );
+                let boundary = get_text_boundary(self, app, origin_position, &origin_text);
                 let origin_placeholder_position =
                     self.get_position_in_paragraph(app, origin_paragraph);
-                let origin_boundary = self.text_boundary_in_text(
-                    app,
-                    get_text_boundary,
-                    origin_placeholder_position,
-                    &origin_text,
-                );
+                let origin_boundary =
+                    get_text_boundary(self, app, origin_placeholder_position, &origin_text);
                 let pivot = if forward_selection {
                     origin_boundary.boundary_end.offset
                 } else {
@@ -2912,12 +2852,7 @@ impl SelectableFragment {
                         && existing_end.offset == range.start)
                     || (existing_selection_start.is_some()
                         && existing_selection_start.unwrap().offset > existing_end.offset);
-                let boundary = self.text_boundary_in_text(
-                    app,
-                    get_text_boundary,
-                    target_position,
-                    &target_text,
-                );
+                let boundary = get_text_boundary(self, app, target_position, &target_text);
                 let placeholder = self.get_position_in_paragraph(app, target_paragraph);
                 let placeholder_range = TextRange::new(placeholder.offset, placeholder.offset + 1);
                 if boundary.boundary_start.offset < placeholder_range.start
@@ -2975,7 +2910,7 @@ impl SelectableFragment {
     fn update_selection_end_edge_at_placeholder(
         self: Handle<Self>,
         app: &mut App,
-        get_text_boundary: BoundaryInText,
+        get_text_boundary: TextBoundaryAtPositionInText,
         global_position: Offset,
         paragraph_contains_position: bool,
         position: TextPosition,
@@ -3002,9 +2937,7 @@ impl SelectableFragment {
                     existing_selection_end,
                 );
             }
-            let transform = origin_paragraph.as_object().get_transform_to(app, None);
-            let inverse = transform.invert()?;
-            let origin_local = waft_painting::transform_point(&inverse, global_position);
+            let origin_local = global_to_paragraph(app, origin_paragraph, global_position);
             let within_origin = origin_paragraph
                 .as_object()
                 .paint_bounds(app)
@@ -3012,20 +2945,11 @@ impl SelectableFragment {
             let origin_position = origin_paragraph.get_position_for_offset(app, origin_local);
             if within_origin {
                 let origin_text = origin_paragraph.text(app).to_plain_text(false, true);
-                let boundary = self.text_boundary_in_text(
-                    app,
-                    get_text_boundary,
-                    origin_position,
-                    &origin_text,
-                );
+                let boundary = get_text_boundary(self, app, origin_position, &origin_text);
                 let origin_placeholder_position =
                     self.get_position_in_paragraph(app, origin_paragraph);
-                let origin_boundary = self.text_boundary_in_text(
-                    app,
-                    get_text_boundary,
-                    origin_placeholder_position,
-                    &origin_text,
-                );
+                let origin_boundary =
+                    get_text_boundary(self, app, origin_placeholder_position, &origin_text);
                 let pivot = if forward_selection {
                     origin_boundary.boundary_start.offset
                 } else {
@@ -3132,12 +3056,7 @@ impl SelectableFragment {
                         && existing_start.offset == range.end)
                     || (existing_selection_end.is_some()
                         && existing_start.offset > existing_selection_end.unwrap().offset);
-                let boundary = self.text_boundary_in_text(
-                    app,
-                    get_text_boundary,
-                    target_position,
-                    &target_text,
-                );
+                let boundary = get_text_boundary(self, app, target_position, &target_text);
                 let placeholder = self.get_position_in_paragraph(app, target_paragraph);
                 let placeholder_range = TextRange::new(placeholder.offset, placeholder.offset + 1);
                 if boundary.boundary_start.offset < placeholder_range.start
@@ -3487,85 +3406,6 @@ impl SelectableFragment {
         result
     }
 
-    fn dispatch_selection_event_inner(
-        self: Handle<Self>,
-        app: &mut App,
-        event: &SelectionEvent,
-    ) -> SelectionResult {
-        let existing_start = app.get(self).text_selection_start;
-        let existing_end = app.get(self).text_selection_end;
-        let result = match event {
-            SelectionEvent::StartEdgeUpdate {
-                global_position,
-                granularity,
-            }
-            | SelectionEvent::EndEdgeUpdate {
-                global_position,
-                granularity,
-            } => {
-                let is_end = matches!(event, SelectionEvent::EndEdgeUpdate { .. });
-                match granularity {
-                    TextGranularity::Character => {
-                        self.update_selection_edge(app, *global_position, is_end)
-                    }
-                    TextGranularity::Word => self.update_selection_edge_by_text_boundary(
-                        app,
-                        *global_position,
-                        is_end,
-                        BoundaryAtPosition::Word,
-                    ),
-                    TextGranularity::Paragraph => self
-                        .update_selection_edge_by_multi_selectable_text_boundary(
-                            app,
-                            *global_position,
-                            is_end,
-                            BoundaryInText::Paragraph,
-                        ),
-                    TextGranularity::Document | TextGranularity::Line => {
-                        debug_assert!(
-                            false,
-                            "Moving the selection edge by line or document is not supported."
-                        );
-                        unreachable!()
-                    }
-                }
-            }
-            SelectionEvent::Clear => self.handle_clear_selection(app),
-            SelectionEvent::SelectAll => self.handle_select_all(app),
-            SelectionEvent::SelectWord { global_position } => {
-                self.handle_select_word(app, *global_position)
-            }
-            SelectionEvent::SelectParagraph {
-                global_position,
-                absorb,
-            } => {
-                if *absorb {
-                    self.handle_select_all(app);
-                    app.get_mut(self).selectable_contains_origin_text_boundary = true;
-                    SelectionResult::Next
-                } else {
-                    self.handle_select_paragraph(app, *global_position)
-                }
-            }
-            SelectionEvent::GranularlyExtendSelection {
-                forward,
-                is_end,
-                granularity,
-            } => self.handle_granularly_extend_selection(app, *forward, *is_end, *granularity),
-            SelectionEvent::DirectionallyExtendSelection {
-                dx,
-                is_end,
-                direction,
-            } => self.handle_directionally_extend_selection(app, *dx, *is_end, *direction),
-        };
-        if existing_start != app.get(self).text_selection_start
-            || existing_end != app.get(self).text_selection_end
-        {
-            self.did_change_selection(app);
-        }
-        result
-    }
-
     fn paint_selection(
         self: Handle<Self>,
         app: &mut App,
@@ -3597,13 +3437,17 @@ impl SelectableFragment {
         }
     }
 
-    #[allow(dead_code)] // SelectableRegion's delegate paints the handles.
     fn paint_handles(
         self: Handle<Self>,
         app: &mut App,
         context: &mut PaintingContext,
         offset: Offset,
     ) {
+        if app.get(self).text_selection_start.is_none()
+            || app.get(self).text_selection_end.is_none()
+        {
+            return;
+        }
         let geometry = app.get(self).selection_geometry.clone();
         let start_link = app.get(self).start_handle_layer_link.clone();
         let end_link = app.get(self).end_handle_layer_link.clone();
@@ -3631,6 +3475,19 @@ impl SelectableFragment {
         }
     }
 }
+/// `global_position` in `paragraph`'s coordinates, through the inverse of its transform to the
+/// root; a transform that cannot be inverted is used as it is, as Dart's `Matrix4.invert` leaves
+/// it.
+fn global_to_paragraph(
+    app: &App,
+    paragraph: RenderHandle<RenderParagraph>,
+    global_position: Offset,
+) -> Offset {
+    let transform = paragraph.as_object().get_transform_to(app, None);
+    let inverse = transform.invert().unwrap_or(transform);
+    waft_painting::transform_point(&inverse, global_position)
+}
+
 /// The fragment's own line boundary: Dart's `LineBoundary(this)` in `_SelectableFragment`.
 struct FragmentLineBoundary {
     fragment: Handle<SelectableFragment>,
@@ -3702,7 +3559,7 @@ impl ChangeNotifier for SelectableFragment {
 }
 
 impl SelectionHandler for SelectableFragment {
-    fn selection_geometry(self: Handle<Self>, app: &App) -> SelectionGeometry {
+    fn value(self: Handle<Self>, app: &App) -> SelectionGeometry {
         app.get(self).selection_geometry.clone()
     }
 
@@ -3735,11 +3592,19 @@ impl SelectionHandler for SelectableFragment {
     }
 
     fn selected_content(self: Handle<Self>, app: &App) -> Option<SelectedContent> {
-        self.selected_content_inner(app)
+        let this = app.get(self);
+        let start = this.text_selection_start?;
+        let end = this.text_selection_end?;
+        let range = TextRange::new(start.offset.min(end.offset), start.offset.max(end.offset));
+        Some(SelectedContent::new(range.text_inside(&this.full_text)))
     }
 
     fn selection(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
-        self.selection_inner(app)
+        let this = app.get(self);
+        Some(SelectedContentRange::new(
+            this.text_selection_start?.offset,
+            this.text_selection_end?.offset,
+        ))
     }
 
     fn dispatch_selection_event(
@@ -3747,7 +3612,78 @@ impl SelectionHandler for SelectableFragment {
         app: &mut App,
         event: &SelectionEvent,
     ) -> SelectionResult {
-        self.dispatch_selection_event_inner(app, event)
+        let existing_start = app.get(self).text_selection_start;
+        let existing_end = app.get(self).text_selection_end;
+        let result = match event {
+            SelectionEvent::StartEdgeUpdate {
+                global_position,
+                granularity,
+            }
+            | SelectionEvent::EndEdgeUpdate {
+                global_position,
+                granularity,
+            } => {
+                let is_end = matches!(event, SelectionEvent::EndEdgeUpdate { .. });
+                match granularity {
+                    TextGranularity::Character => {
+                        self.update_selection_edge(app, *global_position, is_end)
+                    }
+                    TextGranularity::Word => self.update_selection_edge_by_text_boundary(
+                        app,
+                        *global_position,
+                        is_end,
+                        Self::get_word_boundary_at_position,
+                    ),
+                    TextGranularity::Paragraph => self
+                        .update_selection_edge_by_multi_selectable_text_boundary(
+                            app,
+                            *global_position,
+                            is_end,
+                            Self::get_paragraph_boundary_at_position,
+                        ),
+                    TextGranularity::Document | TextGranularity::Line => {
+                        debug_assert!(
+                            false,
+                            "Moving the selection edge by line or document is not supported."
+                        );
+                        unreachable!()
+                    }
+                }
+            }
+            SelectionEvent::Clear => self.handle_clear_selection(app),
+            SelectionEvent::SelectAll => self.handle_select_all(app),
+            SelectionEvent::SelectWord { global_position } => {
+                self.handle_select_word(app, *global_position)
+            }
+            SelectionEvent::SelectParagraph {
+                global_position,
+                absorb,
+            } => {
+                if *absorb {
+                    self.handle_select_all(app);
+                    app.get_mut(self).selectable_contains_origin_text_boundary = true;
+                    SelectionResult::Next
+                } else {
+                    self.handle_select_paragraph(app, *global_position)
+                }
+            }
+            SelectionEvent::GranularlyExtendSelection {
+                forward,
+                is_end,
+                granularity,
+            } => self.handle_granularly_extend_selection(app, *forward, *is_end, *granularity),
+            SelectionEvent::DirectionallyExtendSelection {
+                dx,
+                is_end,
+                direction,
+            } => self.handle_directionally_extend_selection(app, *dx, *is_end, *direction),
+        };
+        if existing_start != app.get(self).text_selection_start
+            || existing_end != app.get(self).text_selection_end
+        {
+            self.did_change_selection(app);
+        }
+        result
     }
 
     fn content_length(self: Handle<Self>, app: &App) -> usize {
@@ -3777,21 +3713,7 @@ impl Selectable for SelectableFragment {
     }
 
     fn dispose_selectable(self: Handle<Self>, app: &mut App) {
-        SelectionRegistrant::dispose_selection_registrant(self, app);
         ChangeNotifierData::dispose(app, self);
-    }
-}
-
-impl SelectionRegistrant for SelectableFragment {
-    fn selection_registrant_data(self: Handle<Self>, app: &App) -> &SelectionRegistrantData {
-        &app.get(self).selection_registrant
-    }
-
-    fn selection_registrant_data_mut(
-        self: Handle<Self>,
-        app: &mut App,
-    ) -> &mut SelectionRegistrantData {
-        &mut app.get_mut(self).selection_registrant
     }
 }
 
@@ -4378,28 +4300,31 @@ mod tests {
 #[cfg(test)]
 mod selection_tests {
     //! The `Selection` group of `paragraph_test.dart`.
+    //!
+    //! Skipped: "can handle select all when contains widget span" is in `waft-widgets`'s
+    //! `widget_span.rs`, as `WidgetSpan` is a widgets type.
 
+    use waft_embedder::valo::Op;
     use waft_embedder::{Color, Offset, Rect, TextPosition};
     use waft_foundation::{AppCell, Handle};
     use waft_painting::TextSpan;
 
     use super::*;
+    use crate::layer::{AnyLayer, OffsetLayer, PictureLayer};
     use crate::selection::{
         AnySelectable, SelectionEvent, SelectionExtendDirection, SelectionRegistrar,
         TextGranularity,
     };
     use crate::testing::EnginePhase;
 
+    /// `paragraph_test.dart`'s `TestSelectionRegistrar`.
     struct TestSelectionRegistrar {
         selectables: Vec<AnySelectable>,
     }
 
     impl SelectionRegistrar for TestSelectionRegistrar {
         fn add(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
-            let selectables = &mut app.get_mut(self).selectables;
-            if !selectables.contains(&selectable) {
-                selectables.push(selectable);
-            }
+            app.get_mut(self).selectables.push(selectable);
         }
 
         fn remove(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
@@ -4407,8 +4332,15 @@ mod selection_tests {
         }
     }
 
+    const SELECTION_COLOR: Color = Color::from_argb(0xAF, 0x66, 0x94, 0xE8);
+
     fn span(text: &str) -> InlineSpanRef {
         TextSpan::new().text(text).into_span()
+    }
+
+    /// Dart's `TextSpan(children: <InlineSpan>[TextSpan(text: text)])`.
+    fn nested_span(text: &str) -> InlineSpanRef {
+        TextSpan::new().children(vec![span(text)]).into_span()
     }
 
     fn registrar(app: &mut App) -> Ref<TestSelectionRegistrar> {
@@ -4423,14 +4355,15 @@ mod selection_tests {
 
     fn paragraph_with_registrar(
         app: &mut App,
-        text: &str,
+        text: InlineSpanRef,
         registrar: &Ref<TestSelectionRegistrar>,
     ) -> RenderHandle<RenderParagraph> {
-        let paragraph = RenderParagraph::new(app, span(text), TextDirection::Ltr, None);
-        paragraph.set_registrar(app, Some(registrar.as_selection_registrar()));
+        let paragraph = RenderParagraph::new(app, text, TextDirection::Ltr, None);
+        paragraph.set_registrar(app, Some(registrar.erase()));
         paragraph
     }
 
+    /// The group's `selectionParagraph`.
     fn selection_paragraph(
         app: &mut App,
         paragraph: RenderHandle<RenderParagraph>,
@@ -4441,19 +4374,64 @@ mod selection_tests {
         for selectable in selectables(app, registrar) {
             let start_offset =
                 paragraph.get_offset_for_caret(app, start, Rect::ZERO) + Offset::new(0.0, 5.0);
-            let end_offset =
-                paragraph.get_offset_for_caret(app, end, Rect::ZERO) + Offset::new(0.0, 5.0);
             selectable
                 .dispatch_selection_event(app, &SelectionEvent::for_start(start_offset, None));
+            let end_offset =
+                paragraph.get_offset_for_caret(app, end, Rect::ZERO) + Offset::new(0.0, 5.0);
             selectable.dispatch_selection_event(app, &SelectionEvent::for_end(end_offset, None));
         }
     }
 
-    fn start_and_end(app: &App, paragraph: RenderHandle<RenderParagraph>) -> Option<(i32, i32)> {
+    /// `paragraph.selections[0]` as its start and end, where Dart expects one selection.
+    fn the_selection(app: &App, paragraph: RenderHandle<RenderParagraph>) -> (i32, i32) {
         let selections = paragraph.selections(app);
-        selections
-            .first()
-            .map(|selection| (selection.start(), selection.end()))
+        assert_eq!(selections.len(), 1);
+        (selections[0].start(), selections[0].end())
+    }
+
+    /// `rendering_tester.dart`'s `layout(box, constraints:)`.
+    fn lay_out(
+        app: &mut App,
+        paragraph: RenderHandle<RenderParagraph>,
+        constraints: Option<BoxConstraints>,
+    ) {
+        crate::testing::layout_with(
+            app,
+            paragraph.as_box(),
+            constraints,
+            waft_painting::AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
+        );
+    }
+
+    fn drawn_rects(ops: &[Op]) -> Vec<(Rect, Color)> {
+        ops.iter()
+            .filter_map(|op| match op {
+                Op::DrawRect { rect, paint, .. } => Some((
+                    Rect::from_ltrb(
+                        rect.x as f64,
+                        rect.y as f64,
+                        (rect.x + rect.width) as f64,
+                        (rect.y + rect.height) as f64,
+                    ),
+                    paint.color.into(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// flutter_test's `isSameColorAs`: equal within one 8-bit step per channel.
+    fn assert_same_color_as(actual: Color, expected: Color) {
+        let step = 1.0 / 255.0;
+        assert!(
+            actual.color_space == expected.color_space
+                && (actual.a - expected.a).abs() <= step
+                && (actual.r - expected.r).abs() <= step
+                && (actual.g - expected.g).abs() <= step
+                && (actual.b - expected.b).abs() <= step,
+            "{actual:?} is not {expected:?}"
+        );
     }
 
     // 'subscribe to SelectionRegistrar'.
@@ -4462,7 +4440,7 @@ mod selection_tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let registrar = registrar(&mut app);
-        let paragraph = paragraph_with_registrar(&mut app, "1234567", &registrar);
+        let paragraph = paragraph_with_registrar(&mut app, span("1234567"), &registrar);
         assert_eq!(selectables(&app, &registrar).len(), 1);
 
         paragraph.set_text(&mut app, span(""));
@@ -4475,17 +4453,11 @@ mod selection_tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let registrar = registrar(&mut app);
-        let selection_color = Color::from_argb(0xAF, 0x66, 0x94, 0xE8);
-        let paragraph = paragraph_with_registrar(&mut app, "1234567", &registrar);
-        paragraph.set_selection_color(&mut app, Some(selection_color));
-        lay_out(&mut app, paragraph);
-        let before = crate::testing::painted_ops(&mut app, paragraph.as_object());
-        assert!(
-            !before
-                .iter()
-                .any(|op| matches!(op, waft_embedder::valo::Op::DrawRect { .. }))
-        );
-
+        let paragraph = paragraph_with_registrar(&mut app, span("1234567"), &registrar);
+        paragraph.set_selection_color(&mut app, Some(SELECTION_COLOR));
+        lay_out(&mut app, paragraph, None);
+        let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
+        assert!(drawn_rects(&ops).is_empty());
         selection_paragraph(
             &mut app,
             paragraph,
@@ -4493,48 +4465,23 @@ mod selection_tests {
             TextPosition::new(1),
             TextPosition::new(5),
         );
-        let expected = Rect::from_ltwh(14.0, 0.0, 56.0, 14.0);
 
         let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
-        let drawn: Vec<(Rect, Color)> = ops
+        let drawn = drawn_rects(&ops);
+        assert_eq!(drawn.len(), 1);
+        assert_eq!(drawn[0].0, Rect::from_ltwh(14.0, 0.0, 56.0, 14.0));
+        assert_same_color_as(drawn[0].1, SELECTION_COLOR);
+        // Selection highlight is painted before text.
+        let drawn_items: Vec<&str> = ops
             .iter()
             .filter_map(|op| match op {
-                waft_embedder::valo::Op::DrawRect { rect, paint, .. } => Some((
-                    Rect::from_ltrb(
-                        rect.x as f64,
-                        rect.y as f64,
-                        (rect.x + rect.width) as f64,
-                        (rect.y + rect.height) as f64,
-                    ),
-                    paint.color.into(),
-                )),
+                Op::DrawRect { .. } => Some("Rect"),
+                Op::GlyphRun { .. } => Some("Paragraph"),
                 _ => None,
             })
             .collect();
-        assert_eq!(drawn.len(), 1);
-        assert_eq!(drawn[0].0, expected);
-        let actual = drawn[0].1;
-        let step = 1.0 / 255.0;
-        assert!(
-            actual.color_space == selection_color.color_space
-                && (actual.a - selection_color.a).abs() <= step
-                && (actual.r - selection_color.r).abs() <= step
-                && (actual.g - selection_color.g).abs() <= step
-                && (actual.b - selection_color.b).abs() <= step,
-            "{actual:?} is not {selection_color:?}"
-        );
-        let first_rect = ops
-            .iter()
-            .position(|op| matches!(op, waft_embedder::valo::Op::DrawRect { .. }))
-            .expect("a selection rect");
-        let first_glyph = ops
-            .iter()
-            .position(|op| matches!(op, waft_embedder::valo::Op::GlyphRun { .. }))
-            .expect("the text");
-        assert!(
-            first_rect < first_glyph,
-            "the highlight is painted before the text"
-        );
+        assert_eq!(drawn_items.first(), Some(&"Rect"));
+        assert!(drawn_items[1..].iter().all(|item| *item == "Paragraph"));
 
         selection_paragraph(
             &mut app,
@@ -4543,223 +4490,79 @@ mod selection_tests {
             TextPosition::new(2),
             TextPosition::new(4),
         );
-        let expected = Rect::from_ltwh(28.0, 0.0, 28.0, 14.0);
         let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
-        let rect = ops
+        let drawn = drawn_rects(&ops);
+        let last = drawn.last().expect("a selection rect");
+        assert_eq!(last.0, Rect::from_ltwh(28.0, 0.0, 28.0, 14.0));
+        assert_same_color_as(last.1, SELECTION_COLOR);
+    }
+
+    // 'paints selection highlights outside fade layer and handles after text'. Waft's fade
+    // clips without its shader (see `PORTING.md`), so the case's checks of the fade's
+    // `saveLayer` and shader rect are left out; the rest are Dart's.
+    #[test]
+    fn paints_selection_highlights_outside_fade_layer_and_handles_after_text() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph = paragraph_with_registrar(&mut app, span("a\na\na\na"), &registrar);
+        paragraph.set_selection_color(&mut app, Some(SELECTION_COLOR));
+        paragraph.set_max_lines(&mut app, Some(3));
+        paragraph.set_overflow(&mut app, TextOverflow::Fade);
+        lay_out(
+            &mut app,
+            paragraph,
+            Some(BoxConstraints::new().max_width(100.0)),
+        );
+
+        for selectable in selectables(&app, &registrar) {
+            selectable.dispatch_selection_event(&mut app, &SelectionEvent::SelectAll);
+            let start = LayerLink::new(&mut app);
+            let end = LayerLink::new(&mut app);
+            selectable.push_handle_layers(&mut app, Some(start), Some(end));
+        }
+
+        let layer = OffsetLayer::new(&mut app, Offset::ZERO);
+        let container = layer.as_container_layer();
+        let bounds = paragraph.as_object().paint_bounds(&app);
+        let mut context = PaintingContext::new(container, bounds);
+        paragraph
+            .as_object()
+            .paint(&mut app, &mut context, Offset::ZERO);
+        context.stop_recording_if_needed(&mut app);
+
+        let mut children: Vec<AnyLayer> = Vec::new();
+        let mut child = container.first_child(&app);
+        while let Some(layer) = child {
+            children.push(layer);
+            child = layer.next_sibling(&app);
+        }
+        // The text's picture, then the handles' leaders pushed after it.
+        assert_eq!(children.len(), 3);
+        let picture = app
+            .handle::<PictureLayer>(children[0].id())
+            .and_then(|picture| picture.picture(&app))
+            .expect("the text's picture");
+        let ops = waft_embedder::flattened_ops(picture);
+        let first_glyph = ops
             .iter()
-            .find_map(|op| match op {
-                waft_embedder::valo::Op::DrawRect { rect, .. } => Some(Rect::from_ltrb(
-                    rect.x as f64,
-                    rect.y as f64,
-                    (rect.x + rect.width) as f64,
-                    (rect.y + rect.height) as f64,
-                )),
-                _ => None,
-            })
-            .expect("a selection rect");
-        assert_eq!(rect, expected);
-    }
-
-    fn lay_out(app: &mut App, paragraph: RenderHandle<RenderParagraph>) {
-        let constraints = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
-        crate::testing::layout_with(
-            app,
-            paragraph.as_box(),
-            Some(constraints),
-            waft_painting::AlignmentGeometry::TOP_LEFT,
-            EnginePhase::Layout,
+            .position(|op| matches!(op, Op::GlyphRun { .. }))
+            .expect("the text");
+        assert!(
+            ops[..first_glyph]
+                .iter()
+                .any(|op| matches!(op, Op::DrawRect { .. }))
         );
-    }
-
-    // 'can granularly extend selection - character'.
-    #[test]
-    fn can_granularly_extend_selection_character() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let registrar = registrar(&mut app);
-        let paragraph =
-            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
-        lay_out(&mut app, paragraph);
-        assert_eq!(selectables(&app, &registrar).len(), 1);
-        selection_paragraph(
-            &mut app,
-            paragraph,
-            &registrar,
-            TextPosition::new(4),
-            TextPosition::new(5),
+        assert!(
+            !ops[first_glyph..]
+                .iter()
+                .any(|op| matches!(op, Op::DrawRect { .. }))
         );
-        assert_eq!(start_and_end(&app, paragraph), Some((4, 5)));
-        let selectable = selectables(&app, &registrar)[0];
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: true,
-                is_end: true,
-                granularity: TextGranularity::Character,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((4, 6)));
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: false,
-                is_end: true,
-                granularity: TextGranularity::Character,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((4, 5)));
-    }
-
-    // 'can granularly extend selection - word'.
-    #[test]
-    fn can_granularly_extend_selection_word() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let registrar = registrar(&mut app);
-        let paragraph =
-            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
-        lay_out(&mut app, paragraph);
-        selection_paragraph(
-            &mut app,
-            paragraph,
-            &registrar,
-            TextPosition::new(4),
-            TextPosition::new(5),
-        );
-        let selectable = selectables(&app, &registrar)[0];
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: true,
-                is_end: true,
-                granularity: TextGranularity::Word,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((4, 7)));
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: false,
-                is_end: true,
-                granularity: TextGranularity::Word,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((4, 4)));
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: false,
-                is_end: true,
-                granularity: TextGranularity::Word,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((0, 4)));
-    }
-
-    // 'can granularly extend selection - line'.
-    #[test]
-    fn can_granularly_extend_selection_line() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let registrar = registrar(&mut app);
-        let paragraph =
-            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
-        lay_out(&mut app, paragraph);
-        selection_paragraph(
-            &mut app,
-            paragraph,
-            &registrar,
-            TextPosition::new(4),
-            TextPosition::new(5),
-        );
-        let selectable = selectables(&app, &registrar)[0];
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: true,
-                is_end: true,
-                granularity: TextGranularity::Line,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((4, 11)));
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: false,
-                is_end: true,
-                granularity: TextGranularity::Line,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((0, 4)));
-    }
-
-    // 'can granularly extend selection - document'.
-    #[test]
-    fn can_granularly_extend_selection_document() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let registrar = registrar(&mut app);
-        let paragraph =
-            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
-        lay_out(&mut app, paragraph);
-        selection_paragraph(
-            &mut app,
-            paragraph,
-            &registrar,
-            TextPosition::new(14),
-            TextPosition::new(15),
-        );
-        let selectable = selectables(&app, &registrar)[0];
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: true,
-                is_end: true,
-                granularity: TextGranularity::Document,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((14, 31)));
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: false,
-                is_end: true,
-                granularity: TextGranularity::Document,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((0, 14)));
-    }
-
-    // 'can granularly extend selection when no active selection'.
-    #[test]
-    fn can_granularly_extend_selection_when_no_active_selection() {
-        let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let registrar = registrar(&mut app);
-        let paragraph =
-            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
-        lay_out(&mut app, paragraph);
-        let selectable = selectables(&app, &registrar)[0];
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: true,
-                is_end: true,
-                granularity: TextGranularity::Word,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((0, 3)));
-        selectable.dispatch_selection_event(&mut app, &SelectionEvent::Clear);
-        assert!(paragraph.selections(&app).is_empty());
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::GranularlyExtendSelection {
-                forward: false,
-                is_end: true,
-                granularity: TextGranularity::Word,
-            },
-        );
-        assert_eq!(start_and_end(&app, paragraph), Some((28, 31)));
+        let leaders = children[1..]
+            .iter()
+            .filter(|layer| app.handle::<LeaderLayer>(layer.id()).is_some())
+            .count();
+        assert_eq!(leaders, 2);
     }
 
     // 'paints selection when tap at chinese character'.
@@ -4768,16 +4571,11 @@ mod selection_tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let registrar = registrar(&mut app);
-        let selection_color = Color::from_argb(0xAF, 0x66, 0x94, 0xE8);
-        let paragraph = paragraph_with_registrar(&mut app, "\u{4F60}\u{597D}", &registrar);
-        paragraph.set_selection_color(&mut app, Some(selection_color));
-        lay_out(&mut app, paragraph);
-        let before = crate::testing::painted_ops(&mut app, paragraph.as_object());
-        assert!(
-            !before
-                .iter()
-                .any(|op| matches!(op, waft_embedder::valo::Op::DrawRect { .. }))
-        );
+        let paragraph = paragraph_with_registrar(&mut app, span("\u{4F60}\u{597D}"), &registrar);
+        paragraph.set_selection_color(&mut app, Some(SELECTION_COLOR));
+        lay_out(&mut app, paragraph, None);
+        let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
+        assert!(drawn_rects(&ops).is_empty());
 
         for selectable in selectables(&app, &registrar) {
             selectable.dispatch_selection_event(
@@ -4787,12 +4585,215 @@ mod selection_tests {
                 },
             );
         }
+
         let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
-        let rect = ops.iter().find_map(|op| match op {
-            waft_embedder::valo::Op::DrawRect { rect, .. } => Some(rect),
-            _ => None,
-        });
-        assert!(rect.is_some_and(|rect| rect.width > 0.0 && rect.height > 0.0));
+        let (rect, color) = *drawn_rects(&ops).last().expect("a selection rect");
+        assert!(!rect.is_empty());
+        assert_same_color_as(color, SELECTION_COLOR);
+    }
+
+    // 'getPositionForOffset works'.
+    #[test]
+    fn get_position_for_offset_works() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let paragraph = RenderParagraph::new(&mut app, span("1234567"), TextDirection::Ltr, None);
+        lay_out(&mut app, paragraph, None);
+        assert_eq!(
+            paragraph.get_position_for_offset(&mut app, Offset::new(42.0, 14.0)),
+            TextPosition::new(3)
+        );
+    }
+
+    fn granularly_extend(
+        app: &mut App,
+        registrar: &Ref<TestSelectionRegistrar>,
+        forward: bool,
+        granularity: TextGranularity,
+    ) {
+        selectables(app, registrar)[0].dispatch_selection_event(
+            app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward,
+                is_end: true,
+                granularity,
+            },
+        );
+    }
+
+    /// The paragraph the extend cases select in, laid out, with its one selectable.
+    fn how_are_you(
+        app: &mut App,
+        registrar: &Ref<TestSelectionRegistrar>,
+    ) -> RenderHandle<RenderParagraph> {
+        let paragraph = paragraph_with_registrar(
+            app,
+            nested_span("how are you\nI am fine\nThank you"),
+            registrar,
+        );
+        lay_out(app, paragraph, None);
+        assert_eq!(selectables(app, registrar).len(), 1);
+        paragraph
+    }
+
+    // 'can granularly extend selection - character'.
+    #[test]
+    fn can_granularly_extend_selection_character() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph = how_are_you(&mut app, &registrar);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(4),
+            TextPosition::new(5),
+        );
+        assert_eq!(the_selection(&app, paragraph), (4, 5)); // how [a]re you
+
+        // Equivalent to sending shift + arrow-right
+        granularly_extend(&mut app, &registrar, true, TextGranularity::Character);
+        assert_eq!(the_selection(&app, paragraph), (4, 6)); // how [ar]e you
+
+        // Equivalent to sending shift + arrow-left
+        granularly_extend(&mut app, &registrar, false, TextGranularity::Character);
+        assert_eq!(the_selection(&app, paragraph), (4, 5)); // how [a]re you
+    }
+
+    // 'can granularly extend selection - word'.
+    #[test]
+    fn can_granularly_extend_selection_word() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph = how_are_you(&mut app, &registrar);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(4),
+            TextPosition::new(5),
+        );
+        assert_eq!(the_selection(&app, paragraph), (4, 5)); // how [a]re you
+
+        // Equivalent to sending shift + alt + arrow-right.
+        granularly_extend(&mut app, &registrar, true, TextGranularity::Word);
+        assert_eq!(the_selection(&app, paragraph), (4, 7)); // how [are] you
+
+        // Equivalent to sending shift + alt + arrow-left.
+        granularly_extend(&mut app, &registrar, false, TextGranularity::Word);
+        assert_eq!(the_selection(&app, paragraph), (4, 4)); // how []are you
+
+        // Equivalent to sending shift + alt + arrow-left.
+        granularly_extend(&mut app, &registrar, false, TextGranularity::Word);
+        assert_eq!(the_selection(&app, paragraph), (0, 4)); // [how ]are you
+    }
+
+    // 'can granularly extend selection - line'.
+    #[test]
+    fn can_granularly_extend_selection_line() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph = how_are_you(&mut app, &registrar);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(4),
+            TextPosition::new(5),
+        );
+        assert_eq!(the_selection(&app, paragraph), (4, 5)); // how [a]re you
+
+        // Equivalent to sending shift + meta + arrow-right.
+        granularly_extend(&mut app, &registrar, true, TextGranularity::Line);
+        // how [are you]
+        assert_eq!(the_selection(&app, paragraph), (4, 11));
+
+        // Equivalent to sending shift + meta + arrow-left.
+        granularly_extend(&mut app, &registrar, false, TextGranularity::Line);
+        // [how ]are you
+        assert_eq!(the_selection(&app, paragraph), (0, 4));
+    }
+
+    // 'can granularly extend selection - document'.
+    #[test]
+    fn can_granularly_extend_selection_document() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph = how_are_you(&mut app, &registrar);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(14),
+            TextPosition::new(15),
+        );
+        // how are you
+        // I [a]m fine
+        assert_eq!(the_selection(&app, paragraph), (14, 15));
+
+        // Equivalent to sending shift + meta + arrow-down.
+        granularly_extend(&mut app, &registrar, true, TextGranularity::Document);
+        // how are you
+        // I [am fine
+        // Thank you]
+        assert_eq!(the_selection(&app, paragraph), (14, 31));
+
+        // Equivalent to sending shift + meta + arrow-up.
+        granularly_extend(&mut app, &registrar, false, TextGranularity::Document);
+        // [how are you
+        // I ]am fine
+        assert_eq!(the_selection(&app, paragraph), (0, 14));
+    }
+
+    // 'can granularly extend selection when no active selection'.
+    #[test]
+    fn can_granularly_extend_selection_when_no_active_selection() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph = how_are_you(&mut app, &registrar);
+        assert!(paragraph.selections(&app).is_empty());
+
+        // Equivalent to sending shift + alt + right.
+        granularly_extend(&mut app, &registrar, true, TextGranularity::Word);
+        // [how] are you
+        assert_eq!(the_selection(&app, paragraph), (0, 3));
+
+        // Remove selection
+        selectables(&app, &registrar)[0].dispatch_selection_event(&mut app, &SelectionEvent::Clear);
+        assert!(paragraph.selections(&app).is_empty());
+
+        // Equivalent to sending shift + alt + left.
+        granularly_extend(&mut app, &registrar, false, TextGranularity::Word);
+        // how are you
+        // I am fine
+        // Thank [you]
+        assert_eq!(the_selection(&app, paragraph), (28, 31));
+    }
+
+    fn directionally_extend(
+        app: &mut App,
+        registrar: &Ref<TestSelectionRegistrar>,
+        dx: f64,
+        direction: SelectionExtendDirection,
+    ) {
+        selectables(app, registrar)[0].dispatch_selection_event(
+            app,
+            &SelectionEvent::DirectionallyExtendSelection {
+                dx,
+                is_end: true,
+                direction,
+            },
+        );
+    }
+
+    /// `MatrixUtils.transformPoint(transform, point).dx`.
+    fn transformed_dx(transform: &Matrix4, point: Offset) -> f64 {
+        waft_painting::transform_point(transform, point).dx()
     }
 
     // 'can directionally extend selection'.
@@ -4801,9 +4802,7 @@ mod selection_tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let registrar = registrar(&mut app);
-        let paragraph =
-            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
-        lay_out(&mut app, paragraph);
+        let paragraph = how_are_you(&mut app, &registrar);
         selection_paragraph(
             &mut app,
             paragraph,
@@ -4811,33 +4810,42 @@ mod selection_tests {
             TextPosition::new(14),
             TextPosition::new(15),
         );
+        // how are you
+        // I [a]m fine
+        assert_eq!(the_selection(&app, paragraph), (14, 15));
+
         let selectable = selectables(&app, &registrar)[0];
-        let geometry = selectable.selection_geometry(&app);
-        let transform = selectable.get_transform_to(&app, None);
-        let baseline = transform
-            .map_point(waft_embedder::valo::Point::new(
-                geometry.end_selection_point.unwrap().local_position.dx() as f32,
-                geometry.end_selection_point.unwrap().local_position.dy() as f32,
-            ))
-            .x as f64;
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::DirectionallyExtendSelection {
-                dx: baseline,
-                is_end: true,
-                direction: SelectionExtendDirection::NextLine,
-            },
+        let baseline = transformed_dx(
+            &selectable.get_transform_to(&app, None),
+            selectable
+                .value(&app)
+                .end_selection_point
+                .expect("a selection")
+                .local_position,
         );
-        assert_eq!(start_and_end(&app, paragraph), Some((14, 25)));
-        selectable.dispatch_selection_event(
+
+        // Equivalent to sending shift + arrow-down.
+        directionally_extend(
             &mut app,
-            &SelectionEvent::DirectionallyExtendSelection {
-                dx: baseline,
-                is_end: true,
-                direction: SelectionExtendDirection::PreviousLine,
-            },
+            &registrar,
+            baseline,
+            SelectionExtendDirection::NextLine,
         );
-        assert_eq!(start_and_end(&app, paragraph), Some((14, 15)));
+        // how are you
+        // I [am fine
+        // Tha]nk you
+        assert_eq!(the_selection(&app, paragraph), (14, 25));
+
+        // Equivalent to sending shift + arrow-up.
+        directionally_extend(
+            &mut app,
+            &registrar,
+            baseline,
+            SelectionExtendDirection::PreviousLine,
+        );
+        // how are you
+        // I [a]m fine
+        assert_eq!(the_selection(&app, paragraph), (14, 15));
     }
 
     // 'can directionally extend selection when no selection'.
@@ -4846,37 +4854,41 @@ mod selection_tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let registrar = registrar(&mut app);
-        let paragraph =
-            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
-        lay_out(&mut app, paragraph);
+        let paragraph = how_are_you(&mut app, &registrar);
+        assert!(paragraph.selections(&app).is_empty());
+
         let selectable = selectables(&app, &registrar)[0];
         let size = selectable.size(&mut app);
-        let transform = selectable.get_transform_to(&app, None);
-        let baseline = transform
-            .map_point(waft_embedder::valo::Point::new(
-                (size.width() / 2.0) as f32,
-                0.0,
-            ))
-            .x as f64;
-        selectable.dispatch_selection_event(
-            &mut app,
-            &SelectionEvent::DirectionallyExtendSelection {
-                dx: baseline,
-                is_end: true,
-                direction: SelectionExtendDirection::Forward,
-            },
+        let baseline = transformed_dx(
+            &selectable.get_transform_to(&app, None),
+            Offset::new(size.width() / 2.0, 0.0),
         );
-        assert_eq!(start_and_end(&app, paragraph), Some((0, 6)));
+
+        // Equivalent to sending shift + arrow-down.
+        directionally_extend(
+            &mut app,
+            &registrar,
+            baseline,
+            SelectionExtendDirection::Forward,
+        );
+        // [how ar]e you
+        // I am fine
+        assert_eq!(the_selection(&app, paragraph), (0, 6));
+
+        // Remove selection
         selectable.dispatch_selection_event(&mut app, &SelectionEvent::Clear);
         assert!(paragraph.selections(&app).is_empty());
-        selectable.dispatch_selection_event(
+
+        // Equivalent to sending shift + arrow-up.
+        directionally_extend(
             &mut app,
-            &SelectionEvent::DirectionallyExtendSelection {
-                dx: baseline,
-                is_end: true,
-                direction: SelectionExtendDirection::Backward,
-            },
+            &registrar,
+            baseline,
+            SelectionExtendDirection::Backward,
         );
-        assert_eq!(start_and_end(&app, paragraph), Some((28, 31)));
+        // how are you
+        // I am fine
+        // Thank [you]
+        assert_eq!(the_selection(&app, paragraph), (28, 31));
     }
 }
