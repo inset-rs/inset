@@ -5679,7 +5679,7 @@ mod tests {
                 .current_context(&tester.cell.borrow_mut())
                 .expect("mounted");
             {
-                let mut show = ShowBottomSheet::new(Rc::new(move |_app, _context| {
+                let show = ShowBottomSheet::new(Rc::new(move |_app, _context| {
                     let count = Rc::clone(&count);
                     Builder::new(move |_app, _context| {
                         count.set(count.get() + 1);
@@ -5723,7 +5723,7 @@ mod tests {
 
             let saving = bottom_sheet_context.clone();
             {
-                let mut show = ShowBottomSheet::new(Rc::new(move |_app, context| {
+                let show = ShowBottomSheet::new(Rc::new(move |_app, context| {
                     saving.0.set(Some(context));
                     Container::new().into_widget()
                 }));
@@ -6504,8 +6504,7 @@ mod tests {
     /// Dart's 'Show Persistent' button.
     fn show_persistent_from(tester: &WidgetTester, saved: &Saved) {
         {
-            let mut show =
-                ShowBottomSheet::new(sheet_builder("This is a persistent bottom sheet."));
+            let show = ShowBottomSheet::new(sheet_builder("This is a persistent bottom sheet."));
             show.show(&mut tester.cell.borrow_mut(), saved.get())
         };
     }

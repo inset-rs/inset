@@ -123,6 +123,14 @@ Ported against: 34b89b2086d4
 - button_theme.rs → button_theme.dart
 - dropdown_menu_form_field.rs → dropdown_menu_form_field.dart
 
+## show_* functions → their .dart files
+- Change: `show_date_picker`, `show_date_range_picker`, `show_dialog`, `show_adaptive_dialog`, `show_time_picker`, `show_search`, `show_modal_bottom_sheet`, `show_bottom_sheet` and `show_menu` are builders — `ShowDatePicker::new(first_date, last_date)` and its siblings, `ShowMenu<T>` keeping the type parameter, with a setter per optional Dart argument — whose `show(app, context)` runs the body the free function ran.
+  Reason: language — Rust has no named optional arguments, so the required arguments stay in `new` and every optional one is a fluent setter.
+  Affect: a call site writes `ShowDatePicker::new(first, last).help_text("Start date").show(app, context)` where Dart writes named arguments, and the free functions no longer exist.
+- Change: `ShowSearch::query` takes a plain string and `ShowSearch::query_none()` is Dart's `query: null`.
+  Reason: language — a setter carries the value a nullable argument usually has, so an explicit null needs a setter of its own.
+  Affect: `ShowSearch::new(delegate)` starts from the empty string, `.query("x")` sets it, and `.query_none()` reuses the delegate's current query.
+
 ## colors.rs → colors.dart
 - Change: `MaterialColor` and `MaterialAccentColor` are colour extensions of their own that deref to painting's `ColorSwatch<i32>`; each `Colors` swatch is one of them, and it becomes a `Color` through `primary()` or an `AnyColor` through `into_any()`.
   Reason: language — dart:ui `Color` is a value here and cannot be subclassed, so `MaterialColor extends ColorSwatch<int> extends Color` cannot be one type (waft-painting's colors.rs entry).

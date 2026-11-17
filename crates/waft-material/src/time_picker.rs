@@ -6100,7 +6100,7 @@ pub(crate) mod tests {
         context: BuildContext,
     ) -> waft_foundation::CompleterFuture<waft_widgets::RouteResult> {
         {
-            let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+            let show = ShowTimePicker::new(TimeOfDay::new(7, 0));
             show.show(app, context)
         }
     }

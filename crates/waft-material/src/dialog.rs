@@ -2003,6 +2003,7 @@ impl Page for DialogContentPage {
 ///  * [`DialogRoute`], the route this pushes.
 ///  * <https://material.io/design/components/dialogs.html>
 ///  * <https://m3.material.io/components/dialogs>
+///
 /// Builder for [`ShowDialog`]'s arguments, in place of Dart's named arguments.
 ///
 /// Create one with [`ShowDialog::new`], set what differs from Flutter's defaults, and call

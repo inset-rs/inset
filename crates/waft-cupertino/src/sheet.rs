@@ -235,6 +235,12 @@ pub struct ShowCupertinoSheet {
     show_drag_handle: bool,
 }
 
+impl Default for ShowCupertinoSheet {
+    fn default() -> ShowCupertinoSheet {
+        ShowCupertinoSheet::new()
+    }
+}
+
 impl ShowCupertinoSheet {
     /// Creates a builder for a Cupertino sheet; Dart's `showCupertinoSheet` has no required
     /// argument besides the context, and every argument is a setter.
