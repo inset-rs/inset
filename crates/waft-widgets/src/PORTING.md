@@ -843,3 +843,4 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## Skipped
 - reorderable_list.rs: the second 'ReorderableList supports items with nested list views without throwing layout exception.', a repeat of the first in Dart's file.
+- async.dart: the future builder and the stream builder; a Waft app's entities and tasks already rebuild a widget when a value arrives, so they gain it nothing.
