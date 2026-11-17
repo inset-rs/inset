@@ -291,7 +291,7 @@ impl State for AccountDetailsState {
             children.push(
                 LayoutId::new(
                     account_name_id(),
-                    Padding::new(EdgeInsets::symmetric(0.0, 2.0).into()).child(
+                    Padding::new(EdgeInsets::symmetric(2.0, 0.0).into()).child(
                         DefaultTextStyle::new(
                             theme
                                 .primary_text_theme
@@ -310,7 +310,7 @@ impl State for AccountDetailsState {
             children.push(
                 LayoutId::new(
                     account_email_id(),
-                    Padding::new(EdgeInsets::symmetric(0.0, 2.0).into()).child(
+                    Padding::new(EdgeInsets::symmetric(2.0, 0.0).into()).child(
                         DefaultTextStyle::new(
                             theme
                                 .primary_text_theme
