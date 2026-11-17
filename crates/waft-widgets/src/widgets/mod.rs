@@ -96,6 +96,7 @@ pub mod scroll_view;
 pub mod scrollable;
 pub mod scrollable_helpers;
 pub mod scrollbar;
+pub mod platform_selectable_region_context_menu;
 pub mod selection_container;
 pub mod shared_app_data;
 pub mod shortcuts;

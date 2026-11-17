@@ -429,6 +429,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — `PointerEvent.respond` is omitted on signal events (waft-gestures records it).
   Affect: an embedder that would scroll the page itself is not told the scrollable took the event.
 
+## platform_selectable_region_context_menu.rs → platform_selectable_region_context_menu.dart
+
+- Change: `PlatformSelectableRegionContextMenu` is the non-web stub alone: every member and its `build` throw where Dart throws `UnimplementedError`.
+  Reason: platform — the context menu is a web platform view, and Waft's `SelectableRegion` only names this widget on the web.
+  Affect: an app on a non-web host never builds one; a host that did would panic.
+
 ## widgets/scroll_view.rs → scroll_view.dart
 
 - Change: the physics a primary scroll view implies is substituted in `build`, not stored on the widget.
@@ -750,6 +756,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Affect: a tag is a shared trait object; two tags of different types never match, as two Dart objects of different classes do not.
 
 ## Deferred
+- platform_selectable_region_context_menu_web.dart: the web context menu, a registered platform view over a DOM element. Trigger: a web host.
 
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
 - selection_container_test.dart: all seven cases build a `MultiSelectableSelectionContainerDelegate` (selectable_region.dart) or `Text`'s internal selection container (text.dart), neither ported yet. Trigger: `MultiSelectableSelectionContainerDelegate` and text.dart's selection container.
