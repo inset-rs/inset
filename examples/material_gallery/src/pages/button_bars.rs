@@ -1,6 +1,9 @@
 //! Button bars: the end-aligned row of buttons, in its padded and constrained layouts, and one
 //! wrapped onto a second line.
-#![expect(deprecated, reason = "the page shows ButtonBar, which Flutter deprecates for OverflowBar")]
+#![expect(
+    deprecated,
+    reason = "the page shows ButtonBar, which Flutter deprecates for OverflowBar"
+)]
 
 use waft_foundation::{App, Listener};
 use waft_material::{ButtonBar, ButtonBarLayoutBehavior, TextButton};

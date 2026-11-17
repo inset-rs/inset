@@ -1859,9 +1859,7 @@ mod tests {
             };
             Container::new()
                 .margin(EdgeInsets::only(0.0, 16.0, 0.0, 0.0).into())
-                .child(
-                    SizedBox::new().height(48.0).child(
-                        Row::new().children(vec![
+                .child(SizedBox::new().height(48.0).child(Row::new().children(vec![
                             TextButton::new(
                                 details.on_step_continue.clone(),
                                 Some(Text::new(continue_label)),
@@ -1874,9 +1872,7 @@ mod tests {
                                     Some(Text::new(cancel_label)),
                                 ))
                                 .into_widget(),
-                        ]),
-                    ),
-                )
+                        ])))
                 .into_widget()
         })
     }
@@ -2115,15 +2111,13 @@ mod tests {
             tester.pump_widget(material_app(
                 theme,
                 Material::new()
-                    .child(
-                        ListView::new().children(vec![
+                    .child(ListView::new().children(vec![
                             Stepper::new(vec![Step::new(
                                 Text::new(LONG_TEXT),
                                 Text::new("Text content"),
                             )])
                             .into_widget(),
-                        ]),
-                    )
+                        ]))
                     .into_widget(),
             ));
             assert_no_flex_overflows(tester);
@@ -2137,15 +2131,13 @@ mod tests {
             tester.pump_widget(material_app(
                 theme,
                 Material::new()
-                    .child(
-                        ListView::new().children(vec![
+                    .child(ListView::new().children(vec![
                             Stepper::new(vec![
                                 text_step("Regular title", "Text content")
                                     .subtitle(Text::new(LONG_TEXT)),
                             ])
                             .into_widget(),
-                        ]),
-                    )
+                        ]))
                     .into_widget(),
             ));
             assert_no_flex_overflows(tester);
