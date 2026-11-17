@@ -1,5 +1,5 @@
 # waft-material/src/compose
-Compose home: compose/material3/adaptive (adaptive, adaptive-layout, adaptive-navigation3) and compose/material3/material3-adaptive-navigation-suite
+Compose home: compose/material3/adaptive (adaptive, adaptive-layout, adaptive-navigation3), compose/material3/material3-adaptive-navigation-suite, and compose/material3/material3 (the Expressive components Flutter lacks)
 Ported against: b8f12c706099a47e1e44d9772d03e14a4ae37146
 
 Reasons are the porting skill's `language` and `platform`, plus `framework`: Compose's mechanism has no place in Flutter's model.
@@ -65,7 +65,39 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
   Reason: framework — Flutter's `NavigationDrawer` is a scrolling list with no group alignment, where Compose's drawer sheet is a column it can space.
   Affect: a centred arrangement centres a rail's destinations, and a drawer still lists them under its header.
 
+## split_button.rs → SplitButton.kt
+
+- Change: a part is one of Flutter's buttons — `FilledButton`, `ElevatedButton` or `OutlinedButton` — with the split's shape, padding and minimum size layered over its style, where Compose builds the part from `Surface` and `ButtonDefaults`.
+  Reason: framework — Flutter's buttons already carry Compose's colours, elevation and disabled behaviour, and a Flutter `ButtonStyle` takes a shape per state.
+  Affect: a part's colours and elevation are the Flutter button's, the same values Compose's defaults draw, and its styles can be swapped only by the four variants.
+- Change: a part's corner change animates over the button `Material`'s animation duration and curve, where Compose drives it with the Expressive effects spring.
+  Reason: framework — Flutter animates a `Material`'s shape change itself, and a button has no hook to replace that animation.
+  Affect: pressing a part morphs its inner corners over 200ms on Flutter's curve instead of the bouncier spring.
+- Change: the outer corners are the circle radius of the height the shapes were chosen for, where Compose's `CornerSize(50%)` resolves against the part's measured size.
+  Reason: framework — Flutter's border radii are absolute, with no percentage corner.
+  Affect: a part with a custom height keeps the radius of its token size, so a part much taller than its size has slightly less round outer corners than Compose's.
+- Change: the layout is an `IntrinsicHeight` around a `Row` whose children stretch, and the leading part is laid out first, where Compose measures the trailing part first for width and forces both to the taller intrinsic height.
+  Reason: framework — Flutter has no multi-child render object to add here, and its `Row` measures in child order.
+  Affect: both parts still share one height; under a width too small for the pair the leading part keeps its width and the trailing one shrinks, the opposite priority to Compose.
+- Change: the trailing part's content is centred by its equal start and end padding; Compose's optical centring for unequal paddings is not ported.
+  Reason: framework — Flutter's button padding has no optical-centring step.
+  Affect: a trailing part with different start and end padding looks off-centre where Compose shifts its content to the middle of the shape.
+
+## button_group.rs → ButtonGroup.kt
+
+- Change: a group lays out buttons the app builds, and an app styles a connected group's buttons from `ButtonGroupDefaults`' three shapes, where Compose's `ButtonGroupScope` builds `clickableItem`s and `toggleableItem`s itself.
+  Reason: framework — Flutter has no content scope; a child list is its equivalent, and a child's style belongs to the child.
+  Affect: an app makes each button and asks for the connected shapes it needs.
+- Change: the standard and connected arrangements are a `Row` with the group's spacing and alignment.
+  Reason: framework — Flutter's `Row` already spaces and aligns children.
+  Affect: the buttons sit at Compose's spacings, 12 and 2.
+
 ## Deferred
+- split button shape morphing on the Expressive spring, and a part's own `ButtonColors`, `ButtonElevation`, border and interaction source. Trigger: an animation scheme on the button, and style arguments on a part.
+- pressing a group's button expands it and compresses its neighbours (`EnlargeOnPress`, `expandedRatio`). Trigger: a layout that measures children while their widths animate.
+- the group's overflow (`overflowIndicator`, `ButtonGroupMenuState`, hiding the items that do not fit into a menu, and its saved state). Trigger: a layout that measures which children fit and a menu built from the hidden ones.
+- the group's `clickableItem`, `toggleableItem` and `customItem` content scope. Trigger: Compose's Expressive `ToggleButton`, which Flutter and Waft lack, for the toggleable item.
+- a group item's `Modifier.weight` and vertical `align`. Trigger: float weights and per-child alignment in the group's layout.
 - levitated panes (`AdaptStrategy::Levitate`, the scrim and drag-to-resize state). Trigger: a modal pane layer in `ThreePaneScaffold`.
 - pane expansion (`PaneExpansionState`, the draggable divider). Trigger: an optional field on `ThreePaneScaffold`.
 - predictive back inside a scene (`seekTo`, `PredictiveBackScaleState`). Trigger: the scaffold observing the back gesture; single-pane steps are already pages.

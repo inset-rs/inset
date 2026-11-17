@@ -10,12 +10,14 @@
 
 mod adapt_strategy;
 mod back_navigation_behavior;
+mod button_group;
 mod navigation_suite_scaffold;
 mod pane;
 mod pane_adapted_value;
 mod pane_motion;
 mod pane_scaffold_directive;
 mod pane_scaffold_role;
+mod split_button;
 mod three_pane_navigator;
 mod three_pane_scaffold;
 mod three_pane_scaffold_horizontal_order;
@@ -25,11 +27,13 @@ mod window_size_class;
 
 pub use adapt_strategy::*;
 pub use back_navigation_behavior::*;
+pub use button_group::*;
 pub use navigation_suite_scaffold::*;
 pub use pane::*;
 pub use pane_adapted_value::*;
 pub use pane_scaffold_directive::*;
 pub use pane_scaffold_role::*;
+pub use split_button::*;
 pub use three_pane_navigator::*;
 pub use three_pane_scaffold::*;
 pub use three_pane_scaffold_horizontal_order::*;
