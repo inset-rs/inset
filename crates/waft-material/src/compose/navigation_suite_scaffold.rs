@@ -1,16 +1,23 @@
 //! One list of destinations shown as a bar, a rail or a drawer for the window's size.
 
+use std::rc::Rc;
+
 use waft_embedder::TextDirection;
 use waft_foundation::{App, ValueChanged};
+use waft_painting::RoundedRectangleBorder;
 use waft_widgets::{
     BuildContext, Column, Directionality, Expanded, IntoWidget, KeyRef, MediaQuery, Positioned,
     Row, SizedBox, Stack, StatelessWidget, Text, WidgetRef,
 };
 
-use crate::compose::{WindowSizeClass, WindowWidthSizeClass};
+use crate::compose::{WindowHeightSizeClass, WindowSizeClass, WindowWidthSizeClass};
+use crate::drawer_theme::DrawerTheme;
 use crate::navigation_bar::{NavigationBar, NavigationDestination};
 use crate::navigation_drawer::{NavigationDrawer, NavigationDrawerDestination};
-use crate::navigation_rail::{NavigationRail, NavigationRailDestination};
+use crate::navigation_rail::{NavigationRail, NavigationRailDestination, NavigationRailLabelType};
+
+/// Compose's `PrimaryActionContentPadding`: the primary action's gap to the bar and the end edge.
+const PRIMARY_ACTION_CONTENT_PADDING: f64 = 16.0;
 
 /// What a [`NavigationSuiteScaffold`] shows its destinations in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,7 +39,7 @@ impl NavigationSuiteType {
     /// otherwise.
     pub fn from_window_size_class(size_class: WindowSizeClass) -> NavigationSuiteType {
         if size_class.width == WindowWidthSizeClass::Compact
-            || size_class.height == crate::compose::WindowHeightSizeClass::Compact
+            || size_class.height == WindowHeightSizeClass::Compact
         {
             NavigationSuiteType::NavigationBar
         } else {
@@ -203,11 +210,11 @@ impl NavigationSuiteScaffold {
             })
             .collect::<Vec<_>>();
         let mut rail = NavigationRail::new(destinations, Some(self.selected_index))
-            .label_type(crate::navigation_rail::NavigationRailLabelType::All);
+            .label_type(NavigationRailLabelType::All);
         if extended {
             rail = rail
                 .extended(true)
-                .label_type(crate::navigation_rail::NavigationRailLabelType::None)
+                .label_type(NavigationRailLabelType::None)
                 .min_extended_width(256.0);
         }
         if let Some(primary_action) = &self.primary_action {
@@ -220,7 +227,8 @@ impl NavigationSuiteScaffold {
         rail.into_widget()
     }
 
-    fn drawer(&self) -> WidgetRef {
+    /// Compose's `PermanentDrawerSheet`: the drawer with square corners and no elevation.
+    fn drawer(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let destinations = self
             .destinations
             .iter()
@@ -236,18 +244,46 @@ impl NavigationSuiteScaffold {
                 item.into_widget()
             })
             .collect::<Vec<_>>();
-        let mut drawer =
-            NavigationDrawer::new(destinations).selected_index(Some(self.selected_index as i32));
+        let mut drawer = NavigationDrawer::new(destinations)
+            .selected_index(Some(self.selected_index as i32))
+            .elevation(0.0);
         if let Some(primary_action) = &self.primary_action {
             drawer = drawer.header(primary_action.clone());
         }
         if let Some(on_selected) = &self.on_destination_selected {
             let on_selected = on_selected.clone();
-            drawer = drawer.on_destination_selected(std::rc::Rc::new(move |app, index| {
+            drawer = drawer.on_destination_selected(Rc::new(move |app, index| {
                 on_selected(app, index as usize);
             }));
         }
-        SizedBox::new().width(360.0).child(drawer).into_widget()
+        let sheet = DrawerTheme::of(app, context).shape(RoundedRectangleBorder::default());
+        DrawerTheme::new(sheet, SizedBox::new().width(360.0).child(drawer)).into_widget()
+    }
+
+    /// The content with the primary action floated above its bottom end, as over a bar.
+    fn content_with_primary_action(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        content: WidgetRef,
+    ) -> WidgetRef {
+        let Some(primary_action) = &self.primary_action else {
+            return content;
+        };
+        let text_direction = Directionality::of(app, context);
+        Stack::new()
+            .children([
+                Positioned::fill(content).into_widget(),
+                Positioned::directional(
+                    text_direction,
+                    None,
+                    Some(PRIMARY_ACTION_CONTENT_PADDING),
+                    primary_action.clone(),
+                )
+                .bottom(PRIMARY_ACTION_CONTENT_PADDING)
+                .into_widget(),
+            ])
+            .into_widget()
     }
 
     fn content_without_padding(
@@ -300,20 +336,10 @@ impl StatelessWidget for NavigationSuiteScaffold {
         match suite_type {
             NavigationSuiteType::None => content,
             NavigationSuiteType::NavigationBar => {
-                let mut stack_children = vec![
-                    Column::new()
-                        .children([Expanded::new(content).into_widget(), self.bar()])
-                        .into_widget(),
-                ];
-                if let Some(primary_action) = &self.primary_action {
-                    stack_children.push(
-                        Positioned::new(primary_action.clone())
-                            .right(16.0)
-                            .bottom(96.0)
-                            .into_widget(),
-                    );
-                }
-                Stack::new().children(stack_children).into_widget()
+                let content = self.content_with_primary_action(app, context, content);
+                Column::new()
+                    .children([Expanded::new(content).into_widget(), self.bar()])
+                    .into_widget()
             }
             NavigationSuiteType::NavigationRail => Row::new()
                 .children([self.rail(false), Expanded::new(content).into_widget()])
@@ -322,7 +348,10 @@ impl StatelessWidget for NavigationSuiteScaffold {
                 .children([self.rail(true), Expanded::new(content).into_widget()])
                 .into_widget(),
             NavigationSuiteType::NavigationDrawer => Row::new()
-                .children([self.drawer(), Expanded::new(content).into_widget()])
+                .children([
+                    self.drawer(app, context),
+                    Expanded::new(content).into_widget(),
+                ])
                 .into_widget(),
         }
     }
@@ -331,16 +360,14 @@ impl StatelessWidget for NavigationSuiteScaffold {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::rc::Rc;
 
     use waft_embedder::Size;
-    use waft_foundation::App;
+    use waft_foundation::{App, ValueKey};
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
     use waft_widgets::{MediaQueryData, Text};
 
     use super::*;
     use crate::compose::WindowHeightSizeClass;
-    use crate::navigation_rail::NavigationRailLabelType;
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
@@ -360,6 +387,7 @@ mod tests {
     }
 
     fn pump(tester: &mut WidgetTester, width: f64, height: f64, suite: NavigationSuiteScaffold) {
+        tester.set_surface_size(Some(Size::new(width, height)));
         let theme = ThemeData::new(&tester.cell.borrow());
         let home = MediaQuery::new(MediaQueryData::new().size(Size::new(width, height)), suite);
         tester.pump_widget(material_app(theme, home.into_widget()));
@@ -508,6 +536,31 @@ mod tests {
             );
             assert!(leading);
             assert!(!find::text("compose").evaluate(tester).is_empty());
+        });
+    }
+
+    #[test]
+    fn the_primary_action_floats_above_the_bar_s_end_in_either_direction() {
+        test_widgets(|tester| {
+            for (direction, expected_left) in
+                [(TextDirection::Ltr, 334.0), (TextDirection::Rtl, 16.0)]
+            {
+                let action = SizedBox::new()
+                    .key(ValueKey::new("action").into())
+                    .width(50.0)
+                    .height(50.0);
+                let suite = Directionality::new(direction, suite().primary_action(action));
+                tester.set_surface_size(Some(Size::new(400.0, 700.0)));
+                let theme = ThemeData::new(&tester.cell.borrow());
+                let home =
+                    MediaQuery::new(MediaQueryData::new().size(Size::new(400.0, 700.0)), suite);
+                tester.pump_widget(material_app(theme, home.into_widget()));
+
+                let action = tester.get_rect(find::by_key(ValueKey::new("action")));
+                let bar = tester.get_rect(find::by_type::<NavigationBar>());
+                assert_eq!(action.left, expected_left, "{direction:?}");
+                assert_eq!(action.bottom, bar.top - 16.0, "{direction:?}");
+            }
         });
     }
 }
