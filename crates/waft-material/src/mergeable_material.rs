@@ -9,8 +9,8 @@ use waft_animation::{
     Animation, AnimationBehavior, AnimationController, AnimationStatus, CurvedAnimation, Curves,
 };
 use waft_embedder::{
-    Canvas, Color, FillRule, Offset, PathBuilder, Radius, Size, TextBaseline,
-    rrect_radii_elliptical, valo,
+    Canvas, Color, Offset, Path, PathBuilder, Radius, Size, TextBaseline, rrect_radii_elliptical,
+    valo,
 };
 use waft_foundation::{App, Handle, Listener, Ref, UniqueKey};
 use waft_painting::{
@@ -21,7 +21,7 @@ use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, ContainerBoxParentData,
     ContainerParentDataMixin, ContainerRenderObjectData, ContainerRenderObjectMixin, RenderBox,
     RenderBoxContainerDefaultsMixin, RenderBoxData, RenderHandle, RenderListBodyData,
-    RenderListBodyMixin, RenderObject, RenderObjectData, RenderView,
+    RenderListBodyMixin, RenderObject, RenderObjectData,
 };
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
@@ -31,10 +31,11 @@ use waft_widgets::{
     get_axis_direction_from_axis_reverse_and_directionality,
 };
 
-use crate::constants::K_THEME_CHANGE_DURATION;
+use crate::colors::Colors;
 use crate::divider::Divider;
 use crate::material::{Material, MaterialType, k_material_edges};
-use crate::theme::Theme;
+use crate::slider_parts::draw_shadow;
+use crate::theme::{K_THEME_ANIMATION_DURATION, Theme};
 
 /// The base type for [`MaterialSlice`] and [`MaterialGap`].
 ///
@@ -58,6 +59,18 @@ impl MergeableMaterialItem {
 
     fn is_gap(&self) -> bool {
         matches!(self, MergeableMaterialItem::Gap(_))
+    }
+}
+
+impl From<MaterialSlice> for MergeableMaterialItem {
+    fn from(slice: MaterialSlice) -> MergeableMaterialItem {
+        MergeableMaterialItem::Slice(slice)
+    }
+}
+
+impl From<MaterialGap> for MergeableMaterialItem {
+    fn from(gap: MaterialGap) -> MergeableMaterialItem {
+        MergeableMaterialItem::Gap(gap)
     }
 }
 
@@ -292,7 +305,7 @@ impl MergeableMaterialState {
         let controller = AnimationController::new(
             app,
             None,
-            Some(K_THEME_CHANGE_DURATION),
+            Some(K_THEME_ANIMATION_DURATION),
             None,
             0.0,
             1.0,
@@ -322,6 +335,31 @@ impl MergeableMaterialState {
         }
     }
 
+    /// Dart's `_debugHasConsecutiveGaps`, which reads the widget's children whatever it is given.
+    fn debug_has_consecutive_gaps(self: Handle<Self>, app: &App) -> bool {
+        self.widget(app)
+            .children
+            .windows(2)
+            .any(|pair| pair[0].is_gap() && pair[1].is_gap())
+    }
+
+    /// Dart's `_debugGapsAreValid`: no two gaps in a row, and neither end is a gap.
+    fn debug_gaps_are_valid(
+        self: Handle<Self>,
+        app: &App,
+        children: &[MergeableMaterialItem],
+    ) -> bool {
+        if self.debug_has_consecutive_gaps(app) {
+            return false;
+        }
+        if let (Some(first), Some(last)) = (children.first(), children.last())
+            && (first.is_gap() || last.is_gap())
+        {
+            return false;
+        }
+        true
+    }
+
     fn insert_child(self: Handle<Self>, app: &mut App, index: usize, child: MergeableMaterialItem) {
         if let MergeableMaterialItem::Gap(gap) = &child {
             self.init_gap(app, gap);
@@ -348,21 +386,16 @@ impl MergeableMaterialState {
     }
 
     fn remove_empty_gaps(self: Handle<Self>, app: &mut App) {
-        let mut j = app.get(self).children.len() as i64 - 1;
-        while j >= 0 {
-            let dismissed = {
-                let child = &app.get(self).children[j as usize];
-                match child {
-                    MergeableMaterialItem::Gap(gap) => {
-                        self.controller(app, &gap.key).status(app) == AnimationStatus::Dismissed
-                    }
-                    MergeableMaterialItem::Slice(_) => false,
+        for j in (0..app.get(self).children.len()).rev() {
+            let dismissed = match &app.get(self).children[j] {
+                MergeableMaterialItem::Gap(gap) => {
+                    self.controller(app, &gap.key).status(app).is_dismissed()
                 }
+                MergeableMaterialItem::Slice(_) => false,
             };
             if dismissed {
-                self.remove_child(app, j as usize);
+                self.remove_child(app, j);
             }
-            j -= 1;
         }
     }
 
@@ -394,13 +427,13 @@ impl MergeableMaterialState {
                 Radius::lerp(Some(Radius::ZERO), Some(card_radius), value).expect("a radius lerps");
         }
 
-        let top = if start { card_radius } else { start_radius };
-        let bottom = if end { card_radius } else { end_radius };
+        let start_radius = if start { card_radius } else { start_radius };
+        let end_radius = if end { card_radius } else { end_radius };
         match self.widget(app).main_axis {
-            Axis::Vertical => BorderRadiusGeometry::vertical(top, bottom),
+            Axis::Vertical => BorderRadiusGeometry::vertical(start_radius, end_radius),
             Axis::Horizontal => BorderRadiusGeometry::BorderRadius(BorderRadius::horizontal(
-                if start { card_radius } else { start_radius },
-                if end { card_radius } else { end_radius },
+                start_radius,
+                end_radius,
             )),
         }
     }
@@ -464,13 +497,14 @@ impl State for MergeableMaterialState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let children = self.widget(app).children.clone();
         app.get_mut(self).children = children.clone();
-        for (index, child) in children.iter().enumerate() {
+        for child in &children {
             if let MergeableMaterialItem::Gap(gap) = child {
                 self.init_gap(app, gap);
+                // Gaps are initially full-sized.
                 self.controller(app, &gap.key).set_value(app, 1.0);
             }
-            let _ = index;
         }
+        debug_assert!(self.debug_gaps_are_valid(app, &children));
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &MergeableMaterial) {
@@ -486,6 +520,8 @@ impl State for MergeableMaterialState {
             .collect();
         let new_only: HashSet<KeyRef> = new_keys.difference(&old_keys).cloned().collect();
         let old_only: HashSet<KeyRef> = old_keys.difference(&new_keys).cloned().collect();
+
+        debug_assert!(self.debug_gaps_are_valid(app, &new_children));
 
         self.remove_empty_gaps(app);
 
@@ -642,10 +678,13 @@ impl State for MergeableMaterialState {
                     self.controller(app, &key).reverse(app, None);
                 }
             } else if app.get(self).children[j].is_gap() == new_children[i].is_gap() {
+                // Same kind: their places have been swapped.
                 app.get_mut(self).children[j] = new_children[i].clone();
                 i += 1;
                 j += 1;
             } else {
+                // A closing gap, which is skipped.
+                debug_assert!(app.get(self).children[j].is_gap());
                 j += 1;
             }
         }
@@ -685,7 +724,7 @@ impl State for MergeableMaterialState {
 
         for i in 0..app.get(self).children.len() {
             if app.get(self).children[i].is_gap() {
-                assert!(!slices.is_empty());
+                debug_assert!(!slices.is_empty());
                 widgets.push(
                     ListBody::new()
                         .main_axis(main_axis)
@@ -711,41 +750,26 @@ impl State for MergeableMaterialState {
                     let has_bottom_divider = self.will_need_divider(app, i as i64 + 1);
                     let divider =
                         Divider::create_border_side(app, Some(context), divider_color, Some(0.5));
+                    let side = |shown: bool| if shown { divider } else { BorderSide::NONE };
                     let border = if i == 0 {
                         Border {
-                            bottom: if has_bottom_divider {
-                                divider
-                            } else {
-                                BorderSide::NONE
-                            },
+                            bottom: side(has_bottom_divider),
                             ..Border::from_border_side(BorderSide::NONE)
                         }
                     } else if i == app.get(self).children.len() - 1 {
                         Border {
-                            top: if has_top_divider {
-                                divider
-                            } else {
-                                BorderSide::NONE
-                            },
+                            top: side(has_top_divider),
                             ..Border::from_border_side(BorderSide::NONE)
                         }
                     } else {
                         Border {
-                            top: if has_top_divider {
-                                divider
-                            } else {
-                                BorderSide::NONE
-                            },
-                            bottom: if has_bottom_divider {
-                                divider
-                            } else {
-                                BorderSide::NONE
-                            },
+                            top: side(has_top_divider),
+                            bottom: side(has_bottom_divider),
                             ..Border::from_border_side(BorderSide::NONE)
                         }
                     };
 
-                    child = AnimatedContainer::new(K_THEME_CHANGE_DURATION)
+                    child = AnimatedContainer::new(K_THEME_ANIMATION_DURATION)
                         .key(KeyRef::Global(waft_widgets::GlobalKey::wrapping(Rc::new(
                             MergeableMaterialSliceKey(slice_key),
                         ))))
@@ -875,7 +899,7 @@ struct RenderMergeableMaterialListBody {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     container: ContainerRenderObjectData<AnyRenderBox>,
-    data: RenderListBodyData,
+    list_body: RenderListBodyData,
     elevation: f64,
 }
 
@@ -890,7 +914,7 @@ impl RenderMergeableMaterialListBody {
                 render_object: RenderObjectData::new(),
                 render_box: RenderBoxData::new(),
                 container: ContainerRenderObjectData::new(),
-                data: RenderListBodyData::new().axis_direction(axis_direction),
+                list_body: RenderListBodyData::new().axis_direction(axis_direction),
                 elevation: 0.0,
             },
         )
@@ -916,27 +940,23 @@ impl RenderMergeableMaterialListBody {
     ) {
         let elevation = self.elevation(app);
         if elevation != 0.0 {
-            let rrect = waft_embedder::RRect::from_rect_and_radius(rect, Radius::circular(2.0));
+            let rrect = k_material_edges(MaterialType::Card)
+                .expect("the card material has a radius")
+                .to_rrect(rect);
             let mut path = PathBuilder::new();
             path.rrect_radii_elliptical(valo::Rect::from(rect), rrect_radii_elliptical(rrect));
-            canvas.draw_shadow(
-                &path.build(),
-                FillRule::NonZero,
-                crate::colors::Colors::BLACK.into(),
-                elevation as f32,
+            draw_shadow(
+                app,
+                canvas,
+                self.as_object().as_box().expect("a list body is a box"),
+                &Path::new(path.build()),
+                Colors::BLACK,
+                elevation,
+                // The occluding object is not (necessarily) opaque.
                 true,
-                device_pixel_ratio_of_view(app, self.as_object()) as f32,
             );
         }
     }
-}
-
-fn device_pixel_ratio_of_view(app: &App, render_object: AnyRenderObject) -> f64 {
-    render_object
-        .owner(app)
-        .and_then(|owner| owner.root_node(app))
-        .and_then(|root| root.downcast::<RenderView>(app))
-        .map_or(1.0, |view| view.configuration(app).device_pixel_ratio)
 }
 
 impl ContainerRenderObjectMixin for RenderMergeableMaterialListBody {
@@ -962,11 +982,11 @@ impl RenderBoxContainerDefaultsMixin for RenderMergeableMaterialListBody {}
 
 impl RenderListBodyMixin for RenderMergeableMaterialListBody {
     fn list_body_data(self: RenderHandle<Self>, app: &App) -> &RenderListBodyData {
-        &self.get(app).data
+        &self.get(app).list_body
     }
 
     fn list_body_data_mut(self: RenderHandle<Self>, app: &mut App) -> &mut RenderListBodyData {
-        &mut self.get_mut(app).data
+        &mut self.get_mut(app).list_body
     }
 }
 
@@ -1027,7 +1047,7 @@ impl RenderObject for RenderMergeableMaterialListBody {
             child = parent_data.next_sibling();
             index += 1;
         }
-        self.default_paint(app, context, offset);
+        RenderListBodyMixin::paint(self, app, context, offset)
     }
 }
 
@@ -1093,249 +1113,1083 @@ impl RenderBox for RenderMergeableMaterialListBody {
 mod tests {
     use std::time::Duration;
 
-    use waft_embedder::{Color, RRect, Radius, Rect, Size};
+    use waft_embedder::{Rect, Size};
     use waft_foundation::ValueKey;
+    use waft_painting::{Border, BorderRadius, BorderRadiusGeometry, BorderSide, BoxDecoration};
+    use waft_rendering::AnyRenderBox;
     use waft_rendering::testing::{PaintCall, assert_paints, paints};
-    use waft_widgets::testing::{find, test_widgets};
-    use waft_widgets::{AnimatedContainer, Container, IntoWidget, SingleChildScrollView, SizedBox};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+    use waft_widgets::{
+        AnimatedContainer, Container, DecoratedBox, IntoWidget, SingleChildScrollView, SizedBox,
+        WidgetRef,
+    };
 
-    use crate::scaffold::Scaffold;
-
-    use super::*;
+    use super::{MaterialGap, MaterialSlice, MergeableMaterial, MergeableMaterialItem};
+    use crate::app::MaterialApp;
     use crate::colors::Colors;
-    use crate::test_support::{PaintInspection, material_app};
+    use crate::material::{MaterialType, k_material_edges};
+    use crate::scaffold::Scaffold;
+    use crate::test_support::PaintInspection;
     use crate::theme_data::ThemeData;
 
-    fn slice(key: &'static str, size: f64) -> MergeableMaterialItem {
-        MergeableMaterialItem::Slice(MaterialSlice::new(
+    #[derive(Clone, Copy)]
+    enum RadiusType {
+        Sharp,
+        Shifting,
+        Round,
+    }
+
+    fn card_radius() -> waft_embedder::Radius {
+        k_material_edges(MaterialType::Card)
+            .expect("the card material has a radius")
+            .top_left
+    }
+
+    /// Dart's `matches`: the corners at the top and at the bottom of `border_radius` are each
+    /// sharp, on their way between sharp and the card's radius, or the card's radius.
+    fn matches(border_radius: Option<BorderRadius>, top: RadiusType, bottom: RadiusType) {
+        let border_radius = border_radius.expect("the slice has a border radius");
+        matches_corners(border_radius.top_left, border_radius.top_right, top);
+        matches_corners(
+            border_radius.bottom_left,
+            border_radius.bottom_right,
+            bottom,
+        );
+    }
+
+    /// One of the two `switch`es of Dart's `matches`, on the two corners of one end.
+    fn matches_corners(
+        left: waft_embedder::Radius,
+        right: waft_embedder::Radius,
+        radius_type: RadiusType,
+    ) {
+        let card_radius = card_radius();
+        match radius_type {
+            RadiusType::Sharp => {
+                assert_eq!(left, waft_embedder::Radius::ZERO);
+                assert_eq!(right, waft_embedder::Radius::ZERO);
+            }
+            RadiusType::Shifting => {
+                for corner in [left, right] {
+                    assert!(corner.x > 0.0, "{corner:?} is shifting");
+                    assert!(corner.x < card_radius.x, "{corner:?} is shifting");
+                    assert!(corner.y > 0.0, "{corner:?} is shifting");
+                    assert!(corner.y < card_radius.y, "{corner:?} is shifting");
+                }
+            }
+            RadiusType::Round => {
+                assert_eq!(left, card_radius);
+                assert_eq!(right, card_radius);
+            }
+        }
+    }
+
+    /// Dart's `getBorderRadius`: the border radius of the decoration of the `index`th
+    /// `Container`, which depends on the exact structure Material and MergeableMaterial build.
+    fn get_border_radius(tester: &WidgetTester, index: usize) -> Option<BorderRadius> {
+        let containers = find::by_type::<Container>().evaluate(tester);
+        tester.widget(containers[index], |container: &Container| {
+            box_decoration(container.decoration.as_ref())
+                .border_radius
+                .map(|border_radius| match border_radius {
+                    BorderRadiusGeometry::BorderRadius(border_radius) => border_radius,
+                    _ => panic!("the radius is a BorderRadius"),
+                })
+        })
+    }
+
+    /// Dart's `isDivider`.
+    fn is_divider(decoration: &BoxDecoration, top: bool, bottom: bool) -> bool {
+        let side = BorderSide::new(
+            waft_embedder::Color::new(0x1F000000),
+            0.5,
+            waft_painting::BorderStyle::Solid,
+            BorderSide::STROKE_ALIGN_INSIDE,
+        );
+        let side_if = |shown: bool| if shown { side } else { BorderSide::NONE };
+        *decoration
+            == BoxDecoration::new().border(Border {
+                top: side_if(top),
+                bottom: side_if(bottom),
+                ..Border::from_border_side(BorderSide::NONE)
+            })
+    }
+
+    /// Dart's `decoration! as BoxDecoration`.
+    fn box_decoration(decoration: Option<&waft_painting::DecorationRef>) -> BoxDecoration {
+        decoration
+            .expect("the widget has a decoration")
+            .as_any()
+            .downcast_ref::<BoxDecoration>()
+            .expect("the decoration is a BoxDecoration")
+            .clone()
+    }
+
+    /// The decorations of every `AnimatedContainer`, in tree order.
+    fn animated_container_decorations(tester: &WidgetTester) -> Vec<BoxDecoration> {
+        find::by_type::<AnimatedContainer>()
+            .evaluate(tester)
+            .into_iter()
+            .map(|container| {
+                tester.widget(container, |container: &AnimatedContainer| {
+                    box_decoration(container.decoration.as_ref())
+                })
+            })
+            .collect()
+    }
+
+    /// Dart's `MaterialSlice(key: ValueKey<String>(key), child: SizedBox(width: 100.0, height: 100.0))`.
+    fn slice(key: &'static str) -> MergeableMaterialItem {
+        MaterialSlice::new(
             ValueKey::new(key),
-            SizedBox::new().width(size).height(size),
-        ))
+            SizedBox::new().width(100.0).height(100.0),
+        )
+        .into()
     }
 
+    /// Dart's `MaterialGap(key: ValueKey<String>(key))`.
     fn gap(key: &'static str) -> MergeableMaterialItem {
-        MergeableMaterialItem::Gap(MaterialGap::new(ValueKey::new(key)))
+        MaterialGap::new(ValueKey::new(key)).into()
     }
 
-    fn pump(tester: &mut waft_widgets::testing::WidgetTester, material: MergeableMaterial) {
-        let theme = ThemeData::builder().build(&tester.cell.borrow());
-        tester.pump_widget(material_app(
-            theme,
-            Scaffold::new()
-                .body(SingleChildScrollView::new().child(material))
-                .into_widget(),
-        ));
+    /// Dart's `Scaffold(body: SingleChildScrollView(child: material))`.
+    fn scaffold(material: MergeableMaterial) -> Scaffold {
+        Scaffold::new().body(SingleChildScrollView::new().child(material))
+    }
+
+    /// Dart's `MaterialApp(home: Scaffold(body: SingleChildScrollView(child: material)))`.
+    fn app(material: MergeableMaterial) -> WidgetRef {
+        MaterialApp::new().home(scaffold(material)).into_widget()
+    }
+
+    /// Dart's `MaterialApp(theme: theme, home: Scaffold(body: SingleChildScrollView(child:
+    /// material)))`.
+    fn themed_app(theme: ThemeData, material: MergeableMaterial) -> WidgetRef {
+        MaterialApp::new()
+            .theme(theme)
+            .home(scaffold(material))
+            .into_widget()
+    }
+
+    /// Dart's `ThemeData(useMaterial3: false)`.
+    fn material2_theme(tester: &WidgetTester) -> ThemeData {
+        ThemeData::builder()
+            .use_material3(false)
+            .build(&tester.cell.borrow())
+    }
+
+    /// Dart's `tester.renderObject(find.byType(MergeableMaterial))` as a `RenderBox`.
+    fn mergeable_material_box(tester: &WidgetTester) -> AnyRenderBox {
+        tester
+            .render_object(find::by_type::<MergeableMaterial>())
+            .as_box()
+            .expect("MergeableMaterial renders a box")
+    }
+
+    /// Dart's `box.size.height`.
+    fn height(tester: &WidgetTester, render_box: AnyRenderBox) -> f64 {
+        tester.get_size(render_box).height()
     }
 
     #[test]
-    fn an_empty_mergeable_material_has_no_height() {
+    fn mergeable_material_empty() {
         test_widgets(|tester| {
-            pump(tester, MergeableMaterial::new());
-            assert_eq!(
-                tester
-                    .get_size(find::by_type::<MergeableMaterial>())
-                    .height(),
-                0.0
-            );
+            tester.pump_widget(app(MergeableMaterial::new()));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 0.0);
         });
     }
 
     #[test]
-    fn a_gap_separates_the_slices_and_closes_again() {
+    fn mergeable_material_update_slice() {
         test_widgets(|tester| {
-            pump(
-                tester,
-                MergeableMaterial::new().children(vec![
-                    slice("A", 100.0),
-                    gap("x"),
-                    slice("B", 100.0),
-                ]),
+            let sized_slice = |height: f64| -> MergeableMaterialItem {
+                MaterialSlice::new(
+                    ValueKey::new("A"),
+                    SizedBox::new().width(100.0).height(height),
+                )
+                .into()
+            };
+            tester.pump_widget(app(MergeableMaterial::new().children([sized_slice(100.0)])));
+
+            let mut render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 100.0);
+
+            tester.pump_widget(app(MergeableMaterial::new().children([sized_slice(200.0)])));
+
+            render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 200.0);
+        });
+    }
+
+    #[test]
+    fn mergeable_material_swap_slices() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("B")])
+            ));
+
+            let mut render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
             );
-            assert_eq!(
-                tester
-                    .get_size(find::by_type::<MergeableMaterial>())
-                    .height(),
-                216.0
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
             );
 
-            pump(
-                tester,
-                MergeableMaterial::new().children(vec![slice("A", 100.0), slice("B", 100.0)]),
-            );
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("B"), slice("A")])
+            ));
+
+            render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 200.0);
+
             tester.pump_by(Duration::from_millis(100));
-            let midway = tester
-                .get_size(find::by_type::<MergeableMaterial>())
-                .height();
-            assert!(midway < 216.0 && midway > 200.0);
-            tester.pump_by(Duration::from_millis(100));
-            assert_eq!(
-                tester
-                    .get_size(find::by_type::<MergeableMaterial>())
-                    .height(),
-                200.0
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
             );
         });
     }
 
     #[test]
-    fn dividers_sit_between_connected_slices() {
+    fn mergeable_material_paints_shadows() {
         test_widgets(|tester| {
-            pump(
-                tester,
-                MergeableMaterial::new().has_dividers(true).children(vec![
-                    slice("A", 100.0),
-                    slice("B", 100.0),
-                    slice("C", 100.0),
-                ]),
-            );
-            let containers = find::by_type::<AnimatedContainer>().evaluate(tester);
-            assert_eq!(containers.len(), 3);
-            let borders: Vec<(bool, bool)> = containers
-                .into_iter()
-                .map(|container| {
-                    tester.widget(container, |container: &AnimatedContainer| {
-                        let decoration = container
-                            .decoration
-                            .as_ref()
-                            .expect("a divider container has a decoration")
-                            .as_any()
-                            .downcast_ref::<BoxDecoration>()
-                            .expect("a box decoration");
-                        let border = decoration
-                            .border
-                            .as_ref()
-                            .expect("a border")
-                            .as_any()
-                            .downcast_ref::<Border>()
-                            .expect("a border");
-                        (
-                            border.top != BorderSide::NONE,
-                            border.bottom != BorderSide::NONE,
-                        )
-                    })
-                })
-                .collect();
-            assert_eq!(borders, [(false, true), (true, true), (true, false)]);
-        });
-    }
-
-    #[test]
-    fn a_slice_uses_its_own_color_or_the_theme_card_color() {
-        test_widgets(|tester| {
-            let theme = ThemeData::builder()
-                .card_color(Color::new(0xFFFF0000))
-                .build(&tester.cell.borrow());
-            let material = MergeableMaterial::new().children(vec![
-                MergeableMaterialItem::Slice(
-                    MaterialSlice::new(
-                        ValueKey::new("A"),
-                        SizedBox::new().width(100.0).height(100.0),
-                    )
-                    .color(Color::new(0xFF00FF00)),
-                ),
-                gap("x"),
-                slice("B", 100.0),
-            ]);
-            tester.pump_widget(material_app(
+            let theme = material2_theme(tester);
+            tester.pump_widget(themed_app(
                 theme,
-                Scaffold::new()
-                    .body(SingleChildScrollView::new().child(material))
-                    .into_widget(),
+                MergeableMaterial::new().children([slice("A")]),
             ));
 
-            let colors: Vec<Color> = find::by_type::<Container>()
-                .evaluate(tester)
-                .into_iter()
-                .filter_map(|container| {
-                    tester.widget(container, |container: &Container| {
-                        container.decoration.as_ref().and_then(|decoration| {
-                            decoration
-                                .as_any()
-                                .downcast_ref::<BoxDecoration>()
-                                .and_then(|decoration| decoration.color.as_ref())
-                                .map(|color| color.color())
-                        })
-                    })
-                })
-                .collect();
-            assert!(colors.contains(&Color::new(0xFF00FF00)));
-            assert!(colors.contains(&Color::new(0xFFFF0000)));
-        });
-    }
-
-    #[test]
-    fn the_widget_does_not_crash_at_zero_area() {
-        test_widgets(|tester| {
-            tester.view().set_physical_size(Size::ZERO);
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                Scaffold::new()
-                    .body(SingleChildScrollView::new().child(MergeableMaterial::new()))
-                    .into_widget(),
-            ));
-            assert_eq!(
-                tester.get_size(find::by_type::<MergeableMaterial>()),
-                Size::ZERO
-            );
-        });
-    }
-
-    /// Dart's `expect(find.byType(MergeableMaterial), paints..shadow(..)..rrect(..))`.
-    fn assert_slice_paints(tester: &waft_widgets::testing::WidgetTester, pattern: &[PaintCall]) {
-        let ops = tester.painted_ops(tester.render_object(find::by_type::<MergeableMaterial>()));
-        assert_paints(&ops, pattern);
-    }
-
-    #[test]
-    fn a_slice_paints_its_elevation_as_a_shadow() {
-        test_widgets(|tester| {
-            let theme = ThemeData::builder()
-                .use_material3(false)
-                .build(&tester.cell.borrow());
-            let material = MergeableMaterial::new().children(vec![slice("A", 100.0)]);
-            tester.pump_widget(material_app(
-                theme,
-                Scaffold::new()
-                    .body(SingleChildScrollView::new().child(material))
-                    .into_widget(),
-            ));
-
-            let rrect = RRect::from_rect_and_radius(
-                Rect::from_ltrb(0.0, 0.0, 800.0, 100.0),
-                Radius::circular(2.0),
-            );
-            assert_slice_paints(
-                tester,
+            let rrect = k_material_edges(MaterialType::Card)
+                .expect("the card material has a radius")
+                .to_rrect(Rect::from_ltrb(0.0, 0.0, 800.0, 100.0));
+            let ops =
+                tester.painted_ops(tester.render_object(find::by_type::<MergeableMaterial>()));
+            assert_paints(
+                &ops,
                 &[
                     PaintCall::shadow_with_elevation(2.0, None),
-                    PaintCall::rrect_at(rrect, Some(Colors::WHITE)),
+                    PaintCall::RRect {
+                        rrect: Some(rrect),
+                        color: Some(Colors::WHITE),
+                        style: None,
+                        has_mask_filter: Some(false),
+                    },
                 ],
             );
         });
     }
 
     #[test]
-    fn zero_elevation_paints_no_shadow() {
+    fn mergeable_material_skips_shadow_for_zero_elevation() {
         test_widgets(|tester| {
-            let theme = ThemeData::builder()
-                .use_material3(false)
-                .build(&tester.cell.borrow());
-            let material = MergeableMaterial::new()
+            tester.pump_widget(app(MergeableMaterial::new()
                 .elevation(0.0)
-                .children(vec![slice("A", 100.0)]);
-            tester.pump_widget(material_app(
-                theme,
-                Scaffold::new()
-                    .body(SingleChildScrollView::new().child(material))
-                    .into_widget(),
-            ));
+                .children([slice("A")])));
 
             let ops =
                 tester.painted_ops(tester.render_object(find::by_type::<MergeableMaterial>()));
             assert!(
                 paints(&ops, &[PaintCall::shadow_with_elevation(0.0, None)]).is_err(),
-                "a zero-elevation slice paints no shadow"
+                "MergeableMaterial paints no shadow at zero elevation"
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_merge_gap() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("B"),
+            ])));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("B")])
+            ));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_separate_slices() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("B")])
+            ));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("B"),
+            ])));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_separate_merge_separate() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("B")])
+            ));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("B"),
+            ])));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("B")])
+            ));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("B"),
+            ])));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_insert_slice() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("C")])
+            ));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                slice("B"),
+                slice("C"),
+            ])));
+
+            assert_eq!(height(tester, render_box), 300.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 2),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_remove_slice() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                slice("B"),
+                slice("C"),
+            ])));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 300.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 2),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("C")])
+            ));
+
+            tester.pump();
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_insert_chunk() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("C")])
+            ));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("B"),
+                gap("y"),
+                slice("C"),
+            ])));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 332.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 2),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 332.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 2),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_remove_chunk() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("B"),
+                gap("y"),
+                slice("C"),
+            ])));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 332.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 2),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([slice("A"), slice("C")])
+            ));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 332.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 200.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Sharp,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Sharp,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_replace_gap_with_chunk() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("C"),
+            ])));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("y"),
+                slice("B"),
+                gap("z"),
+                slice("C"),
+            ])));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 332.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 2),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 332.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 2),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_replace_chunk_with_gap() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("B"),
+                gap("y"),
+                slice("C"),
+            ])));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 332.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 2),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("z"),
+                slice("C"),
+            ])));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 332.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_insert_and_separate_slice() {
+        test_widgets(|tester| {
+            tester.pump_widget(app(MergeableMaterial::new().children([slice("A")])));
+
+            let render_box = mergeable_material_box(tester);
+            assert_eq!(height(tester, render_box), 100.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+
+            tester.pump_widget(app(MergeableMaterial::new().children([
+                slice("A"),
+                gap("x"),
+                slice("B"),
+            ])));
+
+            tester.pump_by(Duration::from_millis(100));
+            assert!(height(tester, render_box) < 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Shifting,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Shifting,
+                RadiusType::Round,
+            );
+
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(height(tester, render_box), 216.0);
+
+            matches(
+                get_border_radius(tester, 0),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+            matches(
+                get_border_radius(tester, 1),
+                RadiusType::Round,
+                RadiusType::Round,
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_dividers() {
+        test_widgets(|tester| {
+            let theme = material2_theme(tester);
+            tester.pump_widget(themed_app(
+                theme.clone(),
+                MergeableMaterial::new().has_dividers(true).children([
+                    slice("A"),
+                    slice("B"),
+                    slice("C"),
+                    slice("D"),
+                ]),
+            ));
+
+            let mut boxes = animated_container_decorations(tester);
+
+            let mut offset = 0;
+
+            assert!(is_divider(&boxes[offset], false, true));
+            assert!(is_divider(&boxes[offset + 1], true, true));
+            assert!(is_divider(&boxes[offset + 2], true, true));
+            assert!(is_divider(&boxes[offset + 3], true, false));
+
+            tester.pump_widget(themed_app(
+                theme,
+                MergeableMaterial::new().has_dividers(true).children([
+                    slice("A"),
+                    slice("B"),
+                    gap("x"),
+                    slice("C"),
+                    slice("D"),
+                ]),
+            ));
+
+            // Wait for dividers to shrink.
+            tester.pump_by(Duration::from_millis(200));
+
+            boxes = animated_container_decorations(tester);
+
+            offset = 0;
+
+            assert!(is_divider(&boxes[offset], false, true));
+            assert!(is_divider(&boxes[offset + 1], true, false));
+            assert!(is_divider(&boxes[offset + 2], false, true));
+            assert!(is_divider(&boxes[offset + 3], true, false));
+        });
+    }
+
+    #[test]
+    fn mergeable_material_respects_divider_color() {
+        test_widgets(|tester| {
+            let divider_color = Colors::RED.primary();
+            tester.pump_widget(app(MergeableMaterial::new()
+                .has_dividers(true)
+                .divider_color(divider_color)
+                .children([slice("A"), slice("B")])));
+
+            let decoration = tester.widget(
+                find::by_type::<DecoratedBox>().last(),
+                |decorated_box: &DecoratedBox| box_decoration(Some(&decorated_box.decoration)),
+            );
+            // Since we are getting the last DecoratedBox, it will have a Border.top.
+            assert_eq!(
+                decoration
+                    .border
+                    .expect("the decoration has a border")
+                    .top()
+                    .color,
+                divider_color
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_respects_material_slice_color() {
+        test_widgets(|tester| {
+            let theme_card_color = Colors::RED.primary();
+            let material_slice_color = Colors::GREEN.primary();
+
+            let theme = ThemeData::builder()
+                .card_color(theme_card_color)
+                .build(&tester.cell.borrow());
+            tester.pump_widget(themed_app(
+                theme,
+                MergeableMaterial::new().children([
+                    MaterialSlice::new(
+                        ValueKey::new("A"),
+                        SizedBox::new().height(100.0).width(100.0),
+                    )
+                    .color(material_slice_color)
+                    .into(),
+                    gap("B"),
+                    MaterialSlice::new(
+                        ValueKey::new("C"),
+                        SizedBox::new().height(100.0).width(100.0),
+                    )
+                    .into(),
+                ]),
+            ));
+
+            let container_color = |finder: waft_widgets::testing::Finder| {
+                tester.widget(finder, |container: &Container| {
+                    box_decoration(container.decoration.as_ref())
+                        .color
+                        .map(|color| color.color())
+                })
+            };
+            assert_eq!(
+                container_color(find::by_type::<Container>().first()),
+                Some(material_slice_color)
+            );
+            assert_eq!(
+                container_color(find::by_type::<Container>().last()),
+                Some(theme_card_color)
+            );
+        });
+    }
+
+    #[test]
+    fn mergeable_material_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
+            tester.pump_widget(app(MergeableMaterial::new()));
+            assert_eq!(
+                tester.get_size(find::by_type::<MergeableMaterial>()),
+                Size::ZERO
             );
         });
     }
