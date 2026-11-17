@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use waft_foundation::{App, CompleterFuture, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Task};
 use waft_material::{
     FilledButton, Icons, ListTile, SearchAnchor, SearchBar, SearchController, SearchDelegate,
     SearchDelegateData, show_search,
@@ -117,7 +117,7 @@ fn anchor_with_bar(state: Handle<SearchDemoState>) -> WidgetRef {
             })
             .collect();
         let _ = context;
-        CompleterFuture::ready(suggestions)
+        Task::ready(suggestions)
     })
     .bar_hint_text("Pick a fruit")
     .into_search_anchor()

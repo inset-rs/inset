@@ -370,7 +370,7 @@ impl InheritedWidget for SearchViewTheme {
 #[cfg(test)]
 mod tests {
     use waft_embedder::{TextAffinity, TextEditingValue, TextSelection};
-    use waft_foundation::CompleterFuture;
+    use waft_foundation::Task;
     use waft_painting::{BorderRadiusGeometry, RoundedRectangleBorder};
     use waft_services::TextInputClient;
     use waft_widgets::testing::{Finder, WidgetTester, find, test_widgets};
@@ -512,7 +512,7 @@ mod tests {
         let child = Builder::new(move |_app, _context| {
             let mut anchor = SearchAnchor::new(
                 |_app, _context, _controller| Icon::new(Some(Icons::search())).into_widget(),
-                |_app, _context, _controller| CompleterFuture::ready(Vec::new()),
+                |_app, _context, _controller| Task::ready(Vec::new()),
             )
             .view_hint_text("hint text")
             .is_full_screen(false);

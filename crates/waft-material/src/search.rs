@@ -51,8 +51,8 @@ use crate::theme_data::ThemeData;
 /// suggested search queries or the search results.
 ///
 /// The appearance of the search page is determined by the provided `delegate`. The initial query
-/// string is given by `query`, which defaults to the empty string. When `query` is `None`,
-/// `delegate.query` will be used as the initial query.
+/// string is given by `query`; Dart's default is the empty string, `Some("")`. When `query` is
+/// `None`, `delegate.query` will be used as the initial query.
 ///
 /// The `use_root_navigator` argument is used to determine whether to push the search page to the
 /// [`Navigator`] furthest from or nearest to the given `context`. By default, `use_root_navigator`
@@ -623,6 +623,11 @@ impl TransitionRoute for SearchPageRoute {
     }
 
     fn create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
+        // Dart's `super.createAnimation()`: the trait's default body.
+        debug_assert!(
+            !TransitionRoute::debug_transition_completed(self, app),
+            "cannot reuse a route after disposing it"
+        );
         let animation: AnimationRef<f64> = TransitionRoute::controller(self, app)
             .expect("createAnimationController ran first")
             .keep(app)
@@ -912,12 +917,6 @@ impl State for SearchPageState {
                     .expect("initState made it")
                     .into_erased(),
             )
-            .style(
-                data.search_field_style
-                    .clone()
-                    .or_else(|| theme.text_theme.title_large.clone())
-                    .unwrap_or_default(),
-            )
             .text_input_action(data.text_input_action)
             .autocorrect(data.autocorrect)
             .enable_suggestions(data.enable_suggestions)
@@ -925,6 +924,14 @@ impl State for SearchPageState {
                 delegate_for_submit.show_results(app, context);
             })
             .decoration(Some(InputDecoration::new().hint_text(search_field_label)));
+        let text_field = match data
+            .search_field_style
+            .clone()
+            .or_else(|| theme.text_theme.title_large.clone())
+        {
+            Some(style) => text_field.style(style),
+            None => text_field,
+        };
         let text_field = match data.keyboard_type {
             Some(keyboard_type) => text_field.keyboard_type(keyboard_type),
             None => text_field,

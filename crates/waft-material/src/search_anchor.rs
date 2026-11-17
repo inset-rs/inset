@@ -13,8 +13,8 @@ use waft_embedder::{
     TextInputType, clamp_double, lerp_double,
 };
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, ListenableObject, Listener,
-    OptionRetained, Ref, Timer, ValueChanged,
+    App, ChangeNotifier, ChangeNotifierData, Handle, ListenableObject, Listener, OptionRetained,
+    Ref, Task, Timer, ValueChanged,
 };
 use waft_painting::{
     AlignmentGeometry, AnyBorderSide, BorderSide, EdgeInsets, EdgeInsetsGeometry,
@@ -93,13 +93,13 @@ pub type SearchAnchorChildBuilder =
 /// Signature for a function that creates a list of suggestion widgets for the search view
 /// of a [`SearchAnchor`].
 ///
-/// Dart's `FutureOr<Iterable<Widget>>` is a [`CompleterFuture`]: a builder with its
-/// suggestions at hand answers [`CompleterFuture::ready`], which Dart's `await` of a plain
-/// value also resumes from the microtask queue.
+/// Dart's `FutureOr<Iterable<Widget>>` is a [`Task`]: a builder with its suggestions at hand
+/// answers [`Task::ready`], which reaches the view at the next checkpoint, as Dart's `await` of
+/// a plain value resumes from the microtask queue.
 ///
 /// Used by [`SearchAnchor::suggestions_builder`].
 pub type SuggestionsBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, Handle<SearchController>) -> CompleterFuture<Vec<WidgetRef>>>;
+    Rc<dyn Fn(&mut App, BuildContext, Handle<SearchController>) -> Task<Vec<WidgetRef>>>;
 
 /// Signature for a function that creates a [`WidgetRef`] to build the suggestion list
 /// of a [`SearchAnchor`] in its search view.
@@ -329,7 +329,7 @@ impl SearchAnchor {
             &mut App,
             BuildContext,
             Handle<SearchController>,
-        ) -> CompleterFuture<Vec<WidgetRef>>
+        ) -> Task<Vec<WidgetRef>>
         + 'static,
     ) -> SearchAnchor {
         SearchAnchor {
@@ -379,7 +379,7 @@ impl SearchAnchor {
             &mut App,
             BuildContext,
             Handle<SearchController>,
-        ) -> CompleterFuture<Vec<WidgetRef>>
+        ) -> Task<Vec<WidgetRef>>
         + 'static,
     ) -> SearchAnchorWithSearchBar {
         SearchAnchorWithSearchBar::new(suggestions_builder)
@@ -684,7 +684,7 @@ impl SearchAnchorState {
                 text_direction: Some(text_direction),
                 view_builder: widget.view_builder.clone(),
                 anchor_key,
-                search_controller,
+                search_controller: search_controller.keep(app),
                 suggestions_builder: Rc::clone(&widget.suggestions_builder),
                 text_capitalization: widget.text_capitalization,
                 captured_themes: Rc::new(captured_themes),
@@ -851,7 +851,7 @@ pub(crate) struct SearchViewRouteArguments {
     text_direction: Option<TextDirection>,
     view_builder: Option<ViewBuilder>,
     anchor_key: GlobalKey,
-    search_controller: Handle<SearchController>,
+    search_controller: Ref<SearchController>,
     suggestions_builder: SuggestionsBuilder,
     text_capitalization: Option<TextCapitalization>,
     captured_themes: Rc<CapturedThemes>,
@@ -1173,7 +1173,7 @@ impl Route for SearchViewRoute {
             curve.dispose(app);
         }
         if app.get(self).will_dispose_search_controller {
-            let search_controller = app.get(self).arguments.search_controller;
+            let search_controller = app.get(self).arguments.search_controller.handle();
             ChangeNotifierData::dispose(app, search_controller);
         }
         TransitionRoute::dispose(self, app)
@@ -1322,7 +1322,7 @@ impl ModalRoute for SearchViewRoute {
                     animation: curved_animation.erase(),
                     view_max_width,
                     view_rect,
-                    search_controller: arguments.search_controller,
+                    search_controller: arguments.search_controller.clone(),
                     suggestions_builder: Rc::clone(&arguments.suggestions_builder),
                     text_input_action: arguments.text_input_action,
                     keyboard_type: arguments.keyboard_type,
@@ -1370,7 +1370,7 @@ pub(crate) struct ViewContent {
     animation: AnimationRef<f64>,
     view_max_width: f64,
     view_rect: Rect,
-    search_controller: Handle<SearchController>,
+    search_controller: Ref<SearchController>,
     suggestions_builder: SuggestionsBuilder,
     text_input_action: Option<TextInputAction>,
     keyboard_type: Option<TextInputType>,
@@ -1468,7 +1468,7 @@ impl ViewContentState {
     }
 
     fn controller(self: Handle<Self>, app: &App) -> Handle<SearchController> {
-        self.widget(app).search_controller
+        self.widget(app).search_controller.handle()
     }
 
     /// Dart's `updateSuggestions`.
@@ -1477,12 +1477,12 @@ impl ViewContentState {
         let text = controller.text_value(app).to_string();
         if app.get(self).search_value.as_deref() != Some(text.as_str()) {
             app.get_mut(self).search_value = Some(text);
-            self.build_suggestions(app);
+            drop(self.build_suggestions(app));
         }
     }
 
     /// Dart's `_buildSuggestions`.
-    fn build_suggestions(self: Handle<Self>, app: &mut App) {
+    fn build_suggestions(self: Handle<Self>, app: &mut App) -> Task<()> {
         let call_id = {
             let state = app.get_mut(self);
             state.suggestions_call_id += 1;
@@ -1492,23 +1492,37 @@ impl ViewContentState {
         let controller = self.controller(app);
         let suggestions_builder = Rc::clone(&self.widget(app).suggestions_builder);
         let suggestions = suggestions_builder(app, context, controller);
-        suggestions.then(app, move |app, suggestions| {
-            if !self.mounted(app) || call_id != app.get(self).suggestions_call_id {
-                return;
-            }
-            self.set_state(app, |state| {
-                state.result = suggestions;
+        app.spawn(async move |cx| {
+            let suggestions = suggestions.await;
+            cx.update(|app| {
+                if !self.mounted(app) || call_id != app.get(self).suggestions_call_id {
+                    return;
+                }
+                self.set_state(app, |state| {
+                    state.result = suggestions;
+                });
             });
-        });
+        })
     }
 
+    /// The body of the timer `did_change_dependencies` starts: Dart's closure, which clears the
+    /// timer once the suggestions are built.
     fn run_suggestions_timer(self: Handle<Self>, app: &mut App) {
         let controller = self.controller(app);
         app.get_mut(self).search_value = Some(controller.text_value(app).to_string());
-        self.build_suggestions(app);
-        if let Some(timer) = app.get_mut(self).timer.take() {
-            timer.cancel(app);
-        }
+        let built = self.build_suggestions(app);
+        drop(app.spawn(async move |cx| {
+            built.await;
+            cx.update(|app| {
+                // `dispose` has cancelled and cleared the timer of a state no longer mounted.
+                if !self.mounted(app) {
+                    return;
+                }
+                if let Some(timer) = app.get_mut(self).timer.take() {
+                    timer.cancel(app);
+                }
+            });
+        }));
     }
 }
 
@@ -1922,7 +1936,7 @@ impl SearchAnchorWithSearchBar {
             &mut App,
             BuildContext,
             Handle<SearchController>,
-        ) -> CompleterFuture<Vec<WidgetRef>>
+        ) -> Task<Vec<WidgetRef>>
         + 'static,
     ) -> SearchAnchorWithSearchBar {
         SearchAnchorWithSearchBar {
@@ -3716,7 +3730,7 @@ mod tests {
     fn search_icon_anchor() -> SearchAnchor {
         SearchAnchor::new(
             |_app, _context, _controller| Icon::new(Some(Icons::search())).into_widget(),
-            |_app, _context, _controller| CompleterFuture::ready(Vec::new()),
+            |_app, _context, _controller| Task::ready(Vec::new()),
         )
     }
 
@@ -3729,7 +3743,7 @@ mod tests {
                 )
                 .into_widget()
             },
-            |_app, _context, _controller| CompleterFuture::ready(Vec::new()),
+            |_app, _context, _controller| Task::ready(Vec::new()),
         )
     }
 
@@ -3904,7 +3918,7 @@ mod tests {
                     )
                     .into_widget()
                 },
-                |_app, _context, _controller| CompleterFuture::ready(Vec::new()),
+                |_app, _context, _controller| Task::ready(Vec::new()),
             )
             .search_controller(controller.clone());
             pump_material_home(tester, None, Material::new().child(anchor).into_widget());
@@ -3935,7 +3949,7 @@ mod tests {
             let anchor = |controller: Option<&Ref<SearchController>>| {
                 let mut anchor = SearchAnchor::new(
                     |_app, _context, _controller| Icon::new(Some(Icons::search())).into_widget(),
-                    |_app, _context, _controller| CompleterFuture::ready(Vec::new()),
+                    |_app, _context, _controller| Task::ready(Vec::new()),
                 );
                 anchor.search_controller = controller.cloned();
                 Material::new().child(anchor).into_widget()
@@ -3975,7 +3989,7 @@ mod tests {
             let anchor = SearchAnchor::new(
                 |_app, _context, _controller| Icon::new(Some(Icons::search())).into_widget(),
                 move |_app, _context, controller| {
-                    CompleterFuture::ready(vec![
+                    Task::ready(vec![
                         ListTile::new()
                             .title(Text::new(suggestion))
                             .on_tap(Listener::new(move |app: &mut App| {
@@ -4019,7 +4033,7 @@ mod tests {
         test_widgets(|tester| {
             let controller = SearchController::new(&mut tester.cell.borrow_mut());
             let anchor = SearchAnchor::bar(|_app, _context, controller| {
-                CompleterFuture::ready(vec![
+                Task::ready(vec![
                     ListTile::new()
                         .title(Text::new("item 0"))
                         .on_tap(Listener::new(move |app: &mut App| {
@@ -4112,11 +4126,11 @@ mod tests {
                 move |app, _context, controller| {
                     let search_text = controller.text_value(app).to_lowercase();
                     if search_text.is_empty() {
-                        return CompleterFuture::ready(vec![
+                        return Task::ready(vec![
                             Center::new().child(Text::new("No Search")).into_widget(),
                         ]);
                     }
-                    CompleterFuture::ready(
+                    Task::ready(
                         suggestions
                             .iter()
                             .filter(|suggestion| suggestion.to_lowercase().contains(&search_text))
@@ -4211,7 +4225,7 @@ mod tests {
                         }))
                         .into_widget();
                     completer.complete(app, vec![list_tile]);
-                    future
+                    app.spawn(async move |_cx| future.await)
                 },
             )
             .search_controller(controller.clone());
@@ -4254,12 +4268,12 @@ mod tests {
                     move |app, _context, controller| {
                         let query = controller.text_value(app).to_string();
                         if query.is_empty() {
-                            return CompleterFuture::ready(Vec::new());
+                            return Task::ready(Vec::new());
                         }
                         let request = Completer::new();
                         let future = request.future();
                         requests.borrow_mut().insert(query, request);
-                        future
+                        app.spawn(async move |_cx| future.await)
                     }
                 },
             );
@@ -4298,7 +4312,7 @@ mod tests {
     fn search_anchor_bar_has_a_default_search_bar_as_the_anchor() {
         test_widgets(|tester| {
             let anchor =
-                SearchAnchor::bar(|_app, _context, _controller| CompleterFuture::ready(Vec::new()))
+                SearchAnchor::bar(|_app, _context, _controller| Task::ready(Vec::new()))
                     .is_full_screen(false)
                     .into_search_anchor();
             pump_material_home(
@@ -4399,7 +4413,7 @@ mod tests {
                 .into_widget()
             },
             |_app, _context, _controller| {
-                CompleterFuture::ready(
+                Task::ready(
                     (0..5)
                         .map(|index| {
                             ListTile::new()
@@ -4992,9 +5006,9 @@ mod tests {
     }
 
     fn empty_suggestions()
-    -> impl Fn(&mut App, BuildContext, Handle<SearchController>) -> CompleterFuture<Vec<WidgetRef>>
+    -> impl Fn(&mut App, BuildContext, Handle<SearchController>) -> Task<Vec<WidgetRef>>
     {
-        |_app, _context, _controller| CompleterFuture::ready(Vec::new())
+        |_app, _context, _controller| Task::ready(Vec::new())
     }
 
     fn text_field_in_view() -> waft_widgets::testing::Finder {
@@ -5528,7 +5542,7 @@ mod tests {
                 },
                 |app, _context, controller| {
                     let length = controller.text_value(app).chars().count();
-                    CompleterFuture::ready(
+                    Task::ready(
                         (0..length)
                             .map(|index| {
                                 ListTile::new()
@@ -5843,7 +5857,7 @@ mod tests {
                     .into_widget()
                 },
                 |_app, _context, _controller| {
-                    CompleterFuture::ready(
+                    Task::ready(
                         (0..5)
                             .map(|index| {
                                 ListTile::new()
@@ -6287,7 +6301,7 @@ mod tests {
                         }
                     },
                     |_app, _context, _controller| {
-                        CompleterFuture::ready(
+                        Task::ready(
                             (0..5)
                                 .map(|index| {
                                     ListTile::new()
@@ -6335,7 +6349,7 @@ mod tests {
                         local_theme,
                         Material::new().child(
                             SearchAnchor::bar(|_app, _context, _controller| {
-                                CompleterFuture::ready(vec![
+                                Task::ready(vec![
                                     Card::new()
                                         .child(
                                             ListTile::new()
@@ -6424,7 +6438,7 @@ mod tests {
                     let called = Rc::clone(&called);
                     move |_app, _context, _controller| {
                         called.set(called.get() + 1);
-                        CompleterFuture::ready(Vec::new())
+                        Task::ready(Vec::new())
                     }
                 },
             );
@@ -6486,7 +6500,7 @@ mod tests {
                             }),
                         );
                         *debounce_timer.borrow_mut() = Some(timer);
-                        future
+                        app.spawn(async move |_cx| future.await)
                     }
                 },
             );
@@ -6561,7 +6575,7 @@ mod tests {
                                     .into_widget()
                                 },
                                 |_app, _context, _controller| {
-                                    CompleterFuture::ready(vec![
+                                    Task::ready(vec![
                                         Text::new("suggestion").into_widget(),
                                     ])
                                 },
@@ -6626,7 +6640,7 @@ mod tests {
         test_widgets(|tester| {
             let name = Rc::new(RefCell::new("silva".to_string()));
             let anchor = SearchAnchor::bar(|_app, _context, controller| {
-                CompleterFuture::ready(vec![
+                Task::ready(vec![
                     ListTile::new()
                         .title(Text::new("item 0"))
                         .on_tap(Listener::new(move |app: &mut App| {
@@ -6663,7 +6677,7 @@ mod tests {
         test_widgets(|tester| {
             let state = Rc::new(RefCell::new("Idle"));
             let anchor = SearchAnchor::bar(|_app, _context, _controller| {
-                CompleterFuture::ready(
+                Task::ready(
                     (0..5)
                         .map(|index| {
                             ListTile::new()
@@ -6706,7 +6720,7 @@ mod tests {
                 tester,
                 None,
                 SearchAnchor::bar(|_app, _context, _controller| {
-                    CompleterFuture::ready(
+                    Task::ready(
                         (0..30)
                             .map(|index| {
                                 ListTile::new()
@@ -6791,7 +6805,7 @@ mod tests {
                         SearchAnchor::new(
                             |_app, _context, _controller| Text::new("X").into_widget(),
                             |_app, _context, _controller| {
-                                CompleterFuture::ready(vec![Text::new("Y").into_widget()])
+                                Task::ready(vec![Text::new("Y").into_widget()])
                             },
                         )
                         .search_controller(controller.clone()),
