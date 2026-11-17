@@ -11,6 +11,24 @@ pub enum ThreePaneScaffoldRole {
     Tertiary,
 }
 
+impl ThreePaneScaffoldRole {
+    /// The three roles, in priority order.
+    pub(crate) const ALL: [ThreePaneScaffoldRole; 3] = [
+        ThreePaneScaffoldRole::Primary,
+        ThreePaneScaffoldRole::Secondary,
+        ThreePaneScaffoldRole::Tertiary,
+    ];
+
+    /// The role's place in [`ALL`](Self::ALL), for arrays indexed by role.
+    pub(crate) fn index(self) -> usize {
+        match self {
+            ThreePaneScaffoldRole::Primary => 0,
+            ThreePaneScaffoldRole::Secondary => 1,
+            ThreePaneScaffoldRole::Tertiary => 2,
+        }
+    }
+}
+
 /// [`ThreePaneScaffoldRole`]'s names in a list-detail scaffold.
 pub struct ListDetailPaneScaffoldRole;
 

@@ -89,7 +89,7 @@ impl ThreePaneSceneStrategy {
 
         let mut pane_entries = [None; 3];
         for (index, item) in items.iter().enumerate().rev() {
-            let slot = &mut pane_entries[role_index(item.pane)];
+            let slot = &mut pane_entries[item.pane.index()];
             if slot.is_none() {
                 *slot = Some(start + index);
             }
@@ -108,11 +108,11 @@ impl ThreePaneSceneStrategy {
         &self,
         items: &[&ThreePaneScaffoldDestinationItem<T>],
     ) -> ThreePaneScaffoldValue {
-        ThreePaneScaffoldValue::calculate_refs(
+        ThreePaneScaffoldValue::from_pane_history(
             self.directive.max_horizontal_partitions,
             self.directive.max_vertical_partitions,
             &self.adapt_strategies,
-            items,
+            items.iter().map(|item| item.pane),
         )
     }
 
@@ -170,15 +170,7 @@ pub struct ThreePaneScaffoldScene {
 impl ThreePaneScaffoldScene {
     /// The back-stack index of the latest entry for `role`; `None` when no entry fills it.
     pub fn entry_for(&self, role: ThreePaneScaffoldRole) -> Option<usize> {
-        self.pane_entries[role_index(role)]
-    }
-}
-
-fn role_index(role: ThreePaneScaffoldRole) -> usize {
-    match role {
-        ThreePaneScaffoldRole::Primary => 0,
-        ThreePaneScaffoldRole::Secondary => 1,
-        ThreePaneScaffoldRole::Tertiary => 2,
+        self.pane_entries[role.index()]
     }
 }
 

@@ -65,48 +65,36 @@ impl ThreePaneScaffoldValue {
         adapt_strategies: &ThreePaneScaffoldAdaptStrategies,
         destination_history: &[ThreePaneScaffoldDestinationItem<T>],
     ) -> ThreePaneScaffoldValue {
-        let history: Vec<&ThreePaneScaffoldDestinationItem<T>> =
-            destination_history.iter().collect();
-        ThreePaneScaffoldValue::calculate_refs(
+        ThreePaneScaffoldValue::from_pane_history(
             max_horizontal_partitions,
             max_vertical_partitions,
             adapt_strategies,
-            &history,
+            destination_history.iter().map(|item| item.pane),
         )
     }
 
-    pub(crate) fn calculate_refs<T>(
+    /// [`calculate`](Self::calculate) over the panes of the destinations, oldest first.
+    pub(crate) fn from_pane_history(
         max_horizontal_partitions: usize,
         max_vertical_partitions: usize,
         adapt_strategies: &ThreePaneScaffoldAdaptStrategies,
-        destination_history: &[&ThreePaneScaffoldDestinationItem<T>],
+        pane_history: impl DoubleEndedIterator<Item = ThreePaneScaffoldRole>,
     ) -> ThreePaneScaffoldValue {
         let mut values = [None; 3];
         let mut expanded_count = 0;
         let mut check_reflowed_pane = max_horizontal_partitions == 1
             && max_vertical_partitions > 1
-            && [
-                ThreePaneScaffoldRole::Primary,
-                ThreePaneScaffoldRole::Secondary,
-                ThreePaneScaffoldRole::Tertiary,
-            ]
-            .into_iter()
-            .any(|role| matches!(adapt_strategies.get(role), AdaptStrategy::Reflow { .. }));
+            && ThreePaneScaffoldRole::ALL
+                .into_iter()
+                .any(|role| matches!(adapt_strategies.get(role), AdaptStrategy::Reflow { .. }));
 
-        let mut panes_by_priority = Vec::with_capacity(destination_history.len() + 3);
-        panes_by_priority.extend(destination_history.iter().rev().map(|item| item.pane));
-        panes_by_priority.extend([
-            ThreePaneScaffoldRole::Primary,
-            ThreePaneScaffoldRole::Secondary,
-            ThreePaneScaffoldRole::Tertiary,
-        ]);
-
+        let panes_by_priority = pane_history.rev().chain(ThreePaneScaffoldRole::ALL);
         for pane in panes_by_priority {
             let has_available_partition = expanded_count < max_horizontal_partitions;
             if !has_available_partition && !check_reflowed_pane {
                 break;
             }
-            if values[role_index(pane)].is_some() {
+            if values[pane.index()].is_some() {
                 continue;
             }
 
@@ -115,17 +103,16 @@ impl ThreePaneScaffoldValue {
             let mut anchor_value = None;
             if check_reflowed_pane
                 && let AdaptStrategy::Reflow { reflow_under } = adapt_strategies.get(pane)
-                && reflow_under != pane
             {
                 reflowed_pane = Some(pane);
                 anchor_pane = reflow_under;
-                anchor_value = values[role_index(anchor_pane)];
+                anchor_value = values[anchor_pane.index()];
             }
 
             match anchor_value {
                 None => {
                     if has_available_partition {
-                        values[role_index(anchor_pane)] = Some(PaneAdaptedValue::Expanded);
+                        values[anchor_pane.index()] = Some(PaneAdaptedValue::Expanded);
                         expanded_count += 1;
                     } else {
                         continue;
@@ -136,7 +123,7 @@ impl ThreePaneScaffoldValue {
             }
 
             if let Some(pane) = reflowed_pane {
-                values[role_index(pane)] = Some(PaneAdaptedValue::Reflowed {
+                values[pane.index()] = Some(PaneAdaptedValue::Reflowed {
                     reflow_under: anchor_pane,
                 });
                 check_reflowed_pane = false;
@@ -148,14 +135,6 @@ impl ThreePaneScaffoldValue {
             secondary: values[1].unwrap_or(PaneAdaptedValue::Hidden),
             tertiary: values[2].unwrap_or(PaneAdaptedValue::Hidden),
         }
-    }
-}
-
-fn role_index(role: ThreePaneScaffoldRole) -> usize {
-    match role {
-        ThreePaneScaffoldRole::Primary => 0,
-        ThreePaneScaffoldRole::Secondary => 1,
-        ThreePaneScaffoldRole::Tertiary => 2,
     }
 }
 
