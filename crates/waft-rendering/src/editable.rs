@@ -343,6 +343,7 @@ impl RenderEditable {
         intrinsics.set_text_direction(painter.text_direction());
         intrinsics.set_text_scaler(painter.text_scaler().clone());
         intrinsics.set_max_lines(painter.max_lines());
+        intrinsics.set_strut_style(painter.strut_style().cloned());
         intrinsics.set_text_width_basis(painter.text_width_basis());
         intrinsics.set_text_height_behavior(painter.text_height_behavior());
         (intrinsics, fonts)
@@ -2418,6 +2419,53 @@ mod tests {
         assert_eq!(
             boundary.get_trailing_text_boundary_at(&mut app, 54),
             Some(59)
+        );
+    }
+
+    // editable_intrinsics_test.dart 'strutStyle affects intrinsics'.
+    #[test]
+    fn strut_style_affects_intrinsics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        crate::testing::install_test_fonts(&mut app);
+        let delegate = app.create(TestDelegate::default());
+        let start = LayerLink::new(&mut app);
+        let end = LayerLink::new(&mut app);
+        let offset = FixedViewportOffset::zero(&mut app).erase();
+        let editable = RenderEditable::new(
+            &mut app,
+            TextDirection::Ltr,
+            start,
+            end,
+            offset,
+            delegate.as_text_selection_delegate(),
+        );
+        editable.set_text(
+            &mut app,
+            Some(
+                TextSpan::new()
+                    .text("Hello World")
+                    .style(TextStyle::new().font_size(10.0))
+                    .into_span(),
+            ),
+        );
+
+        assert_eq!(
+            editable
+                .as_box()
+                .get_max_intrinsic_height(&mut app, f64::INFINITY),
+            10.0
+        );
+
+        editable.set_strut_style(
+            &mut app,
+            Some(StrutStyle::new().font_size(100.0).force_strut_height(true)),
+        );
+        assert_eq!(
+            editable
+                .as_box()
+                .get_max_intrinsic_height(&mut app, f64::INFINITY),
+            100.0
         );
     }
 

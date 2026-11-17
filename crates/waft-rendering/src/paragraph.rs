@@ -3812,6 +3812,41 @@ mod tests {
         assert_eq!(box_.get_max_intrinsic_height(&mut app, max_width), one_line);
     }
 
+    // paragraph_intrinsics_test.dart 'strutStyle affects intrinsics'.
+    #[test]
+    fn strut_style_affects_intrinsics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        crate::testing::install_test_fonts(&mut app);
+        let paragraph = RenderParagraph::new(
+            &mut app,
+            TextSpan::new()
+                .text("Hello World")
+                .style(TextStyle::new().font_size(10.0))
+                .into_span(),
+            TextDirection::Ltr,
+            None,
+        );
+
+        assert_eq!(
+            paragraph
+                .as_box()
+                .get_max_intrinsic_height(&mut app, f64::INFINITY),
+            10.0
+        );
+
+        paragraph.set_strut_style(
+            &mut app,
+            Some(StrutStyle::new().font_size(100.0).force_strut_height(true)),
+        );
+        assert_eq!(
+            paragraph
+                .as_box()
+                .get_max_intrinsic_height(&mut app, f64::INFINITY),
+            100.0
+        );
+    }
+
     /// The dry layout of a paragraph is the size it lays out to, and its dry baseline is the
     /// baseline that layout reports.
     #[test]
