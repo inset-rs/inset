@@ -1,6 +1,7 @@
 //! Flutter counterpart: `package:flutter/foundation.dart`.
 #![feature(arbitrary_self_types)]
 
+mod any_eq;
 mod app;
 mod app_cell;
 mod background;
@@ -17,6 +18,7 @@ mod key;
 mod observer_list;
 mod timers;
 
+pub use any_eq::*;
 pub use app::*;
 pub use app_cell::*;
 pub use basic_types::*;

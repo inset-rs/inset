@@ -15,7 +15,8 @@ use waft_embedder::{
     TextBaseline, TextDirection, clamp_double,
 };
 use waft_foundation::{
-    App, Handle, ListenableObject, Listener, OptionRetained, Ref, ValueChanged, ValueListenable,
+    AnyEq, App, Handle, ListenableObject, Listener, OptionRetained, Ref, ValueChanged,
+    ValueListenable,
 };
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, AxisDirection, Border, BorderSide, BorderStyle,
@@ -35,9 +36,9 @@ use waft_widgets::{
     AnyModalRoute, AnySize, BackdropFilter, BuildContext, Builder, ClipRect, Column,
     ConstrainedBox, DecoratedBox, DefaultTextStyle, DefaultTextStyleTransition, Directionality,
     Expanded, FadeTransition, Flexible, FocusableActionDetector, GestureDetector, GlobalKey, Hero,
-    HeroFlightDirection, HeroTagRef, IconTheme, IconThemeData, IntoWidget, KeyRef, KeyedSubtree,
-    LayoutBuilder, MediaQuery, NavigationToolbar, Navigator, NavigatorState, Opacity, Orientation,
-    Padding, PositionedTransition, PreferredSizeWidget, PreferredSizeWidgetRef, RectTweenObject,
+    HeroFlightDirection, IconTheme, IconThemeData, IntoWidget, KeyRef, KeyedSubtree, LayoutBuilder,
+    MediaQuery, NavigationToolbar, Navigator, NavigatorState, Opacity, Orientation, Padding,
+    PositionedTransition, PreferredSizeWidget, PreferredSizeWidgetRef, RectTweenObject,
     RelativeRectTween, RenderObjectWidget, Row, SafeArea, ScaleTransition, ScrollNotification,
     ScrollNotificationCallback, ScrollNotificationObserver, ScrollNotificationObserverState,
     ScrollUpdateNotification, Scrollable, ScrollableState, Semantics,
@@ -180,9 +181,9 @@ const K_BOTTOM_NAV_BAR_HEADER_TRANSITION_CURVE: Cubic = Cubic::new(0.05, 0.90, 0
 ///
 /// Dart's `const _HeroTag _defaultHeroTag`; a shared value here, so `Rc::ptr_eq` reproduces
 /// Dart's `identical` as well as its `==`.
-fn default_hero_tag() -> HeroTagRef {
+fn default_hero_tag() -> Rc<dyn AnyEq> {
     thread_local! {
-        static TAG: HeroTagRef = Rc::new(HeroTag { navigator: None });
+        static TAG: Rc<dyn AnyEq> = Rc::new(HeroTag { navigator: None });
     }
     TAG.with(Rc::clone)
 }
@@ -551,7 +552,7 @@ pub struct CupertinoNavigationBar {
     ///
     /// To disable `Hero` transitions for this navigation bar, set `transition_between_routes` to
     /// false.
-    pub hero_tag: HeroTagRef,
+    pub hero_tag: Rc<dyn AnyEq>,
 
     /// A widget to place at the bottom of the navigation bar.
     ///
@@ -740,7 +741,7 @@ impl CupertinoNavigationBar {
     }
 
     /// Dart `CupertinoNavigationBar(heroTag:)`.
-    pub fn hero_tag(mut self, hero_tag: HeroTagRef) -> CupertinoNavigationBar {
+    pub fn hero_tag(mut self, hero_tag: Rc<dyn AnyEq>) -> CupertinoNavigationBar {
         self.hero_tag = hero_tag;
         debug_assert!(
             !self.transition_between_routes || Rc::ptr_eq(&self.hero_tag, &default_hero_tag()),
@@ -1066,7 +1067,7 @@ impl State for CupertinoNavigationBarState {
         // Get the context that might have a possibly changed `CupertinoTheme`.
         Builder::new(move |app: &mut App, context: BuildContext| {
             let text_theme = CupertinoTheme::of(app, context).text_theme();
-            let tag: HeroTagRef = if Rc::ptr_eq(&hero_tag, &default_hero_tag()) {
+            let tag: Rc<dyn AnyEq> = if Rc::ptr_eq(&hero_tag, &default_hero_tag()) {
                 Rc::new(HeroTag {
                     navigator: Some(Navigator::of(app, context, false)),
                 })
@@ -1230,7 +1231,7 @@ pub struct CupertinoSliverNavigationBar {
 
     /// Tag for the navigation bar's `Hero` widget if
     /// [`transition_between_routes`](Self::transition_between_routes) is true.
-    pub hero_tag: HeroTagRef,
+    pub hero_tag: Rc<dyn AnyEq>,
 
     /// A widget to place at the bottom of the large title or static navigation bar if there is
     /// no large title.
@@ -1453,7 +1454,7 @@ impl CupertinoSliverNavigationBar {
     }
 
     /// Dart `CupertinoSliverNavigationBar(heroTag:)`.
-    pub fn hero_tag(mut self, hero_tag: HeroTagRef) -> CupertinoSliverNavigationBar {
+    pub fn hero_tag(mut self, hero_tag: Rc<dyn AnyEq>) -> CupertinoSliverNavigationBar {
         self.hero_tag = hero_tag;
         self
     }
@@ -2002,7 +2003,7 @@ struct LargeTitleNavigationBarSliverDelegate {
     padding: Option<EdgeInsetsDirectional>,
     actions_foreground_color: AnyColor,
     transition_between_routes: bool,
-    hero_tag: HeroTagRef,
+    hero_tag: Rc<dyn AnyEq>,
     persistent_height: f64,
     large_title_height: f64,
     always_show_middle: bool,
@@ -2194,7 +2195,7 @@ impl SliverPersistentHeaderDelegate for LargeTitleNavigationBarSliverDelegate {
             return nav_bar;
         }
 
-        let tag: HeroTagRef = if Rc::ptr_eq(&self.hero_tag, &default_hero_tag()) {
+        let tag: Rc<dyn AnyEq> = if Rc::ptr_eq(&self.hero_tag, &default_hero_tag()) {
             Rc::new(HeroTag {
                 navigator: Some(Navigator::of(app, context, false)),
             })

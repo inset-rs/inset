@@ -135,7 +135,7 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 
 ## nav_bar.rs → nav_bar.dart
 
-- Change: `heroTag` is a shared `HeroTagRef`, and the file's default tag is one process-local instance, so Dart's identity check against it and its `==` are both pointer equality.
+- Change: `heroTag` is a shared `Rc<dyn AnyEq>`, and the file's default tag is one process-local instance, so Dart's identity check against it and its `==` are both pointer equality.
   Reason: language — a `const` tag value has no canonical instance to compare identity against.
   Affect: the assert that a custom tag needs `transitionBetweenRoutes` false fires on whichever of the two setters is written second.
 
