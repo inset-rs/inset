@@ -1191,13 +1191,6 @@ pub struct RenderBoxData {
 }
 
 impl RenderBoxData {
-    /// The constraints most recently supplied by the parent, or `None` before layout.
-    pub fn constraints(&self) -> Option<BoxConstraints> {
-        self.constraints
-            .as_ref()
-            .map(AnyBoxConstraints::constraints)
-    }
-
     /// Unlaid-out box state.
     pub fn new() -> RenderBoxData {
         RenderBoxData {
@@ -1207,6 +1200,14 @@ impl RenderBoxData {
             debug_computing_this_dry_layout: false,
             debug_computing_this_dry_baseline: false,
         }
+    }
+
+    /// The constraints most recently supplied by the parent, or `None` before layout: Dart's
+    /// `super.constraints` for a leaf that overrides [`RenderBox::constraints`].
+    pub fn constraints(&self) -> Option<BoxConstraints> {
+        self.constraints
+            .as_ref()
+            .map(AnyBoxConstraints::constraints)
     }
 }
 

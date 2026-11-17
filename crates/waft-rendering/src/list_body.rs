@@ -113,7 +113,6 @@ impl Default for RenderListBodyData {
         RenderListBodyData::new()
     }
 }
-
 /// Displays its children sequentially along a given axis, forcing them to the dimensions of the
 /// parent in the other axis.
 ///
@@ -121,12 +120,7 @@ impl Default for RenderListBodyData {
 /// [`RenderListBodyData`], implements this trait, and calls these where Dart would run the
 /// inherited method: `RenderListBodyMixin::perform_layout(self, app)`.
 ///
-/// This layout algorithm arranges its children linearly along the main axis (either
-/// horizontally or vertically). In the cross axis, children are stretched to match the box's
-/// cross-axis extent. In the main axis, children are given unlimited space and the box expands
-/// its main axis to contain all its children. Because list body boxes expand in the main axis,
-/// they must be given unlimited space in the main axis, typically by being contained in a
-/// viewport with a scrolling direction that matches the box's main axis.
+/// See [`RenderListBody`] for the layout algorithm.
 pub trait RenderListBodyMixin:
     RenderBox
     + ContainerRenderObjectMixin<ChildType = AnyRenderBox, ParentDataType = ListBodyParentData>
@@ -137,6 +131,13 @@ pub trait RenderListBodyMixin:
 
     /// See [`list_body_data`](Self::list_body_data).
     fn list_body_data_mut(self: RenderHandle<Self>, app: &mut App) -> &mut RenderListBodyData;
+
+    /// Dart's `RenderListBody.setupParentData`.
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        if !child.parent_data_is::<ListBodyParentData>(app) {
+            child.set_parent_data(app, ListBodyParentData::new());
+        }
+    }
 
     /// The direction in which the children are laid out.
     ///
@@ -161,14 +162,125 @@ pub trait RenderListBodyMixin:
         axis_direction_to_axis(self.axis_direction(app))
     }
 
-    /// Dart's `RenderListBody.setupParentData`.
-    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
-        if !child.parent_data_is::<ListBodyParentData>(app) {
-            child.set_parent_data(app, ListBodyParentData::new());
+    /// Dart's `RenderListBody.computeDryBaseline`.
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        debug_assert!(self.debug_check_constraints(app, constraints));
+        let mut child;
+        let next_child: fn(RenderHandle<Self>, &App, AnyRenderBox) -> Option<AnyRenderBox>;
+        match self.axis_direction(app) {
+            AxisDirection::Right | AxisDirection::Left => {
+                let child_constraints =
+                    BoxConstraints::tight_for(None, Some(constraints.max_height));
+                let mut baseline_offset = BaselineOffset::NO_BASELINE;
+                child = self.first_child(app);
+                while let Some(current) = child {
+                    baseline_offset = baseline_offset.min_of(BaselineOffset(
+                        current.get_dry_baseline(app, child_constraints, baseline),
+                    ));
+                    child = self.child_after(app, current);
+                }
+                return baseline_offset.offset();
+            }
+            AxisDirection::Up => {
+                child = self.last_child(app);
+                next_child = |this, app, child| this.child_before(app, child);
+            }
+            AxisDirection::Down => {
+                child = self.first_child(app);
+                next_child = |this, app, child| this.child_after(app, child);
+            }
+        }
+        let child_constraints = BoxConstraints::tight_for(Some(constraints.max_width), None);
+        let mut main_axis_extent = 0.0;
+        while let Some(current) = child {
+            let child_baseline = current.get_dry_baseline(app, child_constraints, baseline);
+            if let Some(child_baseline) = child_baseline {
+                return Some(child_baseline + main_axis_extent);
+            }
+            main_axis_extent += current.get_dry_layout(app, child_constraints).height();
+            child = next_child(self, app, current);
+        }
+        None
+    }
+
+    /// Dart's `RenderListBody.computeDryLayout`.
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        debug_assert!(self.debug_check_constraints(app, constraints));
+        let mut main_axis_extent = 0.0;
+        let mut child = self.first_child(app);
+        match self.axis_direction(app) {
+            AxisDirection::Right | AxisDirection::Left => {
+                let inner_constraints =
+                    BoxConstraints::tight_for(None, Some(constraints.max_height));
+                while let Some(current) = child {
+                    let child_size = current.get_dry_layout(app, inner_constraints);
+                    main_axis_extent += child_size.width();
+                    child = self.child_after(app, current);
+                }
+                constraints.constrain(Size::new(main_axis_extent, constraints.max_height))
+            }
+            AxisDirection::Up | AxisDirection::Down => {
+                let inner_constraints =
+                    BoxConstraints::tight_for(Some(constraints.max_width), None);
+                while let Some(current) = child {
+                    let child_size = current.get_dry_layout(app, inner_constraints);
+                    main_axis_extent += child_size.height();
+                    child = self.child_after(app, current);
+                }
+                constraints.constrain(Size::new(constraints.max_width, main_axis_extent))
+            }
         }
     }
 
-    /// Sizes this list body and positions its children.
+    /// Flutter's `_debugCheckConstraints`: panics unless the main axis is unbounded and the cross
+    /// axis bounded. Internal to the list body layout.
+    fn debug_check_constraints(
+        self: RenderHandle<Self>,
+        app: &App,
+        constraints: BoxConstraints,
+    ) -> bool {
+        if cfg!(debug_assertions) {
+            let unbounded_main_axis = match self.main_axis(app) {
+                Axis::Horizontal => !constraints.has_bounded_width(),
+                Axis::Vertical => !constraints.has_bounded_height(),
+            };
+            assert!(
+                unbounded_main_axis,
+                "RenderListBody must have unlimited space along its main axis.\n\
+                 RenderListBody does not clip or resize its children, so it must be placed in a \
+                 parent that does not constrain the main axis.\n\
+                 You probably want to put the RenderListBody inside a RenderViewport with a \
+                 matching main axis."
+            );
+            let bounded_cross_axis = match self.main_axis(app) {
+                Axis::Horizontal => constraints.has_bounded_height(),
+                Axis::Vertical => constraints.has_bounded_width(),
+            };
+            assert!(
+                bounded_cross_axis,
+                "RenderListBody must have a bounded constraint for its cross axis.\n\
+                 RenderListBody forces its children to expand to fit the RenderListBody's \
+                 container, so it must be placed in a parent that constrains the cross axis to a \
+                 finite dimension.\n\
+                 If you are attempting to nest a RenderListBody with one direction inside one of \
+                 another direction, you will want to wrap the inner one inside a box that fixes \
+                 the dimension in that direction, for example, a RenderIntrinsicWidth or \
+                 RenderIntrinsicHeight object. This is relatively expensive, however."
+            );
+        }
+        true
+    }
+
+    /// Dart's `RenderListBody.performLayout`.
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
         let constraints = self.constraints(app);
         debug_assert!(self.debug_check_constraints(app, constraints));
@@ -261,83 +373,36 @@ pub trait RenderListBodyMixin:
         debug_assert!(self.size(app).is_finite());
     }
 
-    /// Dart's `RenderListBody.computeDryLayout`.
-    fn compute_dry_layout(
+    /// Flutter's `_getIntrinsicCrossAxis`: the largest of the children's sizes. Internal to the
+    /// list body layout.
+    fn get_intrinsic_cross_axis(
         self: RenderHandle<Self>,
         app: &mut App,
-        constraints: BoxConstraints,
-    ) -> Size {
-        debug_assert!(self.debug_check_constraints(app, constraints));
-        let mut main_axis_extent = 0.0;
+        child_size: impl Fn(&mut App, AnyRenderBox) -> f64,
+    ) -> f64 {
+        let mut extent: f64 = 0.0;
         let mut child = self.first_child(app);
-        match self.axis_direction(app) {
-            AxisDirection::Right | AxisDirection::Left => {
-                let inner_constraints =
-                    BoxConstraints::tight_for(None, Some(constraints.max_height));
-                while let Some(current) = child {
-                    let child_size = current.get_dry_layout(app, inner_constraints);
-                    main_axis_extent += child_size.width();
-                    child = self.child_after(app, current);
-                }
-                constraints.constrain(Size::new(main_axis_extent, constraints.max_height))
-            }
-            AxisDirection::Up | AxisDirection::Down => {
-                let inner_constraints =
-                    BoxConstraints::tight_for(Some(constraints.max_width), None);
-                while let Some(current) = child {
-                    let child_size = current.get_dry_layout(app, inner_constraints);
-                    main_axis_extent += child_size.height();
-                    child = self.child_after(app, current);
-                }
-                constraints.constrain(Size::new(constraints.max_width, main_axis_extent))
-            }
+        while let Some(current) = child {
+            extent = extent.max(child_size(app, current));
+            child = self.child_after(app, current);
         }
+        extent
     }
 
-    /// Dart's `RenderListBody.computeDryBaseline`.
-    fn compute_dry_baseline(
+    /// Flutter's `_getIntrinsicMainAxis`: the sum of the children's sizes. Internal to the list
+    /// body layout.
+    fn get_intrinsic_main_axis(
         self: RenderHandle<Self>,
         app: &mut App,
-        constraints: BoxConstraints,
-        baseline: TextBaseline,
-    ) -> Option<f64> {
-        debug_assert!(self.debug_check_constraints(app, constraints));
-        let mut child;
-        let next_child: fn(RenderHandle<Self>, &App, AnyRenderBox) -> Option<AnyRenderBox>;
-        match self.axis_direction(app) {
-            AxisDirection::Right | AxisDirection::Left => {
-                let child_constraints =
-                    BoxConstraints::tight_for(None, Some(constraints.max_height));
-                let mut baseline_offset = BaselineOffset::NO_BASELINE;
-                child = self.first_child(app);
-                while let Some(current) = child {
-                    baseline_offset = baseline_offset.min_of(BaselineOffset(
-                        current.get_dry_baseline(app, child_constraints, baseline),
-                    ));
-                    child = self.child_after(app, current);
-                }
-                return baseline_offset.offset();
-            }
-            AxisDirection::Up => {
-                child = self.last_child(app);
-                next_child = |this, app, child| this.child_before(app, child);
-            }
-            AxisDirection::Down => {
-                child = self.first_child(app);
-                next_child = |this, app, child| this.child_after(app, child);
-            }
-        }
-        let child_constraints = BoxConstraints::tight_for(Some(constraints.max_width), None);
-        let mut main_axis_extent = 0.0;
+        child_size: impl Fn(&mut App, AnyRenderBox) -> f64,
+    ) -> f64 {
+        let mut extent = 0.0;
+        let mut child = self.first_child(app);
         while let Some(current) = child {
-            let child_baseline = current.get_dry_baseline(app, child_constraints, baseline);
-            if let Some(child_baseline) = child_baseline {
-                return Some(child_baseline + main_axis_extent);
-            }
-            main_axis_extent += current.get_dry_layout(app, child_constraints).height();
-            child = next_child(self, app, current);
+            extent += child_size(app, current);
+            child = self.child_after(app, current);
         }
-        None
+        extent
     }
 
     /// Dart's `RenderListBody.computeMinIntrinsicWidth`.
@@ -389,6 +454,16 @@ pub trait RenderListBodyMixin:
         self.default_compute_distance_to_first_actual_baseline(app, baseline)
     }
 
+    /// Dart's `RenderListBody.paint`.
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        self.default_paint(app, context, offset);
+    }
+
     /// Dart's `RenderListBody.hitTestChildren`.
     fn hit_test_children(
         self: RenderHandle<Self>,
@@ -398,80 +473,22 @@ pub trait RenderListBodyMixin:
     ) -> bool {
         self.default_hit_test_children(app, result, position)
     }
-
-    /// The layout and intrinsic methods share these two helpers.
-    fn debug_check_constraints(
-        self: RenderHandle<Self>,
-        app: &App,
-        constraints: BoxConstraints,
-    ) -> bool {
-        if cfg!(debug_assertions) {
-            let unbounded_main_axis = match self.main_axis(app) {
-                Axis::Horizontal => !constraints.has_bounded_width(),
-                Axis::Vertical => !constraints.has_bounded_height(),
-            };
-            assert!(
-                unbounded_main_axis,
-                "RenderListBody must have unlimited space along its main axis.\n\
-                 RenderListBody does not clip or resize its children, so it must be placed in a \
-                 parent that does not constrain the main axis.\n\
-                 You probably want to put the RenderListBody inside a RenderViewport with a \
-                 matching main axis."
-            );
-            let bounded_cross_axis = match self.main_axis(app) {
-                Axis::Horizontal => constraints.has_bounded_height(),
-                Axis::Vertical => constraints.has_bounded_width(),
-            };
-            assert!(
-                bounded_cross_axis,
-                "RenderListBody must have a bounded constraint for its cross axis.\n\
-                 RenderListBody forces its children to expand to fit the RenderListBody's \
-                 container, so it must be placed in a parent that constrains the cross axis to a \
-                 finite dimension.\n\
-                 If you are attempting to nest a RenderListBody with one direction inside one of \
-                 another direction, you will want to wrap the inner one inside a box that fixes \
-                 the dimension in that direction, for example, a RenderIntrinsicWidth or \
-                 RenderIntrinsicHeight object. This is relatively expensive, however."
-            );
-        }
-        true
-    }
-
-    fn get_intrinsic_cross_axis(
-        self: RenderHandle<Self>,
-        app: &mut App,
-        child_size: impl Fn(&mut App, AnyRenderBox) -> f64,
-    ) -> f64 {
-        let mut extent: f64 = 0.0;
-        let mut child = self.first_child(app);
-        while let Some(current) = child {
-            extent = extent.max(child_size(app, current));
-            child = self.child_after(app, current);
-        }
-        extent
-    }
-
-    fn get_intrinsic_main_axis(
-        self: RenderHandle<Self>,
-        app: &mut App,
-        child_size: impl Fn(&mut App, AnyRenderBox) -> f64,
-    ) -> f64 {
-        let mut extent = 0.0;
-        let mut child = self.first_child(app);
-        while let Some(current) = child {
-            extent += child_size(app, current);
-            child = self.child_after(app, current);
-        }
-        extent
-    }
 }
 
-/// A render object that displays its children sequentially along a given axis.
+/// Displays its children sequentially along a given axis, forcing them to the dimensions of the
+/// parent in the other axis.
+///
+/// This layout algorithm arranges its children linearly along the main axis (either
+/// horizontally or vertically). In the cross axis, children are stretched to match the box's
+/// cross-axis extent. In the main axis, children are given unlimited space and the box expands
+/// its main axis to contain all its children. Because [`RenderListBody`] boxes expand in the main
+/// axis, they must be given unlimited space in the main axis, typically by being contained in a
+/// viewport with a scrolling direction that matches the box's main axis.
 pub struct RenderListBody {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     container: ContainerRenderObjectData<AnyRenderBox>,
-    data: RenderListBodyData,
+    list_body: RenderListBodyData,
 }
 
 impl RenderListBody {
@@ -488,26 +505,22 @@ impl RenderListBody {
                 render_object: RenderObjectData::new(),
                 render_box: RenderBoxData::new(),
                 container: ContainerRenderObjectData::new(),
-                data: RenderListBodyData::new().axis_direction(axis_direction),
+                list_body: RenderListBodyData::new().axis_direction(axis_direction),
             },
         )
     }
 
-    /// The direction in which the children are laid out.
-    ///
-    /// For example, if the [`axis_direction`](Self::axis_direction) is [`AxisDirection::Down`],
-    /// each child will be laid out below the next, vertically.
+    /// See [`RenderListBodyMixin::axis_direction`].
     pub fn axis_direction(self: RenderHandle<Self>, app: &App) -> AxisDirection {
         RenderListBodyMixin::axis_direction(self, app)
     }
 
-    /// Sets [`axis_direction`](Self::axis_direction).
+    /// See [`RenderListBodyMixin::set_axis_direction`].
     pub fn set_axis_direction(self: RenderHandle<Self>, app: &mut App, value: AxisDirection) {
         RenderListBodyMixin::set_axis_direction(self, app, value)
     }
 
-    /// The axis (horizontal or vertical) corresponding to the current
-    /// [`axis_direction`](Self::axis_direction).
+    /// See [`RenderListBodyMixin::main_axis`].
     pub fn main_axis(self: RenderHandle<Self>, app: &App) -> Axis {
         RenderListBodyMixin::main_axis(self, app)
     }
@@ -536,11 +549,11 @@ impl RenderBoxContainerDefaultsMixin for RenderListBody {}
 
 impl RenderListBodyMixin for RenderListBody {
     fn list_body_data(self: RenderHandle<Self>, app: &App) -> &RenderListBodyData {
-        &self.get(app).data
+        &self.get(app).list_body
     }
 
     fn list_body_data_mut(self: RenderHandle<Self>, app: &mut App) -> &mut RenderListBodyData {
-        &mut self.get_mut(app).data
+        &mut self.get_mut(app).list_body
     }
 }
 
@@ -577,7 +590,7 @@ impl RenderObject for RenderListBody {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        self.default_paint(app, context, offset);
+        RenderListBodyMixin::paint(self, app, context, offset)
     }
 }
 
