@@ -389,9 +389,7 @@ impl<T: Clone + PartialEq + Hash + Debug + 'static> Debug for AutocompleteOption
     }
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + 'static> StatelessWidget
-    for AutocompleteOptions<T>
-{
+impl<T: Clone + PartialEq + Hash + Debug + 'static> StatelessWidget for AutocompleteOptions<T> {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let highlighted_index = AutocompleteHighlightedOption::of(app, context);
 
@@ -427,9 +425,7 @@ impl<T: Clone + PartialEq + Hash + Debug + 'static> Debug for AutocompleteOption
     }
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + 'static> StatefulWidget
-    for AutocompleteOptionsList<T>
-{
+impl<T: Clone + PartialEq + Hash + Debug + 'static> StatefulWidget for AutocompleteOptionsList<T> {
     type State = AutocompleteOptionsListState<T>;
 
     fn create_state(&self) -> AutocompleteOptionsListState<T> {
@@ -463,9 +459,7 @@ impl<T: Clone + PartialEq + Hash + Debug + 'static> AutocompleteOptionsListState
     }
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + 'static> State
-    for AutocompleteOptionsListState<T>
-{
+impl<T: Clone + PartialEq + Hash + Debug + 'static> State for AutocompleteOptionsListState<T> {
     type Widget = AutocompleteOptionsList<T>;
     waft_widgets::state_accessors!();
 

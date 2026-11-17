@@ -1381,9 +1381,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{
-        Color, Offset, Size, TextDirection, TextInputAction, View, ViewPadding,
-    };
+    use waft_embedder::{Color, Offset, Size, TextDirection, TextInputAction, View, ViewPadding};
     use waft_foundation::{Completer, Timer};
     use waft_painting::{EdgeInsetsGeometry, TextStyle};
     use waft_services::{PhysicalKeyboardKey, TextInputClient};

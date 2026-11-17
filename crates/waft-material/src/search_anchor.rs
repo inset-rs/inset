@@ -4311,10 +4311,9 @@ mod tests {
     #[test]
     fn search_anchor_bar_has_a_default_search_bar_as_the_anchor() {
         test_widgets(|tester| {
-            let anchor =
-                SearchAnchor::bar(|_app, _context, _controller| Task::ready(Vec::new()))
-                    .is_full_screen(false)
-                    .into_search_anchor();
+            let anchor = SearchAnchor::bar(|_app, _context, _controller| Task::ready(Vec::new()))
+                .is_full_screen(false)
+                .into_search_anchor();
             pump_material_home(
                 tester,
                 None,
@@ -5006,8 +5005,7 @@ mod tests {
     }
 
     fn empty_suggestions()
-    -> impl Fn(&mut App, BuildContext, Handle<SearchController>) -> Task<Vec<WidgetRef>>
-    {
+    -> impl Fn(&mut App, BuildContext, Handle<SearchController>) -> Task<Vec<WidgetRef>> {
         |_app, _context, _controller| Task::ready(Vec::new())
     }
 
@@ -6575,9 +6573,7 @@ mod tests {
                                     .into_widget()
                                 },
                                 |_app, _context, _controller| {
-                                    Task::ready(vec![
-                                        Text::new("suggestion").into_widget(),
-                                    ])
+                                    Task::ready(vec![Text::new("suggestion").into_widget()])
                                 },
                             )
                             .into_widget()
