@@ -1012,13 +1012,19 @@ fn reply_on_a_wide_window_shows_the_mail_beside_the_list() {
     });
 }
 
-/// On a wide window the index stays beside the page it opens, and opening another page
-/// replaces it there.
+/// On a wide window the index stays beside the page it opens, with no drawer of its own, and
+/// opening another page replaces it there.
 #[test]
 fn a_wide_window_shows_the_index_beside_the_page() {
     on_each_platform(|fixture| {
         fixture.resize(1300.0);
         fixture.expect_shown("No page open");
+        // Beside a page the index is the navigation: no drawer, so no menu button.
+        expect(
+            fixture.tester,
+            &find::by_type::<DrawerButton>(),
+            finds_nothing(),
+        );
 
         fixture.tap_text(Entry::Buttons.title());
         fixture.assert_app_bar_reads(Entry::Buttons.title());

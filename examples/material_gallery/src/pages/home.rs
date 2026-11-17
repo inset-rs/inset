@@ -3,7 +3,8 @@
 //! The index is a `Scaffold` whose `AppBar` carries the theme toggle, whose `Drawer` lists the
 //! entries again, and whose body is a `ListView` of `ListTile`s — the same widgets the Lists,
 //! Drawers and App Bars entries demonstrate. With the page it opens it is a list-detail layout:
-//! on a wide window the page sits beside the index, and on a phone it is pushed over it.
+//! on a wide window the page sits beside the index, and on a phone it is pushed over it. Beside a
+//! page the index is itself the navigation, so only a phone's index has the drawer.
 
 use std::fmt::{self, Debug};
 use std::rc::Rc;
@@ -114,12 +115,12 @@ impl State for HomeState {
             app.get(self).stack.clone(),
             GalleryEntry::pane,
             move |app, context, index| match app.get(self).stack[index] {
-                GalleryEntry::Index => self.index(app, context),
+                GalleryEntry::Index => self.index(app, context, false),
                 GalleryEntry::Page(entry) => entry.body(app, context),
             },
             move |app, context, scene| {
                 let directive = &scene.directive;
-                let index = self.index(app, context);
+                let index = self.index(app, context, side_by_side(directive));
                 let page = match self.open_page(app) {
                     Some(entry) => entry.body(app, context),
                     None => empty_state(
@@ -173,22 +174,31 @@ impl HomeState {
         });
     }
 
-    /// The index page: the toggle, the drawer and the tiles.
-    fn index(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
+    /// The index page: the toggle, the tiles, and the drawer unless the index sits beside the
+    /// page it opens.
+    fn index(
+        self: Handle<Self>,
+        app: &mut App,
+        context: BuildContext,
+        beside_page: bool,
+    ) -> WidgetRef {
         let selected = self.open_page(app);
         let tiles: Vec<WidgetRef> = Entry::ALL
             .iter()
             .map(|entry| self.entry_tile(*entry, selected == Some(*entry), context))
             .collect();
-        Scaffold::new()
+        let index = Scaffold::new()
             .app_bar(PreferredSizeWidgetRef::new(
                 AppBar::new()
                     .title(Text::new(INDEX_TITLE))
                     .actions(vec![self.theme_toggle(app, context)]),
             ))
-            .drawer(self.index_drawer())
-            .body(ListView::new().children(tiles))
-            .into_widget()
+            .body(ListView::new().children(tiles));
+        if beside_page {
+            index.into_widget()
+        } else {
+            index.drawer(self.index_drawer()).into_widget()
+        }
     }
 
     /// The app-bar action that flips the app to the other brightness.

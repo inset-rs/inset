@@ -7,13 +7,14 @@
 
 use waft_foundation::{App, Entity, Listener};
 use waft_material::{
-    ListDetailPaneScaffoldRole, Pane, PanePreferredSize, PaneScaffoldDirective, Theme,
+    ListDetailPaneScaffoldRole, Pane, PanePreferredSize, PaneScaffoldDirective, Scaffold, Theme,
     ThreePaneNavigator, ThreePaneScaffold, ThreePaneScaffoldDestinationItem,
     ThreePaneSceneStrategy, WindowSizeClass,
 };
-use waft_painting::EdgeInsetsGeometry;
+use waft_painting::{EdgeInsets, EdgeInsetsGeometry};
 use waft_widgets::{
-    BuildContext, ColoredBox, Column, Expanded, IntoWidget, ListView, Navigator, Padding, WidgetRef,
+    BuildContext, Column, Expanded, IntoWidget, ListView, MediaQuery, Navigator, Padding,
+    PreferredSizeWidgetRef, WidgetRef,
 };
 
 use crate::reply::components::app_bars::{email_detail_app_bar, reply_search_bar};
@@ -92,9 +93,21 @@ fn pane_of(entry: &InboxEntry) -> Option<ThreePaneScaffoldDestinationItem<u64>> 
 
 /// The open mail beside the list: a rounded surface inside the window's margin, so the thread
 /// reads as a sheet laid beside the inbox.
+///
+/// The rounded bottom corners cover part of the pane's bottom edge, so the pane tells the thread
+/// as `MediaQuery` padding, as a phone's rounded screen does: the thread then ends clear of the
+/// corners, and its scrollbar, which reads that padding, stops above them instead of being cut.
 fn detail_pane(app: &mut App, context: BuildContext, detail: WidgetRef) -> Pane {
     let margin = WindowSizeClass::of(app, context).width.margin();
-    Pane::new(detail)
+    let data = MediaQuery::of(app, context);
+    let padding = data.padding;
+    let padding = EdgeInsets::only(
+        padding.left,
+        padding.top,
+        padding.right,
+        padding.bottom.max(shapes::LARGE),
+    );
+    Pane::new(MediaQuery::new(data.copy_with().padding(padding), detail).into_widget())
         .margins(EdgeInsetsGeometry::all(margin))
         .shape(rounded(shapes::LARGE))
 }
@@ -139,6 +152,10 @@ fn reply_email_list(
 
 /// `ReplyEmailDetail`: the open mail's bar over its thread, on the inverse of the surface's
 /// content colour.
+///
+/// The sample scrolls the bar away with the thread; here the bar stays, as a `Scaffold`'s does,
+/// so the thread's scroll view, and its scrollbar on a desktop, start below it, clear of a
+/// rounded pane's top corners.
 fn reply_email_detail(
     app: &mut App,
     context: BuildContext,
@@ -148,16 +165,15 @@ fn reply_email_detail(
 ) -> WidgetRef {
     let email = app.read(home).opened_email().clone();
     let background = Theme::of(app, context).color_scheme.on_inverse_surface();
-    let mut children = vec![
-        email_detail_app_bar(app, context, &email, is_full_screen, on_back_pressed).into_widget(),
-    ];
-    children.extend(
-        email
-            .threads
-            .iter()
-            .map(|thread| email_thread_item(app, context, thread)),
-    );
-    ColoredBox::new(background)
-        .child(ListView::new().children(children))
+    let app_bar = email_detail_app_bar(app, context, &email, is_full_screen, on_back_pressed);
+    let threads: Vec<WidgetRef> = email
+        .threads
+        .iter()
+        .map(|thread| email_thread_item(app, context, thread))
+        .collect();
+    Scaffold::new()
+        .background_color(background)
+        .app_bar(PreferredSizeWidgetRef::new(app_bar))
+        .body(ListView::new().children(threads))
         .into_widget()
 }

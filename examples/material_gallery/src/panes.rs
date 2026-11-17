@@ -4,14 +4,20 @@
 //! When the window has room for panes side by side, each pane is its own rounded surface over
 //! the tinted window, kept the window margin from its edges and the directive's spacer from the
 //! next pane. A single pane fills the window as a phone's page does.
+//!
+//! A rounded pane's bottom corners cover part of its bottom edge, as a phone's rounded screen
+//! does, so the pane tells its content so the same way: as `MediaQuery` padding. A list then
+//! ends clear of the corners, and its scrollbar, which reads that padding, stops above them
+//! instead of being cut by the clip. The top edge needs none: every pane puts its bar there.
 
 use waft_embedder::Color;
 use waft_foundation::App;
 use waft_material::{ColorScheme, Pane, PaneScaffoldDirective, WindowSizeClass};
 use waft_painting::{
-    BorderRadius, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder, ShapeBorderRef,
+    BorderRadius, BorderSide, EdgeInsets, EdgeInsetsGeometry, RoundedRectangleBorder,
+    ShapeBorderRef,
 };
-use waft_widgets::{BuildContext, IntoWidget};
+use waft_widgets::{BuildContext, IntoWidget, MediaQuery, WidgetRef};
 
 /// The radius of a pane's corners: the large corner of Material 3's shape scale
 /// (m3.material.io/styles/shape/corner-radius-scale), which Compose's own list-detail sample
@@ -37,13 +43,26 @@ pub fn pane<K>(
     directive: &PaneScaffoldDirective,
     child: impl IntoWidget<K>,
 ) -> Pane {
-    let pane = Pane::new(child);
     if !side_by_side(directive) {
-        return pane;
+        return Pane::new(child);
     }
     let margin = WindowSizeClass::of(app, context).width.margin();
-    pane.margins(EdgeInsetsGeometry::all(margin))
+    Pane::new(clear_of_bottom_corners(app, context, child.into_widget()))
+        .margins(EdgeInsetsGeometry::all(margin))
         .shape(rounded_shape())
+}
+
+/// `child` told that the pane's bottom corners cover its bottom edge by [`CORNER_RADIUS`].
+fn clear_of_bottom_corners(app: &mut App, context: BuildContext, child: WidgetRef) -> WidgetRef {
+    let data = MediaQuery::of(app, context);
+    let padding = data.padding;
+    let padding = EdgeInsets::only(
+        padding.left,
+        padding.top,
+        padding.right,
+        padding.bottom.max(CORNER_RADIUS),
+    );
+    MediaQuery::new(data.copy_with().padding(padding), child).into_widget()
 }
 
 /// The shape of a pane.
