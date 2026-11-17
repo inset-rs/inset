@@ -55,6 +55,7 @@ Ported against: 34b89b2086d4
 - drawer_header.rs → drawer_header.dart
 - grid_tile.rs → grid_tile.dart
 - grid_tile_bar.rs → grid_tile_bar.dart
+- user_accounts_drawer_header.rs → user_accounts_drawer_header.dart
 - drawer.rs → drawer.dart
 - generated/drawer_defaults_m3.rs → generated/drawer_defaults_m3.g.dart
 - generated/navigation_drawer_defaults_m3.rs → generated/navigation_drawer_defaults_m3.g.dart
@@ -732,3 +733,4 @@ Ported against: 34b89b2086d4
 - input_decorator.rs tests: 'Widget height stays at hint height by default' keeps its explicit line break: text layout does not break an unbreakable word at the line end as Dart's does. Trigger: waft-painting text layout breaking a long word.
 - list_tile.rs tests: list_tile_test's Material 2 'selected, enabled ListTile default icon color, light and dark themes' keeps a tester per frame: on one tester the dark frame shows the light primary first, as an `AnimatedTheme` at t=0 would, where Dart shows the dark primary at once. Trigger: finding why Dart's differs.
 - text_field.rs, selectable_text.rs tests: the cases that assert FlutterTest glyph metrics (the audit's 658 and 665), still unported: roughly 380 of text_field_test's 413 cases and 105 of selectable_text_test's 138 have no Rust port. Trigger: none, needs its own step (porting them against the one tester).
+- user_accounts_drawer_header.rs tests: the three semantics cases ('UserAccountsDrawerHeader provides semantics', '… with missing properties', and 'alternative account selectors have sufficient tap targets') and the mid-animation 'speedy' case, whose only new check is that an animation is running; the visible start, half turn and return are ported. Trigger: the semantics tree; a running-animation count in the tester.

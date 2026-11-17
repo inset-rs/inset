@@ -163,6 +163,7 @@ mod tooltip;
 mod tooltip_theme;
 mod tooltip_visibility;
 mod typography;
+mod user_accounts_drawer_header;
 
 pub use action_buttons::*;
 pub use action_chip::*;
@@ -320,3 +321,4 @@ pub use tooltip::*;
 pub use tooltip_theme::*;
 pub use tooltip_visibility::*;
 pub use typography::*;
+pub use user_accounts_drawer_header::*;
