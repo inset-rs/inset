@@ -550,6 +550,14 @@ impl PaintCall {
         }
     }
 
+    /// `..shadow(elevation:, color:)`.
+    pub fn shadow_with_elevation(elevation: f64, color: Option<Color>) -> PaintCall {
+        PaintCall::Shadow {
+            elevation: Some(elevation),
+            color,
+        }
+    }
+
     /// `..something(predicate)`.
     pub fn something(
         predicate: impl Fn(&RecordedCall) -> Result<bool, String> + 'static,
