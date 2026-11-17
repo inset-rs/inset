@@ -23,12 +23,23 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - proxy_box.rs → RenderSemanticsAnnotations, RenderBlockSemantics, RenderMergeSemantics, RenderExcludeSemantics, RenderIndexedSemantics
 - object.rs / box.rs → getTransformTo, globalToLocal, localToGlobal
 - editable.rs → TextSelectionPoint
+- selection.rs → selection.dart (`SelectionUtils`, the geometry and content values)
 - pipeline_owner.rs → object.dart (PipelineOwner)
 - sliver_fixed_extent_list.rs → sliver_fixed_extent_list.dart
 - image.rs → image.dart (RenderImage)
 - wrap.rs → wrap.dart
 - list_body.rs → list_body.dart
 - sliver_fill.rs → sliver_fill.dart
+
+## selection.rs → selection.dart
+
+- Change: `SelectionEvent` is one enum with a variant per Dart subclass, its `type` read with `ty()`.
+  Reason: language — Rust has no subclasses to downcast an event to.
+  Affect: a handler matches the event's variant where Dart casts it to `SelectionEdgeUpdateEvent` and the rest.
+
+- Change: a `SelectionRegistrar` holds its selectables as bare `AnySelectable`s, which keep nothing, while a selectable keeps its registrar (`SelectionRegistrarRef`).
+  Reason: language — a container's state is a selectable that keeps the registrar above it, and that registrar keeping the state back would be a ring of `Ref`s nothing frees.
+  Affect: a selectable must be removed from its registrar before it is freed, as `RenderParagraph` and `SelectionRegistrant` do; a registrar that still lists a freed selectable panics when it calls it.
 
 ## debug.rs → debug.dart
 
@@ -152,9 +163,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## paragraph.rs → paragraph.dart
 
-- Change: `RenderParagraph` takes an optional `FontCollection` handle, falling back to `PaintingBinding`'s app-wide one, and has no selection registrar or `selectionColor`.
-  Reason: platform — the font collection is explicit (painting's `binding.rs`), and selection waits on `selection.dart`.
-  Affect: text in a `RichText` cannot be selected.
+- Change: `RenderParagraph` takes an optional `FontCollection` handle, falling back to `PaintingBinding`'s app-wide one.
+  Reason: platform — the font collection is explicit (painting's `binding.rs`).
+  Affect: `RichText` may name the collection it shapes against; otherwise it uses the app's.
 
 - Change: `TextOverflow::Fade` clips like `Clip`.
   Reason: platform — the fade is a gradient shader, and gradients are deferred.
@@ -254,6 +265,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a subclass instance survives one hop (parent's `layout` or `layout_child` → the child's stored constraints → a `LayoutBuilder`'s builder); a render object that hands its own `constraints()` on to its child passes the plain value, where Dart passes the subclass object along. Nothing in Flutter's scaffold relies on more than one hop.
 
 ## Deferred
+- `paragraph_test.dart`'s "paints selection highlights outside fade layer and handles after text": the checks of the fade's `saveLayer` and shader rect. Trigger: the fade overflow shader.
 
 - box.rs: `AnyBoxConstraints`'s `Hash` (Dart's subclasses override `hashCode`). Trigger: the first map or set keyed by one.
 - `RenderImage`'s `color` / `colorBlendMode` and `invertColors`. Trigger: painting's colour filters.

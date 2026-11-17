@@ -929,4 +929,72 @@ mod tests {
             .expect("a RenderIntrinsicHeight");
         assert_eq!(intrinsic.size(&app).height(), 3.0 * 16.0);
     }
+
+    /// `paragraph_test.dart`'s `TestSelectionRegistrar`.
+    struct TestSelectionRegistrar {
+        selectables: Vec<waft_rendering::AnySelectable>,
+    }
+
+    impl waft_rendering::SelectionRegistrar for TestSelectionRegistrar {
+        fn add(
+            self: waft_foundation::Handle<Self>,
+            app: &mut App,
+            selectable: waft_rendering::AnySelectable,
+        ) {
+            app.get_mut(self).selectables.push(selectable);
+        }
+
+        fn remove(
+            self: waft_foundation::Handle<Self>,
+            app: &mut App,
+            selectable: waft_rendering::AnySelectable,
+        ) {
+            app.get_mut(self).selectables.retain(|s| *s != selectable);
+        }
+    }
+
+    // paragraph_test.dart 'can handle select all when contains widget span': a rendering case,
+    // here because `WidgetSpan` is a widgets type.
+    #[test]
+    fn can_handle_select_all_when_contains_widget_span() {
+        use waft_rendering::{ContainerRenderObjectMixin as _, SelectionEvent, SelectionStatus};
+
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = app.create(TestSelectionRegistrar {
+            selectables: Vec::new(),
+        });
+        let render_box = RenderParagraph::new(&mut app, text("widget"), TextDirection::Ltr, None);
+        let widget_span = WidgetSpan::new(Text::new("widget"));
+        let paragraph = RenderParagraph::new(
+            &mut app,
+            TextSpan::new()
+                .children(vec![
+                    text("before the span"),
+                    widget_span.clone().into_span(),
+                    text("after the span"),
+                ])
+                .into_span(),
+            TextDirection::Ltr,
+            None,
+        );
+        paragraph.set_registrar(&mut app, Some(registrar.erase()));
+        paragraph.add(&mut app, render_box.as_box());
+        // `_applyParentData`.
+        render_box
+            .as_object()
+            .parent_data_of_mut::<TextParentData>(&mut app)
+            .span = Some(std::rc::Rc::new(widget_span));
+        waft_rendering::testing::layout(&mut app, paragraph.as_box());
+        // The widget span will register to the selection container without going
+        // through the render paragraph.
+        let selectables = app.get(&registrar).selectables.clone();
+        assert_eq!(selectables.len(), 2);
+        for segment in selectables {
+            segment.dispatch_selection_event(&mut app, &SelectionEvent::SelectAll);
+            let geometry = segment.value(&app);
+            assert!(geometry.has_content);
+            assert_eq!(geometry.status, SelectionStatus::Uncollapsed);
+        }
+    }
 }

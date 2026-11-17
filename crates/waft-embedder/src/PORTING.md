@@ -76,6 +76,12 @@ Ported against Flutter `9c427b5d7b`.
   Reason: platform — a program is made with no platform at hand, from a static, and each of a host's views draws with a renderer of its own.
   Affect: a program's common pipeline is compiled before the first frame of each view drawn after the program is made, so a program made in the frame that first draws it still compiles then.
 
+## test_font.rs → engine `txt/test_font_manager.cc` and `FontCollection::RegisterTestFonts`
+
+- Change: `TestFontSource` carries FlutterTest alone, so every family, "Ahem" and "Cough" included, answers with FlutterTest; it lives here, behind `test-support`, so both `waft-test`'s platform and `waft-rendering`'s rendering harness install the same face.
+  Reason: platform — the lead's decision D16 bundles FlutterTest under Flutter's licence and no Ahem, and the rendering harness must seed a collection without a platform.
+  Affect: a test that names Ahem or Cough measures FlutterTest's squares (ascent 0.75 em) instead of Ahem's (0.8 em).
+
 ## paragraph.rs → text.dart (`TextStyle`, `ParagraphStyle`, `ParagraphBuilder`, `Paragraph`), fonts.rs
 
 - Change: fonts are explicit — `Platform::font_source` is the host's font lookup, and `ParagraphBuilder::build` shapes against a `FontCollection` the caller passes.

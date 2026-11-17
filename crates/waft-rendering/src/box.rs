@@ -1729,25 +1729,10 @@ pub trait RenderBox: RenderObject {
     /// Mark this render object's layout information as dirty.
     ///
     /// Flutter's `RenderBox.markNeedsLayout`: it also clears the intrinsics, dry layout and
-    /// baseline caches, and defers to the parent when they held anything.
+    /// baseline caches, and defers to the parent when they held anything. An override calls
+    /// [`RenderBoxBase::mark_needs_layout`] where Dart writes `super.markNeedsLayout()`.
     fn mark_needs_layout(self: RenderHandle<Self>, app: &mut App) {
-        // If the cache was not empty, then this box's layout is used by the parent's layout
-        // algorithm (it's possible that the parent only used the intrinsics for paint, but
-        // there's no good way to detect that so we conservatively assume it's a layout
-        // dependency).
-        //
-        // A render object's perform_layout implementation may depend on the baseline location or
-        // the intrinsic dimensions of a descendant, even when there are relayout boundaries
-        // between them.
-        //
-        // Some calculations may fail (dry baseline, for example). The layout dependency is still
-        // established, but only from the box that failed to compute the dry baseline to the
-        // ancestor that queried the dry baseline.
-        if self.render_box_data_mut(app).layout_cache.clear() && self.parent(app).is_some() {
-            self.as_object().mark_parent_needs_layout(app);
-            return;
-        }
-        crate::object::RenderObjectBase::mark_needs_layout(self, app);
+        RenderBoxBase::mark_needs_layout(self, app);
     }
 
     /// Updates the box's size using only the constraints.
@@ -1944,6 +1929,27 @@ pub trait RenderBox: RenderObject {
 /// shape `ElementBase` has for `Element`). A leaf in any crate calls it at Dart's `super` call:
 /// `RenderBoxBase::hit_test(self, app, result, position)`.
 pub trait RenderBoxBase: RenderBox {
+    /// Flutter's `RenderBox.markNeedsLayout`.
+    fn mark_needs_layout(self: RenderHandle<Self>, app: &mut App) {
+        // If the cache was not empty, then this box's layout is used by the parent's layout
+        // algorithm (it's possible that the parent only used the intrinsics for paint, but
+        // there's no good way to detect that so we conservatively assume it's a layout
+        // dependency).
+        //
+        // A render object's perform_layout implementation may depend on the baseline location or
+        // the intrinsic dimensions of a descendant, even when there are relayout boundaries
+        // between them.
+        //
+        // Some calculations may fail (dry baseline, for example). The layout dependency is still
+        // established, but only from the box that failed to compute the dry baseline to the
+        // ancestor that queried the dry baseline.
+        if self.render_box_data_mut(app).layout_cache.clear() && self.parent(app).is_some() {
+            self.as_object().mark_parent_needs_layout(app);
+            return;
+        }
+        crate::object::RenderObjectBase::mark_needs_layout(self, app);
+    }
+
     /// Flutter's `RenderBox.performResize`.
     fn perform_resize(self: RenderHandle<Self>, app: &mut App) {
         // Default behavior for subclasses that have sized_by_parent = true.
@@ -3122,7 +3128,7 @@ mod intrinsics_tests {
         assert_eq!(box_.as_box().get_min_intrinsic_width(&mut app, 10.0), 110.0);
         assert_eq!(computations.get(), 2, "another height is another entry");
 
-        box_.mark_needs_layout(&mut app);
+        RenderBox::mark_needs_layout(box_, &mut app);
         assert_eq!(box_.as_box().get_min_intrinsic_width(&mut app, 0.0), 100.0);
         assert_eq!(computations.get(), 3, "mark_needs_layout cleared the cache");
     }
@@ -3151,7 +3157,7 @@ mod intrinsics_tests {
         assert!(!parent.debug_needs_layout(&app));
 
         child.as_box().get_min_intrinsic_width(&mut app, 0.0);
-        child.mark_needs_layout(&mut app);
+        RenderBox::mark_needs_layout(child, &mut app);
         assert!(
             parent.debug_needs_layout(&app),
             "the parent read an intrinsic, so it has to lay out again"

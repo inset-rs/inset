@@ -69,6 +69,20 @@ impl PaintingBinding {
         handle
     }
 
+    /// Installs flutter_test's fonts: every family is FlutterTest, as
+    /// `TestRenderingFlutterBinding` installs them.
+    #[cfg(feature = "test-support")]
+    pub fn install_flutter_test_fonts(self: Handle<Self>, app: &mut App) -> Handle<FontCollection> {
+        let families = app.platform().default_font_families();
+        self.install_fonts(app, |fonts| {
+            set_default_font_manager(
+                fonts,
+                Box::new(waft_embedder::TestFontSource::new()),
+                &families,
+            );
+        })
+    }
+
     /// Installs the app-wide font collection seeded with the platform's own font lookup
     /// (`Platform::font_source`) and its default families (`Platform::default_font_families`),
     /// the way Flutter's engine asks the OS for faces.

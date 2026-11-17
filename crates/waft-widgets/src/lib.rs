@@ -146,6 +146,7 @@ pub use widgets::scroll_view::*;
 pub use widgets::scrollable::*;
 pub use widgets::scrollable_helpers::*;
 pub use widgets::scrollbar::*;
+pub use widgets::selection_container::*;
 pub use widgets::shared_app_data::*;
 pub use widgets::shortcuts::*;
 pub use widgets::single_child_scroll_view::*;

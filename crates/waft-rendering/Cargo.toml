@@ -21,11 +21,12 @@ waft-services.workspace = true
 unicode-general-category.workspace = true
 
 [features]
-# `testing`: flutter_test's `paints` matcher, for the tests of a crate above this one.
-test-support = []
+# `testing`: flutter_test's `paints` matcher and fonts, for the tests of a crate above this one.
+test-support = ["waft-painting/test-support"]
 
 [dev-dependencies]
 waft-test.workspace = true
+waft-painting = { workspace = true, features = ["test-support"] }
 waft-embedder = { workspace = true, features = ["test-support"] }
 valo.workspace = true
 valo-system-fonts.workspace = true

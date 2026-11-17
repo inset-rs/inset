@@ -80,18 +80,7 @@ use crate::widgets::transitions::FadeTransition;
 use waft_foundation::ListenableObject;
 use waft_foundation::Ref;
 
-/// Which kind of selection handle to build.
-///
-/// Flutter: `rendering/selection.dart`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum TextSelectionHandleType {
-    /// The selection handle is to the left of the selection end point.
-    Left,
-    /// The selection handle is to the right of the selection end point.
-    Right,
-    /// The start and end of the selection are co-incident at this point.
-    Collapsed,
-}
+pub use waft_rendering::TextSelectionHandleType;
 
 /// The type for a Function that builds a toolbar's container with the given
 /// child.

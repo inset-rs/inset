@@ -21,6 +21,6 @@ pub use paints::{
 };
 pub use pictures::{painted_ops, painted_ops_deep, pictures, pictures_deep};
 pub use rendering_tester::{
-    EnginePhase, TEST_VIEW_SIZE, layout, layout_with, pump_frame, test_pipeline_owner,
-    test_render_root,
+    EnginePhase, TEST_VIEW_SIZE, install_test_fonts, layout, layout_with, pump_frame,
+    test_pipeline_owner, test_render_root,
 };
