@@ -404,16 +404,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
     /// controlled by the animation controller created by
     /// [`create_animation_controller`](Self::create_animation_controller).
     fn create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
-        debug_assert!(
-            !TransitionRoute::debug_transition_completed(self, app),
-            "cannot reuse a route after disposing it"
-        );
-        // Dart's `controller!.view`: the controller itself, as an animation.
-        self.transition_route_data(app)
-            .controller
-            .as_ref()
-            .expect("createAnimationController ran first")
-            .erase()
+        TransitionRouteBase::create_animation(self, app)
     }
 
     /// Creates the simulation that drives the transition animation for this route.
@@ -989,6 +980,29 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         std::any::type_name::<Self>().to_string()
     }
 }
+
+/// Dart's `TransitionRoute` bodies an override reaches as `super`.
+///
+/// Every [`TransitionRoute`] implements it. An override that must run the inherited body calls
+/// it trait-qualified, `TransitionRouteBase::create_animation(self, app)`, where Dart writes
+/// `super.createAnimation()`; the [`TransitionRoute`] default runs the same body.
+pub trait TransitionRouteBase: TransitionRoute {
+    /// `TransitionRoute.createAnimation`: the controller itself, as an animation.
+    fn create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
+        debug_assert!(
+            !TransitionRoute::debug_transition_completed(self, app),
+            "cannot reuse a route after disposing it"
+        );
+        // Dart's `controller!.view`: the controller itself, as an animation.
+        self.transition_route_data(app)
+            .controller
+            .as_ref()
+            .expect("createAnimationController ran first")
+            .erase()
+    }
+}
+
+impl<T: TransitionRoute> TransitionRouteBase for T {}
 
 /// The vtable of an erased [`AnyTransitionRoute`]: one `&'static` table per route type, built
 /// by [`TransitionRouteVTable::of`].

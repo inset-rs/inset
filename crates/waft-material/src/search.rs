@@ -29,7 +29,8 @@ use waft_widgets::{
     LocalHistoryRouteData, ModalRoute, ModalRouteData, Navigator, OverlayRoute, OverlayRouteData,
     PageRoute, PageRouteData, PredictiveBackRoute, PreferredSizeWidgetRef, Route, RouteData,
     RouteResult, Semantics, State, StateData, StatefulWidget, TextEditingController,
-    TextEditingControllerLeaf, TransitionRoute, TransitionRouteData, UnfocusDisposition, WidgetRef,
+    TextEditingControllerLeaf, TransitionRoute, TransitionRouteBase, TransitionRouteData,
+    UnfocusDisposition, WidgetRef,
 };
 
 use crate::app_bar::AppBar;
@@ -624,14 +625,7 @@ impl TransitionRoute for SearchPageRoute {
 
     fn create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
         // Dart's `super.createAnimation()`: the trait's default body.
-        debug_assert!(
-            !TransitionRoute::debug_transition_completed(self, app),
-            "cannot reuse a route after disposing it"
-        );
-        let animation: AnimationRef<f64> = TransitionRoute::controller(self, app)
-            .expect("createAnimationController ran first")
-            .keep(app)
-            .into_erased();
+        let animation = TransitionRouteBase::create_animation(self, app);
         let delegate = Rc::clone(&app.get(self).delegate);
         delegate
             .search_delegate_data()
