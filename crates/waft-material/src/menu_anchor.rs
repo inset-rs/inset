@@ -11863,7 +11863,7 @@ mod tests {
         use waft_widgets::{Center, Column, SizedBox};
 
         use super::*;
-        use crate::dialog::{AlertDialog, show_dialog};
+        use crate::dialog::{AlertDialog, ShowDialog};
         use crate::scaffold::Scaffold;
 
         fn new_controller(tester: &WidgetTester) -> MenuControllerRef {
@@ -13233,10 +13233,7 @@ mod tests {
                                                 )
                                                 .into_widget()
                                         });
-                                    drop(show_dialog(
-                                        app, context, builder, true, None, None, true, true, None,
-                                        None, false, None, None,
-                                    ));
+                                    drop(ShowDialog::new(builder).show(app, context));
                                 })),
                                 Some(Text::new("Show Dialog")),
                             )

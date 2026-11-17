@@ -534,7 +534,7 @@ Ported against: 34b89b2086d4
   Affect: `Dialog::fullscreen().elevation(8.0)` and `AlertDialog::new().scroll_controller(c)` compile and change nothing, and `Dialog::fullscreen().inset_padding(p)` pads by `p`, where Dart rejects all three; and an `AlertDialog::adaptive()` is found by a lookup of type `AlertDialog`, where Dart's is a private subclass that `find.byType(AlertDialog)` misses.
 - Change: `DialogRoute::new` reads `MaterialLocalizations::modal_barrier_dismiss_label` for its default barrier label whether or not `barrier_label` is set after it.
   Reason: language — the route's optional arguments are setters called after it is made, so its constructor cannot see whether a label will be given, where Dart's `barrierLabel ?? …` sees every argument at once.
-  Affect: a `DialogRoute` made where no `MaterialLocalizations` is found panics even when it is then given a barrier label; `show_dialog` checks for them first, as Dart's does.
+  Affect: a `DialogRoute` made where no `MaterialLocalizations` is found panics even when it is then given a barrier label; `ShowDialog::show` checks for them first, as Dart's does.
 
 ## popup_menu.rs → popup_menu.dart
 - Change: a menu's entries are `PopupMenuEntryRef<T>`s, each erasing an entry widget with its `height` and `represents`, and `PopupMenuDivider` is a `PopupMenuEntry<T>` of every `T`.

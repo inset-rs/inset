@@ -54,7 +54,7 @@ use crate::colors::Colors;
 use crate::constants::K_MIN_INTERACTIVE_DIMENSION;
 #[allow(deprecated)]
 use crate::curves::standard_easing;
-use crate::dialog::Dialog;
+use crate::dialog::{Dialog, ShowDialog};
 use crate::generated::time_picker_defaults_m3::TimePickerDefaultsM3;
 use crate::icon_button::IconButton;
 use crate::icons::Icons;
@@ -3403,8 +3403,8 @@ const HOUR_MINUTE_MODES: [HourMinuteMode; 2] = [HourMinuteMode::Hour, HourMinute
 
 /// A Material Design time picker designed to appear inside a popup dialog.
 ///
-/// Pass this widget to [`showDialog`](crate::show_dialog). The value returned by
-/// [`showDialog`](crate::show_dialog) is the selected [`TimeOfDay`] if the user taps the "OK"
+/// Pass this widget to [`ShowDialog`]. The value returned by
+/// [`ShowDialog`] is the selected [`TimeOfDay`] if the user taps the "OK"
 /// button, or null if the user taps the "CANCEL" button. The selected time is reported by
 /// popping the navigator with the selected time.
 ///
@@ -4768,24 +4768,22 @@ pub fn show_time_picker(
         dialog = dialog.switch_to_timer_entry_mode_icon(icon);
     }
     let dialog = waft_widgets::IntoWidget::into_widget(dialog);
-    crate::dialog::show_dialog(
-        app,
-        context,
-        std::rc::Rc::new(move |app, context| match &builder {
-            None => dialog.clone(),
-            Some(builder) => builder(app, context, Some(&dialog)),
-        }),
-        barrier_dismissible,
-        barrier_color,
-        barrier_label,
-        true,
-        use_root_navigator,
-        route_settings,
-        None,
-        false,
-        None,
-        None,
-    )
+    let mut show = ShowDialog::new(std::rc::Rc::new(move |app, context| match &builder {
+        None => dialog.clone(),
+        Some(builder) => builder(app, context, Some(&dialog)),
+    }))
+    .barrier_dismissible(barrier_dismissible)
+    .use_root_navigator(use_root_navigator);
+    if let Some(barrier_color) = barrier_color {
+        show = show.barrier_color(barrier_color);
+    }
+    if let Some(barrier_label) = barrier_label {
+        show = show.barrier_label(barrier_label);
+    }
+    if let Some(route_settings) = route_settings {
+        show = show.route_settings(route_settings);
+    }
+    show.show(app, context)
 }
 
 /// Dart's `_TimePickerDefaults`: the defaults of a [`TimePickerThemeData`], each getter

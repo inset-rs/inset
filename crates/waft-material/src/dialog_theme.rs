@@ -302,7 +302,7 @@ impl DialogTheme {
         }
     }
 
-    /// Overrides the default value for `barrier_color` in `show_dialog`.
+    /// Overrides the default value for `barrier_color` in `ShowDialog`.
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the [`DialogThemeData::barrier_color`] property in [`data`](Self::data)
@@ -580,7 +580,7 @@ pub struct DialogThemeData {
     /// Used to configure the `IconTheme` for the `AlertDialog::icon` widget.
     pub icon_color: Option<Color>,
 
-    /// Overrides the default value for `barrier_color` in `show_dialog`.
+    /// Overrides the default value for `barrier_color` in `ShowDialog`.
     pub barrier_color: Option<Color>,
 
     /// Overrides the default value for `Dialog::inset_padding`.
@@ -824,7 +824,7 @@ mod tests {
         dialog_material, last_barrier_color, material_from_dialog, open, placeholder, rect_of_key,
         text_style_in_dialog,
     };
-    use crate::dialog::{AlertDialog, Dialog, SimpleDialog, show_dialog};
+    use crate::dialog::{AlertDialog, Dialog, ShowDialog, SimpleDialog};
     use crate::elevated_button::ElevatedButton;
     use crate::icons::Icons;
     use crate::material::Material;
@@ -851,10 +851,7 @@ mod tests {
                             let dialog = dialog.clone();
                             let builder: WidgetBuilder =
                                 Rc::new(move |_app, _context| dialog.clone());
-                            drop(show_dialog(
-                                app, context, builder, true, None, None, true, true, None, None,
-                                false, None, None,
-                            ));
+                            drop(ShowDialog::new(builder).show(app, context));
                         })),
                         Some(Text::new("X")),
                     ))

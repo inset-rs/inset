@@ -13,7 +13,7 @@ use crate::date::{
     GregorianCalendarDelegate, is_day_before,
 };
 use crate::date_picker_theme::DatePickerTheme;
-use crate::dialog::Dialog;
+use crate::dialog::{Dialog, ShowDialog};
 use crate::divider::{Divider, VerticalDivider};
 use crate::icon_button::IconButton;
 use crate::icons::Icons;
@@ -142,7 +142,7 @@ const FONT_SIZE_TO_SCALE: f64 = 14.0;
 /// The `calendar_delegate` provides the calendar the dialog works in; it defaults to the
 /// Gregorian calendar.
 ///
-/// Dart's `anchorPoint` waits for `show_dialog` to take one.
+/// Dart's `anchorPoint` waits for `ShowDialog` to take one.
 #[expect(
     clippy::too_many_arguments,
     reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
@@ -252,24 +252,22 @@ pub fn show_date_picker(
             .into_widget();
     }
 
-    crate::dialog::show_dialog(
-        app,
-        context,
-        Rc::new(move |app, context| match &builder {
-            None => dialog.clone(),
-            Some(builder) => builder(app, context, Some(&dialog)),
-        }),
-        barrier_dismissible,
-        barrier_color,
-        barrier_label,
-        true,
-        use_root_navigator,
-        route_settings,
-        None,
-        false,
-        None,
-        None,
-    )
+    let mut show = ShowDialog::new(Rc::new(move |app, context| match &builder {
+        None => dialog.clone(),
+        Some(builder) => builder(app, context, Some(&dialog)),
+    }))
+    .barrier_dismissible(barrier_dismissible)
+    .use_root_navigator(use_root_navigator);
+    if let Some(barrier_color) = barrier_color {
+        show = show.barrier_color(barrier_color);
+    }
+    if let Some(barrier_label) = barrier_label {
+        show = show.barrier_label(barrier_label);
+    }
+    if let Some(route_settings) = route_settings {
+        show = show.route_settings(route_settings);
+    }
+    show.show(app, context)
 }
 
 const ENTRY_MODES: [DatePickerEntryMode; 4] = [
@@ -1390,7 +1388,7 @@ pub type SelectableDayForRangePredicate =
 ///
 /// The `selectable_day_predicate` customizes the days enabled for selection.
 ///
-/// Dart's `anchorPoint` waits for `show_dialog` to take one.
+/// Dart's `anchorPoint` waits for `ShowDialog` to take one.
 #[expect(
     clippy::too_many_arguments,
     reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
@@ -1513,24 +1511,23 @@ pub fn show_date_range_picker(
             .into_widget();
     }
 
-    crate::dialog::show_dialog(
-        app,
-        context,
-        Rc::new(move |app, context| match &builder {
-            None => dialog.clone(),
-            Some(builder) => builder(app, context, Some(&dialog)),
-        }),
-        barrier_dismissible,
-        barrier_color,
-        barrier_label,
-        false,
-        use_root_navigator,
-        route_settings,
-        None,
-        false,
-        None,
-        None,
-    )
+    let mut show = ShowDialog::new(Rc::new(move |app, context| match &builder {
+        None => dialog.clone(),
+        Some(builder) => builder(app, context, Some(&dialog)),
+    }))
+    .barrier_dismissible(barrier_dismissible)
+    .use_safe_area(false)
+    .use_root_navigator(use_root_navigator);
+    if let Some(barrier_color) = barrier_color {
+        show = show.barrier_color(barrier_color);
+    }
+    if let Some(barrier_label) = barrier_label {
+        show = show.barrier_label(barrier_label);
+    }
+    if let Some(route_settings) = route_settings {
+        show = show.route_settings(route_settings);
+    }
+    show.show(app, context)
 }
 
 /// Dart's `_formatRangeStartDate`.
