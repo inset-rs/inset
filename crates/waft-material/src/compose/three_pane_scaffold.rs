@@ -709,7 +709,7 @@ mod tests {
                 ThreePaneScaffold::list_detail(
                     expanded_directive(),
                     list_and_detail(),
-                    pane(1).margins(margins.clone()),
+                    pane(1).margins(margins),
                     pane(2).margins(margins),
                 ),
             );
