@@ -565,17 +565,16 @@ impl<T: Clone + PartialEq + Hash + Debug + 'static> State for AutocompleteOption
 mod tests {
     use std::cell::{Cell, RefCell};
 
-    use waft_embedder::{Color, KeyEventType, Size, TextAffinity, TextSelection};
+    use waft_embedder::{Color, Size, TextAffinity, TextSelection};
     use waft_rendering::testing::{CanvasMethod, PaintCall, assert_paints, count_calls};
-    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient};
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::testing::{
         WidgetTester, assert_f32_equals, assert_more_or_less_equals, expect, find, finds_nothing,
         finds_one_widget, test_widgets,
     };
     use waft_widgets::{
-        Align, AlignmentGeometry, AnyElement, Center, Column, EditableText, EditableTextState,
-        Expanded, FocusNode, Icon, ScrollView, SizedBox, StatefulBuilder, TextEditingController,
-        UnfocusDisposition,
+        Align, AlignmentGeometry, Center, Column, EditableText, Expanded, FocusNode, Icon,
+        ScrollView, SizedBox, StatefulBuilder, TextEditingController, UnfocusDisposition,
     };
 
     use super::*;
@@ -692,54 +691,6 @@ mod tests {
         tester.pump_widget(app);
     }
 
-    fn editable_state(tester: &WidgetTester) -> Handle<EditableTextState> {
-        let element: AnyElement = tester.element(find::descendant(
-            find::by_type::<TextFormField>(),
-            find::by_type::<EditableText>(),
-        ));
-        element
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state")
-    }
-
-    /// Dart's `tester.enterText(find.byType(TextFormField), text)`.
-    fn enter_text(tester: &mut WidgetTester, text: &str) {
-        let state = editable_state(tester);
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        let length = text.encode_utf16().count() as i32;
-        let value = TextEditingValue::new()
-            .text(text)
-            .selection(TextSelection::collapsed(length, TextAffinity::Downstream));
-        TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-    }
-
-    /// Dart's `tester.sendKeyDownEvent(key)` or `sendKeyUpEvent(key)`.
-    fn send_key_down_or_up(
-        tester: &mut WidgetTester,
-        physical: PhysicalKeyboardKey,
-        logical: LogicalKeyboardKey,
-        event_type: KeyEventType,
-    ) {
-        use waft_embedder::{KeyData, KeyEventDeviceType};
-        {
-            let mut app = tester.cell.borrow_mut();
-            waft_services::KeyEventManager::instance(&mut app).handle_key_data(
-                &mut app,
-                KeyData {
-                    time_stamp: Duration::ZERO,
-                    event_type,
-                    device_type: KeyEventDeviceType::Keyboard,
-                    physical: physical.usb_hid_usage,
-                    logical: logical.key_id,
-                    character: None,
-                    synthesized: false,
-                },
-            );
-            app.drain_microtasks();
-        }
-    }
-
     fn arrow_down(tester: &mut WidgetTester) {
         tester.send_key_event(
             PhysicalKeyboardKey::ARROW_DOWN,
@@ -753,18 +704,14 @@ mod tests {
         physical: PhysicalKeyboardKey,
         logical: LogicalKeyboardKey,
     ) {
-        send_key_down_or_up(
-            tester,
+        tester.send_key_down_event(
             PhysicalKeyboardKey::CONTROL_LEFT,
             LogicalKeyboardKey::CONTROL_LEFT,
-            KeyEventType::Down,
         );
         tester.send_key_event(physical, logical);
-        send_key_down_or_up(
-            tester,
+        tester.send_key_up_event(
             PhysicalKeyboardKey::CONTROL_LEFT,
             LogicalKeyboardKey::CONTROL_LEFT,
-            KeyEventType::Up,
         );
     }
 
@@ -868,7 +815,7 @@ mod tests {
             assert_eq!(semantic_child_count(tester), K_OPTIONS.len() as i32);
 
             // Enter text. The options are filtered by the text.
-            enter_text(tester, "ele");
+            tester.enter_text(find::by_type::<TextFormField>(), "ele");
             tester.pump();
             expect(
                 tester,
@@ -892,7 +839,7 @@ mod tests {
             assert_eq!(*last_selection.borrow(), "chameleon");
 
             // Modify the field text. The options appear again and are filtered.
-            enter_text(tester, "e");
+            tester.enter_text(find::by_type::<TextFormField>(), "e");
             tester.pump();
             expect(
                 tester,
@@ -926,7 +873,7 @@ mod tests {
             assert_eq!(semantic_child_count(tester), K_OPTIONS_USERS.len() as i32);
 
             // Enter text. The options are filtered by the text.
-            enter_text(tester, "example");
+            tester.enter_text(find::by_type::<TextFormField>(), "example");
             tester.pump();
             expect(
                 tester,
@@ -949,7 +896,7 @@ mod tests {
             assert_eq!(field_text(tester), "Alice, alice@example.com");
 
             // Modify the field text. The options appear again and are filtered.
-            enter_text(tester, "B");
+            tester.enter_text(find::by_type::<TextFormField>(), "B");
             tester.pump();
             expect(
                 tester,
@@ -1087,7 +1034,7 @@ mod tests {
             pump_in_scaffold(tester, string_autocomplete());
 
             tester.tap(find::by_type::<TextFormField>());
-            enter_text(tester, "");
+            tester.enter_text(find::by_type::<TextFormField>(), "");
             tester.pump();
             assert_f32_equals(options_height(tester), 200.0);
         });
@@ -1105,7 +1052,7 @@ mod tests {
             // Entering "a" returns 9 items from kOptions so basically the height of 9 options
             // would be beyond `desiredHeight=150`, so height gets restricted to desiredHeight.
             tester.tap(find::by_type::<TextFormField>());
-            enter_text(tester, "a");
+            tester.enter_text(find::by_type::<TextFormField>(), "a");
             tester.pump();
             assert_f32_equals(options_height(tester), DESIRED_HEIGHT);
         });
@@ -1120,7 +1067,7 @@ mod tests {
                 let controller = field_controller(tester);
                 tester.update(|app| controller.handle().clear(app));
                 tester.tap(find::by_type::<TextFormField>());
-                enter_text(tester, entered_text);
+                tester.enter_text(find::by_type::<TextFormField>(), entered_text);
                 tester.pump();
                 options_height(tester)
             }
@@ -1200,7 +1147,7 @@ mod tests {
             pump_in_highlight_scaffold(tester, string_autocomplete());
 
             tester.tap(find::by_type::<TextFormField>());
-            enter_text(tester, "el");
+            tester.enter_text(find::by_type::<TextFormField>(), "el");
             tester.pump();
             expect(tester, &find::by_type::<ListView>(), finds_one_widget());
             assert_eq!(semantic_child_count(tester), 2);
@@ -1225,7 +1172,7 @@ mod tests {
             pump_in_highlight_scaffold(tester, string_autocomplete());
 
             tester.tap(find::by_type::<TextFormField>());
-            enter_text(tester, "e");
+            tester.enter_text(find::by_type::<TextFormField>(), "e");
             tester.pump();
             expect(tester, &find::by_type::<ListView>(), finds_one_widget());
             assert_eq!(semantic_child_count(tester), 6);
@@ -1314,7 +1261,7 @@ mod tests {
             assert_eq!(raw_open_direction(tester), OptionsViewOpenDirection::Up);
 
             tester.tap(find::by_type::<RawAutocomplete<String>>());
-            enter_text(tester, "a");
+            tester.enter_text(find::by_type::<TextFormField>(), "a");
             tester.pump();
             expect(tester, &find::text("aa"), finds_one_widget());
             assert!(hit_testable(tester, find::text("aa")));
@@ -1639,15 +1586,8 @@ mod tests {
             );
 
             // Open the popup menu.
-            let state = tester.element(find::by_type::<EditableText>());
-            let state = state
-                .state_handle::<EditableTextState>(&tester.cell.borrow())
-                .expect("an EditableText state");
-            state.request_keyboard(&mut tester.cell.borrow_mut());
-            tester.pump();
-            TextInputClient::update_editing_value(
-                state,
-                &mut tester.cell.borrow_mut(),
+            tester.show_keyboard(find::by_type::<EditableText>());
+            tester.test_text_input().update_editing_value(
                 TextEditingValue::new()
                     .selection(TextSelection::collapsed(0, TextAffinity::Downstream)),
             );

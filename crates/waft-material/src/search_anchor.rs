@@ -3366,13 +3366,10 @@ mod tests {
     use waft_embedder::{FontWeight, TargetPlatform, TextAffinity, TextSelection};
     use waft_foundation::Completer;
     use waft_painting::{Border, BoxDecoration, StadiumBorder};
-    use waft_services::TextInputClient;
     use waft_widgets::testing::{
         WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
     };
-    use waft_widgets::{
-        Center, Container, EditableText, EditableTextState, FocusNode, Text, TextEditingController,
-    };
+    use waft_widgets::{Center, Container, EditableText, FocusNode, Text, TextEditingController};
 
     use super::*;
     use crate::icon_button::IconButton;
@@ -3390,44 +3387,6 @@ mod tests {
     fn pump_material_home(tester: &mut WidgetTester, theme: Option<ThemeData>, home: WidgetRef) {
         let theme = theme.unwrap_or_else(|| m3(tester));
         tester.pump_widget(material_app(theme, home));
-    }
-
-    /// The `EditableTextState` of the `index`th `EditableText` below `of`.
-    fn editable_state_in(
-        tester: &WidgetTester,
-        of: waft_widgets::testing::Finder,
-    ) -> Handle<EditableTextState> {
-        let element = tester.element(find::descendant(of, find::by_type::<EditableText>()).first());
-        element
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state")
-    }
-
-    /// Dart's `tester.enterText(find.byType(SearchBar), text)`.
-    fn enter_text_in_search_bar(tester: &mut WidgetTester, text: &str) {
-        enter_text_in(tester, find::by_type::<SearchBar>(), text);
-    }
-
-    fn enter_text_in(tester: &mut WidgetTester, of: waft_widgets::testing::Finder, text: &str) {
-        let state = editable_state_in(tester, of);
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        let length = text.encode_utf16().count() as i32;
-        let value = TextEditingValue::new()
-            .text(text)
-            .selection(TextSelection::collapsed(length, TextAffinity::Downstream));
-        TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-        tester.cell.checkpoint();
-    }
-
-    fn receive_action(
-        tester: &mut WidgetTester,
-        of: waft_widgets::testing::Finder,
-        action: TextInputAction,
-    ) {
-        let state = editable_state_in(tester, of);
-        TextInputClient::perform_action(state, &mut tester.cell.borrow_mut(), action);
-        tester.cell.checkpoint();
     }
 
     fn search_bar_material(tester: &WidgetTester) -> Material {
@@ -3465,7 +3424,7 @@ mod tests {
         assert_eq!(hint_style.font_weight, Some(FontWeight::W400));
 
         let input = "entered text";
-        enter_text_in_search_bar(tester, input);
+        tester.enter_text(find::by_type::<SearchBar>(), input);
         let input_style =
             tester.widget(find::text(input), |text: &EditableText| text.style.clone());
         assert_eq!(
@@ -3519,7 +3478,7 @@ mod tests {
             expect(tester, &find::text(default_text), finds_one_widget());
 
             let updated_text = "updated text";
-            enter_text_in_search_bar(tester, updated_text);
+            tester.enter_text(find::by_type::<SearchBar>(), updated_text);
             assert_eq!(
                 controller.handle().text_value(&tester.cell.borrow()),
                 updated_text
@@ -3686,9 +3645,9 @@ mod tests {
                     .into_widget(),
             );
             assert_eq!(change_count.get(), 0);
-            enter_text_in_search_bar(tester, "a");
+            tester.enter_text(find::by_type::<SearchBar>(), "a");
             assert_eq!(change_count.get(), 1);
-            enter_text_in_search_bar(tester, "b");
+            tester.enter_text(find::by_type::<SearchBar>(), "b");
             assert_eq!(change_count.get(), 2);
         });
     }
@@ -3708,8 +3667,10 @@ mod tests {
                     }))
                     .into_widget(),
             );
-            enter_text_in_search_bar(tester, "query");
-            receive_action(tester, find::by_type::<SearchBar>(), TextInputAction::Done);
+            tester.enter_text(find::by_type::<SearchBar>(), "query");
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             assert_eq!(*submitted_query.borrow(), "query");
         });
     }
@@ -3812,7 +3773,7 @@ mod tests {
             assert_eq!(hint_style.font_weight, Some(FontWeight::W400));
 
             let input = "entered text";
-            enter_text_in_search_bar(tester, input);
+            tester.enter_text(find::by_type::<SearchBar>(), input);
             let input_style =
                 tester.widget(find::text(input), |text: &EditableText| text.style.clone());
             assert_eq!(
@@ -3932,7 +3893,7 @@ mod tests {
             expect(tester, &find::text(default_text), finds_one_widget());
 
             let updated_text = "updated text";
-            enter_text_in_search_bar(tester, updated_text);
+            tester.enter_text(find::by_type::<SearchBar>(), updated_text);
             assert_eq!(
                 controller.handle().text_value(&tester.cell.borrow()),
                 updated_text
@@ -4181,7 +4142,7 @@ mod tests {
             expect(tester, &list_tile2(), finds_nothing());
             expect(tester, &list_tile3(), finds_nothing());
 
-            enter_text_in_search_bar(tester, "f");
+            tester.enter_text(find::by_type::<SearchBar>(), "f");
             tester.pump_and_settle();
             expect(tester, &text_widget(), finds_nothing());
             expect(tester, &list_tile1(), finds_one_widget());
@@ -4284,9 +4245,9 @@ mod tests {
 
             let text_field =
                 || find::descendant(find::by_type::<SearchBar>(), find::by_type::<TextField>());
-            enter_text_in(tester, text_field(), "a");
+            tester.enter_text(text_field(), "a");
             tester.pump();
-            enter_text_in(tester, text_field(), "ab");
+            tester.enter_text(text_field(), "ab");
             tester.pump();
 
             let complete = |tester: &mut WidgetTester, query: &str, text: &str| {
@@ -5059,12 +5020,14 @@ mod tests {
             tester.pump_and_settle();
             assert!(controller.handle().is_open(&tester.cell.borrow()));
 
-            enter_text_in(tester, text_field_in_view(), "a");
+            tester.enter_text(text_field_in_view(), "a");
             assert_eq!(changed.get(), 1);
-            enter_text_in(tester, text_field_in_view(), "abc");
+            tester.enter_text(text_field_in_view(), "abc");
             assert_eq!(changed.get(), 2);
 
-            receive_action(tester, text_field_in_view(), TextInputAction::Done);
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             assert_eq!(submitted.get(), 1);
             assert!(!controller.handle().is_open(&tester.cell.borrow()));
         });
@@ -5106,12 +5069,14 @@ mod tests {
             tester.pump_and_settle();
             assert!(controller.handle().is_open(&tester.cell.borrow()));
 
-            enter_text_in(tester, text_field_in_view(), "a");
+            tester.enter_text(text_field_in_view(), "a");
             assert_eq!(changed.get(), 1);
-            enter_text_in(tester, text_field_in_view(), "abc");
+            tester.enter_text(text_field_in_view(), "abc");
             assert_eq!(changed.get(), 2);
 
-            receive_action(tester, text_field_in_view(), TextInputAction::Done);
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             assert_eq!(submitted.get(), 1);
             assert!(!controller.handle().is_open(&tester.cell.borrow()));
         });
@@ -5145,7 +5110,9 @@ mod tests {
             let view_node = text_field_focus_node(tester, text_field_in_view());
             assert!(view_node.handle().has_focus(&mut tester.cell.borrow_mut()));
 
-            receive_action(tester, text_field_in_view(), TextInputAction::Done);
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             tester.pump_and_settle();
             assert_eq!(submitted.get(), 1);
             assert!(!controller.handle().is_open(&tester.cell.borrow()));
@@ -5199,7 +5166,7 @@ mod tests {
             constraints.min_height = 35.0;
             constraints.max_height = 35.0;
             pump_centered_bar(tester, SearchBar::new().constraints(constraints));
-            enter_text_in(tester, find::by_type::<TextField>(), "input text");
+            tester.enter_text(find::by_type::<TextField>(), "input text");
             let text_center_y = tester.get_center(find::text("input text")).dy();
             let search_bar_center_y = tester.get_center(find::by_type::<SearchBar>()).dy();
             assert_eq!(text_center_y, search_bar_center_y);
@@ -5342,7 +5309,7 @@ mod tests {
         test_widgets(|tester| {
             open_view_of(tester, view_anchor());
             // Default is an icon button with a close icon when the input is not empty.
-            enter_text_in(tester, find::by_type::<TextField>(), "a");
+            tester.enter_text(find::by_type::<TextField>(), "a");
             tester.pump();
             expect(
                 tester,
@@ -5463,7 +5430,7 @@ mod tests {
                 view_anchor()
                     .header_text_style(body_large.copy_with().color(Colors::RED.primary())),
             );
-            enter_text_in(tester, find::by_type::<SearchBar>(), "input text");
+            tester.enter_text(find::by_type::<SearchBar>(), "input text");
             tester.pump_and_settle();
             let style = tester.widget(find::text("input text"), |text: &EditableText| {
                 text.style.clone()
@@ -5565,7 +5532,7 @@ mod tests {
                 Rect::from_ltrb(0.0, 0.0, 800.0, 56.0)
             );
 
-            enter_text_in(tester, find::by_type::<SearchBar>(), "a");
+            tester.enter_text(find::by_type::<SearchBar>(), "a");
             tester.pump_and_settle();
             expect(tester, &divider, finds_one_widget());
             assert_eq!(
@@ -6087,7 +6054,7 @@ mod tests {
                 .map(|color| color.color());
             assert_eq!(hint_color, Some(color_scheme.on_surface_variant()));
             let input = "entered text";
-            enter_text_in_search_bar(tester, input);
+            tester.enter_text(find::by_type::<SearchBar>(), input);
             let input_color = tester
                 .widget(find::text(input), |text: &EditableText| text.style.clone())
                 .color
@@ -6255,11 +6222,11 @@ mod tests {
             let close = find::widget_with_icon::<IconButton>(&Icons::close());
             expect(tester, &close, finds_nothing());
 
-            enter_text_in(tester, find_text_field(), "a");
+            tester.enter_text(find_text_field(), "a");
             tester.pump();
             expect(tester, &close, finds_one_widget());
 
-            enter_text_in(tester, find_text_field(), "");
+            tester.enter_text(find_text_field(), "");
             tester.pump();
             expect(tester, &close, finds_nothing());
         });
@@ -6404,7 +6371,7 @@ mod tests {
                     )
                     .into_widget(),
             );
-            enter_text_in_search_bar(tester, "abcdefghi");
+            tester.enter_text(find::by_type::<SearchBar>(), "abcdefghi");
             assert_eq!(
                 controller.handle().text_value(&tester.cell.borrow()),
                 "init"
@@ -6417,12 +6384,6 @@ mod tests {
             bottom: 500.0,
             ..waft_embedder::ViewPadding::ZERO
         });
-    }
-
-    fn show_keyboard(tester: &mut WidgetTester, finder: waft_widgets::testing::Finder) {
-        let state = editable_state_in(tester, finder);
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
     }
 
     // 'suggestionsBuilder is not called when the search value does not change'.
@@ -6453,13 +6414,15 @@ mod tests {
 
             // Simulate the keyboard opening resizing the view.
             set_keyboard_insets(tester);
-            show_keyboard(tester, find::by_type::<TextField>());
+            tester.show_keyboard(find::by_type::<TextField>());
             tester.pump_and_settle();
             assert_eq!(called.get(), 2);
 
             // Remove the view insets, as if the keyboard were hidden, and hide the keyboard.
             tester.view().reset_view_insets();
-            receive_action(tester, find::by_type::<TextField>(), TextInputAction::Done);
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             tester.pump_and_settle();
             assert_eq!(called.get(), 2);
         });
@@ -6514,7 +6477,7 @@ mod tests {
 
             // Simulate the keyboard opening resizing the view, and show the keyboard.
             set_keyboard_insets(tester);
-            show_keyboard(tester, find::by_type::<TextField>());
+            tester.show_keyboard(find::by_type::<TextField>());
             tester.pump_and_settle_by(api_call_duration);
             expect(tester, &find::text("Item - 1"), finds_one_widget());
         });

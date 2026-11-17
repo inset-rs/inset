@@ -1770,15 +1770,12 @@ mod tests {
     use std::cell::{Cell, RefCell, RefMut};
     use std::time::Duration;
 
-    use waft_embedder::{
-        Clip, Color, KeyData, KeyEventDeviceType, KeyEventType, Matrix4, PointerDeviceKind,
-        TextDirection,
-    };
+    use waft_embedder::{Clip, Color, Matrix4, PointerDeviceKind, TextDirection};
     use waft_foundation::{ChangeNotifier, Timer, UniqueKey, ValueNotifier};
     use waft_gestures::{GestureBinding, PointerEvent, PointerScrollEvent};
     use waft_painting::{AlignmentGeometry, Axis, BoxDecoration, EdgeInsetsGeometry};
     use waft_rendering::{AnyRenderObject, BoxConstraints, MainAxisSize, RenderHandle};
-    use waft_services::{KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey};
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
 
     use super::*;
     use crate::framework::StatelessWidget;
@@ -1852,29 +1849,6 @@ mod tests {
         /// Dart's `MediaQueryData.fromView(tester.view)`.
         fn media_query_data(&self) -> MediaQueryData {
             MediaQueryData::from_view(&self.tester.cell.borrow(), &**self.view(), None)
-        }
-
-        /// `tester.sendKeyDownEvent(key)` and `sendKeyUpEvent(key)`.
-        fn send_key(
-            &self,
-            event_type: KeyEventType,
-            physical: PhysicalKeyboardKey,
-            logical: LogicalKeyboardKey,
-        ) {
-            let mut app = self.app();
-            KeyEventManager::instance(&mut app).handle_key_data(
-                &mut app,
-                KeyData {
-                    time_stamp: Duration::ZERO,
-                    event_type,
-                    device_type: KeyEventDeviceType::Keyboard,
-                    physical: physical.usb_hid_usage,
-                    logical: logical.key_id,
-                    character: None,
-                    synthesized: false,
-                },
-            );
-            app.drain_microtasks();
         }
 
         /// The debug label of the primary focus: Dart's `focusedMenu`.
@@ -5174,14 +5148,12 @@ mod tests {
     /// Shift-Tab, as Dart's `sendKeyDownEvent(shift)`, `sendKeyEvent(tab)` and
     /// `sendKeyUpEvent(shift)`.
     fn send_shift_tab(tester: &mut Tester) {
-        tester.send_key(
-            KeyEventType::Down,
+        tester.send_key_down_event(
             PhysicalKeyboardKey::SHIFT_LEFT,
             LogicalKeyboardKey::SHIFT_LEFT,
         );
         tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
-        tester.send_key(
-            KeyEventType::Up,
+        tester.send_key_up_event(
             PhysicalKeyboardKey::SHIFT_LEFT,
             LogicalKeyboardKey::SHIFT_LEFT,
         );

@@ -3044,21 +3044,6 @@ pub(crate) mod tests {
             .expect("an EditableText state")
     }
 
-    /// Dart's `tester.enterText(find.byType(TextField).first, text)`: the keyboard is shown,
-    /// then the platform sends the text with the caret at its end.
-    fn enter_text(tester: &mut WidgetTester, text: &str) {
-        let state = editable_state(tester);
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        pump(tester);
-        let state = editable_state(tester);
-        TextInputClient::update_editing_value(
-            state,
-            &mut tester.cell.borrow_mut(),
-            text_editing_value_of(text),
-        );
-        tester.cell.checkpoint();
-    }
-
     fn text_field<R>(tester: &WidgetTester, read: impl FnOnce(&TextField) -> R) -> R {
         tester.widget::<TextField, R>(first::<TextField>(tester), read)
     }
@@ -4528,7 +4513,7 @@ pub(crate) mod tests {
         tap_dropdown_menu::<TestMenu>(tester);
         pump(tester);
 
-        enter_text(tester, "example");
+        tester.enter_text(find::by_type::<TextField>().first(), "example");
         pump(tester);
         assert_eq!(controller_text(tester, controller), "example");
         assert_eq!(controller_selection(tester, controller), collapsed(7));
@@ -4685,9 +4670,9 @@ pub(crate) mod tests {
             // Open the menu.
             tap_dropdown_menu::<TestMenu>(tester);
             pump(tester);
-            enter_text(tester, "Me");
+            tester.enter_text(find::by_type::<TextField>().first(), "Me");
             pump(tester);
-            enter_text(tester, "Meu");
+            tester.enter_text(find::by_type::<TextField>().first(), "Meu");
             pump(tester);
         });
     }
@@ -4705,11 +4690,11 @@ pub(crate) mod tests {
             ));
             tap_dropdown_menu::<TestMenu>(tester);
             pump(tester);
-            enter_text(tester, "No match");
+            tester.enter_text(find::by_type::<TextField>().first(), "No match");
             pump(tester);
             send_key(tester, LogicalKeyboardKey::ARROW_DOWN);
             pump(tester);
-            enter_text(tester, "No match 2");
+            tester.enter_text(find::by_type::<TextField>().first(), "No match 2");
             pump(tester);
         });
     }
@@ -4740,7 +4725,7 @@ pub(crate) mod tests {
             pump(tester);
 
             // Filter the entries to only show the ones with 'Good Match'.
-            enter_text(tester, "Good Match");
+            tester.enter_text(find::by_type::<TextField>().first(), "Good Match");
             pump(tester);
 
             // Since the first entry is already highlighted, navigate to the second item, the
@@ -4768,12 +4753,12 @@ pub(crate) mod tests {
             tap_dropdown_menu::<TestMenu>(tester);
             pump(tester);
             // Highlight the third item by exact search.
-            enter_text(tester, item_label);
+            tester.enter_text(find::by_type::<TextField>().first(), item_label);
             pump(tester);
             assert!(is_item_highlighted(tester, &theme, item_label));
 
             // Search something that matches multiple items.
-            enter_text(tester, "Item");
+            tester.enter_text(find::by_type::<TextField>().first(), "Item");
             pump(tester);
             // The third item should still be highlighted.
             assert!(is_item_highlighted(tester, &theme, item_label));
@@ -4832,13 +4817,6 @@ pub(crate) mod tests {
         })
     }
 
-    /// Dart's `testTextInput.receiveAction(action)`.
-    fn receive_action(tester: &mut WidgetTester, action: TextInputAction) {
-        let state = editable_state(tester);
-        TextInputClient::perform_action(state, &mut tester.cell.borrow_mut(), action);
-        tester.cell.checkpoint();
-    }
-
     fn tap_item(tester: &mut WidgetTester, label: &str) {
         let item = find_menu_item_button(tester, label);
         tap(tester, item);
@@ -4883,7 +4861,7 @@ pub(crate) mod tests {
             pump(tester);
             // Search for the last item.
             let searched_label = entries.last().expect("entries").label.clone();
-            enter_text(tester, &searched_label);
+            tester.enter_text(find::by_type::<TextField>().first(), &searched_label);
             pump(tester);
             // The corresponding menu entry is highlighted.
             assert!(is_item_highlighted(tester, &theme, &searched_label));
@@ -5006,7 +4984,7 @@ pub(crate) mod tests {
             // Open the menu
             tap_dropdown_menu::<TestMenu>(tester);
             pump(tester);
-            enter_text(tester, "Menu 1");
+            tester.enter_text(find::by_type::<TextField>().first(), "Menu 1");
             tester.pump_and_settle();
             assert!(is_item_highlighted(tester, &theme, "Menu 1"));
 
@@ -5034,7 +5012,7 @@ pub(crate) mod tests {
             tap_dropdown_menu::<TestMenu>(tester);
             pump(tester);
 
-            enter_text(tester, "Menu 1");
+            tester.enter_text(find::by_type::<TextField>().first(), "Menu 1");
             tester.pump_and_settle();
             for menu in TestMenu::VALUES {
                 // One is layout for the _DropdownMenuBody, the other one is the real button item in the menu.
@@ -5063,7 +5041,7 @@ pub(crate) mod tests {
             tap_dropdown_menu::<TestMenu>(tester);
             pump(tester);
 
-            enter_text(tester, "Menu 1");
+            tester.enter_text(find::by_type::<TextField>().first(), "Menu 1");
             tester.pump_and_settle();
             for menu in TestMenu::VALUES {
                 // 'Menu 1' should be 2, other items should only find one.
@@ -5096,7 +5074,7 @@ pub(crate) mod tests {
             tap_dropdown_menu::<TestMenu>(tester);
             pump(tester);
 
-            enter_text(tester, "item");
+            tester.enter_text(find::by_type::<TextField>().first(), "item");
             assert_eq!(controller_text(tester, controller.handle()), "item");
             tester.pump_and_settle();
             for menu in TestMenu::VALUES {
@@ -5104,7 +5082,7 @@ pub(crate) mod tests {
                 assert!(!hit_testable(tester, button), "{menu:?}");
             }
 
-            enter_text(tester, "Item");
+            tester.enter_text(find::by_type::<TextField>().first(), "Item");
             assert_eq!(controller_text(tester, controller.handle()), "Item");
             tester.pump_and_settle();
             for (label, shown) in [
@@ -5154,7 +5132,7 @@ pub(crate) mod tests {
 
             assert_eq!(controller_text(tester, controller.handle()), "Item 3");
 
-            enter_text(tester, "New Item");
+            tester.enter_text(find::by_type::<TextField>().first(), "New Item");
             assert_eq!(controller_text(tester, controller.handle()), "New Item");
         });
     }
@@ -5187,7 +5165,9 @@ pub(crate) mod tests {
             assert!(menu_controller_is_open(tester));
 
             // Simulate `TextInputAction.done` on textfield
-            receive_action(tester, TextInputAction::Done);
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             tester.pump_and_settle();
             assert!(!menu_controller_is_open(tester));
         });
@@ -5230,7 +5210,9 @@ pub(crate) mod tests {
                 if is_mobile {
                     send_key(tester, LogicalKeyboardKey::ENTER);
                 } else {
-                    receive_action(tester, TextInputAction::Done);
+                    tester
+                        .test_text_input()
+                        .receive_action(TextInputAction::Done);
                 }
                 tester.pump_and_settle();
                 assert_eq!(selection_count.get(), expected_count, "{platform:?}");
@@ -5262,11 +5244,11 @@ pub(crate) mod tests {
                 // On desktop platforms, when typing something in the text field without selecting any of the options,
                 // the onSelected should not be called.
                 if !is_mobile {
-                    enter_text(tester, "New Item");
+                    tester.enter_text(find::by_type::<TextField>().first(), "New Item");
                     assert_eq!(controller_text(tester, controller.handle()), "New Item");
                     assert_eq!(selection_count.get(), expected_count, "{platform:?}");
                     assert!(text_field_shows(tester, "New Item"));
-                    enter_text(tester, "");
+                    tester.enter_text(find::by_type::<TextField>().first(), "");
                     assert_eq!(selection_count.get(), expected_count, "{platform:?}");
                     assert!(controller_text(tester, controller.handle()).is_empty());
                 }
@@ -5663,7 +5645,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             assert!(!text_is_hit_testable(tester, "Item 5"));
-            enter_text(tester, "5");
+            tester.enter_text(find::by_type::<TextField>().first(), "5");
             tester.pump_and_settle();
             // Item 5 should show up.
             assert!(text_is_hit_testable(tester, "Item 5"));
@@ -5794,7 +5776,7 @@ pub(crate) mod tests {
             tap_dropdown_menu::<i32>(tester);
             tester.pump_and_settle();
 
-            enter_text(tester, "read");
+            tester.enter_text(find::by_type::<TextField>().first(), "read");
             pump(tester);
             // Because "Unread" contains "read".
             check_expected_highlight(tester, Some("Unread"), &["All", "Read"]);
@@ -5804,7 +5786,7 @@ pub(crate) mod tests {
                 Some(0)
             }))));
             pump(tester);
-            enter_text(tester, "read");
+            tester.enter_text(find::by_type::<TextField>().first(), "read");
             pump(tester);
             // Because the search result should always be index 0.
             check_expected_highlight(tester, Some("All"), &["Unread", "Read"]);
@@ -5820,11 +5802,11 @@ pub(crate) mod tests {
             ))));
             pump(tester);
 
-            enter_text(tester, "read");
+            tester.enter_text(find::by_type::<TextField>().first(), "read");
             pump(tester);
             // Because it's case sensitive.
             check_expected_highlight(tester, None, &["All", "Unread", "Read"]);
-            enter_text(tester, "Read");
+            tester.enter_text(find::by_type::<TextField>().first(), "Read");
             pump(tester);
             check_expected_highlight(tester, Some("Read"), &["All", "Unread"]);
         });
@@ -6298,7 +6280,7 @@ pub(crate) mod tests {
             assert_every_item_is_shown_twice(tester);
 
             // Text input would enable the filter.
-            enter_text(tester, "Menu 1");
+            tester.enter_text(find::by_type::<TextField>().first(), "Menu 1");
             tester.pump_and_settle();
             for menu in TestMenu::VALUES {
                 // 'Menu 1' should be 2, other items should only find one.
@@ -7555,7 +7537,10 @@ pub(crate) mod tests {
             pump(tester);
 
             // Filter the entries to only show 'Menu 1'.
-            enter_text(tester, TestMenu::MainMenu1.label());
+            tester.enter_text(
+                find::by_type::<TextField>().first(),
+                TestMenu::MainMenu1.label(),
+            );
             pump(tester);
 
             // Select the 'Menu 1' item.
@@ -7665,7 +7650,7 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
                 assert!(has_focus(tester, text_field_focus_node.handle()));
 
-                receive_action(tester, text_input_action);
+                tester.test_text_input().receive_action(text_input_action);
                 tester.pump_and_settle();
 
                 assert_eq!(

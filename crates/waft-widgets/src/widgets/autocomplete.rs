@@ -1381,44 +1381,29 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{Color, Offset, Size, TextDirection, TextInputAction, View, ViewPadding};
-    use waft_foundation::{Completer, Timer};
-    use waft_painting::{EdgeInsetsGeometry, TextStyle};
-    use waft_services::{PhysicalKeyboardKey, TextInputClient};
+    use waft_embedder::{Offset, Size, TextDirection, TextInputAction, View, ViewPadding};
+    use waft_foundation::Completer;
+    use waft_painting::EdgeInsetsGeometry;
+    use waft_services::PhysicalKeyboardKey;
 
     use super::*;
-    use crate::PageRouteRef;
+    use crate::framework::IntoWidget;
     use crate::framework::StatelessWidget;
-    use crate::framework::{AnyElement, IntoWidget};
     use crate::testing::{
-        Finder, WidgetTester, assert_more_or_less_equals, assert_more_or_less_equals_within,
-        expect, find, finds_n_widgets, finds_nothing, finds_one_widget, finds_widgets,
-        test_widgets,
+        Finder, TestTextField, TestWidgetsApp, WidgetTester, assert_more_or_less_equals,
+        assert_more_or_less_equals_within, delayed, expect, find, finds_n_widgets, finds_nothing,
+        finds_one_widget, finds_widgets, test_widgets,
     };
-    use crate::widgets::app::WidgetsApp;
-    use crate::widgets::basic::Semantics;
-    use crate::widgets::basic::WidgetBuilder;
     use crate::widgets::basic::{
         Center, Column, Directionality, Expanded, Padding, Row, StatefulBuilder,
     };
     use crate::widgets::container::Container;
-    use crate::widgets::editable_text::{EditableText, EditableTextState};
     use crate::widgets::focus_manager::{AnyFocusNode, UnfocusDisposition};
     use crate::widgets::focus_scope::Focus;
     use crate::widgets::gesture_detector::GestureDetector;
-    use crate::widgets::navigator::RouteSettings;
-    use crate::widgets::navigator::RouteSettingsRef;
-    use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::placeholder::Placeholder;
-    use crate::widgets::routes::RoutePageBuilder;
     use crate::widgets::scroll_view::ListView;
     use crate::widgets::text::Text;
-    use crate::widgets::text_selection::{
-        ClipboardStatusNotifier, TextSelectionControls, TextSelectionGestureDetectorBuilder,
-        TextSelectionGestureDetectorBuilderData, TextSelectionGestureDetectorBuilderDelegate,
-        TextSelectionHandleType,
-    };
-    use waft_rendering::HitTestBehavior;
 
     // Matches the Material kMinInteractiveDimension (48.0).
     const K_MIN_INTERACTIVE_DIMENSION: f64 = 48.0;
@@ -1488,257 +1473,6 @@ mod tests {
     /// The `optionsBuilder` most cases share: the options containing the field's text.
     fn string_options(_app: &mut App, value: TextEditingValue) -> Task<Vec<String>> {
         Task::ready(matching(&value.text))
-    }
-
-    /// The `pageRouteBuilder` flutter_test's `TestWidgetsApp` hands to [`WidgetsApp`]: a page
-    /// with no transition.
-    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> PageRouteRef {
-        let page_builder: RoutePageBuilder =
-            Rc::new(move |app, context, _animation, _secondary| builder(app, context));
-        PageRouteBuilder::new(app, page_builder)
-            .settings(app, RouteSettingsRef::Settings(settings.clone()))
-            .into_erased()
-    }
-
-    /// flutter_test's `TestWidgetsApp(home: home)`.
-    fn test_widgets_app<K>(home: impl IntoWidget<K>) -> WidgetRef {
-        WidgetsApp::new(Color::new(0xFFFFFFFF))
-            .page_route_builder(page_route)
-            .home(home)
-            .into_widget()
-    }
-
-    /// Dart's `TestTextField` (`editable_text_tester.dart`): an [`EditableText`] under a
-    /// selection gesture detector, with its required members filled, owning a controller and a
-    /// focus node unless given them.
-    #[derive(Default)]
-    struct TestTextField {
-        key: Option<KeyRef>,
-        controller: Option<TextEditingControllerRef>,
-        focus_node: Option<FocusNodeRef>,
-        on_submitted: Option<SubmittedCallback>,
-    }
-
-    /// `TestTextField.onSubmitted`'s type.
-    type SubmittedCallback = Rc<dyn Fn(&mut App, String)>;
-
-    impl TestTextField {
-        fn new() -> TestTextField {
-            TestTextField::default()
-        }
-
-        fn key(mut self, key: &GlobalKey) -> TestTextField {
-            self.key = Some(key.clone().into());
-            self
-        }
-
-        fn controller(mut self, controller: TextEditingControllerRef) -> TestTextField {
-            self.controller = Some(controller);
-            self
-        }
-
-        fn focus_node(mut self, focus_node: FocusNodeRef) -> TestTextField {
-            self.focus_node = Some(focus_node);
-            self
-        }
-
-        fn on_submitted(
-            mut self,
-            on_submitted: impl Fn(&mut App, String) + 'static,
-        ) -> TestTextField {
-            self.on_submitted = Some(Rc::new(on_submitted));
-            self
-        }
-    }
-
-    impl Debug for TestTextField {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("TestTextField").finish_non_exhaustive()
-        }
-    }
-
-    impl StatefulWidget for TestTextField {
-        type State = TestTextFieldState;
-
-        fn key(&self) -> Option<&KeyRef> {
-            self.key.as_ref()
-        }
-
-        fn create_state(&self) -> TestTextFieldState {
-            TestTextFieldState {
-                state: StateData::new(),
-                controller: None,
-                focus_node: None,
-                editable_text_key: GlobalKey::new(),
-                selection_gesture_detector_builder: None,
-            }
-        }
-    }
-
-    struct TestTextFieldState {
-        state: StateData<TestTextField>,
-        controller: Option<Ref<TextEditingController>>,
-        focus_node: Option<Ref<FocusNode>>,
-        editable_text_key: GlobalKey,
-        selection_gesture_detector_builder:
-            Option<Ref<TestTextFieldSelectionGestureDetectorBuilder>>,
-    }
-
-    impl TestTextFieldState {
-        fn effective_controller(self: Handle<Self>, app: &mut App) -> TextEditingControllerRef {
-            if let Some(controller) = &self.widget(app).controller {
-                return controller.clone();
-            }
-            if app.get(self).controller.is_none() {
-                let controller = TextEditingController::new(app);
-                app.get_mut(self).controller = Some(controller);
-            }
-            app.get(self)
-                .controller
-                .as_ref()
-                .expect("made above")
-                .erase()
-        }
-
-        fn effective_focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
-            if let Some(focus_node) = &self.widget(app).focus_node {
-                return focus_node.clone();
-            }
-            if app.get(self).focus_node.is_none() {
-                let focus_node = FocusNode::new(app);
-                app.get_mut(self).focus_node = Some(focus_node);
-            }
-            app.get(self)
-                .focus_node
-                .as_ref()
-                .expect("made above")
-                .erase()
-        }
-    }
-
-    impl TextSelectionGestureDetectorBuilderDelegate for TestTextFieldState {
-        fn editable_text_key(self: Handle<Self>, app: &App) -> GlobalKey {
-            app.get(self).editable_text_key.clone()
-        }
-
-        fn force_press_enabled(self: Handle<Self>, _app: &App) -> bool {
-            false
-        }
-
-        fn selection_enabled(self: Handle<Self>, _app: &App) -> bool {
-            true
-        }
-    }
-
-    impl State for TestTextFieldState {
-        type Widget = TestTextField;
-        crate::state_accessors!();
-
-        fn init_state(self: Handle<Self>, app: &mut App) {
-            let builder = app.create(TestTextFieldSelectionGestureDetectorBuilder {
-                builder: TextSelectionGestureDetectorBuilderData::new(
-                    self.as_text_selection_gesture_detector_builder_delegate(),
-                ),
-            });
-            app.get_mut(self).selection_gesture_detector_builder = Some(builder);
-        }
-
-        fn dispose(self: Handle<Self>, app: &mut App) {
-            if let Some(focus_node) = app.get(self).focus_node.clone() {
-                focus_node.dispose(app);
-            }
-            if let Some(controller) = app.get(self).controller.clone() {
-                controller.dispose(app);
-            }
-        }
-
-        fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-            const RED: Color = Color::new(0xFFF44336);
-            let controller = self.effective_controller(app);
-            let focus_node = self.effective_focus_node(app);
-            let mut field =
-                EditableText::new(controller, focus_node.clone(), TextStyle::new(), RED, RED)
-                    .key(app.get(self).editable_text_key.clone().into())
-                    .renderer_ignores_pointer(true)
-                    .selection_controls(Rc::new(TestTextSelectionHandleControls));
-            if let Some(on_submitted) = self.widget(app).on_submitted.clone() {
-                field = field.on_submitted(move |app, value| on_submitted(app, value));
-            }
-            let builder = app
-                .get(self)
-                .selection_gesture_detector_builder
-                .as_ref()
-                .expect("made in init_state")
-                .handle();
-            let gestured = TextSelectionGestureDetectorBuilder::build_gesture_detector(
-                builder,
-                app,
-                None,
-                Some(HitTestBehavior::Translucent),
-                field.into_widget(),
-            );
-            Semantics::new()
-                .enabled(true)
-                .on_tap(Rc::new(move |app: &mut App| {
-                    focus_node.handle().request_focus(app, None)
-                }))
-                .child(gestured)
-                .into_widget()
-        }
-    }
-
-    /// Dart's `_TestTextFieldSelectionGestureDetectorBuilder`: the base builder, with no
-    /// `onTap` of its own.
-    struct TestTextFieldSelectionGestureDetectorBuilder {
-        builder: TextSelectionGestureDetectorBuilderData,
-    }
-
-    impl TextSelectionGestureDetectorBuilder for TestTextFieldSelectionGestureDetectorBuilder {
-        crate::text_selection_gesture_detector_builder_accessors!(builder);
-    }
-
-    /// Dart's `TestTextSelectionHandleControls`: handles that take no room.
-    struct TestTextSelectionHandleControls;
-
-    #[allow(deprecated)]
-    impl TextSelectionControls for TestTextSelectionHandleControls {
-        fn build_handle(
-            &self,
-            _app: &mut App,
-            _context: BuildContext,
-            _handle_type: TextSelectionHandleType,
-            _text_line_height: f64,
-            _on_tap: Option<Listener>,
-        ) -> WidgetRef {
-            SizedBox::shrink().into_widget()
-        }
-
-        fn get_handle_anchor(
-            &self,
-            _handle_type: TextSelectionHandleType,
-            _text_line_height: f64,
-        ) -> Offset {
-            Offset::ZERO
-        }
-
-        fn build_toolbar(
-            &self,
-            _app: &mut App,
-            _context: BuildContext,
-            _global_editable_region: waft_embedder::Rect,
-            _text_line_height: f64,
-            _selection_midpoint: Offset,
-            _endpoints: &[waft_rendering::TextSelectionPoint],
-            _delegate: waft_services::AnyTextSelectionDelegate,
-            _clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
-            _last_secondary_tap_down_position: Option<Offset>,
-        ) -> WidgetRef {
-            SizedBox::shrink().into_widget()
-        }
-
-        fn get_handle_size(&self, _text_line_height: f64) -> Size {
-            Size::ZERO
-        }
     }
 
     /// Dart's `_OptionTile`: a tappable box at least [`K_MIN_INTERACTIVE_DIMENSION`] tall.
@@ -1891,64 +1625,6 @@ mod tests {
             .selection(TextSelection::collapsed(offset, TextAffinity::Downstream))
     }
 
-    fn editable_text_state(tester: &WidgetTester, field: Finder) -> Handle<EditableTextState> {
-        let element: AnyElement = tester.element(find::descendant_or_self(
-            field,
-            find::by_type::<EditableText>(),
-        ));
-        element
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state")
-    }
-
-    /// Dart's `tester.showKeyboard(finder)`.
-    fn show_keyboard(tester: &mut WidgetTester, field: Finder) {
-        let state = editable_text_state(tester, field);
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-    }
-
-    /// Dart's `tester.enterText(finder, text)`: the keyboard is shown, then the platform sends
-    /// `text` with the caret at its end.
-    fn enter_text(tester: &mut WidgetTester, field: Finder, text: &str) {
-        show_keyboard(tester, field.clone());
-        let state = editable_text_state(tester, field);
-        let value = value_at(text, text.encode_utf16().count() as i32);
-        TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-    }
-
-    /// Dart's `tester.testTextInput.receiveAction(action)` on the field with the connection.
-    fn receive_action(tester: &mut WidgetTester, field: Finder, action: TextInputAction) {
-        let state = editable_text_state(tester, field);
-        TextInputClient::perform_action(state, &mut tester.cell.borrow_mut(), action);
-    }
-
-    /// Dart's `tester.sendKeyDownEvent(key)` or `sendKeyUpEvent(key)`: one key event.
-    fn send_key_down_or_up(
-        tester: &mut WidgetTester,
-        physical: PhysicalKeyboardKey,
-        logical: LogicalKeyboardKey,
-        event_type: waft_embedder::KeyEventType,
-    ) {
-        use waft_embedder::{KeyData, KeyEventDeviceType};
-        {
-            let mut app = tester.cell.borrow_mut();
-            waft_services::KeyEventManager::instance(&mut app).handle_key_data(
-                &mut app,
-                KeyData {
-                    time_stamp: Duration::ZERO,
-                    event_type,
-                    device_type: KeyEventDeviceType::Keyboard,
-                    physical: physical.usb_hid_usage,
-                    logical: logical.key_id,
-                    character: None,
-                    synthesized: false,
-                },
-            );
-            app.drain_microtasks();
-        }
-    }
-
     fn send_key(
         tester: &mut WidgetTester,
         physical: PhysicalKeyboardKey,
@@ -1987,31 +1663,15 @@ mod tests {
         physical: PhysicalKeyboardKey,
         logical: LogicalKeyboardKey,
     ) {
-        send_key_down_or_up(
-            tester,
+        tester.send_key_down_event(
             PhysicalKeyboardKey::CONTROL_LEFT,
             LogicalKeyboardKey::CONTROL_LEFT,
-            waft_embedder::KeyEventType::Down,
         );
         send_key(tester, physical, logical);
-        send_key_down_or_up(
-            tester,
+        tester.send_key_up_event(
             PhysicalKeyboardKey::CONTROL_LEFT,
             LogicalKeyboardKey::CONTROL_LEFT,
-            waft_embedder::KeyEventType::Up,
         );
-    }
-
-    /// Dart's `Future<T>.delayed(delay, () => value)`.
-    fn delayed<T: Clone + 'static>(app: &mut App, delay: Duration, value: T) -> Task<T> {
-        let completer: Completer<T> = Completer::new();
-        let future = completer.future();
-        Timer::new(
-            app,
-            delay,
-            Listener::new(move |app| completer.complete(app, value.clone())),
-        );
-        app.spawn(async move |_cx| future.await)
     }
 
     /// Dart's `textEditingController.text`.
@@ -2032,7 +1692,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -2104,24 +1764,26 @@ mod tests {
             let options_key = GlobalKey::new();
             let options_key_for_view = options_key.clone();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(
-                Align::new().alignment(AlignmentGeometry::TOP_CENTER).child(
-                    RawAutocomplete::new(
-                        move |_app, _context, _on_selected, options: &[String]| {
-                            ListView::new()
-                                .key(options_key_for_view.clone().into())
-                                .children(
-                                    options
-                                        .iter()
-                                        .map(|option| Text::new(option.clone()).into_widget()),
-                                )
-                                .into_widget()
-                        },
-                        string_options,
-                    )
-                    .field_view_builder(field_view(&captured, &field_key)),
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Align::new().alignment(AlignmentGeometry::TOP_CENTER).child(
+                        RawAutocomplete::new(
+                            move |_app, _context, _on_selected, options: &[String]| {
+                                ListView::new()
+                                    .key(options_key_for_view.clone().into())
+                                    .children(
+                                        options
+                                            .iter()
+                                            .map(|option| Text::new(option.clone()).into_widget()),
+                                    )
+                                    .into_widget()
+                            },
+                            string_options,
+                        )
+                        .field_view_builder(field_view(&captured, &field_key)),
+                    ),
                 ),
-            ));
+            );
 
             // Field is shown but not options.
             expect(tester, &find::by_global_key(&field_key), finds_one_widget());
@@ -2209,51 +1871,54 @@ mod tests {
             let submitted_key = autocomplete_key.clone();
             let view_key = options_key.clone();
             let recorded = Rc::clone(&captured);
-            tester.pump_widget(test_widgets_app(
-                Column::new().children([
-                    // The field that is not actually a child of RawAutocomplete.
-                    TestTextField::new()
-                        .key(&field_key)
-                        .controller(text_editing_controller.erase())
-                        .focus_node(focus_node.erase())
-                        .on_submitted(move |app, _value| {
-                            RawAutocomplete::<String>::on_field_submitted(app, &submitted_key)
-                        })
-                        .into_widget(),
-                    Expanded::new(
-                        Align::new().alignment(AlignmentGeometry::TOP_LEFT).child(
-                            RawAutocomplete::new(
-                                move |_app,
-                                      _context,
-                                      on_selected: AutocompleteOnSelected<String>,
-                                      options: &[String]| {
-                                    *recorded.last_options.borrow_mut() = Some(options.to_vec());
-                                    *recorded.last_on_selected.borrow_mut() =
-                                        Some(Rc::clone(&on_selected));
-                                    ListView::new()
-                                        .key(view_key.clone().into())
-                                        .children(options.iter().map(|option| {
-                                            let on_selected = Rc::clone(&on_selected);
-                                            let tapped = option.clone();
-                                            GestureDetector::new()
-                                                .on_tap(Listener::new(move |app| {
-                                                    on_selected(app, tapped.clone())
-                                                }))
-                                                .child(test_list_tile(option.clone()))
-                                                .into_widget()
-                                        }))
-                                        .into_widget()
-                                },
-                                string_options,
-                            )
-                            .key(autocomplete_key.clone().into())
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Column::new().children([
+                        // The field that is not actually a child of RawAutocomplete.
+                        TestTextField::new()
+                            .key(&field_key)
+                            .controller(text_editing_controller.erase())
                             .focus_node(focus_node.erase())
-                            .text_editing_controller(text_editing_controller.erase()),
-                        ),
-                    )
-                    .into_widget(),
-                ]),
-            ));
+                            .on_submitted(move |app, _value| {
+                                RawAutocomplete::<String>::on_field_submitted(app, &submitted_key)
+                            })
+                            .into_widget(),
+                        Expanded::new(
+                            Align::new().alignment(AlignmentGeometry::TOP_LEFT).child(
+                                RawAutocomplete::new(
+                                    move |_app,
+                                          _context,
+                                          on_selected: AutocompleteOnSelected<String>,
+                                          options: &[String]| {
+                                        *recorded.last_options.borrow_mut() =
+                                            Some(options.to_vec());
+                                        *recorded.last_on_selected.borrow_mut() =
+                                            Some(Rc::clone(&on_selected));
+                                        ListView::new()
+                                            .key(view_key.clone().into())
+                                            .children(options.iter().map(|option| {
+                                                let on_selected = Rc::clone(&on_selected);
+                                                let tapped = option.clone();
+                                                GestureDetector::new()
+                                                    .on_tap(Listener::new(move |app| {
+                                                        on_selected(app, tapped.clone())
+                                                    }))
+                                                    .child(test_list_tile(option.clone()))
+                                                    .into_widget()
+                                            }))
+                                            .into_widget()
+                                    },
+                                    string_options,
+                                )
+                                .key(autocomplete_key.clone().into())
+                                .focus_node(focus_node.erase())
+                                .text_editing_controller(text_editing_controller.erase()),
+                            ),
+                        )
+                        .into_widget(),
+                    ]),
+                ),
+            );
 
             // The field is always rendered, but the options are not unless needed.
             expect(tester, &by_key(&field_key), finds_one_widget());
@@ -2311,43 +1976,45 @@ mod tests {
                 let captured = Captured::<String>::new();
                 let view_key = options_key.clone();
                 let recorded = Rc::clone(&captured);
-                tester.pump_widget(test_widgets_app(
-                    Column::new().children([
-                        SizedBox::new().height(200.0).into_widget(),
-                        RawAutocomplete::new(
-                            move |_app,
-                                  _context,
-                                  on_selected: AutocompleteOnSelected<String>,
-                                  options: &[String]| {
-                                *recorded.last_options.borrow_mut() = Some(options.to_vec());
-                                let options = options.to_vec();
-                                let count = options.len() as i32;
-                                ListView::builder(move |_app, _context, index| {
-                                    let option = options[index as usize].clone();
-                                    let on_selected = Rc::clone(&on_selected);
-                                    let tapped = option.clone();
-                                    Some(
-                                        GestureDetector::new()
-                                            .on_tap(Listener::new(move |app| {
-                                                on_selected(app, tapped.clone())
-                                            }))
-                                            .child(test_list_tile(option))
-                                            .into_widget(),
-                                    )
-                                })
-                                .item_count(count)
-                                .build()
-                                .key(view_key.clone().into())
-                                .padding(EdgeInsetsGeometry::all(8.0))
-                                .into_widget()
-                            },
-                            string_options,
-                        )
-                        .options_view_open_direction(open_direction)
-                        .field_view_builder(field_view(&captured, &field_key))
-                        .into_widget(),
-                    ]),
-                ));
+                tester.pump_widget(
+                    TestWidgetsApp::new().home(
+                        Column::new().children([
+                            SizedBox::new().height(200.0).into_widget(),
+                            RawAutocomplete::new(
+                                move |_app,
+                                      _context,
+                                      on_selected: AutocompleteOnSelected<String>,
+                                      options: &[String]| {
+                                    *recorded.last_options.borrow_mut() = Some(options.to_vec());
+                                    let options = options.to_vec();
+                                    let count = options.len() as i32;
+                                    ListView::builder(move |_app, _context, index| {
+                                        let option = options[index as usize].clone();
+                                        let on_selected = Rc::clone(&on_selected);
+                                        let tapped = option.clone();
+                                        Some(
+                                            GestureDetector::new()
+                                                .on_tap(Listener::new(move |app| {
+                                                    on_selected(app, tapped.clone())
+                                                }))
+                                                .child(test_list_tile(option))
+                                                .into_widget(),
+                                        )
+                                    })
+                                    .item_count(count)
+                                    .build()
+                                    .key(view_key.clone().into())
+                                    .padding(EdgeInsetsGeometry::all(8.0))
+                                    .into_widget()
+                                },
+                                string_options,
+                            )
+                            .options_view_open_direction(open_direction)
+                            .field_view_builder(field_view(&captured, &field_key))
+                            .into_widget(),
+                        ]),
+                    ),
+                );
 
                 // The field is always rendered, but the options are not unless needed.
                 expect(tester, &by_key(&field_key), finds_one_widget());
@@ -2386,7 +2053,7 @@ mod tests {
                 let captured = Captured::<String>::new();
                 let (stored, aligned) = (Rc::clone(&setter), Rc::clone(&alignment));
                 let (field, options) = (field_key.clone(), options_key.clone());
-                tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+                tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                     move |_app, _context, set_state| {
                         *stored.borrow_mut() = Some(set_state);
                         Padding::new(EdgeInsetsGeometry::symmetric(0.0, PADDING))
@@ -2410,7 +2077,7 @@ mod tests {
                 expect(tester, &by_key(&field_key), finds_one_widget());
                 expect(tester, &by_key(&options_key), finds_one_widget());
 
-                enter_text(tester, by_key(&field_key), "go"); // 3 results.
+                tester.enter_text(by_key(&field_key), "go"); // 3 results.
                 tester.pump();
 
                 let tiles = || find::by_type::<OptionTile>();
@@ -2496,22 +2163,24 @@ mod tests {
                 let options_key = GlobalKey::new();
                 let captured = Captured::<String>::new();
                 let view_key = options_key.clone();
-                tester.pump_widget(test_widgets_app(Directionality::new(
-                    TextDirection::Rtl,
-                    Padding::new(EdgeInsetsGeometry::symmetric(0.0, 32.0)).child(
-                        RawAutocomplete::new(
-                            move |_app, _context, _on_selected, _options: &[String]| {
-                                SizedBox::new()
-                                    .width(K_OPTIONS_WIDTH)
-                                    .key(view_key.clone().into())
-                                    .into_widget()
-                            },
-                            string_options,
-                        )
-                        .options_view_open_direction(open_direction)
-                        .field_view_builder(field_view(&captured, &field_key)),
-                    ),
-                )));
+                tester.pump_widget(
+                    TestWidgetsApp::new().home(Directionality::new(
+                        TextDirection::Rtl,
+                        Padding::new(EdgeInsetsGeometry::symmetric(0.0, 32.0)).child(
+                            RawAutocomplete::new(
+                                move |_app, _context, _on_selected, _options: &[String]| {
+                                    SizedBox::new()
+                                        .width(K_OPTIONS_WIDTH)
+                                        .key(view_key.clone().into())
+                                        .into_widget()
+                                },
+                                string_options,
+                            )
+                            .options_view_open_direction(open_direction)
+                            .field_view_builder(field_view(&captured, &field_key)),
+                        ),
+                    )),
+                );
 
                 expect(tester, &by_key(&field_key), finds_one_widget());
                 expect(tester, &by_key(&options_key), finds_nothing());
@@ -2541,14 +2210,16 @@ mod tests {
                 let field_key = GlobalKey::new();
                 let options_key = GlobalKey::new();
                 let captured = Captured::<String>::new();
-                tester.pump_widget(test_widgets_app(
-                    Padding::new(EdgeInsetsGeometry::symmetric(0.0, 32.0)).child(
-                        Center::new().child(
-                            string_autocomplete(&captured, &field_key, &options_key)
-                                .options_view_open_direction(open_direction),
+                tester.pump_widget(
+                    TestWidgetsApp::new().home(
+                        Padding::new(EdgeInsetsGeometry::symmetric(0.0, 32.0)).child(
+                            Center::new().child(
+                                string_autocomplete(&captured, &field_key, &options_key)
+                                    .options_view_open_direction(open_direction),
+                            ),
                         ),
                     ),
-                ));
+                );
 
                 expect(tester, &by_key(&field_key), finds_one_widget());
                 expect(tester, &by_key(&options_key), finds_nothing());
@@ -2594,11 +2265,13 @@ mod tests {
             let captured = Captured::<User>::new();
             let last_user_selected: Rc<RefCell<Option<User>>> = Rc::default();
             let selected = Rc::clone(&last_user_selected);
-            tester.pump_widget(test_widgets_app(
-                RawAutocomplete::new(options_view(&captured, &options_key), user_options)
-                    .on_selected(move |_app, user| *selected.borrow_mut() = Some(user))
-                    .field_view_builder(field_view(&captured, &field_key)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    RawAutocomplete::new(options_view(&captured, &options_key), user_options)
+                        .on_selected(move |_app, user| *selected.borrow_mut() = Some(user))
+                        .field_view_builder(field_view(&captured, &field_key)),
+                ),
+            );
 
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -2643,12 +2316,14 @@ mod tests {
             let captured = Captured::<User>::new();
             let last_user_selected: Rc<RefCell<Option<User>>> = Rc::default();
             let selected = Rc::clone(&last_user_selected);
-            tester.pump_widget(test_widgets_app(
-                RawAutocomplete::new(options_view(&captured, &options_key), user_options)
-                    .display_string_for_option(|option: &User| option.name.to_string())
-                    .on_selected(move |_app, user| *selected.borrow_mut() = Some(user))
-                    .field_view_builder(field_view(&captured, &field_key)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    RawAutocomplete::new(options_view(&captured, &options_key), user_options)
+                        .display_string_for_option(|option: &User| option.name.to_string())
+                        .on_selected(move |_app, user| *selected.borrow_mut() = Some(user))
+                        .field_view_builder(field_view(&captured, &field_key)),
+                ),
+            );
 
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -2692,7 +2367,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -2742,10 +2417,10 @@ mod tests {
     #[test]
     fn options_view_open_direction_unset_opens_downward() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(
-                Center::new().child(one_option_autocomplete()),
-            ));
-            show_keyboard(tester, find::by_type::<TestTextField>());
+            tester.pump_widget(
+                TestWidgetsApp::new().home(Center::new().child(one_option_autocomplete())),
+            );
+            tester.show_keyboard(find::by_type::<TestTextField>());
             tester.pump();
             assert_more_or_less_equals(
                 tester.get_bottom_left(find::by_type::<TestTextField>()),
@@ -2757,13 +2432,15 @@ mod tests {
     #[test]
     fn options_view_open_direction_down_opens_downward() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(
-                Center::new().child(
-                    one_option_autocomplete()
-                        .options_view_open_direction(OptionsViewOpenDirection::Down),
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Center::new().child(
+                        one_option_autocomplete()
+                            .options_view_open_direction(OptionsViewOpenDirection::Down),
+                    ),
                 ),
-            ));
-            show_keyboard(tester, find::by_type::<TestTextField>());
+            );
+            tester.show_keyboard(find::by_type::<TestTextField>());
             tester.pump();
             assert_more_or_less_equals(
                 tester.get_bottom_left(find::by_type::<TestTextField>()),
@@ -2775,10 +2452,10 @@ mod tests {
     #[test]
     fn options_view_open_direction_up_opens_upward() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(Center::new().child(
+            tester.pump_widget(TestWidgetsApp::new().home(Center::new().child(
                 one_option_autocomplete().options_view_open_direction(OptionsViewOpenDirection::Up),
             )));
-            show_keyboard(tester, find::by_type::<TestTextField>());
+            tester.show_keyboard(find::by_type::<TestTextField>());
             tester.pump();
             assert_more_or_less_equals(
                 tester.get_top_left(find::by_type::<TestTextField>()),
@@ -2797,7 +2474,7 @@ mod tests {
 
             let (stored, aligned) = (Rc::clone(&setter), Rc::clone(&alignment));
             let (field, options) = (field_key.clone(), options_key.clone());
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                 move |_app, _context, set_state| {
                     *stored.borrow_mut() = Some(set_state);
                     let options = options.clone();
@@ -2878,23 +2555,25 @@ mod tests {
         test_widgets(|tester| {
             let autocomplete_key = GlobalKey::new();
             let (controller, focus_node) = own_field(tester);
-            tester.pump_widget(test_widgets_app(
-                Column::new()
-                    .cross_axis_alignment(waft_rendering::CrossAxisAlignment::Start)
-                    .children([
-                        TestTextField::new()
-                            .controller(controller.erase())
-                            .focus_node(focus_node.erase())
-                            .into_widget(),
-                        split_one_option_autocomplete(
-                            &autocomplete_key,
-                            &controller,
-                            &focus_node,
-                            OptionsViewOpenDirection::Down,
-                        ),
-                    ]),
-            ));
-            show_keyboard(tester, find::by_type::<TestTextField>());
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Column::new()
+                        .cross_axis_alignment(waft_rendering::CrossAxisAlignment::Start)
+                        .children([
+                            TestTextField::new()
+                                .controller(controller.erase())
+                                .focus_node(focus_node.erase())
+                                .into_widget(),
+                            split_one_option_autocomplete(
+                                &autocomplete_key,
+                                &controller,
+                                &focus_node,
+                                OptionsViewOpenDirection::Down,
+                            ),
+                        ]),
+                ),
+            );
+            tester.show_keyboard(find::by_type::<TestTextField>());
             tester.pump();
             assert_more_or_less_equals(
                 tester.get_bottom_left(by_key(&autocomplete_key)),
@@ -2908,24 +2587,26 @@ mod tests {
         test_widgets(|tester| {
             let autocomplete_key = GlobalKey::new();
             let (controller, focus_node) = own_field(tester);
-            tester.pump_widget(test_widgets_app(
-                Column::new()
-                    .main_axis_alignment(waft_rendering::MainAxisAlignment::End)
-                    .cross_axis_alignment(waft_rendering::CrossAxisAlignment::Start)
-                    .children([
-                        split_one_option_autocomplete(
-                            &autocomplete_key,
-                            &controller,
-                            &focus_node,
-                            OptionsViewOpenDirection::Up,
-                        ),
-                        TestTextField::new()
-                            .controller(controller.erase())
-                            .focus_node(focus_node.erase())
-                            .into_widget(),
-                    ]),
-            ));
-            show_keyboard(tester, find::by_type::<TestTextField>());
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Column::new()
+                        .main_axis_alignment(waft_rendering::MainAxisAlignment::End)
+                        .cross_axis_alignment(waft_rendering::CrossAxisAlignment::Start)
+                        .children([
+                            split_one_option_autocomplete(
+                                &autocomplete_key,
+                                &controller,
+                                &focus_node,
+                                OptionsViewOpenDirection::Up,
+                            ),
+                            TestTextField::new()
+                                .controller(controller.erase())
+                                .focus_node(focus_node.erase())
+                                .into_widget(),
+                        ]),
+                ),
+            );
+            tester.show_keyboard(find::by_type::<TestTextField>());
             tester.pump();
             assert_more_or_less_equals(
                 tester.get_top_left(by_key(&autocomplete_key)),
@@ -2949,7 +2630,7 @@ mod tests {
                 Rc::clone(&captured),
             );
             let (field, options) = (field_key.clone(), options_key.clone());
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                 move |_app, _context, set_state| {
                     *stored.borrow_mut() = Some(set_state);
                     Align::new()
@@ -3006,18 +2687,20 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(
-                RawAutocomplete::new(
-                    options_view(&captured, &options_key),
-                    |_app, value: TextEditingValue| {
-                        if value.text.is_empty() {
-                            return Task::ready(Vec::new());
-                        }
-                        Task::ready(matching(&value.text))
-                    },
-                )
-                .field_view_builder(field_view(&captured, &field_key)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    RawAutocomplete::new(
+                        options_view(&captured, &options_key),
+                        |_app, value: TextEditingValue| {
+                            if value.text.is_empty() {
+                                return Task::ready(Vec::new());
+                            }
+                            Task::ready(matching(&value.text))
+                        },
+                    )
+                    .field_view_builder(field_view(&captured, &field_key)),
+                ),
+            );
 
             // The field is always rendered, but the options are not unless needed.
             expect(tester, &by_key(&field_key), finds_one_widget());
@@ -3052,26 +2735,31 @@ mod tests {
             let (text_editing_controller, focus_node) = own_field(tester);
 
             let submitted_key = autocomplete_key.clone();
-            tester.pump_widget(test_widgets_app(
-                Column::new().children([
-                    // This is where the real field is being built.
-                    TestTextField::new()
-                        .key(&field_key)
-                        .controller(text_editing_controller.erase())
-                        .focus_node(focus_node.erase())
-                        .on_submitted(move |app, _value| {
-                            RawAutocomplete::<String>::on_field_submitted(app, &submitted_key)
-                        })
-                        .into_widget(),
-                    Expanded::new(
-                        RawAutocomplete::new(options_view(&captured, &options_key), string_options)
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Column::new().children([
+                        // This is where the real field is being built.
+                        TestTextField::new()
+                            .key(&field_key)
+                            .controller(text_editing_controller.erase())
+                            .focus_node(focus_node.erase())
+                            .on_submitted(move |app, _value| {
+                                RawAutocomplete::<String>::on_field_submitted(app, &submitted_key)
+                            })
+                            .into_widget(),
+                        Expanded::new(
+                            RawAutocomplete::new(
+                                options_view(&captured, &options_key),
+                                string_options,
+                            )
                             .key(autocomplete_key.clone().into())
                             .focus_node(focus_node.erase())
                             .text_editing_controller(text_editing_controller.erase()),
-                    )
-                    .into_widget(),
-                ]),
-            ));
+                        )
+                        .into_widget(),
+                    ]),
+                ),
+            );
 
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -3088,12 +2776,10 @@ mod tests {
             assert_eq!(captured.options(), strings(&["chameleon", "elephant"]));
 
             // Submit the field. The options hide and the field updates to show the selection.
-            show_keyboard(tester, find::by_type::<TestTextField>());
-            receive_action(
-                tester,
-                find::by_type::<TestTextField>(),
-                TextInputAction::Done,
-            );
+            tester.show_keyboard(find::by_type::<TestTextField>());
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -3107,11 +2793,13 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(
-                string_autocomplete(&captured, &field_key, &options_key)
-                    // Should initialize text field with 'lem'.
-                    .initial_value(TextEditingValue::new().text("lem")),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    string_autocomplete(&captured, &field_key, &options_key)
+                        // Should initialize text field with 'lem'.
+                        .initial_value(TextEditingValue::new().text("lem")),
+                ),
+            );
 
             // The field is always rendered, but the options are not unless needed.
             expect(tester, &by_key(&field_key), finds_one_widget());
@@ -3193,13 +2881,15 @@ mod tests {
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
             let delay: Rc<Cell<Option<Duration>>> = Rc::default();
-            tester.pump_widget(test_widgets_app(
-                RawAutocomplete::new(
-                    options_view(&captured, &options_key),
-                    delayed_options(&delay),
-                )
-                .field_view_builder(field_view(&captured, &field_key)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    RawAutocomplete::new(
+                        options_view(&captured, &options_key),
+                        delayed_options(&delay),
+                    )
+                    .field_view_builder(field_view(&captured, &field_key)),
+                ),
+            );
 
             // Enter text to build the options with delay.
             let focus_node = captured.focus_node();
@@ -3207,7 +2897,7 @@ mod tests {
                 focus_node.request_focus(app, None);
                 delay.set(Some(Duration::from_millis(500)));
             });
-            enter_text(tester, by_key(&field_key), "go");
+            tester.enter_text(by_key(&field_key), "go");
             tester.pump_and_settle();
 
             // The options have not yet been built.
@@ -3224,7 +2914,7 @@ mod tests {
 
             // Enter text to rebuild the options without delay.
             delay.set(None);
-            enter_text(tester, by_key(&field_key), "ngo");
+            tester.enter_text(by_key(&field_key), "ngo");
             tester.pump();
             assert_eq!(
                 last_options(&captured),
@@ -3239,7 +2929,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -3248,7 +2938,7 @@ mod tests {
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
             tester.update(|app| focus_node.request_focus(app, None));
-            enter_text(tester, by_key(&field_key), "ele");
+            tester.enter_text(by_key(&field_key), "ele");
             tester.pump_and_settle();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -3258,7 +2948,9 @@ mod tests {
             arrow_down(tester);
             // Can't use the key event for enter to submit to the text field using the test
             // framework, so this appears to be the equivalent.
-            receive_action(tester, by_key(&field_key), TextInputAction::Done);
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -3269,7 +2961,7 @@ mod tests {
                 focus_node.request_focus(app, None);
                 controller.handle().clear(app);
             });
-            enter_text(tester, by_key(&field_key), "e");
+            tester.enter_text(by_key(&field_key), "e");
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -3308,7 +3000,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -3320,7 +3012,7 @@ mod tests {
                 focus_node.request_focus(app, None);
                 controller.handle().clear(app);
             });
-            enter_text(tester, by_key(&field_key), "e");
+            tester.enter_text(by_key(&field_key), "e");
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -3380,7 +3072,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -3392,7 +3084,7 @@ mod tests {
                 focus_node.request_focus(app, None);
                 controller.handle().clear(app);
             });
-            enter_text(tester, by_key(&field_key), "e");
+            tester.enter_text(by_key(&field_key), "e");
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -3438,7 +3130,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -3447,7 +3139,7 @@ mod tests {
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
             tester.update(|app| focus_node.request_focus(app, None));
-            enter_text(tester, by_key(&field_key), "ele");
+            tester.enter_text(by_key(&field_key), "ele");
             tester.pump_and_settle();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -3486,7 +3178,7 @@ mod tests {
 
             // Show the options again by editing the text (but not when selecting text or
             // moving the caret).
-            enter_text(tester, by_key(&field_key), "elep");
+            tester.enter_text(by_key(&field_key), "elep");
             tester.pump();
             expect(tester, &by_key(&options_key), finds_one_widget());
             escape(tester);
@@ -3519,7 +3211,7 @@ mod tests {
                     }),
                 )
             });
-            tester.pump_widget(test_widgets_app(Actions::new(
+            tester.pump_widget(TestWidgetsApp::new().home(Actions::new(
                 HashMap::from([(TypeId::of::<DismissIntent>(), dismiss.into_erased())]),
                 string_autocomplete(&captured, &field_key, &options_key),
             )));
@@ -3527,7 +3219,7 @@ mod tests {
             // Enter text to show options.
             let focus_node = captured.focus_node();
             tester.update(|app| focus_node.request_focus(app, None));
-            enter_text(tester, by_key(&field_key), "ele");
+            tester.enter_text(by_key(&field_key), "ele");
             tester.pump_and_settle();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -3552,7 +3244,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -3561,7 +3253,7 @@ mod tests {
             // Enter text. The options are filtered by the text.
             let focus_node = captured.focus_node();
             tester.update(|app| focus_node.request_focus(app, None));
-            enter_text(tester, by_key(&field_key), "e");
+            tester.enter_text(by_key(&field_key), "e");
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -3606,7 +3298,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -3616,7 +3308,7 @@ mod tests {
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
 
-            enter_text(tester, by_key(&field_key), K_OPTIONS[0]);
+            tester.enter_text(by_key(&field_key), K_OPTIONS[0]);
             tester.pump_and_settle();
             expect(tester, &by_key(&options_key), finds_one_widget());
 
@@ -3641,7 +3333,7 @@ mod tests {
             let (stored, sized, recorded) =
                 (Rc::clone(&setter), Rc::clone(&width), Rc::clone(&captured));
             let (field, options) = (field_key.clone(), options_key.clone());
-            tester.pump_widget(test_widgets_app(
+            tester.pump_widget(TestWidgetsApp::new().home(
                 Align::new().alignment(AlignmentGeometry::TOP_LEFT).child(
                     Padding::new(EdgeInsetsGeometry::symmetric(0.0, 32.0)).child(
                         StatefulBuilder::new(move |_app, _context, set_state| {
@@ -3710,7 +3402,7 @@ mod tests {
                         },
                     );
 
-            tester.pump_widget(test_widgets_app(
+            tester.pump_widget(TestWidgetsApp::new().home(
                 Align::new().alignment(AlignmentGeometry::TOP_LEFT).child(
                     Padding::new(EdgeInsetsGeometry::symmetric(0.0, 32.0)).child(autocomplete),
                 ),
@@ -3748,23 +3440,25 @@ mod tests {
         alignment: AlignmentGeometry,
     ) {
         let field_key = field_key.clone();
-        tester.pump_widget(test_widgets_app(
-            Padding::new(EdgeInsetsGeometry::symmetric(0.0, 32.0)).child(
-                Align::new().alignment(alignment).child(
-                    RawAutocomplete::new(option_tiles(options_key), string_options)
-                        .options_view_open_direction(options_view_open_direction)
-                        .field_view_builder(
-                            move |_app, _context, controller, focus_node, _on_submitted| {
-                                TestTextField::new()
-                                    .key(&field_key)
-                                    .focus_node(focus_node)
-                                    .controller(controller)
-                                    .into_widget()
-                            },
-                        ),
+        tester.pump_widget(
+            TestWidgetsApp::new().home(
+                Padding::new(EdgeInsetsGeometry::symmetric(0.0, 32.0)).child(
+                    Align::new().alignment(alignment).child(
+                        RawAutocomplete::new(option_tiles(options_key), string_options)
+                            .options_view_open_direction(options_view_open_direction)
+                            .field_view_builder(
+                                move |_app, _context, controller, focus_node, _on_submitted| {
+                                    TestTextField::new()
+                                        .key(&field_key)
+                                        .focus_node(focus_node)
+                                        .controller(controller)
+                                        .into_widget()
+                                },
+                            ),
+                    ),
                 ),
             ),
-        ));
+        );
     }
 
     /// Dart's `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1.0;`.
@@ -4202,13 +3896,15 @@ mod tests {
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
             let delay: Rc<Cell<Option<Duration>>> = Rc::default();
-            tester.pump_widget(test_widgets_app(
-                RawAutocomplete::new(
-                    options_view(&captured, &options_key),
-                    delayed_options(&delay),
-                )
-                .field_view_builder(field_view(&captured, &field_key)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    RawAutocomplete::new(
+                        options_view(&captured, &options_key),
+                        delayed_options(&delay),
+                    )
+                    .field_view_builder(field_view(&captured, &field_key)),
+                ),
+            );
 
             let long_request_delay = Duration::from_millis(5000);
             let short_request_delay = Duration::from_millis(1000);
@@ -4219,13 +3915,13 @@ mod tests {
                 // Enter the first letter.
                 delay.set(Some(long_request_delay));
             });
-            enter_text(tester, by_key(&field_key), "c");
+            tester.enter_text(by_key(&field_key), "c");
             tester.pump();
             assert_eq!(last_options(&captured), None);
 
             // Enter the second letter which resolves faster.
             delay.set(Some(short_request_delay));
-            enter_text(tester, by_key(&field_key), "ch");
+            tester.enter_text(by_key(&field_key), "ch");
             tester.pump();
             assert_eq!(last_options(&captured), None);
 
@@ -4249,13 +3945,15 @@ mod tests {
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
             let delay: Rc<Cell<Option<Duration>>> = Rc::default();
-            tester.pump_widget(test_widgets_app(
-                RawAutocomplete::new(
-                    options_view(&captured, &options_key),
-                    delayed_options(&delay),
-                )
-                .field_view_builder(field_view(&captured, &field_key)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    RawAutocomplete::new(
+                        options_view(&captured, &options_key),
+                        delayed_options(&delay),
+                    )
+                    .field_view_builder(field_view(&captured, &field_key)),
+                ),
+            );
 
             let focus_node = captured.focus_node();
             let first_request_delay = Duration::from_millis(1000);
@@ -4267,19 +3965,19 @@ mod tests {
                 // Enter the first letter.
                 delay.set(Some(first_request_delay));
             });
-            enter_text(tester, by_key(&field_key), "l");
+            tester.enter_text(by_key(&field_key), "l");
             tester.pump();
             assert_eq!(last_options(&captured), None);
 
             // Enter the second letter which resolves slower.
             delay.set(Some(second_request_delay));
-            enter_text(tester, by_key(&field_key), "le");
+            tester.enter_text(by_key(&field_key), "le");
             tester.pump();
             assert_eq!(last_options(&captured), None);
 
             // Enter the third letter which resolves the slowest.
             delay.set(Some(third_request_delay));
-            enter_text(tester, by_key(&field_key), "lem");
+            tester.enter_text(by_key(&field_key), "lem");
             tester.pump();
             assert_eq!(last_options(&captured), None);
 
@@ -4305,16 +4003,20 @@ mod tests {
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
             let delay = Duration::from_millis(100);
-            tester.pump_widget(test_widgets_app(
-                RawAutocomplete::new(
-                    options_view(&captured, &options_key),
-                    move |app, value: TextEditingValue| delayed(app, delay, matching(&value.text)),
-                )
-                .field_view_builder(field_view(&captured, &field_key)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    RawAutocomplete::new(
+                        options_view(&captured, &options_key),
+                        move |app, value: TextEditingValue| {
+                            delayed(app, delay, matching(&value.text))
+                        },
+                    )
+                    .field_view_builder(field_view(&captured, &field_key)),
+                ),
+            );
 
             // Setup starting point.
-            enter_text(tester, by_key(&field_key), "ele");
+            tester.enter_text(by_key(&field_key), "ele");
             tester.pump_by(delay);
             assert_eq!(
                 last_options(&captured),
@@ -4328,11 +4030,11 @@ mod tests {
             expect(tester, &by_key(&options_key), finds_nothing());
 
             // Enter another letter and then immediately erase it.
-            enter_text(tester, by_key(&field_key), "eleo");
+            tester.enter_text(by_key(&field_key), "eleo");
             tester.pump();
             expect(tester, &by_key(&options_key), finds_nothing());
 
-            enter_text(tester, by_key(&field_key), "ele");
+            tester.enter_text(by_key(&field_key), "ele");
             tester.pump_by(delay);
             assert_eq!(
                 last_options(&captured),
@@ -4362,23 +4064,25 @@ mod tests {
                 Rc::clone(&times_options_builder_called_with_ele),
                 alt_ele_options.clone(),
             );
-            tester.pump_widget(test_widgets_app(
-                RawAutocomplete::new(
-                    options_view(&captured, &options_key),
-                    move |app, value: TextEditingValue| {
-                        if value.text == "ele" {
-                            times.set(times.get() + 1);
-                            if times.get() > 1 {
-                                return delayed(app, delay, alt.clone());
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    RawAutocomplete::new(
+                        options_view(&captured, &options_key),
+                        move |app, value: TextEditingValue| {
+                            if value.text == "ele" {
+                                times.set(times.get() + 1);
+                                if times.get() > 1 {
+                                    return delayed(app, delay, alt.clone());
+                                }
                             }
-                        }
-                        delayed(app, delay, matching(&value.text))
-                    },
-                )
-                .field_view_builder(field_view(&captured, &field_key)),
-            ));
+                            delayed(app, delay, matching(&value.text))
+                        },
+                    )
+                    .field_view_builder(field_view(&captured, &field_key)),
+                ),
+            );
 
-            enter_text(tester, by_key(&field_key), "ele");
+            tester.enter_text(by_key(&field_key), "ele");
             tester.pump_by(delay);
             assert_eq!(
                 last_options(&captured),
@@ -4390,11 +4094,11 @@ mod tests {
             tester.pump();
             expect(tester, &by_key(&options_key), finds_nothing());
 
-            enter_text(tester, by_key(&field_key), "eleo");
+            tester.enter_text(by_key(&field_key), "eleo");
             tester.pump();
             expect(tester, &by_key(&options_key), finds_nothing());
 
-            enter_text(tester, by_key(&field_key), "ele");
+            tester.enter_text(by_key(&field_key), "ele");
             tester.pump_by(delay);
             assert_eq!(last_options(&captured), Some(alt_ele_options));
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -4404,24 +4108,26 @@ mod tests {
     #[test]
     fn raw_autocomplete_renders_at_zero_area() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(
-                Center::new().child(
-                    SizedBox::shrink().child(
-                        RawAutocomplete::new(
-                            |_app, _context, _on_selected, _options: &[String]| {
-                                Container::new().into_widget()
-                            },
-                            |_app, _value| Task::ready(strings(&["Y"])),
-                        )
-                        .initial_value(TextEditingValue::new().text("X"))
-                        .field_view_builder(
-                            |_app, _context, controller, _focus_node, _on_submitted| {
-                                TestTextField::new().controller(controller).into_widget()
-                            },
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Center::new().child(
+                        SizedBox::shrink().child(
+                            RawAutocomplete::new(
+                                |_app, _context, _on_selected, _options: &[String]| {
+                                    Container::new().into_widget()
+                                },
+                                |_app, _value| Task::ready(strings(&["Y"])),
+                            )
+                            .initial_value(TextEditingValue::new().text("X"))
+                            .field_view_builder(
+                                |_app, _context, controller, _focus_node, _on_submitted| {
+                                    TestTextField::new().controller(controller).into_widget()
+                                },
+                            ),
                         ),
                     ),
                 ),
-            ));
+            );
             let x_text = find::text("X");
             assert!(tester.get_size(x_text).is_empty());
         });
@@ -4434,7 +4140,7 @@ mod tests {
             let field_key = GlobalKey::new();
             let options_key = GlobalKey::new();
             let captured = Captured::<String>::new();
-            tester.pump_widget(test_widgets_app(string_autocomplete(
+            tester.pump_widget(TestWidgetsApp::new().home(string_autocomplete(
                 &captured,
                 &field_key,
                 &options_key,
@@ -4444,7 +4150,7 @@ mod tests {
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
 
-            enter_text(tester, by_key(&field_key), K_OPTIONS[0]);
+            tester.enter_text(by_key(&field_key), K_OPTIONS[0]);
             tester.pump_and_settle();
             expect(tester, &by_key(&options_key), finds_one_widget());
 
@@ -4476,7 +4182,7 @@ mod tests {
                 Rc::clone(&show_autocomplete),
                 options_completer.clone(),
             );
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                 move |_app, _context, set_state| {
                     *stored.borrow_mut() = Some(set_state);
                     if !shown.get() {
@@ -4521,28 +4227,32 @@ mod tests {
             const PADDING: f64 = 50.0;
             const BOTTOM_INSETS: f64 = 70.0;
             tester.view().set_device_pixel_ratio(1.0);
-            tester.pump_widget(test_widgets_app(
-                Column::new().children([
-                    SizedBox::new().height(200.0).into_widget(),
-                    RawAutocomplete::new(
-                        |_app, _context, _on_selected, _options: &[String]| {
-                            Placeholder::new().into_widget()
-                        },
-                        |_app, _value| Task::ready(strings(&["abcd"])),
-                    )
-                    .field_view_builder(|_app, _context, controller, focus_node, _on_submitted| {
-                        TestTextField::new()
-                            .controller(controller)
-                            .focus_node(focus_node)
-                            .into_widget()
-                    })
-                    .into_widget(),
-                    SizedBox::new().height(200.0).into_widget(),
-                ]),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Column::new().children([
+                        SizedBox::new().height(200.0).into_widget(),
+                        RawAutocomplete::new(
+                            |_app, _context, _on_selected, _options: &[String]| {
+                                Placeholder::new().into_widget()
+                            },
+                            |_app, _value| Task::ready(strings(&["abcd"])),
+                        )
+                        .field_view_builder(
+                            |_app, _context, controller, focus_node, _on_submitted| {
+                                TestTextField::new()
+                                    .controller(controller)
+                                    .focus_node(focus_node)
+                                    .into_widget()
+                            },
+                        )
+                        .into_widget(),
+                        SizedBox::new().height(200.0).into_widget(),
+                    ]),
+                ),
+            );
 
             tester.tap(find::by_type::<TestTextField>());
-            enter_text(tester, find::by_type::<TestTextField>(), "a");
+            tester.enter_text(find::by_type::<TestTextField>(), "a");
             tester.pump();
 
             let initial_size = tester.get_size(find::by_type::<Placeholder>()).height();
@@ -4571,7 +4281,7 @@ mod tests {
             assert_eq!(tester.view().metrics().view_insets.bottom, BOTTOM_INSETS);
 
             tester.tap(find::by_type::<TestTextField>());
-            enter_text(tester, find::by_type::<TestTextField>(), "abc");
+            tester.enter_text(find::by_type::<TestTextField>(), "abc");
             tester.pump();
 
             // The options view has shrunk to the available height.
@@ -4588,29 +4298,33 @@ mod tests {
         test_widgets(|tester| {
             const PADDING: f64 = 100.0;
             tester.view().set_device_pixel_ratio(1.0);
-            tester.pump_widget(test_widgets_app(
-                Column::new().children([
-                    SizedBox::new().height(200.0).into_widget(),
-                    RawAutocomplete::new(
-                        |_app, _context, _on_selected, _options: &[String]| {
-                            Placeholder::new().into_widget()
-                        },
-                        |_app, _value| Task::ready(strings(&["abcd"])),
-                    )
-                    .options_view_open_direction(OptionsViewOpenDirection::Up)
-                    .field_view_builder(|_app, _context, controller, focus_node, _on_submitted| {
-                        TestTextField::new()
-                            .controller(controller)
-                            .focus_node(focus_node)
-                            .into_widget()
-                    })
-                    .into_widget(),
-                    SizedBox::new().height(200.0).into_widget(),
-                ]),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Column::new().children([
+                        SizedBox::new().height(200.0).into_widget(),
+                        RawAutocomplete::new(
+                            |_app, _context, _on_selected, _options: &[String]| {
+                                Placeholder::new().into_widget()
+                            },
+                            |_app, _value| Task::ready(strings(&["abcd"])),
+                        )
+                        .options_view_open_direction(OptionsViewOpenDirection::Up)
+                        .field_view_builder(
+                            |_app, _context, controller, focus_node, _on_submitted| {
+                                TestTextField::new()
+                                    .controller(controller)
+                                    .focus_node(focus_node)
+                                    .into_widget()
+                            },
+                        )
+                        .into_widget(),
+                        SizedBox::new().height(200.0).into_widget(),
+                    ]),
+                ),
+            );
 
             tester.tap(find::by_type::<TestTextField>());
-            enter_text(tester, find::by_type::<TestTextField>(), "a");
+            tester.enter_text(find::by_type::<TestTextField>(), "a");
             tester.pump();
 
             let initial_size = tester.get_size(find::by_type::<Placeholder>()).height();
@@ -4653,12 +4367,12 @@ mod tests {
                 )
             };
 
-            tester.pump_widget(test_widgets_app(autocomplete("initial")));
+            tester.pump_widget(TestWidgetsApp::new().home(autocomplete("initial")));
 
             // Change the key to force the RawAutocomplete to dispose and re-initialize.
-            tester.pump_widget(test_widgets_app(autocomplete("new-key")));
+            tester.pump_widget(TestWidgetsApp::new().home(autocomplete("new-key")));
 
-            enter_text(tester, find::by_type::<TestTextField>(), "trigger");
+            tester.enter_text(find::by_type::<TestTextField>(), "trigger");
             tester.pump();
         });
     }
@@ -4670,64 +4384,66 @@ mod tests {
             let list_item = strings(&["test", "abc", "dexter"]);
 
             let cleared: TextEditingControllerRef = text_ctrl.erase();
-            tester.pump_widget(test_widgets_app(
-                Row::new().children([
-                    Expanded::new(
-                        RawAutocomplete::new(
-                            |_app,
-                             _context,
-                             on_selected: AutocompleteOnSelected<String>,
-                             options: &[String]| {
-                                let options = options.to_vec();
-                                let count = options.len() as i32;
-                                ListView::builder(move |_app, _context, index| {
-                                    let option = options[index as usize].clone();
-                                    let on_selected = Rc::clone(&on_selected);
-                                    let tapped = option.clone();
-                                    Some(
-                                        GestureDetector::new()
-                                            .on_tap(Listener::new(move |app| {
-                                                on_selected(app, tapped.clone())
-                                            }))
-                                            .child(Text::new(option))
-                                            .into_widget(),
-                                    )
-                                })
-                                .item_count(count)
-                                .build()
-                                .into_widget()
-                            },
-                            move |_app, value: TextEditingValue| {
-                                Task::ready(
-                                    list_item
-                                        .iter()
-                                        .filter(|e| e.contains(&value.text))
-                                        .cloned()
-                                        .collect(),
-                                )
-                            },
-                        )
-                        .text_editing_controller(text_ctrl.erase())
-                        .focus_node(text_focus.erase())
-                        .field_view_builder(
-                            |_app, _context, controller, focus_node, _on_submitted| {
-                                TestTextField::new()
-                                    .controller(controller)
-                                    .focus_node(focus_node)
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Row::new().children([
+                        Expanded::new(
+                            RawAutocomplete::new(
+                                |_app,
+                                 _context,
+                                 on_selected: AutocompleteOnSelected<String>,
+                                 options: &[String]| {
+                                    let options = options.to_vec();
+                                    let count = options.len() as i32;
+                                    ListView::builder(move |_app, _context, index| {
+                                        let option = options[index as usize].clone();
+                                        let on_selected = Rc::clone(&on_selected);
+                                        let tapped = option.clone();
+                                        Some(
+                                            GestureDetector::new()
+                                                .on_tap(Listener::new(move |app| {
+                                                    on_selected(app, tapped.clone())
+                                                }))
+                                                .child(Text::new(option))
+                                                .into_widget(),
+                                        )
+                                    })
+                                    .item_count(count)
+                                    .build()
                                     .into_widget()
-                            },
-                        ),
-                    )
-                    .into_widget(),
-                    GestureDetector::new()
-                        .on_tap(Listener::new(move |app| cleared.handle().clear(app)))
-                        .child(Text::new("Clear"))
+                                },
+                                move |_app, value: TextEditingValue| {
+                                    Task::ready(
+                                        list_item
+                                            .iter()
+                                            .filter(|e| e.contains(&value.text))
+                                            .cloned()
+                                            .collect(),
+                                    )
+                                },
+                            )
+                            .text_editing_controller(text_ctrl.erase())
+                            .focus_node(text_focus.erase())
+                            .field_view_builder(
+                                |_app, _context, controller, focus_node, _on_submitted| {
+                                    TestTextField::new()
+                                        .controller(controller)
+                                        .focus_node(focus_node)
+                                        .into_widget()
+                                },
+                            ),
+                        )
                         .into_widget(),
-                ]),
-            ));
+                        GestureDetector::new()
+                            .on_tap(Listener::new(move |app| cleared.handle().clear(app)))
+                            .child(Text::new("Clear"))
+                            .into_widget(),
+                    ]),
+                ),
+            );
 
             // Open the popup menu.
-            enter_text(tester, find::by_type::<TestTextField>(), "");
+            tester.enter_text(find::by_type::<TestTextField>(), "");
             tester.pump_and_settle();
             expect(tester, &find::text("test"), finds_one_widget());
 
@@ -4760,48 +4476,52 @@ mod tests {
         // Regression test for https://github.com/flutter/flutter/issues/183456.
         test_widgets(|tester| {
             let target_focus = tester.update(FocusNode::new);
-            tester.pump_widget(test_widgets_app(
-                Column::new().children([
-                    RawAutocomplete::new(
-                        |_app,
-                         _context,
-                         on_selected: AutocompleteOnSelected<String>,
-                         options: &[String]| {
-                            let options = options.to_vec();
-                            let count = options.len() as i32;
-                            ListView::builder(move |_app, _context, index| {
-                                let option = options[index as usize].clone();
-                                let on_selected = Rc::clone(&on_selected);
-                                let tapped = option.clone();
-                                Some(
-                                    GestureDetector::new()
-                                        .on_tap(Listener::new(move |app| {
-                                            on_selected(app, tapped.clone())
-                                        }))
-                                        .child(Focus::new(Text::new(option)))
-                                        .into_widget(),
-                                )
-                            })
-                            .item_count(count)
-                            .build()
-                            .shrink_wrap(true)
-                            .into_widget()
-                        },
-                        string_options,
-                    )
-                    .field_view_builder(|_app, _context, controller, focus_node, _on_submitted| {
-                        TestTextField::new()
-                            .controller(controller)
-                            .focus_node(focus_node)
-                            .into_widget()
-                    })
-                    .into_widget(),
-                    ExcludeFocus::new(TestTextField::new()).into_widget(),
-                    TestTextField::new()
-                        .focus_node(target_focus.erase())
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Column::new().children([
+                        RawAutocomplete::new(
+                            |_app,
+                             _context,
+                             on_selected: AutocompleteOnSelected<String>,
+                             options: &[String]| {
+                                let options = options.to_vec();
+                                let count = options.len() as i32;
+                                ListView::builder(move |_app, _context, index| {
+                                    let option = options[index as usize].clone();
+                                    let on_selected = Rc::clone(&on_selected);
+                                    let tapped = option.clone();
+                                    Some(
+                                        GestureDetector::new()
+                                            .on_tap(Listener::new(move |app| {
+                                                on_selected(app, tapped.clone())
+                                            }))
+                                            .child(Focus::new(Text::new(option)))
+                                            .into_widget(),
+                                    )
+                                })
+                                .item_count(count)
+                                .build()
+                                .shrink_wrap(true)
+                                .into_widget()
+                            },
+                            string_options,
+                        )
+                        .field_view_builder(
+                            |_app, _context, controller, focus_node, _on_submitted| {
+                                TestTextField::new()
+                                    .controller(controller)
+                                    .focus_node(focus_node)
+                                    .into_widget()
+                            },
+                        )
                         .into_widget(),
-                ]),
-            ));
+                        ExcludeFocus::new(TestTextField::new()).into_widget(),
+                        TestTextField::new()
+                            .focus_node(target_focus.erase())
+                            .into_widget(),
+                    ]),
+                ),
+            );
 
             // Focus the autocomplete field by tapping it, then TAB.
             tester.tap(find::by_type::<TestTextField>().first());

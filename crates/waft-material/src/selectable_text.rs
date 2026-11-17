@@ -1183,9 +1183,9 @@ mod tests {
     use std::time::Duration;
 
     use waft_cupertino::{CupertinoButton, cupertino_text_selection_controls};
-    use waft_embedder::{KeyData, KeyEventDeviceType, KeyEventType, TextAffinity};
+    use waft_embedder::TextAffinity;
     use waft_rendering::{RenderBox as _, RenderEditable};
-    use waft_services::{KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey};
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_test::{MockClipboard, TestPlatform};
     use waft_widgets::{
         AnyElement, AnyTextEditingController, Center, Column, DefaultTextStyle, Focus,
@@ -1325,26 +1325,6 @@ mod tests {
         selection_overlay(tester).toolbar_is_visible(&tester.cell.borrow())
     }
 
-    fn key(tester: &mut WidgetTester, event_type: KeyEventType, logical: LogicalKeyboardKey) {
-        let physical = physical_of(logical);
-        let mut app = tester.cell.borrow_mut();
-        KeyEventManager::instance(&mut app).handle_key_data(
-            &mut app,
-            KeyData {
-                time_stamp: Duration::ZERO,
-                event_type,
-                device_type: KeyEventDeviceType::Keyboard,
-                physical: physical.usb_hid_usage,
-                logical: logical.key_id,
-                character: None,
-                synthesized: false,
-            },
-        );
-        app.drain_microtasks();
-        drop(app);
-        tester.cell.checkpoint();
-    }
-
     fn physical_of(logical: LogicalKeyboardKey) -> PhysicalKeyboardKey {
         [
             (
@@ -1378,22 +1358,6 @@ mod tests {
         .into_iter()
         .find_map(|(l, p)| (l == logical).then_some(p))
         .expect("a key the cases press")
-    }
-
-    /// Dart's `tester.sendKeyDownEvent(key)`.
-    fn key_down(tester: &mut WidgetTester, logical: LogicalKeyboardKey) {
-        key(tester, KeyEventType::Down, logical);
-    }
-
-    /// Dart's `tester.sendKeyUpEvent(key)`.
-    fn key_up(tester: &mut WidgetTester, logical: LogicalKeyboardKey) {
-        key(tester, KeyEventType::Up, logical);
-    }
-
-    /// Dart's `tester.sendKeyEvent(key)`.
-    fn key_press(tester: &mut WidgetTester, logical: LogicalKeyboardKey) {
-        key_down(tester, logical);
-        key_up(tester, logical);
     }
 
     /// Dart's `expectMaterialSelectionToolbar()`.
@@ -2097,8 +2061,14 @@ mod tests {
         test_widgets(|tester| {
             setup_keyboard_widget(tester, "a big house");
 
-            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(tester, LogicalKeyboardKey::ARROW_LEFT);
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::ARROW_LEFT),
+                LogicalKeyboardKey::ARROW_LEFT,
+            );
             assert_eq!(selection_delta(tester), -1);
         });
     }
@@ -2114,8 +2084,14 @@ mod tests {
             );
             tester.pump();
 
-            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(tester, LogicalKeyboardKey::ARROW_RIGHT);
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::ARROW_RIGHT),
+                LogicalKeyboardKey::ARROW_RIGHT,
+            );
             tester.pump_and_settle();
             assert_eq!(selection_delta(tester), 1);
         });
@@ -2126,9 +2102,18 @@ mod tests {
         test_widgets(|tester| {
             setup_keyboard_widget(tester, "their big house");
 
-            key_down(tester, LogicalKeyboardKey::CONTROL_LEFT);
-            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(tester, LogicalKeyboardKey::ARROW_LEFT);
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::CONTROL_LEFT),
+                LogicalKeyboardKey::CONTROL_LEFT,
+            );
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::ARROW_LEFT),
+                LogicalKeyboardKey::ARROW_LEFT,
+            );
             tester.pump_and_settle();
 
             assert_eq!(selection_delta(tester), -5);
@@ -2140,16 +2125,34 @@ mod tests {
         test_widgets(|tester| {
             setup_keyboard_widget(tester, "a big house");
 
-            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(tester, LogicalKeyboardKey::ARROW_UP);
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::ARROW_UP),
+                LogicalKeyboardKey::ARROW_UP,
+            );
             tester.pump_and_settle();
 
             assert_eq!(selection_delta(tester), -11);
 
-            key_up(tester, LogicalKeyboardKey::ARROW_UP);
-            key_up(tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(tester, LogicalKeyboardKey::ARROW_DOWN);
+            tester.send_key_up_event(
+                physical_of(LogicalKeyboardKey::ARROW_UP),
+                LogicalKeyboardKey::ARROW_UP,
+            );
+            tester.send_key_up_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::ARROW_DOWN),
+                LogicalKeyboardKey::ARROW_DOWN,
+            );
             tester.pump_and_settle();
 
             assert_eq!(selection_delta(tester), 0);
@@ -2177,18 +2180,39 @@ mod tests {
             tester.pump();
 
             // Select the first 5 characters.
-            key_down(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
             for _ in 0..5 {
-                key_press(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+                tester.send_key_event(
+                    physical_of(LogicalKeyboardKey::ARROW_RIGHT),
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
                 tester.pump_and_settle();
             }
-            key_up(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
+            tester.send_key_up_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
 
             // Copy them.
-            key_down(&mut tester, LogicalKeyboardKey::CONTROL_RIGHT);
-            key_down(&mut tester, LogicalKeyboardKey::KEY_C);
-            key_up(&mut tester, LogicalKeyboardKey::KEY_C);
-            key_up(&mut tester, LogicalKeyboardKey::CONTROL_RIGHT);
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::CONTROL_RIGHT),
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::KEY_C),
+                LogicalKeyboardKey::KEY_C,
+            );
+            tester.send_key_up_event(
+                physical_of(LogicalKeyboardKey::KEY_C),
+                LogicalKeyboardKey::KEY_C,
+            );
+            tester.send_key_up_event(
+                physical_of(LogicalKeyboardKey::CONTROL_RIGHT),
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
             tester.pump_and_settle();
 
             assert_eq!(clipboard.clipboard_data().as_deref(), Some("a big"));
@@ -2206,9 +2230,18 @@ mod tests {
             tester.pump_and_settle();
 
             // Select All.
-            key_down(tester, LogicalKeyboardKey::CONTROL_LEFT);
-            key_press(tester, LogicalKeyboardKey::KEY_A);
-            key_up(tester, LogicalKeyboardKey::CONTROL_LEFT);
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::CONTROL_LEFT),
+                LogicalKeyboardKey::CONTROL_LEFT,
+            );
+            tester.send_key_event(
+                physical_of(LogicalKeyboardKey::KEY_A),
+                LogicalKeyboardKey::KEY_A,
+            );
+            tester.send_key_up_event(
+                physical_of(LogicalKeyboardKey::CONTROL_LEFT),
+                LogicalKeyboardKey::CONTROL_LEFT,
+            );
             tester.pump_and_settle();
 
             assert_eq!(selection(tester).base_offset, 0);
@@ -2246,9 +2279,15 @@ mod tests {
             tester.pump();
 
             // Select the first 5 characters.
-            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
+            tester.send_key_down_event(
+                physical_of(LogicalKeyboardKey::SHIFT_LEFT),
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
             for i in 0..5 {
-                key_press(tester, LogicalKeyboardKey::ARROW_RIGHT);
+                tester.send_key_event(
+                    physical_of(LogicalKeyboardKey::ARROW_RIGHT),
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
                 tester.pump_and_settle();
                 let selection = new_selection.borrow_mut().take().expect("a key selects");
                 assert_eq!(selection.base_offset, 0);
