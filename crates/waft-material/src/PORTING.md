@@ -53,6 +53,8 @@ Ported against: 34b89b2086d4
 - generated/divider_defaults_m3.rs → generated/divider_defaults_m3.g.dart
 - divider_theme.rs → divider_theme.dart
 - drawer_header.rs → drawer_header.dart
+- grid_tile.rs → grid_tile.dart
+- grid_tile_bar.rs → grid_tile_bar.dart
 - drawer.rs → drawer.dart
 - generated/drawer_defaults_m3.rs → generated/drawer_defaults_m3.g.dart
 - generated/navigation_drawer_defaults_m3.rs → generated/navigation_drawer_defaults_m3.g.dart
