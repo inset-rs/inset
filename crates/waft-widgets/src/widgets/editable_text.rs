@@ -42,9 +42,9 @@ use waft_services::{
     Clipboard, ClipboardData, DefaultProcessTextService, DocumentBoundary,
     FilteringTextInputFormatter, KeyboardInsertedContent, LiveText, MouseCursorRef,
     ParagraphBoundary, ProcessTextAction, ProcessTextService, SelectionChangedCause, SelectionRect,
-    SpellCheckResults, SuggestionSpan, TextBoundary, TextEditingValue, TextInput, TextInputClient,
-    TextInputConnection, TextInputFormatter, TextInputFormatterRef, TextInputStyle,
-    TextSelectionDelegate,
+    SpellCheckResults, SuggestionSpan, SystemMouseCursors, TextBoundary, TextEditingValue,
+    TextInput, TextInputClient, TextInputConnection, TextInputFormatter, TextInputFormatterRef,
+    TextInputStyle, TextSelectionDelegate,
 };
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
@@ -65,7 +65,7 @@ use crate::widgets::automatic_keep_alive::{
 };
 use crate::widgets::basic::CompositedTransformTarget;
 use crate::widgets::basic::WidgetBuilder;
-use crate::widgets::basic::{Builder, Directionality};
+use crate::widgets::basic::{Builder, Directionality, MouseRegion};
 use crate::widgets::constants::K_MIN_INTERACTIVE_DIMENSION;
 use crate::widgets::context_menu_button_item::{ContextMenuButtonItem, ContextMenuButtonType};
 use crate::widgets::default_text_editing_shortcuts::intent_for_macos_selector;
@@ -5452,7 +5452,15 @@ impl State for EditableTextState {
         if let Some(undo_controller) = undo_controller {
             history = history.controller(undo_controller);
         }
-        let focused = history.into_widget();
+        let cursor = self
+            .widget(app)
+            .mouse_cursor
+            .clone()
+            .unwrap_or_else(|| SystemMouseCursors::TEXT.into());
+        let focused = MouseRegion::new()
+            .cursor(cursor)
+            .child(history.into_widget())
+            .into_widget();
         let actions = self.ensure_actions(app, context);
         let has_focus = self.has_focus(app);
         let group_id = self.widget(app).group_id;

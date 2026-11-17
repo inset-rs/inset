@@ -1917,6 +1917,14 @@ impl State for TextFieldState {
             }
         }
 
+        let effective_mouse_cursor = <dyn WidgetStateProperty<MouseCursorRef>>::resolve_as(
+            &self
+                .widget(app)
+                .mouse_cursor
+                .clone()
+                .unwrap_or_else(|| WidgetStateMouseCursor::textable().into()),
+            &states,
+        );
         let widget = self.widget(app);
         let mut editable = EditableText::new(
             controller.clone(),
@@ -1926,6 +1934,7 @@ impl State for TextFieldState {
             CupertinoColors::INACTIVE_GRAY.color(),
         )
         .key(app.get(self).editable_text_key.clone().into())
+        .mouse_cursor(effective_mouse_cursor.clone())
         .read_only(widget.read_only || !self.is_enabled(app))
         .show_selection_handles(app.get(self).show_selection_handles)
         .keyboard_type(widget.effective_keyboard_type())
@@ -2092,15 +2101,6 @@ impl State for TextFieldState {
             .child(child)
             .into_widget();
         }
-        let effective_mouse_cursor = <dyn WidgetStateProperty<MouseCursorRef>>::resolve_as(
-            &self
-                .widget(app)
-                .mouse_cursor
-                .clone()
-                .unwrap_or_else(|| WidgetStateMouseCursor::textable().into()),
-            &states,
-        );
-
         let max_length = self.widget(app).max_length;
         let semantics_max_value_length = match max_length {
             Some(max_length)
@@ -2327,19 +2327,23 @@ fn m3_counter_error_style(app: &mut App, context: BuildContext) -> TextStyle {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{TextAffinity, TextRange};
+    use waft_embedder::{TextAffinity, TextPosition, TextRange};
     use waft_painting::TextSpan;
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{SystemMouseCursors, TextInputClient, TextInputFormatterRef};
     use waft_widgets::{
-        AnyElement, Builder, Center, Column, FocusScope, IntoWidget, MediaQueryData, Opacity,
-        SizedBox, Text, TextEditingController, WidgetStates,
+        AnyElement, AnyFocusNode, Builder, Center, Column, FocusScope, IntoWidget, MediaQueryData,
+        Opacity, Overlay, OverlayEntry, SizedBox, Text, TextEditingController, WidgetStates,
     };
 
-    use waft_rendering::testing::{PaintCall, paints};
+    use waft_rendering::testing::{
+        CanvasMethod, PaintCall, assert_more_or_less_equals_within, count_calls, painted_ops,
+        paints,
+    };
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::testing::{
         TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
         finds_one_widget, test_widgets, test_widgets_variant,
@@ -2349,17 +2353,25 @@ mod tests {
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
     use crate::constants::K_MIN_INTERACTIVE_DIMENSION;
+    use crate::icon_button::IconButton;
     use crate::icons::Icons;
     use crate::input_border::OutlineInputBorder;
     use crate::input_decorator::InputDecorationThemeData;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
     use crate::test_support::{PaintInspection, material_app};
+    use crate::text_form_field::TextFormField;
     use crate::text_selection::material_text_selection_controls;
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;
+    use crate::typography::Typography;
 
-    use waft_widgets::{FocusNodeLeaf, TextEditingControllerLeaf};
+    use waft_foundation::UniqueKey;
+    use waft_test::{MockClipboard, TestPlatform};
+    use waft_widgets::{
+        Container, IntrinsicHeight, MainAxisAlignment, MainAxisSize, Row, TickerMode,
+    };
+    use waft_widgets::{FocusNodeLeaf, ScrollControllerLeaf, TextEditingControllerLeaf};
 
     const ALL_PLATFORMS: [TargetPlatform; 6] = [
         TargetPlatform::Android,
@@ -2379,6 +2391,10 @@ mod tests {
         TargetPlatform::Fuchsia,
         TargetPlatform::IOS,
     ];
+
+    const K_THREE_LINES: &str =
+        "First line of text is\nSecond line goes until\nThird line of stuff";
+    const K_MORE_THAN_FOUR_LINES: &str = "First line of text is\nSecond line goes until\nThird line of stuff\nFourth line won't display and ends at";
 
     /// A tester on `platform` with flutter_test's fonts, so a `Text` measures as in Flutter's
     /// tests.
@@ -2402,11 +2418,28 @@ mod tests {
         )
     }
 
-    /// Dart's `overlay(child:)`: the child centred on a `Material` under an `Overlay`, which
-    /// here is the `MaterialApp`'s; its theme is the default one, as Dart's `Theme.of` falls
-    /// back to.
+    /// Dart's `overlay(child:)`: the child centred on a `Material` in an entry of a bare
+    /// `Overlay`, which gives the entry loose constraints, as Flutter's does.
     fn overlay<K>(tester: &WidgetTester, child: impl IntoWidget<K>) -> WidgetRef {
-        boilerplate(tester, child)
+        let child = child.into_widget();
+        let entry = {
+            let mut app = tester.cell.borrow_mut();
+            OverlayEntry::new(
+                &mut app,
+                Rc::new(move |_app, _context| {
+                    Center::new()
+                        .child(Material::new().child(child.clone()))
+                        .into_widget()
+                }),
+                false,
+                false,
+                false,
+            )
+        };
+        material_app(
+            theme(tester),
+            Overlay::new().initial_entries([entry]).into_widget(),
+        )
     }
 
     /// Dart's `MaterialApp(theme: theme, home: Material(child: child))`.
@@ -5433,6 +5466,3147 @@ mod tests {
                 };
                 assert_eq!(selection_color, Some(expected), "{platform:?}");
             }
+        });
+    }
+
+    #[test]
+    fn text_field_has_consistent_size() {
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            let value = Rc::new(RefCell::new(None::<String>));
+            let seen = Rc::clone(&value);
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .key(key.clone())
+                    .decoration(Some(InputDecoration::new().hint_text("Placeholder")))
+                    .on_changed(move |_app, text| *seen.borrow_mut() = Some(text)),
+            );
+            tester.pump_widget(root);
+            let empty_size = tester.get_size(find::by_key(key.clone()));
+
+            let check_text = |tester: &mut WidgetTester, text: &str| {
+                assert_eq!(*value.borrow(), None, "before {text:?}");
+                tester.enter_text(find::by_type::<TextField>(), text);
+                assert_eq!(*value.borrow(), Some(text.to_owned()));
+                *value.borrow_mut() = None;
+                skip_past_scrolling_animation(tester);
+                assert_eq!(tester.get_size(find::by_key(key.clone())), empty_size);
+            };
+            check_text(tester, " ");
+            check_text(tester, "Test");
+        });
+    }
+
+    #[test]
+    fn render_editable_sets_correct_text_editing_value() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "how are you");
+            let icon = UniqueKey::new();
+            let key: KeyRef = icon.into();
+            let clearing = controller.clone();
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .controller(controller.erase())
+                    .decoration(Some(
+                        InputDecoration::new().suffix_icon(
+                            IconButton::new(
+                                Some(Listener::new(move |app| clearing.handle().clear(app))),
+                                waft_widgets::Icon::new(Some(Icons::cancel())),
+                            )
+                            .key(key.clone()),
+                        ),
+                    )),
+            );
+            tester.pump_widget(root);
+            tester.tap(find::by_key(key.clone()));
+            tester.pump();
+            assert_eq!(text(tester, controller.handle()), "");
+            assert_eq!(
+                selection(tester, controller.handle()),
+                TextSelection::collapsed(0, TextAffinity::Downstream)
+            );
+        });
+    }
+
+    #[test]
+    fn overflowing_a_line_with_spaces_stops_the_cursor_at_the_end() {
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            let controller = controller_with(tester, "");
+            let root = overlay(
+                tester,
+                Theme::new(
+                    m2_theme(tester),
+                    TextField::new()
+                        .key(key.clone())
+                        .controller(controller.erase())
+                        .max_lines(None),
+                ),
+            );
+            tester.pump_widget(root);
+            assert_eq!(selection(tester, controller.handle()).base_offset, -1);
+            assert_eq!(selection(tester, controller.handle()).extent_offset, -1);
+
+            let one_line = "enough text to be exactly at the end of the line.";
+            tester.enter_text(find::by_type::<TextField>(), one_line);
+            skip_past_scrolling_animation(tester);
+            let one_line_size = tester.get_size(find::by_key(key.clone()));
+
+            tester.tap_at(text_offset_to_position(tester, one_line.len() as i32), 1);
+            tester.pump();
+
+            let two_lines = "enough text to overflow the first line and go to the second";
+            tester.enter_text(find::by_type::<TextField>(), two_lines);
+            skip_past_scrolling_animation(tester);
+            assert!(tester.get_size(find::by_key(key.clone())).height() > one_line_size.height());
+            let two_line_size = tester.get_size(find::by_key(key.clone()));
+
+            let spaces = format!("{one_line}          ");
+            assert_eq!(spaces.len(), two_lines.len());
+            tester.enter_text(find::by_type::<TextField>(), &spaces);
+            skip_past_scrolling_animation(tester);
+            assert_eq!(
+                tester.get_size(find::by_key(key.clone())).height(),
+                one_line_size.height()
+            );
+
+            let spaces_overflow = format!("{one_line}         a");
+            assert_eq!(spaces_overflow.len(), two_lines.len());
+            tester.enter_text(find::by_type::<TextField>(), &spaces_overflow);
+            skip_past_scrolling_animation(tester);
+            assert_eq!(
+                tester.get_size(find::by_key(key.clone())).height(),
+                two_line_size.height()
+            );
+
+            tester.enter_text(find::by_type::<TextField>(), &spaces);
+            skip_past_scrolling_animation(tester);
+            tester.tap_at(text_offset_to_position(tester, spaces.len() as i32), 1);
+            tester.pump();
+
+            let render = render_editable(tester);
+            let width = {
+                let app = tester.cell.borrow();
+                render.size(&app).width()
+            };
+            let caret = {
+                let mut app = tester.cell.borrow_mut();
+                render
+                    .get_local_rect_for_caret(&mut app, TextPosition::new(spaces.len() as i32))
+                    .bottom_right()
+            };
+            assert_eq!(caret.dx(), width - 1.0);
+        });
+    }
+
+    #[test]
+    fn overflowing_a_line_with_spaces_stops_the_cursor_at_the_end_rtl_direction() {
+        test_widgets(|tester| {
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .text_direction(TextDirection::Rtl)
+                    .max_lines(None),
+            );
+            tester.pump_widget(root);
+
+            let one_line = "enough text to be exactly at the end of the line.";
+            let spaces = format!("{one_line}          ");
+            tester.enter_text(find::by_type::<TextField>(), &spaces);
+            skip_past_scrolling_animation(tester);
+            tester.tap_at(text_offset_to_position(tester, spaces.len() as i32), 1);
+            tester.pump();
+
+            let render = render_editable(tester);
+            let caret = {
+                let mut app = tester.cell.borrow_mut();
+                render
+                    .get_local_rect_for_caret(&mut app, TextPosition::new(spaces.len() as i32))
+                    .top_left()
+            };
+            assert!(caret.dx() >= 0.0);
+        });
+    }
+
+    /// Dart's `textFieldBuilder`: a 34pt field whose height follows `maxLines` and `minLines`.
+    fn text_field_with_lines(
+        tester: &WidgetTester,
+        key: &KeyRef,
+        max_lines: Option<i32>,
+        min_lines: Option<i32>,
+    ) -> WidgetRef {
+        let mut field = TextField::new()
+            .key(key.clone())
+            .style(TextStyle::new().color(Colors::BLACK).font_size(34.0))
+            .max_lines(max_lines)
+            .decoration(Some(InputDecoration::new().hint_text("Placeholder")));
+        if let Some(min_lines) = min_lines {
+            field = field.min_lines(min_lines);
+        }
+        boilerplate(tester, field)
+    }
+
+    #[test]
+    fn text_field_height_with_min_lines_unset() {
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(1), None));
+            let empty_size = tester.get_size(find::by_key(key.clone()));
+
+            tester.enter_text(find::by_type::<TextField>(), "No wrapping here.");
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(1), None));
+            assert_eq!(tester.get_size(find::by_key(key.clone())), empty_size);
+
+            // Even entering multiline text wakes no room on a single-line field.
+            tester.enter_text(find::by_type::<TextField>(), K_THREE_LINES);
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(1), None));
+            assert_eq!(tester.get_size(find::by_key(key.clone())), empty_size);
+
+            // maxLines: 3 makes the field three lines tall.
+            tester.enter_text(find::by_type::<TextField>(), "");
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(3), None));
+            let three_line = tester.get_size(find::by_key(key.clone()));
+            assert!(three_line.height() > empty_size.height());
+            assert_eq!(three_line.width(), empty_size.width());
+
+            // Filling three lines stays the same size.
+            tester.enter_text(find::by_type::<TextField>(), K_THREE_LINES);
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(3), None));
+            assert_eq!(tester.get_size(find::by_key(key.clone())), three_line);
+
+            // An extra line does not grow past the max.
+            tester.enter_text(find::by_type::<TextField>(), K_MORE_THAN_FOUR_LINES);
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(3), None));
+            assert_eq!(tester.get_size(find::by_key(key.clone())), three_line);
+
+            // maxLines: 4 is taller than three.
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(4), None));
+            let four_line = tester.get_size(find::by_key(key.clone()));
+            assert!(four_line.height() > three_line.height());
+            assert_eq!(four_line.width(), three_line.width());
+
+            // With no max, an empty field is one line and grows with the text.
+            tester.enter_text(find::by_type::<TextField>(), "");
+            tester.pump_widget(text_field_with_lines(tester, &key, None, None));
+            assert_eq!(tester.get_size(find::by_key(key.clone())), empty_size);
+            tester.enter_text(find::by_type::<TextField>(), K_THREE_LINES);
+            tester.pump();
+            assert_eq!(tester.get_size(find::by_key(key.clone())), three_line);
+            tester.enter_text(find::by_type::<TextField>(), K_MORE_THAN_FOUR_LINES);
+            tester.pump();
+            assert!(tester.get_size(find::by_key(key.clone())).height() > four_line.height());
+            assert_eq!(
+                tester.get_size(find::by_key(key.clone())).width(),
+                four_line.width()
+            );
+        });
+    }
+
+    #[test]
+    fn text_field_height_with_min_lines_and_max_lines() {
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(1), None));
+            let empty_size = tester.get_size(find::by_key(key.clone()));
+
+            tester.enter_text(find::by_type::<TextField>(), "No wrapping here.");
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(1), None));
+            assert_eq!(tester.get_size(find::by_key(key.clone())), empty_size);
+
+            // min and max the same locks the height.
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(3), Some(3)));
+            let three_line = tester.get_size(find::by_key(key.clone()));
+            assert!(three_line.height() > empty_size.height());
+            assert_eq!(three_line.width(), empty_size.width());
+
+            // A null max grows past the min.
+            tester.pump_widget(text_field_with_lines(tester, &key, None, Some(3)));
+            assert_eq!(tester.get_size(find::by_key(key.clone())), three_line);
+            tester.enter_text(find::by_type::<TextField>(), K_MORE_THAN_FOUR_LINES);
+            tester.pump();
+            assert!(tester.get_size(find::by_key(key.clone())).height() > three_line.height());
+            assert_eq!(
+                tester.get_size(find::by_key(key.clone())).width(),
+                three_line.width()
+            );
+
+            // min and max expand through the range.
+            tester.enter_text(find::by_type::<TextField>(), "");
+            tester.pump_widget(text_field_with_lines(tester, &key, Some(4), Some(3)));
+            assert_eq!(tester.get_size(find::by_key(key.clone())), three_line);
+            tester.enter_text(find::by_type::<TextField>(), K_MORE_THAN_FOUR_LINES);
+            tester.pump();
+            assert!(tester.get_size(find::by_key(key.clone())).height() > three_line.height());
+            assert_eq!(
+                tester.get_size(find::by_key(key.clone())).width(),
+                three_line.width()
+            );
+
+            // minLines can't be greater than maxLines, and maxLines can't be the default 1.
+            for (max_lines, min_lines) in [(Some(2), Some(3)), (Some(1), Some(3))] {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    tester.pump_widget(text_field_with_lines(tester, &key, max_lines, min_lines));
+                }));
+                assert!(result.is_err(), "{max_lines:?} and {min_lines:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn multiline_text_when_wrapped_in_expanded() {
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            let builder = |tester: &WidgetTester,
+                           max_lines: Option<i32>,
+                           min_lines: Option<i32>,
+                           expands: bool| {
+                let mut field = TextField::new()
+                    .key(key.clone())
+                    .style(TextStyle::new().color(Colors::BLACK).font_size(34.0))
+                    .max_lines(max_lines)
+                    .expands(expands)
+                    .decoration(Some(InputDecoration::new().hint_text("Placeholder")));
+                if let Some(min_lines) = min_lines {
+                    field = field.min_lines(min_lines);
+                }
+                boilerplate(
+                    tester,
+                    Column::new().children([waft_widgets::Expanded::new(field).into_widget()]),
+                )
+            };
+            let border = || {
+                find::descendant(
+                    find::by_type::<crate::input_decorator::InputDecorator>(),
+                    find::by_type::<waft_widgets::CustomPaint>(),
+                )
+                .first()
+            };
+            tester.pump_widget(builder(tester, Some(1), None, false));
+            let unexpanded = tester.get_size(border());
+
+            tester.pump_widget(builder(tester, None, None, true));
+            let expanded = tester.get_size(border());
+            assert!(expanded.height() > unexpanded.height());
+            assert_eq!(expanded.width(), unexpanded.width());
+
+            for (max_lines, min_lines) in [(Some(4), None), (None, Some(1))] {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    tester.pump_widget(builder(tester, max_lines, min_lines, true));
+                }));
+                assert!(result.is_err(), "{max_lines:?} and {min_lines:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn multiline_text_when_wrapped_in_intrinsic_height() {
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            let intrinsic_key: KeyRef = UniqueKey::new().into();
+            let builder = |tester: &WidgetTester, wrap: bool| {
+                let field = TextFormField::new()
+                    .key(key.clone())
+                    .style(TextStyle::new().color(Colors::BLACK).font_size(34.0))
+                    .max_lines(None)
+                    .decoration(Some(InputDecoration::new().counter_text("I am counter")));
+                let widget = if wrap {
+                    IntrinsicHeight::new()
+                        .child(field)
+                        .key(intrinsic_key.clone())
+                        .into_widget()
+                } else {
+                    field.into_widget()
+                };
+                boilerplate(tester, Column::new().children([widget]))
+            };
+
+            tester.pump_widget(builder(tester, false));
+            assert!(
+                find::by_key(intrinsic_key.clone())
+                    .evaluate(tester)
+                    .is_empty()
+            );
+            let unwrapped = tester.get_size(find::by_type::<EditableText>());
+
+            tester.pump_widget(builder(tester, true));
+            let wrapped = tester.get_size(find::by_type::<EditableText>());
+            assert_eq!(wrapped.height(), unwrapped.height());
+            assert_eq!(wrapped.width(), unwrapped.width());
+        });
+    }
+
+    #[test]
+    fn errortext_empty_string() {
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            let builder = |tester: &WidgetTester, error_text: Option<&str>| {
+                let mut decoration = InputDecoration::new().counter_text("");
+                if let Some(error_text) = error_text {
+                    decoration = decoration.error_text(error_text);
+                }
+                boilerplate(
+                    tester,
+                    Column::new().children([TextFormField::new()
+                        .key(key.clone())
+                        .max_length(3)
+                        .max_length_enforcement(MaxLengthEnforcement::None)
+                        .decoration(Some(decoration))
+                        .into_widget()]),
+                )
+            };
+            tester.pump_widget(builder(tester, None));
+            let null_size = tester.get_size(find::by_key(key.clone()));
+
+            tester.pump_widget(builder(tester, Some("im errorText")));
+            let error_size = tester.get_size(find::by_key(key.clone()));
+            assert!(error_size.height() > null_size.height());
+            assert_eq!(error_size.width(), null_size.width());
+
+            // An empty error text still makes room for the line, though it shows nothing.
+            tester.pump_widget(builder(tester, Some("")));
+            assert_eq!(
+                tester.get_size(find::by_key(key.clone())).height(),
+                error_size.height()
+            );
+            assert_eq!(
+                tester.get_size(find::by_key(key.clone())).width(),
+                null_size.width()
+            );
+        });
+    }
+
+    #[test]
+    fn growable_text_field_when_content_height_exceeds_parent() {
+        test_widgets(|tester| {
+            const HEIGHT: f64 = 200.0;
+            const PADDING: f64 = 24.0;
+            let key: KeyRef = UniqueKey::new().into();
+            let theme = m2_theme(tester);
+            let builder = |tester: &WidgetTester, decoration: InputDecoration| {
+                boilerplate(
+                    tester,
+                    Theme::new(
+                        theme.clone(),
+                        SizedBox::new().height(HEIGHT).child(
+                            TextField::new()
+                                .key(key.clone())
+                                .max_lines(None)
+                                .decoration(Some(decoration)),
+                        ),
+                    ),
+                )
+            };
+            tester.pump_widget(builder(tester, InputDecoration::new()));
+            let editable = find::by_type::<EditableText>();
+            tester.enter_text(find::by_type::<TextField>(), &("a\n".repeat(11)));
+            tester.pump();
+            let width = tester.get_size(editable.clone()).width();
+            assert_eq!(
+                tester.get_size(editable.clone()),
+                waft_embedder::Size::new(width, HEIGHT - PADDING)
+            );
+
+            const COUNTER_HEIGHT: f64 = 40.0;
+            const SUPPORTING_TEXT_GAP: f64 = 8.0;
+            const COUNTER_SPACE: f64 = COUNTER_HEIGHT + SUPPORTING_TEXT_GAP;
+            tester.pump_widget(builder(
+                tester,
+                InputDecoration::new().counter(Container::new().height(COUNTER_HEIGHT)),
+            ));
+            assert_eq!(
+                tester.get_size(editable.clone()),
+                waft_embedder::Size::new(width, HEIGHT - PADDING - COUNTER_SPACE)
+            );
+
+            tester.pump_widget(builder(
+                tester,
+                InputDecoration::new().helper_text("I am helperText"),
+            ));
+            assert_eq!(
+                tester.get_size(editable.clone()),
+                waft_embedder::Size::new(width, HEIGHT - PADDING - 12.0 - SUPPORTING_TEXT_GAP)
+            );
+
+            tester.pump_widget(builder(
+                tester,
+                InputDecoration::new()
+                    .counter(Container::new().height(COUNTER_HEIGHT))
+                    .helper_text("I am helperText"),
+            ));
+            assert_eq!(
+                tester.get_size(editable.clone()),
+                waft_embedder::Size::new(width, HEIGHT - PADDING - COUNTER_SPACE)
+            );
+
+            tester.pump_widget(builder(
+                tester,
+                InputDecoration::new().label_text("I am labelText"),
+            ));
+            assert_eq!(
+                tester.get_size(editable.clone()),
+                waft_embedder::Size::new(width, HEIGHT - PADDING - 16.0)
+            );
+
+            tester.pump_widget(builder(
+                tester,
+                InputDecoration::new()
+                    .counter(Container::new().height(COUNTER_HEIGHT))
+                    .label_text("I am labelText"),
+            ));
+            assert_eq!(
+                tester.get_size(editable.clone()),
+                waft_embedder::Size::new(width, HEIGHT - PADDING - COUNTER_SPACE - 16.0)
+            );
+
+            tester.pump_widget(builder(
+                tester,
+                InputDecoration::new()
+                    .counter(Container::new().height(COUNTER_HEIGHT))
+                    .label_text("I am labelText")
+                    .prefix(SizedBox::new().width(10.0).height(60.0)),
+            ));
+            assert_eq!(
+                tester.get_size(editable.clone()).height(),
+                HEIGHT - PADDING - 16.0 - COUNTER_SPACE
+            );
+        });
+    }
+
+    #[test]
+    fn multiline_hint_text_will_wrap_up_to_max_lines() {
+        test_widgets(|tester| {
+            let key: KeyRef = UniqueKey::new().into();
+            let builder = |tester: &WidgetTester, max_lines: Option<i32>, hint: &str| {
+                boilerplate(
+                    tester,
+                    TextField::new()
+                        .key(key.clone())
+                        .style(TextStyle::new().color(Colors::BLACK).font_size(34.0))
+                        .max_lines(max_lines)
+                        .decoration(Some(InputDecoration::new().hint_text(hint))),
+                )
+            };
+            let placeholder = "Placeholder";
+            tester.pump_widget(builder(tester, None, placeholder));
+            let one_line = tester.get_size(find::text(placeholder));
+
+            tester.pump_widget(builder(tester, None, placeholder));
+            assert_eq!(tester.get_size(find::text(placeholder)), one_line);
+
+            let multiple = "Here's a text, which is more than one line, to demonstrate the multiple line hint text";
+            tester.pump_widget(builder(tester, Some(3), multiple));
+            let max_lines = tester.widget::<Text, _>(find::text(multiple), |text| text.max_lines);
+            assert_eq!(max_lines, Some(3));
+            assert!(tester.get_size(find::text(multiple)).width() >= one_line.width());
+            assert!(tester.get_size(find::text(multiple)).height() >= one_line.height());
+        });
+    }
+
+    #[test]
+    fn text_field_smoke_test() {
+        test_widgets(|tester| {
+            let value = Rc::new(RefCell::new(None::<String>));
+            let seen = Rc::clone(&value);
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .decoration(None)
+                    .on_changed(move |_app, text| *seen.borrow_mut() = Some(text)),
+            );
+            tester.pump_widget(root);
+
+            tester.enter_text(find::by_type::<TextField>(), "Hello World");
+            assert_eq!(*value.borrow(), Some("Hello World".to_owned()));
+        });
+    }
+
+    #[test]
+    fn text_field_with_global_key() {
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let value = Rc::new(RefCell::new(None::<String>));
+            let seen = Rc::clone(&value);
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .key(key.clone().into())
+                    .decoration(Some(InputDecoration::new().hint_text("Placeholder")))
+                    .on_changed(move |_app, text| *seen.borrow_mut() = Some(text)),
+            );
+            tester.pump_widget(root);
+
+            tester.enter_text(find::by_global_key(&key), "Hello World");
+            assert_eq!(*value.borrow(), Some("Hello World".to_owned()));
+        });
+    }
+
+    #[test]
+    fn text_field_with_default_helper_style() {
+        test_widgets(|tester| {
+            let theme_data = ThemeData::builder()
+                .use_material3(false)
+                .hint_color(Colors::BLUE.shade500())
+                .build(&tester.cell.borrow());
+            let expected_size = Typography::english_like2014()
+                .body_small
+                .as_ref()
+                .and_then(|style| style.font_size);
+            let root = overlay(
+                tester,
+                Theme::new(
+                    theme_data.clone(),
+                    TextField::new()
+                        .decoration(Some(InputDecoration::new().helper_text("helper text"))),
+                ),
+            );
+            tester.pump_widget(root);
+            let (color, font_size) = tester.widget::<Text, _>(find::text("helper text"), |text| {
+                let style = text.style.as_ref().expect("the helper has a style");
+                (
+                    style.color.as_ref().map(|color| color.color()),
+                    style.font_size,
+                )
+            });
+            assert_eq!(color, Some(theme_data.hint_color));
+            assert_eq!(font_size, expected_size);
+        });
+    }
+
+    #[test]
+    fn text_field_with_specified_helper_style() {
+        test_widgets(|tester| {
+            let style = TextStyle::new()
+                .inherit(false)
+                .color(Colors::PINK.shade500())
+                .font_size(10.0);
+            let root = overlay(
+                tester,
+                TextField::new().decoration(Some(
+                    InputDecoration::new()
+                        .helper_text("helper text")
+                        .helper_style(style.clone()),
+                )),
+            );
+            tester.pump_widget(root);
+            let actual =
+                tester.widget::<Text, _>(find::text("helper text"), |text| text.style.clone());
+            assert_eq!(actual, Some(style));
+        });
+    }
+
+    #[test]
+    fn text_field_with_default_hint_style() {
+        test_widgets(|tester| {
+            let style = TextStyle::new()
+                .color(Colors::PINK.shade500())
+                .font_size(10.0);
+            let theme_data = theme(tester);
+            let expected_color = theme_data.color_scheme.on_surface_variant();
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .style(style.clone())
+                    .decoration(Some(InputDecoration::new().hint_text("Placeholder"))),
+            );
+            tester.pump_widget(root);
+            let (color, font_size) = tester.widget::<Text, _>(find::text("Placeholder"), |text| {
+                let style = text.style.as_ref().expect("the hint has a style");
+                (
+                    style.color.as_ref().map(|color| color.color()),
+                    style.font_size,
+                )
+            });
+            assert_eq!(color, Some(expected_color));
+            assert_eq!(font_size, style.font_size);
+        });
+    }
+
+    #[test]
+    fn material2_text_field_with_default_hint_style() {
+        test_widgets(|tester| {
+            let style = TextStyle::new()
+                .color(Colors::PINK.shade500())
+                .font_size(10.0);
+            let theme_data = ThemeData::builder()
+                .use_material3(false)
+                .hint_color(Colors::BLUE.shade500())
+                .build(&tester.cell.borrow());
+            let root = overlay(
+                tester,
+                Theme::new(
+                    theme_data.clone(),
+                    TextField::new()
+                        .style(style.clone())
+                        .decoration(Some(InputDecoration::new().hint_text("Placeholder"))),
+                ),
+            );
+            tester.pump_widget(root);
+            let (color, font_size) = tester.widget::<Text, _>(find::text("Placeholder"), |text| {
+                let style = text.style.as_ref().expect("the hint has a style");
+                (
+                    style.color.as_ref().map(|color| color.color()),
+                    style.font_size,
+                )
+            });
+            assert_eq!(color, Some(theme_data.hint_color));
+            assert_eq!(font_size, style.font_size);
+        });
+    }
+
+    #[test]
+    fn text_field_with_specified_hint_style() {
+        test_widgets(|tester| {
+            let hint_style = TextStyle::new()
+                .inherit(false)
+                .color(Colors::PINK.shade500())
+                .font_size(10.0);
+            let root = overlay(
+                tester,
+                TextField::new().decoration(Some(
+                    InputDecoration::new()
+                        .hint_text("Placeholder")
+                        .hint_style(hint_style.clone()),
+                )),
+            );
+            tester.pump_widget(root);
+            let actual =
+                tester.widget::<Text, _>(find::text("Placeholder"), |text| text.style.clone());
+            assert_eq!(actual, Some(hint_style));
+        });
+    }
+
+    #[test]
+    fn text_field_with_specified_prefix_style() {
+        test_widgets(|tester| {
+            let prefix_style = TextStyle::new()
+                .inherit(false)
+                .color(Colors::PINK.shade500())
+                .font_size(10.0);
+            let root = overlay(
+                tester,
+                TextField::new().decoration(Some(
+                    InputDecoration::new()
+                        .prefix_text("Prefix:")
+                        .prefix_style(prefix_style.clone()),
+                )),
+            );
+            tester.pump_widget(root);
+            let actual = tester.widget::<Text, _>(find::text("Prefix:"), |text| text.style.clone());
+            assert_eq!(actual, Some(prefix_style));
+        });
+    }
+
+    #[test]
+    fn text_field_with_specified_suffix_style() {
+        test_widgets(|tester| {
+            let suffix_style = TextStyle::new()
+                .color(Colors::PINK.shade500())
+                .font_size(10.0);
+            let root = overlay(
+                tester,
+                TextField::new().decoration(Some(
+                    InputDecoration::new()
+                        .suffix_text(".com")
+                        .suffix_style(suffix_style.clone()),
+                )),
+            );
+            tester.pump_widget(root);
+            let actual = tester.widget::<Text, _>(find::text(".com"), |text| text.style.clone());
+            assert_eq!(actual, Some(suffix_style));
+        });
+    }
+
+    /// Dart's `getOpacity(tester, text)`: the value of the nearest `FadeTransition` above
+    /// `text`.
+    fn text_opacity(tester: &WidgetTester, text: &str) -> f64 {
+        let fade = find::ancestor(
+            find::text(text),
+            find::by_type::<waft_widgets::FadeTransition>(),
+        )
+        .first();
+        tester.widget::<waft_widgets::FadeTransition, _>(fade, |fade| {
+            fade.opacity.value(&tester.cell.borrow())
+        })
+    }
+
+    #[test]
+    fn text_field_prefix_and_suffix_appear_correctly_with_no_hint_or_label() {
+        test_widgets(|tester| {
+            let second_key: KeyRef = UniqueKey::new().into();
+            let root = overlay(
+                tester,
+                Column::new().children([
+                    TextField::new()
+                        .decoration(Some(InputDecoration::new().label_text("First")))
+                        .into_widget(),
+                    TextField::new()
+                        .key(second_key.clone())
+                        .decoration(Some(
+                            InputDecoration::new()
+                                .prefix_text("Prefix")
+                                .suffix_text("Suffix"),
+                        ))
+                        .into_widget(),
+                ]),
+            );
+            tester.pump_widget(root);
+            expect(tester, &find::text("Prefix"), finds_one_widget());
+            expect(tester, &find::text("Suffix"), finds_one_widget());
+
+            tester.tap(find::by_key(second_key.clone()));
+            tester.pump();
+            expect(tester, &find::text("Prefix"), finds_one_widget());
+            expect(tester, &find::text("Suffix"), finds_one_widget());
+
+            tester.enter_text(find::by_key(second_key), "Hi");
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            expect(tester, &find::text("Prefix"), finds_one_widget());
+            expect(tester, &find::text("Suffix"), finds_one_widget());
+        });
+    }
+
+    #[test]
+    fn text_field_prefix_and_suffix_appear_correctly_with_hint_text() {
+        test_widgets(|tester| {
+            let hint_style = TextStyle::new()
+                .inherit(false)
+                .color(Colors::PINK.shade500())
+                .font_size(10.0);
+            let second_key: KeyRef = UniqueKey::new().into();
+            let root = overlay(
+                tester,
+                Column::new().children([
+                    TextField::new()
+                        .decoration(Some(InputDecoration::new().label_text("First")))
+                        .into_widget(),
+                    TextField::new()
+                        .key(second_key.clone())
+                        .decoration(Some(
+                            InputDecoration::new()
+                                .hint_text("Hint")
+                                .hint_style(hint_style.clone())
+                                .prefix_text("Prefix")
+                                .suffix_text("Suffix"),
+                        ))
+                        .into_widget(),
+                ]),
+            );
+            tester.pump_widget(root);
+
+            assert_eq!(text_opacity(tester, "Prefix"), 0.0);
+            assert_eq!(text_opacity(tester, "Suffix"), 0.0);
+            assert_eq!(text_opacity(tester, "Hint"), 1.0);
+
+            tester.tap(find::by_key(second_key.clone()));
+            tester.pump_and_settle();
+            assert_eq!(text_opacity(tester, "Prefix"), 1.0);
+            assert_eq!(text_opacity(tester, "Suffix"), 1.0);
+            assert_eq!(text_opacity(tester, "Hint"), 1.0);
+
+            tester.enter_text(find::by_key(second_key), "Hi");
+            tester.pump_and_settle();
+            assert_eq!(text_opacity(tester, "Prefix"), 1.0);
+            assert_eq!(text_opacity(tester, "Suffix"), 1.0);
+            assert_eq!(text_opacity(tester, "Hint"), 0.0);
+
+            let prefix = tester.widget::<Text, _>(find::text("Prefix"), |text| text.style.clone());
+            assert_eq!(prefix, Some(hint_style.clone()));
+            let suffix = tester.widget::<Text, _>(find::text("Suffix"), |text| text.style.clone());
+            assert_eq!(suffix, Some(hint_style));
+        });
+    }
+
+    #[test]
+    fn text_field_prefix_and_suffix_appear_correctly_with_label_text() {
+        test_widgets(|tester| {
+            let prefix_style = TextStyle::new()
+                .color(Colors::PINK.shade500())
+                .font_size(10.0);
+            let suffix_style = TextStyle::new()
+                .color(Colors::GREEN.shade500())
+                .font_size(12.0);
+            let second_key: KeyRef = UniqueKey::new().into();
+            let root = overlay(
+                tester,
+                Column::new().children([
+                    TextField::new()
+                        .decoration(Some(InputDecoration::new().label_text("First")))
+                        .into_widget(),
+                    TextField::new()
+                        .key(second_key.clone())
+                        .decoration(Some(
+                            InputDecoration::new()
+                                .label_text("Label")
+                                .prefix_text("Prefix")
+                                .prefix_style(prefix_style.clone())
+                                .suffix_text("Suffix")
+                                .suffix_style(suffix_style.clone()),
+                        ))
+                        .into_widget(),
+                ]),
+            );
+            tester.pump_widget(root);
+
+            assert_eq!(text_opacity(tester, "Prefix"), 0.0);
+            assert_eq!(text_opacity(tester, "Suffix"), 0.0);
+            expect(tester, &find::text("Label"), finds_one_widget());
+
+            tester.tap(find::by_key(second_key.clone()));
+            tester.pump_and_settle();
+            assert_eq!(text_opacity(tester, "Prefix"), 1.0);
+            assert_eq!(text_opacity(tester, "Suffix"), 1.0);
+            expect(tester, &find::text("Label"), finds_one_widget());
+
+            tester.enter_text(find::by_key(second_key), "Hi");
+            tester.pump_and_settle();
+            assert_eq!(text_opacity(tester, "Prefix"), 1.0);
+            assert_eq!(text_opacity(tester, "Suffix"), 1.0);
+            expect(tester, &find::text("Label"), finds_one_widget());
+
+            let prefix = tester.widget::<Text, _>(find::text("Prefix"), |text| text.style.clone());
+            assert_eq!(prefix, Some(prefix_style));
+            let suffix = tester.widget::<Text, _>(find::text("Suffix"), |text| text.style.clone());
+            assert_eq!(suffix, Some(suffix_style));
+        });
+    }
+
+    #[test]
+    fn text_field_label_text_animates() {
+        test_widgets(|tester| {
+            let second_key: KeyRef = UniqueKey::new().into();
+            let root = overlay(
+                tester,
+                Column::new().children([
+                    TextField::new()
+                        .decoration(Some(InputDecoration::new().label_text("First")))
+                        .into_widget(),
+                    TextField::new()
+                        .key(second_key.clone())
+                        .decoration(Some(InputDecoration::new().label_text("Second")))
+                        .into_widget(),
+                ]),
+            );
+            tester.pump_widget(root);
+            let mut position = tester.get_top_left(find::text("Second")).dy();
+
+            tester.tap(find::by_key(second_key));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
+            let new_position = tester.get_top_left(find::text("Second")).dy();
+            assert!(new_position < position);
+
+            tester.pump_by(Duration::from_millis(50));
+            position = new_position;
+            let new_position = tester.get_top_left(find::text("Second")).dy();
+            assert!(new_position < position);
+        });
+    }
+
+    #[test]
+    fn icon_is_separated_from_input_label_by_16_12() {
+        test_widgets(|tester| {
+            let root = overlay(
+                tester,
+                TextField::new().decoration(Some(
+                    InputDecoration::new()
+                        .icon(waft_widgets::Icon::new(Some(Icons::phone())))
+                        .label_text("label")
+                        .filled(true),
+                )),
+            );
+            tester.pump_widget(root);
+            let icon_right = tester
+                .get_top_right(find::by_type::<waft_widgets::Icon>())
+                .dx();
+            assert_eq!(
+                icon_right + 16.0 + 16.0,
+                tester.get_top_left(find::text("label")).dx()
+            );
+            assert_eq!(
+                icon_right + 16.0 + 16.0,
+                tester.get_top_left(find::by_type::<EditableText>()).dx()
+            );
+        });
+    }
+
+    #[test]
+    fn controller_can_update_server() {
+        test_widgets(|tester| {
+            let controller1 = controller_with(tester, "Initial Text");
+            let controller2 = controller_with(tester, "More Text");
+            let current: Rc<RefCell<Option<TextEditingControllerRef>>> = Rc::default();
+            let set_state: Rc<RefCell<Option<waft_widgets::StateSetter>>> = Rc::default();
+            let root = overlay(tester, {
+                let current = Rc::clone(&current);
+                let set_state = Rc::clone(&set_state);
+                waft_widgets::StatefulBuilder::new(move |_app, _context, setter| {
+                    *set_state.borrow_mut() = Some(setter);
+                    let mut field = TextField::new();
+                    if let Some(controller) = current.borrow().clone() {
+                        field = field.controller(controller);
+                    }
+                    field.into_widget()
+                })
+            });
+            tester.pump_widget(root);
+            assert!(tester.test_text_input().editing_state().is_none());
+
+            tester.tap(find::by_type::<TextField>());
+            tester.pump();
+            assert_eq!(
+                tester
+                    .test_text_input()
+                    .editing_state()
+                    .expect("the field sent a state")
+                    .text,
+                ""
+            );
+
+            let setter = set_state.borrow().clone().expect("the builder ran");
+            tester.update(|app| {
+                setter(app, &mut |_app| {
+                    *current.borrow_mut() = Some(controller1.clone().erase());
+                })
+            });
+            tester.pump();
+            assert_eq!(
+                tester.test_text_input().editing_state().unwrap().text,
+                "Initial Text"
+            );
+
+            controller1
+                .handle()
+                .set_text(&mut tester.cell.borrow_mut(), "Updated Text");
+            tester.cell.checkpoint();
+            assert_eq!(
+                tester.test_text_input().editing_state().unwrap().text,
+                "Updated Text"
+            );
+
+            let setter = set_state.borrow().clone().expect("the builder ran");
+            tester.update(|app| {
+                setter(app, &mut |_app| {
+                    *current.borrow_mut() = Some(controller2.clone().erase());
+                })
+            });
+            tester.pump();
+            assert_eq!(
+                tester.test_text_input().editing_state().unwrap().text,
+                "More Text"
+            );
+
+            controller1
+                .handle()
+                .set_text(&mut tester.cell.borrow_mut(), "Ignored Text");
+            tester.cell.checkpoint();
+            assert_eq!(
+                tester.test_text_input().editing_state().unwrap().text,
+                "More Text"
+            );
+
+            controller2
+                .handle()
+                .set_text(&mut tester.cell.borrow_mut(), "Additional Text");
+            tester.cell.checkpoint();
+            assert_eq!(
+                tester.test_text_input().editing_state().unwrap().text,
+                "Additional Text"
+            );
+
+            controller2
+                .handle()
+                .set_selection(&mut tester.cell.borrow_mut(), TextSelection::new(0, 5));
+            tester.cell.checkpoint();
+            let state = tester.test_text_input().editing_state().unwrap();
+            assert_eq!(state.selection.base_offset, 0);
+            assert_eq!(state.selection.extent_offset, 5);
+
+            controller2.handle().clear(&mut tester.cell.borrow_mut());
+            tester.cell.checkpoint();
+            assert_eq!(tester.test_text_input().editing_state().unwrap().text, "");
+
+            controller2
+                .handle()
+                .set_text(&mut tester.cell.borrow_mut(), "The Final Cut");
+            tester.cell.checkpoint();
+            assert_eq!(
+                tester.test_text_input().editing_state().unwrap().text,
+                "The Final Cut"
+            );
+            let setter = set_state.borrow().clone().expect("the builder ran");
+            tester.update(|app| setter(app, &mut |_app| *current.borrow_mut() = None));
+            tester.pump();
+            assert_eq!(
+                tester.test_text_input().editing_state().unwrap().text,
+                "The Final Cut"
+            );
+
+            controller2
+                .handle()
+                .set_text(&mut tester.cell.borrow_mut(), "Goodbye Cruel World");
+            assert_eq!(
+                tester.test_text_input().editing_state().unwrap().text,
+                "The Final Cut"
+            );
+        });
+    }
+
+    #[test]
+    fn multiline_text_field_scrolls_the_caret_into_view() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_lines(Some(6)),
+            );
+            tester.pump_widget(root);
+
+            let tall_text = "a\nb\nc\nd\ne\nf\ng";
+            tester.enter_text(find::by_type::<TextField>(), tall_text);
+            skip_past_scrolling_animation(tester);
+
+            let scrollable = |tester: &WidgetTester| {
+                let element = find::by_type::<waft_widgets::Scrollable>().evaluate(tester)[0];
+                element
+                    .state_handle::<waft_widgets::ScrollableState>(&tester.cell.borrow())
+                    .expect("a Scrollable state")
+            };
+            let pixels = |tester: &WidgetTester| {
+                let position = scrollable(tester).position(&tester.cell.borrow());
+                position.pixels(&tester.cell.borrow())
+            };
+            assert_eq!(pixels(tester), 0.0);
+
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text(tall_text)
+                    .selection(TextSelection::collapsed(
+                        tall_text.len() as i32,
+                        TextAffinity::Downstream,
+                    )),
+            );
+            tester.pump();
+            skip_past_scrolling_animation(tester);
+
+            let render = render_editable(tester);
+            let line_height = {
+                let mut app = tester.cell.borrow_mut();
+                render.preferred_line_height(&mut app)
+            };
+            assert_more_or_less_equals_within(pixels(tester), line_height, 0.1);
+        });
+    }
+
+    #[test]
+    fn selection_is_consistent_with_text_length() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "abcde");
+            controller.handle().set_selection(
+                &mut tester.cell.borrow_mut(),
+                TextSelection::collapsed(5, TextAffinity::Downstream),
+            );
+            controller
+                .handle()
+                .set_text(&mut tester.cell.borrow_mut(), "");
+            let selection = controller.handle().selection(&tester.cell.borrow());
+            assert!(selection.start() <= 0);
+            assert!(selection.end() <= 0);
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                controller.handle().set_selection(
+                    &mut tester.cell.borrow_mut(),
+                    TextSelection::collapsed(10, TextAffinity::Downstream),
+                );
+            }));
+            assert!(result.is_err(), "an out-of-range selection is rejected");
+        });
+    }
+
+    #[test]
+    fn clearing_text_field_with_suffix_icon_does_not_cause_text_selection_exception() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "Prefilled text.");
+            let clearing = controller.clone();
+            let root = boilerplate(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .decoration(Some(InputDecoration::new().suffix_icon(IconButton::new(
+                        Some(Listener::new(move |app| clearing.handle().clear(app))),
+                        waft_widgets::Icon::new(Some(Icons::close())),
+                    )))),
+            );
+            tester.pump_widget(root);
+            tester.tap(find::by_type::<IconButton>());
+            assert_eq!(text(tester, controller.handle()), "");
+        });
+    }
+
+    #[test]
+    fn max_length_limits_input_in_the_center_of_a_maxed_out_field_with_collapsed_selection() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = boilerplate(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_length(10),
+            );
+            tester.pump_widget(root);
+            let value = "0123456789";
+
+            tester.show_keyboard(find::by_type::<TextField>());
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text(value)
+                    .selection(TextSelection::collapsed(10, TextAffinity::Downstream)),
+            );
+            tester.pump();
+            assert_eq!(text(tester, controller.handle()), value);
+
+            tester.show_keyboard(find::by_type::<TextField>());
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text(format!("{value}9999999"))
+                    .selection(TextSelection::collapsed(17, TextAffinity::Downstream)),
+            );
+            tester.pump();
+            assert_eq!(text(tester, controller.handle()), value);
+
+            tester.show_keyboard(find::by_type::<TextField>());
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text("0123455555555556789")
+                    .selection(TextSelection::collapsed(19, TextAffinity::Downstream)),
+            );
+            tester.pump();
+            assert_eq!(text(tester, controller.handle()), value);
+        });
+    }
+
+    #[test]
+    fn max_length_limits_input_in_the_center_of_a_maxed_out_field_with_non_collapsed_selection() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = boilerplate(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_length(10)
+                    .max_length_enforcement(MaxLengthEnforcement::Enforced),
+            );
+            tester.pump_widget(root);
+            let value = "0123456789";
+
+            tester.show_keyboard(find::by_type::<TextField>());
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text(value)
+                    .selection(TextSelection::new(8, 10)),
+            );
+            tester.pump();
+            assert_eq!(text(tester, controller.handle()), value);
+
+            tester.show_keyboard(find::by_type::<TextField>());
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text("01234569999999")
+                    .selection(TextSelection::collapsed(14, TextAffinity::Downstream)),
+            );
+            tester.pump();
+            assert_eq!(text(tester, controller.handle()), "0123456999");
+        });
+    }
+
+    #[test]
+    fn cursor_blinks() {
+        test_widgets(|tester| {
+            let root = overlay(
+                tester,
+                TextField::new().decoration(Some(InputDecoration::new().hint_text("Placeholder"))),
+            );
+            tester.pump_widget(root);
+            tester.show_keyboard(find::by_type::<TextField>());
+            let state = editable_state(tester);
+
+            let check_cursor_toggle = |tester: &mut WidgetTester| {
+                let interval = EditableTextState::cursor_blink_interval();
+                let initial = state.cursor_currently_visible(&tester.cell.borrow());
+                tester.pump_by(interval);
+                assert_eq!(
+                    state.cursor_currently_visible(&tester.cell.borrow()),
+                    !initial
+                );
+                tester.pump_by(interval);
+                assert_eq!(
+                    state.cursor_currently_visible(&tester.cell.borrow()),
+                    initial
+                );
+                tester.pump_by(interval / 10);
+                assert_eq!(
+                    state.cursor_currently_visible(&tester.cell.borrow()),
+                    initial
+                );
+                tester.pump_by(interval);
+                assert_eq!(
+                    state.cursor_currently_visible(&tester.cell.borrow()),
+                    !initial
+                );
+                tester.pump_by(interval);
+                assert_eq!(
+                    state.cursor_currently_visible(&tester.cell.borrow()),
+                    initial
+                );
+            };
+            check_cursor_toggle(tester);
+            tester.show_keyboard(find::by_type::<TextField>());
+
+            // The same with a non-empty field.
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text("X")
+                    .selection(TextSelection::collapsed(1, TextAffinity::Downstream)),
+            );
+            tester.cell.checkpoint();
+            assert_eq!(editable_state(tester), state);
+            check_cursor_toggle(tester);
+        });
+    }
+
+    /// Dart's `TestFormatter`: records the values a formatter is asked about.
+    #[derive(Clone)]
+    struct RecordingFormatter(Rc<RefCell<Option<(TextEditingValue, TextEditingValue)>>>);
+
+    impl waft_services::TextInputFormatter for RecordingFormatter {
+        fn format_edit_update(
+            &self,
+            old_value: &TextEditingValue,
+            new_value: &TextEditingValue,
+        ) -> TextEditingValue {
+            *self.0.borrow_mut() = Some((old_value.clone(), new_value.clone()));
+            new_value.clone()
+        }
+    }
+
+    #[test]
+    fn text_input_formatter_gets_correct_selection_value() {
+        test_widgets(|tester| {
+            let recorded = Rc::new(RefCell::new(None));
+            let controller = controller_with(tester, "123");
+            let root = boilerplate(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .input_formatters(vec![TextInputFormatterRef(Rc::new(RecordingFormatter(
+                        Rc::clone(&recorded),
+                    )))]),
+            );
+            tester.pump_widget(root);
+            tester.tap(find::by_type::<TextField>());
+            tester.pump_and_settle();
+
+            tester.send_key_event(
+                PhysicalKeyboardKey::BACKSPACE,
+                LogicalKeyboardKey::BACKSPACE,
+            );
+            tester.pump_and_settle();
+
+            let (old, new) = recorded.borrow().clone().expect("the formatter ran");
+            assert_eq!(old.text, "123");
+            assert_eq!(
+                old.selection,
+                TextSelection::collapsed(3, TextAffinity::Upstream)
+            );
+            assert_eq!(new.text, "12");
+            assert_eq!(
+                new.selection,
+                TextSelection::collapsed(2, TextAffinity::Downstream)
+            );
+        });
+    }
+
+    #[test]
+    fn mobile_obscure_text_control_test() {
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::Android),
+            |tester| {
+                let root = overlay(
+                    tester,
+                    TextField::new()
+                        .obscure_text(true)
+                        .decoration(Some(InputDecoration::new().hint_text("Placeholder"))),
+                );
+                tester.pump_widget(root);
+                tester.show_keyboard(find::by_type::<TextField>());
+
+                tester.test_text_input().update_editing_value(
+                    TextEditingValue::new()
+                        .text("ABC")
+                        .selection(TextSelection::collapsed(3, TextAffinity::Downstream)),
+                );
+                tester.pump();
+
+                tester.test_text_input().update_editing_value(
+                    TextEditingValue::new()
+                        .text("ABCX")
+                        .selection(TextSelection::collapsed(4, TextAffinity::Downstream)),
+                );
+                tester.pump();
+
+                let render = render_editable(tester);
+                let text = {
+                    let mut app = tester.cell.borrow_mut();
+                    render.plain_text(&mut app)
+                };
+                assert!(text.ends_with('X'), "{text:?}");
+
+                tester.pump_by(Duration::from_secs(2));
+                let text = {
+                    let mut app = tester.cell.borrow_mut();
+                    render.plain_text(&mut app)
+                };
+                assert!(text.ends_with('\u{2022}'), "{text:?}");
+            },
+        );
+    }
+
+    #[test]
+    fn desktop_obscure_text_control_test() {
+        let variant = TargetPlatformVariant::new([
+            TargetPlatform::MacOS,
+            TargetPlatform::Linux,
+            TargetPlatform::Windows,
+        ]);
+        test_widgets_variant(variant, |tester| {
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .obscure_text(true)
+                    .decoration(Some(InputDecoration::new().hint_text("Placeholder"))),
+            );
+            tester.pump_widget(root);
+            tester.show_keyboard(find::by_type::<TextField>());
+
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text("ABC")
+                    .selection(TextSelection::collapsed(3, TextAffinity::Downstream)),
+            );
+            tester.pump();
+
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text("ABCX")
+                    .selection(TextSelection::collapsed(4, TextAffinity::Downstream)),
+            );
+            tester.pump();
+
+            let render = render_editable(tester);
+            let text = {
+                let mut app = tester.cell.borrow_mut();
+                render.plain_text(&mut app)
+            };
+            assert!(text.ends_with('\u{2022}'), "{text:?}");
+        });
+    }
+
+    /// A tester on `platform` whose clipboard is `clipboard`.
+    fn tester_with_clipboard(platform: TargetPlatform) -> (WidgetTester, MockClipboard) {
+        let clipboard = MockClipboard::new();
+        let tester = WidgetTester::with_platform(
+            TestPlatform::new()
+                .on(platform)
+                .with_clipboard(Rc::new(clipboard.clone())),
+        );
+        (tester, clipboard)
+    }
+
+    /// Pumps `field` over a `Material` on a `MaterialApp`, as the keyboard cases do.
+    /// Dart's keyboard cases: enter `text`, then tap the field, after a frame first when
+    /// `pump_before_tap` (Dart's own cases differ in whether they pump before the tap).
+    fn keyboard_case(
+        tester: &mut WidgetTester,
+        field: TextField,
+        text: &str,
+        pump_before_tap: bool,
+    ) {
+        let root = overlay(tester, field);
+        tester.pump_widget(root);
+        tester.enter_text(find::by_type::<TextField>(), text);
+        tester.cell.checkpoint();
+        if pump_before_tap {
+            tester.pump();
+        }
+        tester.tap(find::by_type::<TextField>());
+        tester.pump_and_settle();
+    }
+
+    fn selection_delta(tester: &WidgetTester, controller: Handle<TextEditingController>) -> i32 {
+        let selection = selection(tester, controller);
+        selection.extent_offset - selection.base_offset
+    }
+
+    #[test]
+    fn keyboard_shift_test_1() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            keyboard_case(
+                tester,
+                TextField::new().controller(controller.erase()),
+                "a big house",
+                true,
+            );
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_event(
+                PhysicalKeyboardKey::ARROW_LEFT,
+                LogicalKeyboardKey::ARROW_LEFT,
+            );
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            assert_eq!(selection_delta(tester, controller.handle()), -1);
+        });
+    }
+
+    #[test]
+    fn keyboard_shift_test_2() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = overlay(tester, TextField::new().controller(controller.erase()));
+            tester.pump_widget(root);
+            tester.show_keyboard(find::by_type::<TextField>());
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text("abcdefghi")
+                    .selection(TextSelection::collapsed(3, TextAffinity::Downstream))
+                    .composing(TextRange::new(0, 9)),
+            );
+            tester.pump();
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::ARROW_RIGHT,
+                LogicalKeyboardKey::ARROW_RIGHT,
+            );
+            tester.pump_and_settle();
+            assert_eq!(selection_delta(tester, controller.handle()), 1);
+        });
+    }
+
+    #[test]
+    fn keyboard_control_shift_test() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            keyboard_case(
+                tester,
+                TextField::new().controller(controller.erase()),
+                "their big house",
+                false,
+            );
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::CONTROL_LEFT,
+                LogicalKeyboardKey::CONTROL_LEFT,
+            );
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::ARROW_RIGHT,
+                LogicalKeyboardKey::ARROW_RIGHT,
+            );
+            tester.pump_and_settle();
+            assert_eq!(selection_delta(tester, controller.handle()), 5);
+        });
+    }
+
+    #[test]
+    fn keyboard_down_and_up_test() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            keyboard_case(
+                tester,
+                TextField::new().controller(controller.erase()),
+                "a big house",
+                true,
+            );
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(PhysicalKeyboardKey::ARROW_UP, LogicalKeyboardKey::ARROW_UP);
+            tester.pump_and_settle();
+            assert_eq!(selection_delta(tester, controller.handle()), -11);
+
+            tester.send_key_up_event(PhysicalKeyboardKey::ARROW_UP, LogicalKeyboardKey::ARROW_UP);
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.pump_and_settle();
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::ARROW_DOWN,
+                LogicalKeyboardKey::ARROW_DOWN,
+            );
+            tester.pump_and_settle();
+            assert_eq!(selection_delta(tester, controller.handle()), 0);
+        });
+    }
+
+    #[test]
+    fn read_only_keyboard_selection_test() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "readonly");
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .read_only(true),
+            );
+            tester.pump_widget(root);
+            tester.tap(find::by_type::<TextField>());
+            tester.pump_and_settle();
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::ARROW_LEFT,
+                LogicalKeyboardKey::ARROW_LEFT,
+            );
+            assert_eq!(selection_delta(tester, controller.handle()), -1);
+        });
+    }
+
+    #[test]
+    fn copy_paste_test() {
+        test_widgets(|_tester| {
+            let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
+            let controller = controller_with(&tester, "");
+            keyboard_case(
+                &mut tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_lines(Some(3)),
+                "a big house\njumped over a mouse",
+                false,
+            );
+            controller.handle().set_selection(
+                &mut tester.cell.borrow_mut(),
+                TextSelection::collapsed(0, TextAffinity::Downstream),
+            );
+            tester.pump();
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            for _ in 0..5 {
+                tester.send_key_event(
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
+                tester.pump_and_settle();
+            }
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.send_key_event(PhysicalKeyboardKey::KEY_C, LogicalKeyboardKey::KEY_C);
+            tester.pump_and_settle();
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.pump_and_settle();
+            assert_eq!(clipboard.clipboard_data().as_deref(), Some("a big"));
+
+            tester.send_key_event(
+                PhysicalKeyboardKey::ARROW_RIGHT,
+                LogicalKeyboardKey::ARROW_RIGHT,
+            );
+            tester.pump_and_settle();
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.send_key_down_event(PhysicalKeyboardKey::KEY_V, LogicalKeyboardKey::KEY_V);
+            tester.pump_and_settle();
+            tester.pump_by(Duration::from_millis(200));
+            tester.send_key_up_event(PhysicalKeyboardKey::KEY_V, LogicalKeyboardKey::KEY_V);
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.pump_and_settle();
+
+            expect(
+                &tester,
+                &find::text("a biga big house\njumped over a mouse"),
+                finds_one_widget(),
+            );
+        });
+    }
+
+    #[test]
+    fn paste_does_not_crash_after_calling_text_controller_text_setter() {
+        test_widgets(|_tester| {
+            let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
+            clipboard.set_clipboard_data(Some("I love Flutter!".to_owned()));
+            let controller = controller_with(&tester, "");
+            let theme = theme(&tester);
+            let root = material_home(
+                theme,
+                TextField::new()
+                    .controller(controller.clone().erase())
+                    .obscure_text(true),
+            );
+            tester.pump_widget(root);
+            tester.tap(find::by_type::<TextField>());
+            tester.pump_and_settle();
+
+            controller
+                .handle()
+                .set_text(&mut tester.cell.borrow_mut(), "");
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.send_key_down_event(PhysicalKeyboardKey::KEY_V, LogicalKeyboardKey::KEY_V);
+            tester.pump_and_settle();
+            tester.pump_by(Duration::from_millis(200));
+            tester.send_key_up_event(PhysicalKeyboardKey::KEY_V, LogicalKeyboardKey::KEY_V);
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.pump_and_settle();
+
+            expect(&tester, &find::text("I love Flutter!"), finds_one_widget());
+        });
+    }
+
+    #[test]
+    fn cut_test() {
+        test_widgets(|_tester| {
+            let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
+            let controller = controller_with(&tester, "");
+            keyboard_case(
+                &mut tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_lines(Some(3)),
+                "a big house\njumped over a mouse",
+                false,
+            );
+            controller.handle().set_selection(
+                &mut tester.cell.borrow_mut(),
+                TextSelection::collapsed(0, TextAffinity::Downstream),
+            );
+            tester.pump();
+
+            for _ in 0..5 {
+                tester.send_key_down_event(
+                    PhysicalKeyboardKey::SHIFT_LEFT,
+                    LogicalKeyboardKey::SHIFT_LEFT,
+                );
+                tester.send_key_event(
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
+                tester.pump_and_settle();
+                tester.send_key_up_event(
+                    PhysicalKeyboardKey::SHIFT_LEFT,
+                    LogicalKeyboardKey::SHIFT_LEFT,
+                );
+                tester.pump_and_settle();
+            }
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.send_key_event(PhysicalKeyboardKey::KEY_X, LogicalKeyboardKey::KEY_X);
+            tester.pump_and_settle();
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.pump_and_settle();
+            assert_eq!(clipboard.clipboard_data().as_deref(), Some("a big"));
+
+            for _ in 0..5 {
+                tester.send_key_event(
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
+                tester.pump_and_settle();
+            }
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.send_key_down_event(PhysicalKeyboardKey::KEY_V, LogicalKeyboardKey::KEY_V);
+            tester.pump_and_settle();
+            tester.pump_by(Duration::from_millis(200));
+            tester.send_key_up_event(PhysicalKeyboardKey::KEY_V, LogicalKeyboardKey::KEY_V);
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::CONTROL_RIGHT,
+                LogicalKeyboardKey::CONTROL_RIGHT,
+            );
+            tester.pump_and_settle();
+
+            expect(
+                &tester,
+                &find::text(" housa bige\njumped over a mouse"),
+                finds_one_widget(),
+            );
+        });
+    }
+
+    #[test]
+    fn select_all_test() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            keyboard_case(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_lines(Some(3)),
+                "a big house\njumped over a mouse",
+                false,
+            );
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::CONTROL_LEFT,
+                LogicalKeyboardKey::CONTROL_LEFT,
+            );
+            tester.send_key_event(PhysicalKeyboardKey::KEY_A, LogicalKeyboardKey::KEY_A);
+            tester.pump_and_settle();
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::CONTROL_LEFT,
+                LogicalKeyboardKey::CONTROL_LEFT,
+            );
+            tester.pump_and_settle();
+
+            tester.send_key_down_event(PhysicalKeyboardKey::DELETE, LogicalKeyboardKey::DELETE);
+            tester.pump_and_settle();
+            tester.pump_by(Duration::from_millis(200));
+            tester.send_key_up_event(PhysicalKeyboardKey::DELETE, LogicalKeyboardKey::DELETE);
+            tester.pump_and_settle();
+
+            expect(tester, &find::text(""), finds_one_widget());
+        });
+    }
+
+    #[test]
+    fn delete_test() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            keyboard_case(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_lines(Some(3)),
+                "a big house\njumped over a mouse",
+                false,
+            );
+            controller.handle().set_selection(
+                &mut tester.cell.borrow_mut(),
+                TextSelection::collapsed(0, TextAffinity::Downstream),
+            );
+            tester.pump();
+
+            for _ in 0..6 {
+                tester.send_key_event(PhysicalKeyboardKey::DELETE, LogicalKeyboardKey::DELETE);
+                tester.pump_and_settle();
+            }
+            expect(
+                tester,
+                &find::text("house\njumped over a mouse"),
+                finds_one_widget(),
+            );
+
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::CONTROL_LEFT,
+                LogicalKeyboardKey::CONTROL_LEFT,
+            );
+            tester.send_key_event(PhysicalKeyboardKey::KEY_A, LogicalKeyboardKey::KEY_A);
+            tester.pump_and_settle();
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::CONTROL_LEFT,
+                LogicalKeyboardKey::CONTROL_LEFT,
+            );
+            tester.pump_and_settle();
+
+            tester.send_key_event(PhysicalKeyboardKey::DELETE, LogicalKeyboardKey::DELETE);
+            tester.pump_and_settle();
+            expect(tester, &find::text(""), finds_one_widget());
+        });
+    }
+
+    fn set_read_only(
+        tester: &mut WidgetTester,
+        setter: &Rc<RefCell<Option<waft_widgets::StateSetter>>>,
+        flag: &Rc<Cell<bool>>,
+        read_only: bool,
+    ) {
+        flag.set(read_only);
+        let setter = setter.borrow().clone().expect("the builder ran");
+        tester.update(|app| setter(app, &mut |_app| {}));
+        tester.pump();
+    }
+
+    #[test]
+    fn dynamically_switching_to_read_only_should_close_input_connection() {
+        test_widgets(|tester| {
+            let read_only = Rc::new(Cell::new(false));
+            let setter: Rc<RefCell<Option<waft_widgets::StateSetter>>> = Rc::default();
+            let controller = controller_with(tester, "readonly");
+            let (flag, stored) = (Rc::clone(&read_only), Rc::clone(&setter));
+            let root = overlay(
+                tester,
+                waft_widgets::StatefulBuilder::new(move |_app, _context, setter| {
+                    *stored.borrow_mut() = Some(setter);
+                    TextField::new()
+                        .controller(controller.clone().erase())
+                        .read_only(flag.get())
+                        .into_widget()
+                }),
+            );
+            tester.pump_widget(root);
+            tester.tap(find::by_type::<TextField>());
+            tester.pump();
+            assert!(tester.test_text_input().has_any_clients());
+
+            set_read_only(tester, &setter, &read_only, true);
+            assert!(!tester.test_text_input().has_any_clients());
+        });
+    }
+
+    #[test]
+    fn dynamically_switching_to_non_read_only_should_open_input_connection() {
+        test_widgets(|tester| {
+            let read_only = Rc::new(Cell::new(true));
+            let setter: Rc<RefCell<Option<waft_widgets::StateSetter>>> = Rc::default();
+            let controller = controller_with(tester, "readonly");
+            let (flag, stored) = (Rc::clone(&read_only), Rc::clone(&setter));
+            let root = overlay(
+                tester,
+                waft_widgets::StatefulBuilder::new(move |_app, _context, setter| {
+                    *stored.borrow_mut() = Some(setter);
+                    TextField::new()
+                        .controller(controller.clone().erase())
+                        .read_only(flag.get())
+                        .into_widget()
+                }),
+            );
+            tester.pump_widget(root);
+            tester.tap(find::by_type::<TextField>());
+            tester.pump();
+            assert!(!tester.test_text_input().has_any_clients());
+
+            set_read_only(tester, &setter, &read_only, false);
+            assert!(tester.test_text_input().has_any_clients());
+        });
+    }
+
+    #[test]
+    fn dynamically_switching_between_read_only_and_not_should_hide_or_show_collapse_cursor() {
+        test_widgets(|tester| {
+            let read_only = Rc::new(Cell::new(true));
+            let setter: Rc<RefCell<Option<waft_widgets::StateSetter>>> = Rc::default();
+            let controller = controller_with(tester, "readonly");
+            let (flag, stored) = (Rc::clone(&read_only), Rc::clone(&setter));
+            let root = overlay(
+                tester,
+                waft_widgets::StatefulBuilder::new(move |_app, _context, setter| {
+                    *stored.borrow_mut() = Some(setter);
+                    TextField::new()
+                        .controller(controller.clone().erase())
+                        .read_only(flag.get())
+                        .into_widget()
+                }),
+            );
+            tester.pump_widget(root);
+            tester.tap(find::by_type::<TextField>());
+            tester.pump();
+            assert!(!selection_overlay_visibility(tester).1);
+
+            set_read_only(tester, &setter, &read_only, false);
+            tester.pump_and_settle();
+            assert!(selection_overlay_visibility(tester).0);
+
+            set_read_only(tester, &setter, &read_only, true);
+            tester.pump_and_settle();
+            assert!(!selection_overlay_visibility(tester).0);
+        });
+    }
+
+    #[test]
+    fn swapping_controllers_should_update_selection() {
+        test_widgets(|tester| {
+            let first = controller_with(tester, "readonly");
+            let current: Rc<RefCell<TextEditingControllerRef>> =
+                Rc::new(RefCell::new(first.clone().erase()));
+            let setter: Rc<RefCell<Option<waft_widgets::StateSetter>>> = Rc::default();
+            let (stored, value) = (Rc::clone(&setter), Rc::clone(&current));
+            let root = overlay(
+                tester,
+                waft_widgets::StatefulBuilder::new(move |_app, _context, setter| {
+                    *stored.borrow_mut() = Some(setter);
+                    TextField::new()
+                        .controller(value.borrow().clone())
+                        .read_only(true)
+                        .into_widget()
+                }),
+            );
+            tester.pump_widget(root);
+            let at = text_offset_to_position(tester, 3);
+            tester.long_press_at(at, 7);
+            tester.pump_and_settle();
+            let state = editable_state(tester);
+            let selection_now = |tester: &WidgetTester| {
+                state
+                    .selection_overlay(&tester.cell.borrow())
+                    .expect("a selection overlay")
+                    .value(&tester.cell.borrow())
+                    .selection
+            };
+            assert_eq!(selection_now(tester).base_offset, 0);
+            assert_eq!(selection_now(tester).extent_offset, 8);
+
+            let base = {
+                let app = tester.cell.borrow();
+                first.value(&app).clone()
+            };
+            let second = {
+                let mut app = tester.cell.borrow_mut();
+                TextEditingController::from_value(
+                    &mut app,
+                    Some(base.copy_with().selection(TextSelection::new(1, 7))),
+                )
+            };
+            *current.borrow_mut() = second.erase();
+            let setter = setter.borrow().clone().expect("the builder ran");
+            tester.update(|app| setter(app, &mut |_app| {}));
+            tester.pump();
+            assert_eq!(selection_now(tester).base_offset, 1);
+            assert_eq!(selection_now(tester).extent_offset, 7);
+        });
+    }
+
+    /// Drags `pointer` from `from` to `to`, with a frame after each step.
+    fn mouse_drag(tester: &mut WidgetTester, pointer: &mut TestPointer, from: Offset, to: Offset) {
+        tester.down(pointer, from);
+        tester.pump();
+        tester.move_to(pointer, to, true);
+        tester.pump();
+        tester.up(pointer);
+        tester.pump_and_settle();
+    }
+
+    #[test]
+    fn can_select_text_by_dragging_with_a_mouse() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .controller(controller.erase()),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(find::by_type::<TextField>(), "abc def ghi");
+            skip_past_scrolling_animation(tester);
+            let text = "abc def ghi";
+            let e = text_offset_to_position(tester, text.find('e').unwrap() as i32);
+            let g = text_offset_to_position(tester, text.find('g').unwrap() as i32);
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            mouse_drag(tester, &mut pointer, e, g);
+            let selection_now = selection(tester, controller.handle());
+            assert_eq!(selection_now.base_offset, text.find('e').unwrap() as i32);
+            assert_eq!(selection_now.extent_offset, text.find('g').unwrap() as i32);
+        });
+    }
+
+    #[test]
+    fn dragging_in_opposite_direction_also_works() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .controller(controller.erase()),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(find::by_type::<TextField>(), "abc def ghi");
+            skip_past_scrolling_animation(tester);
+            let text = "abc def ghi";
+            let e = text_offset_to_position(tester, text.find('e').unwrap() as i32);
+            let g = text_offset_to_position(tester, text.find('g').unwrap() as i32);
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            mouse_drag(tester, &mut pointer, g, e);
+            let selection_now = selection(tester, controller.handle());
+            assert_eq!(selection_now.base_offset, text.find('g').unwrap() as i32);
+            assert_eq!(selection_now.extent_offset, text.find('e').unwrap() as i32);
+        });
+    }
+
+    #[test]
+    fn slow_mouse_dragging_also_selects_text() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .controller(controller.erase()),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(find::by_type::<TextField>(), "abc def ghi");
+            skip_past_scrolling_animation(tester);
+            let text = "abc def ghi";
+            let e = text_offset_to_position(tester, text.find('e').unwrap() as i32);
+            let g = text_offset_to_position(tester, text.find('g').unwrap() as i32);
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut pointer, e);
+            tester.pump_by(Duration::from_secs(2));
+            tester.move_to(&mut pointer, g, true);
+            tester.pump();
+            tester.up(&pointer);
+            let selection_now = selection(tester, controller.handle());
+            assert_eq!(selection_now.base_offset, text.find('e').unwrap() as i32);
+            assert_eq!(selection_now.extent_offset, text.find('g').unwrap() as i32);
+        });
+    }
+
+    #[test]
+    fn continuous_dragging_does_not_cause_flickering() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "abc def ghi");
+            let changed = Rc::new(Cell::new(0));
+            let count = Rc::clone(&changed);
+            controller.handle().add_listener(
+                &mut tester.cell.borrow_mut(),
+                Listener::new(move |_app| count.set(count.get() + 1)),
+            );
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .controller(controller.erase())
+                    .style(TextStyle::new().font_size(10.0)),
+            );
+            tester.pump_widget(root);
+
+            let c = text_offset_to_position(tester, 2);
+            let g = text_offset_to_position(tester, 8);
+            let h = text_offset_to_position(tester, 9);
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut pointer, c);
+            tester.pump();
+            tester.move_to(&mut pointer, g, true);
+            tester.pump_and_settle();
+            assert!(changed.get() > 0);
+            changed.set(0);
+            let selection_now = selection(tester, controller.handle());
+            assert_eq!(selection_now.base_offset, 2);
+            assert_eq!(selection_now.extent_offset, 8);
+
+            tester.move_to(&mut pointer, g + Offset::new(2.0, 0.0), true);
+            tester.pump_and_settle();
+            assert_eq!(changed.get(), 0);
+
+            tester.move_to(&mut pointer, h, true);
+            tester.pump();
+            tester.up(&pointer);
+            tester.pump_and_settle();
+            assert_eq!(changed.get(), 1);
+            let selection_now = selection(tester, controller.handle());
+            assert_eq!(selection_now.base_offset, 2);
+            assert_eq!(selection_now.extent_offset, 9);
+        });
+    }
+
+    #[test]
+    fn can_move_cursor_when_dragging_android() {
+        for platform in [TargetPlatform::Android, TargetPlatform::Fuchsia] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, "");
+                let root = material_home(
+                    theme(tester),
+                    TextField::new()
+                        .drag_start_behavior(DragStartBehavior::Down)
+                        .controller(controller.erase()),
+                );
+                tester.pump_widget(root);
+                tester.enter_text(find::by_type::<TextField>(), "abc def ghi");
+                skip_past_scrolling_animation(tester);
+                let text = "abc def ghi";
+                let e = text_offset_to_position(tester, text.find('e').unwrap() as i32);
+                let d = text_offset_to_position(tester, text.find('d').unwrap() as i32);
+                let g = text_offset_to_position(tester, text.find('g').unwrap() as i32);
+
+                let mut pointer = TestPointer::touch(1);
+                tester.down(&mut pointer, e);
+                tester.pump();
+                tester.up(&pointer);
+                tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
+                assert!(selection(tester, controller.handle()).is_collapsed());
+                assert_eq!(
+                    selection(tester, controller.handle()).base_offset,
+                    text.find('e').unwrap() as i32
+                );
+
+                tester.down(&mut pointer, d);
+                tester.pump();
+                tester.move_to(&mut pointer, g, true);
+                tester.pump_and_settle();
+                assert!(selection(tester, controller.handle()).is_collapsed());
+                assert_eq!(
+                    selection(tester, controller.handle()).base_offset,
+                    text.find('g').unwrap() as i32
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn can_move_cursor_when_dragging_android_multiline() {
+        for platform in [TargetPlatform::Android, TargetPlatform::Fuchsia] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, "");
+                let root = material_home(
+                    theme(tester),
+                    TextField::new()
+                        .drag_start_behavior(DragStartBehavior::Down)
+                        .controller(controller.erase())
+                        .max_lines(None),
+                );
+                tester.pump_widget(root);
+                tester.enter_text(find::by_type::<TextField>(), "abc\ndef\nghi");
+                skip_past_scrolling_animation(tester);
+                let text = "abc\ndef\nghi";
+                let a = text_offset_to_position(tester, 0);
+                let c = text_offset_to_position(tester, 2);
+                let g = text_offset_to_position(tester, text.find('g').unwrap() as i32);
+
+                let mut pointer = TestPointer::touch(1);
+                tester.down(&mut pointer, a);
+                tester.pump();
+                tester.up(&pointer);
+                tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
+                assert_eq!(selection(tester, controller.handle()).base_offset, 0);
+
+                tester.down(&mut pointer, c);
+                tester.pump();
+                tester.move_to(&mut pointer, g, true);
+                tester.pump_and_settle();
+                assert!(selection(tester, controller.handle()).is_collapsed());
+                assert_eq!(
+                    selection(tester, controller.handle()).base_offset,
+                    text.find('g').unwrap() as i32
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn can_double_click_and_drag_with_a_mouse_to_select_word_by_word() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .controller(controller.erase()),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(find::by_type::<TextField>(), "abc def ghi");
+            skip_past_scrolling_animation(tester);
+            let text = "abc def ghi";
+            let e = text_offset_to_position(tester, text.find('e').unwrap() as i32);
+            let h = text_offset_to_position(tester, text.find('h').unwrap() as i32);
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut pointer, e);
+            tester.pump();
+            tester.up(&pointer);
+            tester.pump();
+            assert!(selection(tester, controller.handle()).is_collapsed());
+            assert_eq!(
+                selection(tester, controller.handle()).base_offset,
+                text.find('e').unwrap() as i32
+            );
+
+            tester.down(&mut pointer, e);
+            tester.pump();
+            assert_eq!(selection(tester, controller.handle()).base_offset, 4);
+            assert_eq!(selection(tester, controller.handle()).extent_offset, 7);
+
+            tester.move_to(&mut pointer, h, true);
+            tester.pump_and_settle();
+            assert_eq!(
+                selection(tester, controller.handle()).base_offset,
+                text.find('d').unwrap() as i32
+            );
+            assert_eq!(
+                selection(tester, controller.handle()).extent_offset,
+                text.find('i').unwrap() as i32 + 1
+            );
+        });
+    }
+
+    #[test]
+    fn tap_moves_cursor_to_the_edge_of_the_word_it_tapped() {
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                Center::new().child(TextField::new().controller(controller.erase())),
+            );
+            tester.pump_widget(root);
+            controller.handle().set_text(
+                &mut tester.cell.borrow_mut(),
+                "Atwater Peel Sherbrooke Bonaventure",
+            );
+            tester.pump();
+
+            let at = text_offset_to_position(tester, 3);
+            tester.tap_at(at, 1);
+            tester.pump();
+            let selection_now = selection(tester, controller.handle());
+            assert!(selection_now.is_collapsed());
+            assert_eq!(selection_now.base_offset, 7);
+            assert_eq!(selection_now.affinity, TextAffinity::Upstream);
+            assert!(!selection_overlay_visibility(tester).1);
+        });
+    }
+
+    #[test]
+    fn tap_with_a_mouse_does_not_move_cursor_to_the_edge_of_the_word() {
+        for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, "");
+                let root = material_home(
+                    theme(tester),
+                    Center::new().child(TextField::new().controller(controller.erase())),
+                );
+                tester.pump_widget(root);
+                controller.handle().set_text(
+                    &mut tester.cell.borrow_mut(),
+                    "Atwater Peel Sherbrooke Bonaventure",
+                );
+                tester.pump();
+
+                let at = text_offset_to_position(tester, 3);
+                let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+                tester.down(&mut pointer, at);
+                tester.up(&pointer);
+                let selection_now = selection(tester, controller.handle());
+                assert!(selection_now.is_collapsed());
+                assert_eq!(selection_now.base_offset, 3, "{platform:?}");
+            });
+        }
+    }
+
+    #[test]
+    fn tap_moves_cursor_to_the_position_tapped() {
+        for platform in [
+            TargetPlatform::Android,
+            TargetPlatform::Fuchsia,
+            TargetPlatform::Linux,
+            TargetPlatform::Windows,
+        ] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, "");
+                let root = material_home(
+                    theme(tester),
+                    Center::new().child(TextField::new().controller(controller.erase())),
+                );
+                tester.pump_widget(root);
+                controller.handle().set_text(
+                    &mut tester.cell.borrow_mut(),
+                    "Atwater Peel Sherbrooke Bonaventure",
+                );
+                tester.pump();
+
+                let at = text_offset_to_position(tester, 3);
+                tester.tap_at(at, 1);
+                tester.pump();
+                let selection_now = selection(tester, controller.handle());
+                assert!(selection_now.is_collapsed());
+                assert_eq!(selection_now.base_offset, 3, "{platform:?}");
+                assert!(!selection_overlay_visibility(tester).1, "{platform:?}");
+            });
+        }
+    }
+
+    #[test]
+    fn ios_select_word_edge_works_correctly() {
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let controller = controller_with(tester, "blah1 blah2");
+            let root = material_home(
+                theme(tester),
+                TextField::new().controller(controller.erase()),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                selection(tester, controller.handle()),
+                TextSelection::new(-1, -1)
+            );
+
+            let pos1 = text_offset_to_position(tester, 1);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, pos1);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+            assert_eq!(
+                selection(tester, controller.handle()),
+                TextSelection::collapsed(5, TextAffinity::Upstream)
+            );
+
+            let pos0 = text_offset_to_position(tester, 0);
+            gesture = TestPointer::touch(2);
+            tester.down(&mut gesture, pos0);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+            assert_eq!(
+                selection(tester, controller.handle()),
+                TextSelection::collapsed(0, TextAffinity::Downstream)
+            );
+        });
+    }
+
+    #[test]
+    fn double_tap_does_not_select_word_on_read_only_obscured_field() {
+        for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, "");
+                let root = material_home(
+                    theme(tester),
+                    Center::new().child(
+                        TextField::new()
+                            .obscure_text(true)
+                            .read_only(true)
+                            .controller(controller.erase()),
+                    ),
+                );
+                tester.pump_widget(root);
+                controller.handle().set_text(
+                    &mut tester.cell.borrow_mut(),
+                    "Atwater Peel Sherbrooke Bonaventure",
+                );
+                tester.pump();
+
+                let at = text_offset_to_position(tester, 10);
+                tester.tap_at(at, 1);
+                tester.pump_by(Duration::from_millis(500));
+                let first = selection(tester, controller.handle());
+                assert!(first.is_collapsed(), "{platform:?}");
+
+                tester.tap_at(at, 2);
+                tester.pump_by(Duration::from_millis(50));
+                tester.tap_at(at, 3);
+                tester.pump_and_settle();
+                let second = selection(tester, controller.handle());
+                assert!(second.is_collapsed(), "{platform:?}");
+                assert_eq!(second.base_offset, first.base_offset, "{platform:?}");
+                assert!(!selection_overlay_visibility(tester).1, "{platform:?}");
+            });
+        }
+    }
+
+    #[test]
+    fn can_double_tap_and_drag_to_select_word_by_word() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .controller(controller.erase()),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(find::by_type::<TextField>(), "abc def ghi");
+            skip_past_scrolling_animation(tester);
+            let text = "abc def ghi";
+            let e = text_offset_to_position(tester, text.find('e').unwrap() as i32);
+            let h = text_offset_to_position(tester, text.find('h').unwrap() as i32);
+
+            let mut pointer = TestPointer::touch(1);
+            tester.down(&mut pointer, e);
+            tester.pump();
+            tester.up(&pointer);
+            tester.pump();
+            assert!(selection(tester, controller.handle()).is_collapsed());
+            assert_eq!(
+                selection(tester, controller.handle()).base_offset,
+                text.find('e').unwrap() as i32
+            );
+
+            tester.down(&mut pointer, e);
+            tester.pump_and_settle();
+            assert_eq!(selection(tester, controller.handle()).base_offset, 4);
+            assert_eq!(selection(tester, controller.handle()).extent_offset, 7);
+
+            tester.move_to(&mut pointer, h, true);
+            tester.pump_and_settle();
+            assert!(!selection_overlay_visibility(tester).1);
+            assert_eq!(
+                selection(tester, controller.handle()).base_offset,
+                text.find('d').unwrap() as i32
+            );
+            assert_eq!(
+                selection(tester, controller.handle()).extent_offset,
+                text.find('i').unwrap() as i32 + 1
+            );
+
+            tester.up(&pointer);
+            tester.pump();
+            assert!(selection_overlay_visibility(tester).1);
+        });
+    }
+
+    #[test]
+    fn when_is_dense_text_field_can_go_below_k_min_interactive_dimension_height() {
+        test_widgets(|tester| {
+            let root = material_app(
+                theme(tester),
+                Scaffold::new()
+                    .body(Center::new().child(
+                        TextField::new().decoration(Some(InputDecoration::new().is_dense(true))),
+                    ))
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert!(
+                tester.get_size(find::by_type::<TextField>()).height()
+                    < K_MIN_INTERACTIVE_DIMENSION
+            );
+        });
+    }
+
+    /// Dart's `buildTest`: a field in a `SliverFillRemaining` whose intrinsic height must match
+    /// its layout height.
+    fn sliver_intrinsics_case(tester: &mut WidgetTester, is_dense: bool) {
+        let root = material_app(
+            theme(tester),
+            Scaffold::new()
+                .body(
+                    waft_widgets::CustomScrollView::new()
+                        .slivers([waft_widgets::SliverFillRemaining::new()
+                            .has_scroll_body(false)
+                            .child(
+                                Column::new().children([
+                                    TextField::new()
+                                        .decoration(Some(InputDecoration::new().is_dense(is_dense)))
+                                        .into_widget(),
+                                    Container::new().height(1000.0).into_widget(),
+                                ]),
+                            )
+                            .into_widget()])
+                        .into_widget(),
+                )
+                .into_widget(),
+        );
+        tester.pump_widget(root);
+    }
+
+    #[test]
+    fn by_default_intrinsic_height_is_at_least_k_min_interactive_dimension_high() {
+        test_widgets(|tester| sliver_intrinsics_case(tester, false));
+    }
+
+    #[test]
+    fn when_is_dense_intrinsic_height_can_go_below_k_min_interactive_dimension_height() {
+        test_widgets(|tester| sliver_intrinsics_case(tester, true));
+    }
+
+    #[test]
+    fn cursor_blinking_respects_ticker_mode() {
+        test_widgets(|tester| {
+            let focus_node = {
+                let mut app = tester.cell.borrow_mut();
+                FocusNode::new(&mut app)
+            };
+            let builder = |tester: &WidgetTester, ticker_mode: bool| {
+                material_app(
+                    theme(tester),
+                    Material::new()
+                        .child(
+                            Center::new().child(TickerMode::new(
+                                ticker_mode,
+                                TextField::new()
+                                    .focus_node(focus_node.clone().into_erased::<AnyFocusNode>()),
+                            )),
+                        )
+                        .into_widget(),
+                )
+            };
+            tester.pump_widget(builder(tester, true));
+            tester.show_keyboard(find::by_type::<TextField>());
+            let editable = render_editable(tester);
+            assert!(
+                *editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                *editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+
+            // With TickerMode off, the cursor does not blink.
+            tester.pump_widget(builder(tester, false));
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            for _ in 0..3 {
+                tester.pump_by(EditableTextState::cursor_blink_interval());
+                assert!(
+                    !*editable
+                        .show_cursor(&tester.cell.borrow())
+                        .value(&tester.cell.borrow())
+                );
+            }
+
+            // On again, it blinks.
+            tester.pump_widget(builder(tester, true));
+            assert!(
+                *editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+
+            // Dismissing focus while off does not start it when on again.
+            tester.pump_widget(builder(tester, false));
+            focus_node.unfocus(
+                &mut tester.cell.borrow_mut(),
+                waft_widgets::UnfocusDisposition::Scope,
+            );
+            tester.pump();
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_widget(builder(tester, true));
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+
+            // Focusing while off does not start it, but turning tickers on does.
+            tester.pump_widget(builder(tester, false));
+            tester.show_keyboard(find::by_type::<TextField>());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_widget(builder(tester, true));
+            assert!(
+                *editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+        });
+    }
+
+    #[test]
+    fn text_field_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            tester.view().set_physical_size(waft_embedder::Size::ZERO);
+            let controller = controller_with(tester, "X");
+            let root = material_app(
+                theme(tester),
+                Scaffold::new()
+                    .body(Center::new().child(TextField::new().controller(controller.erase())))
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>()),
+                waft_embedder::Size::ZERO
+            );
+            controller.handle().set_selection(
+                &mut tester.cell.borrow_mut(),
+                TextSelection::collapsed(0, TextAffinity::Downstream),
+            );
+            tester.pump();
+        });
+    }
+
+    #[test]
+    fn entering_text_does_not_scroll_a_surrounding_page_view() {
+        test_widgets(|tester| {
+            let page_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::PageController::new(&mut app, 1, true, 1.0, None, None)
+            };
+            let controller = controller_with(tester, "");
+            let root = material_app(
+                theme(tester),
+                Material::new()
+                    .child(
+                        waft_widgets::PageView::new()
+                            .controller(page_controller)
+                            .children([
+                                Container::new().color(Colors::RED).into_widget(),
+                                waft_widgets::ColoredBox::new(Colors::GREEN)
+                                    .child(TextField::new().controller(controller.erase()))
+                                    .into_widget(),
+                                Container::new().color(Colors::RED).into_widget(),
+                            ]),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            tester.show_keyboard(find::by_type::<EditableText>());
+            tester.pump_and_settle();
+            assert_eq!(text(tester, controller.handle()), "");
+            tester.test_text_input().enter_text("H");
+            let frames = tester.pump_and_settle();
+
+            // The text input must not trigger any animation, which would mean the PageView
+            // scrolled back and forth.
+            assert_eq!(frames, 1);
+            assert_eq!(text(tester, controller.handle()), "H");
+        });
+    }
+
+    #[test]
+    fn cursor_does_not_show_when_not_focused() {
+        test_widgets(|tester| {
+            let focus_node = {
+                let mut app = tester.cell.borrow_mut();
+                FocusNode::new(&mut app)
+            };
+            let root = material_app(
+                theme(tester),
+                Material::new()
+                    .child(
+                        TextField::new()
+                            .focus_node(focus_node.clone().erase())
+                            .autofocus(true),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert!(has_focus(tester, focus_node.clone().handle()));
+            let editable = render_editable(tester);
+
+            focus_node.unfocus(
+                &mut tester.cell.borrow_mut(),
+                waft_widgets::UnfocusDisposition::Scope,
+            );
+            tester.pump();
+            let caret_rects = |tester: &WidgetTester| {
+                let mut app = tester.cell.borrow_mut();
+                let ops = painted_ops(&mut app, editable.as_object());
+                count_calls(&ops, CanvasMethod::DrawRect)
+            };
+            assert_eq!(caret_rects(tester), 0);
+
+            focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100));
+            assert!(caret_rects(tester) > 0);
+        });
+    }
+
+    #[test]
+    fn arrow_keys_dont_move_input_focus() {
+        test_widgets(|tester| {
+            let (focus_node1, focus_node2, focus_node3, focus_node4, focus_node5) = {
+                let mut app = tester.cell.borrow_mut();
+                (
+                    FocusNode::new(&mut app),
+                    FocusNode::new(&mut app),
+                    FocusNode::new(&mut app),
+                    FocusNode::new(&mut app),
+                    FocusNode::new(&mut app),
+                )
+            };
+            let field = |controller: &Ref<TextEditingController>, focus_node: &Ref<FocusNode>| {
+                SizedBox::new().width(100.0).child(
+                    TextField::new()
+                        .controller(controller.clone().erase())
+                        .focus_node(focus_node.clone().into_erased::<AnyFocusNode>()),
+                )
+            };
+            let controller1 = controller_with(tester, "");
+            let controller2 = controller_with(tester, "");
+            let controller3 = controller_with(tester, "");
+            let controller4 = controller_with(tester, "");
+            let controller5 = controller_with(tester, "");
+            let root = material_app(
+                theme(tester),
+                Scaffold::new()
+                    .body(
+                        Center::new().child(
+                            Column::new()
+                                .main_axis_alignment(MainAxisAlignment::Center)
+                                .main_axis_size(MainAxisSize::Min)
+                                .children([
+                                    field(&controller1, &focus_node1).into_widget(),
+                                    Row::new()
+                                        .main_axis_alignment(MainAxisAlignment::Center)
+                                        .main_axis_size(MainAxisSize::Min)
+                                        .children([
+                                            field(&controller2, &focus_node2).into_widget(),
+                                            field(&controller3, &focus_node3).into_widget(),
+                                            field(&controller4, &focus_node4).into_widget(),
+                                        ])
+                                        .into_widget(),
+                                    field(&controller5, &focus_node5).into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            focus_node3.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump();
+            assert!(has_focus(tester, focus_node3.clone().handle()));
+
+            for (physical, logical) in [
+                (PhysicalKeyboardKey::ARROW_UP, LogicalKeyboardKey::ARROW_UP),
+                (
+                    PhysicalKeyboardKey::ARROW_DOWN,
+                    LogicalKeyboardKey::ARROW_DOWN,
+                ),
+                (
+                    PhysicalKeyboardKey::ARROW_LEFT,
+                    LogicalKeyboardKey::ARROW_LEFT,
+                ),
+                (
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                ),
+            ] {
+                tester.send_key_event(physical, logical);
+                tester.pump();
+                assert!(
+                    has_focus(tester, focus_node3.clone().handle()),
+                    "{logical:?}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn text_field_icons_change_mouse_cursor_when_hovered() {
+        test_widgets(|tester| {
+            let root = material_app(
+                theme(tester),
+                Material::new()
+                    .child(
+                        waft_widgets::MouseRegion::new()
+                            .cursor(SystemMouseCursors::FORBIDDEN.into())
+                            .child(
+                                TextField::new().decoration(Some(
+                                    InputDecoration::new()
+                                        .icon(waft_widgets::Icon::new(Some(Icons::label())))
+                                        .prefix_icon(waft_widgets::Icon::new(Some(Icons::cabin())))
+                                        .suffix_icon(waft_widgets::Icon::new(
+                                            Some(Icons::person()),
+                                        )),
+                                )),
+                            ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            let center = tester.get_center(find::by_type::<TextField>());
+            let icon_area = tester.get_center(find::by_icon(&Icons::label()));
+            let prefix_area = tester.get_center(find::by_icon(&Icons::cabin()));
+            let suffix_area = tester.get_center(find::by_icon(&Icons::person()));
+
+            let mut pointer = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut pointer, center);
+            tester.pump();
+            tester.move_to(&mut pointer, center, false);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
+            tester.move_to(&mut pointer, icon_area, false);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
+            tester.move_to(&mut pointer, prefix_area, false);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
+            tester.move_to(&mut pointer, suffix_area, false);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
+        });
+    }
+
+    #[test]
+    fn read_only_text_field_basic() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "readonly");
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .read_only(true),
+            );
+            tester.pump_widget(root);
+            tester.show_keyboard(find::by_type::<TextField>());
+            assert!(!tester.test_text_input().has_any_clients());
+            skip_past_scrolling_animation(tester);
+            assert!(selection(tester, controller.handle()).is_collapsed());
+
+            tester.tap(find::by_type::<TextField>());
+            tester.pump();
+            assert!(!tester.test_text_input().has_any_clients());
+            assert!(!selection_overlay_visibility(tester).0);
+
+            let at = text_offset_to_position(tester, 3);
+            tester.long_press_at(at, 1);
+            tester.pump_and_settle();
+            expect(tester, &find::text("Copy"), finds_one_widget());
+            expect(tester, &find::text("Paste"), finds_nothing());
+            expect(tester, &find::text("Cut"), finds_nothing());
+        });
+    }
+
+    #[test]
+    fn when_text_field_would_be_blocked_by_keyboard_it_is_shown_with_enough_space_for_the_selection_handle()
+     {
+        test_widgets(|tester| {
+            let scroll_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::ScrollController::default(&mut app)
+            };
+            let root = material_app(
+                m2_theme(tester),
+                Scaffold::new()
+                    .body(
+                        Center::new().child(
+                            waft_widgets::ListView::new()
+                                .controller(scroll_controller.clone().into_erased())
+                                .children([
+                                    Container::new().height(579.0).into_widget(),
+                                    TextField::new().into_widget(),
+                                    Container::new().height(1000.0).into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            let offset = |tester: &WidgetTester| {
+                scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow())
+            };
+            assert_eq!(offset(tester), 0.0);
+            let at = tester.get_top_left(find::by_type::<TextField>());
+            tester.tap_at(at, 1);
+            tester.pump_and_settle();
+            assert_eq!(offset(tester), 50.0);
+        });
+    }
+
+    #[test]
+    fn text_field_and_last_input_character_are_visible_on_the_screen_when_the_cursor_is_not_shown()
+    {
+        test_widgets(|tester| {
+            let scroll_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::ScrollController::default(&mut app)
+            };
+            let field_scroll_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::ScrollController::default(&mut app)
+            };
+            let root = material_app(
+                m2_theme(tester),
+                Scaffold::new()
+                    .body(
+                        Center::new().child(
+                            waft_widgets::ListView::new()
+                                .controller(scroll_controller.clone().into_erased())
+                                .children([
+                                    Container::new().height(579.0).into_widget(),
+                                    TextField::new()
+                                        .scroll_controller(
+                                            field_scroll_controller.clone().into_erased(),
+                                        )
+                                        .show_cursor(false)
+                                        .into_widget(),
+                                    Container::new().height(1000.0).into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow()),
+                0.0
+            );
+            let at = tester.get_top_left(find::by_type::<TextField>());
+            tester.tap_at(at, 1);
+            tester.pump_and_settle();
+            assert_eq!(
+                scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow()),
+                50.0
+            );
+            assert_eq!(
+                field_scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow()),
+                0.0
+            );
+
+            let test_value = "I love Flutter!".repeat(10);
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text(&test_value)
+                    .selection(TextSelection::collapsed(
+                        test_value.len() as i32,
+                        TextAffinity::Downstream,
+                    )),
+            );
+            tester.pump();
+            tester.pump_and_settle();
+            assert_eq!(
+                field_scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow()),
+                1602.0
+            );
+        });
+    }
+
+    #[test]
+    fn text_field_scrolls_into_view_but_does_not_bounce_list_view() {
+        test_widgets(|tester| {
+            let controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::ScrollController::default(&mut app)
+            };
+            let key1: KeyRef = UniqueKey::new().into();
+            let key2: KeyRef = UniqueKey::new().into();
+            let offsets = Rc::new(RefCell::new(Vec::new()));
+            let recorded = Rc::clone(&offsets);
+            let listening = controller.clone();
+            controller.handle().add_listener(
+                &mut tester.cell.borrow_mut(),
+                Listener::new(move |app| {
+                    recorded.borrow_mut().push(listening.handle().offset(app));
+                }),
+            );
+            let frame = |tester: &WidgetTester| {
+                material_app(
+                    theme(tester),
+                    Scaffold::new()
+                        .body(
+                            waft_widgets::ListView::new()
+                                .physics(Rc::new(waft_widgets::BouncingScrollPhysics::new()))
+                                .controller(controller.clone().into_erased())
+                                .children([
+                                    SizedBox::new()
+                                        .width(100.0)
+                                        .height(100.0)
+                                        .child(
+                                            TextField::new()
+                                                .key(key1.clone())
+                                                .scroll_padding(EdgeInsets::all(200.0)),
+                                        )
+                                        .into_widget(),
+                                    SizedBox::new().width(650.0).height(450.0).into_widget(),
+                                    SizedBox::new()
+                                        .width(100.0)
+                                        .height(100.0)
+                                        .child(
+                                            TextField::new()
+                                                .key(key2.clone())
+                                                .scroll_padding(EdgeInsets::all(200.0)),
+                                        )
+                                        .into_widget(),
+                                ]),
+                        )
+                        .into_widget(),
+                )
+            };
+            tester.pump_widget(frame(tester));
+            tester.enter_text(find::by_key(key1.clone()), "1");
+            tester.pump_and_settle();
+            tester.enter_text(find::by_key(key2.clone()), "2");
+            tester.pump_and_settle();
+            tester.enter_text(find::by_key(key1), "3");
+            tester.pump_and_settle();
+            let seen = offsets.borrow();
+            assert_eq!(seen.iter().copied().fold(f64::INFINITY, f64::min), 0.0);
+            assert_eq!(seen.iter().copied().fold(f64::NEG_INFINITY, f64::max), 50.0);
         });
     }
 }

@@ -1183,13 +1183,16 @@ mod tests {
     use std::time::Duration;
 
     use waft_cupertino::{CupertinoButton, cupertino_text_selection_controls};
+    use waft_embedder::Size;
     use waft_embedder::TextAffinity;
     use waft_rendering::{RenderBox as _, RenderEditable};
-    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
+    use waft_services::{
+        LogicalKeyboardKey, PhysicalKeyboardKey, SystemMouseCursors, TextInputClient,
+    };
     use waft_test::{MockClipboard, TestPlatform};
     use waft_widgets::{
         AnyElement, AnyTextEditingController, Center, Column, DefaultTextStyle, Focus,
-        FocusNodeLeaf, IntoWidget, SizedBox,
+        FocusNodeLeaf, IntoWidget, MediaQueryData, ScrollBehaviorRef, SizedBox, Text,
     };
 
     use waft_widgets::testing::{
@@ -2916,5 +2919,823 @@ mod tests {
             assert!(!force_line);
             assert_eq!(max_lines, None);
         });
+    }
+
+    #[test]
+    fn no_text_keyboard_when_widget_is_focused() {
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("selectable text"));
+            tester.pump_widget(root);
+            tester.tap(find::by_type::<SelectableText>());
+            tester.cell.checkpoint();
+            assert!(!tester.test_text_input().has_any_clients());
+        });
+    }
+
+    #[test]
+    fn scroll_behavior_can_be_overridden() {
+        test_widgets(|tester| {
+            let root = material_home(
+                tester,
+                SelectableText::new(K_MORE_THAN_FOUR_LINES)
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .style(TextStyle::new().color(Colors::BLACK).font_size(34.0))
+                    .max_lines(Some(2)),
+            );
+            tester.pump_widget(root);
+            let editable_behavior = tester
+                .widget::<EditableText, _>(find::by_type::<EditableText>(), |widget| {
+                    widget.scroll_behavior.clone()
+                });
+            assert!(editable_behavior.is_none());
+            let scroll_behavior = tester.widget::<waft_widgets::Scrollable, _>(
+                find::by_type::<waft_widgets::Scrollable>(),
+                |widget| widget.scroll_behavior.clone(),
+            );
+            assert!(scroll_behavior.is_some());
+
+            let behavior =
+                ScrollBehaviorRef::new(ScrollBehaviorRef::plain().copy_with().scrollbars(false));
+            let root = material_home(
+                tester,
+                SelectableText::new(K_MORE_THAN_FOUR_LINES)
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .style(TextStyle::new().color(Colors::BLACK).font_size(34.0))
+                    .max_lines(Some(2))
+                    .scroll_behavior(behavior.clone()),
+            );
+            tester.pump_widget(root);
+            let editable_behavior = tester
+                .widget::<EditableText, _>(find::by_type::<EditableText>(), |widget| {
+                    widget.scroll_behavior.clone()
+                });
+            assert_eq!(editable_behavior, Some(behavior.clone()));
+            let scroll_behavior = tester
+                .widget::<waft_widgets::Scrollable, _>(
+                    find::by_type::<waft_widgets::Scrollable>(),
+                    |widget| widget.scroll_behavior.clone(),
+                )
+                .expect("the scrollable has a behavior");
+            assert_eq!(scroll_behavior, behavior);
+        });
+    }
+
+    #[test]
+    fn caret_works_when_max_lines_is_null() {
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("x"));
+            tester.pump_widget(root);
+            assert_eq!(selection(tester).base_offset, -1);
+
+            tester.tap_at(text_offset_to_position(tester, 0), 1);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
+            assert_eq!(selection(tester).base_offset, 0);
+        });
+    }
+
+    #[test]
+    fn double_tap_hold_selects_word() {
+        for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = material_home(tester, Center::new().child(SelectableText::new(ATWATER)));
+                tester.pump_widget(root);
+                let start = top_left_of_selectable_text(tester, 0);
+                tester.tap_at(start + Offset::new(150.0, 5.0), 1);
+                tester.pump_by(Duration::from_millis(50));
+
+                let mut gesture = TestPointer::touch(2);
+                tester.down(&mut gesture, start + Offset::new(150.0, 5.0));
+                tester.pump_by(Duration::from_millis(500));
+                assert_eq!(selection(tester), TextSelection::new(8, 12));
+                expect_cupertino_selection_toolbar(tester, platform);
+
+                tester.up(&gesture);
+                tester.pump();
+                assert_eq!(selection(tester), TextSelection::new(8, 12));
+                expect_cupertino_selection_toolbar(tester, platform);
+            });
+        }
+    }
+
+    #[test]
+    fn tap_after_a_double_tap_select_is_not_affected_ios() {
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let root = material_home(tester, Center::new().child(SelectableText::new(ATWATER)));
+            tester.pump_widget(root);
+            let start = top_left_of_selectable_text(tester, 0);
+
+            tester.tap_at(start + Offset::new(150.0, 5.0), 1);
+            tester.pump_by(Duration::from_millis(50));
+            assert_eq!(
+                selection(tester),
+                TextSelection::collapsed(12, TextAffinity::Upstream)
+            );
+            tester.tap_at(start + Offset::new(150.0, 5.0), 2);
+            tester.pump_by(Duration::from_millis(500));
+            tester.tap_at(start + Offset::new(100.0, 5.0), 3);
+            tester.pump();
+            assert_eq!(
+                selection(tester),
+                TextSelection::collapsed(7, TextAffinity::Downstream)
+            );
+            assert!(
+                find::by_type::<CupertinoButton>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
+        });
+    }
+
+    #[test]
+    fn tap_after_a_double_tap_select_is_not_affected_macos() {
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::MacOS),
+            |tester| {
+                let root = material_home(tester, Center::new().child(SelectableText::new(ATWATER)));
+                tester.pump_widget(root);
+                let start = top_left_of_selectable_text(tester, 0);
+
+                tester.tap_at(start + Offset::new(150.0, 5.0), 1);
+                tester.pump_by(Duration::from_millis(50));
+                assert_eq!(
+                    selection(tester),
+                    TextSelection::collapsed(11, TextAffinity::Upstream)
+                );
+                tester.tap_at(start + Offset::new(150.0, 5.0), 2);
+                tester.pump_by(Duration::from_millis(500));
+                tester.tap_at(start + Offset::new(100.0, 5.0), 3);
+                tester.pump();
+                assert_eq!(
+                    selection(tester),
+                    TextSelection::collapsed(7, TextAffinity::Downstream)
+                );
+                assert!(
+                    find::by_type::<CupertinoButton>()
+                        .evaluate(tester)
+                        .is_empty()
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn long_press_tap_cannot_initiate_a_double_tap_on_macos() {
+        test_widgets_variant(
+            TargetPlatformVariant::only(TargetPlatform::MacOS),
+            |tester| {
+                let root = material_home(tester, Center::new().child(SelectableText::new(ATWATER)));
+                tester.pump_widget(root);
+                let start = top_left_of_selectable_text(tester, 0);
+
+                tester.long_press_at(start + Offset::new(50.0, 5.0), 1);
+                tester.pump_by(Duration::from_millis(50));
+                editable_state(tester).hide_toolbar(&mut tester.cell.borrow_mut(), false);
+                tester.pump_and_settle();
+
+                tester.tap_at(start + Offset::new(50.0, 5.0), 2);
+                tester.pump();
+                assert_eq!(
+                    selection(tester),
+                    TextSelection::collapsed(4, TextAffinity::Upstream)
+                );
+                assert!(
+                    find::by_type::<CupertinoButton>()
+                        .evaluate(tester)
+                        .is_empty()
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn long_press_tap_cannot_initiate_a_double_tap_on_ios() {
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let root = material_home(tester, Center::new().child(SelectableText::new(ATWATER)));
+            tester.pump_widget(root);
+            let start = top_left_of_selectable_text(tester, 0);
+
+            tester.long_press_at(start + Offset::new(50.0, 5.0), 1);
+            tester.pump_by(Duration::from_millis(50));
+            editable_state(tester).hide_toolbar(&mut tester.cell.borrow_mut(), false);
+            tester.pump_and_settle();
+
+            tester.tap_at(start + Offset::new(50.0, 5.0), 2);
+            tester.pump();
+            assert_eq!(selection(tester), TextSelection::new(0, 7));
+            expect(
+                tester,
+                &find::by_type::<CupertinoButton>(),
+                finds_n_widgets(4),
+            );
+        });
+    }
+
+    #[test]
+    fn selectable_text_changes_mouse_cursor_when_hovered() {
+        test_widgets(|tester| {
+            let root = material_home(tester, Center::new().child(SelectableText::new("test")));
+            tester.pump_widget(root);
+            let at = tester.get_center(find::by_type::<EditableText>());
+            let mut pointer = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut pointer, at);
+            tester.pump();
+            tester.move_to(&mut pointer, at, false);
+            tester.pump();
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
+        });
+    }
+
+    #[test]
+    fn the_handles_show_after_pressing_select_all() {
+        for platform in [TargetPlatform::Android, TargetPlatform::Fuchsia] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = material_home(tester, SelectableText::new("abc def ghi"));
+                tester.pump_widget(root);
+                let at = text_offset_to_position(tester, 5);
+                tester.long_press_at(at, 1);
+                tester.pump_and_settle();
+                expect(tester, &find::text("Select all"), finds_one_widget());
+                expect(tester, &find::text("Copy"), finds_one_widget());
+                expect(tester, &find::text("Paste"), finds_nothing());
+                expect(tester, &find::text("Cut"), finds_nothing());
+                assert!(handles_are_visible(tester));
+                assert!(toolbar_is_visible(tester));
+
+                tester.tap(find::text("Select all"));
+                tester.pump();
+                expect(tester, &find::text("Copy"), finds_one_widget());
+                expect(tester, &find::text("Select all"), finds_nothing());
+                expect(tester, &find::text("Paste"), finds_nothing());
+                expect(tester, &find::text("Cut"), finds_nothing());
+                assert!(handles_are_visible(tester));
+            });
+        }
+    }
+
+    #[test]
+    fn the_select_all_calls_on_selection_changed() {
+        for platform in [TargetPlatform::Android, TargetPlatform::Fuchsia] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let seen: Rc<RefCell<Option<TextSelection>>> = Rc::default();
+                let recorded = Rc::clone(&seen);
+                let root = material_home(
+                    tester,
+                    SelectableText::new("abc def ghi").on_selection_changed(
+                        move |_app, selection, _cause| {
+                            assert!(recorded.borrow().is_none());
+                            *recorded.borrow_mut() = Some(selection);
+                        },
+                    ),
+                );
+                tester.pump_widget(root);
+                let at = text_offset_to_position(tester, 5);
+                tester.long_press_at(at, 1);
+                tester.pump_and_settle();
+                let selection = seen.borrow_mut().take().expect("the long press selects");
+                assert_eq!(selection, TextSelection::new(4, 7));
+
+                tester.tap(find::text("Select all"));
+                tester.pump();
+                let selection = seen.borrow_mut().take().expect("select all selects");
+                assert_eq!(selection, TextSelection::new(0, 11));
+            });
+        }
+    }
+
+    #[test]
+    fn selectable_text_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            let root = material_app(
+                ThemeData::new(&tester.cell.borrow()),
+                Center::new()
+                    .child(SizedBox::shrink().child(SelectableText::new("XYZ")))
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<SelectableText>()),
+                Size::ZERO
+            );
+
+            let state = editable_state(tester);
+            state.update_editing_value(
+                &mut tester.cell.borrow_mut(),
+                TextEditingValue::new()
+                    .text("XYZ")
+                    .selection(TextSelection::new(0, 3)),
+            );
+            tester.pump();
+        });
+    }
+
+    /// The global endpoints of `selection`, as Dart's `globalize` gives them.
+    fn global_endpoints(tester: &WidgetTester, selection: TextSelection) -> Vec<Offset> {
+        let render = render_editable_at(tester, 0);
+        let mut app = tester.cell.borrow_mut();
+        render
+            .get_endpoints_for_selection(&mut app, selection)
+            .into_iter()
+            .map(|endpoint| render.as_box().local_to_global(&app, endpoint.point, None))
+            .collect()
+    }
+
+    #[test]
+    fn can_drag_handles_to_change_selection() {
+        test_widgets(|tester| {
+            let root = material_home(
+                tester,
+                SelectableText::new("abc def ghi").drag_start_behavior(DragStartBehavior::Down),
+            );
+            tester.pump_widget(root);
+            let at = text_offset_to_position(tester, 5);
+            tester.long_press_at(at, 7);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
+            assert_eq!(selection(tester), TextSelection::new(4, 7));
+
+            let endpoints = global_endpoints(tester, TextSelection::new(4, 7));
+            assert_eq!(endpoints.len(), 2);
+            let mut gesture = TestPointer::touch(7);
+            tester.down(&mut gesture, endpoints[1] + Offset::new(1.0, 1.0));
+            tester.pump();
+            tester.move_to(&mut gesture, text_offset_to_position(tester, 11), true);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump();
+            assert_eq!(selection(tester), TextSelection::new(4, 11));
+
+            tester.down(&mut gesture, endpoints[0] + Offset::new(-1.0, 1.0));
+            tester.pump();
+            tester.move_to(&mut gesture, text_offset_to_position(tester, 0), true);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump();
+            assert_eq!(selection(tester), TextSelection::new(0, 11));
+        });
+    }
+
+    #[test]
+    fn dragging_handles_calls_on_selection_changed() {
+        test_widgets(|tester| {
+            let seen: Rc<RefCell<Option<TextSelection>>> = Rc::default();
+            let recorded = Rc::clone(&seen);
+            let root = material_home(
+                tester,
+                SelectableText::new("abc def ghi")
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .on_selection_changed(move |_app, selection, _cause| {
+                        assert!(recorded.borrow().is_none());
+                        *recorded.borrow_mut() = Some(selection);
+                    }),
+            );
+            tester.pump_widget(root);
+            let at = text_offset_to_position(tester, 5);
+            tester.long_press_at(at, 7);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
+            let first = seen.borrow_mut().take().expect("the long press selects");
+            assert_eq!(first, TextSelection::new(4, 7));
+
+            let endpoints = global_endpoints(tester, first);
+            let mut gesture = TestPointer::touch(7);
+            tester.down(&mut gesture, endpoints[1] + Offset::new(1.0, 1.0));
+            tester.pump();
+            tester.move_to(&mut gesture, text_offset_to_position(tester, 9), true);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump();
+            let dragged = seen.borrow_mut().take().expect("the handle selects");
+            assert_eq!(dragged, TextSelection::new(4, 9));
+        });
+    }
+
+    #[test]
+    fn cannot_drag_one_handle_past_the_other() {
+        test_widgets(|tester| {
+            let root = material_home(
+                tester,
+                SelectableText::new("abc def ghi").drag_start_behavior(DragStartBehavior::Down),
+            );
+            tester.pump_widget(root);
+            let at = text_offset_to_position(tester, 5);
+            tester.long_press_at(at, 7);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
+            assert_eq!(selection(tester), TextSelection::new(4, 7));
+
+            let endpoints = global_endpoints(tester, TextSelection::new(4, 7));
+            let mut gesture = TestPointer::touch(7);
+            tester.down(&mut gesture, endpoints[1] + Offset::new(1.0, 1.0));
+            tester.pump();
+            tester.move_to(&mut gesture, text_offset_to_position(tester, 5), true);
+            tester.pump();
+            assert_eq!(selection(tester), TextSelection::new(4, 5));
+
+            tester.move_to(&mut gesture, text_offset_to_position(tester, 2), true);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump();
+            assert_eq!(selection(tester), TextSelection::new(4, 5));
+        });
+    }
+
+    #[test]
+    fn can_drag_handles_to_change_selection_in_multiline() {
+        test_widgets(|tester| {
+            let root = material_home(
+                tester,
+                SelectableText::new(K_THREE_LINES)
+                    .style(TextStyle::new().color(Colors::BLACK).font_size(34.0))
+                    .max_lines(Some(3))
+                    .drag_start_behavior(DragStartBehavior::Down),
+            );
+            tester.pump_widget(root);
+            let at =
+                text_offset_to_position(tester, K_THREE_LINES.find("until").unwrap() as i32 + 1);
+            tester.long_press_at(at, 7);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
+            assert_eq!(selection(tester), TextSelection::new(39, 44));
+
+            let endpoints = global_endpoints(tester, TextSelection::new(39, 44));
+            assert_eq!(endpoints.len(), 2);
+            let mut gesture = TestPointer::touch(7);
+            tester.down(&mut gesture, endpoints[1] + Offset::new(1.0, 1.0));
+            tester.pump();
+            tester.move_to(
+                &mut gesture,
+                text_offset_to_position(tester, K_THREE_LINES.find("Third").unwrap() as i32 + 5)
+                    + Offset::new(0.0, 3.0),
+                true,
+            );
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump();
+            assert_eq!(selection(tester), TextSelection::new(39, 50));
+
+            tester.down(&mut gesture, endpoints[0] + Offset::new(-1.0, 1.0));
+            tester.pump();
+            tester.move_to(
+                &mut gesture,
+                text_offset_to_position(tester, K_THREE_LINES.find("First").unwrap() as i32 + 5),
+                true,
+            );
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump();
+            assert_eq!(selection(tester).base_offset, 5);
+            assert_eq!(selection(tester).extent_offset, 50);
+        });
+    }
+
+    #[test]
+    fn continuous_dragging_does_not_cause_flickering() {
+        test_widgets(|tester| {
+            let root = material_home(
+                tester,
+                SelectableText::new("abc def ghi")
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .style(TextStyle::new().font_size(10.0)),
+            );
+            tester.pump_widget(root);
+            let changed = Rc::new(Cell::new(0));
+            let count = Rc::clone(&changed);
+            controller(tester).add_listener(
+                &mut tester.cell.borrow_mut(),
+                Listener::new(move |_app| count.set(count.get() + 1)),
+            );
+
+            let c = text_offset_to_position(tester, 2);
+            let g = text_offset_to_position(tester, 8);
+            let h = text_offset_to_position(tester, 9);
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut pointer, c);
+            tester.pump();
+            tester.move_to(&mut pointer, g, true);
+            tester.pump_and_settle();
+            assert!(changed.get() > 0);
+            changed.set(0);
+            assert_eq!(selection(tester), TextSelection::new(2, 8));
+
+            tester.move_to(&mut pointer, g + Offset::new(4.0, 0.0), true);
+            tester.pump_and_settle();
+            assert_eq!(changed.get(), 0);
+
+            tester.move_to(&mut pointer, h, true);
+            tester.pump();
+            tester.up(&pointer);
+            tester.pump_and_settle();
+            assert_eq!(changed.get(), 1);
+            assert_eq!(selection(tester), TextSelection::new(2, 9));
+        });
+    }
+
+    #[test]
+    fn dragging_in_opposite_direction_also_works() {
+        test_widgets(|tester| {
+            let root = material_home(
+                tester,
+                SelectableText::new("abc def ghi").drag_start_behavior(DragStartBehavior::Down),
+            );
+            tester.pump_widget(root);
+            let e = text_offset_to_position(tester, 5);
+            let g = text_offset_to_position(tester, 8);
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut pointer, g);
+            tester.pump();
+            tester.move_to(&mut pointer, e, true);
+            tester.pump();
+            tester.up(&pointer);
+            tester.pump_and_settle();
+            assert_eq!(selection(tester), TextSelection::new(8, 5));
+        });
+    }
+
+    #[test]
+    fn slow_mouse_dragging_also_selects_text() {
+        test_widgets(|tester| {
+            let root = material_home(
+                tester,
+                SelectableText::new("abc def ghi").drag_start_behavior(DragStartBehavior::Down),
+            );
+            tester.pump_widget(root);
+            let e = text_offset_to_position(tester, 5);
+            let g = text_offset_to_position(tester, 8);
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut pointer, e);
+            tester.pump_by(Duration::from_secs(2));
+            tester.move_to(&mut pointer, g, true);
+            tester.pump();
+            tester.up(&pointer);
+            assert_eq!(selection(tester), TextSelection::new(5, 8));
+        });
+    }
+
+    #[test]
+    fn selecting_a_space_selects_the_previous_word_on_mobile() {
+        for platform in [TargetPlatform::IOS, TargetPlatform::Android] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let seen: Rc<RefCell<Option<TextSelection>>> = Rc::default();
+                let recorded = Rc::clone(&seen);
+                let root = material_app(
+                    ThemeData::new(&tester.cell.borrow()),
+                    SelectableText::new(" blah blah")
+                        .on_selection_changed(move |_app, selection, _cause| {
+                            *recorded.borrow_mut() = Some(selection)
+                        })
+                        .into_widget(),
+                );
+                tester.pump_widget(root);
+                assert!(seen.borrow().is_none());
+
+                tester.tap_at(text_offset_to_position(tester, 10), 1);
+                let current = seen.borrow_mut().take().expect("the tap selects");
+                assert_eq!((current.base_offset, current.extent_offset), (10, 10));
+
+                tester.long_press_at(text_offset_to_position(tester, 5), 2);
+                tester.pump_and_settle();
+                assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(1, 5)));
+
+                tester.tap_at(text_offset_to_position(tester, 10), 3);
+                let current = seen.borrow_mut().take().expect("the tap selects");
+                assert_eq!((current.base_offset, current.extent_offset), (10, 10));
+                tester.long_press_at(text_offset_to_position(tester, 0), 4);
+                tester.pump_and_settle();
+                assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(0, 1)));
+            });
+        }
+    }
+
+    #[test]
+    fn double_tapping_a_space_selects_the_previous_word_on_mobile() {
+        for platform in [TargetPlatform::IOS, TargetPlatform::Android] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let seen: Rc<RefCell<Option<TextSelection>>> = Rc::default();
+                let recorded = Rc::clone(&seen);
+                let root = material_app(
+                    ThemeData::builder()
+                        .use_material3(false)
+                        .build(&tester.cell.borrow()),
+                    Center::new()
+                        .child(
+                            SelectableText::new(" blah blah  \n  blah").on_selection_changed(
+                                move |_app, selection, _cause| {
+                                    *recorded.borrow_mut() = Some(selection)
+                                },
+                            ),
+                        )
+                        .into_widget(),
+                );
+                tester.pump_widget(root);
+
+                tester.tap_at(text_offset_to_position(tester, 19), 1);
+                let current = seen.borrow_mut().take().expect("the tap selects");
+                assert_eq!((current.base_offset, current.extent_offset), (19, 19));
+                tester.pump_by(Duration::from_millis(500));
+                tester.tap_at(text_offset_to_position(tester, 5), 2);
+                tester.pump_by(Duration::from_millis(50));
+                tester.tap_at(text_offset_to_position(tester, 5), 3);
+                tester.pump_and_settle();
+                assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(1, 5)));
+
+                tester.pump_by(Duration::from_millis(500));
+                tester.tap_at(text_offset_to_position(tester, 0), 4);
+                tester.pump_by(Duration::from_millis(50));
+                tester.tap_at(text_offset_to_position(tester, 0), 5);
+                tester.pump_and_settle();
+                assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(0, 1)));
+
+                tester.tap_at(text_offset_to_position(tester, 19), 6);
+                let current = seen.borrow_mut().take().expect("the tap selects");
+                assert_eq!((current.base_offset, current.extent_offset), (19, 19));
+                tester.pump_by(Duration::from_millis(500));
+                tester.tap_at(text_offset_to_position(tester, 14), 7);
+                tester.pump_by(Duration::from_millis(50));
+                tester.tap_at(text_offset_to_position(tester, 14), 8);
+                tester.pump_and_settle();
+                assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(6, 14)));
+            });
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "No Overlay widget found")]
+    fn throw_if_no_overlay_widget_exists_above() {
+        test_widgets(|tester| {
+            let home: waft_widgets::WidgetRef = Center::new()
+                .child(Material::new().child(SelectableText::new("I love Flutter!")))
+                .into_widget();
+            let media = waft_widgets::MediaQuery::new(
+                MediaQueryData::new().size(Size::new(800.0, 600.0)),
+                home,
+            )
+            .into_widget();
+            let root = waft_widgets::Directionality::new(TextDirection::Ltr, media);
+            tester.pump_widget(root);
+            let start = top_left_of_selectable_text(tester, 0);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut gesture, start);
+            tester.pump_by(Duration::from_secs(2));
+            tester.up(&gesture);
+            tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
+        });
+    }
+
+    #[test]
+    fn page_view_beats_selectable_text_drag_gestures_ios() {
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let page_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::PageController::new(&mut app, 0, true, 1.0, None, None)
+            };
+            let test_value = "abc def ghi jkl mno pqr stu vwx yz";
+            let root = material_app(
+                ThemeData::new(&tester.cell.borrow()),
+                Material::new()
+                    .child(
+                        waft_widgets::PageView::new()
+                            .controller(page_controller.clone())
+                            .children([
+                                Center::new()
+                                    .child(SelectableText::new(test_value))
+                                    .into_widget(),
+                                SizedBox::new()
+                                    .height(200.0)
+                                    .child(Center::new().child(Text::new("Page 2")))
+                                    .into_widget(),
+                            ]),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            tester.pump_and_settle();
+
+            let g = text_offset_to_position(tester, test_value.find('g').unwrap() as i32);
+            let p = text_offset_to_position(tester, test_value.find('p').unwrap() as i32);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, g);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump();
+            tester.down(&mut gesture, g);
+            tester.pump_and_settle();
+            tester.move_to(&mut gesture, p, true);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+            assert_eq!(
+                selection(tester),
+                TextSelection::new(
+                    test_value.find('g').unwrap() as i32,
+                    test_value.find('p').unwrap() as i32 + 3
+                )
+            );
+            assert_eq!(
+                page_controller.handle().page(&tester.cell.borrow()),
+                Some(0.0)
+            );
+
+            let rect = tester.get_rect(find::by_type::<SelectableText>());
+            tester.drag_from(
+                rect.center_right() - Offset::new(0.1, 0.0),
+                Offset::new(-500.0, 0.0),
+                9,
+            );
+            tester.pump_and_settle();
+            assert_eq!(
+                page_controller.handle().page(&tester.cell.borrow()),
+                Some(1.0)
+            );
+        });
+    }
+
+    #[test]
+    fn the_select_all_calls_on_selection_changed_with_a_mouse_on_windows_and_linux() {
+        for platform in [TargetPlatform::Windows, TargetPlatform::Linux] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let seen: Rc<RefCell<Option<TextSelection>>> = Rc::default();
+                let recorded = Rc::clone(&seen);
+                let root = material_home(
+                    tester,
+                    SelectableText::new("abc def ghi").on_selection_changed(
+                        move |_app, selection, _cause| {
+                            assert!(recorded.borrow().is_none());
+                            *recorded.borrow_mut() = Some(selection);
+                        },
+                    ),
+                );
+                tester.pump_widget(root);
+
+                let e = text_offset_to_position(tester, 5);
+                let mut gesture = TestPointer::mouse(1, waft_gestures::K_SECONDARY_BUTTON);
+                tester.down(&mut gesture, e);
+                tester.pump();
+                tester.up(&gesture);
+                tester.pump_and_settle();
+                let first = seen.borrow_mut().take().expect("the right click selects");
+                assert!(first.is_collapsed());
+                assert_eq!(first.base_offset, 5);
+
+                tester.tap(find::text("Select all"));
+                tester.pump();
+                let second = seen.borrow_mut().take().expect("select all selects");
+                assert_eq!(second.base_offset, 0);
+                assert_eq!(second.extent_offset, 11);
+            });
+        }
+    }
+
+    #[test]
+    fn selecting_a_space_selects_the_space_on_non_mobile_platforms() {
+        for platform in [
+            TargetPlatform::MacOS,
+            TargetPlatform::Windows,
+            TargetPlatform::Linux,
+            TargetPlatform::Fuchsia,
+        ] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let seen: Rc<RefCell<Option<TextSelection>>> = Rc::default();
+                let recorded = Rc::clone(&seen);
+                let root = material_app(
+                    ThemeData::new(&tester.cell.borrow()),
+                    Material::new()
+                        .child(Center::new().child(
+                            SelectableText::new(" blah blah").on_selection_changed(
+                                move |_app, selection, _cause| {
+                                    *recorded.borrow_mut() = Some(selection)
+                                },
+                            ),
+                        ))
+                        .into_widget(),
+                );
+                tester.pump_widget(root);
+                assert!(seen.borrow().is_none());
+
+                tester.tap_at(text_offset_to_position(tester, 10), 1);
+                let current = seen.borrow_mut().take().expect("the tap selects");
+                assert_eq!((current.base_offset, current.extent_offset), (10, 10));
+
+                tester.pump_by(Duration::from_millis(500));
+                tester.tap_at(text_offset_to_position(tester, 5), 2);
+                tester.pump_by(Duration::from_millis(50));
+                tester.tap_at(text_offset_to_position(tester, 5), 3);
+                tester.pump_and_settle();
+                assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(5, 6)));
+
+                tester.tap_at(text_offset_to_position(tester, 0), 4);
+                tester.pump_and_settle();
+                tester.tap_at(text_offset_to_position(tester, 10), 5);
+                let current = seen.borrow_mut().take().expect("the tap selects");
+                assert_eq!((current.base_offset, current.extent_offset), (10, 10));
+
+                tester.pump_by(Duration::from_millis(500));
+                tester.tap_at(text_offset_to_position(tester, 0), 6);
+                tester.pump_by(Duration::from_millis(50));
+                tester.tap_at(text_offset_to_position(tester, 0), 7);
+                tester.pump_and_settle();
+                assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(0, 1)));
+            });
+        }
     }
 }
