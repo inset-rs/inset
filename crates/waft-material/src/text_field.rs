@@ -2330,7 +2330,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{TextAffinity, TextPosition, TextRange};
+    use waft_embedder::{TextAffinity, TextBaseline, TextPosition, TextRange};
     use waft_painting::TextSpan;
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{SystemMouseCursors, TextInputClient, TextInputFormatterRef};
@@ -2369,7 +2369,8 @@ mod tests {
     use waft_foundation::UniqueKey;
     use waft_test::{MockClipboard, TestPlatform};
     use waft_widgets::{
-        Container, IntrinsicHeight, MainAxisAlignment, MainAxisSize, Row, TickerMode,
+        Container, CrossAxisAlignment, IntrinsicHeight, MainAxisAlignment, MainAxisSize, Row,
+        TickerMode,
     };
     use waft_widgets::{FocusNodeLeaf, ScrollControllerLeaf, TextEditingControllerLeaf};
 
@@ -8607,6 +8608,68 @@ mod tests {
             let seen = offsets.borrow();
             assert_eq!(seen.iter().copied().fold(f64::INFINITY, f64::min), 0.0);
             assert_eq!(seen.iter().copied().fold(f64::NEG_INFINITY, f64::max), 50.0);
+        });
+    }
+
+    #[test]
+    fn text_field_baseline_alignment() {
+        test_widgets(|tester| {
+            let controller_a = controller_with(tester, "A");
+            let controller_b = controller_with(tester, "B");
+            let key_a: KeyRef = UniqueKey::new().into();
+            let key_b: KeyRef = UniqueKey::new().into();
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    Material::new().child(
+                        Row::new()
+                            .cross_axis_alignment(CrossAxisAlignment::Baseline)
+                            .text_baseline(TextBaseline::Alphabetic)
+                            .children([
+                                waft_widgets::Expanded::new(
+                                    TextField::new()
+                                        .key(key_a.clone())
+                                        .decoration(None)
+                                        .controller(controller_a.erase())
+                                        .style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(12.0),
+                                        ),
+                                )
+                                .into_widget(),
+                                Text::new("abc")
+                                    .style(
+                                        TextStyle::new().font_family("FlutterTest").font_size(24.0),
+                                    )
+                                    .into_widget(),
+                                waft_widgets::Expanded::new(
+                                    TextField::new()
+                                        .key(key_b.clone())
+                                        .decoration(None)
+                                        .controller(controller_b.erase())
+                                        .style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(36.0),
+                                        ),
+                                )
+                                .into_widget(),
+                            ]),
+                    ),
+                ),
+            );
+            tester.pump_widget(root);
+            let row_bottom = tester.get_bottom_left(find::by_type::<Row>()).dy();
+            assert_eq!(
+                tester.get_bottom_left(find::by_key(key_a)).dy(),
+                row_bottom - 6.0
+            );
+            assert_eq!(
+                tester.get_bottom_left(find::text("abc")).dy(),
+                row_bottom - 3.0
+            );
+            assert_eq!(tester.get_bottom_left(find::by_key(key_b)).dy(), row_bottom);
         });
     }
 }
