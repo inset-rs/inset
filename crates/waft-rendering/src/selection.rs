@@ -144,7 +144,7 @@ pub struct AnySelectable {
 }
 
 /// The erased `pushHandleLayers`: the object, its two links, and the app whose paint it marks.
-type PushHandleLayers = fn(&mut App, HandleId, Option<Ref<LayerLink>>, Option<Ref<LayerLink>>);
+pub type PushHandleLayers = fn(&mut App, HandleId, Option<Ref<LayerLink>>, Option<Ref<LayerLink>>);
 
 struct SelectableVTable {
     selection_geometry: fn(&App, HandleId) -> SelectionGeometry,
