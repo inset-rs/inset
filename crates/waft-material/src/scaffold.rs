@@ -2438,7 +2438,7 @@ pub type BottomSheetScrimBuilder =
 ///  * [`BottomSheet`], which is an overlay typically shown near the bottom of the
 ///    app. A bottom sheet can either be persistent, in which case it is shown
 ///    using the [`ScaffoldState::show_bottom_sheet`] method, or modal, in which case
-///    it is shown using the `show_modal_bottom_sheet` function.
+///    it is shown using the `ShowModalBottomSheet` function.
 pub struct Scaffold {
     pub key: Option<KeyRef>,
 
@@ -2622,7 +2622,7 @@ pub struct Scaffold {
     /// A closely related widget is a modal bottom sheet, which is an alternative
     /// to a menu or a dialog and prevents the user from interacting with the rest
     /// of the app. Modal bottom sheets can be created and displayed with the
-    /// `show_modal_bottom_sheet` function.
+    /// `ShowModalBottomSheet` function.
     ///
     /// Unlike the persistent bottom sheet displayed by
     /// [`ScaffoldState::show_bottom_sheet`], this bottom sheet is not a `LocalHistoryEntry`
@@ -2634,7 +2634,7 @@ pub struct Scaffold {
     ///
     /// The value of [`bottom_sheet`](Self::bottom_sheet) can be any widget at all. It's
     /// unlikely to actually be a [`BottomSheet`], which is used by the implementations of
-    /// [`ScaffoldState::show_bottom_sheet`] and `show_modal_bottom_sheet`. Typically it's a
+    /// [`ScaffoldState::show_bottom_sheet`] and `ShowModalBottomSheet`. Typically it's a
     /// widget that includes [`Material`].
     pub bottom_sheet: Option<WidgetRef>,
 
@@ -3806,7 +3806,7 @@ impl ScaffoldState {
     /// A closely related widget is a modal bottom sheet, which is an alternative
     /// to a menu or a dialog and prevents the user from interacting with the rest
     /// of the app. Modal bottom sheets can be created and displayed with the
-    /// `show_modal_bottom_sheet` function.
+    /// `ShowModalBottomSheet` function.
     ///
     /// The `sheet_animation_style` parameter is used to override the bottom sheet
     /// animation duration and reverse animation duration.
@@ -3825,8 +3825,8 @@ impl ScaffoldState {
     ///
     ///  * [`BottomSheet`], which becomes the parent of the widget returned by the
     ///    `builder`.
-    ///  * `show_bottom_sheet`, which calls this method given a [`BuildContext`].
-    ///  * `show_modal_bottom_sheet`, which can be used to display a modal bottom
+    ///  * `ShowBottomSheet`, which calls this method given a [`BuildContext`].
+    ///  * `ShowModalBottomSheet`, which can be used to display a modal bottom
     ///    sheet.
     ///  * [`Scaffold::of`], for information about how to obtain the [`ScaffoldState`].
     ///  * The Material 2 spec at <https://m2.material.io/components/sheets-bottom>.
@@ -8419,25 +8419,15 @@ mod tests {
                                     match current {
                                         None => {
                                             let bottom_sheet_key = bottom_sheet_key.clone();
-                                            let shown = crate::show_bottom_sheet(
-                                                app,
-                                                context,
+                                            let shown = crate::bottom_sheet::ShowBottomSheet::new(
                                                 Rc::new(move |_app, _context| {
                                                     Container::new()
                                                         .key(bottom_sheet_key.clone().into())
                                                         .height(200.0)
                                                         .into_widget()
                                                 }),
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                            );
+                                            )
+                                            .show(app, context);
                                             *controller.borrow_mut() = Some(shown);
                                         }
                                         Some(current) => current.close(app),

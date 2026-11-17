@@ -56,6 +56,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/drag_boundary.rs → drag_boundary.dart
 - widgets/sliver_prototype_extent_list.rs → sliver_prototype_extent_list.dart
 
+## show_* functions → their .dart files
+- Change: `show_raw_dialog` and `show_general_dialog` are builders — `ShowRawDialog::new(builder)` and `ShowGeneralDialog::new(page_builder)`, with a setter per optional Dart argument — whose `show(app, context)` runs the body the free function ran.
+  Reason: language — Rust has no named optional arguments, so the required arguments stay in `new` and every optional one is a fluent setter.
+  Affect: a call site writes `ShowRawDialog::new(builder).use_root_navigator(false).show(app, context)` where Dart writes named arguments, and the free functions no longer exist.
+
 ## widgets/preferred_size.rs → preferred_size.dart (+ the `Size` subclass mechanism)
 
 - Change: Flutter's `Size` subclass `_PreferredAppBarSize` is a `SizeExtension` payload that `AnySize` carries beside the plain `Size`, as `AnyColor` carries a `Color`'s; `PreferredSizeWidget::preferred_size` and `PreferredSize`'s field hold `AnySize`, which derefs to `Size`, and `extension::<T>()` is Dart's `is T`.

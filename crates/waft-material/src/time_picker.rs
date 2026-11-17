@@ -54,7 +54,7 @@ use crate::colors::Colors;
 use crate::constants::K_MIN_INTERACTIVE_DIMENSION;
 #[allow(deprecated)]
 use crate::curves::standard_easing;
-use crate::dialog::Dialog;
+use crate::dialog::{Dialog, ShowDialog};
 use crate::generated::time_picker_defaults_m3::TimePickerDefaultsM3;
 use crate::icon_button::IconButton;
 use crate::icons::Icons;
@@ -3403,12 +3403,12 @@ const HOUR_MINUTE_MODES: [HourMinuteMode; 2] = [HourMinuteMode::Hour, HourMinute
 
 /// A Material Design time picker designed to appear inside a popup dialog.
 ///
-/// Pass this widget to [`showDialog`](crate::show_dialog). The value returned by
-/// [`showDialog`](crate::show_dialog) is the selected [`TimeOfDay`] if the user taps the "OK"
+/// Pass this widget to [`ShowDialog`]. The value returned by
+/// [`ShowDialog`] is the selected [`TimeOfDay`] if the user taps the "OK"
 /// button, or null if the user taps the "CANCEL" button. The selected time is reported by
 /// popping the navigator with the selected time.
 ///
-/// Use [`show_time_picker`](crate::show_time_picker) to show the dialog.
+/// Use [`ShowTimePicker`] to show the dialog.
 #[derive(Clone)]
 pub struct TimePickerDialog {
     pub key: Option<waft_widgets::KeyRef>,
@@ -4719,13 +4719,7 @@ impl State for TimePickerState {
 /// [`MediaQuery`](waft_widgets::MediaQuery).
 ///
 /// The `empty_initial_input` parameter starts the input mode with empty hour and minute fields.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_time_picker(
-    app: &mut waft_foundation::App,
-    context: waft_widgets::BuildContext,
+pub struct ShowTimePicker {
     initial_time: TimeOfDay,
     builder: Option<waft_widgets::TransitionBuilder>,
     barrier_dismissible: bool,
@@ -4745,47 +4739,224 @@ pub fn show_time_picker(
     switch_to_input_entry_mode_icon: Option<waft_widgets::Icon>,
     switch_to_timer_entry_mode_icon: Option<waft_widgets::Icon>,
     empty_initial_input: bool,
-) -> waft_foundation::CompleterFuture<waft_widgets::RouteResult> {
-    debug_assert!(crate::debug::debug_check_has_material_localizations(
-        app, context
-    ));
+}
 
-    let mut dialog = TimePickerDialog::new(initial_time)
-        .initial_entry_mode(initial_entry_mode)
-        .empty_initial_input(empty_initial_input);
-    dialog.cancel_text = cancel_text;
-    dialog.confirm_text = confirm_text;
-    dialog.help_text = help_text;
-    dialog.error_invalid_text = error_invalid_text;
-    dialog.hour_label_text = hour_label_text;
-    dialog.minute_label_text = minute_label_text;
-    dialog.orientation = orientation;
-    dialog.on_entry_mode_changed = on_entry_mode_changed;
-    if let Some(icon) = switch_to_input_entry_mode_icon {
-        dialog = dialog.switch_to_input_entry_mode_icon(icon);
+impl ShowTimePicker {
+    /// Creates a builder for a Material time picker; Dart's `showTimePicker` required argument
+    /// is the initial time, and every other argument is a setter.
+    pub fn new(initial_time: TimeOfDay) -> ShowTimePicker {
+        ShowTimePicker {
+            initial_time,
+            builder: None,
+            barrier_dismissible: true,
+            barrier_color: None,
+            barrier_label: None,
+            use_root_navigator: true,
+            initial_entry_mode: TimePickerEntryMode::Dial,
+            cancel_text: None,
+            confirm_text: None,
+            help_text: None,
+            error_invalid_text: None,
+            hour_label_text: None,
+            minute_label_text: None,
+            route_settings: None,
+            on_entry_mode_changed: None,
+            orientation: None,
+            switch_to_input_entry_mode_icon: None,
+            switch_to_timer_entry_mode_icon: None,
+            empty_initial_input: false,
+        }
     }
-    if let Some(icon) = switch_to_timer_entry_mode_icon {
-        dialog = dialog.switch_to_timer_entry_mode_icon(icon);
+
+    /// Wraps the dialog to add inherited widgets such as localizations, direction or media
+    /// query.
+    pub fn builder(mut self, builder: waft_widgets::TransitionBuilder) -> ShowTimePicker {
+        self.builder = Some(builder);
+        self
     }
-    let dialog = waft_widgets::IntoWidget::into_widget(dialog);
-    crate::dialog::show_dialog(
-        app,
-        context,
-        std::rc::Rc::new(move |app, context| match &builder {
+
+    /// Whether tapping on the barrier dismisses the dialog. Defaults to `true`.
+    pub fn barrier_dismissible(mut self, barrier_dismissible: bool) -> ShowTimePicker {
+        self.barrier_dismissible = barrier_dismissible;
+        self
+    }
+
+    /// The color of the modal barrier below the dialog.
+    pub fn barrier_color(mut self, barrier_color: waft_embedder::Color) -> ShowTimePicker {
+        self.barrier_color = Some(barrier_color);
+        self
+    }
+
+    /// The semantic label of the dialog's modal barrier.
+    pub fn barrier_label(mut self, barrier_label: impl Into<String>) -> ShowTimePicker {
+        self.barrier_label = Some(barrier_label.into());
+        self
+    }
+
+    /// Whether to push the dialog to the root navigator. Defaults to `true`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowTimePicker {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// The initial time entry selection: a clock dial or text input. Defaults to
+    /// `TimePickerEntryMode::Dial`.
+    pub fn initial_entry_mode(mut self, initial_entry_mode: TimePickerEntryMode) -> ShowTimePicker {
+        self.initial_entry_mode = initial_entry_mode;
+        self
+    }
+
+    /// The text of the cancel button.
+    pub fn cancel_text(mut self, cancel_text: impl Into<String>) -> ShowTimePicker {
+        self.cancel_text = Some(cancel_text.into());
+        self
+    }
+
+    /// The text of the confirm button.
+    pub fn confirm_text(mut self, confirm_text: impl Into<String>) -> ShowTimePicker {
+        self.confirm_text = Some(confirm_text.into());
+        self
+    }
+
+    /// The text of the help label.
+    pub fn help_text(mut self, help_text: impl Into<String>) -> ShowTimePicker {
+        self.help_text = Some(help_text.into());
+        self
+    }
+
+    /// The text of the error for an invalid time.
+    pub fn error_invalid_text(mut self, error_invalid_text: impl Into<String>) -> ShowTimePicker {
+        self.error_invalid_text = Some(error_invalid_text.into());
+        self
+    }
+
+    /// The text of the hour field's label.
+    pub fn hour_label_text(mut self, hour_label_text: impl Into<String>) -> ShowTimePicker {
+        self.hour_label_text = Some(hour_label_text.into());
+        self
+    }
+
+    /// The text of the minute field's label.
+    pub fn minute_label_text(mut self, minute_label_text: impl Into<String>) -> ShowTimePicker {
+        self.minute_label_text = Some(minute_label_text.into());
+        self
+    }
+
+    /// The route settings passed to the dialog route.
+    pub fn route_settings(
+        mut self,
+        route_settings: waft_widgets::RouteSettingsRef,
+    ) -> ShowTimePicker {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// Called when the user changes the entry mode.
+    pub fn on_entry_mode_changed(
+        mut self,
+        on_entry_mode_changed: EntryModeChangeCallback,
+    ) -> ShowTimePicker {
+        self.on_entry_mode_changed = Some(on_entry_mode_changed);
+        self
+    }
+
+    /// The orientation of the dialog; defaults to the ambient media query's.
+    pub fn orientation(mut self, orientation: waft_widgets::Orientation) -> ShowTimePicker {
+        self.orientation = Some(orientation);
+        self
+    }
+
+    /// The icon that switches to the input entry mode.
+    pub fn switch_to_input_entry_mode_icon(
+        mut self,
+        switch_to_input_entry_mode_icon: waft_widgets::Icon,
+    ) -> ShowTimePicker {
+        self.switch_to_input_entry_mode_icon = Some(switch_to_input_entry_mode_icon);
+        self
+    }
+
+    /// The icon that switches to the timer entry mode.
+    pub fn switch_to_timer_entry_mode_icon(
+        mut self,
+        switch_to_timer_entry_mode_icon: waft_widgets::Icon,
+    ) -> ShowTimePicker {
+        self.switch_to_timer_entry_mode_icon = Some(switch_to_timer_entry_mode_icon);
+        self
+    }
+
+    /// Starts the input mode with empty hour and minute fields.
+    pub fn empty_initial_input(mut self, empty_initial_input: bool) -> ShowTimePicker {
+        self.empty_initial_input = empty_initial_input;
+        self
+    }
+
+    /// Shows the dialog and returns a future that resolves when it is dismissed.
+    pub fn show(
+        self,
+        app: &mut waft_foundation::App,
+        context: waft_widgets::BuildContext,
+    ) -> waft_foundation::CompleterFuture<waft_widgets::RouteResult> {
+        let ShowTimePicker {
+            initial_time,
+            builder,
+            barrier_dismissible,
+            barrier_color,
+            barrier_label,
+            use_root_navigator,
+            initial_entry_mode,
+            cancel_text,
+            confirm_text,
+            help_text,
+            error_invalid_text,
+            hour_label_text,
+            minute_label_text,
+            route_settings,
+            on_entry_mode_changed,
+            orientation,
+            switch_to_input_entry_mode_icon,
+            switch_to_timer_entry_mode_icon,
+            empty_initial_input,
+        } = self;
+
+        debug_assert!(crate::debug::debug_check_has_material_localizations(
+            app, context
+        ));
+
+        let mut dialog = TimePickerDialog::new(initial_time)
+            .initial_entry_mode(initial_entry_mode)
+            .empty_initial_input(empty_initial_input);
+        dialog.cancel_text = cancel_text;
+        dialog.confirm_text = confirm_text;
+        dialog.help_text = help_text;
+        dialog.error_invalid_text = error_invalid_text;
+        dialog.hour_label_text = hour_label_text;
+        dialog.minute_label_text = minute_label_text;
+        dialog.orientation = orientation;
+        dialog.on_entry_mode_changed = on_entry_mode_changed;
+        if let Some(icon) = switch_to_input_entry_mode_icon {
+            dialog = dialog.switch_to_input_entry_mode_icon(icon);
+        }
+        if let Some(icon) = switch_to_timer_entry_mode_icon {
+            dialog = dialog.switch_to_timer_entry_mode_icon(icon);
+        }
+        let dialog = waft_widgets::IntoWidget::into_widget(dialog);
+        let mut show = ShowDialog::new(std::rc::Rc::new(move |app, context| match &builder {
             None => dialog.clone(),
             Some(builder) => builder(app, context, Some(&dialog)),
-        }),
-        barrier_dismissible,
-        barrier_color,
-        barrier_label,
-        true,
-        use_root_navigator,
-        route_settings,
-        None,
-        false,
-        None,
-        None,
-    )
+        }))
+        .barrier_dismissible(barrier_dismissible)
+        .use_root_navigator(use_root_navigator);
+        if let Some(barrier_color) = barrier_color {
+            show = show.barrier_color(barrier_color);
+        }
+        if let Some(barrier_label) = barrier_label {
+            show = show.barrier_label(barrier_label);
+        }
+        if let Some(route_settings) = route_settings {
+            show = show.route_settings(route_settings);
+        }
+        show.show(app, context)
+    }
 }
 
 /// Dart's `_TimePickerDefaults`: the defaults of a [`TimePickerThemeData`], each getter
@@ -5235,29 +5406,29 @@ pub(crate) mod tests {
                 let boilerplate = boilerplate.clone();
                 TextButton::new(
                     Some(Listener::new(move |app| {
-                        drop(show_time_picker(
-                            app,
-                            context,
-                            boilerplate.initial_time,
-                            None,
-                            true,
-                            None,
-                            None,
-                            true,
-                            boilerplate.entry_mode,
-                            None,
-                            None,
-                            boilerplate.help_text.clone(),
-                            boilerplate.error_invalid_text.clone(),
-                            boilerplate.hour_label_text.clone(),
-                            boilerplate.minute_label_text.clone(),
-                            None,
-                            boilerplate.on_entry_mode_change.clone(),
-                            boilerplate.orientation,
-                            None,
-                            None,
-                            false,
-                        ));
+                        drop({
+                            let mut show = ShowTimePicker::new(boilerplate.initial_time);
+                            show = show.initial_entry_mode(boilerplate.entry_mode);
+                            if let Some(value) = boilerplate.help_text.clone() {
+                                show = show.help_text(value);
+                            }
+                            if let Some(value) = boilerplate.error_invalid_text.clone() {
+                                show = show.error_invalid_text(value);
+                            }
+                            if let Some(value) = boilerplate.hour_label_text.clone() {
+                                show = show.hour_label_text(value);
+                            }
+                            if let Some(value) = boilerplate.minute_label_text.clone() {
+                                show = show.minute_label_text(value);
+                            }
+                            if let Some(value) = boilerplate.on_entry_mode_change.clone() {
+                                show = show.on_entry_mode_changed(value);
+                            }
+                            if let Some(value) = boilerplate.orientation {
+                                show = show.orientation(value);
+                            }
+                            show.show(app, context)
+                        });
                     })),
                     Some(Text::new("X")),
                 )
@@ -5384,29 +5555,13 @@ pub(crate) mod tests {
                             let result_slot = Rc::clone(&result_slot);
                             crate::elevated_button::ElevatedButton::new(
                                 Some(Listener::new(move |app| {
-                                    let future = show_time_picker(
-                                        app,
-                                        context,
-                                        TimeOfDay::new(7, 0),
-                                        None,
-                                        true,
-                                        None,
-                                        None,
-                                        true,
-                                        parameters.entry_mode,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        parameters.empty_initial_input,
-                                    );
+                                    let future = {
+                                        let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+                                        show = show.initial_entry_mode(parameters.entry_mode);
+                                        show = show
+                                            .empty_initial_input(parameters.empty_initial_input);
+                                        show.show(app, context)
+                                    };
                                     *result_slot.borrow_mut() = Some(future);
                                 })),
                                 Some(Text::new("X")),
@@ -5942,29 +6097,10 @@ pub(crate) mod tests {
         app: &mut waft_foundation::App,
         context: BuildContext,
     ) -> waft_foundation::CompleterFuture<waft_widgets::RouteResult> {
-        show_time_picker(
-            app,
-            context,
-            TimeOfDay::new(7, 0),
-            None,
-            true,
-            None,
-            None,
-            true,
-            TimePickerEntryMode::Dial,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-        )
+        {
+            let show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+            show.show(app, context)
+        }
     }
 
     #[test]
@@ -5988,29 +6124,11 @@ pub(crate) mod tests {
     fn barrier_is_not_dismissible_with_barrier_dismissible_is_false() {
         test_widgets(|tester| {
             open_picker_app(tester, |app, context| {
-                drop(show_time_picker(
-                    app,
-                    context,
-                    TimeOfDay::new(7, 0),
-                    None,
-                    false,
-                    None,
-                    None,
-                    true,
-                    TimePickerEntryMode::Dial,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                ));
+                drop({
+                    let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+                    show = show.barrier_dismissible(false);
+                    show.show(app, context)
+                });
             });
 
             // Open the dialog.
@@ -6053,29 +6171,11 @@ pub(crate) mod tests {
             tester.tap_at(Offset::new(10.0, 10.0), 1);
 
             open_picker_app(tester, |app, context| {
-                drop(show_time_picker(
-                    app,
-                    context,
-                    TimeOfDay::new(7, 0),
-                    None,
-                    true,
-                    Some(crate::colors::Colors::PINK.primary()),
-                    None,
-                    true,
-                    TimePickerEntryMode::Dial,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                ));
+                drop({
+                    let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+                    show = show.barrier_color(crate::colors::Colors::PINK.primary());
+                    show.show(app, context)
+                });
             });
 
             // Open the dialog.
@@ -6092,29 +6192,11 @@ pub(crate) mod tests {
     fn barrier_label() {
         test_widgets(|tester| {
             open_picker_app(tester, |app, context| {
-                drop(show_time_picker(
-                    app,
-                    context,
-                    TimeOfDay::new(7, 0),
-                    None,
-                    true,
-                    None,
-                    Some("Custom Label".to_string()),
-                    true,
-                    TimePickerEntryMode::Dial,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                ));
+                drop({
+                    let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+                    show = show.barrier_label("Custom Label".to_string());
+                    show.show(app, context)
+                });
             });
 
             // Open the dialog.
@@ -6141,29 +6223,11 @@ pub(crate) mod tests {
                                 )
                                 .into_widget()
                             });
-                        drop(show_time_picker(
-                            app,
-                            context,
-                            TimeOfDay::new(7, 0),
-                            Some(builder),
-                            true,
-                            None,
-                            None,
-                            true,
-                            TimePickerEntryMode::Dial,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            false,
-                        ));
+                        drop({
+                            let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+                            show = show.builder(builder);
+                            show.show(app, context)
+                        });
                     });
                 };
 
@@ -6196,29 +6260,13 @@ pub(crate) mod tests {
     fn optional_text_parameters_are_utilized() {
         test_widgets(|tester| {
             open_picker_app(tester, |app, context| {
-                drop(show_time_picker(
-                    app,
-                    context,
-                    TimeOfDay::new(7, 0),
-                    None,
-                    true,
-                    None,
-                    None,
-                    true,
-                    TimePickerEntryMode::Dial,
-                    Some("Custom Cancel".to_string()),
-                    Some("Custom OK".to_string()),
-                    Some("Custom Help".to_string()),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                ));
+                drop({
+                    let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+                    show = show.cancel_text("Custom Cancel".to_string());
+                    show = show.confirm_text("Custom OK".to_string());
+                    show = show.help_text("Custom Help".to_string());
+                    show.show(app, context)
+                });
             });
 
             // Open the picker.
@@ -6243,29 +6291,11 @@ pub(crate) mod tests {
                 )
                 .into_widget()
             });
-            drop(show_time_picker(
-                app,
-                context,
-                TimeOfDay::new(7, 0),
-                Some(builder),
-                true,
-                None,
-                None,
-                true,
-                TimePickerEntryMode::Dial,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-            ));
+            drop({
+                let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+                show = show.builder(builder);
+                show.show(app, context)
+            });
         });
     }
 
@@ -6290,29 +6320,11 @@ pub(crate) mod tests {
                                             )
                                             .into_widget()
                                         });
-                                    drop(show_time_picker(
-                                        app,
-                                        context,
-                                        TimeOfDay::new(7, 0),
-                                        Some(builder),
-                                        true,
-                                        None,
-                                        None,
-                                        true,
-                                        TimePickerEntryMode::Dial,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        false,
-                                    ));
+                                    drop({
+                                        let mut show = ShowTimePicker::new(TimeOfDay::new(7, 0));
+                                        show = show.builder(builder);
+                                        show.show(app, context)
+                                    });
                                 })),
                                 Some(Text::new("X")),
                             )
@@ -7266,29 +7278,12 @@ pub(crate) mod tests {
                                 Rc::new(move |_app, context| {
                                     crate::elevated_button::ElevatedButton::new(
                                         Some(Listener::new(move |app| {
-                                            drop(show_time_picker(
-                                                app,
-                                                context,
-                                                TimeOfDay::new(7, 0),
-                                                None,
-                                                true,
-                                                None,
-                                                None,
-                                                use_root_navigator,
-                                                TimePickerEntryMode::Dial,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                false,
-                                            ));
+                                            drop({
+                                                let mut show =
+                                                    ShowTimePicker::new(TimeOfDay::new(7, 0));
+                                                show = show.use_root_navigator(use_root_navigator);
+                                                show.show(app, context)
+                                            });
                                         })),
                                         Some(Text::new("Show Picker")),
                                     )

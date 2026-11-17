@@ -8,9 +8,8 @@ use std::rc::Rc;
 
 use waft_cupertino::{
     CupertinoActionSheet, CupertinoActionSheetAction, CupertinoAlertDialog, CupertinoButton,
-    CupertinoDialogAction, CupertinoNavigationBar, CupertinoPopupSurface,
-    K_CUPERTINO_MODAL_BARRIER_COLOR, show_cupertino_dialog, show_cupertino_modal_popup,
-    show_cupertino_sheet,
+    CupertinoDialogAction, CupertinoNavigationBar, CupertinoPopupSurface, ShowCupertinoDialog,
+    ShowCupertinoModalPopup, ShowCupertinoSheet,
 };
 use waft_foundation::{App, Handle, Listener};
 use waft_painting::EdgeInsetsGeometry;
@@ -137,8 +136,7 @@ fn ask(
 ) -> Listener {
     Listener::new(move |app: &mut App| {
         let builder: WidgetBuilder = Rc::new(dialog);
-        let answer =
-            show_cupertino_dialog(app, context, builder, None, None, true, false, None, None);
+        let answer = ShowCupertinoDialog::new(builder).show(app, context);
         app.spawn(async move |cx| {
             let answer = answer
                 .await
@@ -152,18 +150,7 @@ fn ask(
 fn action_sheet(this: Handle<LastAnswer>, context: BuildContext) -> Listener {
     Listener::new(move |app: &mut App| {
         let builder: WidgetBuilder = Rc::new(sheet_actions);
-        let chosen = show_cupertino_modal_popup(
-            app,
-            context,
-            builder,
-            None,
-            K_CUPERTINO_MODAL_BARRIER_COLOR,
-            true,
-            true,
-            false,
-            None,
-            None,
-        );
+        let chosen = ShowCupertinoModalPopup::new(builder).show(app, context);
         app.spawn(async move |cx| {
             // `None` here is the dismissible barrier: tapped outside, the route popped with no
             // result at all.
@@ -179,35 +166,16 @@ fn action_sheet(this: Handle<LastAnswer>, context: BuildContext) -> Listener {
 fn bare_popup(context: BuildContext) -> Listener {
     Listener::new(move |app: &mut App| {
         let builder: WidgetBuilder = Rc::new(popup_card);
-        show_cupertino_modal_popup(
-            app,
-            context,
-            builder,
-            None,
-            K_CUPERTINO_MODAL_BARRIER_COLOR,
-            true,
-            true,
-            false,
-            None,
-            None,
-        );
+        ShowCupertinoModalPopup::new(builder).show(app, context);
     })
 }
 
 fn sheet(this: Handle<LastAnswer>, context: BuildContext) -> Listener {
     Listener::new(move |app: &mut App| {
         let builder: WidgetBuilder = Rc::new(sheet_page);
-        let closed = show_cupertino_sheet(
-            app,
-            context,
-            Some(builder),
-            None,
-            false,
-            true,
-            None,
-            None,
-            false,
-        );
+        let closed = ShowCupertinoSheet::new()
+            .builder(builder)
+            .show(app, context);
         app.spawn(async move |cx| {
             let closed = closed
                 .await
@@ -320,7 +288,7 @@ fn sheet_page(app: &mut App, context: BuildContext) -> WidgetRef {
             vec![showcase(secondary(
                 app,
                 context,
-                "show_cupertino_sheet pushes to the root navigator.",
+                "ShowCupertinoSheet pushes to the root navigator.",
             ))],
         )]),
     )

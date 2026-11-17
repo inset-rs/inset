@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use waft_foundation::{App, Handle, Listener};
 use waft_material::{
-    AlertDialog, AppBar, Dialog, FilledButton, Scaffold, SimpleDialog, SimpleDialogOption,
-    TextButton, show_dialog,
+    AlertDialog, AppBar, Dialog, FilledButton, Scaffold, ShowDialog, SimpleDialog,
+    SimpleDialogOption, TextButton,
 };
 use waft_widgets::{
     BuildContext, IntoWidget, ListView, Navigator, PreferredSizeWidgetRef, State, StateData,
@@ -78,21 +78,10 @@ fn ask_button(
     let (builder, fullscreen) = dialog;
     FilledButton::tonal(
         Some(Listener::new(move |app: &mut App| {
-            let answer = show_dialog(
-                app,
-                context,
-                Rc::clone(&builder),
-                true,
-                None,
-                None,
-                true,
-                false,
-                None,
-                None,
-                fullscreen,
-                None,
-                None,
-            );
+            let answer = ShowDialog::new(Rc::clone(&builder))
+                .use_root_navigator(false)
+                .fullscreen_dialog(fullscreen)
+                .show(app, context);
             answer.then(app, move |app, result| {
                 let text = result
                     .and_then(|value| value.downcast_ref::<String>().cloned())

@@ -46,7 +46,7 @@ enum CardVariant {
 /// See also:
 ///
 ///  * `ListTile`, to display icons and text in a card.
-///  * `show_dialog`, to display a modal card.
+///  * `ShowDialog`, to display a modal card.
 ///  * <https://material.io/design/components/cards.html>
 ///  * <https://m3.material.io/components/cards>
 #[derive(Debug)]

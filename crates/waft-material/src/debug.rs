@@ -298,20 +298,10 @@ mod tests {
         test_widgets(|_| {
             let mut tester = WidgetTester::on(waft_embedder::TargetPlatform::Android);
             let home = waft_widgets::Builder::new(|app, context| {
-                crate::bottom_sheet::show_bottom_sheet(
-                    app,
-                    context,
-                    std::rc::Rc::new(|_app, _context| waft_widgets::Container::new().into_widget()),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                );
+                crate::bottom_sheet::ShowBottomSheet::new(std::rc::Rc::new(|_app, _context| {
+                    waft_widgets::Container::new().into_widget()
+                }))
+                .show(app, context);
                 waft_widgets::Container::new().into_widget()
             })
             .into_widget();

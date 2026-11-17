@@ -13,7 +13,7 @@ use crate::widgets::routes::{RawDialogRoute, RoutePageBuilder};
 
 /// Signature for a function that creates a [`Route`] for a dialog.
 ///
-/// Used by [`show_raw_dialog`] to allow customization of the route.
+/// Used by [`ShowRawDialog`] to allow customization of the route.
 pub type RawDialogRouteBuilder = Rc<dyn Fn(&mut App, BuildContext, WidgetBuilder) -> RouteRef>;
 
 /// Displays a dialog above the current contents of the app.
@@ -35,41 +35,87 @@ pub type RawDialogRouteBuilder = Rc<dyn Fn(&mut App, BuildContext, WidgetBuilder
 ///
 /// Returns a future that resolves to the value (if any) that was passed to [`Navigator::pop`]
 /// when the dialog was closed.
-pub fn show_raw_dialog(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowRawDialog {
     builder: WidgetBuilder,
     route_builder: Option<RawDialogRouteBuilder>,
     use_root_navigator: bool,
     route_settings: Option<RouteSettingsRef>,
     fullscreen_dialog: bool,
-) -> CompleterFuture<RouteResult> {
-    debug_assert!(debug_check_has_widgets_localizations(app, context));
+}
 
-    let navigator = Navigator::of(app, context, use_root_navigator);
-
-    let route = match route_builder {
-        Some(route_builder) => route_builder(app, context, builder),
-        None => {
-            let page_builder: RoutePageBuilder =
-                Rc::new(move |app, context, _animation, _secondary_animation| {
-                    builder(app, context)
-                });
-            let mut route =
-                RawDialogRoute::new(app, page_builder).fullscreen_dialog(app, fullscreen_dialog);
-            if let Some(route_settings) = route_settings {
-                route = route.settings(app, route_settings);
-            }
-            route.into_erased()
+impl ShowRawDialog {
+    /// Creates a builder for a raw dialog; Dart's `showRawDialog` required argument is the
+    /// `builder`, and every other argument is a setter.
+    pub fn new(builder: WidgetBuilder) -> ShowRawDialog {
+        ShowRawDialog {
+            builder,
+            route_builder: None,
+            use_root_navigator: true,
+            route_settings: None,
+            fullscreen_dialog: false,
         }
-    };
+    }
 
-    navigator.push(app, route)
+    /// Creates the route for the dialog; a [`RawDialogRoute`] is used when this is unset.
+    pub fn route_builder(mut self, route_builder: RawDialogRouteBuilder) -> ShowRawDialog {
+        self.route_builder = Some(route_builder);
+        self
+    }
+
+    /// Whether to push the dialog to the root navigator. Defaults to `true`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowRawDialog {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// The route settings passed to the route when no route builder is given.
+    pub fn route_settings(mut self, route_settings: RouteSettingsRef) -> ShowRawDialog {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// Whether this is a fullscreen dialog. Defaults to `false`.
+    pub fn fullscreen_dialog(mut self, fullscreen_dialog: bool) -> ShowRawDialog {
+        self.fullscreen_dialog = fullscreen_dialog;
+        self
+    }
+
+    /// Displays the dialog and returns a future that resolves when it closes.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowRawDialog {
+            builder,
+            route_builder,
+            use_root_navigator,
+            route_settings,
+            fullscreen_dialog,
+        } = self;
+        debug_assert!(debug_check_has_widgets_localizations(app, context));
+
+        let navigator = Navigator::of(app, context, use_root_navigator);
+
+        let route = match route_builder {
+            Some(route_builder) => route_builder(app, context, builder),
+            None => {
+                let page_builder: RoutePageBuilder =
+                    Rc::new(move |app, context, _animation, _secondary_animation| {
+                        builder(app, context)
+                    });
+                let mut route = RawDialogRoute::new(app, page_builder)
+                    .fullscreen_dialog(app, fullscreen_dialog);
+                if let Some(route_settings) = route_settings {
+                    route = route.settings(app, route_settings);
+                }
+                route.into_erased()
+            }
+        };
+
+        navigator.push(app, route)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    //! Flutter has no `widgets/dialog_test.dart`; these pin what `show_raw_dialog` hands the
+    //! Flutter has no `widgets/dialog_test.dart`; these pin what `ShowRawDialog` hands the
     //! navigator.
 
     use std::cell::{Cell, RefCell};
@@ -165,15 +211,10 @@ mod tests {
                 let mut app = tester.cell.borrow_mut();
                 let settings: RouteSettingsRef =
                     RouteSettings::new().name("dialog".to_string()).into();
-                let popped = show_raw_dialog(
-                    &mut app,
-                    context,
-                    dialog_content(Rc::clone(&seen)),
-                    None,
-                    true,
-                    Some(settings),
-                    true,
-                );
+                let popped = ShowRawDialog::new(dialog_content(Rc::clone(&seen)))
+                    .route_settings(settings)
+                    .fullscreen_dialog(true)
+                    .show(&mut app, context);
                 let out = Rc::clone(&result);
                 popped.then(&mut app, move |_app, value| *out.borrow_mut() = Some(value));
             }
@@ -223,15 +264,11 @@ mod tests {
             let seen = Rc::new(Cell::new(None));
             {
                 let mut app = tester.cell.borrow_mut();
-                drop(show_raw_dialog(
-                    &mut app,
-                    context,
-                    dialog_content(Rc::clone(&seen)),
-                    None,
-                    false,
-                    None,
-                    false,
-                ));
+                drop(
+                    ShowRawDialog::new(dialog_content(Rc::clone(&seen)))
+                        .use_root_navigator(false)
+                        .show(&mut app, context),
+                );
             }
             tester.pump_and_settle();
 
@@ -260,15 +297,11 @@ mod tests {
                         Rc::new(move |app, context, _animation, _secondary| builder(app, context));
                     PageRouteBuilder::new(app, page_builder).into_erased()
                 });
-                drop(show_raw_dialog(
-                    &mut app,
-                    context,
-                    dialog_content(Rc::clone(&seen)),
-                    Some(route_builder),
-                    true,
-                    None,
-                    false,
-                ));
+                drop(
+                    ShowRawDialog::new(dialog_content(Rc::clone(&seen)))
+                        .route_builder(route_builder)
+                        .show(&mut app, context),
+                );
             }
             tester.pump_and_settle();
 

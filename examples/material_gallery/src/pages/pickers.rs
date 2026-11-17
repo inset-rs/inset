@@ -8,12 +8,10 @@
 
 use std::rc::Rc;
 
-use waft_embedder::TextInputType;
 use waft_foundation::{App, DateTime, Handle, Listener};
 use waft_material::{
-    DatePickerEntryMode, DatePickerMode, DateTimeRange, FilledButton, GregorianCalendarDelegate,
-    OutlinedButton, TimeOfDay, TimePickerEntryMode, show_date_picker, show_date_range_picker,
-    show_time_picker,
+    DatePickerEntryMode, DateTimeRange, FilledButton, GregorianCalendarDelegate, OutlinedButton,
+    ShowDatePicker, ShowDateRangePicker, ShowTimePicker, TimeOfDay, TimePickerEntryMode,
 };
 use waft_widgets::{
     BuildContext, Builder, IntoWidget, ListView, RouteResult, State, StateData, StatefulWidget,
@@ -102,39 +100,12 @@ fn date_button(
     Builder::new(move |_app: &mut App, context: BuildContext| {
         FilledButton::tonal(
             Some(Listener::new(move |app: &mut App| {
-                let future = show_date_picker(
-                    app,
-                    context,
-                    Some(DateTime::now()),
-                    DateTime::utc(2000, 1, 1),
-                    DateTime::utc(2100, 12, 31),
-                    None,
-                    entry_mode,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    true,
-                    None,
-                    None,
-                    true,
-                    None,
-                    None,
-                    None,
-                    DatePickerMode::Day,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    Rc::new(GregorianCalendarDelegate),
-                );
+                let future =
+                    ShowDatePicker::new(DateTime::utc(2000, 1, 1), DateTime::utc(2100, 12, 31))
+                        .initial_date(DateTime::now())
+                        .initial_entry_mode(entry_mode)
+                        .calendar_delegate(Rc::new(GregorianCalendarDelegate))
+                        .show(app, context);
                 future.then(app, move |app, result| {
                     if let Some(date) = answer::<DateTime>(&result) {
                         let text = format!(
@@ -162,39 +133,13 @@ fn range_button(
     Builder::new(move |_app: &mut App, context: BuildContext| {
         OutlinedButton::new(
             Some(Listener::new(move |app: &mut App| {
-                let future = show_date_range_picker(
-                    app,
-                    context,
-                    None,
+                let future = ShowDateRangePicker::new(
                     DateTime::utc(2000, 1, 1),
                     DateTime::utc(2100, 12, 31),
-                    None,
-                    entry_mode,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    true,
-                    None,
-                    None,
-                    true,
-                    None,
-                    None,
-                    None,
-                    TextInputType::DATETIME,
-                    None,
-                    None,
-                    None,
-                    Rc::new(GregorianCalendarDelegate),
-                );
+                )
+                .initial_entry_mode(entry_mode)
+                .calendar_delegate(Rc::new(GregorianCalendarDelegate))
+                .show(app, context);
                 future.then(app, move |app, result| {
                     if let Some(range) = answer::<DateTimeRange>(&result) {
                         let text = format!(
@@ -225,29 +170,11 @@ fn time_button(
     Builder::new(move |_app: &mut App, context: BuildContext| {
         FilledButton::new(
             Some(Listener::new(move |app: &mut App| {
-                let future = show_time_picker(
-                    app,
-                    context,
-                    TimeOfDay::new(9, 30),
-                    None,
-                    true,
-                    None,
-                    None,
-                    true,
-                    entry_mode,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                );
+                let future = {
+                    let mut show = ShowTimePicker::new(TimeOfDay::new(9, 30));
+                    show = show.initial_entry_mode(entry_mode);
+                    show.show(app, context)
+                };
                 future.then(app, move |app, result| {
                     if let Some(time) = answer::<TimeOfDay>(&result) {
                         let text = format!("{:02}:{:02}", time.hour, time.minute);

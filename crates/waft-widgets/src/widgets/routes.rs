@@ -3555,7 +3555,7 @@ impl<T: RouteAwareObject> RouteAware for Handle<T> {
 
 /// Signature for the function that builds a route's primary contents.
 ///
-/// Used in `PageRouteBuilder` and [`show_general_dialog`].
+/// Used in `PageRouteBuilder` and [`ShowGeneralDialog`].
 ///
 /// See [`ModalRoute::build_page`] for the complete definition of the parameters.
 pub type RoutePageBuilder =
@@ -3563,7 +3563,7 @@ pub type RoutePageBuilder =
 
 /// Signature for the function that builds a route's transitions.
 ///
-/// Used in `PageRouteBuilder` and [`show_general_dialog`].
+/// Used in `PageRouteBuilder` and [`ShowGeneralDialog`].
 ///
 /// The `animation` argument drives this route's transition when it is pushed onto or popped off
 /// the [`Navigator`]. The `secondary_animation` argument lets this route coordinate with the
@@ -3629,7 +3629,7 @@ impl RouteBarrierDetails {
 
 /// Signature for the function that builds a custom modal barrier for a route.
 ///
-/// Used by [`RawDialogRoute::barrier_builder`] and [`show_general_dialog`] to wrap or replace
+/// Used by [`RawDialogRoute::barrier_builder`] and [`ShowGeneralDialog`] to wrap or replace
 /// the default modal barrier.
 ///
 /// The `barrier` parameter is the default [`ModalBarrier`] (or [`AnimatedModalBarrier`])
@@ -3949,7 +3949,7 @@ macro_rules! raw_dialog_route_transition_route_overrides {
 
 /// A general dialog route which allows for customization of the dialog popup.
 ///
-/// It is used internally by [`show_general_dialog`] or can be directly pushed onto the
+/// It is used internally by [`ShowGeneralDialog`] or can be directly pushed onto the
 /// [`Navigator`] stack to enable state restoration.
 ///
 /// This route takes a [`page_builder`](RawDialogRouteData::page_builder), which typically
@@ -4197,13 +4197,7 @@ impl RawDialogRouteLeaf for RawDialogRoute {
 /// See also:
 ///
 ///  * [`RawDialogRoute`], the route this pushes.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_general_dialog(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowGeneralDialog {
     page_builder: RoutePageBuilder,
     barrier_dismissible: bool,
     barrier_label: Option<String>,
@@ -4215,30 +4209,130 @@ pub fn show_general_dialog(
     fullscreen_dialog: bool,
     route_settings: Option<RouteSettingsRef>,
     request_focus: Option<bool>,
-) -> CompleterFuture<RouteResult> {
-    debug_assert!(!barrier_dismissible || barrier_label.is_some());
-    let mut route = RawDialogRoute::new(app, page_builder)
-        .barrier_dismissible(app, barrier_dismissible)
-        .barrier_color(app, Some(barrier_color))
-        .transition_duration(app, transition_duration)
-        .fullscreen_dialog(app, fullscreen_dialog);
-    if let Some(barrier_label) = barrier_label {
-        route = route.barrier_label(app, barrier_label);
+}
+
+impl ShowGeneralDialog {
+    /// Creates a builder for a general dialog; Dart's `showGeneralDialog` required argument is
+    /// the page builder, and every other argument is a setter.
+    pub fn new(page_builder: RoutePageBuilder) -> ShowGeneralDialog {
+        ShowGeneralDialog {
+            page_builder,
+            barrier_dismissible: false,
+            barrier_label: None,
+            barrier_color: Color::new(0x8000_0000),
+            transition_duration: Duration::from_millis(200),
+            transition_builder: None,
+            barrier_builder: None,
+            use_root_navigator: true,
+            fullscreen_dialog: false,
+            route_settings: None,
+            request_focus: None,
+        }
     }
-    if let Some(transition_builder) = transition_builder {
-        route = route.transition_builder(app, transition_builder);
+
+    /// Whether tapping the barrier dismisses the dialog. Defaults to `false`.
+    pub fn barrier_dismissible(mut self, barrier_dismissible: bool) -> ShowGeneralDialog {
+        self.barrier_dismissible = barrier_dismissible;
+        self
     }
-    if let Some(barrier_builder) = barrier_builder {
-        route = route.barrier_builder(app, barrier_builder);
+
+    /// The semantic label of the dialog's modal barrier.
+    pub fn barrier_label(mut self, barrier_label: impl Into<String>) -> ShowGeneralDialog {
+        self.barrier_label = Some(barrier_label.into());
+        self
     }
-    if let Some(route_settings) = route_settings {
-        route = route.settings(app, route_settings);
+
+    /// The color of the dialog's modal barrier.
+    pub fn barrier_color(mut self, barrier_color: Color) -> ShowGeneralDialog {
+        self.barrier_color = barrier_color;
+        self
     }
-    if let Some(request_focus) = request_focus {
-        route = route.request_focus(app, request_focus);
+
+    /// The duration of the dialog's transition.
+    pub fn transition_duration(mut self, transition_duration: Duration) -> ShowGeneralDialog {
+        self.transition_duration = transition_duration;
+        self
     }
-    let navigator = Navigator::of(app, context, use_root_navigator);
-    navigator.push(app, route.into_erased())
+
+    /// Builds the dialog's transition.
+    pub fn transition_builder(
+        mut self,
+        transition_builder: RouteTransitionsBuilder,
+    ) -> ShowGeneralDialog {
+        self.transition_builder = Some(transition_builder);
+        self
+    }
+
+    /// Builds the dialog's barrier.
+    pub fn barrier_builder(mut self, barrier_builder: RouteBarrierBuilder) -> ShowGeneralDialog {
+        self.barrier_builder = Some(barrier_builder);
+        self
+    }
+
+    /// Whether to push the dialog to the root navigator. Defaults to `true`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowGeneralDialog {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// Whether this is a fullscreen dialog. Defaults to `false`.
+    pub fn fullscreen_dialog(mut self, fullscreen_dialog: bool) -> ShowGeneralDialog {
+        self.fullscreen_dialog = fullscreen_dialog;
+        self
+    }
+
+    /// The route settings passed to the dialog's route.
+    pub fn route_settings(mut self, route_settings: RouteSettingsRef) -> ShowGeneralDialog {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// Whether the dialog's route requests focus when it is pushed.
+    pub fn request_focus(mut self, request_focus: bool) -> ShowGeneralDialog {
+        self.request_focus = Some(request_focus);
+        self
+    }
+
+    /// Displays the dialog and returns a future that resolves when it closes.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowGeneralDialog {
+            page_builder,
+            barrier_dismissible,
+            barrier_label,
+            barrier_color,
+            transition_duration,
+            transition_builder,
+            barrier_builder,
+            use_root_navigator,
+            fullscreen_dialog,
+            route_settings,
+            request_focus,
+        } = self;
+
+        debug_assert!(!barrier_dismissible || barrier_label.is_some());
+        let mut route = RawDialogRoute::new(app, page_builder)
+            .barrier_dismissible(app, barrier_dismissible)
+            .barrier_color(app, Some(barrier_color))
+            .transition_duration(app, transition_duration)
+            .fullscreen_dialog(app, fullscreen_dialog);
+        if let Some(barrier_label) = barrier_label {
+            route = route.barrier_label(app, barrier_label);
+        }
+        if let Some(transition_builder) = transition_builder {
+            route = route.transition_builder(app, transition_builder);
+        }
+        if let Some(barrier_builder) = barrier_builder {
+            route = route.barrier_builder(app, barrier_builder);
+        }
+        if let Some(route_settings) = route_settings {
+            route = route.settings(app, route_settings);
+        }
+        if let Some(request_focus) = request_focus {
+            route = route.request_focus(app, request_focus);
+        }
+        let navigator = Navigator::of(app, context, use_root_navigator);
+        navigator.push(app, route.into_erased())
+    }
 }
 
 #[cfg(test)]

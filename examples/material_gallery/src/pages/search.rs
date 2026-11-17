@@ -9,7 +9,7 @@ use std::rc::{Rc, Weak};
 use waft_foundation::{App, Handle, Listener, Task};
 use waft_material::{
     FilledButton, Icons, ListTile, SearchAnchor, SearchBar, SearchController, SearchDelegate,
-    SearchDelegateData, show_search,
+    SearchDelegateData, ShowSearch,
 };
 use waft_widgets::{
     BuildContext, Icon, IntoWidget, ListView, State, StateData, StatefulWidget, Text,
@@ -124,12 +124,14 @@ fn anchor_with_bar(state: Handle<SearchDemoState>) -> WidgetRef {
     .into_widget()
 }
 
-/// A button that opens `show_search` and writes what the search page closed with.
+/// A button that opens `ShowSearch` and writes what the search page closed with.
 fn delegate_button(state: Handle<SearchDemoState>, context: BuildContext) -> WidgetRef {
     FilledButton::tonal(
         Some(Listener::new(move |app: &mut App| {
             let delegate = FruitDelegate::new(app);
-            let result = show_search(app, context, delegate, None, false, true);
+            let result = ShowSearch::new(delegate)
+                .maintain_state(true)
+                .show(app, context);
             result.then(app, move |app, route_result| {
                 let chosen = route_result
                     .as_ref()
