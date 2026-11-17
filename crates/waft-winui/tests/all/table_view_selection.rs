@@ -127,3 +127,50 @@ fn a_table_rebuilt_over_a_new_source_clears_the_selection_after_the_frame() {
         );
     });
 }
+
+#[test]
+fn rows_added_while_no_table_is_mounted_move_the_selected_row() {
+    test_widgets(|tester| {
+        let table = Table::new(tester);
+        let listener_builds = Rc::new(Cell::new(0));
+        tester.pump_widget(table.root(&listener_builds));
+        // Asha, the second row.
+        tester.update(|app| table.selection.select(app, 1));
+
+        // The tab goes away and rows keep arriving above the selected one.
+        tester.pump_widget(SizedBox::shrink());
+        tester.update(|app| table.source.insert(app, 0, "Zed"));
+
+        tester.pump_widget(table.root(&listener_builds));
+        tester.pump_and_settle();
+
+        // The same item, one row further down, as WinUI's model follows its source.
+        assert_eq!(
+            table.selection.selected_index(&tester.cell.borrow()),
+            Some(2)
+        );
+        assert_eq!(
+            table.selection.selected_item(&tester.cell.borrow()),
+            Some(2)
+        );
+    });
+}
+
+#[test]
+fn rows_removed_while_no_table_is_mounted_clear_the_selection() {
+    test_widgets(|tester| {
+        let table = Table::new(tester);
+        let listener_builds = Rc::new(Cell::new(0));
+        tester.pump_widget(table.root(&listener_builds));
+        // Lea, the last row.
+        tester.update(|app| table.selection.select(app, 3));
+
+        // The tab goes away and the selected row's item is removed.
+        tester.pump_widget(SizedBox::shrink());
+        tester.update(|app| table.source.remove(app, 3));
+
+        tester.pump_widget(table.root(&listener_builds));
+        tester.pump_and_settle();
+        assert_eq!(table.selection.selected_index(&tester.cell.borrow()), None);
+    });
+}
