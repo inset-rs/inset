@@ -30,6 +30,7 @@ pub enum Entry {
     Pickers,
     Autocomplete,
     ReorderableListView,
+    Adaptive,
     DataTables,
     Search,
     Carousels,
@@ -44,7 +45,7 @@ pub enum Entry {
 
 impl Entry {
     /// Index order — the order the tiles appear in.
-    pub const ALL: [Entry; 28] = [
+    pub const ALL: [Entry; 29] = [
         Entry::Buttons,
         Entry::AppBars,
         Entry::Lists,
@@ -63,6 +64,7 @@ impl Entry {
         Entry::Pickers,
         Entry::Autocomplete,
         Entry::ReorderableListView,
+        Entry::Adaptive,
         Entry::DataTables,
         Entry::Search,
         Entry::Carousels,
@@ -104,6 +106,7 @@ impl Entry {
             Entry::Pickers => "Date & Time Pickers",
             Entry::Autocomplete => "Autocomplete",
             Entry::ReorderableListView => "Reorderable Lists",
+            Entry::Adaptive => "Adaptive Layout",
             Entry::DataTables => "Data Tables",
             Entry::Search => "Search",
             Entry::Carousels => "Carousels",
@@ -138,6 +141,7 @@ impl Entry {
             Entry::Pickers => Icons::event(),
             Entry::Autocomplete => Icons::manage_search(),
             Entry::ReorderableListView => Icons::reorder(),
+            Entry::Adaptive => Icons::devices(),
             Entry::DataTables => Icons::table_chart(),
             Entry::Search => Icons::search(),
             Entry::Carousels => Icons::view_carousel(),
@@ -183,6 +187,7 @@ impl Entry {
             Entry::Pickers => pages::pickers::body(app, context),
             Entry::Autocomplete => pages::autocomplete::body(app, context),
             Entry::ReorderableListView => pages::reorderable_list_view::body(app, context),
+            Entry::Adaptive => pages::adaptive::body(app, context),
             Entry::DataTables => pages::data_tables::body(app, context),
             Entry::Search => pages::search::body(app, context),
             Entry::Carousels => pages::carousels::body(app, context),

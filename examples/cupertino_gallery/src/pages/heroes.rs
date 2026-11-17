@@ -19,11 +19,9 @@ use waft_animation::{AnimationRef, Drive, Tween};
 use waft_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
 };
-use waft_foundation::{App, Task};
+use waft_foundation::{AnyEq, App, Task};
 use waft_painting::{AnyColor, BorderRadiusGeometry, BoxDecoration};
-use waft_widgets::{
-    AnimatedBuilder, BuildContext, Container, Hero, HeroTagRef, IntoWidget, Text, WidgetRef,
-};
+use waft_widgets::{AnimatedBuilder, BuildContext, Container, Hero, IntoWidget, Text, WidgetRef};
 
 use crate::app::open_sub_page;
 use crate::catalog::Entry;
@@ -100,7 +98,7 @@ fn row(index: usize, subject: &Subject, app: &mut App, context: BuildContext) ->
 
 fn swatch(subject: &Subject, side: f64, app: &mut App, context: BuildContext) -> WidgetRef {
     let color = CupertinoDynamicColor::resolve(&subject.color, app, context);
-    let tag: HeroTagRef = Rc::new(subject.tag);
+    let tag: Rc<dyn AnyEq> = Rc::new(subject.tag);
     let flying = color.clone();
 
     Hero::new(

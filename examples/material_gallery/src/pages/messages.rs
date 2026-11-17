@@ -140,11 +140,8 @@ fn modal_sheet_button(context: BuildContext) -> WidgetRef {
 fn persistent_sheet_button(context: BuildContext) -> WidgetRef {
     OutlinedButton::new(
         Some(Listener::new(move |app: &mut App| {
-            {
-                let mut show =
-                    ShowBottomSheet::new(sheet(PERSISTENT_SHEET_TEXT, "Close persistent sheet"));
-                show.show(app, context)
-            };
+            ShowBottomSheet::new(sheet(PERSISTENT_SHEET_TEXT, "Close persistent sheet"))
+                .show(app, context);
         })),
         Some(Text::new("Persistent sheet")),
     )

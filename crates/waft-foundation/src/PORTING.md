@@ -60,6 +60,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — there are no isolates; the host's threads and a task are the Rust shape, and the work's panic resumes in the awaiting task as the isolate's error would rethrow.
   Affect: blocking work — a request, a file read — leaves the main thread for the system's queue and comes back through the ordinary checkpoint.
 
+## any_eq.rs → dart:core `Object`
+
+- Change: Dart's `Object`, where a widget only compares it with `==` and hashes it (a hero's tag, a radio panel's value), is the trait `AnyEq`, blanket-implemented for every `PartialEq + Hash + Debug + 'static` value and shared as `Rc<dyn AnyEq>`.
+  Reason: language — a Rust position that only compares and hashes needs a trait, and one trait serves every such place where Dart has one class.
+  Affect: a caller wraps a value with `Rc::new`; it equals an equal value of the same type only, never one of another type carrying the same value.
+
 ## key.rs → key.dart
 
 - Change: `Key` equality and hashing go through `eq_key` / `hash_key`, so `dyn Key` can be `PartialEq` and `Hash`; a `UniqueKey`'s identity is a monotonic id, not object identity.
