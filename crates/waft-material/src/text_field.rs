@@ -2330,7 +2330,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{TextAffinity, TextBaseline, TextPosition, TextRange};
+    use waft_embedder::{TextAffinity, TextPosition, TextRange};
     use waft_painting::TextSpan;
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{SystemMouseCursors, TextInputClient, TextInputFormatterRef};
@@ -2369,10 +2369,9 @@ mod tests {
     use waft_foundation::UniqueKey;
     use waft_test::{MockClipboard, TestPlatform};
     use waft_widgets::{
-        Container, CrossAxisAlignment, IntrinsicHeight, MainAxisAlignment, MainAxisSize, Row,
-        TickerMode,
+        Container, IntrinsicHeight, MainAxisAlignment, MainAxisSize, Row, TickerMode,
     };
-    use waft_widgets::{FocusNodeLeaf, TextEditingControllerLeaf};
+    use waft_widgets::{FocusNodeLeaf, ScrollControllerLeaf, TextEditingControllerLeaf};
 
     const ALL_PLATFORMS: [TargetPlatform; 6] = [
         TargetPlatform::Android,
@@ -8077,7 +8076,6 @@ mod tests {
             };
             tester.pump_widget(builder(tester, true));
             tester.show_keyboard(find::by_type::<TextField>());
-            let state = editable_state(tester);
             let editable = render_editable(tester);
             assert!(
                 *editable
@@ -8396,6 +8394,219 @@ mod tests {
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
             tester.move_to(&mut pointer, suffix_area, false);
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
+        });
+    }
+
+    #[test]
+    fn read_only_text_field_basic() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "readonly");
+            let root = overlay(
+                tester,
+                TextField::new()
+                    .controller(controller.erase())
+                    .read_only(true),
+            );
+            tester.pump_widget(root);
+            tester.show_keyboard(find::by_type::<TextField>());
+            assert!(!tester.test_text_input().has_any_clients());
+            skip_past_scrolling_animation(tester);
+            assert!(selection(tester, controller.handle()).is_collapsed());
+
+            tester.tap(find::by_type::<TextField>());
+            tester.pump();
+            assert!(!tester.test_text_input().has_any_clients());
+            assert!(!selection_overlay_visibility(tester).0);
+
+            let at = text_offset_to_position(tester, 3);
+            tester.long_press_at(at, 1);
+            tester.pump_and_settle();
+            expect(tester, &find::text("Copy"), finds_one_widget());
+            expect(tester, &find::text("Paste"), finds_nothing());
+            expect(tester, &find::text("Cut"), finds_nothing());
+        });
+    }
+
+    #[test]
+    fn when_text_field_would_be_blocked_by_keyboard_it_is_shown_with_enough_space_for_the_selection_handle()
+     {
+        test_widgets(|tester| {
+            let scroll_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::ScrollController::default(&mut app)
+            };
+            let root = material_app(
+                m2_theme(tester),
+                Scaffold::new()
+                    .body(
+                        Center::new().child(
+                            waft_widgets::ListView::new()
+                                .controller(scroll_controller.clone().into_erased())
+                                .children([
+                                    Container::new().height(579.0).into_widget(),
+                                    TextField::new().into_widget(),
+                                    Container::new().height(1000.0).into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            let offset = |tester: &WidgetTester| {
+                scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow())
+            };
+            assert_eq!(offset(tester), 0.0);
+            let at = tester.get_top_left(find::by_type::<TextField>());
+            tester.tap_at(at, 1);
+            tester.pump_and_settle();
+            assert_eq!(offset(tester), 50.0);
+        });
+    }
+
+    #[test]
+    fn text_field_and_last_input_character_are_visible_on_the_screen_when_the_cursor_is_not_shown()
+    {
+        test_widgets(|tester| {
+            let scroll_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::ScrollController::default(&mut app)
+            };
+            let field_scroll_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::ScrollController::default(&mut app)
+            };
+            let root = material_app(
+                m2_theme(tester),
+                Scaffold::new()
+                    .body(
+                        Center::new().child(
+                            waft_widgets::ListView::new()
+                                .controller(scroll_controller.clone().into_erased())
+                                .children([
+                                    Container::new().height(579.0).into_widget(),
+                                    TextField::new()
+                                        .scroll_controller(
+                                            field_scroll_controller.clone().into_erased(),
+                                        )
+                                        .show_cursor(false)
+                                        .into_widget(),
+                                    Container::new().height(1000.0).into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow()),
+                0.0
+            );
+            let at = tester.get_top_left(find::by_type::<TextField>());
+            tester.tap_at(at, 1);
+            tester.pump_and_settle();
+            assert_eq!(
+                scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow()),
+                50.0
+            );
+            assert_eq!(
+                field_scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow()),
+                0.0
+            );
+
+            let test_value = "I love Flutter!".repeat(10);
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text(&test_value)
+                    .selection(TextSelection::collapsed(
+                        test_value.len() as i32,
+                        TextAffinity::Downstream,
+                    )),
+            );
+            tester.pump();
+            tester.pump_and_settle();
+            assert_eq!(
+                field_scroll_controller
+                    .handle()
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow()),
+                1602.0
+            );
+        });
+    }
+
+    #[test]
+    fn text_field_scrolls_into_view_but_does_not_bounce_list_view() {
+        test_widgets(|tester| {
+            let controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::ScrollController::default(&mut app)
+            };
+            let key1: KeyRef = UniqueKey::new().into();
+            let key2: KeyRef = UniqueKey::new().into();
+            let offsets = Rc::new(RefCell::new(Vec::new()));
+            let recorded = Rc::clone(&offsets);
+            let listening = controller.clone();
+            controller.handle().add_listener(
+                &mut tester.cell.borrow_mut(),
+                Listener::new(move |app| {
+                    recorded.borrow_mut().push(listening.handle().offset(app));
+                }),
+            );
+            let frame = |tester: &WidgetTester| {
+                material_app(
+                    theme(tester),
+                    Scaffold::new()
+                        .body(
+                            waft_widgets::ListView::new()
+                                .physics(Rc::new(waft_widgets::BouncingScrollPhysics::new()))
+                                .controller(controller.clone().into_erased())
+                                .children([
+                                    SizedBox::new()
+                                        .width(100.0)
+                                        .height(100.0)
+                                        .child(
+                                            TextField::new()
+                                                .key(key1.clone())
+                                                .scroll_padding(EdgeInsets::all(200.0)),
+                                        )
+                                        .into_widget(),
+                                    SizedBox::new().width(650.0).height(450.0).into_widget(),
+                                    SizedBox::new()
+                                        .width(100.0)
+                                        .height(100.0)
+                                        .child(
+                                            TextField::new()
+                                                .key(key2.clone())
+                                                .scroll_padding(EdgeInsets::all(200.0)),
+                                        )
+                                        .into_widget(),
+                                ]),
+                        )
+                        .into_widget(),
+                )
+            };
+            tester.pump_widget(frame(tester));
+            tester.enter_text(find::by_key(key1.clone()), "1");
+            tester.pump_and_settle();
+            tester.enter_text(find::by_key(key2.clone()), "2");
+            tester.pump_and_settle();
+            tester.enter_text(find::by_key(key1), "3");
+            tester.pump_and_settle();
+            let seen = offsets.borrow();
+            assert_eq!(seen.iter().copied().fold(f64::INFINITY, f64::min), 0.0);
+            assert_eq!(seen.iter().copied().fold(f64::NEG_INFINITY, f64::max), 50.0);
         });
     }
 }
