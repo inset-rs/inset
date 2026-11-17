@@ -74,4 +74,26 @@ impl TestTextInput<'_> {
         drop(app);
         self.tester.cell.checkpoint();
     }
+
+    /// Dart's `testTextInput.hasAnyClients`: whether a field has the input connection.
+    pub fn has_any_clients(&self) -> bool {
+        let mut app = self.tester.cell.borrow_mut();
+        let input = TextInput::instance(&mut app);
+        input.current_connection(&app).is_some()
+    }
+
+    /// Dart's `testTextInput.editingState`: the last editing value the framework sent the
+    /// host, or `None` before it sent one.
+    pub fn editing_state(&self) -> Option<TextEditingValue> {
+        self.tester
+            .view()
+            .test_host()
+            .text_input_calls()
+            .into_iter()
+            .rev()
+            .find_map(|call| match call {
+                waft_test::TextInputCall::SetEditingState(value) => Some(value),
+                _ => None,
+            })
+    }
 }
