@@ -15,6 +15,12 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
 - text_editing.rs → text_editing.dart (re-export of embedder `TextSelection`)
 - text_boundary.rs → text_boundary.dart (`LineBoundary` needs layout, so it sits in rendering)
 
+## browser_context_menu.rs → browser_context_menu.dart
+
+- Change: `BrowserContextMenu` keeps the enabled flag in a process-wide atomic, and enabling or disabling it returns a ready `Task`.
+  Reason: platform — Waft has no browser platform channel, so the flag changes without telling a browser's DOM.
+  Affect: `SelectableRegion` reads the same default and flag; a web host would still show the browser's own menu.
+
 ## binding.rs → binding.dart
 
 - Change: `ServicesBinding` reaches the widgets binding's exit handler through a registered `ServicesBindingOverrides`, where Dart's `WidgetsBinding` overrides it.
