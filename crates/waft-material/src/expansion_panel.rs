@@ -1,13 +1,12 @@
 //! Flutter counterpart: material_ui's `expansion_panel.dart`.
 
-use std::any::Any;
 use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{Curves, Interval};
 use waft_embedder::Color;
-use waft_foundation::{App, Handle, HandleId, Listener, ValueKey};
+use waft_foundation::{AnyEq, App, Handle, HandleId, Listener, ValueKey};
 use waft_painting::{EdgeInsets, EdgeInsetsDirectional};
 use waft_rendering::BoxConstraints;
 use waft_widgets::{
@@ -125,28 +124,9 @@ impl fmt::Debug for ExpansionPanel {
     }
 }
 
-/// The value that identifies an [`ExpansionPanelRadio`]: Dart's `Object value`, compared with
-/// `==`. Every `PartialEq` type is one.
-pub trait ExpansionPanelRadioValue: Any {
-    /// Dart's `operator ==`. Must return false when `other` is a different concrete type, even
-    /// if the two carry the same value.
-    fn eq_value(&self, other: &dyn ExpansionPanelRadioValue) -> bool;
-}
-
-impl<T: PartialEq + 'static> ExpansionPanelRadioValue for T {
-    fn eq_value(&self, other: &dyn ExpansionPanelRadioValue) -> bool {
-        (other as &dyn Any)
-            .downcast_ref::<T>()
-            .is_some_and(|other| other == self)
-    }
-}
-
-/// A shared [`ExpansionPanelRadioValue`].
-pub type ExpansionPanelRadioValueRef = Rc<dyn ExpansionPanelRadioValue>;
-
 /// Dart's `==` on two radio values: the values', not the shared pointers'.
-fn same_value(a: &ExpansionPanelRadioValueRef, b: &ExpansionPanelRadioValueRef) -> bool {
-    (**a).eq_value(&**b)
+fn same_value(a: &Rc<dyn AnyEq>, b: &Rc<dyn AnyEq>) -> bool {
+    a == b
 }
 
 /// An expansion panel that allows for radio-like functionality. This means that at any given
@@ -163,14 +143,14 @@ pub struct ExpansionPanelRadio {
     pub panel: ExpansionPanel,
     /// The value that uniquely identifies a radio panel so that the currently selected radio
     /// panel can be identified.
-    pub value: ExpansionPanelRadioValueRef,
+    pub value: Rc<dyn AnyEq>,
 }
 
 impl ExpansionPanelRadio {
     /// An expansion panel that allows for radio functionality; Dart's optional named arguments
     /// are the setters.
     pub fn new<K>(
-        value: impl ExpansionPanelRadioValue,
+        value: impl AnyEq,
         header_builder: ExpansionPanelHeaderBuilder,
         body: impl IntoWidget<K>,
     ) -> Self {
@@ -236,10 +216,10 @@ pub struct ExpansionPanelList {
     allow_only_one_panel_open: bool,
     // Dart's `ExpansionPanelRadio.value` of each child of a radio list, in order; empty
     // otherwise.
-    radio_values: Vec<ExpansionPanelRadioValueRef>,
+    radio_values: Vec<Rc<dyn AnyEq>>,
     /// The value of the panel that initially begins open. (This value is only used when
     /// initializing with the [`ExpansionPanelList::radio`] constructor.)
-    pub initial_open_panel_value: Option<ExpansionPanelRadioValueRef>,
+    pub initial_open_panel_value: Option<Rc<dyn AnyEq>>,
     /// The padding that surrounds the panel header when expanded.
     ///
     /// By default, 16px of space is added to the header vertically (above and below) during
@@ -337,10 +317,7 @@ impl ExpansionPanelList {
     }
 
     /// Dart `ExpansionPanelList.radio(initialOpenPanelValue:)`.
-    pub fn initial_open_panel_value(
-        mut self,
-        value: impl ExpansionPanelRadioValue,
-    ) -> ExpansionPanelList {
+    pub fn initial_open_panel_value(mut self, value: impl AnyEq) -> ExpansionPanelList {
         self.initial_open_panel_value = Some(Rc::new(value));
         self
     }
@@ -413,13 +390,13 @@ impl StatefulWidget for ExpansionPanelList {
 pub struct ExpansionPanelListState {
     state: StateData<ExpansionPanelList>,
     // Dart keeps the open `ExpansionPanelRadio`; its value is all that is read.
-    current_open_panel: Option<ExpansionPanelRadioValueRef>,
+    current_open_panel: Option<Rc<dyn AnyEq>>,
 }
 
 impl ExpansionPanelListState {
     fn all_identifiers_unique(self: Handle<Self>, app: &App) -> bool {
         let list = self.widget(app);
-        let mut unique: Vec<&ExpansionPanelRadioValueRef> = Vec::new();
+        let mut unique: Vec<&Rc<dyn AnyEq>> = Vec::new();
         for value in &list.radio_values {
             if !unique.iter().any(|seen| same_value(seen, value)) {
                 unique.push(value);
@@ -481,8 +458,8 @@ impl ExpansionPanelListState {
     fn search_panel_by_value(
         self: Handle<Self>,
         app: &App,
-        value: Option<&ExpansionPanelRadioValueRef>,
-    ) -> Option<ExpansionPanelRadioValueRef> {
+        value: Option<&Rc<dyn AnyEq>>,
+    ) -> Option<Rc<dyn AnyEq>> {
         let value = value?;
         self.widget(app)
             .radio_values
