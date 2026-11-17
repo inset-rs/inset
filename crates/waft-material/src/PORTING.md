@@ -58,6 +58,7 @@ Ported against: 34b89b2086d4
 - user_accounts_drawer_header.rs → user_accounts_drawer_header.dart
 - refresh_indicator.rs → refresh_indicator.dart
 - button_bar_theme.rs → button_bar_theme.dart
+- material_button.rs → material_button.dart
 - drawer.rs → drawer.dart
 - generated/drawer_defaults_m3.rs → generated/drawer_defaults_m3.g.dart
 - generated/navigation_drawer_defaults_m3.rs → generated/navigation_drawer_defaults_m3.g.dart
@@ -667,7 +668,6 @@ Ported against: 34b89b2086d4
 - ink_decoration.rs: `Ink.image`. Trigger: `DecorationImage`.
 - debug.rs: the `describeMissingAncestor` part of the messages. Trigger: `BuildContext::describe_missing_ancestor` in waft-widgets.
 - theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, carousel_view_theme (`carousel_theme.dart`), data_table_theme, search_bar_theme, search_view_theme. Trigger: each one's `*_theme.dart`, with its component.
-- button_theme.rs: `ButtonThemeData`'s methods that take a `MaterialButton` (`getBrightness`, `getTextTheme`, `getDisabledTextColor`, `getDisabledFillColor`, `getFillColor`, `getTextColor`, `getSplashColor`, `getFocusColor`, `getHoverColor`, `getHighlightColor`, the five elevation getters, `getPadding`, `getShape`, `getAnimationDuration`, `getConstraints`, `getMaterialTapTargetSize`). Trigger: material_button.dart.
 - theme_data.rs: `ThemeData(useSystemColors:)` and `_overrideWithSystemColors`. Trigger: dart:ui `SystemColor` in waft-embedder, with `floating_action_button_theme`.
 - theme_data.rs: `ThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ThemeData`.
 - `ColorScheme.fromImageProvider` with `_extractColorsFromImageProvider`, `_imageProviderToScaled` and `_getArgbFromAbgr`. Trigger: reading an image's pixels back (`Image.toByteData`, deferred in waft-embedder) and `Picture.toImage`.
@@ -738,3 +738,4 @@ Ported against: 34b89b2086d4
 - user_accounts_drawer_header.rs tests: the three semantics cases ('UserAccountsDrawerHeader provides semantics', '… with missing properties', and 'alternative account selectors have sufficient tap targets') and the mid-animation 'speedy' case, whose only new check is that an animation is running; the visible start, half turn and return are ported. Trigger: the semantics tree; a running-animation count in the tester.
 - refresh_indicator.rs tests: the semantics case ('RefreshIndicator') and the paint-only 'disallows indicator - glow/stretch' and 'manipulates value color opacity correctly' cases; the status, programmatic-show, no-spinner, adaptive, color default and zero-area cases are ported. Trigger: the semantics tree; paint inspection of the glow indicator.
 - button_bar_theme.rs tests: the two debug-properties cases, which print diagnostics; the lerp, null-field, default, copy, and `of` fallback/override cases are ported. Trigger: diagnostics.
+- material_button.rs tests: the hover and focus paint/elevation cases, the accessibility-contrast case and the density cases, which read the ink feature render object or depend on the platform's text metrics; the structural defaults, elevation and color precedence, sizes, shape, disabled elevation, clip, callbacks and zero-area cases are ported. Trigger: the ink-feature paint inspection; FlutterTest font metrics.

@@ -1,11 +1,9 @@
 //! Flutter counterpart: material_ui's `button_theme.dart`.
-//!
-//! `ButtonThemeData`'s methods that take a `MaterialButton` (`getBrightness`, `getFillColor`,
-//! `getTextColor`, …) are not ported: `material_button.dart` is not (PORTING.md).
 
 use std::fmt::{self, Debug};
+use std::time::Duration;
 
-use waft_embedder::{Color, Radius};
+use waft_embedder::{Brightness, Color, Radius};
 use waft_foundation::App;
 use waft_painting::{
     BorderRadiusGeometry, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder, ShapeBorderRef,
@@ -14,8 +12,11 @@ use waft_rendering::BoxConstraints;
 use waft_widgets::{BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
 
 use crate::color_scheme::ColorScheme;
+use crate::colors::Colors;
+use crate::constants::K_THEME_CHANGE_DURATION;
+use crate::material_button::MaterialButton;
 use crate::theme::Theme;
-use crate::theme_data::MaterialTapTargetSize;
+use crate::theme_data::{MaterialTapTargetSize, ThemeData};
 
 /// Used with [`ButtonTheme`] and [`ButtonThemeData`] to define a button's base colors, and the
 /// defaults for the button's minimum size, internal padding, and shape.
@@ -530,6 +531,211 @@ impl ButtonThemeData {
                 )),
             },
         }
+    }
+
+    fn color_scheme(&self) -> &ColorScheme {
+        self.color_scheme
+            .as_ref()
+            .expect("a button theme has a color scheme")
+    }
+
+    /// The [button]'s overall brightness.
+    ///
+    /// Returns the button's `colorBrightness` if it is non-null, otherwise the color scheme's
+    /// `brightness`.
+    pub fn get_brightness(&self, button: &MaterialButton) -> Brightness {
+        button
+            .color_brightness
+            .unwrap_or_else(|| self.color_scheme().brightness)
+    }
+
+    /// Defines the [button]'s base colors, and the defaults for the button's minimum size,
+    /// internal padding, and shape.
+    pub fn get_text_theme(&self, button: &MaterialButton) -> ButtonTextTheme {
+        button.text_theme.unwrap_or(self.text_theme)
+    }
+
+    /// The foreground color of the [button]'s text and icon when `on_pressed` is null.
+    pub fn get_disabled_text_color(&self, button: &MaterialButton) -> Color {
+        button
+            .text_color
+            .or(button.disabled_text_color)
+            .unwrap_or_else(|| {
+                self.color_scheme()
+                    .on_surface
+                    .with_values(Some(0.38), None, None, None, None)
+            })
+    }
+
+    /// The [button]'s background color when `on_pressed` is null.
+    pub fn get_disabled_fill_color(&self, button: &MaterialButton) -> Color {
+        button
+            .disabled_color
+            .or(self.disabled_color)
+            .unwrap_or_else(|| {
+                self.color_scheme()
+                    .on_surface
+                    .with_values(Some(0.38), None, None, None, None)
+            })
+    }
+
+    /// The button's background fill color, or `None` for buttons that don't have a background
+    /// color.
+    pub fn get_fill_color(&self, button: &MaterialButton) -> Option<Color> {
+        let fill_color = if button.enabled() {
+            button.color
+        } else {
+            button.disabled_color
+        };
+        if fill_color.is_some() {
+            return fill_color;
+        }
+        // A plain `MaterialButton` has no fill; only a subclass would, and this port has none.
+        None
+    }
+
+    /// The foreground color of the [button]'s text and icon.
+    pub fn get_text_color(&self, button: &MaterialButton) -> Color {
+        if !button.enabled() {
+            return self.get_disabled_text_color(button);
+        }
+        if let Some(text_color) = button.text_color {
+            return text_color;
+        }
+        match self.get_text_theme(button) {
+            ButtonTextTheme::Normal => {
+                if self.get_brightness(button) == Brightness::Dark {
+                    Colors::WHITE
+                } else {
+                    Colors::BLACK87
+                }
+            }
+            ButtonTextTheme::Accent => self.color_scheme().secondary,
+            ButtonTextTheme::Primary => {
+                let fill_is_dark = match self.get_fill_color(button) {
+                    Some(fill_color) => {
+                        ThemeData::estimate_brightness_for_color(fill_color) == Brightness::Dark
+                    }
+                    None => self.get_brightness(button) == Brightness::Dark,
+                };
+                if fill_is_dark {
+                    Colors::WHITE
+                } else {
+                    Colors::BLACK
+                }
+            }
+        }
+    }
+
+    /// The color of the ink "splash" overlay that appears when the (enabled) [button] is
+    /// tapped.
+    pub fn get_splash_color(&self, button: &MaterialButton) -> Color {
+        if let Some(splash_color) = button.splash_color {
+            return splash_color;
+        }
+        if let Some(splash_color) = self.splash_color
+            && matches!(
+                self.get_text_theme(button),
+                ButtonTextTheme::Normal | ButtonTextTheme::Accent
+            )
+        {
+            return splash_color;
+        }
+        self.get_text_color(button)
+            .with_values(Some(0.12), None, None, None, None)
+    }
+
+    /// The fill color of the button when it has input focus.
+    pub fn get_focus_color(&self, button: &MaterialButton) -> Color {
+        button.focus_color.or(self.focus_color).unwrap_or_else(|| {
+            self.get_text_color(button)
+                .with_values(Some(0.12), None, None, None, None)
+        })
+    }
+
+    /// The fill color of the button when a pointer is hovering over it.
+    pub fn get_hover_color(&self, button: &MaterialButton) -> Color {
+        button.hover_color.or(self.hover_color).unwrap_or_else(|| {
+            self.get_text_color(button)
+                .with_values(Some(0.04), None, None, None, None)
+        })
+    }
+
+    /// The color of the overlay that appears when the [button] is pressed.
+    pub fn get_highlight_color(&self, button: &MaterialButton) -> Color {
+        if let Some(highlight_color) = button.highlight_color {
+            return highlight_color;
+        }
+        match self.get_text_theme(button) {
+            ButtonTextTheme::Normal | ButtonTextTheme::Accent => {
+                self.highlight_color.unwrap_or_else(|| {
+                    self.get_text_color(button)
+                        .with_values(Some(0.16), None, None, None, None)
+                })
+            }
+            ButtonTextTheme::Primary => Colors::TRANSPARENT,
+        }
+    }
+
+    /// The [button]'s elevation when it is enabled and has not been pressed.
+    pub fn get_elevation(&self, button: &MaterialButton) -> f64 {
+        button.elevation.unwrap_or(2.0)
+    }
+
+    /// The [button]'s elevation when it is enabled and has focus.
+    pub fn get_focus_elevation(&self, button: &MaterialButton) -> f64 {
+        button.focus_elevation.unwrap_or(4.0)
+    }
+
+    /// The [button]'s elevation when it is enabled and hovered.
+    pub fn get_hover_elevation(&self, button: &MaterialButton) -> f64 {
+        button.hover_elevation.unwrap_or(4.0)
+    }
+
+    /// The [button]'s elevation when it is enabled and pressed.
+    pub fn get_highlight_elevation(&self, button: &MaterialButton) -> f64 {
+        button.highlight_elevation.unwrap_or(8.0)
+    }
+
+    /// The [button]'s elevation when `on_pressed` is null.
+    pub fn get_disabled_elevation(&self, button: &MaterialButton) -> f64 {
+        button.disabled_elevation.unwrap_or(0.0)
+    }
+
+    /// Padding for the [button]'s child (typically the button's label).
+    pub fn get_padding(&self, button: &MaterialButton) -> EdgeInsetsGeometry {
+        button
+            .padding
+            .or(self.padding)
+            .unwrap_or_else(|| match self.get_text_theme(button) {
+                ButtonTextTheme::Normal | ButtonTextTheme::Accent => {
+                    EdgeInsetsGeometry::symmetric(0.0, 16.0)
+                }
+                ButtonTextTheme::Primary => EdgeInsetsGeometry::symmetric(0.0, 24.0),
+            })
+    }
+
+    /// The shape of the [button]'s `Material`.
+    pub fn get_shape(&self, button: &MaterialButton) -> ShapeBorderRef {
+        button.shape.clone().unwrap_or_else(|| self.shape())
+    }
+
+    /// The duration of the [button]'s highlight animation.
+    pub fn get_animation_duration(&self, button: &MaterialButton) -> Duration {
+        button.animation_duration.unwrap_or(K_THEME_CHANGE_DURATION)
+    }
+
+    /// The `BoxConstraints` that define the [button]'s size.
+    pub fn get_constraints(&self, _button: &MaterialButton) -> BoxConstraints {
+        self.constraints()
+    }
+
+    /// The minimum size of the [button]'s tap target.
+    pub fn get_material_tap_target_size(&self, button: &MaterialButton) -> MaterialTapTargetSize {
+        button
+            .material_tap_target_size
+            .or(self.material_tap_target_size)
+            .unwrap_or(MaterialTapTargetSize::Padded)
     }
 
     /// Creates a copy of this button theme data object with the matching fields replaced with
