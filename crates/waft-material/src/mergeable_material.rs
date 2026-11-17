@@ -1093,15 +1093,17 @@ impl RenderBox for RenderMergeableMaterialListBody {
 mod tests {
     use std::time::Duration;
 
-    use waft_embedder::{Color, Size};
+    use waft_embedder::{Color, RRect, Radius, Rect, Size};
     use waft_foundation::ValueKey;
+    use waft_rendering::testing::{PaintCall, assert_paints, paints};
     use waft_widgets::testing::{find, test_widgets};
     use waft_widgets::{AnimatedContainer, Container, IntoWidget, SingleChildScrollView, SizedBox};
 
     use crate::scaffold::Scaffold;
 
     use super::*;
-    use crate::test_support::material_app;
+    use crate::colors::Colors;
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
 
     fn slice(key: &'static str, size: f64) -> MergeableMaterialItem {
@@ -1275,6 +1277,65 @@ mod tests {
             assert_eq!(
                 tester.get_size(find::by_type::<MergeableMaterial>()),
                 Size::ZERO
+            );
+        });
+    }
+
+    /// Dart's `expect(find.byType(MergeableMaterial), paints..shadow(..)..rrect(..))`.
+    fn assert_slice_paints(tester: &waft_widgets::testing::WidgetTester, pattern: &[PaintCall]) {
+        let ops = tester.painted_ops(tester.render_object(find::by_type::<MergeableMaterial>()));
+        assert_paints(&ops, pattern);
+    }
+
+    #[test]
+    fn a_slice_paints_its_elevation_as_a_shadow() {
+        test_widgets(|tester| {
+            let theme = ThemeData::builder()
+                .use_material3(false)
+                .build(&tester.cell.borrow());
+            let material = MergeableMaterial::new().children(vec![slice("A", 100.0)]);
+            tester.pump_widget(material_app(
+                theme,
+                Scaffold::new()
+                    .body(SingleChildScrollView::new().child(material))
+                    .into_widget(),
+            ));
+
+            let rrect = RRect::from_rect_and_radius(
+                Rect::from_ltrb(0.0, 0.0, 800.0, 100.0),
+                Radius::circular(2.0),
+            );
+            assert_slice_paints(
+                tester,
+                &[
+                    PaintCall::shadow_with_elevation(2.0, None),
+                    PaintCall::rrect_at(rrect, Some(Colors::WHITE)),
+                ],
+            );
+        });
+    }
+
+    #[test]
+    fn zero_elevation_paints_no_shadow() {
+        test_widgets(|tester| {
+            let theme = ThemeData::builder()
+                .use_material3(false)
+                .build(&tester.cell.borrow());
+            let material = MergeableMaterial::new()
+                .elevation(0.0)
+                .children(vec![slice("A", 100.0)]);
+            tester.pump_widget(material_app(
+                theme,
+                Scaffold::new()
+                    .body(SingleChildScrollView::new().child(material))
+                    .into_widget(),
+            ));
+
+            let ops =
+                tester.painted_ops(tester.render_object(find::by_type::<MergeableMaterial>()));
+            assert!(
+                paints(&ops, &[PaintCall::shadow_with_elevation(0.0, None)]).is_err(),
+                "a zero-elevation slice paints no shadow"
             );
         });
     }

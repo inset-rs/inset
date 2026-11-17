@@ -591,85 +591,351 @@ impl RenderBox for RenderButtonBarRow {
 #[cfg(test)]
 mod tests {
     use waft_embedder::Size;
-    use waft_widgets::testing::{find, test_widgets};
-    use waft_widgets::{Center, SizedBox};
+    use waft_foundation::ValueKey;
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+    use waft_widgets::{
+        Center, Directionality, IntoWidget, KeyRef, ListBody, MainAxisAlignment, MainAxisSize,
+        SingleChildScrollView, SizedBox, TextDirection, VerticalDirection,
+    };
 
     use super::*;
+    use crate::button_bar_theme::{ButtonBarTheme, ButtonBarThemeData};
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
-    fn pump(tester: &mut waft_widgets::testing::WidgetTester, bar: ButtonBar) {
+    /// Dart's `pumpWidget(MaterialApp(home: bar))`.
+    fn pump_home(tester: &mut WidgetTester, bar: ButtonBar) {
+        let theme = ThemeData::builder().build(&tester.cell.borrow());
+        tester.pump_widget(material_app(theme, bar.into_widget()));
+    }
+
+    /// Dart's `pumpWidget(MaterialApp(home: Center(child: bar)))`.
+    fn pump_centered(tester: &mut WidgetTester, bar: ButtonBar) {
         let theme = ThemeData::builder().build(&tester.cell.borrow());
         tester.pump_widget(material_app(theme, Center::new().child(bar).into_widget()));
+    }
+
+    /// Dart's `pumpWidget(MaterialApp(home: widget))`, for a theme-wrapped bar.
+    fn pump_wrapped(tester: &mut WidgetTester, widget: WidgetRef) {
+        let theme = ThemeData::builder().build(&tester.cell.borrow());
+        tester.pump_widget(material_app(theme, widget));
+    }
+
+    /// Dart's `SingleChildScrollView(child: ListBody(children: [Directionality(ltr, bar)]))`:
+    /// the bar is laid out with a loose height, as it is in a column.
+    fn pump_scrolling(tester: &mut WidgetTester, bar: ButtonBar) {
+        let theme = ThemeData::builder().build(&tester.cell.borrow());
+        tester.pump_widget(material_app(
+            theme,
+            SingleChildScrollView::new()
+                .child(ListBody::new().children(vec![
+                    Directionality::new(TextDirection::Ltr, bar).into_widget(),
+                ]))
+                .into_widget(),
+        ));
     }
 
     fn boxed(size: f64) -> WidgetRef {
         SizedBox::new().width(size).height(size).into_widget()
     }
 
+    fn keyed(width: f64, height: f64, name: &'static str) -> (KeyRef, WidgetRef) {
+        let key = KeyRef::from(ValueKey::new(name));
+        (
+            key.clone(),
+            SizedBox::new()
+                .key(key)
+                .width(width)
+                .height(height)
+                .into_widget(),
+        )
+    }
+
+    fn overflow_bar(
+        name: &'static str,
+        alignment: MainAxisAlignment,
+    ) -> (KeyRef, KeyRef, ButtonBar) {
+        let (first_key, first) = keyed(500.0, 50.0, name);
+        let (second_key, second) = keyed(500.0, 50.0, "second");
+        (
+            first_key,
+            second_key,
+            ButtonBar::new()
+                .alignment(alignment)
+                .button_padding(waft_painting::EdgeInsets::ZERO)
+                .children(vec![first, second]),
+        )
+    }
+
     #[test]
     fn the_default_alignment_is_end() {
         test_widgets(|tester| {
-            pump(tester, ButtonBar::new().children(vec![boxed(10.0)]));
-            let bar = tester.get_rect(find::by_type::<ButtonBar>());
+            pump_home(tester, ButtonBar::new().children(vec![boxed(10.0)]));
             let child = tester.get_rect(find::by_type::<SizedBox>().first());
-            assert_eq!(child.right, bar.right - 8.0);
+            assert_eq!(child.left, 782.0);
+            assert_eq!(child.right, 792.0);
         });
     }
 
     #[test]
-    fn an_alignment_overrides_the_theme_and_the_default() {
+    fn the_bar_theme_alignment_overrides_the_default() {
         test_widgets(|tester| {
-            pump(
+            let data = ButtonBarThemeData::new().with_alignment(MainAxisAlignment::Center);
+            pump_wrapped(
                 tester,
-                ButtonBar::new()
-                    .alignment(MainAxisAlignment::Start)
-                    .children(vec![boxed(10.0)]),
+                ButtonBarTheme::new(data, ButtonBar::new().children(vec![boxed(10.0)]))
+                    .into_widget(),
             );
             let child = tester.get_rect(find::by_type::<SizedBox>().first());
-            assert!(child.left < 20.0, "the child starts at the left");
+            assert_eq!(child.left, 395.0);
+            assert_eq!(child.right, 405.0);
         });
+    }
+
+    #[test]
+    fn an_alignment_overrides_the_bar_theme_and_the_default() {
+        test_widgets(|tester| {
+            let data = ButtonBarThemeData::new().with_alignment(MainAxisAlignment::Center);
+            pump_wrapped(
+                tester,
+                ButtonBarTheme::new(
+                    data,
+                    ButtonBar::new()
+                        .alignment(MainAxisAlignment::Start)
+                        .children(vec![boxed(10.0)]),
+                )
+                .into_widget(),
+            );
+            let child = tester.get_rect(find::by_type::<SizedBox>().first());
+            assert_eq!(child.left, 8.0);
+            assert_eq!(child.right, 18.0);
+        });
+    }
+
+    fn three_children(name: &'static str) -> (KeyRef, KeyRef, KeyRef, Vec<WidgetRef>) {
+        let (child0, widget0) = keyed(100.0, 100.0, name);
+        let (child1, widget1) = keyed(100.0, 100.0, "child1");
+        let (child2, widget2) = keyed(100.0, 100.0, "child2");
+        (child0, child1, child2, vec![widget0, widget1, widget2])
     }
 
     #[test]
     fn the_default_main_axis_size_is_max() {
         test_widgets(|tester| {
-            pump(tester, ButtonBar::new().children(vec![boxed(10.0)]));
-            assert_eq!(tester.get_size(find::by_type::<ButtonBar>()).width(), 800.0);
+            let bar_key = KeyRef::from(ValueKey::new("row"));
+            let (child0, child1, child2, children) = three_children("child0");
+            pump_centered(
+                tester,
+                ButtonBar::new()
+                    .key(bar_key.clone())
+                    .button_padding(waft_painting::EdgeInsets::ZERO)
+                    .children(children),
+            );
+
+            let bar = tester.get_rect(find::by_key(bar_key));
+            assert_eq!(bar.width(), 800.0);
+            assert_eq!(bar.height(), 100.0);
+
+            assert_eq!(tester.get_rect(find::by_key(child0)).right, 800.0 - 200.0);
+            assert_eq!(tester.get_rect(find::by_key(child1)).right, 800.0 - 100.0);
+            assert_eq!(tester.get_rect(find::by_key(child2)).right, 800.0);
         });
     }
 
     #[test]
-    fn children_wrap_when_they_overflow() {
+    fn the_bar_theme_main_axis_size_overrides_the_default() {
         test_widgets(|tester| {
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                Center::new()
-                    .child(
-                        SizedBox::new().width(100.0).child(
-                            ButtonBar::new()
-                                .button_padding(EdgeInsets::ZERO)
-                                .children(vec![boxed(60.0), boxed(60.0), boxed(60.0)]),
-                        ),
-                    )
-                    .into_widget(),
-            ));
-            let bar = tester.get_rect(find::by_type::<ButtonBar>());
-            assert!(bar.height() >= 60.0 * 3.0);
+            let bar_key = KeyRef::from(ValueKey::new("row"));
+            let (child0, child1, child2, children) = three_children("child0");
+            let data = ButtonBarThemeData::new().with_main_axis_size(MainAxisSize::Min);
+            pump_wrapped(
+                tester,
+                ButtonBarTheme::new(
+                    data,
+                    Center::new().child(
+                        ButtonBar::new()
+                            .key(bar_key.clone())
+                            .button_padding(waft_painting::EdgeInsets::ZERO)
+                            .children(children),
+                    ),
+                )
+                .into_widget(),
+            );
+
+            let bar = tester.get_rect(find::by_key(bar_key));
+            assert_eq!(bar.width(), 300.0);
+            assert_eq!(bar.height(), 100.0);
+
+            let left = (800.0 - bar.width()) / 2.0;
+            assert_eq!(tester.get_rect(find::by_key(child0)).left, left);
+            assert_eq!(tester.get_rect(find::by_key(child1)).left, left + 100.0);
+            assert_eq!(tester.get_rect(find::by_key(child2)).left, left + 200.0);
+        });
+    }
+
+    #[test]
+    fn a_main_axis_size_overrides_the_bar_theme_and_the_default() {
+        test_widgets(|tester| {
+            let bar_key = KeyRef::from(ValueKey::new("row"));
+            let (child0, child1, child2, children) = three_children("child0");
+            let data = ButtonBarThemeData::new().with_main_axis_size(MainAxisSize::Min);
+            pump_wrapped(
+                tester,
+                ButtonBarTheme::new(
+                    data,
+                    Center::new().child(
+                        ButtonBar::new()
+                            .key(bar_key.clone())
+                            .button_padding(waft_painting::EdgeInsets::ZERO)
+                            .main_axis_size(MainAxisSize::Max)
+                            .children(children),
+                    ),
+                )
+                .into_widget(),
+            );
+
+            let bar = tester.get_rect(find::by_key(bar_key));
+            assert_eq!(bar.width(), 800.0);
+            assert_eq!(bar.height(), 100.0);
+            assert_eq!(tester.get_rect(find::by_key(child0)).right, 800.0 - 200.0);
+            assert_eq!(tester.get_rect(find::by_key(child1)).right, 800.0 - 100.0);
+            assert_eq!(tester.get_rect(find::by_key(child2)).right, 800.0);
         });
     }
 
     #[test]
     fn a_constrained_layout_has_a_minimum_height_of_fifty_two() {
         test_widgets(|tester| {
-            pump(
+            pump_scrolling(
                 tester,
                 ButtonBar::new()
                     .layout_behavior(ButtonBarLayoutBehavior::Constrained)
                     .children(vec![boxed(10.0)]),
             );
-            assert!(tester.get_size(find::by_type::<ButtonBar>()).height() >= 52.0);
+            let bar = tester.get_rect(find::by_type::<ButtonBar>());
+            assert_eq!(bar.bottom - bar.top, 52.0);
+        });
+    }
+
+    #[test]
+    fn a_padded_layout_adds_its_padding() {
+        test_widgets(|tester| {
+            pump_scrolling(
+                tester,
+                ButtonBar::new()
+                    .layout_behavior(ButtonBarLayoutBehavior::Padded)
+                    .children(vec![boxed(10.0)]),
+            );
+            let bar = tester.get_rect(find::by_type::<ButtonBar>());
+            assert_eq!(bar.bottom - bar.top, 26.0);
+        });
+    }
+
+    #[test]
+    fn the_children_wrap_when_they_overflow() {
+        test_widgets(|tester| {
+            let (first_key, first) = keyed(800.0, 50.0, "one");
+            let (second_key, second) = keyed(800.0, 50.0, "two");
+            pump_home(tester, ButtonBar::new().children(vec![first, second]));
+            let first = tester.get_rect(find::by_key(first_key));
+            let second = tester.get_rect(find::by_key(second_key));
+            assert_eq!(first.bottom, second.top);
+            assert_eq!(first.left, second.left);
+        });
+    }
+
+    #[test]
+    fn overflowing_children_default_to_the_end_alignment() {
+        test_widgets(|tester| {
+            let (first_key, second_key, bar) = overflow_bar("one", MainAxisAlignment::End);
+            pump_home(tester, bar);
+            let bar = tester.get_rect(find::by_type::<ButtonBar>());
+            let first = tester.get_rect(find::by_key(first_key));
+            let second = tester.get_rect(find::by_key(second_key));
+            assert_eq!(first.bottom, second.top);
+            assert_eq!(first.right, second.right);
+            assert_eq!(first.right, bar.right);
+        });
+    }
+
+    #[test]
+    fn overflowing_children_follow_a_start_alignment() {
+        test_widgets(|tester| {
+            let (first_key, second_key, bar) = overflow_bar("one", MainAxisAlignment::Start);
+            pump_home(tester, bar);
+            let bar = tester.get_rect(find::by_type::<ButtonBar>());
+            let first = tester.get_rect(find::by_key(first_key));
+            let second = tester.get_rect(find::by_key(second_key));
+            assert_eq!(first.bottom, second.top);
+            assert_eq!(first.left, second.left);
+            assert_eq!(first.left, bar.left);
+        });
+    }
+
+    #[test]
+    fn overflowing_children_follow_a_center_alignment() {
+        test_widgets(|tester| {
+            let (first_key, second_key, bar) = overflow_bar("one", MainAxisAlignment::Center);
+            pump_home(tester, bar);
+            let bar = tester.get_rect(find::by_type::<ButtonBar>());
+            let first = tester.get_rect(find::by_key(first_key));
+            let second = tester.get_rect(find::by_key(second_key));
+            assert_eq!(first.bottom, second.top);
+            assert_eq!(first.center().dx(), second.center().dx());
+            assert_eq!(first.center().dx(), bar.center().dx());
+        });
+    }
+
+    #[test]
+    fn overflowing_children_of_a_spread_alignment_start_at_the_start() {
+        test_widgets(|tester| {
+            for alignment in [
+                MainAxisAlignment::SpaceEvenly,
+                MainAxisAlignment::SpaceAround,
+                MainAxisAlignment::SpaceBetween,
+            ] {
+                let (first_key, second_key, bar) = overflow_bar("one", alignment);
+                pump_home(tester, bar);
+                let bar_rect = tester.get_rect(find::by_type::<ButtonBar>());
+                let first = tester.get_rect(find::by_key(first_key));
+                let second = tester.get_rect(find::by_key(second_key));
+                assert_eq!(first.bottom, second.top);
+                assert_eq!(first.left, second.left);
+                assert_eq!(first.left, bar_rect.left);
+            }
+        });
+    }
+
+    #[test]
+    fn overflowing_children_respect_the_overflow_direction() {
+        test_widgets(|tester| {
+            let (first_key, second_key, bar) = overflow_bar("one", MainAxisAlignment::Center);
+            pump_home(tester, bar.overflow_direction(VerticalDirection::Up));
+            let first = tester.get_rect(find::by_key(first_key));
+            let second = tester.get_rect(find::by_key(second_key));
+            assert!(second.bottom <= first.top);
+        });
+    }
+
+    #[test]
+    fn overflowing_children_have_no_spacing_by_default() {
+        test_widgets(|tester| {
+            let (first_key, second_key, bar) = overflow_bar("one", MainAxisAlignment::Center);
+            pump_home(tester, bar);
+            let first = tester.get_rect(find::by_key(first_key));
+            let second = tester.get_rect(find::by_key(second_key));
+            assert_eq!(first.bottom, second.top);
+        });
+    }
+
+    #[test]
+    fn overflowing_children_respect_the_overflow_button_spacing() {
+        test_widgets(|tester| {
+            let (first_key, second_key, bar) = overflow_bar("one", MainAxisAlignment::Center);
+            pump_home(tester, bar.overflow_button_spacing(10.0));
+            let first = tester.get_rect(find::by_key(first_key));
+            let second = tester.get_rect(find::by_key(second_key));
+            assert_eq!(first.bottom, second.top - 10.0);
         });
     }
 

@@ -1495,6 +1495,7 @@ impl StepStyle {
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::time::Duration;
 
     use waft_embedder::Size;
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
@@ -1740,6 +1741,45 @@ mod tests {
                 ])
                 .r#type(StepperType::Horizontal),
             );
+        });
+    }
+
+    fn sized_step(title: &'static str, height: f64) -> Step {
+        Step::new(Text::new(title), SizedBox::new().height(height))
+    }
+
+    #[test]
+    fn the_vertical_stepper_grows_as_the_next_step_opens() {
+        test_widgets(|tester| {
+            let steps = || vec![sized_step("Step 1", 100.0), sized_step("Step 2", 200.0)];
+            let pump_centered = |tester: &mut WidgetTester, stepper: Stepper| {
+                let theme = ThemeData::builder().build(&tester.cell.borrow());
+                tester.pump_widget(material_app(
+                    theme,
+                    Center::new()
+                        .child(Material::new().child(stepper))
+                        .into_widget(),
+                ));
+            };
+            pump_centered(tester, Stepper::new(steps()));
+            assert_eq!(tester.get_size(find::by_type::<Stepper>()).height(), 332.0);
+
+            pump_centered(tester, Stepper::new(steps()).current_step(1));
+            tester.pump_by(Duration::from_millis(100));
+            assert!(tester.get_size(find::by_type::<Stepper>()).height() > 332.0);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(tester.get_size(find::by_type::<Stepper>()).height(), 432.0);
+        });
+    }
+
+    #[test]
+    fn the_horizontal_stepper_fills_the_height_it_is_given() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                Stepper::new(vec![sized_step("Step 1", 100.0)]).r#type(StepperType::Horizontal),
+            );
+            assert_eq!(tester.get_size(find::by_type::<Stepper>()).height(), 600.0);
         });
     }
 

@@ -926,6 +926,25 @@ mod tests {
     }
 
     #[test]
+    fn the_arrow_keeps_turning_through_four_mid_animation_taps() {
+        test_widgets(|tester| {
+            pump_test_widget(tester, Options::default());
+            assert!(rotation(tester) > 0.99);
+
+            for _ in 0..4 {
+                tester.tap(find::by_type::<Icon>());
+                tester.pump();
+                tester.pump_by(Duration::from_millis(100));
+                assert!(tester.has_running_animations());
+            }
+
+            tester.pump_and_settle();
+            tester.pump();
+            assert!(rotation(tester) > 0.99);
+        });
+    }
+
+    #[test]
     fn a_rebuild_does_not_turn_the_arrow() {
         test_widgets(|tester| {
             let set_state: Rc<RefCell<Option<StateSetter>>> = Rc::default();

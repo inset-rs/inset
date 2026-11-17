@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use material_gallery_lib::pages::cards::EXPANDED_TILE_CHILD;
 use material_gallery_lib::pages::drawers::{DRAWER_HEADER, END_DRAWER_HEADER};
-use material_gallery_lib::pages::steppers::LAST_ACTION;
 use material_gallery_lib::pages::messages::{BANNER_TEXT, PERSISTENT_SHEET_TEXT};
+use material_gallery_lib::pages::steppers::LAST_ACTION;
 use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
 use waft_embedder::{Brightness, Offset, Size, TargetPlatform};
 use waft_material::{

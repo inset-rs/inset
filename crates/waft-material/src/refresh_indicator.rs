@@ -943,17 +943,23 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    use waft_animation::{
+        AnimationBehavior, AnimationController, ColorTween, CurveTween, Curves, Drive, Interval,
+    };
     use waft_embedder::{Offset, Size, TargetPlatform};
     use waft_widgets::testing::{
-        TargetPlatformVariant, WidgetTester, find, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestVSync, WidgetTester, find, test_widgets, test_widgets_variant,
     };
     use waft_widgets::{
-        AlwaysScrollableScrollPhysics, Center, IntoWidget, ListView, SizedBox, StatefulElement,
-        Text,
+        AlwaysScrollableScrollPhysics, Builder, Center, GlowingOverscrollIndicator, IntoWidget,
+        ListView, Notification, NotificationListener, OverscrollIndicatorNotification,
+        OverscrollNotification, ScrollNotification, SizedBox, StatefulElement,
+        StretchingOverscrollIndicator, Text,
     };
 
     use super::*;
     use crate::color_scheme::ColorScheme;
+    use crate::colors::Colors;
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
@@ -1240,5 +1246,208 @@ mod tests {
                 Size::ZERO
             );
         });
+    }
+
+    /// A six-step list, each step 200 tall, under `AlwaysScrollableScrollPhysics`.
+    fn tall_list() -> ListView {
+        ListView::new()
+            .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+            .children(
+                ["A", "B", "C", "D", "E", "F"]
+                    .into_iter()
+                    .map(|text| {
+                        SizedBox::new()
+                            .height(200.0)
+                            .child(Text::new(text))
+                            .into_widget()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+    }
+
+    /// Dart's `NotificationListener<ScrollNotification>` around the list: the first overscroll
+    /// dispatches an `OverscrollIndicatorNotification` and records whether it was accepted.
+    fn overscroll_probe(
+        list: ListView,
+        accepted: Rc<Cell<bool>>,
+    ) -> impl Fn(&mut App, BuildContext) -> WidgetRef {
+        let last_was_overscroll = Rc::new(Cell::new(false));
+        let list: WidgetRef = list.into_widget();
+        move |_app: &mut App, context: BuildContext| {
+            let accepted = Rc::clone(&accepted);
+            let last_was_overscroll = Rc::clone(&last_was_overscroll);
+            let list = list.clone();
+            NotificationListener::<dyn ScrollNotification>::new(list)
+                .on_notification(move |app, notification| {
+                    let is_overscroll = notification.as_any().is::<OverscrollNotification>();
+                    if is_overscroll && !last_was_overscroll.get() {
+                        let confirmation = OverscrollIndicatorNotification::new(true);
+                        confirmation.dispatch(app, Some(context));
+                        accepted.set(confirmation.accepted.get());
+                    }
+                    last_was_overscroll.set(is_overscroll);
+                    false
+                })
+                .into_widget()
+        }
+    }
+
+    #[test]
+    fn the_indicator_disallows_the_glow_while_dragging() {
+        test_widgets(|tester| {
+            let (refresh, called) = refresh_called();
+            let glow_accepted = Rc::new(Cell::new(true));
+            let theme = ThemeData::builder()
+                .use_material3(false)
+                .build(&tester.cell.borrow());
+            let probe = overscroll_probe(tall_list(), Rc::clone(&glow_accepted));
+            let indicator = RefreshIndicator::new(refresh, Builder::new(probe));
+            tester.pump_widget(material_app(theme, indicator.into_widget()));
+
+            assert!(
+                find::by_type::<StretchingOverscrollIndicator>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
+            assert_eq!(
+                find::by_type::<GlowingOverscrollIndicator>()
+                    .evaluate(tester)
+                    .len(),
+                1
+            );
+
+            tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            assert!(called.get());
+            assert!(!glow_accepted.get());
+        });
+    }
+
+    #[test]
+    fn the_indicator_disallows_the_stretch_while_dragging() {
+        test_widgets(|tester| {
+            let (refresh, called) = refresh_called();
+            let stretch_accepted = Rc::new(Cell::new(true));
+            let theme = ThemeData::builder().build(&tester.cell.borrow());
+            let probe = overscroll_probe(tall_list(), Rc::clone(&stretch_accepted));
+            let indicator = RefreshIndicator::new(refresh, Builder::new(probe));
+            tester.pump_widget(material_app(theme, indicator.into_widget()));
+
+            assert_eq!(
+                find::by_type::<StretchingOverscrollIndicator>()
+                    .evaluate(tester)
+                    .len(),
+                1
+            );
+            assert!(
+                find::by_type::<GlowingOverscrollIndicator>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
+
+            tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            assert!(called.get());
+            assert!(!stretch_accepted.get());
+        });
+    }
+
+    /// The refresh indicator's value colour fades in over the first 1/1.5 of the drag, from
+    /// the colour's alpha 0 to its own alpha.
+    #[test]
+    fn the_value_color_fades_in_with_the_drag() {
+        const POSITIONS: [f64; 3] = [50.0, 100.0, 150.0];
+        let colors = [
+            Colors::BLACK,
+            Colors::BLACK54,
+            Colors::WHITE,
+            Colors::WHITE54,
+            Colors::TRANSPARENT,
+        ];
+        for color in colors {
+            test_widgets(|tester| {
+                let (refresh, _called) = refresh_called();
+                let (controller, expected) = {
+                    let mut app = tester.cell.borrow_mut();
+                    let controller = AnimationController::new(
+                        &mut app,
+                        Some(0.0),
+                        None,
+                        None,
+                        0.0,
+                        1.0,
+                        AnimationBehavior::Normal,
+                        TestVSync,
+                    );
+                    let tween = ColorTween::new(&mut app, Some(color.with_alpha(0)), Some(color));
+                    let curve = CurveTween::new(
+                        &mut app,
+                        Rc::new(Interval::new(
+                            0.0,
+                            1.0 / K_DRAG_SIZE_FACTOR_LIMIT,
+                            Curves::linear(),
+                        )),
+                    );
+                    let expected = controller.drive(&mut app, tween.chain(curve));
+                    (controller, expected)
+                };
+
+                let item = SizedBox::new()
+                    .height(200.0)
+                    .child(Text::new("X"))
+                    .into_widget();
+                let list = ListView::new()
+                    .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+                    .children(vec![item]);
+                let theme = ThemeData::builder().build(&tester.cell.borrow());
+                tester.pump_widget(material_app(
+                    theme,
+                    RefreshIndicator::new(refresh, list)
+                        .color(color)
+                        .into_widget(),
+                ));
+
+                let metrics = waft_embedder::View::metrics(&**tester.view());
+                let max_position = metrics.physical_size[1] / metrics.device_pixel_ratio
+                    * K_DRAG_CONTAINER_EXTENT_PERCENTAGE;
+                for position in POSITIONS {
+                    tester.fling(find::text("X"), Offset::new(0.0, position), 1.0);
+                    tester.pump();
+                    {
+                        let mut app = tester.cell.borrow_mut();
+                        controller.set_value(&mut app, position / max_position);
+                    }
+                    let value_color = tester
+                        .widget(
+                            find::by_type::<RefreshProgressIndicator>(),
+                            |indicator: &RefreshProgressIndicator| {
+                                indicator
+                                    .circular_progress_indicator
+                                    .progress_indicator
+                                    .value_color
+                                    .clone()
+                            },
+                        )
+                        .expect("the indicator has a value color");
+                    let actual = {
+                        let app = tester.cell.borrow();
+                        value_color.value(&app).expect("the value color resolves").a
+                    };
+                    let expected_alpha = {
+                        let app = tester.cell.borrow();
+                        expected.value(&app).expect("the tween resolves").a
+                    };
+                    assert_eq!(actual, expected_alpha, "at a drag of {position}");
+                    tester.pump_and_settle();
+                }
+                controller.dispose(&mut tester.cell.borrow_mut());
+            });
+        }
     }
 }

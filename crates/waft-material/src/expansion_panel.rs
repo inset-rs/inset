@@ -612,11 +612,15 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use waft_foundation::ValueKey;
+    use waft_foundation::{Handle, ValueKey};
+    use waft_painting::EdgeInsets;
     use waft_widgets::testing::{find, test_widgets};
-    use waft_widgets::{IntoWidget, SingleChildScrollView, SizedBox, Text};
+    use waft_widgets::{
+        IntoWidget, KeyRef, SingleChildScrollView, SizedBox, State, StateData, StatefulWidget, Text,
+    };
 
     use super::*;
+    use crate::icon_button::IconButton;
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
@@ -754,6 +758,161 @@ mod tests {
             tester.pump_and_settle();
             assert_eq!(find::text("B").evaluate(tester).len(), 1);
             assert!(find::text("A").evaluate(tester).is_empty());
+        });
+    }
+
+    /// Dart's test file's `SimpleExpansionPanelListTestWidget`: two panels whose callback
+    /// toggles each panel's `is_expanded`.
+    #[derive(Debug)]
+    struct SimpleExpansionPanelListTestWidget {
+        first_panel_key: KeyRef,
+        can_tap_on_header: bool,
+        expanded_header_padding: EdgeInsets,
+    }
+
+    struct SimpleExpansionPanelListTestWidgetState {
+        state: StateData<SimpleExpansionPanelListTestWidget>,
+        extended_state: [bool; 2],
+    }
+
+    impl StatefulWidget for SimpleExpansionPanelListTestWidget {
+        type State = SimpleExpansionPanelListTestWidgetState;
+
+        fn create_state(&self) -> SimpleExpansionPanelListTestWidgetState {
+            SimpleExpansionPanelListTestWidgetState {
+                state: StateData::new(),
+                extended_state: [false, false],
+            }
+        }
+    }
+
+    impl State for SimpleExpansionPanelListTestWidgetState {
+        type Widget = SimpleExpansionPanelListTestWidget;
+        waft_widgets::state_accessors!();
+
+        fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+            let widget = self.widget(app).clone_values();
+            let expanded = app.get(self).extended_state;
+            let headers = ["A", "B", "C", "D"];
+            let first_key = widget.first_panel_key.clone();
+            let header = move |left: &'static str,
+                               right: &'static str,
+                               key: Option<KeyRef>|
+                  -> ExpansionPanelHeaderBuilder {
+                Rc::new(
+                    move |_app: &mut App, _context: BuildContext, is_expanded: bool| {
+                        let text = Text::new(if is_expanded { right } else { left });
+                        match key.clone() {
+                            Some(key) => text.key(key).into_widget(),
+                            None => text.into_widget(),
+                        }
+                    },
+                )
+            };
+            let first = ExpansionPanel::new(
+                header(headers[0], headers[1], Some(first_key)),
+                SizedBox::new().height(100.0),
+            )
+            .can_tap_on_header(widget.can_tap_on_header)
+            .is_expanded(expanded[0]);
+            let second = ExpansionPanel::new(
+                header(headers[2], headers[3], None),
+                SizedBox::new().height(100.0),
+            )
+            .can_tap_on_header(widget.can_tap_on_header)
+            .is_expanded(expanded[1]);
+            ExpansionPanelList::new()
+                .expanded_header_padding(widget.expanded_header_padding)
+                .expansion_callback(Rc::new(
+                    move |app: &mut App, index: usize, is_expanded: bool| {
+                        self.set_state(app, |state| state.extended_state[index] = is_expanded);
+                    },
+                ))
+                .children(vec![first, second])
+                .into_widget()
+        }
+    }
+
+    impl SimpleExpansionPanelListTestWidget {
+        fn clone_values(&self) -> SimpleExpansionPanelListTestWidget {
+            SimpleExpansionPanelListTestWidget {
+                first_panel_key: self.first_panel_key.clone(),
+                can_tap_on_header: self.can_tap_on_header,
+                expanded_header_padding: self.expanded_header_padding,
+            }
+        }
+    }
+
+    fn pump_simple(
+        tester: &mut waft_widgets::testing::WidgetTester,
+        expanded_header_padding: EdgeInsets,
+    ) -> KeyRef {
+        let first_panel_key = KeyRef::from(ValueKey::new("firstPanelKey"));
+        let theme = ThemeData::builder().build(&tester.cell.borrow());
+        tester.pump_widget(material_app(
+            theme,
+            SingleChildScrollView::new()
+                .child(SimpleExpansionPanelListTestWidget {
+                    first_panel_key: first_panel_key.clone(),
+                    can_tap_on_header: true,
+                    expanded_header_padding,
+                })
+                .into_widget(),
+        ));
+        first_panel_key
+    }
+
+    /// The `AnimatedContainer` that wraps the header: Dart's
+    /// `find.ancestor(of: find.byKey(firstPanelKey), matching: find.byType(AnimatedContainer))`.
+    fn header_box(first_panel_key: &KeyRef) -> waft_widgets::testing::Finder {
+        find::ancestor(
+            find::by_key(first_panel_key.clone()),
+            find::by_type::<AnimatedContainer>(),
+        )
+        .first()
+    }
+
+    #[test]
+    fn a_closed_header_has_no_padding() {
+        test_widgets(|tester| {
+            let key = pump_simple(tester, ExpansionPanelList::new().expanded_header_padding);
+            assert_eq!(find::text("A").evaluate(tester).len(), 1);
+            assert!(find::text("B").evaluate(tester).is_empty());
+
+            let container = tester.get_size(header_box(&key));
+            let icon_button = tester.get_size(find::by_type::<IconButton>().first());
+            assert_eq!(container.height(), icon_button.height());
+            assert_eq!(container.height(), 48.0);
+        });
+    }
+
+    #[test]
+    fn a_header_is_at_least_the_minimum_interactive_dimension() {
+        test_widgets(|tester| {
+            let key = pump_simple(tester, ExpansionPanelList::new().expanded_header_padding);
+            assert!(tester.get_size(header_box(&key)).height() >= K_MIN_INTERACTIVE_DIMENSION);
+        });
+    }
+
+    #[test]
+    fn the_expanded_header_padding_is_applied() {
+        test_widgets(|tester| {
+            let key = pump_simple(tester, EdgeInsets::symmetric(40.0, 0.0));
+            assert_eq!(find::text("A").evaluate(tester).len(), 1);
+            assert!(find::text("B").evaluate(tester).is_empty());
+
+            let closed = tester.get_size(header_box(&key));
+            assert_eq!(closed.height(), 48.0);
+            assert_eq!(closed.width(), 744.0);
+
+            tester.tap(find::by_key(key.clone()));
+            tester.pump_and_settle();
+            assert!(find::text("A").evaluate(tester).is_empty());
+            assert_eq!(find::text("B").evaluate(tester).len(), 1);
+
+            let expanded = tester.get_size(header_box(&key));
+            assert_eq!(expanded.height(), 128.0);
+            assert_eq!(expanded.width(), 744.0);
         });
     }
 }

@@ -430,14 +430,20 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use waft_embedder::{Clip, Size, TargetPlatform};
-    use waft_widgets::testing::{find, test_widgets};
-    use waft_widgets::{Center, Directionality, IntoWidget, SizedBox, Text, TextDirection};
+    use waft_embedder::{Clip, Offset, Size, TargetPlatform};
+    use waft_foundation::ValueKey;
+    use waft_rendering::testing::{PaintCall, assert_paints};
+    use waft_widgets::testing::{TestPointer, find, test_widgets};
+    use waft_widgets::{
+        Center, Directionality, FocusHighlightStrategy, FocusManager, FocusNode, IntoWidget,
+        SizedBox, Text, TextDirection,
+    };
 
     use crate::material::Material;
 
     use super::*;
-    use crate::test_support::material_app;
+    use crate::test_support::{PaintInspection, material_app};
+    use crate::theme::Theme;
     use crate::theme_data::ThemeData;
 
     fn theme(app: &App) -> ThemeData {
@@ -620,6 +626,216 @@ mod tests {
             assert_eq!(
                 tester.get_size(find::by_type::<MaterialButton>()),
                 Size::ZERO
+            );
+        });
+    }
+
+    /// Dart's `pumpWidget(Directionality(textDirection: ltr, child: button))`: no `Material`
+    /// above it, so the tester's first ink features are the button's own.
+    fn pump_bare(tester: &mut waft_widgets::testing::WidgetTester, button: MaterialButton) {
+        let theme = theme(&tester.cell.borrow());
+        tester.pump_widget(material_app(
+            theme,
+            Directionality::new(TextDirection::Ltr, button).into_widget(),
+        ));
+    }
+
+    fn button(on_pressed: bool) -> MaterialButton {
+        MaterialButton::new(on_pressed.then(|| Listener::new(|_app| {}))).child(Text::new("button"))
+    }
+
+    fn button_elevation(tester: &waft_widgets::testing::WidgetTester) -> f64 {
+        tester.widget(
+            find::descendant(
+                find::by_type::<MaterialButton>(),
+                find::by_type::<Material>(),
+            )
+            .first(),
+            |material: &Material| material.elevation,
+        )
+    }
+
+    #[test]
+    fn a_hovered_button_paints_its_hover_color() {
+        test_widgets(|tester| {
+            let hover_color = Color::new(0xff001122);
+            pump_bare(tester, button(true).hover_color(hover_color));
+
+            let mut mouse = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut mouse, Offset::ZERO);
+            tester.move_to(
+                &mut mouse,
+                tester.get_center(find::by_type::<MaterialButton>()),
+                false,
+            );
+            tester.pump_and_settle();
+
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect(Some(hover_color))],
+            );
+        });
+    }
+
+    #[test]
+    fn a_focused_button_paints_its_focus_color() {
+        test_widgets(|tester| {
+            let focus_color = Color::new(0xff001122);
+            let focus_node: FocusNodeRef =
+                FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
+            {
+                let mut app = tester.cell.borrow_mut();
+                FocusManager::instance(&mut app)
+                    .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
+            }
+            pump_bare(
+                tester,
+                button(true)
+                    .focus_color(focus_color)
+                    .focus_node(focus_node.clone()),
+            );
+            focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump_and_settle();
+
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect(Some(focus_color))],
+            );
+            assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
+        });
+    }
+
+    #[test]
+    fn elevation_and_colors_follow_focus_then_hover_then_press() {
+        test_widgets(|tester| {
+            let elevation = 10.0;
+            let focus_elevation = 11.0;
+            let hover_elevation = 12.0;
+            let highlight_elevation = 13.0;
+            let focus_color = Color::new(0xff001122);
+            let hover_color = Color::new(0xff112233);
+            let highlight_color = Color::new(0xff223344);
+
+            let focus_node: FocusNodeRef =
+                FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
+            pump_bare(
+                tester,
+                button(true)
+                    .focus_color(focus_color)
+                    .hover_color(hover_color)
+                    .highlight_color(highlight_color)
+                    .elevation(elevation)
+                    .focus_elevation(focus_elevation)
+                    .hover_elevation(hover_elevation)
+                    .highlight_elevation(highlight_elevation)
+                    .focus_node(focus_node.clone()),
+            );
+            tester.pump_and_settle();
+            {
+                let mut app = tester.cell.borrow_mut();
+                FocusManager::instance(&mut app)
+                    .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
+            }
+
+            // Base elevation.
+            assert_eq!(button_elevation(tester), elevation);
+
+            // Focus elevation overrides base.
+            focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump_and_settle();
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect(Some(focus_color))],
+            );
+            assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
+            assert_eq!(button_elevation(tester), focus_elevation);
+
+            // Hover elevation overrides focus.
+            let mut mouse = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut mouse, Offset::ZERO);
+            tester.move_to(
+                &mut mouse,
+                tester.get_center(find::by_type::<MaterialButton>()),
+                false,
+            );
+            tester.pump_and_settle();
+            assert_paints(
+                tester.ink_list().ops(),
+                &[
+                    PaintCall::rect(Some(focus_color)),
+                    PaintCall::rect(Some(hover_color)),
+                ],
+            );
+            assert_eq!(button_elevation(tester), hover_elevation);
+            tester.remove_pointer(&mouse);
+
+            // Highlight elevation overrides hover.
+            let mut touch = TestPointer::touch(2);
+            tester.down(
+                &mut touch,
+                tester.get_center(find::by_type::<MaterialButton>()),
+            );
+            tester.pump_and_settle();
+            assert_paints(
+                tester.ink_list().ops(),
+                &[
+                    PaintCall::rect(Some(focus_color)),
+                    PaintCall::rect(Some(highlight_color)),
+                ],
+            );
+            assert_eq!(button_elevation(tester), highlight_elevation);
+            tester.up(&touch);
+        });
+    }
+
+    #[test]
+    fn the_tap_target_size_follows_the_theme() {
+        test_widgets(|tester| {
+            let padded = KeyRef::from(ValueKey::new("padded"));
+            let theme = ThemeData::builder()
+                .use_material3(false)
+                .platform(TargetPlatform::Android)
+                .material_tap_target_size(MaterialTapTargetSize::Padded)
+                .build(&tester.cell.borrow());
+            tester.pump_widget(
+                Theme::new(
+                    theme,
+                    Directionality::new(
+                        TextDirection::Ltr,
+                        Center::new().child(
+                            button(true)
+                                .key(padded.clone())
+                                .child(SizedBox::new().width(50.0).height(8.0)),
+                        ),
+                    ),
+                )
+                .into_widget(),
+            );
+            assert_eq!(tester.get_size(find::by_key(padded)), Size::new(88.0, 48.0));
+
+            let shrink_wrap = KeyRef::from(ValueKey::new("shrinkWrap"));
+            let theme = ThemeData::builder()
+                .use_material3(false)
+                .platform(TargetPlatform::Android)
+                .material_tap_target_size(MaterialTapTargetSize::ShrinkWrap)
+                .build(&tester.cell.borrow());
+            tester.pump_widget(
+                Theme::new(
+                    theme,
+                    Directionality::new(
+                        TextDirection::Ltr,
+                        Center::new().child(
+                            button(true)
+                                .key(shrink_wrap.clone())
+                                .child(SizedBox::new().width(50.0).height(8.0)),
+                        ),
+                    ),
+                )
+                .into_widget(),
+            );
+            assert_eq!(
+                tester.get_size(find::by_key(shrink_wrap)),
+                Size::new(88.0, 36.0)
             );
         });
     }

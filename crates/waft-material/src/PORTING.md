@@ -776,6 +776,15 @@ Ported against: 34b89b2086d4
 - tests of about 40 files: element-based lookups remain, `tester.descendants_of_type`, `ancestor_of_type`, `ancestors`, `render_box_of`, `is_onstage` and `global_rect` on an `AnyElement` (about 120, 190, 30 and 10 sites; 54 `render_box_of` sites in dropdown.rs), because `find::descendant` and `find::ancestor` take a `Finder` and there is no finder from an element. They move to Dart's finders (`find::descendant(of:)`, `find::ancestor(of:)`, `tester.render_object(finder)`), not to a finder from an element, which flutter_test has none of. Trigger: the next edit of each file.
 - tests: `PaintCall::Clip` has no path matcher, so `navigation_bar::paints_indicator_ripple` and `navigation_rail::paints_indicator_highlight` read the clip path raw; `PaintCall::Paragraph` has no offset, so switch.rs's 'Switch can set icon - M3' reads the glyph runs' origins. Trigger: a path matcher on `Clip` and an offset on `Paragraph` in waft-rendering's testing.
 
+- paginated_data_table.rs tests: the RenderFlex overflow exception Dart expects in 'PaginatedDataTable control test' (the test forces a 600-pixel column); Waft reports none, having no `tester.takeException`. Trigger: `FlutterError.reportError`.
+- material_button.rs tests: 'Default MaterialButton meets a11y contrast guidelines', which runs Flutter's `textContrastGuideline`. Trigger: accessibility guidelines in the harness.
+- button_bar.rs tests: '_RenderButtonBarRow.constraints does not work before layout', which pumps to `EnginePhase.build` and reads a render object's constraints before layout. Trigger: a build-only pump in the harness.
+- expansion_panel.rs tests: the semantics cases. Trigger: the semantics tree.
+- stepper.rs tests: the focus cases ('Vertical Stepper can't be focused when disabled', 'Horizontal Stepper can't be focused when disabled') and the semantics cases. Trigger: `Focus::of(context, scopeOk: true)`; the semantics tree.
+- refresh_indicator.rs tests: the semantics case ('RefreshIndicator'). Trigger: the semantics tree.
+- user_accounts_drawer_header.rs tests: the three semantics cases ('UserAccountsDrawerHeader provides semantics', '… with missing properties', and 'alternative account selectors have sufficient tap targets'). Trigger: the semantics tree.
+- button_bar_theme.rs tests: the two debug-properties cases, which print diagnostics. Trigger: diagnostics.
+
 ## Skipped
 
 - segmented_button.rs: the second segment's path of segmented_button_test's 'SegmentedButton clips border path when drawing segments', and 'SegmentedButton.styleFrom with transparent overlayColor', whose hovered and pressed overlay paints a rect: calls drawn at alpha 0, with no visible effect, that the display list drops; each segment's save and clip and the first segment's fill are ported.
@@ -794,14 +803,12 @@ Ported against: 34b89b2086d4
 - input_decorator.rs tests: 'Widget height stays at hint height by default' keeps its explicit line break: text layout does not break an unbreakable word at the line end as Dart's does. Trigger: waft-painting text layout breaking a long word.
 - list_tile.rs tests: list_tile_test's Material 2 'selected, enabled ListTile default icon color, light and dark themes' keeps a tester per frame: on one tester the dark frame shows the light primary first, as an `AnimatedTheme` at t=0 would, where Dart shows the dark primary at once. Trigger: finding why Dart's differs.
 - text_field.rs, selectable_text.rs tests: the cases that assert FlutterTest glyph metrics (the audit's 658 and 665), still unported: roughly 380 of text_field_test's 413 cases and 105 of selectable_text_test's 138 have no Rust port. Trigger: none, needs its own step (porting them against the one tester).
-- material_button.rs tests: the hover and focus paint/elevation cases, the accessibility-contrast case and the density cases, which read the ink feature render object or depend on the platform's text metrics; the structural defaults, elevation and color precedence, sizes, shape, disabled elevation, clip, callbacks and zero-area cases are ported. Trigger: the ink-feature paint inspection; FlutterTest font metrics.
 
 ## mergeable_material.rs → mergeable_material.dart
 
 - Change: `MergeableMaterialItem` is an enum whose `Slice` and `Gap` variants wrap `MaterialSlice` and `MaterialGap`; `MergeableMaterial::children` takes those variants.
   Reason: language — Rust has no subclassing, so Dart's abstract class and its two subclasses become one closed enum.
   Affect: a children list names the variant, and a `MaterialSlice` or `MaterialGap` is not accepted by itself.
-- mergeable_material.rs tests: the two shadow paint cases, which read the display list's shadow with `debugDisableShadows` off; the empty, gap merge, divider, slice color and zero-area cases are ported. Trigger: a tester that records shadows.
 
 ## expansion_panel.rs → expansion_panel.dart
 
@@ -812,13 +819,9 @@ Ported against: 34b89b2086d4
 - Change: `ExpansionPanelList` has no `ExpansionPanelList.radio` initializer overload; it is the associated function `ExpansionPanelList::radio(children)`.
   Reason: language — Rust has no constructor overloading.
   Affect: a radio list is named as the constructor's path, as elsewhere in the port.
-- expansion_panel.rs tests: the semantics cases and the pixel-metric header-padding cases, which read the semantics tree or an exact text width; the reported callback, radio one-open-at-a-time, initial value and header-tap cases are ported. Trigger: the semantics tree; FlutterTest font metrics.
-- button_bar.rs tests: the exact pixel positions of the alignment, main-axis-size and header-padding cases, the overflow direction and spacing cases, and the constraints-before-layout case, which depend on FlutterTest font metrics or on reading layout before the first frame; the default end alignment, alignment override, max main-axis size, wrapping, constrained height and zero-area cases are ported. Trigger: FlutterTest text metrics; a constraints query before layout.
 
 ## stepper.rs → stepper.dart
 
 - Change: the rule that `stepIconHeight` and `stepIconWidth` are both given and equal is checked when the stepper builds, not when it is made.
   Reason: language — the two values arrive in separate setter calls, where the constructor takes them together.
   Affect: a mismatched pair panics on the first build rather than at the call that made it.
-- stepper.rs tests: the exact pixel heights of the expansion and horizontal-size cases, the focus-traversal cases and the semantics cases, which depend on FlutterTest text metrics, on the focus tree or on the semantics tree; the tap, disabled, index, error, icon size, custom controls, step style, icon builder, nested-stepper and zero-area cases are ported. Trigger: FlutterTest text metrics; the focus tree; the semantics tree.
-- paginated_data_table.rs tests: the RenderFlex overflow exception Dart expects in 'PaginatedDataTable control test' (the test forces a 600-pixel column); Waft reports none, having no `tester.takeException`. Trigger: `FlutterError.reportError`.
