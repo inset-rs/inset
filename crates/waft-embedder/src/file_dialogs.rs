@@ -22,7 +22,9 @@ use std::future::Future;
 use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
+#[cfg(any(not(target_family = "wasm"), test))]
 use std::sync::{Arc, Mutex, PoisonError};
+#[cfg(any(not(target_family = "wasm"), test))]
 use std::task::{Context, Poll, Waker};
 
 use crate::ViewId;
@@ -261,7 +263,8 @@ impl PickedFile {
     }
 
     /// The whole file, as Flutter's `XFile.readAsBytes` reads it: a path is read on a thread of
-    /// its own, a handle from its start to its end, and a stream through, which uses it up.
+    /// its own where the platform starts threads, and in place where it starts none (WASI); a
+    /// handle from its start to its end, and a stream through, which uses it up.
     pub fn read_all(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Vec<u8>>> + '_>> {
         match self {
             PickedFile::Path(path) => Box::pin(read_path(path.clone())),
@@ -271,12 +274,27 @@ impl PickedFile {
     }
 }
 
+/// The whole file at `path`, read on a thread of its own so a large read stays off the UI thread.
+#[cfg(not(target_family = "wasm"))]
 async fn read_path(path: PathBuf) -> io::Result<Vec<u8>> {
     let (answer, read) = one_shot();
     std::thread::Builder::new()
         .name("waft-read-picked-file".to_owned())
         .spawn(move || answer.give(std::fs::read(path)))?;
     read.await
+}
+
+/// The whole file at `path`, read in place: WASI starts no thread, and a picked file's read is
+/// local and cheap there. A host compiles this too, so its test runs the code a component runs.
+#[cfg(any(target_family = "wasm", test))]
+async fn read_in_place(path: PathBuf) -> io::Result<Vec<u8>> {
+    std::fs::read(path)
+}
+
+/// The whole file at `path`, read where the platform has no thread to read it on.
+#[cfg(target_family = "wasm")]
+async fn read_path(path: PathBuf) -> io::Result<Vec<u8>> {
+    read_in_place(path).await
 }
 
 async fn read_handle(handle: &dyn FileHandle) -> io::Result<Vec<u8>> {
@@ -304,15 +322,19 @@ async fn read_stream(stream: &mut dyn FileStream) -> io::Result<Vec<u8>> {
 }
 
 /// An answer given once, from any thread, and the future that waits for it.
+#[cfg(not(target_family = "wasm"))]
 fn one_shot<T>() -> (Answer<T>, Answered<T>) {
     let shared = Arc::new(Mutex::new((None, None)));
     (Answer(Arc::clone(&shared)), Answered(shared))
 }
 
+#[cfg(not(target_family = "wasm"))]
 type Shared<T> = Arc<Mutex<(Option<io::Result<T>>, Option<Waker>)>>;
 
+#[cfg(not(target_family = "wasm"))]
 struct Answer<T>(Shared<T>);
 
+#[cfg(not(target_family = "wasm"))]
 impl<T> Answer<T> {
     fn give(self, value: io::Result<T>) {
         let waker = {
@@ -326,8 +348,10 @@ impl<T> Answer<T> {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 struct Answered<T>(Shared<T>);
 
+#[cfg(not(target_family = "wasm"))]
 impl<T> Future for Answered<T> {
     type Output = io::Result<T>;
 
@@ -389,6 +413,9 @@ mod tests {
             if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
                 return output;
             }
+            // A host yields between polls; WASI starts no thread, and the readers tested here
+            // answer within a poll, so there is nothing to yield to there.
+            #[cfg(not(target_family = "wasm"))]
             std::thread::yield_now();
         }
     }
@@ -406,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn a_path_is_read_whole_on_a_thread() {
+    fn a_path_is_read_whole() {
         let path = std::env::temp_dir().join(format!("waft-read-all-{}", std::process::id()));
         std::fs::write(&path, b"on disk").unwrap();
         let mut picked = PickedFile::Path(path.clone());
@@ -414,5 +441,16 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         let mut missing = PickedFile::Path(PathBuf::from("/no/such/waft/file"));
         assert!(now(missing.read_all()).is_err());
+    }
+
+    // The reader a component uses: the host compiles the same code, so the test reads the file the
+    // way a WebAssembly app does.
+    #[test]
+    fn a_path_is_read_whole_in_place() {
+        let path = std::env::temp_dir().join(format!("waft-read-in-place-{}", std::process::id()));
+        std::fs::write(&path, b"in place").unwrap();
+        assert_eq!(now(read_in_place(path.clone())).unwrap(), b"in place");
+        std::fs::remove_file(path).unwrap();
+        assert!(now(read_in_place(PathBuf::from("/no/such/waft/file"))).is_err());
     }
 }
