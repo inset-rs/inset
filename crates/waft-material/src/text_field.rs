@@ -5503,7 +5503,7 @@ mod tests {
         test_widgets(|tester| {
             let controller = controller_with(tester, "how are you");
             let icon = UniqueKey::new();
-            let key: KeyRef = icon.clone().into();
+            let key: KeyRef = icon.into();
             let clearing = controller.clone();
             let root = material_home(
                 theme(tester),
@@ -6672,7 +6672,7 @@ mod tests {
             tester.show_keyboard(find::by_type::<TextField>());
             tester.test_text_input().update_editing_value(
                 TextEditingValue::new()
-                    .text(&format!("{value}9999999"))
+                    .text(format!("{value}9999999"))
                     .selection(TextSelection::collapsed(17, TextAffinity::Downstream)),
             );
             tester.pump();
