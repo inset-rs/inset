@@ -1,6 +1,7 @@
 //! One module per gallery entry, plus the index.
 
 pub mod account_header;
+pub mod adaptive;
 pub mod app_bars;
 pub mod autocomplete;
 pub mod button_bars;
