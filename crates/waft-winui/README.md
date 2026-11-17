@@ -1,6 +1,6 @@
 # Waft WinUI
 
-WinUI controls and Fluent styling for [Waft](https://github.com/xtyxtyx/waft-ui).
+WinUI controls and Fluent styling for [Waft](https://github.com/waos-dev/waft).
 
 The library ports control templates, theme resources and behavior from [Microsoft’s WinUI](https://github.com/microsoft/microsoft-ui-xaml). Waft handles rendering, layout and input.
 
@@ -13,7 +13,7 @@ rustup install nightly
 cargo run -p winui_gallery
 ```
 
-Run the gallery from the [Waft repository](https://github.com/xtyxtyx/waft-ui), where the kit lives.
+Run the gallery from the [Waft repository](https://github.com/waos-dev/waft), where the kit lives.
 
 ## Use it
 
@@ -34,12 +34,12 @@ ThemeScope::new(Theme::Light, app)
 
 `ThemeScope::overriding(child)` changes the enclosing scope's resources for one control, as `<Control.Resources>` does.
 
-The [gallery](https://github.com/xtyxtyx/waft-ui/tree/main/examples/winui_gallery) demonstrates application setup, font registration and control state.
+The [gallery](https://github.com/waos-dev/waft/tree/main/examples/winui_gallery) demonstrates application setup, font registration and control state.
 
 ## Contributing
 
-Porting guidance, tests and resource generation: [the porting-winui skill](https://github.com/xtyxtyx/waft-ui/blob/main/.agents/skills/porting-winui/SKILL.md).
+Porting guidance, tests and resource generation: [the porting-winui skill](https://github.com/waos-dev/waft/blob/main/.agents/skills/porting-winui/SKILL.md).
 
 ## License
 
-MIT. Microsoft’s source and the bundled icon font retain their [third-party notices](https://github.com/xtyxtyx/waft-ui/blob/main/crates/waft-winui/THIRD_PARTY.md).
+MIT. Microsoft’s source and the bundled icon font retain their [third-party notices](https://github.com/waos-dev/waft/blob/main/crates/waft-winui/THIRD_PARTY.md).

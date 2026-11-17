@@ -36,7 +36,7 @@ cargo waft build web            # static folder: index.html, app.js, app_bg.wasm
 
 ## Project shape
 
-`new` starts from a widget kit: `--template cupertino` (the default, phone apps) or `--template winui` (desktop apps, from [waft-winui](https://github.com/xtyxtyx/waft-ui/tree/main/crates/waft-winui)). Both write:
+`new` starts from a widget kit: `--template cupertino` (the default, phone apps) or `--template winui` (desktop apps, from [waft-winui](https://github.com/waos-dev/waft/tree/main/crates/waft-winui)). Both write:
 
 ```
 myapp/
