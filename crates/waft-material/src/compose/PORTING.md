@@ -27,6 +27,11 @@ Ported against: b8f12c706099a47e1e44d9772d03e14a4ae37146
   Reason: framework — Flutter's implicit animations take the place of Compose's animation core and lookahead bounds animation.
   Affect: a hidden pane slides off the side and fades instead of taking Compose's per-role enter and exit transitions; the settled layout and which pane keeps its state are the same.
 
+## three_pane_navigator.rs → ThreePaneScaffoldNavigator.kt (replaced)
+- Change: `ThreePaneNavigator` turns the app's back stack and a `ThreePaneSceneStrategy` into Waft `Navigator` pages; there is no `ThreePaneScaffoldNavigator` and no pane history beside the app's navigation.
+  Reason: framework — Flutter's Navigator 2.0 owns the page list and its back gestures, and the app owns the back stack.
+  Affect: an app supplies one entry-page builder, one scene-page builder and a truncate callback; a phone's detail is an ordinary pushed page with predictive back and the platform's swipe.
+
 ## Deferred
 - levitated panes (`AdaptStrategy::Levitate`, the scrim and drag-to-resize state). Trigger: a modal pane layer in `ThreePaneScaffold`.
 - pane expansion (`PaneExpansionState`, the draggable divider). Trigger: an optional field on `ThreePaneScaffold`.
