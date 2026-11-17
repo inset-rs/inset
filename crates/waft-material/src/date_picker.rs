@@ -1,6 +1,6 @@
 //! Flutter counterpart: material_ui's `date_picker.dart`.
 //!
-//! The date picker dialogs and the functions that show them: [`show_date_picker`] with
+//! The date picker dialogs and the builders that show them: [`ShowDatePicker`] with
 //! [`DatePickerDialog`], and [`show_date_range_picker`] with [`DateRangePickerDialog`].
 
 use crate::action_buttons::CloseButton;
@@ -143,13 +143,7 @@ const FONT_SIZE_TO_SCALE: f64 = 14.0;
 /// Gregorian calendar.
 ///
 /// Dart's `anchorPoint` waits for `ShowDialog` to take one.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_date_picker(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowDatePicker {
     initial_date: Option<DateTime>,
     first_date: DateTime,
     last_date: DateTime,
@@ -179,95 +173,350 @@ pub fn show_date_picker(
     day_builder: Option<CalendarDatePickerDayBuilder>,
     weekday_builder: Option<CalendarDatePickerWeekdayBuilder>,
     calendar_delegate: Rc<dyn CalendarDelegate>,
-) -> CompleterFuture<RouteResult> {
-    let initial_date = initial_date.map(|date| calendar_delegate.date_only(app, &date));
-    let first_date = calendar_delegate.date_only(app, &first_date);
-    let last_date = calendar_delegate.date_only(app, &last_date);
-    assert!(
-        !last_date.is_before(&first_date),
-        "lastDate {} must be on or after firstDate {}.",
-        last_date.to_string(app),
-        first_date.to_string(app)
-    );
-    assert!(
-        initial_date.is_none_or(|date| !date.is_before(&first_date)),
-        "initialDate {:?} must be on or after firstDate {}.",
-        initial_date.map(|date| date.to_string(app)),
-        first_date.to_string(app)
-    );
-    assert!(
-        initial_date.is_none_or(|date| !date.is_after(&last_date)),
-        "initialDate {:?} must be on or before lastDate {}.",
-        initial_date.map(|date| date.to_string(app)),
-        last_date.to_string(app)
-    );
-    assert!(
-        selectable_day_predicate
-            .as_ref()
-            .zip(initial_date)
-            .is_none_or(|(predicate, date)| predicate(app, date)),
-        "Provided initialDate {initial_date:?} must satisfy provided selectableDayPredicate."
-    );
-    debug_assert!(crate::debug::debug_check_has_material_localizations(
-        app, context
-    ));
+}
 
-    let mut dialog = DatePickerDialog::new(first_date, last_date)
-        .initial_entry_mode(initial_entry_mode)
-        .initial_calendar_mode(initial_date_picker_mode)
-        .calendar_delegate(Rc::clone(&calendar_delegate));
-    dialog.initial_date = initial_date;
-    dialog.current_date = current_date;
-    dialog.selectable_day_predicate = selectable_day_predicate;
-    dialog.help_text = help_text;
-    dialog.cancel_text = cancel_text;
-    dialog.confirm_text = confirm_text;
-    dialog.error_format_text = error_format_text;
-    dialog.error_invalid_text = error_invalid_text;
-    dialog.field_hint_text = field_hint_text;
-    dialog.field_label_text = field_label_text;
-    dialog.keyboard_type = keyboard_type;
-    dialog.on_date_picker_mode_change = on_date_picker_mode_change;
-    dialog.switch_to_input_entry_mode_icon =
-        switch_to_input_entry_mode_icon.map(IntoWidget::into_widget);
-    dialog.switch_to_calendar_entry_mode_icon =
-        switch_to_calendar_entry_mode_icon.map(IntoWidget::into_widget);
-    dialog.day_builder = day_builder;
-    dialog.weekday_builder = weekday_builder;
-    let mut dialog = dialog.into_widget();
-
-    if let Some(text_direction) = text_direction {
-        dialog = Directionality::new(text_direction, dialog).into_widget();
+impl ShowDatePicker {
+    /// Creates a builder for a Material date picker; Dart's `showDatePicker` required arguments
+    /// are the first and last dates, and every other argument is a setter.
+    pub fn new(first_date: DateTime, last_date: DateTime) -> ShowDatePicker {
+        ShowDatePicker {
+            initial_date: None,
+            first_date,
+            last_date,
+            current_date: None,
+            initial_entry_mode: DatePickerEntryMode::Calendar,
+            selectable_day_predicate: None,
+            help_text: None,
+            cancel_text: None,
+            confirm_text: None,
+            locale: None,
+            barrier_dismissible: true,
+            barrier_color: None,
+            barrier_label: None,
+            use_root_navigator: true,
+            route_settings: None,
+            text_direction: None,
+            builder: None,
+            initial_date_picker_mode: DatePickerMode::Day,
+            error_format_text: None,
+            error_invalid_text: None,
+            field_hint_text: None,
+            field_label_text: None,
+            keyboard_type: None,
+            on_date_picker_mode_change: None,
+            switch_to_input_entry_mode_icon: None,
+            switch_to_calendar_entry_mode_icon: None,
+            day_builder: None,
+            weekday_builder: None,
+            calendar_delegate: Rc::new(GregorianCalendarDelegate),
+        }
     }
 
-    if let Some(locale) = locale {
-        dialog = Localizations::r#override(app, context)
-            .locale(locale)
-            .child(dialog)
-            .into_widget();
-    } else if let Some(locale) = DatePickerTheme::of(app, context).locale {
-        dialog = Localizations::r#override(app, context)
-            .locale(locale)
-            .child(dialog)
-            .into_widget();
+    /// Which date the picker opens on; with none, it opens in the input mode without a date.
+    pub fn initial_date(mut self, initial_date: DateTime) -> ShowDatePicker {
+        self.initial_date = Some(initial_date);
+        self
     }
 
-    let mut show = ShowDialog::new(Rc::new(move |app, context| match &builder {
-        None => dialog.clone(),
-        Some(builder) => builder(app, context, Some(&dialog)),
-    }))
-    .barrier_dismissible(barrier_dismissible)
-    .use_root_navigator(use_root_navigator);
-    if let Some(barrier_color) = barrier_color {
-        show = show.barrier_color(barrier_color);
+    /// The current day, highlighted in the day grid; defaults to the calendar delegate's today.
+    pub fn current_date(mut self, current_date: DateTime) -> ShowDatePicker {
+        self.current_date = Some(current_date);
+        self
     }
-    if let Some(barrier_label) = barrier_label {
-        show = show.barrier_label(barrier_label);
+
+    /// The entry mode the picker opens in. Defaults to `DatePickerEntryMode::Calendar`.
+    pub fn initial_entry_mode(mut self, initial_entry_mode: DatePickerEntryMode) -> ShowDatePicker {
+        self.initial_entry_mode = initial_entry_mode;
+        self
     }
-    if let Some(route_settings) = route_settings {
-        show = show.route_settings(route_settings);
+
+    /// Which days may be selected.
+    pub fn selectable_day_predicate(
+        mut self,
+        selectable_day_predicate: SelectableDayPredicate,
+    ) -> ShowDatePicker {
+        self.selectable_day_predicate = Some(selectable_day_predicate);
+        self
     }
-    show.show(app, context)
+
+    /// The text of the help label.
+    pub fn help_text(mut self, help_text: impl Into<String>) -> ShowDatePicker {
+        self.help_text = Some(help_text.into());
+        self
+    }
+
+    /// The text of the cancel button.
+    pub fn cancel_text(mut self, cancel_text: impl Into<String>) -> ShowDatePicker {
+        self.cancel_text = Some(cancel_text.into());
+        self
+    }
+
+    /// The text of the confirm button.
+    pub fn confirm_text(mut self, confirm_text: impl Into<String>) -> ShowDatePicker {
+        self.confirm_text = Some(confirm_text.into());
+        self
+    }
+
+    /// The locale of the date picker; defaults to the ambient locale.
+    pub fn locale(mut self, locale: Locale) -> ShowDatePicker {
+        self.locale = Some(locale);
+        self
+    }
+
+    /// Whether tapping on the barrier dismisses the dialog. Defaults to `true`.
+    pub fn barrier_dismissible(mut self, barrier_dismissible: bool) -> ShowDatePicker {
+        self.barrier_dismissible = barrier_dismissible;
+        self
+    }
+
+    /// The color of the modal barrier below the dialog.
+    pub fn barrier_color(mut self, barrier_color: Color) -> ShowDatePicker {
+        self.barrier_color = Some(barrier_color);
+        self
+    }
+
+    /// The semantic label of the dialog's modal barrier.
+    pub fn barrier_label(mut self, barrier_label: impl Into<String>) -> ShowDatePicker {
+        self.barrier_label = Some(barrier_label.into());
+        self
+    }
+
+    /// Whether to push the dialog to the root navigator. Defaults to `true`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowDatePicker {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// The route settings passed to the dialog route.
+    pub fn route_settings(mut self, route_settings: RouteSettingsRef) -> ShowDatePicker {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// The text direction of the date picker; defaults to the ambient direction.
+    pub fn text_direction(mut self, text_direction: TextDirection) -> ShowDatePicker {
+        self.text_direction = Some(text_direction);
+        self
+    }
+
+    /// Wraps the dialog to add inherited widgets such as a theme.
+    pub fn builder(mut self, builder: TransitionBuilder) -> ShowDatePicker {
+        self.builder = Some(builder);
+        self
+    }
+
+    /// The mode the calendar opens in. Defaults to `DatePickerMode::Day`.
+    pub fn initial_date_picker_mode(
+        mut self,
+        initial_date_picker_mode: DatePickerMode,
+    ) -> ShowDatePicker {
+        self.initial_date_picker_mode = initial_date_picker_mode;
+        self
+    }
+
+    /// The text of the error for an unparseable date.
+    pub fn error_format_text(mut self, error_format_text: impl Into<String>) -> ShowDatePicker {
+        self.error_format_text = Some(error_format_text.into());
+        self
+    }
+
+    /// The text of the error for an invalid date.
+    pub fn error_invalid_text(mut self, error_invalid_text: impl Into<String>) -> ShowDatePicker {
+        self.error_invalid_text = Some(error_invalid_text.into());
+        self
+    }
+
+    /// The hint text of the input field.
+    pub fn field_hint_text(mut self, field_hint_text: impl Into<String>) -> ShowDatePicker {
+        self.field_hint_text = Some(field_hint_text.into());
+        self
+    }
+
+    /// The label text of the input field.
+    pub fn field_label_text(mut self, field_label_text: impl Into<String>) -> ShowDatePicker {
+        self.field_label_text = Some(field_label_text.into());
+        self
+    }
+
+    /// The keyboard type of the input field.
+    pub fn keyboard_type(mut self, keyboard_type: TextInputType) -> ShowDatePicker {
+        self.keyboard_type = Some(keyboard_type);
+        self
+    }
+
+    /// Called when the user toggles the entry mode.
+    pub fn on_date_picker_mode_change(
+        mut self,
+        on_date_picker_mode_change: ValueChanged<DatePickerEntryMode>,
+    ) -> ShowDatePicker {
+        self.on_date_picker_mode_change = Some(on_date_picker_mode_change);
+        self
+    }
+
+    /// The icon that switches to the input entry mode.
+    pub fn switch_to_input_entry_mode_icon(
+        mut self,
+        switch_to_input_entry_mode_icon: Icon,
+    ) -> ShowDatePicker {
+        self.switch_to_input_entry_mode_icon = Some(switch_to_input_entry_mode_icon);
+        self
+    }
+
+    /// The icon that switches to the calendar entry mode.
+    pub fn switch_to_calendar_entry_mode_icon(
+        mut self,
+        switch_to_calendar_entry_mode_icon: Icon,
+    ) -> ShowDatePicker {
+        self.switch_to_calendar_entry_mode_icon = Some(switch_to_calendar_entry_mode_icon);
+        self
+    }
+
+    /// Builds a day cell.
+    pub fn day_builder(mut self, day_builder: CalendarDatePickerDayBuilder) -> ShowDatePicker {
+        self.day_builder = Some(day_builder);
+        self
+    }
+
+    /// Builds a weekday header cell.
+    pub fn weekday_builder(
+        mut self,
+        weekday_builder: CalendarDatePickerWeekdayBuilder,
+    ) -> ShowDatePicker {
+        self.weekday_builder = Some(weekday_builder);
+        self
+    }
+
+    /// The calendar the dialog works in. Defaults to the Gregorian calendar.
+    pub fn calendar_delegate(
+        mut self,
+        calendar_delegate: Rc<dyn CalendarDelegate>,
+    ) -> ShowDatePicker {
+        self.calendar_delegate = calendar_delegate;
+        self
+    }
+
+    /// Shows the dialog and returns a future that resolves when the user closes it.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowDatePicker {
+            initial_date,
+            first_date,
+            last_date,
+            current_date,
+            initial_entry_mode,
+            selectable_day_predicate,
+            help_text,
+            cancel_text,
+            confirm_text,
+            locale,
+            barrier_dismissible,
+            barrier_color,
+            barrier_label,
+            use_root_navigator,
+            route_settings,
+            text_direction,
+            builder,
+            initial_date_picker_mode,
+            error_format_text,
+            error_invalid_text,
+            field_hint_text,
+            field_label_text,
+            keyboard_type,
+            on_date_picker_mode_change,
+            switch_to_input_entry_mode_icon,
+            switch_to_calendar_entry_mode_icon,
+            day_builder,
+            weekday_builder,
+            calendar_delegate,
+        } = self;
+        let initial_date = initial_date.map(|date| calendar_delegate.date_only(app, &date));
+        let first_date = calendar_delegate.date_only(app, &first_date);
+        let last_date = calendar_delegate.date_only(app, &last_date);
+        assert!(
+            !last_date.is_before(&first_date),
+            "lastDate {} must be on or after firstDate {}.",
+            last_date.to_string(app),
+            first_date.to_string(app)
+        );
+        assert!(
+            initial_date.is_none_or(|date| !date.is_before(&first_date)),
+            "initialDate {:?} must be on or after firstDate {}.",
+            initial_date.map(|date| date.to_string(app)),
+            first_date.to_string(app)
+        );
+        assert!(
+            initial_date.is_none_or(|date| !date.is_after(&last_date)),
+            "initialDate {:?} must be on or before lastDate {}.",
+            initial_date.map(|date| date.to_string(app)),
+            last_date.to_string(app)
+        );
+        assert!(
+            selectable_day_predicate
+                .as_ref()
+                .zip(initial_date)
+                .is_none_or(|(predicate, date)| predicate(app, date)),
+            "Provided initialDate {initial_date:?} must satisfy provided selectableDayPredicate."
+        );
+        debug_assert!(crate::debug::debug_check_has_material_localizations(
+            app, context
+        ));
+
+        let mut dialog = DatePickerDialog::new(first_date, last_date)
+            .initial_entry_mode(initial_entry_mode)
+            .initial_calendar_mode(initial_date_picker_mode)
+            .calendar_delegate(Rc::clone(&calendar_delegate));
+        dialog.initial_date = initial_date;
+        dialog.current_date = current_date;
+        dialog.selectable_day_predicate = selectable_day_predicate;
+        dialog.help_text = help_text;
+        dialog.cancel_text = cancel_text;
+        dialog.confirm_text = confirm_text;
+        dialog.error_format_text = error_format_text;
+        dialog.error_invalid_text = error_invalid_text;
+        dialog.field_hint_text = field_hint_text;
+        dialog.field_label_text = field_label_text;
+        dialog.keyboard_type = keyboard_type;
+        dialog.on_date_picker_mode_change = on_date_picker_mode_change;
+        dialog.switch_to_input_entry_mode_icon =
+            switch_to_input_entry_mode_icon.map(IntoWidget::into_widget);
+        dialog.switch_to_calendar_entry_mode_icon =
+            switch_to_calendar_entry_mode_icon.map(IntoWidget::into_widget);
+        dialog.day_builder = day_builder;
+        dialog.weekday_builder = weekday_builder;
+        let mut dialog = dialog.into_widget();
+
+        if let Some(text_direction) = text_direction {
+            dialog = Directionality::new(text_direction, dialog).into_widget();
+        }
+
+        if let Some(locale) = locale {
+            dialog = Localizations::r#override(app, context)
+                .locale(locale)
+                .child(dialog)
+                .into_widget();
+        } else if let Some(locale) = DatePickerTheme::of(app, context).locale {
+            dialog = Localizations::r#override(app, context)
+                .locale(locale)
+                .child(dialog)
+                .into_widget();
+        }
+
+        let mut show = ShowDialog::new(Rc::new(move |app, context| match &builder {
+            None => dialog.clone(),
+            Some(builder) => builder(app, context, Some(&dialog)),
+        }))
+        .barrier_dismissible(barrier_dismissible)
+        .use_root_navigator(use_root_navigator);
+        if let Some(barrier_color) = barrier_color {
+            show = show.barrier_color(barrier_color);
+        }
+        if let Some(barrier_label) = barrier_label {
+            show = show.barrier_label(barrier_label);
+        }
+        if let Some(route_settings) = route_settings {
+            show = show.route_settings(route_settings);
+        }
+        show.show(app, context)
+    }
 }
 
 const ENTRY_MODES: [DatePickerEntryMode; 4] = [
@@ -288,13 +537,13 @@ const AUTOVALIDATE_MODES: [AutovalidateMode; 4] = [
 /// It displays a calendar grid of days, allowing the user to select a date, and a button to
 /// switch to a text field where a date can be typed.
 ///
-/// It is used by [`show_date_picker`](crate::show_date_picker), which should usually be called
+/// It is used by [`ShowDatePicker`], which should usually be used
 /// rather than creating a [`DatePickerDialog`] directly.
 ///
-/// See also: [`CalendarDatePicker`], [`InputDatePickerFormField`], [`show_date_picker`],
+/// See also: [`CalendarDatePicker`], [`InputDatePickerFormField`], [`ShowDatePicker`],
 /// [`DateRangePickerDialog`](crate::DateRangePickerDialog).
 ///
-/// [`show_date_picker`]: crate::show_date_picker
+/// [`ShowDatePicker`]: crate::ShowDatePicker
 #[derive(Clone)]
 pub struct DatePickerDialog {
     pub key: Option<waft_widgets::KeyRef>,
@@ -4541,41 +4790,57 @@ pub(crate) mod tests {
                         ElevatedButton::new(
                             Some(Listener::new(move |app| {
                                 let current_mode = Rc::clone(&options.current_mode);
-                                let future = show_date_picker(
-                                    app,
-                                    context,
-                                    options.initial_date,
-                                    options.first_date,
-                                    options.last_date,
-                                    Some(options.today),
-                                    options.initial_entry_mode,
-                                    options.selectable_day_predicate.clone(),
-                                    options.help_text.clone(),
-                                    options.cancel_text.clone(),
-                                    options.confirm_text.clone(),
-                                    None,
-                                    true,
-                                    None,
-                                    None,
-                                    true,
-                                    None,
-                                    None,
-                                    options.builder.clone(),
-                                    options.initial_calendar_mode,
-                                    options.error_format_text.clone(),
-                                    options.error_invalid_text.clone(),
-                                    options.field_hint_text.clone(),
-                                    options.field_label_text.clone(),
-                                    options.keyboard_type,
-                                    Some(Rc::new(move |_app, value| {
+                                let mut show =
+                                    ShowDatePicker::new(options.first_date, options.last_date)
+                                        .initial_entry_mode(options.initial_entry_mode)
+                                        .initial_date_picker_mode(options.initial_calendar_mode)
+                                        .calendar_delegate(Rc::clone(&options.calendar_delegate));
+                                if let Some(initial_date) = options.initial_date {
+                                    show = show.initial_date(initial_date);
+                                }
+                                show = show.current_date(options.today);
+                                if let Some(predicate) = options.selectable_day_predicate.clone() {
+                                    show = show.selectable_day_predicate(predicate);
+                                }
+                                if let Some(help_text) = options.help_text.clone() {
+                                    show = show.help_text(help_text);
+                                }
+                                if let Some(cancel_text) = options.cancel_text.clone() {
+                                    show = show.cancel_text(cancel_text);
+                                }
+                                if let Some(confirm_text) = options.confirm_text.clone() {
+                                    show = show.confirm_text(confirm_text);
+                                }
+                                if let Some(builder) = options.builder.clone() {
+                                    show = show.builder(builder);
+                                }
+                                if let Some(error_format_text) = options.error_format_text.clone() {
+                                    show = show.error_format_text(error_format_text);
+                                }
+                                if let Some(error_invalid_text) = options.error_invalid_text.clone()
+                                {
+                                    show = show.error_invalid_text(error_invalid_text);
+                                }
+                                if let Some(field_hint_text) = options.field_hint_text.clone() {
+                                    show = show.field_hint_text(field_hint_text);
+                                }
+                                if let Some(field_label_text) = options.field_label_text.clone() {
+                                    show = show.field_label_text(field_label_text);
+                                }
+                                if let Some(keyboard_type) = options.keyboard_type {
+                                    show = show.keyboard_type(keyboard_type);
+                                }
+                                show =
+                                    show.on_date_picker_mode_change(Rc::new(move |_app, value| {
                                         *current_mode.borrow_mut() = value;
-                                    })),
-                                    None,
-                                    None,
-                                    options.day_builder.clone(),
-                                    options.weekday_builder.clone(),
-                                    Rc::clone(&options.calendar_delegate),
-                                );
+                                    }));
+                                if let Some(day_builder) = options.day_builder.clone() {
+                                    show = show.day_builder(day_builder);
+                                }
+                                if let Some(weekday_builder) = options.weekday_builder.clone() {
+                                    show = show.weekday_builder(weekday_builder);
+                                }
+                                let future = show.show(app, context);
                                 *result.borrow_mut() = Some(future);
                             })),
                             Some(Text::new("Go")),
@@ -5220,39 +5485,28 @@ pub(crate) mod tests {
                     DateTime::new(app, 2018, 1, 1),
                     DateTime::new(app, 2030, 1, 1),
                 ));
-                let future = show_date_picker(
-                    app,
-                    context,
-                    Some(initial_date),
-                    first_date,
-                    last_date,
-                    None,
-                    self.initial_entry_mode,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    self.barrier_dismissible,
-                    self.barrier_color,
-                    self.barrier_label.clone(),
-                    self.use_root_navigator,
-                    None,
-                    None,
-                    self.builder.clone(),
-                    DatePickerMode::Day,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    self.switch_to_input_entry_mode_icon.map(|icon| icon()),
-                    self.switch_to_calendar_entry_mode_icon.map(|icon| icon()),
-                    None,
-                    None,
-                    Rc::clone(&self.calendar_delegate),
-                );
+                let mut show = ShowDatePicker::new(first_date, last_date)
+                    .initial_date(initial_date)
+                    .initial_entry_mode(self.initial_entry_mode)
+                    .barrier_dismissible(self.barrier_dismissible)
+                    .use_root_navigator(self.use_root_navigator)
+                    .calendar_delegate(Rc::clone(&self.calendar_delegate));
+                if let Some(barrier_color) = self.barrier_color {
+                    show = show.barrier_color(barrier_color);
+                }
+                if let Some(barrier_label) = self.barrier_label.clone() {
+                    show = show.barrier_label(barrier_label);
+                }
+                if let Some(builder) = self.builder.clone() {
+                    show = show.builder(builder);
+                }
+                if let Some(icon) = self.switch_to_input_entry_mode_icon {
+                    show = show.switch_to_input_entry_mode_icon(icon());
+                }
+                if let Some(icon) = self.switch_to_calendar_entry_mode_icon {
+                    show = show.switch_to_calendar_entry_mode_icon(icon());
+                }
+                let future = show.show(app, context);
                 if let Some(result) = &self.result {
                     *result.borrow_mut() = Some(future.clone());
                 }
