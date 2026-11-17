@@ -10,18 +10,22 @@
 
 mod adapt_strategy;
 mod back_navigation_behavior;
+mod pane;
 mod pane_adapted_value;
 mod pane_scaffold_directive;
 mod pane_scaffold_role;
+mod three_pane_scaffold;
 mod three_pane_scaffold_value;
 mod three_pane_scene_strategy;
 mod window_size_class;
 
 pub use adapt_strategy::*;
 pub use back_navigation_behavior::*;
+pub use pane::*;
 pub use pane_adapted_value::*;
 pub use pane_scaffold_directive::*;
 pub use pane_scaffold_role::*;
+pub use three_pane_scaffold::*;
 pub use three_pane_scaffold_value::*;
 pub use three_pane_scene_strategy::*;
 pub use window_size_class::*;
