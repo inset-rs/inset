@@ -27,8 +27,8 @@ use waft_widgets::{
     Padding, Page, PageRef, PageRouteBuilder, PopScope, PopupRoute, PredictiveBackRoute,
     RawDialogRoute, RawDialogRouteBuilder, RawDialogRouteData, RawDialogRouteLeaf, Route,
     RouteData, RoutePageBuilder, RouteRef, RouteResult, RouteSettingsRef, SafeArea,
-    ScrollControllerRef, Semantics, SingleChildScrollView, State, StatelessWidget, TransitionRoute,
-    TransitionRouteData, TraversalEdgeBehavior, WidgetBuilder, WidgetRef, show_raw_dialog,
+    ScrollControllerRef, Semantics, ShowRawDialog, SingleChildScrollView, State, StatelessWidget,
+    TransitionRoute, TransitionRouteData, TraversalEdgeBehavior, WidgetBuilder, WidgetRef,
 };
 
 use crate::colors::Colors;
@@ -2193,15 +2193,14 @@ impl ShowDialog {
             .into_widget()
         });
 
-        show_raw_dialog(
-            app,
-            context,
-            window_builder,
-            Some(route_builder),
-            use_root_navigator,
-            route_settings,
-            fullscreen_dialog,
-        )
+        let mut show = ShowRawDialog::new(window_builder)
+            .route_builder(route_builder)
+            .use_root_navigator(use_root_navigator)
+            .fullscreen_dialog(fullscreen_dialog);
+        if let Some(route_settings) = route_settings {
+            show = show.route_settings(route_settings);
+        }
+        show.show(app, context)
     }
 }
 
