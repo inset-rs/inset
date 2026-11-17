@@ -34,11 +34,18 @@ pub enum Entry {
     DataTables,
     Search,
     Carousels,
+    GridTiles,
+    Steppers,
+    Refresh,
+    ButtonBars,
+    MaterialButton,
+    ExpansionPanels,
+    AccountHeader,
 }
 
 impl Entry {
     /// Index order — the order the tiles appear in.
-    pub const ALL: [Entry; 22] = [
+    pub const ALL: [Entry; 29] = [
         Entry::Buttons,
         Entry::AppBars,
         Entry::Lists,
@@ -61,6 +68,13 @@ impl Entry {
         Entry::DataTables,
         Entry::Search,
         Entry::Carousels,
+        Entry::GridTiles,
+        Entry::Steppers,
+        Entry::Refresh,
+        Entry::ButtonBars,
+        Entry::MaterialButton,
+        Entry::ExpansionPanels,
+        Entry::AccountHeader,
     ];
 
     /// The entry named by its variant, case-insensitively: how a launcher picks a page.
@@ -96,6 +110,13 @@ impl Entry {
             Entry::DataTables => "Data Tables",
             Entry::Search => "Search",
             Entry::Carousels => "Carousels",
+            Entry::GridTiles => "Grid Tiles",
+            Entry::Steppers => "Steppers",
+            Entry::Refresh => "Refresh",
+            Entry::ButtonBars => "Button Bars",
+            Entry::MaterialButton => "Material Button",
+            Entry::ExpansionPanels => "Expansion Panels",
+            Entry::AccountHeader => "Account Header",
         }
     }
 
@@ -124,6 +145,13 @@ impl Entry {
             Entry::DataTables => Icons::table_chart(),
             Entry::Search => Icons::search(),
             Entry::Carousels => Icons::view_carousel(),
+            Entry::GridTiles => Icons::grid_view(),
+            Entry::Steppers => Icons::linear_scale(),
+            Entry::Refresh => Icons::refresh(),
+            Entry::ButtonBars => Icons::view_stream(),
+            Entry::MaterialButton => Icons::touch_app(),
+            Entry::ExpansionPanels => Icons::expand_more(),
+            Entry::AccountHeader => Icons::account_circle(),
         }
     }
 
@@ -163,6 +191,13 @@ impl Entry {
             Entry::DataTables => pages::data_tables::body(app, context),
             Entry::Search => pages::search::body(app, context),
             Entry::Carousels => pages::carousels::body(app, context),
+            Entry::GridTiles => pages::grid_tiles::body(app, context),
+            Entry::Steppers => pages::steppers::body(app, context),
+            Entry::Refresh => pages::refresh::body(app, context),
+            Entry::ButtonBars => pages::button_bars::body(app, context),
+            Entry::MaterialButton => pages::material_button::body(app, context),
+            Entry::ExpansionPanels => pages::expansion_panels::body(app, context),
+            Entry::AccountHeader => pages::account_header::body(app, context),
         }
     }
 

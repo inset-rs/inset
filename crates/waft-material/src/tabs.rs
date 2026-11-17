@@ -10212,9 +10212,7 @@ pub(crate) mod tests {
                 let frame = build_test_widget(tester, 300.0, 400.0);
                 tester.pump_widget(frame);
 
-                let has_running_animations =
-                    SchedulerBinding::transient_callback_count(&mut tester.cell.borrow_mut()) > 0;
-                assert!(!has_running_animations);
+                assert!(!tester.has_running_animations());
                 assert_eq!(tester.pump_and_settle(), 1); // no more frames are scheduled.
             });
         }

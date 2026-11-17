@@ -202,6 +202,12 @@ impl WidgetTester {
         waft_embedder::View::metrics(&*self.view).device_pixel_ratio
     }
 
+    /// Dart's `tester.hasRunningAnimations`: whether any transient callback is scheduled, which
+    /// a running [`Ticker`](waft_scheduler::Ticker) registers one per frame.
+    pub fn has_running_animations(&self) -> bool {
+        SchedulerBinding::transient_callback_count(&mut self.cell.borrow_mut()) > 0
+    }
+
     /// Dart's `tester.getRestorationData()`: what the host holds, which is what the app last
     /// handed it, or else what it restored the app from.
     pub fn restoration_data(&self) -> Option<RestorationMap> {

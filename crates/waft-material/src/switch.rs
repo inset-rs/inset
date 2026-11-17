@@ -2694,7 +2694,6 @@ pub(crate) mod tests {
     use waft_rendering::{
         AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject, RenderOpacity,
     };
-    use waft_scheduler::SchedulerBinding;
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::{
         Align, AnyElement, Center, Container, FocusHighlightStrategy, FocusNode, IconData,
@@ -2892,11 +2891,6 @@ pub(crate) mod tests {
         let state = state(tester);
         let app = tester.cell.borrow();
         state.position(&app).value(&app)
-    }
-
-    /// Dart's `tester.hasRunningAnimations`.
-    fn has_running_animations(tester: &WidgetTester) -> bool {
-        SchedulerBinding::transient_callback_count(&mut tester.cell.borrow_mut()) > 0
     }
 
     fn colors_of(app: &App, theme: fn(&App) -> ThemeData) -> ColorScheme {
@@ -3600,7 +3594,7 @@ pub(crate) mod tests {
             tester.pump();
             tester.pump_by(Duration::from_millis(200));
             assert!(value.get());
-            assert!(!has_running_animations(tester));
+            assert!(!tester.has_running_animations());
         });
     }
 
@@ -4559,13 +4553,13 @@ pub(crate) mod tests {
                     // The value on y axis is greater than 1 when t > 0.375
                     // 300 * 0.375 = 112.5
                     tester.pump_by(Duration::from_millis(113));
-                    assert!(has_running_animations(tester));
+                    assert!(tester.has_running_animations());
                     assert!(position(tester) > 1.0, "{}", position(tester));
                 } else {
                     tester.pump_by(Duration::from_millis(200)); // M2 animation duration
-                    assert!(has_running_animations(tester));
+                    assert!(tester.has_running_animations());
                     tester.pump_by(Duration::from_millis(101));
-                    assert!(!has_running_animations(tester));
+                    assert!(!tester.has_running_animations());
                 }
             });
         }
