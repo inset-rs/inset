@@ -131,6 +131,9 @@ pub fn email_detail_app_bar(
         ]);
     let mut app_bar = AppBar::new()
         .background_color(color_scheme.on_inverse_surface())
+        // Reply's bar never has the thread scrolled under it, so it keeps its colour; Flutter's
+        // would tint itself when the thread scrolls under.
+        .scrolled_under_elevation(0.0)
         .center_title(is_full_screen)
         .automatically_imply_leading(false)
         .title(title)
