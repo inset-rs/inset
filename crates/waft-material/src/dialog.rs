@@ -1999,7 +1999,7 @@ impl Page for DialogContentPage {
 ///    not show buttons below its body.
 ///  * [`Dialog`], on which [`SimpleDialog`] and [`AlertDialog`] are based.
 ///  * `ShowCupertinoDialog`, which displays an iOS-style dialog.
-///  * `show_general_dialog`, which allows for customization of the dialog popup.
+///  * `ShowGeneralDialog`, which allows for customization of the dialog popup.
 ///  * [`DialogRoute`], the route this pushes.
 ///  * <https://material.io/design/components/dialogs.html>
 ///  * <https://m3.material.io/components/dialogs>
@@ -2446,7 +2446,7 @@ fn dialog_page_builder(
 /// See also:
 ///
 ///  * [`ShowDialog`], which is a way to display a [`DialogRoute`].
-///  * `show_general_dialog`, which allows for customization of the dialog popup.
+///  * `ShowGeneralDialog`, which allows for customization of the dialog popup.
 ///  * `ShowCupertinoDialog`, which displays an iOS-style dialog.
 pub struct DialogRoute {
     route: RouteData,

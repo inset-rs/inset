@@ -2659,7 +2659,7 @@ fn build_cupertino_dialog_transitions(
 /// See also:
 ///
 ///  * `CupertinoAlertDialog`, an iOS-style alert dialog.
-///  * `show_general_dialog`, which allows for customization of the dialog popup.
+///  * `ShowGeneralDialog`, which allows for customization of the dialog popup.
 ///  * <https://developer.apple.com/design/human-interface-guidelines/alerts/>
 pub struct ShowCupertinoDialog {
     builder: WidgetBuilder,
@@ -2778,7 +2778,7 @@ impl ShowCupertinoDialog {
 /// See also:
 ///
 ///  * [`ShowCupertinoDialog`], which is a way to display an iOS-style dialog.
-///  * `show_general_dialog`, which allows for customization of the dialog popup.
+///  * `ShowGeneralDialog`, which allows for customization of the dialog popup.
 pub struct CupertinoDialogRoute {
     route: RouteData,
     overlay_route: OverlayRouteData,
