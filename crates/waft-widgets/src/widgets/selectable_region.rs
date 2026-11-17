@@ -1764,7 +1764,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
 
 /// Dart's `_compareVertically`: two rectangles in screen order by their vertical positions only,
 /// equal when one cannot be placed above the other within the threshold.
-fn compare_vertically(a: Rect, b: Rect) -> Ordering {
+pub(crate) fn compare_vertically(a: Rect, b: Rect) -> Ordering {
     if (a.top - b.top < K_SELECTABLE_VERTICAL_COMPARING_THRESHOLD
         && a.bottom - b.bottom > -K_SELECTABLE_VERTICAL_COMPARING_THRESHOLD)
         || (b.top - a.top < K_SELECTABLE_VERTICAL_COMPARING_THRESHOLD
@@ -1788,7 +1788,7 @@ fn compare_vertically(a: Rect, b: Rect) -> Ordering {
 
 /// Dart's `_compareHorizontally`: two rectangles in screen order by their horizontal positions,
 /// assuming one encloses the other vertically.
-fn compare_horizontally(a: Rect, b: Rect) -> Ordering {
+pub(crate) fn compare_horizontally(a: Rect, b: Rect) -> Ordering {
     // a encloses b.
     if a.left - b.left < PRECISION_ERROR_TOLERANCE && a.right - b.right > -PRECISION_ERROR_TOLERANCE
     {
@@ -2633,41 +2633,24 @@ mod tests {
     //! yet, so a case here puts a `RichText` wired to the enclosing container where Flutter
     //! writes `Text`: one paragraph, and so one selectable, either way.
 
-    use waft_embedder::{Color, Offset, Size, TextDirection, TextPosition};
+    use waft_embedder::{Offset, Size, TextDirection, TextPosition};
     use waft_foundation::{App, Handle, Ref};
-    use waft_painting::TextSpan;
     use waft_rendering::{RenderBox, RenderParagraph};
 
     use super::*;
     use crate::Placeholder;
     use crate::framework::{IntoWidget, WidgetRef};
+    use waft_scheduler::{FrameTarget, SchedulerBinding};
+
     use crate::testing::{WidgetTester, find, test_widgets};
     use crate::widgets::basic::{Builder, Center, Column, SizedBox};
     use crate::widgets::selection_container::{SelectionContainer, SelectionRegistrarScope};
-    use crate::widgets::text::RichText;
+    use crate::widgets::text::Text;
 
-    /// A color the paragraphs draw their selection with; a `RichText` with a registrar needs
-    /// one, as Dart asserts.
-    const TEST_SELECTION_COLOR: Color = Color::from_argb(0xAF, 0x66, 0x94, 0xE8);
-
-    /// A `RichText` wired to the enclosing [`SelectionContainer`], the way Flutter's `Text` is
-    /// under a `SelectableRegion`.
+    /// A [`Text`] under the enclosing [`SelectionContainer`], as Flutter's is under a
+    /// `SelectableRegion`; under a disabled container it is simply not selectable.
     fn selectable_text(text: &'static str) -> WidgetRef {
-        Builder::new(move |app, context| {
-            let registrar = SelectionContainer::maybe_of(app, context)
-                .expect("a SelectionContainer above the text");
-            RichText::new(TextSpan::new().text(text).into_span())
-                .text_direction(TextDirection::Ltr)
-                .selection_registrar(registrar)
-                .selection_color(TEST_SELECTION_COLOR)
-                .into_widget()
-        })
-        .into_widget()
-    }
-
-    /// A `RichText` with no registrar, as under a disabled container.
-    fn plain_text(text: &'static str) -> WidgetRef {
-        RichText::new(TextSpan::new().text(text).into_span())
+        Text::new(text)
             .text_direction(TextDirection::Ltr)
             .into_widget()
     }
@@ -2989,9 +2972,9 @@ mod tests {
                 SelectionContainer::new(
                     delegate.erase(),
                     SelectionContainer::disabled(Column::new().children([
-                        plain_text("column1"),
-                        plain_text("column2"),
-                        plain_text("column3"),
+                        selectable_text("column1"),
+                        selectable_text("column2"),
+                        selectable_text("column3"),
                     ])),
                 )
                 .registrar(registrar.erase()),
@@ -3038,6 +3021,7 @@ mod tests {
                     .registrar(registrar.erase()),
                 );
                 tester.pump_and_settle();
+                next_frame(tester);
             };
             pump_inner(tester, &child_delegate);
             tester.update(|app| {
@@ -3080,8 +3064,9 @@ mod tests {
                 .registrar(registrar.erase()),
             );
             // The nested delegate's update is a post-frame callback, and its microtask stands in
-            // for `tester.idle()`: the checkpoint after the frame drains it.
-            tester.pump();
+            // for `tester.idle()`; the next frame, which Flutter's `pump` always produces, folds
+            // the nested container's selectable into the outer delegate.
+            next_frame(tester);
 
             tester.update(|app| {
                 assert_eq!(app.get(&registrar).selectables.len(), 1);
@@ -3165,6 +3150,14 @@ mod tests {
                 Size::ZERO
             );
         });
+    }
+
+    /// Runs one more frame, for an update a delegate scheduled after the last one: a nested
+    /// container's selectable reaches its delegate a frame after the container below it, as in
+    /// Flutter, where `pump` always produces a frame.
+    fn next_frame(tester: &mut WidgetTester) {
+        tester.update(|app| SchedulerBinding::schedule_frame(app, FrameTarget::EveryView));
+        tester.pump_and_settle();
     }
 
     /// Sends `event` to `handle`, as a gesture or a keyboard action would.

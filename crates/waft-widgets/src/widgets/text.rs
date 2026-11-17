@@ -1,23 +1,42 @@
 //! Flutter counterpart: `widgets/text.dart`, plus the public `RichText` from `basic.dart`.
 //!
-//! [`Text`] builds only the [`RichText`] branch: selection (`SelectionContainer.maybeOf`,
-//! `_SelectableTextContainer`, `selectionColor`), `Locale`, `StrutStyle`, and `Semantics` wait.
+//! [`Text`] builds [`RichText`]. Under a [`SelectionContainer`], as under a `SelectableRegion`,
+//! it builds a container of its own: a `SelectableTextContainer` whose delegate handles the
+//! paragraph's selection, over the foundation in `selectable_region.rs`. `Locale`, `StrutStyle`
+//! and `Semantics` wait; see `PORTING.md`.
+
+use std::cmp::Ordering;
 
 use waft_embedder::{Color, FontWeight, TextAlign, TextDirection, TextHeightBehavior};
-use waft_foundation::App;
-use waft_painting::{InlineSpanRef, TextOverflow, TextScaler, TextSpan, TextStyle, TextWidthBasis};
-use waft_rendering::{
-    AnyRenderObject, RenderBox, RenderHandle, RenderParagraph, SelectionRegistrarRef,
+use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Ref};
+use waft_painting::{
+    InlineSpanRef, TextOverflow, TextScaler, TextSpan, TextStyle, TextWidthBasis, transform_rect,
 };
+use waft_rendering::{
+    AnyRenderObject, AnySelectable, RenderBox, RenderHandle, RenderParagraph, SelectedContentRange,
+    SelectionEvent, SelectionGeometry, SelectionHandler, SelectionRegistrar, SelectionRegistrarRef,
+    SelectionResult,
+};
+use waft_services::SystemMouseCursors;
 
 use crate::framework::{
-    BuildContext, InheritedWidget, IntoWidget, KeyRef, MultiChildRenderObjectWidget,
-    RenderObjectWidget, StatelessWidget, WidgetRef,
+    BuildContext, GlobalKey, InheritedWidget, IntoWidget, KeyRef, MultiChildRenderObjectWidget,
+    RenderObjectWidget, State, StateData, StatefulWidget, StatelessWidget, WidgetRef,
 };
 use crate::view::View;
-use crate::widgets::basic::{Builder, Directionality, ExcludeSemantics, Semantics};
+use crate::widgets::basic::{Builder, Directionality, ExcludeSemantics, MouseRegion, Semantics};
+use crate::widgets::default_selection_style::DefaultSelectionStyle;
 use crate::widgets::inherited_theme::InheritedTheme;
 use crate::widgets::media_query::MediaQuery;
+use crate::widgets::selectable_region::{
+    MultiSelectableSelectionContainerDelegate, MultiSelectableSelectionContainerDelegateBase,
+    MultiSelectableSelectionContainerDelegateData, StaticSelectionContainerDelegate,
+    StaticSelectionContainerDelegateBase, StaticSelectionContainerDelegateData,
+    compare_horizontally, compare_vertically,
+};
+use crate::widgets::selection_container::{
+    SelectionContainer, SelectionContainerDelegate, SelectionContainerDelegateData,
+};
 use crate::widgets::widget_span::WidgetSpan;
 
 // ---------------------------------------------------------------------------------------------
@@ -595,6 +614,14 @@ pub struct Text {
     pub text_width_basis: Option<TextWidthBasis>,
     /// Defines how to apply `TextStyle.height` over and under text.
     pub text_height_behavior: Option<TextHeightBehavior>,
+    /// The color to use when painting the selection.
+    ///
+    /// This is ignored if [`SelectionContainer::maybe_of`] returns `None` in the
+    /// [`BuildContext`] of this widget.
+    ///
+    /// If `None`, the ambient [`DefaultSelectionStyle`] is used (if any); failing that, the
+    /// selection color defaults to [`DefaultSelectionStyle::DEFAULT_COLOR`].
+    pub selection_color: Option<Color>,
 }
 
 impl Text {
@@ -639,6 +666,7 @@ impl Text {
             semantics_identifier: None,
             text_width_basis: None,
             text_height_behavior: None,
+            selection_color: None,
         }
     }
 
@@ -713,6 +741,12 @@ impl Text {
         self.text_height_behavior = Some(text_height_behavior);
         self
     }
+
+    /// Dart `Text(selectionColor:)`.
+    pub fn selection_color(mut self, selection_color: Color) -> Text {
+        self.selection_color = Some(selection_color);
+        self
+    }
 }
 
 impl StatelessWidget for Text {
@@ -761,36 +795,69 @@ impl StatelessWidget for Text {
             .text_height_behavior
             .or(default_text_style.text_height_behavior)
             .or_else(|| DefaultTextHeightBehavior::maybe_of(app, context));
-        let mut rich_text = RichText::new(effective_text_span.into_span())
-            .text_align(
-                self.text_align
-                    .or(default_text_style.text_align)
-                    .unwrap_or(TextAlign::Start),
-            )
-            .soft_wrap(self.soft_wrap.unwrap_or(default_text_style.soft_wrap))
-            .overflow(
-                self.overflow
-                    .or(effective_text_style
-                        .as_ref()
-                        .and_then(|style| style.overflow))
-                    .unwrap_or(default_text_style.overflow),
-            )
-            .text_scaler(text_scaler)
-            .text_width_basis(
-                self.text_width_basis
-                    .unwrap_or(default_text_style.text_width_basis),
-            );
-        // RichText uses Directionality.of to obtain a default if this is None.
-        if let Some(text_direction) = self.text_direction {
-            rich_text = rich_text.text_direction(text_direction);
-        }
-        if let Some(max_lines) = self.max_lines.or(default_text_style.max_lines) {
-            rich_text = rich_text.max_lines(max_lines);
-        }
-        if let Some(text_height_behavior) = text_height_behavior {
-            rich_text = rich_text.text_height_behavior(text_height_behavior);
-        }
-        let mut result = rich_text.into_widget();
+        let text_align = self
+            .text_align
+            .or(default_text_style.text_align)
+            .unwrap_or(TextAlign::Start);
+        let soft_wrap = self.soft_wrap.unwrap_or(default_text_style.soft_wrap);
+        let overflow = self
+            .overflow
+            .or(effective_text_style
+                .as_ref()
+                .and_then(|style| style.overflow))
+            .unwrap_or(default_text_style.overflow);
+        let text_width_basis = self
+            .text_width_basis
+            .unwrap_or(default_text_style.text_width_basis);
+        let max_lines = self.max_lines.or(default_text_style.max_lines);
+        let default_selection_style = DefaultSelectionStyle::of(app, context);
+        let selection_color = self
+            .selection_color
+            .or_else(|| default_selection_style.selection_color.as_deref().copied())
+            .unwrap_or(DefaultSelectionStyle::DEFAULT_COLOR);
+        let registrar = SelectionContainer::maybe_of(app, context);
+        let mut result = if registrar.is_some() {
+            // A mouse hovering the selectable text shows the text cursor, as `SelectableRegion`'s
+            // text does.
+            let cursor = default_selection_style
+                .mouse_cursor
+                .clone()
+                .unwrap_or_else(|| SystemMouseCursors::TEXT.into());
+            MouseRegion::new()
+                .cursor(cursor)
+                .child(SelectableTextContainer {
+                    text: effective_text_span,
+                    text_align,
+                    text_direction: self.text_direction,
+                    soft_wrap,
+                    overflow,
+                    text_scaler,
+                    max_lines,
+                    text_width_basis,
+                    text_height_behavior,
+                    selection_color,
+                })
+                .into_widget()
+        } else {
+            let mut rich_text = RichText::new(effective_text_span.into_span())
+                .text_align(text_align)
+                .soft_wrap(soft_wrap)
+                .overflow(overflow)
+                .text_scaler(text_scaler)
+                .text_width_basis(text_width_basis)
+                .selection_color(selection_color);
+            // RichText uses Directionality.of to obtain a default if this is None.
+            if let Some(text_direction) = self.text_direction {
+                rich_text = rich_text.text_direction(text_direction);
+            }
+            if let Some(max_lines) = max_lines {
+                rich_text = rich_text.max_lines(max_lines);
+            }
+            if let Some(text_height_behavior) = text_height_behavior {
+                rich_text = rich_text.text_height_behavior(text_height_behavior);
+            }
+            rich_text.into_widget()
+        };
         if self.semantics_label.is_some() || self.semantics_identifier.is_some() {
             let mut semantics = Semantics::new();
             if let Some(text_direction) = self.text_direction {
@@ -814,6 +881,812 @@ impl StatelessWidget for Text {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// SelectableTextContainer
+
+/// Dart's `_SelectableTextContainer`: the [`SelectionContainer`] a selectable [`Text`] builds, so
+/// that its paragraph's selectables register with it and its delegate handles the paragraph's
+/// selection.
+#[derive(Debug)]
+struct SelectableTextContainer {
+    text: TextSpan,
+    text_align: TextAlign,
+    text_direction: Option<TextDirection>,
+    soft_wrap: bool,
+    overflow: TextOverflow,
+    text_scaler: TextScaler,
+    max_lines: Option<i32>,
+    text_width_basis: TextWidthBasis,
+    text_height_behavior: Option<TextHeightBehavior>,
+    selection_color: Color,
+}
+
+impl StatefulWidget for SelectableTextContainer {
+    type State = SelectableTextContainerState;
+
+    fn create_state(&self) -> SelectableTextContainerState {
+        SelectableTextContainerState {
+            state: StateData::new(),
+            selection_delegate: None,
+            text_key: GlobalKey::new(),
+        }
+    }
+}
+
+/// The state of a [`SelectableTextContainer`]: Dart's `_SelectableTextContainerState`.
+struct SelectableTextContainerState {
+    state: StateData<SelectableTextContainer>,
+    selection_delegate: Option<Ref<SelectableTextContainerDelegate>>,
+    /// The key of the paragraph below, which the delegate finds its `RenderParagraph` by.
+    text_key: GlobalKey,
+}
+
+impl SelectableTextContainerState {
+    fn selection_delegate(
+        self: Handle<Self>,
+        app: &App,
+    ) -> Handle<SelectableTextContainerDelegate> {
+        app.get(self)
+            .selection_delegate
+            .as_ref()
+            .expect("the delegate is created in init_state")
+            .handle()
+    }
+}
+
+impl State for SelectableTextContainerState {
+    type Widget = SelectableTextContainer;
+    crate::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let text_key = app.get(self).text_key.clone();
+        let delegate = SelectableTextContainerDelegate::new(app, text_key);
+        app.get_mut(self).selection_delegate = Some(delegate);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        let delegate = self.selection_delegate(app);
+        MultiSelectableSelectionContainerDelegate::dispose(delegate, app);
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let delegate = self.selection_delegate(app).keep(app).into_erased();
+        let widget = self.widget(app);
+        SelectionContainer::new(
+            delegate,
+            SelectableRichText {
+                text_key: app.get(self).text_key.clone(),
+                text: widget.text.clone(),
+                text_align: widget.text_align,
+                text_direction: widget.text_direction,
+                soft_wrap: widget.soft_wrap,
+                overflow: widget.overflow,
+                text_scaler: widget.text_scaler.clone(),
+                max_lines: widget.max_lines,
+                text_width_basis: widget.text_width_basis,
+                text_height_behavior: widget.text_height_behavior,
+                selection_color: widget.selection_color,
+            },
+        )
+        .into_widget()
+    }
+}
+
+/// Dart's `_RichText`: the [`RichText`] under the container, which reads the container's
+/// registrar and registers the paragraph's selectables with it.
+#[derive(Debug)]
+struct SelectableRichText {
+    text_key: GlobalKey,
+    text: TextSpan,
+    text_align: TextAlign,
+    text_direction: Option<TextDirection>,
+    soft_wrap: bool,
+    overflow: TextOverflow,
+    text_scaler: TextScaler,
+    max_lines: Option<i32>,
+    text_width_basis: TextWidthBasis,
+    text_height_behavior: Option<TextHeightBehavior>,
+    selection_color: Color,
+}
+
+impl StatelessWidget for SelectableRichText {
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+        let registrar = SelectionContainer::maybe_of(app, context)
+            .expect("the text's own selection container hosts a registrar");
+        let mut rich_text = RichText::new(self.text.clone().into_span())
+            .key(KeyRef::Global(self.text_key.clone()))
+            .text_align(self.text_align)
+            .soft_wrap(self.soft_wrap)
+            .overflow(self.overflow)
+            .text_scaler(self.text_scaler.clone())
+            .text_width_basis(self.text_width_basis)
+            .selection_registrar(registrar)
+            .selection_color(self.selection_color);
+        if let Some(text_direction) = self.text_direction {
+            rich_text = rich_text.text_direction(text_direction);
+        }
+        if let Some(max_lines) = self.max_lines {
+            rich_text = rich_text.max_lines(max_lines);
+        }
+        if let Some(text_height_behavior) = self.text_height_behavior {
+            rich_text = rich_text.text_height_behavior(text_height_behavior);
+        }
+        rich_text.into_widget()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// SelectableTextContainerDelegate
+
+/// Dart's `_SelectableTextContainerDelegate`: the delegate of a [`Text`]'s selection container.
+///
+/// It handles the paragraph's selection across the fragments a `WidgetSpan` splits it into, and
+/// finds its `RenderParagraph` through the container's global key.
+struct SelectableTextContainerDelegate {
+    selection_container_delegate: SelectionContainerDelegateData,
+    multi_selectable_selection_container_delegate: MultiSelectableSelectionContainerDelegateData,
+    static_selection_container_delegate: StaticSelectionContainerDelegateData,
+    /// The key of the paragraph this delegate handles the selection of.
+    text_key: GlobalKey,
+    /// Where each fragment of the paragraph after its first starts in it, recorded when the
+    /// selectables change: reading it needs `&mut App`, and `selection` has `&App` (see
+    /// `PORTING.md`).
+    selectable_content_starts: Vec<(AnySelectable, i32)>,
+}
+
+impl SelectableTextContainerDelegate {
+    fn new(app: &mut App, text_key: GlobalKey) -> Ref<SelectableTextContainerDelegate> {
+        app.create(SelectableTextContainerDelegate {
+            selection_container_delegate: SelectionContainerDelegateData::new(),
+            multi_selectable_selection_container_delegate:
+                MultiSelectableSelectionContainerDelegateData::new(),
+            static_selection_container_delegate: StaticSelectionContainerDelegateData::new(),
+            text_key,
+            selectable_content_starts: Vec::new(),
+        })
+    }
+
+    /// Dart's `paragraph` getter.
+    fn paragraph(self: Handle<Self>, app: &App) -> RenderHandle<RenderParagraph> {
+        let context = app
+            .get(self)
+            .text_key
+            .current_context(app)
+            .expect("the text's paragraph is in the tree");
+        context
+            .find_render_object(app)
+            .expect("the text's paragraph has a render object")
+            .downcast::<RenderParagraph>(app)
+            .expect("the text's render object is a RenderParagraph")
+    }
+
+    /// Where `selectable` starts in the paragraph, as recorded by
+    /// [`record_selectable_content_starts`](Self::record_selectable_content_starts).
+    fn selectable_content_start(
+        self: Handle<Self>,
+        app: &App,
+        selectable: AnySelectable,
+    ) -> Option<i32> {
+        app.get(self)
+            .selectable_content_starts
+            .iter()
+            .find_map(|(held, start)| (*held == selectable).then_some(*start))
+    }
+
+    /// Records where each fragment after the paragraph's first starts in it: Flutter reads it
+    /// from the fragment's first box when it computes the range, which needs `&mut App` there.
+    fn record_selectable_content_starts(self: Handle<Self>, app: &mut App) {
+        let selectables = self
+            .multi_selectable_selection_container_delegate_data(app)
+            .selectables
+            .clone();
+        let paragraph = self.paragraph(app);
+        let mut starts = Vec::new();
+        for (index, selectable) in selectables.iter().enumerate() {
+            if index == 0 || !paragraph.selectable_belongs_to_paragraph(app, *selectable) {
+                continue;
+            }
+            let Some(first_box) = selectable.bounding_boxes(app).into_iter().next() else {
+                continue;
+            };
+            let position = paragraph.get_position_for_offset(app, first_box.center_left());
+            starts.push((*selectable, position.offset));
+        }
+        app.get_mut(self).selectable_content_starts = starts;
+    }
+
+    /// Dart's `compareOrder` for a text paragraph: sorts the selectables by their first
+    /// bounding box's top left, where the multi-selectable delegate sorts by their union.
+    fn compare_top_left_screen_order(
+        self: Handle<Self>,
+        app: &mut App,
+        a: AnySelectable,
+        b: AnySelectable,
+    ) -> Ordering {
+        let rect_a = transform_rect(
+            &a.get_transform_to(app, None),
+            a.bounding_boxes(app)
+                .into_iter()
+                .next()
+                .expect("a selectable has a bounding box"),
+        );
+        let rect_b = transform_rect(
+            &b.get_transform_to(app, None),
+            b.bounding_boxes(app)
+                .into_iter()
+                .next()
+                .expect("a selectable has a bounding box"),
+        );
+        let result = compare_vertically(rect_a, rect_b);
+        if result != Ordering::Equal {
+            return result;
+        }
+        compare_horizontally(rect_a, rect_b)
+    }
+
+    /// Dart's `handleSelectParagraph`, whose own body is `_handleSelectParagraph`.
+    fn handle_select_paragraph_body(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let SelectionEvent::SelectParagraph {
+            global_position,
+            absorb,
+        } = event
+        else {
+            panic!("a paragraph selection event selects a paragraph");
+        };
+        let global_position = *global_position;
+        let selectables = self
+            .multi_selectable_selection_container_delegate_data(app)
+            .selectables
+            .clone();
+        if *absorb {
+            for selectable in &selectables {
+                MultiSelectableSelectionContainerDelegate::dispatch_selection_event_to_child(
+                    self,
+                    app,
+                    *selectable,
+                    event,
+                );
+            }
+            let data = self.multi_selectable_selection_container_delegate_data_mut(app);
+            data.current_selection_start_index = 0;
+            data.current_selection_end_index = selectables.len() as i32 - 1;
+            return SelectionResult::Next;
+        }
+
+        // First pass: if the position is on a placeholder, dispatch the selection event to the
+        // selectable at the location and terminate.
+        let paragraph = self.paragraph(app);
+        for (index, selectable) in selectables.iter().enumerate() {
+            let selectable_is_placeholder =
+                !paragraph.selectable_belongs_to_paragraph(app, *selectable);
+            if selectable_is_placeholder {
+                let boxes = selectable.bounding_boxes(app);
+                if !boxes.is_empty() {
+                    let transform = selectable.get_transform_to(app, None);
+                    for rect in boxes {
+                        let global_rect = transform_rect(&transform, rect);
+                        if global_rect.contains(global_position) {
+                            let data =
+                                self.multi_selectable_selection_container_delegate_data_mut(app);
+                            data.current_selection_start_index = index as i32;
+                            data.current_selection_end_index = index as i32;
+                            return MultiSelectableSelectionContainerDelegate::dispatch_selection_event_to_child(
+                                self, app, *selectable, event,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut last_selection_result: Option<SelectionResult> = None;
+        let mut found_start = false;
+        let mut last_next_index: Option<i32> = None;
+        for (index, selectable) in selectables.iter().enumerate() {
+            if !paragraph.selectable_belongs_to_paragraph(app, *selectable) {
+                if found_start {
+                    let synthesized_event = SelectionEvent::SelectParagraph {
+                        global_position,
+                        absorb: true,
+                    };
+                    let result =
+                        MultiSelectableSelectionContainerDelegate::dispatch_selection_event_to_child(
+                            self,
+                            app,
+                            *selectable,
+                            &synthesized_event,
+                        );
+                    if selectables.len() - 1 == index {
+                        let data = self.multi_selectable_selection_container_delegate_data_mut(app);
+                        data.current_selection_end_index = index as i32;
+                        MultiSelectableSelectionContainerDelegateBase::flush_inactive_selections(
+                            self, app,
+                        );
+                        return result;
+                    }
+                }
+                continue;
+            }
+            let existing_geometry = selectable.value(app);
+            last_selection_result = Some(
+                MultiSelectableSelectionContainerDelegate::dispatch_selection_event_to_child(
+                    self,
+                    app,
+                    *selectable,
+                    event,
+                ),
+            );
+            let result = last_selection_result.expect("assigned just now");
+            if index == selectables.len() - 1 && result == SelectionResult::Next {
+                let data = self.multi_selectable_selection_container_delegate_data_mut(app);
+                if found_start {
+                    data.current_selection_end_index = index as i32;
+                } else {
+                    data.current_selection_start_index = index as i32;
+                    data.current_selection_end_index = index as i32;
+                }
+                return SelectionResult::Next;
+            }
+            if result == SelectionResult::Next {
+                if selectable.value(app) == existing_geometry && !found_start {
+                    last_next_index = Some(index as i32);
+                }
+                if selectable.value(app) != existing_geometry && !found_start {
+                    let boxes = selectable.bounding_boxes(app);
+                    debug_assert!(!boxes.is_empty());
+                    let selection_rects = selectable.value(app).selection_rects;
+                    debug_assert!(!selection_rects.is_empty());
+                    let selection_at_start_of_selectable = boxes[0].overlaps(selection_rects[0]);
+                    let start_index = if let Some(last_next_index) = last_next_index
+                        && selection_at_start_of_selectable
+                    {
+                        last_next_index + 1
+                    } else if last_next_index.is_none() && selection_at_start_of_selectable {
+                        0
+                    } else {
+                        index as i32
+                    };
+                    for selectable in &selectables[start_index as usize..index] {
+                        let synthesized_event = SelectionEvent::SelectParagraph {
+                            global_position,
+                            absorb: true,
+                        };
+                        MultiSelectableSelectionContainerDelegate::dispatch_selection_event_to_child(
+                            self,
+                            app,
+                            *selectable,
+                            &synthesized_event,
+                        );
+                    }
+                    let data = self.multi_selectable_selection_container_delegate_data_mut(app);
+                    data.current_selection_start_index = start_index;
+                    found_start = true;
+                }
+                continue;
+            }
+            if index == 0 && result == SelectionResult::Previous {
+                return SelectionResult::Previous;
+            }
+            if selectable.value(app) != existing_geometry {
+                if !found_start && last_next_index.is_none() {
+                    let data = self.multi_selectable_selection_container_delegate_data_mut(app);
+                    data.current_selection_start_index = 0;
+                    for selectable in &selectables[..index] {
+                        let synthesized_event = SelectionEvent::SelectParagraph {
+                            global_position,
+                            absorb: true,
+                        };
+                        MultiSelectableSelectionContainerDelegate::dispatch_selection_event_to_child(
+                            self,
+                            app,
+                            *selectable,
+                            &synthesized_event,
+                        );
+                    }
+                }
+                let data = self.multi_selectable_selection_container_delegate_data_mut(app);
+                data.current_selection_end_index = index as i32;
+                // Geometry changed as a result of selecting a paragraph; clear the other
+                // selectables to keep the selection in sync.
+                MultiSelectableSelectionContainerDelegateBase::flush_inactive_selections(self, app);
+            }
+            return SelectionResult::End;
+        }
+        debug_assert!(last_selection_result.is_none());
+        SelectionResult::End
+    }
+
+    /// Dart's `_adjustSelection`: [`MultiSelectableSelectionContainerDelegateBase::adjust_selection`]
+    /// with the crossing of the opposite edge that a paragraph selection needs.
+    fn adjust_selection(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+        is_end: bool,
+    ) -> SelectionResult {
+        let selectables = self
+            .multi_selectable_selection_container_delegate_data(app)
+            .selectables
+            .clone();
+        let value = SelectionHandler::value(self, app);
+        let is_current_edge_within_viewport = if is_end {
+            value.end_selection_point.is_some()
+        } else {
+            value.start_selection_point.is_some()
+        };
+        let is_opposite_edge_within_viewport = if is_end {
+            value.start_selection_point.is_some()
+        } else {
+            value.end_selection_point.is_some()
+        };
+        let data = self.multi_selectable_selection_container_delegate_data(app);
+        let mut new_index: i32 = if is_end {
+            if is_current_edge_within_viewport {
+                data.current_selection_end_index
+            } else if is_opposite_edge_within_viewport {
+                data.current_selection_start_index
+            } else {
+                0
+            }
+        } else if is_current_edge_within_viewport {
+            data.current_selection_start_index
+        } else if is_opposite_edge_within_viewport {
+            data.current_selection_end_index
+        } else {
+            0
+        };
+        debug_assert!(new_index < selectables.len() as i32 && new_index >= 0);
+        let mut forward: Option<bool> = None;
+        let mut final_result: Option<SelectionResult> = None;
+        while (new_index as usize) < selectables.len() && new_index >= 0 && final_result.is_none() {
+            let current_selectable_result =
+                MultiSelectableSelectionContainerDelegate::dispatch_selection_event_to_child(
+                    self,
+                    app,
+                    selectables[new_index as usize],
+                    event,
+                );
+            match current_selectable_result {
+                SelectionResult::End | SelectionResult::Pending | SelectionResult::None => {
+                    final_result = Some(current_selectable_result);
+                }
+                SelectionResult::Next => {
+                    if forward == Some(false) {
+                        new_index += 1;
+                        final_result = Some(SelectionResult::End);
+                    } else if new_index as usize == selectables.len() - 1 {
+                        final_result = Some(current_selectable_result);
+                    } else {
+                        forward = Some(true);
+                        new_index += 1;
+                    }
+                }
+                SelectionResult::Previous => {
+                    if forward == Some(true) {
+                        new_index -= 1;
+                        final_result = Some(SelectionResult::End);
+                    } else if new_index == 0 {
+                        final_result = Some(current_selectable_result);
+                    } else {
+                        forward = Some(false);
+                        new_index -= 1;
+                    }
+                }
+            }
+        }
+        let data = self.multi_selectable_selection_container_delegate_data_mut(app);
+        if is_end {
+            let forward_selection =
+                data.current_selection_end_index >= data.current_selection_start_index;
+            if let Some(forward) = forward
+                && ((!forward_selection
+                    && forward
+                    && new_index >= data.current_selection_start_index)
+                    || (forward_selection
+                        && !forward
+                        && new_index <= data.current_selection_start_index))
+            {
+                data.current_selection_start_index = data.current_selection_end_index;
+            }
+            data.current_selection_end_index = new_index;
+        } else {
+            let forward_selection =
+                data.current_selection_end_index >= data.current_selection_start_index;
+            if let Some(forward) = forward
+                && ((!forward_selection
+                    && !forward
+                    && new_index <= data.current_selection_end_index)
+                    || (forward_selection
+                        && forward
+                        && new_index >= data.current_selection_end_index))
+            {
+                data.current_selection_end_index = data.current_selection_start_index;
+            }
+            data.current_selection_start_index = new_index;
+        }
+        MultiSelectableSelectionContainerDelegateBase::flush_inactive_selections(self, app);
+        final_result.expect("the loop answered a result")
+    }
+
+    /// Dart's `_calculateLocalRange`: the selectables' ranges, with a fragment that is not the
+    /// paragraph's first offset by where it starts in the paragraph.
+    fn calculate_local_range(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
+        let data = self.multi_selectable_selection_container_delegate_data(app);
+        if data.current_selection_start_index == -1 || data.current_selection_end_index == -1 {
+            return None;
+        }
+        let selectables = data.selectables.clone();
+        let mut start_offset = 0i32;
+        let mut end_offset = 0i32;
+        let mut found_start = false;
+        let mut forward_selection =
+            data.current_selection_end_index >= data.current_selection_start_index;
+        if data.current_selection_end_index == data.current_selection_start_index {
+            // Determining the direction is inaccurate when both edges share a selectable; the
+            // range within it is the source of truth.
+            let range = selectables[data.current_selection_start_index as usize]
+                .selection(app)
+                .expect("the selectable holding both edges has a selection");
+            forward_selection = range.end_offset >= range.start_offset;
+        }
+        let paragraph = self.paragraph(app);
+        for (index, selectable) in selectables.iter().enumerate() {
+            let Some(range) = selectable.selection(app) else {
+                if found_start {
+                    return Some(SelectedContentRange::new(
+                        if forward_selection {
+                            start_offset
+                        } else {
+                            end_offset
+                        },
+                        if forward_selection {
+                            end_offset
+                        } else {
+                            start_offset
+                        },
+                    ));
+                }
+                start_offset += selectable.content_length(app) as i32;
+                end_offset = start_offset;
+                continue;
+            };
+            let selection_start_normalized = range.start_offset.min(range.end_offset);
+            let selection_end_normalized = range.start_offset.max(range.end_offset);
+            if !found_start {
+                // A `RenderParagraph` may split its content into several selectables, so a
+                // fragment that is not the paragraph's first starts partway through it.
+                let should_consider_content_start =
+                    index > 0 && paragraph.selectable_belongs_to_paragraph(app, *selectable);
+                let selectable_content_start = if should_consider_content_start {
+                    self.selectable_content_start(app, *selectable).unwrap_or(0)
+                } else {
+                    0
+                };
+                start_offset += (selection_start_normalized - selectable_content_start).abs();
+                end_offset =
+                    start_offset + (selection_end_normalized - selection_start_normalized).abs();
+                found_start = true;
+            } else {
+                end_offset += (selection_end_normalized - selection_start_normalized).abs();
+            }
+        }
+        debug_assert!(
+            found_start,
+            "The start of the selection has not been found despite this selection delegate \
+             having an existing currentSelectionStartIndex and currentSelectionEndIndex."
+        );
+        Some(SelectedContentRange::new(
+            if forward_selection {
+                start_offset
+            } else {
+                end_offset
+            },
+            if forward_selection {
+                end_offset
+            } else {
+                start_offset
+            },
+        ))
+    }
+}
+
+impl SelectionContainerDelegate for SelectableTextContainerDelegate {
+    fn selection_container_delegate_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &SelectionContainerDelegateData {
+        &app.get(self).selection_container_delegate
+    }
+
+    fn selection_container_delegate_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SelectionContainerDelegateData {
+        &mut app.get_mut(self).selection_container_delegate
+    }
+}
+
+impl MultiSelectableSelectionContainerDelegate for SelectableTextContainerDelegate {
+    crate::multi_selectable_selection_container_delegate_accessors!();
+
+    fn did_change_selectables(self: Handle<Self>, app: &mut App) {
+        self.record_selectable_content_starts(app);
+        StaticSelectionContainerDelegateBase::did_change_selectables(self, app);
+    }
+
+    fn compare_order(
+        self: Handle<Self>,
+        app: &mut App,
+        a: AnySelectable,
+        b: AnySelectable,
+    ) -> Ordering {
+        self.compare_top_left_screen_order(app, a, b)
+    }
+
+    fn handle_select_all(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        StaticSelectionContainerDelegateBase::handle_select_all(self, app, event)
+    }
+
+    fn handle_select_word(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        StaticSelectionContainerDelegateBase::handle_select_word(self, app, event)
+    }
+
+    fn handle_select_paragraph(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let result = self.handle_select_paragraph_body(app, event);
+        StaticSelectionContainerDelegate::did_receive_selection_boundary_events(self, app);
+        result
+    }
+
+    fn handle_clear_selection(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        StaticSelectionContainerDelegateBase::handle_clear_selection(self, app, event)
+    }
+
+    fn handle_selection_edge_update(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let (global_position, for_end, granularity) = match event {
+            SelectionEvent::StartEdgeUpdate {
+                global_position,
+                granularity,
+            } => (*global_position, false, *granularity),
+            SelectionEvent::EndEdgeUpdate {
+                global_position,
+                granularity,
+            } => (*global_position, true, *granularity),
+            _ => panic!("a selection edge update names an edge"),
+        };
+        if granularity != waft_rendering::TextGranularity::Paragraph {
+            return StaticSelectionContainerDelegateBase::handle_selection_edge_update(
+                self, app, event,
+            );
+        }
+        StaticSelectionContainerDelegate::update_last_selection_edge_location(
+            self,
+            app,
+            global_position,
+            for_end,
+        );
+        let selection_index = {
+            let data = self.multi_selectable_selection_container_delegate_data(app);
+            if for_end {
+                data.current_selection_end_index
+            } else {
+                data.current_selection_start_index
+            }
+        };
+        if selection_index == -1 {
+            return StaticSelectionContainerDelegateBase::handle_selection_edge_update(
+                self, app, event,
+            );
+        }
+        self.adjust_selection(app, event, for_end)
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        StaticSelectionContainerDelegateBase::dispose(self, app);
+    }
+
+    fn ensure_child_updated(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+        StaticSelectionContainerDelegateBase::ensure_child_updated(self, app, selectable);
+    }
+
+    fn dispatch_selection_event_to_child(
+        self: Handle<Self>,
+        app: &mut App,
+        selectable: AnySelectable,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        StaticSelectionContainerDelegateBase::dispatch_selection_event_to_child(
+            self, app, selectable, event,
+        )
+    }
+}
+
+impl StaticSelectionContainerDelegate for SelectableTextContainerDelegate {
+    crate::static_selection_container_delegate_accessors!();
+}
+
+impl SelectionHandler for SelectableTextContainerDelegate {
+    fn value(self: Handle<Self>, app: &App) -> SelectionGeometry {
+        StaticSelectionContainerDelegateBase::value(self, app)
+    }
+
+    fn push_handle_layers(
+        self: Handle<Self>,
+        app: &mut App,
+        start_handle: Option<Ref<waft_rendering::LayerLink>>,
+        end_handle: Option<Ref<waft_rendering::LayerLink>>,
+    ) {
+        StaticSelectionContainerDelegateBase::push_handle_layers(
+            self,
+            app,
+            start_handle,
+            end_handle,
+        );
+    }
+
+    fn selected_content(self: Handle<Self>, app: &App) -> Option<waft_rendering::SelectedContent> {
+        StaticSelectionContainerDelegateBase::selected_content(self, app)
+    }
+
+    fn selection(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
+        self.calculate_local_range(app)
+    }
+
+    fn dispatch_selection_event(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        StaticSelectionContainerDelegateBase::dispatch_selection_event(self, app, event)
+    }
+
+    fn content_length(self: Handle<Self>, app: &App) -> usize {
+        StaticSelectionContainerDelegateBase::content_length(self, app)
+    }
+}
+
+impl SelectionRegistrar for SelectableTextContainerDelegate {
+    crate::static_selection_container_delegate_selection_registrar!();
+}
+
+impl ChangeNotifier for SelectableTextContainerDelegate {
+    fn change_notifier_data(&self) -> &ChangeNotifierData {
+        &self
+            .multi_selectable_selection_container_delegate
+            .change_notifier
+    }
+
+    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+        &mut self
+            .multi_selectable_selection_container_delegate
+            .change_notifier
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------
 // RichText (basic.dart)
 
@@ -1129,9 +2002,8 @@ impl MultiChildRenderObjectWidget for RichText {
 mod tests {
     use waft_foundation::AppCell;
 
-    use waft_embedder::{Color, TextLeadingDistribution};
-    use waft_foundation::ValueKey;
-    use waft_painting::PaintingBinding;
+    use waft_embedder::{Color, Offset, Rect, TextLeadingDistribution, TextPosition};
+    use waft_painting::{PaintingBinding, transform_point};
 
     use super::*;
     use crate::test_harness::Harness;
@@ -1455,5 +2327,373 @@ mod tests {
         assert_eq!(style.letter_spacing, Some(3.0));
         assert_eq!(style.word_spacing, Some(4.0));
         assert_eq!(paragraph.text_scaler(&app), TextScaler::linear(2.0));
+    }
+
+    // ---- selection ----
+
+    use waft_foundation::ValueKey;
+    use waft_rendering::{SelectionEvent, SelectionStatus};
+
+    use waft_scheduler::{FrameTarget, SchedulerBinding};
+
+    use crate::testing::{WidgetTester, find, test_widgets};
+    use crate::widgets::basic::{Column, SizedBox};
+    use crate::widgets::selectable_region::PlainStaticSelectionContainerDelegate;
+    use crate::widgets::selection_container::SelectionContainer;
+
+    /// Pumps `texts` in a column under a selection container, as under a `SelectableRegion`, and
+    /// answers the container's delegate.
+    fn pump_selectable_texts(
+        tester: &mut WidgetTester,
+        texts: Vec<WidgetRef>,
+    ) -> Ref<PlainStaticSelectionContainerDelegate> {
+        let delegate = tester.update(PlainStaticSelectionContainerDelegate::new);
+        tester.pump_widget(Directionality::new(
+            TextDirection::Ltr,
+            SelectionContainer::new(delegate.erase(), Column::new().children(texts)),
+        ));
+        tester.pump_and_settle();
+        // The outer container registers itself from a microtask after the frame, so its
+        // selectable reaches the delegate at the next frame.
+        tester.update(|app| SchedulerBinding::schedule_frame(app, FrameTarget::EveryView));
+        tester.pump();
+        tester.pump_and_settle();
+        delegate
+    }
+
+    /// The global position of the caret at `offset` in `paragraph`, five pixels down from the
+    /// top of the line.
+    fn position_of(
+        tester: &mut WidgetTester,
+        paragraph: RenderHandle<RenderParagraph>,
+        offset: i32,
+    ) -> Offset {
+        tester.update(|app| {
+            let local = paragraph.get_offset_for_caret(app, TextPosition::new(offset), Rect::ZERO)
+                + Offset::new(0.0, 5.0);
+            transform_point(&paragraph.as_object().get_transform_to(app, None), local)
+        })
+    }
+
+    /// Sends `event` to `handle`.
+    fn dispatch<D: SelectionHandler>(
+        tester: &mut WidgetTester,
+        handle: Handle<D>,
+        event: SelectionEvent,
+    ) {
+        tester.update(|app| {
+            SelectionHandler::dispatch_selection_event(handle, app, &event);
+        });
+    }
+
+    /// The selected range and status of `handle`.
+    fn assert_selection<D: SelectionHandler>(
+        tester: &WidgetTester,
+        handle: Handle<D>,
+        expected_range: Option<(i32, i32)>,
+        expected_status: SelectionStatus,
+    ) {
+        tester.update(|app| {
+            let range = SelectionHandler::selection(handle, app);
+            assert_eq!(
+                range.map(|range| (range.start_offset, range.end_offset)),
+                expected_range
+            );
+            assert_eq!(SelectionHandler::value(handle, app).status, expected_status);
+        });
+    }
+
+    /// The plain text `handle` has selected, or `None`.
+    fn selected_text<D: SelectionHandler>(
+        tester: &WidgetTester,
+        handle: Handle<D>,
+    ) -> Option<String> {
+        tester.update(|app| {
+            SelectionHandler::selected_content(handle, app).map(|content| content.plain_text)
+        })
+    }
+
+    /// The paragraph showing `text`.
+    fn paragraph_showing(tester: &WidgetTester, text: &str) -> RenderHandle<RenderParagraph> {
+        let paragraphs = tester.all::<RenderParagraph>();
+        tester.update(|app| {
+            *paragraphs
+                .iter()
+                .find(|paragraph| paragraph.text(app).to_plain_text(true, true) == text)
+                .unwrap_or_else(|| panic!("a paragraph showing {text}"))
+        })
+    }
+
+    /// `paragraph`'s one selection, as its start and end.
+    fn paragraph_selection(
+        tester: &WidgetTester,
+        paragraph: RenderHandle<RenderParagraph>,
+    ) -> (i32, i32) {
+        tester.update(|app| {
+            let selections = paragraph.selections(app);
+            assert_eq!(selections.len(), 1, "one selection");
+            (selections[0].start(), selections[0].end())
+        })
+    }
+
+    // selectable_region_test.dart 'onSelectionChanged SelectedContentRange is accurate', now
+    // through `Text`, which builds its own selection container.
+    #[test]
+    fn the_selection_range_covers_the_texts_between_the_edges() {
+        test_widgets(|tester| {
+            let delegate = pump_selectable_texts(
+                tester,
+                vec![
+                    Text::new("How are you?").into_widget(),
+                    Text::new("Good, and you?").into_widget(),
+                    Text::new("Fine, thank you.").into_widget(),
+                ],
+            );
+            let paragraphs = tester.all::<RenderParagraph>();
+            assert_eq!(paragraphs.len(), 3);
+            let start = position_of(tester, paragraphs[0], 4);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_start(start, None),
+            );
+
+            let end = position_of(tester, paragraphs[0], 7);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_end(end, None),
+            );
+            assert_selection(
+                tester,
+                delegate.handle(),
+                Some((4, 7)),
+                SelectionStatus::Uncollapsed,
+            );
+
+            let end = position_of(tester, paragraphs[0], 10);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_end(end, None),
+            );
+            assert_selection(
+                tester,
+                delegate.handle(),
+                Some((4, 10)),
+                SelectionStatus::Uncollapsed,
+            );
+
+            let end = position_of(tester, paragraphs[1], 10);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_end(end, None),
+            );
+            assert_selection(
+                tester,
+                delegate.handle(),
+                Some((4, 22)),
+                SelectionStatus::Uncollapsed,
+            );
+
+            let end = position_of(tester, paragraphs[2], 10);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_end(end, None),
+            );
+            assert_selection(
+                tester,
+                delegate.handle(),
+                Some((4, 36)),
+                SelectionStatus::Uncollapsed,
+            );
+
+            // A collapsed selection, as a click makes one.
+            dispatch(tester, delegate.handle(), SelectionEvent::Clear);
+            let point = position_of(tester, paragraphs[0], 3);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_start(point, None),
+            );
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_end(point, None),
+            );
+            assert_selection(
+                tester,
+                delegate.handle(),
+                Some((3, 3)),
+                SelectionStatus::Collapsed,
+            );
+
+            // A backward selection.
+            dispatch(tester, delegate.handle(), SelectionEvent::Clear);
+            let start = position_of(tester, paragraphs[2], 4);
+            let end = position_of(tester, paragraphs[0], 0);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_start(start, None),
+            );
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_end(end, None),
+            );
+            assert_selection(
+                tester,
+                delegate.handle(),
+                Some((30, 0)),
+                SelectionStatus::Uncollapsed,
+            );
+        });
+    }
+
+    // selectable_region_test.dart 'can select word when selectable is broken up by an
+    // unselectable WidgetSpan': the fragment that starts after the span is selected, and the
+    // range counts from the paragraph's start.
+    #[test]
+    fn a_word_after_a_widget_span_is_selected_and_ranged_from_the_paragraph_start() {
+        const BEFORE: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+        // The 123 characters, then the placeholder, then "Hello, world.": the word is at 124.
+        assert_eq!(BEFORE.len(), 123, "as in the test");
+        test_widgets(|tester| {
+            let span = TextSpan::new()
+                .children(vec![
+                    TextSpan::new().text(BEFORE).into_span(),
+                    WidgetSpan::new(SizedBox::shrink()).into_span(),
+                    TextSpan::new().text("Hello, world.").into_span(),
+                ])
+                .into_span();
+            let delegate = pump_selectable_texts(tester, vec![Text::rich(span).into_widget()]);
+            let paragraphs = tester.all::<RenderParagraph>();
+            assert_eq!(paragraphs.len(), 1);
+            let position = position_of(tester, paragraphs[0], 125);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::SelectWord {
+                    global_position: position,
+                },
+            );
+
+            assert_eq!(paragraph_selection(tester, paragraphs[0]), (124, 129));
+            assert_eq!(
+                selected_text(tester, delegate.handle()),
+                Some("Hello".to_string())
+            );
+            // Dart's range counts the first fragment's whole content and then the distance to
+            // where the selected fragment starts in the paragraph, so the placeholder the
+            // unselected fragment ends at is not counted.
+            assert_selection(
+                tester,
+                delegate.handle(),
+                Some((123, 128)),
+                SelectionStatus::Uncollapsed,
+            );
+        });
+    }
+
+    // selectable_region_test.dart 'selects backwards across multiple Text widgets and
+    // WidgetSpans via mouse drag': every inner and outer text is fully selected.
+    #[test]
+    fn a_backward_drag_selects_every_inner_and_outer_text() {
+        test_widgets(|tester| {
+            let texts = (0..5)
+                .map(|index| {
+                    let number = index + 1;
+                    Text::rich(
+                        TextSpan::new()
+                            .children(vec![
+                                WidgetSpan::new(Text::new(format!("{number}. "))).into_span(),
+                                TextSpan::new().text(format!("Item {number}")).into_span(),
+                            ])
+                            .into_span(),
+                    )
+                    .key(ValueKey::new(index as usize).into())
+                    .into_widget()
+                })
+                .collect();
+            let delegate = pump_selectable_texts(tester, texts);
+            let drag_start = tester.get_bottom_right(find::by_key(ValueKey::new(4usize)));
+            let drag_end = tester.get_top_left(find::by_key(ValueKey::new(0usize)));
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_start(drag_start, None),
+            );
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_end(drag_end, None),
+            );
+
+            for index in 0..5 {
+                let number = index + 1;
+                let inner = paragraph_showing(tester, &format!("{number}. "));
+                let length =
+                    tester.update(|app| inner.text(app).to_plain_text(true, true).len() as i32);
+                assert_eq!(paragraph_selection(tester, inner), (0, length));
+
+                let outer_text = format!("\u{FFFC}Item {number}");
+                let outer = paragraph_showing(tester, &outer_text);
+                assert_eq!(
+                    paragraph_selection(tester, outer),
+                    (1, outer_text.chars().count() as i32)
+                );
+            }
+        });
+    }
+
+    // selectable_region_test.dart 'mouse can select multiple widgets on triple click drag when
+    // selecting inside a WidgetSpan': a paragraph extension drag selects every line it crosses,
+    // and the range counts each inner text's content.
+    #[test]
+    fn a_paragraph_extension_selects_the_lines_it_crosses() {
+        test_widgets(|tester| {
+            let texts: Vec<WidgetRef> = (0..5)
+                .map(|index| {
+                    Text::new(format!("Text widget {}.", (b'A' + index) as char)).into_widget()
+                })
+                .collect();
+            let span = WidgetSpan::new(Column::new().children(texts)).into_span();
+            let delegate = pump_selectable_texts(tester, vec![Text::rich(span).into_widget()]);
+            let paragraph_c = paragraph_showing(tester, "Text widget C.");
+            let paragraph_e = paragraph_showing(tester, "Text widget E.");
+            let point_c = position_of(tester, paragraph_c, 2);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::SelectParagraph {
+                    global_position: point_c,
+                    absorb: false,
+                },
+            );
+            assert_eq!(paragraph_selection(tester, paragraph_c), (0, 14));
+
+            let point_e = position_of(tester, paragraph_e, 5);
+            dispatch(
+                tester,
+                delegate.handle(),
+                SelectionEvent::for_end(point_e, Some(waft_rendering::TextGranularity::Paragraph)),
+            );
+            assert_eq!(paragraph_selection(tester, paragraph_c), (0, 14));
+            assert_eq!(
+                paragraph_selection(tester, paragraph_showing(tester, "Text widget D.")),
+                (0, 14)
+            );
+            assert_eq!(paragraph_selection(tester, paragraph_e), (0, 14));
+            // A, B, C, D and E are 14 characters each; C through E is 28..70.
+            assert_selection(
+                tester,
+                delegate.handle(),
+                Some((28, 70)),
+                SelectionStatus::Uncollapsed,
+            );
+        });
     }
 }

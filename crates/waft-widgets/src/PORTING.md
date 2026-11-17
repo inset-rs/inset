@@ -445,9 +445,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a selectable's bounding boxes are read through `&mut App`, which the comparator a getter returned could not carry.
   Affect: a subclass overrides `compare_order(self, app, a, b)` where Dart overrides `compareOrder`.
 
-- Change: the `selection_container_test.dart` cases run with a `RichText` wired to the enclosing container where Flutter writes `Text`.
-  Reason: platform — `Text`'s own selection container (`_SelectableTextContainer`) waits, so a `Text` under a container is not selectable yet.
-  Affect: the cases exercise the delegates through one paragraph per child either way, but not `Text`'s delegate.
+## widgets/text.rs → text.dart (selection)
+
+- Change: the text delegate records where each fragment of the paragraph after its first starts in it when the selectables change, where Dart reads it from the fragment's first box while it computes the range.
+  Reason: language — `Selectable::bounding_boxes` and `RenderParagraph::get_position_for_offset` take `&mut App` here, and `SelectionHandler::selection` has `&App`.
+  Affect: a paragraph split by a `WidgetSpan` reports the range its selectables had when they last changed; a re-layout that moves a fragment without changing the selectables does not recompute where the fragment starts.
 
 ## widgets/scroll_view.rs → scroll_view.dart
 
@@ -773,7 +775,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - platform_selectable_region_context_menu_web.dart: the web context menu, a registered platform view over a DOM element. Trigger: a web host.
 
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
-- text.rs: `Text`'s internal selection container (`_SelectableTextContainer` and `_SelectableTextContainerDelegate`), and so `Text`'s own selection, `selectionColor` and registrar under a `SelectionContainer`; `selection_container_test.dart`'s cases run in `selectable_region.rs` with a `RichText` wired to the container instead. Trigger: the text selection delegate.
 - raw_tooltip.rs: the `SemanticsService.tooltip` announcement. Trigger: the semantics tree.
 - form.rs: `Form.onWillPop`, the `WillPopScope` it builds, and the deprecated `Form.onPopInvoked`. Trigger: `WillPopScope` (deferred; Flutter deprecates both).
 - form.rs: the error announcement `FormState._validate` sends through `SemanticsService`. Trigger: the semantics tree.
@@ -801,7 +802,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - view.rs, overlay.rs: the hidden-by-a-`LookupBoundary` variants of the `View.of` and `Overlay.of` error messages. Trigger: diagnostics.
 - form.rs, page_storage.rs, tap_region.rs: the 'The context used was' lines print the widget's type where Dart describes the element. Trigger: diagnostics.
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value (the check is in debug.rs). Trigger: each such widget's next edit.
-- text.rs: selection, `locale`, `strutStyle`, and the deprecated `textScaleFactor`. Trigger: the text selection delegate; the next edit of text.rs for `locale` (embedder's `Locale` exists); `StrutStyle`.
+- text.rs: `locale`, `strutStyle`, `hyphens`, and the deprecated `textScaleFactor`; `Text`'s selection container and `_RichText` carry none of them either. Trigger: `Locale` (the embedder's exists); `StrutStyle`; `Hyphens`.
 - basic.rs: `Flow`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
 - basic.rs, implicit_animations.rs: the `PhysicalModel`, `PhysicalShape` and `AnimatedPhysicalModel` diagnostics. Trigger: diagnostics.
 - basic.rs: `RepaintBoundary.wrap` and `wrapAll`, `DefaultAssetBundle`. Trigger: the sliver child delegates that call them; asset bundles.
