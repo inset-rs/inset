@@ -455,6 +455,7 @@ impl CarouselViewState {
         initial_item
     }
 
+    #[allow(deprecated)] // Dart's `withOpacity`.
     fn build_carousel_item(self: Handle<Self>, app: &mut App, mut index: i32) -> WidgetRef {
         let widget = self.widget(app);
         // For infinite scrolling, wrap the index to the actual children range.
@@ -496,13 +497,13 @@ impl CarouselViewState {
                 let on_surface = color_scheme.on_surface;
                 <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(on_surface.with_alpha(0x1a));
+                        return Some(on_surface.with_opacity(0.1));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(on_surface.with_alpha(0x14));
+                        return Some(on_surface.with_opacity(0.08));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(on_surface.with_alpha(0x1a));
+                        return Some(on_surface.with_opacity(0.1));
                     }
                     None
                 })
@@ -845,7 +846,7 @@ impl FixedCarouselExtents {
         // space is larger than `minExtent`, the extent for last item should be at
         // least the remaining extent to ensure a smooth size transition.
         let effective_min_extent =
-            dart_remainder(self.remaining_paint_extent, self.max_extent).max(self.min_extent);
+            dart_modulo(self.remaining_paint_extent, self.max_extent).max(self.min_extent);
 
         // Two special cases are the first and last visible items. Other items' extent
         // should all return `maxExtent`.
@@ -877,7 +878,7 @@ impl FixedCarouselExtents {
         // space is larger than `minExtent`, the extent for last item should be at
         // least the remaining extent to make sure a smooth size transition.
         let effective_min_extent =
-            dart_remainder(self.remaining_paint_extent, self.max_extent).max(self.min_extent);
+            dart_modulo(self.remaining_paint_extent, self.max_extent).max(self.min_extent);
         if index == first_visible_index {
             let first_visible_item_extent = self.build_item_extent(index);
 
@@ -915,9 +916,9 @@ impl FixedCarouselExtents {
     }
 }
 
-/// Dart's `%` on doubles: the remainder, with the sign of the dividend.
-fn dart_remainder(dividend: f64, divisor: f64) -> f64 {
-    let result = dividend % divisor;
+/// Dart's `%` on doubles, the Euclidean modulo: never negative.
+fn dart_modulo(dividend: f64, divisor: f64) -> f64 {
+    let result = dividend.rem_euclid(divisor);
     if result == 0.0 { 0.0 } else { result }
 }
 
@@ -2658,11 +2659,7 @@ mod tests {
     }
 
     fn assert_item_rect(tester: &WidgetTester, index: i32, expected: Rect) {
-        waft_widgets::testing::assert_more_or_less_equals_within(
-            tester.get_rect(get_item(index)),
-            expected,
-            1e-6,
-        );
+        assert_eq!(tester.get_rect(get_item(index)), expected);
     }
 
     fn expect_items(tester: &WidgetTester, present: &[i32], absent: &[i32]) {
@@ -4526,6 +4523,65 @@ mod tests {
             let size = tester.get_size(find::by_key(waft_foundation::ValueKey::new("item")));
             // The default horizontal padding is 4 on each side.
             assert_eq!(size.width(), 800.0 - 8.0);
+        });
+    }
+
+    fn pump_in_zero_width_parent(tester: &mut WidgetTester, carousel: CarouselView) {
+        let theme = ThemeData::builder().build(&tester.cell.borrow());
+        tester.pump_widget(material_app(
+            theme,
+            Scaffold::new()
+                .body(SizedBox::new().width(0.0).child(carousel))
+                .into_widget(),
+        ));
+    }
+
+    // Dart's `expect(tester.takeException(), isNull)` in the five cases below: a panic fails
+    // the test.
+    #[test]
+    fn does_not_crash_when_parent_size_is_zero() {
+        test_widgets(|tester| {
+            pump_in_zero_width_parent(tester, CarouselView::new(40.0, vec![sized_item()]));
+        });
+    }
+
+    #[test]
+    fn does_not_crash_when_initial_viewport_dimension_is_zero_and_item_extent_is_fixed() {
+        test_widgets(|tester| {
+            tester.set_surface_size(Some(Size::new(0.0, 0.0)));
+            pump_carousel(tester, CarouselView::new(60.0, vec![sized_item()]));
+            tester.set_surface_size(None);
+        });
+    }
+
+    #[test]
+    fn does_not_crash_when_initial_viewport_dimension_is_zero_and_item_extent_is_infinite() {
+        test_widgets(|tester| {
+            tester.set_surface_size(Some(Size::new(0.0, 0.0)));
+            pump_carousel(tester, CarouselView::new(f64::INFINITY, vec![sized_item()]));
+            tester.set_surface_size(None);
+        });
+    }
+
+    #[test]
+    fn carousel_view_weighted_does_not_crash_when_parent_size_is_zero() {
+        test_widgets(|tester| {
+            pump_in_zero_width_parent(
+                tester,
+                CarouselView::weighted(vec![1, 2], vec![sized_item(), sized_item()]),
+            );
+        });
+    }
+
+    #[test]
+    fn carousel_view_weighted_does_not_crash_when_initial_viewport_dimension_is_zero() {
+        test_widgets(|tester| {
+            tester.set_surface_size(Some(Size::new(0.0, 0.0)));
+            pump_carousel(
+                tester,
+                CarouselView::weighted(vec![1, 2], vec![sized_item(), sized_item()]),
+            );
+            tester.set_surface_size(None);
         });
     }
 

@@ -1109,6 +1109,7 @@ impl DataTable {
     }
 
     #[expect(clippy::too_many_arguments, reason = "Dart's named arguments")]
+    #[allow(deprecated)] // Dart's `withOpacity`.
     fn build_data_cell(
         &self,
         app: &mut App,
@@ -1175,7 +1176,7 @@ impl DataTable {
                     .as_ref()
                     .expect("a data text style has a color")
                     .color()
-                    .with_alpha(0x99),
+                    .with_opacity(0.6),
             )
         } else {
             merged
@@ -1288,6 +1289,7 @@ impl StatelessWidget for DataTable {
         });
     }
 
+    #[allow(deprecated)] // Dart's `withOpacity`.
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         debug_assert!(!self.debug_interactive() || debug_check_has_material(app, context));
 
@@ -1307,7 +1309,7 @@ impl StatelessWidget for DataTable {
         let default_row_color =
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Selected) {
-                    return Some(primary.with_alpha(0x14));
+                    return Some(primary.with_opacity(0.08));
                 }
                 None
             });
@@ -3291,6 +3293,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Dart's `withOpacity`.
     fn data_row_renders_default_selected_row_colors() {
         test_widgets(|tester| {
             let theme_data = m3(&tester.cell.borrow());
@@ -3316,7 +3319,7 @@ pub(crate) mod tests {
             tester.pump_widget(build_table(true));
             assert_eq!(
                 last_row_decoration(tester).color.map(|color| color.color()),
-                Some(theme_data.color_scheme.primary.with_alpha(0x14))
+                Some(theme_data.color_scheme.primary.with_opacity(0.08))
             );
         });
     }

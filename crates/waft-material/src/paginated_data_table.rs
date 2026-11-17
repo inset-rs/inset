@@ -542,8 +542,9 @@ pub struct PaginatedDataTableState {
 
 impl PaginatedDataTableState {
     fn handle_data_source_changed(self: Handle<Self>, app: &mut App) {
-        self.set_state(app, |_state| {});
+        // Dart's `setState(_updateCaches)`.
         self.update_caches(app);
+        self.set_state(app, |_state| {});
     }
 
     fn update_caches(self: Handle<Self>, app: &mut App) {
@@ -690,7 +691,7 @@ impl State for PaginatedDataTableState {
             app,
             Listener::handle_method(self, Self::handle_data_source_changed),
         );
-        self.handle_data_source_changed_in_init(app);
+        self.handle_data_source_changed(app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &PaginatedDataTable) {
@@ -841,7 +842,6 @@ impl State for PaginatedDataTableState {
         }
         footer_widgets.push(SizedBox::new().width(14.0).into_widget());
 
-        let rows = self.get_rows(app, first_row_index, widget.rows_per_page);
         let table_key = app.get(self).table_key.clone();
         let header_style = if selected_row_count > 0 {
             theme_data
@@ -866,7 +866,7 @@ impl State for PaginatedDataTableState {
         Card::new()
             .semantic_container(false)
             .child(
-                LayoutBuilder::new(move |_app, _context, constraints| {
+                LayoutBuilder::new(move |app, _context, constraints| {
                     let mut children: Vec<WidgetRef> = Vec::new();
                     if !header_widgets.is_empty() {
                         let mut ink = Ink::new().height(64.0);
@@ -901,7 +901,9 @@ impl State for PaginatedDataTableState {
                                 .into_widget(),
                         );
                     }
-                    let mut table = DataTable::new(widget.columns.clone(), rows.clone())
+                    // Dart asks the source for the page's rows here, at layout.
+                    let rows = self.get_rows(app, first_row_index, widget.rows_per_page);
+                    let mut table = DataTable::new(widget.columns.clone(), rows)
                         .key(table_key.clone().into())
                         .sort_ascending(widget.sort_ascending)
                         // Make sure no decoration is set on the DataTable from the theme, as its
@@ -982,14 +984,6 @@ impl State for PaginatedDataTableState {
                 .into_widget(),
             )
             .into_widget()
-    }
-}
-
-impl PaginatedDataTableState {
-    /// The part of Dart's `initState` that runs `_handleDataSourceChanged()` once at start: the
-    /// caches are filled; no rebuild is asked, the first build is about to run.
-    fn handle_data_source_changed_in_init(self: Handle<Self>, app: &mut App) {
-        self.update_caches(app);
     }
 }
 
