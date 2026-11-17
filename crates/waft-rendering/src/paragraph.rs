@@ -3527,11 +3527,7 @@ impl SelectableFragment {
 struct FragmentTextLayout(Handle<SelectableFragment>);
 
 impl waft_services::TextLayoutMetrics for FragmentTextLayout {
-    fn get_line_at_offset(
-        self,
-        app: &mut App,
-        position: TextPosition,
-    ) -> TextSelection {
+    fn get_line_at_offset(self, app: &mut App, position: TextPosition) -> TextSelection {
         let range = app.get(self.0).range;
         let line = app.get(self.0).paragraph.get_line_at_offset(app, position);
         TextSelection::new(

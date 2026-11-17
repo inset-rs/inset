@@ -1472,8 +1472,7 @@ impl RenderEditable {
             TextAffinity::Downstream => position.offset,
         };
         debug_assert!(effective_offset >= 0);
-        if effective_offset > 0
-            && code_unit_at(&plain, effective_offset).is_some_and(is_whitespace)
+        if effective_offset > 0 && code_unit_at(&plain, effective_offset).is_some_and(is_whitespace)
         {
             if let Some(previous_word) = self.get_previous_word(app, word.start) {
                 match app.platform().target_platform() {
@@ -2249,27 +2248,15 @@ impl TextLayoutMetrics for RenderHandle<RenderEditable> {
         RenderEditable::get_line_at_offset(self, app, position)
     }
 
-    fn get_word_boundary(
-        self,
-        app: &mut App,
-        position: TextPosition,
-    ) -> waft_embedder::TextRange {
+    fn get_word_boundary(self, app: &mut App, position: TextPosition) -> waft_embedder::TextRange {
         RenderEditable::get_word_boundary(self, app, position)
     }
 
-    fn get_text_position_above(
-        self,
-        app: &mut App,
-        position: TextPosition,
-    ) -> TextPosition {
+    fn get_text_position_above(self, app: &mut App, position: TextPosition) -> TextPosition {
         RenderEditable::get_text_position_above(self, app, position)
     }
 
-    fn get_text_position_below(
-        self,
-        app: &mut App,
-        position: TextPosition,
-    ) -> TextPosition {
+    fn get_text_position_below(self, app: &mut App, position: TextPosition) -> TextPosition {
         RenderEditable::get_text_position_below(self, app, position)
     }
 }

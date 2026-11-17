@@ -11,8 +11,8 @@
 #![feature(arbitrary_self_types)]
 
 mod autofill;
-mod browser_context_menu;
 mod binding;
+mod browser_context_menu;
 mod clipboard;
 mod haptic_feedback;
 mod hardware_keyboard;
@@ -35,8 +35,8 @@ mod text_layout_metrics;
 mod undo_manager;
 
 pub use autofill::*;
-pub use browser_context_menu::*;
 pub use binding::*;
+pub use browser_context_menu::*;
 pub use clipboard::*;
 pub use haptic_feedback::*;
 pub use hardware_keyboard::*;

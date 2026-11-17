@@ -24,8 +24,8 @@ use crate::framework::{
 use crate::widgets::automatic_keep_alive::{
     AutomaticKeepAlive, AutomaticKeepAliveClientMixin, AutomaticKeepAliveClientMixinData,
 };
-use crate::widgets::selection_container::{SelectionContainer, SelectionRegistrarScope};
 use crate::widgets::basic::{IndexedSemantics, KeyedSubtree, RepaintBoundary};
+use crate::widgets::selection_container::{SelectionContainer, SelectionRegistrarScope};
 
 /// Signature for a function that creates a widget for a given index, e.g., in a list, but may
 /// return `None`.
@@ -315,16 +315,20 @@ struct SelectionKeepAliveState {
 }
 
 impl SelectionKeepAliveState {
-    fn registrar_handle(self: Handle<Self>, app: &App) -> Option<waft_rendering::AnySelectionRegistrar> {
-        app.get(self).registrar.as_ref().map(|registrar| registrar.handle())
+    fn registrar_handle(
+        self: Handle<Self>,
+        app: &App,
+    ) -> Option<waft_rendering::AnySelectionRegistrar> {
+        app.get(self)
+            .registrar
+            .as_ref()
+            .map(|registrar| registrar.handle())
     }
 
     fn listens_to(self: Handle<Self>, selectable: AnySelectable) -> Listener {
         Listener::new(move |app| {
             let add = selectable.value(app).has_selection();
-            SelectionKeepAliveState::update_selectables_with_selections(
-                self, app, selectable, add,
-            );
+            SelectionKeepAliveState::update_selectables_with_selections(self, app, selectable, add);
         })
     }
 
@@ -361,7 +365,6 @@ impl SelectionKeepAliveState {
         }
     }
 }
-
 
 impl State for SelectionKeepAliveState {
     type Widget = SelectionKeepAlive;
@@ -422,11 +425,7 @@ impl State for SelectionKeepAliveState {
             return child;
         }
         let child = self.widget(app).child.clone();
-        SelectionRegistrarScope::new(
-            self.as_selection_registrar().keep(app),
-            child,
-        )
-        .into_widget()
+        SelectionRegistrarScope::new(self.as_selection_registrar().keep(app), child).into_widget()
     }
 }
 

@@ -48,8 +48,7 @@ use waft_scheduler::{
 };
 use waft_services::{
     AnyTextSelectionDelegate, Clipboard, HapticFeedback, HardwareKeyboard, LogicalKeyboardKey,
-    SelectionChangedCause, ServicesBinding, TextSelectionDelegate,
-    is_line_terminator,
+    SelectionChangedCause, ServicesBinding, TextSelectionDelegate, is_line_terminator,
 };
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
