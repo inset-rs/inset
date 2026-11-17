@@ -5,5 +5,6 @@
 
 mod button_input;
 mod selector_bar_icon;
+mod table_view_selection;
 mod text_box_height;
 mod text_box_no_wrap;
