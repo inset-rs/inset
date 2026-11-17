@@ -61,7 +61,13 @@ impl InfoBadgeDisplayKind {
     fn margin(self, r: &ThemeResources) -> [f64; 4] {
         match self {
             Self::Dot => [0.0; 4],
-            Self::Value => r.value_info_badge_text_margin,
+            // Waft's line box is the font's ascent and descent, as Flutter's is: the number
+            // centred in it sits within half a pixel of the badge's centre, and the template's
+            // 2 px lift would put it about 0.7 px high.
+            Self::Value => {
+                let [left, top, right, _bottom] = r.value_info_badge_text_margin;
+                [left, top, right, 0.0]
+            }
             Self::Icon => r.icon_info_badge_icon_margin,
             Self::FontIcon => r.icon_info_badge_font_icon_margin,
         }

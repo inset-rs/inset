@@ -326,6 +326,10 @@ Ported against: aa3207e6
   Reason: os — WinUI's named icon styles depend on symbols from the Windows icon font, which this kit replaces with the bundled Fluent System Icons font.
   Affect: Applications supply `icon_source` themselves and use 4 logical pixels of top padding, 2 at the bottom and none on either side when reproducing the attention or informational icon styles.
 
+- Change: The badge's number is centred in its line without the 2 pixels the template lifts it by.
+  Reason: framework — the lift is tuned for XAML's text layout, and Flutter's text line, the font's ascent and descent, already centres the digits within half a pixel.
+  Affect: The number sits in the middle of the badge with Selawik or a system font, where the lift put it about 0.7 pixels high.
+
 ## flyout/mod.rs → `Flyout` and `FlyoutBase`
 
 - Change: `Flyout` keeps its content mounted while hidden and displays it inside the application’s root Overlay.
