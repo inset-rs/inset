@@ -2,7 +2,10 @@
 //! one family of Material widgets.
 //!
 //! The index is itself a `Scaffold` with an `AppBar`, a `Drawer` and a `ListView` of
-//! `ListTile`s, so the gallery's own structure is built out of the widgets it shows.
+//! `ListTile`s, so the gallery's own structure is built out of the widgets it shows. With the
+//! page it opens it is a list-detail layout on the pane scaffold: side by side on a wide window,
+//! one over the other on a phone. The Adaptive Layout entry is [`reply`], Google's Material 3
+//! mail sample, a whole app of its own.
 //!
 //! The crate is a library as well as a binary so `tests/` can push the real gallery's pages
 //! instead of rebuilding a look-alike tree of its own.
@@ -11,6 +14,8 @@
 pub mod app;
 pub mod catalog;
 pub mod pages;
+pub mod panes;
+pub mod reply;
 pub mod support;
 
 pub use app::{Gallery, entry_route, open_entry, open_sub_page, run_gallery, sub_route};
