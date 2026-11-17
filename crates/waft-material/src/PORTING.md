@@ -752,7 +752,6 @@ Ported against: 34b89b2086d4
 - material.rs: `assert(vsync == renderObject.vsync)` in `_MaterialState`. Trigger: an identity hook on `TickerProvider`.
 - button_style.rs, menu_style.rs: `ButtonStyle`'s and `MenuStyle`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
 - tooltip_theme.rs: `TooltipThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `TooltipThemeData`.
-- ink_well.rs: `InkResponse(onDoubleTap:)` reaching the gesture detector (the field, `handleDoubleTap` and `DoubleTapGestureRecognizer` exist; the detector does not pass the callback). Trigger: passing `on_double_tap` in InkResponse's `GestureDetector`.
 - ink_decoration.rs: `Ink.image`. Trigger: `DecorationImage`.
 - debug.rs: the `describeMissingAncestor` part of the messages. Trigger: `BuildContext::describe_missing_ancestor` in waft-widgets.
 - theme_data.rs: the component theme field bottom_app_bar_theme, with its factory and `copyWith` argument and its `lerp` and `==` branches. Trigger: `bottom_app_bar_theme.dart`, with its component.
@@ -796,7 +795,6 @@ Ported against: 34b89b2086d4
 - date_picker.rs, time_picker.rs: the `anchorPoint` of `showDatePicker`, `showDateRangePicker` and `showTimePicker`, and the cases on `anchorPoint` and display features (six in date_picker_test, the `anchorPoint` ones of time_picker_test). Trigger: `display_feature_sub_screen.dart`, with dialog.rs's `anchorPoint`.
 - date_picker.rs tests: one assertion of the M3 and M2 'Default layout (calendar mode)' cases of date_range_picker_test, the gap between the first and last date headers (66 in M3, 72 in M2), the width of the `Text(' – ')` between them, whose trailing space Valo leaves out of a paragraph's max intrinsic width. Trigger: Valo counting trailing whitespace in a paragraph's max intrinsic width.
 - date_picker.rs tests: the golden 'Dialog contents are visible' and 'Calendar dialog contents are visible' cases (textScaler 0.88, 1.0, 2.0). Trigger: golden comparison in waft-test.
-- time_picker.rs tests: the 'Can double tap hours/minutes (when selected) to enter input mode' cases. Trigger: ink_well.rs's `InkResponse(onDoubleTap:)` wiring.
 - time_picker.rs tests, calendar_date_picker.rs tests: the cases that need non-English `MaterialLocalizations` ('Accepts 24-hour input for a 24-hour locale', 'parses localized digits', 'TimePicker dialog displays centered separator between hour and minute inputs for non-english locale', the `ko_KR` and Farsi spacing cases, `weekdayBuilder` in `en_GB` order, 'Date text localization'). Trigger: non-English `MaterialLocalizations`.
 - time_picker.rs tests: 'Material3 - large actions label should not overflow in input mode', which asserts no overflow was reported. Trigger: `FlutterError.reportError`, with the flex overflow report.
 - time_picker.rs tests: the `feedback.clickSoundCount` assertions. Trigger: `SystemSound`.
