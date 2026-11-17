@@ -25,6 +25,7 @@ use crate::badge_theme::BadgeThemeData;
 use crate::banner_theme::MaterialBannerThemeData;
 use crate::bottom_navigation_bar_theme::BottomNavigationBarThemeData;
 use crate::bottom_sheet_theme::BottomSheetThemeData;
+use crate::button_bar_theme::ButtonBarThemeData;
 use crate::button_theme::ButtonThemeData;
 use crate::card_theme::CardThemeData;
 use crate::checkbox_theme::CheckboxThemeData;
@@ -623,6 +624,8 @@ pub struct ThemeData {
     pub bottom_navigation_bar_theme: BottomNavigationBarThemeData,
     /// A theme for customizing the color, elevation, and shape of a bottom sheet.
     pub bottom_sheet_theme: BottomSheetThemeData,
+    /// A theme for customizing the appearance and layout of `ButtonBar` widgets.
+    pub button_bar_theme: ButtonBarThemeData,
     /// Defines the default configuration of button widgets, like `DropdownButton` and
     /// `ButtonBar`.
     pub button_theme: ButtonThemeData,
@@ -1143,6 +1146,11 @@ impl ThemeData {
                 t,
             )
             .expect("both sides"),
+            button_bar_theme: ButtonBarThemeData::lerp(
+                Some(&a.button_bar_theme),
+                Some(&b.button_bar_theme),
+                t,
+            ),
             button_theme: if t < 0.5 {
                 a.button_theme.clone()
             } else {
@@ -1372,6 +1380,7 @@ impl PartialEq for ThemeData {
             && other.banner_theme == self.banner_theme
             && other.bottom_navigation_bar_theme == self.bottom_navigation_bar_theme
             && other.bottom_sheet_theme == self.bottom_sheet_theme
+            && other.button_bar_theme == self.button_bar_theme
             && other.button_theme == self.button_theme
             && other.card_theme == self.card_theme
             && other.checkbox_theme == self.checkbox_theme
@@ -1476,6 +1485,7 @@ pub struct ThemeDataBuilder {
     banner_theme: Option<Box<MaterialBannerThemeData>>,
     bottom_navigation_bar_theme: Option<Box<BottomNavigationBarThemeData>>,
     bottom_sheet_theme: Option<Box<BottomSheetThemeData>>,
+    button_bar_theme: Option<Box<ButtonBarThemeData>>,
     button_theme: Option<Box<ButtonThemeData>>,
     card_theme: Option<Box<CardThemeData>>,
     checkbox_theme: Option<Box<CheckboxThemeData>>,
@@ -1828,6 +1838,12 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(buttonBarTheme:)`.
+    pub fn button_bar_theme(mut self, button_bar_theme: ButtonBarThemeData) -> ThemeDataBuilder {
+        self.button_bar_theme = Some(Box::new(button_bar_theme));
+        self
+    }
+
     /// Dart `ThemeData(buttonTheme:)`.
     pub fn button_theme(mut self, button_theme: ButtonThemeData) -> ThemeDataBuilder {
         self.button_theme = Some(Box::new(button_theme));
@@ -2147,6 +2163,7 @@ impl ThemeDataBuilder {
             banner_theme,
             bottom_navigation_bar_theme,
             bottom_sheet_theme,
+            button_bar_theme,
             button_theme,
             card_theme,
             checkbox_theme,
@@ -2385,6 +2402,9 @@ impl ThemeDataBuilder {
                 Colors::BLACK.with_opacity(0.6)
             }
         });
+        let button_bar_theme = button_bar_theme
+            .map(|button_bar_theme| *button_bar_theme)
+            .unwrap_or_default();
         // The default [buttonTheme] is here because it doesn't use the defaults for
         // [disabledColor], [highlightColor], and [splashColor].
         let button_theme = button_theme
@@ -2563,6 +2583,7 @@ impl ThemeDataBuilder {
             banner_theme: unboxed_or_default(banner_theme),
             bottom_navigation_bar_theme: unboxed_or_default(bottom_navigation_bar_theme),
             bottom_sheet_theme: unboxed_or_default(bottom_sheet_theme),
+            button_bar_theme,
             button_theme,
             card_theme: unboxed_or_default(card_theme),
             checkbox_theme: unboxed_or_default(checkbox_theme),
@@ -2956,6 +2977,12 @@ impl ThemeDataCopyWith {
         bottom_sheet_theme: BottomSheetThemeData,
     ) -> ThemeDataCopyWith {
         self.theme.bottom_sheet_theme = bottom_sheet_theme;
+        self
+    }
+
+    /// Dart `copyWith(buttonBarTheme:)`.
+    pub fn button_bar_theme(mut self, button_bar_theme: ButtonBarThemeData) -> ThemeDataCopyWith {
+        self.theme.button_bar_theme = button_bar_theme;
         self
     }
 
@@ -3770,6 +3797,7 @@ mod tests {
 
     use waft_painting::TextStyle;
 
+    use waft_widgets::MainAxisAlignment;
     use waft_widgets::testing::{WidgetTester, test_widgets};
 
     use super::*;
@@ -5043,6 +5071,7 @@ mod tests {
             bottom_navigation_bar_theme: BottomNavigationBarThemeData::new()
                 .r#type(BottomNavigationBarType::Fixed),
             bottom_sheet_theme: BottomSheetThemeData::new().elevation(1.0),
+            button_bar_theme: ButtonBarThemeData::new().with_alignment(MainAxisAlignment::Center),
             button_theme: ButtonThemeData::new().with_color_scheme(ColorScheme::dark()),
             card_theme: CardThemeData::new().elevation(1.0),
             checkbox_theme: CheckboxThemeData::new(),
@@ -5186,6 +5215,7 @@ mod tests {
             bottom_navigation_bar_theme: BottomNavigationBarThemeData::new()
                 .r#type(BottomNavigationBarType::Shifting),
             bottom_sheet_theme: BottomSheetThemeData::new().elevation(2.0),
+            button_bar_theme: ButtonBarThemeData::new().with_alignment(MainAxisAlignment::End),
             button_theme: ButtonThemeData::new().with_color_scheme(ColorScheme::light()),
             card_theme: CardThemeData::new().elevation(2.0),
             checkbox_theme: CheckboxThemeData::new(),
@@ -5301,6 +5331,7 @@ mod tests {
             .banner_theme(other_theme.banner_theme.clone())
             .bottom_navigation_bar_theme(other_theme.bottom_navigation_bar_theme.clone())
             .bottom_sheet_theme(other_theme.bottom_sheet_theme.clone())
+            .button_bar_theme(other_theme.button_bar_theme.clone())
             .button_theme(other_theme.button_theme.clone())
             .card_theme(other_theme.card_theme.clone())
             .checkbox_theme(other_theme.checkbox_theme.clone())
@@ -5450,6 +5481,10 @@ mod tests {
             assert_eq!(
                 theme_data_copy.bottom_sheet_theme,
                 other_theme.bottom_sheet_theme
+            );
+            assert_eq!(
+                theme_data_copy.button_bar_theme,
+                other_theme.button_bar_theme
             );
             assert_eq!(theme_data_copy.button_theme, other_theme.button_theme);
             assert_eq!(theme_data_copy.card_theme, other_theme.card_theme);
