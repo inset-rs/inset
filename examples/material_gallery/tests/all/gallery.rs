@@ -15,15 +15,15 @@ use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
 use waft_embedder::{Brightness, Offset, Size, TargetPlatform};
 use waft_material::{
     AppBar, BackButton, Drawer, DrawerButton, DrawerHeader, ElevatedButton, EndDrawerButton,
-    FilledButton, IconButton, ListTile, OutlinedButton, Scaffold, SliverAppBar, SnackBar,
-    TextButton, Theme,
+    FilledButton, IconButton, ListTile, NavigationRail, OutlinedButton, Scaffold, SliverAppBar,
+    SnackBar, TextButton, Theme,
 };
 use waft_rendering::{RenderAnimatedOpacity, RenderAnimatedOpacityMixin, RenderOpacity};
 use waft_widgets::testing::{
     Finder, TargetPlatformVariant, WidgetTester, expect, find, finds_nothing, finds_one_widget,
     finds_widgets, test_widgets_variant,
 };
-use waft_widgets::{GlobalKey, NavigatorState, RouteRef, Text, Wrap};
+use waft_widgets::{GlobalKey, NavigatorState, RouteRef, Text, WidgetsBinding, Wrap};
 
 /// The window `main.rs` opens, in logical points.
 const VIEW: [f64; 2] = [420.0, 720.0];
@@ -96,6 +96,17 @@ impl<'t> Fixture<'t> {
     fn can_pop(&mut self) -> bool {
         let navigator = self.navigator();
         navigator.can_pop(&self.tester.cell.borrow())
+    }
+
+    /// The system back, as the engine's `popRoute` sends it, and lets the app settle.
+    fn system_back(&mut self) {
+        {
+            let mut app = self.tester.cell.borrow_mut();
+            let view = app.platform().views().first().expect("a view").id();
+            WidgetsBinding::instance(&mut app).handle_pop_route(&mut app, view);
+            app.drain_microtasks();
+        }
+        self.settle();
     }
 
     /// Taps the middle of the one onstage widget `finder` finds, and lets the app settle.
@@ -939,5 +950,42 @@ fn an_adaptive_mail_opens_its_detail_and_back_returns_to_the_list() {
 
         fixture.tap(find::by_type::<BackButton>().first());
         fixture.expect_shown("Mail 1");
+
+        // The system back closes the mail, not the whole page.
+        fixture.tap_text("Mail 2");
+        fixture.expect_shown("Message 2");
+        fixture.system_back();
+        fixture.expect_shown("Mail 2");
+        fixture.assert_app_bar_reads(Entry::Adaptive.title());
+    });
+}
+
+/// On a wide window the adaptive page's inbox shows the list beside the detail in one page, a
+/// rail instead of the bar, and opening a mail changes only the detail.
+#[test]
+fn an_adaptive_wide_window_shows_the_list_beside_the_detail() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Adaptive);
+        let ratio = fixture.tester.device_pixel_ratio();
+        fixture
+            .tester
+            .view()
+            .set_physical_size(Size::new(1000.0 * ratio, VIEW[1] * ratio));
+        fixture.settle();
+        expect(
+            fixture.tester,
+            &find::by_type::<NavigationRail>(),
+            finds_one_widget(),
+        );
+        fixture.expect_shown("Select a mail");
+
+        fixture.tap_text("Mail 1");
+        fixture.expect_shown("Message 1");
+        fixture.expect_shown("Mail 2");
+        expect(
+            fixture.tester,
+            &find::by_type::<BackButton>(),
+            finds_one_widget(),
+        );
     });
 }

@@ -32,7 +32,7 @@ pub struct AdaptiveDemo;
 pub struct AdaptiveDemoState {
     state: StateData<AdaptiveDemo>,
     destination: usize,
-    /// `None` is the inbox's home; the list and each mail are panes.
+    /// The list, then each opened mail; every entry is a pane.
     stack: Vec<Option<ThreePaneScaffoldDestinationItem<u32>>>,
 }
 
@@ -47,7 +47,7 @@ impl StatefulWidget for AdaptiveDemo {
         AdaptiveDemoState {
             state: StateData::new(),
             destination: 0,
-            stack: vec![None, list],
+            stack: vec![list],
         }
     }
 }
@@ -87,38 +87,34 @@ fn inbox(self_: Handle<AdaptiveDemoState>, app: &mut App, context: BuildContext)
     );
     let stack = app.get(self_).stack.clone();
     let directive = strategy.directive.clone();
-    let stack_for_pages = stack.clone();
-    let stack_for_scene = stack.clone();
-    ThreePaneNavigator::new(strategy, stack)
-        .entry_page(move |app, context, index| {
-            match stack_for_pages[index]
-                .as_ref()
-                .map(|item| (item.pane, item.content_key))
-            {
-                Some((ListDetailPaneScaffoldRole::DETAIL, Some(mail))) => {
-                    mail_detail(mail).into_widget()
-                }
-                Some((ListDetailPaneScaffoldRole::LIST, _)) => mail_list(self_, app, context, None),
-                _ => Center::new().child(Text::new("Inbox")).into_widget(),
-            }
-        })
-        .scene_page(move |app, context, scene| {
-            let open_mail = scene
+    ThreePaneNavigator::new(
+        strategy,
+        stack,
+        move |app, context, index| match open_mail(app, self_, index) {
+            Some(mail) => mail_detail(mail).into_widget(),
+            None => mail_list(self_, app, context, None),
+        },
+        move |app, context, scene| {
+            let mail = scene
                 .entry_for(ListDetailPaneScaffoldRole::DETAIL)
-                .and_then(|index| stack_for_scene[index].as_ref()?.content_key);
+                .and_then(|index| open_mail(app, self_, index));
             ThreePaneScaffold::list_detail(
                 directive.clone(),
                 scene.value,
-                Pane::new(mail_list(self_, app, context, open_mail))
+                Pane::new(mail_list(self_, app, context, mail))
                     .preferred_width(PanePreferredSize::Fixed(300.0)),
-                Pane::new(mail_detail_of(open_mail)),
+                Pane::new(mail_detail_of(mail)),
             )
             .into_widget()
-        })
-        .on_truncate(move |app, len| {
-            self_.set_state(app, |state| state.stack.truncate(len));
-        })
-        .into_widget()
+        },
+        move |app, len| self_.set_state(app, |state| state.stack.truncate(len)),
+    )
+    .into_widget()
+}
+
+/// The mail `stack[index]` shows: `None` for the list.
+fn open_mail(app: &App, self_: Handle<AdaptiveDemoState>, index: usize) -> Option<u32> {
+    app.get(self_).stack[index].as_ref()?.content_key
 }
 
 fn mail_list(
