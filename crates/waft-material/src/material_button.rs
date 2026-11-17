@@ -430,22 +430,27 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use waft_embedder::{Clip, Offset, Size, TargetPlatform};
-    use waft_foundation::ValueKey;
-    use waft_rendering::testing::{PaintCall, assert_paints};
-    use waft_widgets::testing::{TestPointer, find, test_widgets};
+    use waft_embedder::{Clip, FontWeight, Offset, Radius, Rect, Size, TargetPlatform};
+    use waft_foundation::{K_IS_WEB, ValueKey};
+    use waft_painting::{
+        BorderRadius, BorderSide, EdgeInsets, RoundedRectangleBorder, ShapeBorder,
+    };
+    use waft_rendering::testing::{CanvasMethod, PaintCall, assert_paints, count_calls};
+    use waft_services::{MouseCursorRef, SystemMouseCursors};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
     use waft_widgets::{
-        Center, Directionality, FocusHighlightStrategy, FocusManager, FocusNode, IntoWidget,
-        SizedBox, Text, TextDirection,
+        Center, Container, Directionality, FocusHighlightStrategy, FocusNode, IntoWidget,
+        MouseRegion, SizedBox, Text, TextDirection,
     };
 
-    use crate::material::Material;
-
     use super::*;
+    use crate::ink_well::InkWell;
+    use crate::material::{Material, MaterialType};
     use crate::test_support::{PaintInspection, material_app};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
 
+    /// Dart's `ThemeData(useMaterial3: false)` on the test platform.
     fn theme(app: &App) -> ThemeData {
         ThemeData::builder()
             .use_material3(false)
@@ -453,186 +458,17 @@ mod tests {
             .build(app)
     }
 
-    fn pump(tester: &mut waft_widgets::testing::WidgetTester, button: MaterialButton) {
-        let theme = theme(&tester.cell.borrow());
-        tester.pump_widget(material_app(
-            theme,
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(Material::new().child(button)),
-            )
-            .into_widget(),
-        ));
+    fn noop() -> Option<Listener> {
+        Some(Listener::new(|_app| {}))
     }
 
-    fn raw_button(tester: &waft_widgets::testing::WidgetTester) -> RawMaterialButton {
-        tester.widget(
-            find::descendant(
-                find::by_type::<MaterialButton>(),
-                find::by_type::<RawMaterialButton>(),
-            ),
-            |button: &RawMaterialButton| RawMaterialButton {
-                key: button.key.clone(),
-                on_pressed: button.on_pressed.clone(),
-                on_long_press: button.on_long_press.clone(),
-                on_highlight_changed: button.on_highlight_changed.clone(),
-                mouse_cursor: button.mouse_cursor.clone(),
-                text_style: button.text_style.clone(),
-                fill_color: button.fill_color,
-                focus_color: button.focus_color,
-                hover_color: button.hover_color,
-                highlight_color: button.highlight_color,
-                splash_color: button.splash_color,
-                elevation: button.elevation,
-                hover_elevation: button.hover_elevation,
-                focus_elevation: button.focus_elevation,
-                highlight_elevation: button.highlight_elevation,
-                disabled_elevation: button.disabled_elevation,
-                padding: button.padding,
-                visual_density: button.visual_density,
-                constraints: button.constraints,
-                shape: button.shape.clone(),
-                animation_duration: button.animation_duration,
-                clip_behavior: button.clip_behavior,
-                focus_node: button.focus_node.clone(),
-                autofocus: button.autofocus,
-                material_tap_target_size: button.material_tap_target_size,
-                child: button.child.clone(),
-                enable_feedback: button.enable_feedback,
-            },
-        )
-    }
-
-    #[test]
-    fn min_width_and_height_are_the_button_s_minimum_size() {
-        test_widgets(|tester| {
-            let cases = [
-                (Some(8.0), Some(24.0), Size::new(8.0, 24.0)),
-                (Some(8.0), None, Size::new(8.0, 36.0)),
-                (None, Some(8.0), Size::new(88.0, 8.0)),
-                (None, None, Size::new(88.0, 36.0)),
-            ];
-            for (min_width, height, expected) in cases {
-                let mut button = MaterialButton::new(None)
-                    .material_tap_target_size(MaterialTapTargetSize::ShrinkWrap)
-                    .padding(waft_painting::EdgeInsets::ZERO);
-                if let Some(min_width) = min_width {
-                    button = button.min_width(min_width);
-                }
-                if let Some(height) = height {
-                    button = button.height(height);
-                }
-                pump(tester, button);
-                assert_eq!(tester.get_size(find::by_type::<MaterialButton>()), expected);
-            }
-        });
-    }
-
-    #[test]
-    fn the_shape_overrides_the_button_theme_shape() {
-        test_widgets(|tester| {
-            pump(
-                tester,
-                MaterialButton::new(None).shape(waft_painting::StadiumBorder::new(
-                    waft_painting::BorderSide::NONE,
-                )),
-            );
-            let button = raw_button(tester);
-            assert!(
-                button
-                    .shape
-                    .as_any()
-                    .downcast_ref::<waft_painting::StadiumBorder>()
-                    .is_some()
-            );
-        });
-    }
-
-    #[test]
-    fn the_disabled_elevation_is_passed_and_defaults_to_zero() {
-        test_widgets(|tester| {
-            pump(tester, MaterialButton::new(None).disabled_elevation(16.0));
-            assert_eq!(raw_button(tester).disabled_elevation, 16.0);
-
-            pump(tester, MaterialButton::new(None));
-            assert_eq!(raw_button(tester).disabled_elevation, 0.0);
-        });
-    }
-
-    #[test]
-    fn the_disabled_color_takes_precedence() {
-        test_widgets(|tester| {
-            pump(
-                tester,
-                MaterialButton::new(None).disabled_color(Color::new(0xFF00FF00)),
-            );
-            let material = tester.widget(
-                find::descendant(
-                    find::by_type::<MaterialButton>(),
-                    find::by_type::<Material>(),
-                )
-                .first(),
-                |material: &Material| (material.color, material.r#type),
-            );
-            assert_eq!(material.0, Some(Color::new(0xFF00FF00)));
-        });
-    }
-
-    #[test]
-    fn the_button_has_no_clip_by_default() {
-        test_widgets(|tester| {
-            pump(tester, MaterialButton::new(None));
-            assert_eq!(raw_button(tester).clip_behavior, Clip::None);
-        });
-    }
-
-    #[test]
-    fn tapping_and_long_pressing_reach_their_own_callbacks() {
-        test_widgets(|tester| {
-            let tapped = Rc::new(Cell::new(false));
-            let long_pressed = Rc::new(Cell::new(false));
-            let tapped_seen = Rc::clone(&tapped);
-            let long_seen = Rc::clone(&long_pressed);
-            pump(
-                tester,
-                MaterialButton::new(Some(Listener::new(move |_app| tapped_seen.set(true))))
-                    .on_long_press(Listener::new(move |_app| long_seen.set(true)))
-                    .child(Text::new("button")),
-            );
-
-            tester.tap(find::by_type::<MaterialButton>());
-            assert!(tapped.get());
-            assert!(!long_pressed.get());
-
-            tapped.set(false);
-            tester.long_press(find::by_type::<MaterialButton>());
-            assert!(!tapped.get(), "a long press is not a tap");
-            assert!(long_pressed.get());
-        });
-    }
-
-    #[test]
-    fn the_button_does_not_crash_at_zero_area() {
-        test_widgets(|tester| {
-            let theme = theme(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                Center::new()
-                    .child(SizedBox::shrink().child(
-                        MaterialButton::new(Some(Listener::new(|_app| {}))).child(Text::new("X")),
-                    ))
-                    .into_widget(),
-            ));
-            assert_eq!(
-                tester.get_size(find::by_type::<MaterialButton>()),
-                Size::ZERO
-            );
-        });
+    fn button(on_pressed: bool) -> MaterialButton {
+        MaterialButton::new(on_pressed.then(|| Listener::new(|_app| {}))).child(Text::new("button"))
     }
 
     /// Dart's `pumpWidget(Directionality(textDirection: ltr, child: button))`: no `Material`
     /// above it, so the tester's first ink features are the button's own.
-    fn pump_bare(tester: &mut waft_widgets::testing::WidgetTester, button: MaterialButton) {
+    fn pump_bare(tester: &mut WidgetTester, button: MaterialButton) {
         let theme = theme(&tester.cell.borrow());
         tester.pump_widget(material_app(
             theme,
@@ -640,31 +476,108 @@ mod tests {
         ));
     }
 
-    fn button(on_pressed: bool) -> MaterialButton {
-        MaterialButton::new(on_pressed.then(|| Listener::new(|_app| {}))).child(Text::new("button"))
+    /// Dart's `pumpWidget(Theme(data: ThemeData(useMaterial3: false), child: Directionality(
+    /// textDirection: ltr, child: child)))`.
+    fn pump_themed<K>(tester: &mut WidgetTester, child: impl IntoWidget<K>) {
+        let theme = theme(&tester.cell.borrow());
+        tester.pump_widget(
+            Theme::new(theme, Directionality::new(TextDirection::Ltr, child)).into_widget(),
+        );
     }
 
-    fn button_elevation(tester: &waft_widgets::testing::WidgetTester) -> f64 {
+    fn button_material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
         tester.widget(
             find::descendant(
                 find::by_type::<MaterialButton>(),
                 find::by_type::<Material>(),
-            )
-            .first(),
-            |material: &Material| material.elevation,
+            ),
+            read,
         )
     }
 
+    fn button_elevation(tester: &WidgetTester) -> f64 {
+        button_material(tester, |material| material.elevation)
+    }
+
+    fn raw_button_disabled_elevation(tester: &WidgetTester) -> f64 {
+        tester.widget(
+            find::descendant(
+                find::by_type::<MaterialButton>(),
+                find::by_type::<RawMaterialButton>(),
+            ),
+            |button: &RawMaterialButton| button.disabled_elevation,
+        )
+    }
+
+    fn enabled(tester: &WidgetTester) -> bool {
+        tester.widget(
+            find::by_type::<MaterialButton>(),
+            |button: &MaterialButton| button.enabled(),
+        )
+    }
+
+    /// The `Material` checks every step of `MaterialButton defaults` repeats.
+    fn assert_default_material(tester: &WidgetTester, elevation: f64, text_color: Color) {
+        let shape = RoundedRectangleBorder::new(
+            BorderSide::NONE,
+            BorderRadius::all(Radius::circular(2.0)).into(),
+        );
+        button_material(tester, |material| {
+            assert_eq!(material.animation_duration, Duration::from_millis(200));
+            assert!(material.border_on_foreground);
+            assert_eq!(material.border_radius, None);
+            assert_eq!(material.clip_behavior, Clip::None);
+            assert_eq!(material.color, None);
+            assert_eq!(material.elevation, elevation);
+            assert_eq!(material.shadow_color, None);
+            assert!(material.shape.as_deref() == Some(&shape as &dyn ShapeBorder));
+            let text_style = material.text_style.as_ref().expect("a text style");
+            assert_eq!(
+                text_style.color.as_ref().map(|color| color.color()),
+                Some(text_color)
+            );
+            assert_eq!(text_style.font_family.as_deref(), Some("Roboto"));
+            assert_eq!(text_style.font_size, Some(14.0));
+            assert_eq!(text_style.font_weight, Some(FontWeight::W500));
+            assert_eq!(material.r#type, MaterialType::Transparency);
+        });
+    }
+
     #[test]
-    fn a_hovered_button_paints_its_hover_color() {
+    fn material_button_defaults() {
+        test_widgets(|tester| {
+            // Enabled MaterialButton
+            pump_themed(tester, button(true));
+            assert_default_material(tester, 2.0, Color::new(0xdd000000));
+
+            let center = tester.get_center(find::by_type::<MaterialButton>());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, center);
+            tester.pump_and_settle();
+
+            // Only elevation changes when enabled and pressed.
+            assert_default_material(tester, 8.0, Color::new(0xdd000000));
+
+            // Disabled MaterialButton
+            pump_themed(tester, button(false));
+            assert_default_material(tester, 0.0, Color::new(0x61000000));
+
+            // Finish gesture to release resources.
+            tester.up(&gesture);
+            tester.pump_and_settle();
+        });
+    }
+
+    #[test]
+    fn does_material_button_work_with_hover() {
         test_widgets(|tester| {
             let hover_color = Color::new(0xff001122);
             pump_bare(tester, button(true).hover_color(hover_color));
 
-            let mut mouse = TestPointer::mouse(1, 0);
-            tester.add_pointer(&mut mouse, Offset::ZERO);
+            let mut gesture = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(
-                &mut mouse,
+                &mut gesture,
                 tester.get_center(find::by_type::<MaterialButton>()),
                 false,
             );
@@ -678,22 +591,19 @@ mod tests {
     }
 
     #[test]
-    fn a_focused_button_paints_its_focus_color() {
+    fn does_material_button_work_with_focus() {
         test_widgets(|tester| {
             let focus_color = Color::new(0xff001122);
             let focus_node: FocusNodeRef =
                 FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
-            {
-                let mut app = tester.cell.borrow_mut();
-                FocusManager::instance(&mut app)
-                    .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-            }
             pump_bare(
                 tester,
                 button(true)
                     .focus_color(focus_color)
                     .focus_node(focus_node.clone()),
             );
+
+            tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
 
@@ -701,12 +611,11 @@ mod tests {
                 tester.ink_list().ops(),
                 &[PaintCall::rect(Some(focus_color))],
             );
-            assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
         });
     }
 
     #[test]
-    fn elevation_and_colors_follow_focus_then_hover_then_press() {
+    fn material_button_elevation_and_colors_have_proper_precedence() {
         test_widgets(|tester| {
             let elevation = 10.0;
             let focus_elevation = 11.0;
@@ -731,16 +640,12 @@ mod tests {
                     .focus_node(focus_node.clone()),
             );
             tester.pump_and_settle();
-            {
-                let mut app = tester.cell.borrow_mut();
-                FocusManager::instance(&mut app)
-                    .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-            }
+            tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
-            // Base elevation.
+            // Base elevation
             assert_eq!(button_elevation(tester), elevation);
 
-            // Focus elevation overrides base.
+            // Focus elevation overrides base
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
             assert_paints(
@@ -750,11 +655,11 @@ mod tests {
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_eq!(button_elevation(tester), focus_elevation);
 
-            // Hover elevation overrides focus.
-            let mut mouse = TestPointer::mouse(1, 0);
-            tester.add_pointer(&mut mouse, Offset::ZERO);
+            // Hover elevation overrides focus
+            let mut gesture = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(
-                &mut mouse,
+                &mut gesture,
                 tester.get_center(find::by_type::<MaterialButton>()),
                 false,
             );
@@ -767,12 +672,12 @@ mod tests {
                 ],
             );
             assert_eq!(button_elevation(tester), hover_elevation);
-            tester.remove_pointer(&mouse);
+            tester.remove_pointer(&gesture);
 
-            // Highlight elevation overrides hover.
-            let mut touch = TestPointer::touch(2);
+            // Highlight elevation overrides hover
+            let mut gesture2 = TestPointer::touch(2);
             tester.down(
-                &mut touch,
+                &mut gesture2,
                 tester.get_center(find::by_type::<MaterialButton>()),
             );
             tester.pump_and_settle();
@@ -784,58 +689,533 @@ mod tests {
                 ],
             );
             assert_eq!(button_elevation(tester), highlight_elevation);
-            tester.up(&touch);
+            tester.up(&gesture2);
         });
     }
 
     #[test]
-    fn the_tap_target_size_follows_the_theme() {
+    fn material_button_s_disabled_color_takes_precedence_over_its_default_disabled_color() {
         test_widgets(|tester| {
-            let padded = KeyRef::from(ValueKey::new("padded"));
-            let theme = ThemeData::builder()
-                .use_material3(false)
-                .platform(TargetPlatform::Android)
-                .material_tap_target_size(MaterialTapTargetSize::Padded)
-                .build(&tester.cell.borrow());
-            tester.pump_widget(
-                Theme::new(
-                    theme,
-                    Directionality::new(
-                        TextDirection::Ltr,
-                        Center::new().child(
-                            button(true)
-                                .key(padded.clone())
-                                .child(SizedBox::new().width(50.0).height(8.0)),
-                        ),
-                    ),
-                )
-                .into_widget(),
+            pump_bare(tester, button(false).disabled_color(Color::new(0xff00ff00)));
+            assert_eq!(
+                button_material(tester, |material| material.color),
+                Some(Color::new(0xff00ff00))
             );
-            assert_eq!(tester.get_size(find::by_key(padded)), Size::new(88.0, 48.0));
+        });
+    }
 
-            let shrink_wrap = KeyRef::from(ValueKey::new("shrinkWrap"));
+    #[test]
+    fn material_button_gets_focus_when_autofocus_is_set() {
+        test_widgets(|tester| {
+            let focus_node: FocusNodeRef =
+                FocusNode::new(&mut tester.cell.borrow_mut()).into_erased();
+            let pump = |tester: &mut WidgetTester, autofocus: bool| {
+                let theme = ThemeData::builder().build(&tester.cell.borrow());
+                tester.pump_widget(material_app(
+                    theme,
+                    Center::new()
+                        .child(
+                            MaterialButton::new(noop())
+                                .autofocus(autofocus)
+                                .focus_node(focus_node.clone())
+                                .child(
+                                    Container::new()
+                                        .width(100.0)
+                                        .height(100.0)
+                                        .color(Color::new(0xffff0000)),
+                                ),
+                        )
+                        .into_widget(),
+                ));
+            };
+
+            pump(tester, false);
+            tester.pump();
+            assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
+
+            pump(tester, true);
+            tester.pump();
+            assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
+        });
+    }
+
+    #[test]
+    fn material_button_on_pressed_and_on_long_press_callbacks_are_correctly_called_when_non_null() {
+        test_widgets(|tester| {
+            let build_frame = |on_pressed: Option<Listener>, on_long_press: Option<Listener>| {
+                let mut button = MaterialButton::new(on_pressed).child(Text::new("button"));
+                if let Some(on_long_press) = on_long_press {
+                    button = button.on_long_press(on_long_press);
+                }
+                Directionality::new(TextDirection::Ltr, button)
+            };
+            let was_pressed = Rc::new(Cell::new(false));
+            let press = || {
+                let was_pressed = Rc::clone(&was_pressed);
+                Listener::new(move |_app| was_pressed.set(true))
+            };
+
+            // onPressed not null, onLongPress null.
+            pump_themed(tester, build_frame(Some(press()), None));
+            assert!(enabled(tester));
+            tester.tap(find::by_type::<MaterialButton>());
+            assert!(was_pressed.get());
+
+            // onPressed null, onLongPress not null.
+            was_pressed.set(false);
+            pump_themed(tester, build_frame(None, Some(press())));
+            assert!(enabled(tester));
+            tester.long_press(find::by_type::<MaterialButton>());
+            assert!(was_pressed.get());
+
+            // onPressed null, onLongPress null.
+            pump_themed(tester, build_frame(None, None));
+            assert!(!enabled(tester));
+        });
+    }
+
+    #[test]
+    fn material_button_on_pressed_and_on_long_press_callbacks_are_distinctly_recognized() {
+        test_widgets(|tester| {
+            let did_press_button = Rc::new(Cell::new(false));
+            let did_long_press_button = Rc::new(Cell::new(false));
+            let pressed = Rc::clone(&did_press_button);
+            let long_pressed = Rc::clone(&did_long_press_button);
+            pump_themed(
+                tester,
+                MaterialButton::new(Some(Listener::new(move |_app| pressed.set(true))))
+                    .on_long_press(Listener::new(move |_app| long_pressed.set(true)))
+                    .child(Text::new("button")),
+            );
+
+            assert!(enabled(tester));
+
+            assert!(!did_press_button.get());
+            tester.tap(find::by_type::<MaterialButton>());
+            assert!(did_press_button.get());
+
+            assert!(!did_long_press_button.get());
+            tester.long_press(find::by_type::<MaterialButton>());
+            assert!(did_long_press_button.get());
+        });
+    }
+
+    #[test]
+    fn material_button_changes_mouse_cursor_when_hovered() {
+        test_widgets(|tester| {
+            let in_region = |button: MaterialButton| {
+                MouseRegion::new()
+                    .cursor(SystemMouseCursors::FORBIDDEN.into())
+                    .child(button)
+            };
+            pump_themed(
+                tester,
+                in_region(
+                    MaterialButton::new(noop()).mouse_cursor(SystemMouseCursors::TEXT.into()),
+                ),
+            );
+
+            let mut gesture = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut gesture, Offset::ZERO);
+            tester.pump();
+
+            let text: MouseCursorRef = SystemMouseCursors::TEXT.into();
+            assert!(*tester.active_cursor(1) == *text);
+
+            // Test default cursor
+            pump_themed(tester, in_region(MaterialButton::new(noop())));
+            let expected: MouseCursorRef = if K_IS_WEB {
+                SystemMouseCursors::CLICK.into()
+            } else {
+                SystemMouseCursors::BASIC.into()
+            };
+            assert!(*tester.active_cursor(1) == *expected);
+
+            // Test default cursor when disabled
+            pump_themed(tester, in_region(MaterialButton::new(None)));
+            let basic: MouseCursorRef = SystemMouseCursors::BASIC.into();
+            assert!(*tester.active_cursor(1) == *basic);
+        });
+    }
+
+    /// Dart matches the clip's path against the button's rounded rect; the recorded clip keeps
+    /// no path, so this only checks that one is there.
+    #[test]
+    fn material_button_with_explicit_splash_color_and_highlight_color() {
+        test_widgets(|tester| {
+            let direct_splash_color = Color::new(0xFF000011);
+            let direct_highlight_color = Color::new(0xFF000011);
+            let themed = |tester: &WidgetTester,
+                          highlight_color: Option<Color>,
+                          splash_color: Option<Color>,
+                          button_widget: WidgetRef| {
+                let mut builder = ThemeData::builder()
+                    .use_material3(false)
+                    .platform(TargetPlatform::Android)
+                    .material_tap_target_size(MaterialTapTargetSize::ShrinkWrap);
+                if let Some(highlight_color) = highlight_color {
+                    builder = builder.highlight_color(highlight_color);
+                }
+                if let Some(splash_color) = splash_color {
+                    builder = builder.splash_color(splash_color);
+                }
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Theme::new(builder.build(&tester.cell.borrow()), button_widget),
+                )
+                .into_widget()
+            };
+            let ink_well_material = |tester: &WidgetTester| {
+                tester.nearest_material_ops(tester.element(find::by_type::<InkWell>()))
+            };
+
+            let button_widget = Center::new()
+                .child(
+                    MaterialButton::new(noop())
+                        .splash_color(direct_splash_color)
+                        .highlight_color(direct_highlight_color)
+                        .clip_behavior(Clip::AntiAlias),
+                )
+                .into_widget();
+            let widget = themed(tester, None, None, button_widget);
+            tester.pump_widget(widget);
+
+            let center = tester.get_center(find::by_type::<MaterialButton>());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, center);
+            tester.pump(); // start gesture
+            tester.pump_by(Duration::from_millis(200)); // wait for splash to be well under way
+
+            // Painter is translated to the center by the Center widget and not
+            // the Material widget.
+            let expected_clip_rect = Rect::from_ltrb(0.0, 0.0, 88.0, 36.0);
+            assert_eq!(
+                tester.get_size(find::by_type::<MaterialButton>()),
+                expected_clip_rect.size()
+            );
+            assert_paints(
+                &ink_well_material(tester),
+                &[
+                    PaintCall::Clip,
+                    PaintCall::circle(Some(direct_splash_color)),
+                    PaintCall::rect(Some(direct_highlight_color)),
+                ],
+            );
+
+            let theme_splash_color1 = Color::new(0xFF001100);
+            let theme_highlight_color1 = Color::new(0xFF001100);
+
+            let button_widget = Center::new()
+                .child(MaterialButton::new(noop()).clip_behavior(Clip::AntiAlias))
+                .into_widget();
+            let widget = themed(
+                tester,
+                Some(theme_highlight_color1),
+                Some(theme_splash_color1),
+                button_widget.clone(),
+            );
+            tester.pump_widget(widget);
+
+            assert_paints(
+                &ink_well_material(tester),
+                &[
+                    PaintCall::Clip,
+                    PaintCall::circle(Some(theme_splash_color1)),
+                    PaintCall::rect(Some(theme_highlight_color1)),
+                ],
+            );
+
+            let theme_splash_color2 = Color::new(0xFF002200);
+            let theme_highlight_color2 = Color::new(0xFF002200);
+
+            // same widget, so does not get updated because of us
+            let widget = themed(
+                tester,
+                Some(theme_highlight_color2),
+                Some(theme_splash_color2),
+                button_widget,
+            );
+            tester.pump_widget(widget);
+
+            assert_paints(
+                &ink_well_material(tester),
+                &[
+                    PaintCall::circle(Some(theme_splash_color2)),
+                    PaintCall::rect(Some(theme_highlight_color2)),
+                ],
+            );
+
+            tester.up(&gesture);
+        });
+    }
+
+    #[test]
+    fn material_button_has_no_clip_by_default() {
+        test_widgets(|tester| {
+            let button_key = KeyRef::from(ValueKey::new("button"));
             let theme = ThemeData::builder()
-                .use_material3(false)
-                .platform(TargetPlatform::Android)
                 .material_tap_target_size(MaterialTapTargetSize::ShrinkWrap)
                 .build(&tester.cell.borrow());
             tester.pump_widget(
-                Theme::new(
-                    theme,
-                    Directionality::new(
-                        TextDirection::Ltr,
-                        Center::new().child(
-                            button(true)
-                                .key(shrink_wrap.clone())
-                                .child(SizedBox::new().width(50.0).height(8.0)),
-                        ),
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Theme::new(
+                        theme,
+                        Center::new().child(MaterialButton::new(noop()).key(button_key.clone())),
                     ),
                 )
                 .into_widget(),
             );
+
+            let render = tester.render_object(find::by_key(button_key));
             assert_eq!(
-                tester.get_size(find::by_key(shrink_wrap)),
-                Size::new(88.0, 36.0)
+                count_calls(&tester.painted_ops_deep(render), CanvasMethod::Clip),
+                0
+            );
+        });
+    }
+
+    #[test]
+    fn material_button_min_width_and_height_parameters() {
+        test_widgets(|tester| {
+            let build_frame = |min_width: Option<f64>,
+                               height: Option<f64>,
+                               padding: EdgeInsets,
+                               child: Option<WidgetRef>| {
+                let mut button = MaterialButton::new(None)
+                    .padding(padding)
+                    .material_tap_target_size(MaterialTapTargetSize::ShrinkWrap);
+                if let Some(min_width) = min_width {
+                    button = button.min_width(min_width);
+                }
+                if let Some(height) = height {
+                    button = button.height(height);
+                }
+                if let Some(child) = child {
+                    button = button.child(child);
+                }
+                Center::new().child(button)
+            };
+            let eight = || Some(SizedBox::new().width(8.0).height(8.0).into_widget());
+            let cases = [
+                (
+                    Some(8.0),
+                    Some(24.0),
+                    EdgeInsets::ZERO,
+                    None,
+                    Size::new(8.0, 24.0),
+                ),
+                // Default minHeight constraint is 36, see RawMaterialButton.
+                (
+                    Some(8.0),
+                    None,
+                    EdgeInsets::ZERO,
+                    None,
+                    Size::new(8.0, 36.0),
+                ),
+                // Default minWidth constraint is 88, see RawMaterialButton.
+                (
+                    None,
+                    Some(8.0),
+                    EdgeInsets::ZERO,
+                    None,
+                    Size::new(88.0, 8.0),
+                ),
+                (None, None, EdgeInsets::ZERO, None, Size::new(88.0, 36.0)),
+                (
+                    None,
+                    None,
+                    EdgeInsets::all(4.0),
+                    None,
+                    Size::new(88.0, 36.0),
+                ),
+                // Size is defined by the padding.
+                (
+                    Some(0.0),
+                    Some(0.0),
+                    EdgeInsets::all(4.0),
+                    None,
+                    Size::new(8.0, 8.0),
+                ),
+                // Size is defined by the padded child.
+                (
+                    Some(0.0),
+                    Some(0.0),
+                    EdgeInsets::all(4.0),
+                    eight(),
+                    Size::new(16.0, 16.0),
+                ),
+                // Size is defined by the minWidth, height constraints.
+                (
+                    Some(18.0),
+                    Some(18.0),
+                    EdgeInsets::all(4.0),
+                    eight(),
+                    Size::new(18.0, 18.0),
+                ),
+            ];
+            for (min_width, height, padding, child, expected) in cases {
+                pump_themed(tester, build_frame(min_width, height, padding, child));
+                assert_eq!(tester.get_size(find::by_type::<MaterialButton>()), expected);
+            }
+        });
+    }
+
+    #[test]
+    fn material_button_size_is_configurable_by_theme_data_material_tap_target_size() {
+        test_widgets(|tester| {
+            let pump = |tester: &mut WidgetTester, key: KeyRef, size: MaterialTapTargetSize| {
+                let theme = ThemeData::builder()
+                    .material_tap_target_size(size)
+                    .build(&tester.cell.borrow());
+                tester.pump_widget(
+                    Theme::new(
+                        theme,
+                        Directionality::new(
+                            TextDirection::Ltr,
+                            Center::new().child(
+                                MaterialButton::new(noop())
+                                    .key(key)
+                                    .child(SizedBox::new().width(50.0).height(8.0)),
+                            ),
+                        ),
+                    )
+                    .into_widget(),
+                );
+            };
+
+            let key1 = KeyRef::from(ValueKey::new("key1"));
+            pump(tester, key1.clone(), MaterialTapTargetSize::Padded);
+            assert_eq!(tester.get_size(find::by_key(key1)), Size::new(88.0, 48.0));
+
+            let key2 = KeyRef::from(ValueKey::new("key2"));
+            pump(tester, key2.clone(), MaterialTapTargetSize::ShrinkWrap);
+            assert_eq!(tester.get_size(find::by_key(key2)), Size::new(88.0, 36.0));
+        });
+    }
+
+    #[test]
+    fn material_button_shape_overrides_button_theme_shape() {
+        test_widgets(|tester| {
+            let shape = waft_painting::StadiumBorder::new(BorderSide::NONE);
+            pump_bare(tester, button(true).shape(shape));
+            assert!(button_material(tester, |material| {
+                material.shape.as_deref() == Some(&shape as &dyn ShapeBorder)
+            }));
+        });
+    }
+
+    #[test]
+    fn material_button_responds_to_density_changes() {
+        test_widgets(|tester| {
+            let key = KeyRef::from(ValueKey::new("test"));
+            let child_key = KeyRef::from(ValueKey::new("test child"));
+            let build_test =
+                |tester: &mut WidgetTester, visual_density: VisualDensity, use_text: bool| {
+                    let child = if use_text {
+                        Text::new("Text").key(child_key.clone()).into_widget()
+                    } else {
+                        Container::new()
+                            .key(child_key.clone())
+                            .width(100.0)
+                            .height(100.0)
+                            .color(Color::new(0xffff0000))
+                            .into_widget()
+                    };
+                    let theme = theme(&tester.cell.borrow());
+                    tester.pump_widget(material_app(
+                        theme,
+                        Directionality::new(
+                            TextDirection::Rtl,
+                            Center::new().child(
+                                MaterialButton::new(noop())
+                                    .visual_density(visual_density)
+                                    .key(key.clone())
+                                    .child(child),
+                            ),
+                        )
+                        .into_widget(),
+                    ));
+                };
+            let cases = [
+                (
+                    VisualDensity::STANDARD,
+                    false,
+                    Size::new(132.0, 100.0),
+                    Rect::from_ltrb(350.0, 250.0, 450.0, 350.0),
+                ),
+                (
+                    VisualDensity::new(3.0, 3.0),
+                    false,
+                    Size::new(156.0, 124.0),
+                    Rect::from_ltrb(350.0, 250.0, 450.0, 350.0),
+                ),
+                (
+                    VisualDensity::new(-3.0, -3.0),
+                    false,
+                    Size::new(108.0, 100.0),
+                    Rect::from_ltrb(350.0, 250.0, 450.0, 350.0),
+                ),
+                (
+                    VisualDensity::STANDARD,
+                    true,
+                    Size::new(88.0, 48.0),
+                    Rect::from_ltrb(372.0, 293.0, 428.0, 307.0),
+                ),
+                (
+                    VisualDensity::new(3.0, 3.0),
+                    true,
+                    Size::new(112.0, 60.0),
+                    Rect::from_ltrb(372.0, 293.0, 428.0, 307.0),
+                ),
+                (
+                    VisualDensity::new(-3.0, -3.0),
+                    true,
+                    Size::new(76.0, 36.0),
+                    Rect::from_ltrb(372.0, 293.0, 428.0, 307.0),
+                ),
+            ];
+            for (visual_density, use_text, size, child_rect) in cases {
+                build_test(tester, visual_density, use_text);
+                tester.pump_and_settle();
+                assert_eq!(tester.get_size(find::by_key(key.clone())), size);
+                assert_eq!(tester.get_rect(find::by_key(child_key.clone())), child_rect);
+            }
+        });
+    }
+
+    #[test]
+    fn disabled_elevation_is_passed_to_raw_material_button() {
+        test_widgets(|tester| {
+            let disabled_elevation = 16.0;
+            pump_bare(tester, button(false).disabled_elevation(disabled_elevation));
+            assert_eq!(raw_button_disabled_elevation(tester), disabled_elevation);
+        });
+    }
+
+    #[test]
+    fn material_button_disabled_elevation_defaults_to_0_0_when_not_provided() {
+        test_widgets(|tester| {
+            pump_bare(tester, button(false));
+            assert_eq!(raw_button_disabled_elevation(tester), 0.0);
+        });
+    }
+
+    #[test]
+    fn material_button_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            let theme = ThemeData::builder().build(&tester.cell.borrow());
+            tester.pump_widget(material_app(
+                theme,
+                Center::new()
+                    .child(
+                        SizedBox::shrink().child(MaterialButton::new(noop()).child(Text::new("X"))),
+                    )
+                    .into_widget(),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<MaterialButton>()),
+                Size::ZERO
             );
         });
     }

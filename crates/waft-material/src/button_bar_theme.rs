@@ -1,11 +1,15 @@
 //! Flutter counterpart: material_ui's `button_bar_theme.dart`.
+#![allow(
+    deprecated,
+    reason = "Dart deprecates `ButtonBarThemeData` and `ButtonBarTheme`, which this file implements"
+)]
 
 use waft_embedder::lerp_double;
 use waft_foundation::App;
 use waft_painting::EdgeInsetsGeometry;
 use waft_widgets::{
-    BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, MainAxisAlignment,
-    MainAxisSize, VerticalDirection, WidgetRef,
+    BuildContext, InheritedWidget, IntoWidget, KeyRef, MainAxisAlignment, MainAxisSize,
+    VerticalDirection, WidgetRef,
 };
 
 use crate::button_theme::{ButtonBarLayoutBehavior, ButtonTextTheme};
@@ -20,6 +24,7 @@ use crate::theme::Theme;
 ///
 ///  * [`ButtonBarTheme`], an `InheritedWidget` that propagates the theme down its subtree.
 ///  * `ButtonBar`, which uses this to configure itself and its children button widgets.
+#[deprecated(note = "Use OverflowBar instead. This feature was deprecated after v3.21.0-10.0.pre.")]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ButtonBarThemeData {
     /// How the children should be placed along the horizontal axis.
@@ -129,20 +134,22 @@ impl ButtonBarThemeData {
     }
 
     /// Linearly interpolate between two button bar themes.
+    ///
+    /// If both arguments are null, then null is returned.
     pub fn lerp(
         a: Option<&ButtonBarThemeData>,
         b: Option<&ButtonBarThemeData>,
         t: f64,
-    ) -> ButtonBarThemeData {
-        if let (Some(a), Some(b)) = (a, b)
-            && std::ptr::eq(a, b)
-        {
-            return a.clone();
+    ) -> Option<ButtonBarThemeData> {
+        match (a, b) {
+            (None, None) => return None,
+            (Some(a), Some(b)) if std::ptr::eq(a, b) => return Some(a.clone()),
+            _ => {}
         }
         let a = a.cloned().unwrap_or_default();
         let b = b.cloned().unwrap_or_default();
         let pick = |t: f64| t < 0.5;
-        ButtonBarThemeData {
+        Some(ButtonBarThemeData {
             alignment: if pick(t) { a.alignment } else { b.alignment },
             main_axis_size: if pick(t) {
                 a.main_axis_size
@@ -172,7 +179,7 @@ impl ButtonBarThemeData {
             } else {
                 b.overflow_direction
             },
-        }
+        })
     }
 }
 
@@ -180,6 +187,7 @@ impl ButtonBarThemeData {
 ///
 /// A button bar theme describes the layout and properties for the buttons contained in a
 /// `ButtonBar`.
+#[deprecated(note = "Use OverflowBar instead. This feature was deprecated after v3.21.0-10.0.pre.")]
 pub struct ButtonBarTheme {
     pub key: Option<KeyRef>,
     /// The properties used for all descendant `ButtonBar` widgets.
@@ -223,12 +231,6 @@ impl std::fmt::Debug for ButtonBarTheme {
     }
 }
 
-impl InheritedTheme for ButtonBarTheme {
-    fn wrap(&self, _app: &mut App, _context: BuildContext, child: WidgetRef) -> WidgetRef {
-        ButtonBarTheme::new(self.data.clone(), child).into_widget()
-    }
-}
-
 impl InheritedWidget for ButtonBarTheme {
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
@@ -240,10 +242,6 @@ impl InheritedWidget for ButtonBarTheme {
 
     fn update_should_notify(&self, old_widget: &ButtonBarTheme) -> bool {
         self.data != old_widget.data
-    }
-
-    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
-        Some(self)
     }
 }
 
@@ -257,15 +255,12 @@ mod tests {
     use crate::theme_data::ThemeData;
 
     #[test]
-    fn lerp_has_dart_special_cases() {
-        assert_eq!(
-            ButtonBarThemeData::lerp(None, None, 0.0),
-            ButtonBarThemeData::default()
-        );
-        let data = ButtonBarThemeData::new().with_button_min_width(42.0);
+    fn button_bar_theme_data_lerp_special_cases() {
+        assert_eq!(ButtonBarThemeData::lerp(None, None, 0.0), None);
+        let data = ButtonBarThemeData::new();
         assert_eq!(
             ButtonBarThemeData::lerp(Some(&data), Some(&data), 0.5),
-            data
+            Some(data)
         );
     }
 
@@ -321,7 +316,8 @@ mod tests {
             .with_layout_behavior(ButtonBarLayoutBehavior::Constrained)
             .with_overflow_direction(VerticalDirection::Up);
 
-        let lerp = ButtonBarThemeData::lerp(Some(&primary), Some(&accent), 0.5);
+        let lerp = ButtonBarThemeData::lerp(Some(&primary), Some(&accent), 0.5)
+            .expect("two themes lerp to a theme");
         assert_eq!(lerp.alignment, Some(MainAxisAlignment::Center));
         assert_eq!(lerp.main_axis_size, Some(MainAxisSize::Max));
         assert_eq!(lerp.button_text_theme, Some(ButtonTextTheme::Accent));
@@ -357,6 +353,12 @@ mod tests {
                 .into_widget(),
             ));
             assert_eq!(seen.borrow().clone(), Some(data));
+            assert_eq!(
+                seen.borrow()
+                    .as_ref()
+                    .and_then(|theme| theme.button_min_width),
+                Some(42.0)
+            );
         });
     }
 

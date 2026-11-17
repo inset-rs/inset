@@ -98,25 +98,26 @@ impl StatelessWidget for AccountPictures {
             })
             .collect::<Vec<_>>();
 
-        let mut children = vec![
-            PositionedDirectional::new(Row::new().children(other_pictures))
-                .top(0.0)
-                .end(0.0)
-                .into_widget(),
-        ];
+        let mut current_picture = SizedBox::from_size(self.current_account_picture_size);
         if let Some(current_account_picture) = &self.current_account_picture {
-            children.push(
+            current_picture = current_picture.child(current_account_picture.clone());
+        }
+
+        Stack::new()
+            .children(vec![
+                PositionedDirectional::new(Row::new().children(other_pictures))
+                    .top(0.0)
+                    .end(0.0)
+                    .into_widget(),
                 Positioned::new(
-                    Semantics::new().explicit_child_nodes(true).child(
-                        SizedBox::from_size(self.current_account_picture_size)
-                            .child(current_account_picture.clone()),
-                    ),
+                    Semantics::new()
+                        .explicit_child_nodes(true)
+                        .child(current_picture),
                 )
                 .top(0.0)
                 .into_widget(),
-            );
-        }
-        Stack::new().children(children).into_widget()
+            ])
+            .into_widget()
     }
 }
 
@@ -721,8 +722,8 @@ mod tests {
     use waft_embedder::{Size, TextDirection};
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
     use waft_widgets::{
-        Center, Directionality, IntoWidget, MediaQuery, MediaQueryData, SizedBox, StateSetter,
-        StatefulBuilder, Text,
+        Center, Directionality, ExcludeSemantics, IntoWidget, MediaQuery, MediaQueryData, SizedBox,
+        StateSetter, StatefulBuilder, Text,
     };
 
     use super::*;
@@ -758,10 +759,12 @@ mod tests {
         }
     }
 
-    fn avatar(key: &'static str, name: &'static str) -> CircleAvatar {
-        CircleAvatar::new()
-            .key(KeyRef::from(ValueKey::new(key)))
-            .child(Text::new(name))
+    fn avatar(name: &'static str) -> CircleAvatar {
+        CircleAvatar::new().child(Text::new(name))
+    }
+
+    fn keyed_avatar(name: &'static str) -> CircleAvatar {
+        avatar(name).key(key(name))
     }
 
     fn header(options: &Options) -> UserAccountsDrawerHeader {
@@ -771,12 +774,12 @@ mod tests {
         )
         .current_account_picture_size(options.current_account_picture_size)
         .other_accounts_pictures_size(options.other_accounts_picture_size)
-        .current_account_picture(avatar("A", "A"))
+        .current_account_picture(ExcludeSemantics::new().child(keyed_avatar("A")))
         .other_accounts_pictures(vec![
-            avatar("B", "B").into_widget(),
-            avatar("C", "C").into_widget(),
-            avatar("D", "D").into_widget(),
-            avatar("E", "E").into_widget(),
+            avatar("B").into_widget(),
+            keyed_avatar("C").into_widget(),
+            keyed_avatar("D").into_widget(),
+            avatar("E").into_widget(),
         ]);
         if options.with_on_details_pressed_handler {
             header = header.on_details_pressed(Listener::new(|_app| {}));
@@ -789,12 +792,13 @@ mod tests {
         if let Some(primary_color) = options.primary_color {
             builder = builder.primary_color(primary_color);
         }
+        let mut color_scheme = ColorScheme::light();
         if let Some(color_scheme_primary) = options.color_scheme_primary {
-            let mut scheme = ColorScheme::light();
-            scheme.primary = color_scheme_primary;
-            builder = builder.color_scheme(scheme);
+            color_scheme.primary = color_scheme_primary;
         }
-        let theme = builder.build(&tester.cell.borrow());
+        let theme = builder
+            .color_scheme(color_scheme)
+            .build(&tester.cell.borrow());
 
         let mut data = MediaQueryData::new();
         data.padding = EdgeInsets::only(10.0, 20.0, 30.0, 40.0);
@@ -855,6 +859,8 @@ mod tests {
                 find::text("E").evaluate(tester).is_empty(),
                 "only three others"
             );
+            assert_eq!(find::text("name").evaluate(tester).len(), 1);
+            assert_eq!(find::text("email").evaluate(tester).len(), 1);
             assert_eq!(tester.get_size(find::by_key(key("A"))), Size::square(72.0));
             assert_eq!(tester.get_size(find::by_key(key("C"))), Size::square(40.0));
             assert_eq!(
@@ -894,34 +900,54 @@ mod tests {
         });
     }
 
-    fn rotation(tester: &WidgetTester) -> f32 {
+    /// Dart's `transform.getRotation()[0]` and `[4]` of the first transform in the header: the
+    /// cosine of the arrow's turn, twice.
+    fn rotation(tester: &WidgetTester) -> (f32, f32) {
         tester.widget(
             find::descendant(
                 find::by_type::<UserAccountsDrawerHeader>(),
                 find::by_type::<Transform>(),
             )
             .first(),
-            |transform: &Transform| transform.transform.to_flutter_array()[0],
+            |transform: &Transform| {
+                let storage = transform.transform.to_flutter_array();
+                (storage[0], storage[5])
+            },
         )
     }
+
+    const RIGHT_SIDE_UP: (f32, f32) = (1.0, 1.0);
+    const UPSIDE_DOWN: (f32, f32) = (-1.0, -1.0);
 
     #[test]
     fn the_arrow_turns_half_a_turn_and_back() {
         test_widgets(|tester| {
             pump_test_widget(tester, Options::default());
-            assert!(rotation(tester) > 0.99);
+
+            // Icon is right side up.
+            assert_eq!(rotation(tester), RIGHT_SIDE_UP);
 
             tester.tap(find::by_type::<Icon>());
             tester.pump();
             tester.pump_by(Duration::from_millis(10));
+            assert!(tester.has_running_animations());
+
             tester.pump_and_settle();
-            assert!(rotation(tester) < -0.99);
+            tester.pump();
+
+            // Icon has rotated 180 degrees.
+            assert_eq!(rotation(tester), UPSIDE_DOWN);
 
             tester.tap(find::by_type::<Icon>());
             tester.pump();
             tester.pump_by(Duration::from_millis(10));
+            assert!(tester.has_running_animations());
+
             tester.pump_and_settle();
-            assert!(rotation(tester) > 0.99);
+            tester.pump();
+
+            // Icon has rotated 180 degrees back to the original position.
+            assert_eq!(rotation(tester), RIGHT_SIDE_UP);
         });
     }
 
@@ -929,8 +955,9 @@ mod tests {
     fn the_arrow_keeps_turning_through_four_mid_animation_taps() {
         test_widgets(|tester| {
             pump_test_widget(tester, Options::default());
-            assert!(rotation(tester) > 0.99);
+            assert_eq!(rotation(tester), RIGHT_SIDE_UP);
 
+            // Down, up, down again and back up, each mid animation.
             for _ in 0..4 {
                 tester.tap(find::by_type::<Icon>());
                 tester.pump();
@@ -940,7 +967,7 @@ mod tests {
 
             tester.pump_and_settle();
             tester.pump();
-            assert!(rotation(tester) > 0.99);
+            assert_eq!(rotation(tester), RIGHT_SIDE_UP);
         });
     }
 
@@ -963,13 +990,17 @@ mod tests {
                 theme,
                 Material::new().child(home).into_widget(),
             ));
-            assert!(rotation(tester) > 0.99);
+            assert_eq!(rotation(tester), RIGHT_SIDE_UP);
 
             let set_state = set_state.borrow().clone().expect("the builder ran");
             set_state(&mut tester.cell.borrow_mut(), &mut |_app: &mut App| {});
             tester.pump_by(Duration::from_millis(10));
-            tester.pump_and_settle();
-            assert!(rotation(tester) > 0.99);
+            assert!(!tester.has_running_animations());
+
+            assert_eq!(tester.pump_and_settle(), 1);
+
+            // Icon has not rotated.
+            assert_eq!(rotation(tester), RIGHT_SIDE_UP);
         });
     }
 
@@ -1015,75 +1046,174 @@ mod tests {
         });
     }
 
-    fn pump_null_parameters(
-        tester: &mut WidgetTester,
-        direction: TextDirection,
-        name: Option<&'static str>,
-        email: Option<&'static str>,
-        on_details: bool,
-    ) {
+    /// The arguments of the null parameters cases' `buildFrame`; `margin` is always null.
+    #[derive(Default)]
+    struct Frame {
+        current_account_picture: Option<WidgetRef>,
+        other_accounts_pictures: Option<Vec<WidgetRef>>,
+        account_name: Option<&'static str>,
+        account_email: Option<&'static str>,
+        on_details_pressed: bool,
+    }
+
+    fn pump_frame(tester: &mut WidgetTester, direction: TextDirection, frame: Frame) {
         let mut header = UserAccountsDrawerHeader::new(
-            name.map(|name| Text::new(name).into_widget()),
-            email.map(|email| Text::new(email).into_widget()),
+            frame.account_name.map(|name| Text::new(name).into_widget()),
+            frame
+                .account_email
+                .map(|email| Text::new(email).into_widget()),
         )
         .margin(None);
-        if on_details {
+        if let Some(current_account_picture) = frame.current_account_picture {
+            header = header.current_account_picture(current_account_picture);
+        }
+        if let Some(other_accounts_pictures) = frame.other_accounts_pictures {
+            header = header.other_accounts_pictures(other_accounts_pictures);
+        }
+        if frame.on_details_pressed {
             header = header.on_details_pressed(Listener::new(|_app| {}));
         }
         let theme = ThemeData::builder().build(&tester.cell.borrow());
         tester.pump_widget(material_app(
             theme,
-            Material::new()
-                .child(Center::new().child(Directionality::new(direction, header)))
-                .into_widget(),
+            Directionality::new(
+                direction,
+                Material::new().child(Center::new().child(header)),
+            )
+            .into_widget(),
         ));
     }
 
+    /// Dart's `UserAccountsDrawerHeader null parameters LTR` and `RTL`: `before` is whether
+    /// the start of `direction` has the smaller x.
+    fn check_null_parameters(tester: &mut WidgetTester, direction: TextDirection) {
+        let ltr = direction == TextDirection::Ltr;
+        let before = |a: f64, b: f64| if ltr { a < b } else { a > b };
+        let icon = find::by_type::<Icon>;
+
+        pump_frame(tester, direction, Frame::default());
+        assert_eq!(
+            tester
+                .get_size(find::by_type::<UserAccountsDrawerHeader>())
+                .height(),
+            160.0 + 1.0 // height + bottom edge
+        );
+        assert!(icon().evaluate(tester).is_empty());
+
+        pump_frame(
+            tester,
+            direction,
+            Frame {
+                on_details_pressed: true,
+                ..Frame::default()
+            },
+        );
+        assert_eq!(icon().evaluate(tester).len(), 1);
+
+        for (account_name, account_email) in
+            [(Some("accountName"), None), (None, Some("accountEmail"))]
+        {
+            pump_frame(
+                tester,
+                direction,
+                Frame {
+                    account_name,
+                    account_email,
+                    on_details_pressed: true,
+                    ..Frame::default()
+                },
+            );
+            let line =
+                tester.get_center(find::text(account_name.or(account_email).expect("a line")));
+            let arrow = tester.get_center(icon());
+            assert_eq!(line.dy(), arrow.dy());
+            assert!(before(line.dx(), arrow.dx()));
+        }
+
+        pump_frame(
+            tester,
+            direction,
+            Frame {
+                account_name: Some("accountName"),
+                account_email: Some("accountEmail"),
+                on_details_pressed: true,
+                ..Frame::default()
+            },
+        );
+        let email = tester.get_center(find::text("accountEmail"));
+        let arrow = tester.get_center(icon());
+        assert_eq!(email.dy(), arrow.dy());
+        assert!(before(email.dx(), arrow.dx()));
+        assert!(
+            tester.get_bottom_left(find::text("accountEmail")).dy()
+                > tester.get_bottom_left(find::text("accountName")).dy()
+        );
+        if ltr {
+            assert_eq!(
+                tester.get_bottom_left(find::text("accountEmail")).dx(),
+                tester.get_bottom_left(find::text("accountName")).dx()
+            );
+        } else {
+            assert_eq!(
+                tester.get_bottom_right(find::text("accountEmail")).dx(),
+                tester.get_bottom_right(find::text("accountName")).dx()
+            );
+        }
+
+        pump_frame(
+            tester,
+            direction,
+            Frame {
+                current_account_picture: Some(avatar("A").into_widget()),
+                ..Frame::default()
+            },
+        );
+        assert_eq!(find::text("A").evaluate(tester).len(), 1);
+
+        pump_frame(
+            tester,
+            direction,
+            Frame {
+                other_accounts_pictures: Some(vec![avatar("A").into_widget()]),
+                ..Frame::default()
+            },
+        );
+        assert_eq!(find::text("A").evaluate(tester).len(), 1);
+
+        pump_frame(
+            tester,
+            direction,
+            Frame {
+                current_account_picture: Some(keyed_avatar("A").into_widget()),
+                account_name: Some("accountName"),
+                ..Frame::default()
+            },
+        );
+        if ltr {
+            assert_eq!(
+                tester.get_bottom_left(find::by_key(key("A"))).dx(),
+                tester.get_bottom_left(find::text("accountName")).dx()
+            );
+        } else {
+            assert_eq!(
+                tester.get_bottom_right(find::by_key(key("A"))).dx(),
+                tester.get_bottom_right(find::text("accountName")).dx()
+            );
+        }
+        assert!(
+            tester.get_bottom_left(find::text("accountName")).dy()
+                > tester.get_bottom_left(find::by_key(key("A"))).dy()
+        );
+    }
+
     #[test]
-    fn null_parameters_lay_out_beside_the_arrow_ltr_and_rtl() {
-        test_widgets(|tester| {
-            for direction in [TextDirection::Ltr, TextDirection::Rtl] {
-                pump_null_parameters(tester, direction, None, None, false);
-                assert_eq!(
-                    tester
-                        .get_size(find::by_type::<UserAccountsDrawerHeader>())
-                        .height(),
-                    160.0 + 1.0
-                );
-                assert!(find::by_type::<Icon>().evaluate(tester).is_empty());
+    fn user_accounts_drawer_header_null_parameters_ltr() {
+        test_widgets(|tester| check_null_parameters(tester, TextDirection::Ltr));
+    }
 
-                pump_null_parameters(tester, direction, None, None, true);
-                assert_eq!(find::by_type::<Icon>().evaluate(tester).len(), 1);
-
-                pump_null_parameters(tester, direction, Some("accountName"), None, true);
-                let name = tester.get_center(find::text("accountName"));
-                let icon = tester.get_center(find::by_type::<Icon>());
-                assert_eq!(name.dy(), icon.dy());
-                if direction == TextDirection::Ltr {
-                    assert!(name.dx() < icon.dx());
-                } else {
-                    assert!(name.dx() > icon.dx());
-                }
-
-                pump_null_parameters(
-                    tester,
-                    direction,
-                    Some("accountName"),
-                    Some("accountEmail"),
-                    true,
-                );
-                let name = tester.get_bottom_left(find::text("accountName"));
-                let email = tester.get_bottom_left(find::text("accountEmail"));
-                assert!(email.dy() > name.dy());
-                if direction == TextDirection::Ltr {
-                    assert_eq!(email.dx(), name.dx());
-                } else {
-                    let name = tester.get_bottom_right(find::text("accountName"));
-                    let email = tester.get_bottom_right(find::text("accountEmail"));
-                    assert_eq!(email.dx(), name.dx());
-                }
-            }
-        });
+    #[test]
+    fn user_accounts_drawer_header_null_parameters_rtl() {
+        test_widgets(|tester| check_null_parameters(tester, TextDirection::Rtl));
     }
 
     #[test]

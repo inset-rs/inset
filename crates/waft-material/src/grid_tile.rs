@@ -69,6 +69,10 @@ impl GridTile {
 }
 
 impl StatelessWidget for GridTile {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         if self.header.is_none() && self.footer.is_none() {
             return self.child.clone();
@@ -76,7 +80,8 @@ impl StatelessWidget for GridTile {
 
         // The child is not positioned so that the stack can size itself to it along an
         // unbounded axis (for example in a horizontally scrolling list view), where a stack of
-        // only positioned children would try to be infinitely large.
+        // only positioned children would try to be infinitely large. Along bounded axes, the
+        // child still fills the available space.
         let mut children = vec![FillBoundedAxes::new(self.child.clone()).into_widget()];
         if let Some(header) = &self.header {
             children.push(
@@ -298,76 +303,304 @@ impl RenderBox for RenderFillBoundedAxes {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::Offset;
+    use waft_embedder::{Size, TextBaseline};
+    use waft_foundation::ValueKey;
+    use waft_painting::{Alignment, Axis, BoxDecoration};
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
-    use waft_widgets::{Center, SizedBox};
+    use waft_widgets::{
+        Align, Center, ColoredBox, ConstrainedBox, Container, DecoratedBox, Directionality, Icon,
+        LayoutBuilder, ListView, SizedBox, Text, TextDirection,
+    };
 
     use super::*;
+    use crate::colors::Colors;
+    use crate::grid_tile_bar::GridTileBar;
+    use crate::icons::Icons;
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
-    /// Dart's `pumpWidget(MaterialApp(home: Center(child: tile)))`.
-    fn pump(tester: &mut WidgetTester, tile: GridTile) {
+    /// Dart's `pumpWidget(MaterialApp(home: home))`.
+    fn pump_home<K>(tester: &mut WidgetTester, home: impl IntoWidget<K>) {
         let theme = ThemeData::builder().build(&tester.cell.borrow());
-        tester.pump_widget(material_app(theme, Center::new().child(tile).into_widget()));
+        tester.pump_widget(material_app(theme, home.into_widget()));
+    }
+
+    fn key(name: &'static str) -> KeyRef {
+        KeyRef::from(ValueKey::new(name))
+    }
+
+    fn tile_box(tester: &WidgetTester) -> AnyRenderBox {
+        tester
+            .render_object(find::by_type::<GridTile>())
+            .as_box()
+            .expect("a grid tile is a box")
     }
 
     #[test]
-    fn a_tile_without_a_header_or_footer_is_its_child() {
+    fn grid_tile_control_test() {
         test_widgets(|tester| {
-            pump(tester, GridTile::new(SizedBox::square(Some(100.0))));
+            let header_key = key("header");
+            let footer_key = key("footer");
 
-            expect_no_stack(tester);
-            let child = find::by_type::<SizedBox>();
-            assert_eq!(
-                tester.get_size(child.first()),
-                waft_embedder::Size::new(100.0, 100.0)
+            pump_home(
+                tester,
+                GridTile::new(DecoratedBox::new(
+                    BoxDecoration::new().color(Colors::GREEN.shade500()),
+                ))
+                .header(
+                    GridTileBar::new()
+                        .key(header_key.clone())
+                        .leading(Icon::new(Some(Icons::thumb_up())))
+                        .title(Text::new("Header"))
+                        .subtitle(Text::new("Subtitle"))
+                        .trailing(Icon::new(Some(Icons::thumb_up()))),
+                )
+                .footer(
+                    GridTileBar::new()
+                        .key(footer_key.clone())
+                        .title(Text::new("Footer"))
+                        .background_color(Colors::BLACK38),
+                ),
             );
-        });
-    }
 
-    #[test]
-    fn a_header_and_a_footer_overlay_a_child_that_fills_the_tile() {
-        test_widgets(|tester| {
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                Center::new()
-                    .child(
-                        SizedBox::square(Some(100.0)).child(
-                            GridTile::new(SizedBox::square(Some(100.0)))
-                                .header(SizedBox::square(Some(20.0)))
-                                .footer(SizedBox::square(Some(20.0))),
-                        ),
-                    )
-                    .into_widget(),
+            assert_eq!(find::text("Header").evaluate(tester).len(), 1);
+            assert_eq!(find::text("Footer").evaluate(tester).len(), 1);
+
+            assert!(
+                tester.get_bottom_left(find::by_key(header_key)).dy()
+                    < tester.get_top_left(find::by_key(footer_key)).dy()
+            );
+
+            tester.pump_widget(Directionality::new(
+                TextDirection::Ltr,
+                GridTile::new(Text::new("Simple")),
             ));
 
-            let tile = tester.get_top_left(find::by_type::<Stack>());
-            let twenty: Vec<_> = find::by_type::<SizedBox>()
-                .evaluate(tester)
-                .into_iter()
-                .filter(|element| tester.get_size(*element).height() == 20.0)
-                .collect();
-            assert_eq!(twenty.len(), 2, "a header and a footer");
+            assert_eq!(find::text("Simple").evaluate(tester).len(), 1);
+        });
+    }
+
+    #[test]
+    fn grid_tile_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            pump_home(
+                tester,
+                Center::new().child(SizedBox::shrink().child(GridTile::new(Text::new("X")))),
+            );
+            assert_eq!(tester.get_size(find::by_type::<GridTile>()), Size::ZERO);
+        });
+    }
+
+    #[test]
+    fn grid_tile_with_header_and_footer_sizes_itself_to_its_child_when_the_width_is_unbounded() {
+        test_widgets(|tester| {
+            pump_home(
+                tester,
+                Center::new().child(
+                    SizedBox::new().height(100.0).child(
+                        ListView::builder(|_app, _context, _index| {
+                            Some(
+                                GridTile::new(
+                                    Container::new()
+                                        .height(100.0)
+                                        .width(80.0)
+                                        .color(Colors::RED.primary()),
+                                )
+                                .header(Text::new("Header"))
+                                .footer(Text::new("Footer"))
+                                .into_widget(),
+                            )
+                        })
+                        .item_count(1)
+                        .build()
+                        .scroll_direction(Axis::Horizontal),
+                    ),
+                ),
+            );
+
             assert_eq!(
-                tester.get_top_left(twenty[0]),
-                tile,
-                "the header is at the tile's top left"
+                tester.get_size(find::by_type::<GridTile>()),
+                Size::new(80.0, 100.0)
+            );
+            assert_eq!(find::text("Header").evaluate(tester).len(), 1);
+            assert_eq!(find::text("Footer").evaluate(tester).len(), 1);
+        });
+    }
+
+    #[test]
+    fn grid_tile_child_fills_the_tile_when_the_constraints_are_tight() {
+        test_widgets(|tester| {
+            let child_key = key("child");
+
+            pump_home(
+                tester,
+                Center::new().child(
+                    SizedBox::new().width(200.0).height(150.0).child(
+                        GridTile::new(
+                            ColoredBox::new(Colors::RED.primary()).key(child_key.clone()),
+                        )
+                        .header(Text::new("Header"))
+                        .footer(Text::new("Footer")),
+                    ),
+                ),
+            );
+
+            assert_eq!(
+                tester.get_size(find::by_type::<GridTile>()),
+                Size::new(200.0, 150.0)
             );
             assert_eq!(
-                tester.get_top_left(twenty[1]),
-                tile + Offset::new(0.0, 80.0),
-                "the footer is at the tile's bottom left"
+                tester.get_size(find::by_key(child_key)),
+                Size::new(200.0, 150.0)
             );
         });
     }
 
-    /// Dart's `expect(find.byType(Stack), findsNothing)`.
-    fn expect_no_stack(tester: &WidgetTester) {
-        assert!(
-            find::by_type::<Stack>().evaluate(tester).is_empty(),
-            "a tile without a header or footer builds no stack"
-        );
+    #[test]
+    fn grid_tile_child_fills_the_tile_when_the_constraints_are_bounded_but_loose() {
+        test_widgets(|tester| {
+            let child_key = key("child");
+
+            pump_home(
+                tester,
+                Center::new().child(
+                    ConstrainedBox::new(BoxConstraints::new().max_width(200.0).max_height(150.0))
+                        .child(
+                            GridTile::new(
+                                Container::new()
+                                    .key(child_key.clone())
+                                    .width(80.0)
+                                    .height(100.0)
+                                    .color(Colors::RED.primary()),
+                            )
+                            .header(Text::new("Header"))
+                            .footer(Text::new("Footer")),
+                        ),
+                ),
+            );
+
+            assert_eq!(
+                tester.get_size(find::by_type::<GridTile>()),
+                Size::new(200.0, 150.0)
+            );
+            assert_eq!(
+                tester.get_size(find::by_key(child_key)),
+                Size::new(200.0, 150.0)
+            );
+        });
+    }
+
+    #[test]
+    fn grid_tile_dry_baseline_matches_its_baseline_when_the_constraints_are_bounded_but_loose() {
+        test_widgets(|tester| {
+            let constraints = BoxConstraints::new().max_width(200.0).max_height(150.0);
+
+            pump_home(
+                tester,
+                Center::new().child(
+                    ConstrainedBox::new(constraints).child(
+                        GridTile::new(
+                            // Shrink-wraps the text vertically under loose constraints, but
+                            // centers it vertically when forced to fill the tile.
+                            Align::new()
+                                .alignment(Alignment::CENTER_LEFT.into())
+                                .height_factor(1.0)
+                                .child(Text::new("X")),
+                        )
+                        .footer(Text::new("Footer")),
+                    ),
+                ),
+            );
+
+            // The tile's baseline is the baseline of the child's text, which is above
+            // the footer's.
+            let text = tester
+                .render_object(find::text("X"))
+                .as_box()
+                .expect("a text is a box");
+            let text_baseline = text
+                .get_dry_baseline(
+                    &mut tester.cell.borrow_mut(),
+                    BoxConstraints::new(),
+                    TextBaseline::Alphabetic,
+                )
+                .expect("a text has a baseline");
+            let expected_baseline = tester.get_top_left(find::text("X")).dy()
+                - tester.get_top_left(find::by_type::<GridTile>()).dy()
+                + text_baseline;
+            assert_eq!(
+                tester.get_size(find::by_type::<GridTile>()),
+                Size::new(200.0, 150.0)
+            );
+
+            let tile = tester
+                .render_object(find::descendant(
+                    find::by_type::<GridTile>(),
+                    find::by_type::<Stack>(),
+                ))
+                .as_box()
+                .expect("a stack is a box");
+            assert_eq!(
+                tile.get_dry_baseline(
+                    &mut tester.cell.borrow_mut(),
+                    constraints,
+                    TextBaseline::Alphabetic
+                ),
+                Some(expected_baseline)
+            );
+        });
+    }
+
+    #[test]
+    fn grid_tile_with_header_and_footer_reports_zero_intrinsic_sizes() {
+        test_widgets(|tester| {
+            pump_home(
+                tester,
+                GridTile::new(SizedBox::new().width(80.0).height(100.0))
+                    .header(Text::new("Header"))
+                    .footer(Text::new("Footer")),
+            );
+
+            let tile = tile_box(tester);
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(tile.get_min_intrinsic_width(&mut app, 150.0), 0.0);
+            assert_eq!(tile.get_max_intrinsic_width(&mut app, 150.0), 0.0);
+            assert_eq!(tile.get_min_intrinsic_height(&mut app, 200.0), 0.0);
+            assert_eq!(tile.get_max_intrinsic_height(&mut app, 200.0), 0.0);
+        });
+    }
+
+    #[test]
+    fn grid_tile_dry_layout_does_not_query_its_child_when_both_axes_are_bounded() {
+        test_widgets(|tester| {
+            pump_home(
+                tester,
+                GridTile::new(
+                    LayoutBuilder::new(|_app, _context, _constraints| {
+                        SizedBox::new().into_widget()
+                    })
+                    .into_widget(),
+                )
+                .header(Text::new("Header"))
+                .footer(Text::new("Footer")),
+            );
+
+            let tile = tile_box(tester);
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                tile.get_dry_layout(
+                    &mut app,
+                    BoxConstraints::new().max_width(200.0).max_height(150.0)
+                ),
+                Size::new(200.0, 150.0)
+            );
+            assert_eq!(
+                tile.get_dry_layout(
+                    &mut app,
+                    BoxConstraints::tight_for(Some(200.0), Some(150.0))
+                ),
+                Size::new(200.0, 150.0)
+            );
+        });
     }
 }

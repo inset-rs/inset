@@ -1,4 +1,8 @@
 //! Flutter counterpart: material_ui's `button_bar.dart`.
+#![allow(
+    deprecated,
+    reason = "Dart deprecates `ButtonBar` and its theme, which this file still implements"
+)]
 
 use std::fmt;
 
@@ -33,6 +37,7 @@ use crate::button_theme::{ButtonBarLayoutBehavior, ButtonTextTheme};
 ///
 /// If the button bar's width exceeds the maximum width constraint on the widget, it aligns its
 /// buttons in a column.
+#[deprecated(note = "Use OverflowBar instead. This feature was deprecated after v3.21.0-10.0.pre.")]
 pub struct ButtonBar {
     pub key: Option<KeyRef>,
     /// How the children should be placed along the horizontal axis.
@@ -271,7 +276,8 @@ impl RenderObjectWidget for ButtonBarRow {
     type RenderObject = RenderButtonBarRow;
 
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
-        let text_direction = Directionality::of(app, context);
+        let text_direction =
+            Directionality::maybe_of(app, context).expect("a button bar needs a Directionality");
         let render_object = RenderButtonBarRow::new(
             app,
             text_direction,
@@ -289,8 +295,8 @@ impl RenderObjectWidget for ButtonBarRow {
         context: BuildContext,
         render_object: RenderHandle<RenderButtonBarRow>,
     ) {
-        let text_direction = Directionality::of(app, context);
-        render_object.set_text_direction(app, Some(text_direction));
+        let text_direction = Directionality::maybe_of(app, context);
+        render_object.set_text_direction(app, text_direction);
         render_object.set_main_axis_alignment(app, self.main_axis_alignment);
         render_object.set_main_axis_size(app, self.main_axis_size);
         render_object.set_vertical_direction(app, self.overflow_direction);
@@ -329,6 +335,7 @@ impl RenderButtonBarRow {
         overflow_direction: VerticalDirection,
         overflow_button_spacing: Option<f64>,
     ) -> RenderHandle<RenderButtonBarRow> {
+        debug_assert!(overflow_button_spacing.is_none_or(|spacing| spacing >= 0.0));
         RenderHandle::new_box(
             app,
             RenderButtonBarRow {
@@ -417,8 +424,11 @@ impl RenderObject for RenderButtonBarRow {
         while let Some(current) = child {
             current.layout(app, child_constraints, true);
             let child_size = current.size(app);
-            let offset = match self.text_direction(app) {
-                Some(TextDirection::Ltr) => match self.main_axis_alignment(app) {
+            let text_direction = self
+                .text_direction(app)
+                .expect("a button bar row is given a text direction");
+            let offset = match text_direction {
+                TextDirection::Ltr => match self.main_axis_alignment(app) {
                     MainAxisAlignment::Center => Offset::new(
                         (constraints.max_width - child_size.width()) / 2.0,
                         current_height,
@@ -426,17 +436,24 @@ impl RenderObject for RenderButtonBarRow {
                     MainAxisAlignment::End => {
                         Offset::new(constraints.max_width - child_size.width(), current_height)
                     }
-                    _ => Offset::new(0.0, current_height),
+                    MainAxisAlignment::SpaceAround
+                    | MainAxisAlignment::SpaceBetween
+                    | MainAxisAlignment::SpaceEvenly
+                    | MainAxisAlignment::Start => Offset::new(0.0, current_height),
                 },
-                Some(TextDirection::Rtl) => match self.main_axis_alignment(app) {
+                TextDirection::Rtl => match self.main_axis_alignment(app) {
                     MainAxisAlignment::Center => Offset::new(
                         constraints.max_width / 2.0 - child_size.width() / 2.0,
                         current_height,
                     ),
                     MainAxisAlignment::End => Offset::new(0.0, current_height),
-                    _ => Offset::new(constraints.max_width - child_size.width(), current_height),
+                    MainAxisAlignment::SpaceAround
+                    | MainAxisAlignment::SpaceBetween
+                    | MainAxisAlignment::SpaceEvenly
+                    | MainAxisAlignment::Start => {
+                        Offset::new(constraints.max_width - child_size.width(), current_height)
+                    }
                 },
-                None => Offset::new(0.0, current_height),
             };
             current
                 .as_object()
@@ -591,16 +608,18 @@ impl RenderBox for RenderButtonBarRow {
 #[cfg(test)]
 mod tests {
     use waft_embedder::Size;
-    use waft_foundation::ValueKey;
+    use waft_foundation::{Listener, ValueKey};
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
     use waft_widgets::{
         Center, Directionality, IntoWidget, KeyRef, ListBody, MainAxisAlignment, MainAxisSize,
-        SingleChildScrollView, SizedBox, TextDirection, VerticalDirection,
+        SingleChildScrollView, SizedBox, Text, TextDirection, VerticalDirection,
     };
 
     use super::*;
     use crate::button_bar_theme::{ButtonBarTheme, ButtonBarThemeData};
-    use crate::test_support::material_app;
+    use crate::button_theme::ButtonThemeData;
+    use crate::test_support::{material_app, probe};
+    use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
 
     /// Dart's `pumpWidget(MaterialApp(home: bar))`.
@@ -665,6 +684,13 @@ mod tests {
                 .button_padding(waft_painting::EdgeInsets::ZERO)
                 .children(vec![first, second]),
         )
+    }
+
+    #[test]
+    fn button_bar_default_control_smoketest() {
+        test_widgets(|tester| {
+            tester.pump_widget(Directionality::new(TextDirection::Ltr, ButtonBar::new()));
+        });
     }
 
     #[test]
@@ -736,9 +762,15 @@ mod tests {
             assert_eq!(bar.width(), 800.0);
             assert_eq!(bar.height(), 100.0);
 
-            assert_eq!(tester.get_rect(find::by_key(child0)).right, 800.0 - 200.0);
-            assert_eq!(tester.get_rect(find::by_key(child1)).right, 800.0 - 100.0);
-            assert_eq!(tester.get_rect(find::by_key(child2)).right, 800.0);
+            let child0 = tester.get_rect(find::by_key(child0));
+            assert_eq!(child0.size(), Size::new(100.0, 100.0));
+            assert_eq!(child0.right, 800.0 - 200.0);
+            let child1 = tester.get_rect(find::by_key(child1));
+            assert_eq!(child1.size(), Size::new(100.0, 100.0));
+            assert_eq!(child1.right, 800.0 - 100.0);
+            let child2 = tester.get_rect(find::by_key(child2));
+            assert_eq!(child2.size(), Size::new(100.0, 100.0));
+            assert_eq!(child2.right, 800.0);
         });
     }
 
@@ -767,9 +799,15 @@ mod tests {
             assert_eq!(bar.height(), 100.0);
 
             let left = (800.0 - bar.width()) / 2.0;
-            assert_eq!(tester.get_rect(find::by_key(child0)).left, left);
-            assert_eq!(tester.get_rect(find::by_key(child1)).left, left + 100.0);
-            assert_eq!(tester.get_rect(find::by_key(child2)).left, left + 200.0);
+            let child0 = tester.get_rect(find::by_key(child0));
+            assert_eq!(child0.size(), Size::new(100.0, 100.0));
+            assert_eq!(child0.left, left);
+            let child1 = tester.get_rect(find::by_key(child1));
+            assert_eq!(child1.size(), Size::new(100.0, 100.0));
+            assert_eq!(child1.left, left + 100.0);
+            let child2 = tester.get_rect(find::by_key(child2));
+            assert_eq!(child2.size(), Size::new(100.0, 100.0));
+            assert_eq!(child2.left, left + 200.0);
         });
     }
 
@@ -797,9 +835,119 @@ mod tests {
             let bar = tester.get_rect(find::by_key(bar_key));
             assert_eq!(bar.width(), 800.0);
             assert_eq!(bar.height(), 100.0);
-            assert_eq!(tester.get_rect(find::by_key(child0)).right, 800.0 - 200.0);
-            assert_eq!(tester.get_rect(find::by_key(child1)).right, 800.0 - 100.0);
-            assert_eq!(tester.get_rect(find::by_key(child2)).right, 800.0);
+            let child0 = tester.get_rect(find::by_key(child0));
+            assert_eq!(child0.size(), Size::new(100.0, 100.0));
+            assert_eq!(child0.right, 800.0 - 200.0);
+            let child1 = tester.get_rect(find::by_key(child1));
+            assert_eq!(child1.size(), Size::new(100.0, 100.0));
+            assert_eq!(child1.right, 800.0 - 100.0);
+            let child2 = tester.get_rect(find::by_key(child2));
+            assert_eq!(child2.size(), Size::new(100.0, 100.0));
+            assert_eq!(child2.right, 800.0);
+        });
+    }
+
+    /// The `ButtonThemeData` a child of `bar` sees, under the theme `wrap` adds.
+    fn child_button_theme(
+        tester: &mut WidgetTester,
+        bar_theme: Option<ButtonBarThemeData>,
+        bar: impl FnOnce(WidgetRef) -> ButtonBar,
+    ) -> ButtonThemeData {
+        probe(
+            tester,
+            move |app, probe| {
+                let bar = bar(probe).into_widget();
+                let home = match bar_theme {
+                    Some(data) => ButtonBarTheme::new(data, bar).into_widget(),
+                    None => bar,
+                };
+                material_app(ThemeData::builder().build(app), home)
+            },
+            ButtonTheme::of,
+        )
+    }
+
+    #[test]
+    fn default_button_properties_override_button_theme_properties() {
+        test_widgets(|tester| {
+            let button_theme =
+                child_button_theme(tester, None, |child| ButtonBar::new().children(vec![child]));
+            assert_eq!(button_theme.text_theme, ButtonTextTheme::Primary);
+            assert_eq!(button_theme.min_width, 64.0);
+            assert_eq!(button_theme.height, 36.0);
+            assert_eq!(
+                button_theme.padding(),
+                EdgeInsets::symmetric(0.0, 8.0).into()
+            );
+            assert!(!button_theme.aligned_dropdown);
+            assert_eq!(
+                button_theme.layout_behavior,
+                ButtonBarLayoutBehavior::Padded
+            );
+        });
+    }
+
+    #[test]
+    fn button_bar_theme_button_properties_override_defaults_and_button_theme_properties() {
+        test_widgets(|tester| {
+            let bar_theme = ButtonBarThemeData::new()
+                .with_button_text_theme(ButtonTextTheme::Primary)
+                .with_button_min_width(42.0)
+                .with_button_height(84.0)
+                .with_button_padding(EdgeInsets::from_ltrb(10.0, 20.0, 30.0, 40.0))
+                .with_button_aligned_dropdown(true)
+                .with_layout_behavior(ButtonBarLayoutBehavior::Constrained);
+            let button_theme = child_button_theme(tester, Some(bar_theme), |child| {
+                ButtonBar::new().children(vec![child])
+            });
+            assert_eq!(button_theme.text_theme, ButtonTextTheme::Primary);
+            assert_eq!(button_theme.min_width, 42.0);
+            assert_eq!(button_theme.height, 84.0);
+            assert_eq!(
+                button_theme.padding(),
+                EdgeInsets::from_ltrb(10.0, 20.0, 30.0, 40.0).into()
+            );
+            assert!(button_theme.aligned_dropdown);
+            assert_eq!(
+                button_theme.layout_behavior,
+                ButtonBarLayoutBehavior::Constrained
+            );
+        });
+    }
+
+    #[test]
+    fn button_bar_button_properties_override_button_bar_theme_defaults_and_button_theme_properties()
+    {
+        test_widgets(|tester| {
+            let bar_theme = ButtonBarThemeData::new()
+                .with_button_text_theme(ButtonTextTheme::Accent)
+                .with_button_min_width(4242.0)
+                .with_button_height(8484.0)
+                .with_button_padding(EdgeInsets::from_ltrb(50.0, 60.0, 70.0, 80.0))
+                .with_button_aligned_dropdown(false)
+                .with_layout_behavior(ButtonBarLayoutBehavior::Padded);
+            let button_theme = child_button_theme(tester, Some(bar_theme), |child| {
+                ButtonBar::new()
+                    .button_text_theme(ButtonTextTheme::Primary)
+                    .button_min_width(42.0)
+                    .button_height(84.0)
+                    .button_padding(EdgeInsets::from_ltrb(10.0, 20.0, 30.0, 40.0))
+                    .button_aligned_dropdown(true)
+                    .layout_behavior(ButtonBarLayoutBehavior::Constrained)
+                    .children(vec![child])
+            });
+            assert_eq!(button_theme.text_theme, ButtonTextTheme::Primary);
+            assert_eq!(button_theme.min_width, 42.0);
+            assert_eq!(button_theme.height, 84.0);
+            assert_eq!(
+                button_theme.padding(),
+                EdgeInsets::from_ltrb(10.0, 20.0, 30.0, 40.0).into()
+            );
+            assert!(button_theme.aligned_dropdown);
+            assert_eq!(
+                button_theme.layout_behavior,
+                ButtonBarLayoutBehavior::Constrained
+            );
         });
     }
 
@@ -946,7 +1094,10 @@ mod tests {
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
-                    .child(SizedBox::shrink().child(ButtonBar::new().children(vec![boxed(10.0)])))
+                    .child(SizedBox::shrink().child(ButtonBar::new().children(vec![
+                        TextButton::new(Some(Listener::new(|_app| {})), Some(Text::new("X")))
+                            .into_widget(),
+                    ])))
                     .into_widget(),
             ));
             assert_eq!(tester.get_size(find::by_type::<ButtonBar>()), Size::ZERO);

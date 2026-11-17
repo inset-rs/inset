@@ -539,7 +539,7 @@ impl ButtonThemeData {
             .expect("a button theme has a color scheme")
     }
 
-    /// The [button]'s overall brightness.
+    /// The `button`'s overall brightness.
     ///
     /// Returns the button's `colorBrightness` if it is non-null, otherwise the color scheme's
     /// `brightness`.
@@ -549,52 +549,43 @@ impl ButtonThemeData {
             .unwrap_or_else(|| self.color_scheme().brightness)
     }
 
-    /// Defines the [button]'s base colors, and the defaults for the button's minimum size,
+    /// Defines the `button`'s base colors, and the defaults for the button's minimum size,
     /// internal padding, and shape.
     pub fn get_text_theme(&self, button: &MaterialButton) -> ButtonTextTheme {
         button.text_theme.unwrap_or(self.text_theme)
     }
 
-    /// The foreground color of the [button]'s text and icon when `on_pressed` is null.
+    /// The foreground color of the `button`'s text and icon when `on_pressed` is null.
+    #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     pub fn get_disabled_text_color(&self, button: &MaterialButton) -> Color {
         button
             .text_color
             .or(button.disabled_text_color)
-            .unwrap_or_else(|| {
-                self.color_scheme()
-                    .on_surface
-                    .with_values(Some(0.38), None, None, None, None)
-            })
+            .unwrap_or_else(|| self.color_scheme().on_surface.with_opacity(0.38))
     }
 
-    /// The [button]'s background color when `on_pressed` is null.
+    /// The `button`'s background color when `on_pressed` is null.
+    #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     pub fn get_disabled_fill_color(&self, button: &MaterialButton) -> Color {
         button
             .disabled_color
             .or(self.disabled_color)
-            .unwrap_or_else(|| {
-                self.color_scheme()
-                    .on_surface
-                    .with_values(Some(0.38), None, None, None, None)
-            })
+            .unwrap_or_else(|| self.color_scheme().on_surface.with_opacity(0.38))
     }
 
     /// The button's background fill color, or `None` for buttons that don't have a background
     /// color.
     pub fn get_fill_color(&self, button: &MaterialButton) -> Option<Color> {
-        let fill_color = if button.enabled() {
+        // Dart goes on to the theme's colors only for a subclass of `MaterialButton`, and a Rust
+        // type has no subclass.
+        if button.enabled() {
             button.color
         } else {
             button.disabled_color
-        };
-        if fill_color.is_some() {
-            return fill_color;
         }
-        // A plain `MaterialButton` has no fill; only a subclass would, and this port has none.
-        None
     }
 
-    /// The foreground color of the [button]'s text and icon.
+    /// The foreground color of the `button`'s text and icon.
     pub fn get_text_color(&self, button: &MaterialButton) -> Color {
         if !button.enabled() {
             return self.get_disabled_text_color(button);
@@ -627,8 +618,9 @@ impl ButtonThemeData {
         }
     }
 
-    /// The color of the ink "splash" overlay that appears when the (enabled) [button] is
+    /// The color of the ink "splash" overlay that appears when the (enabled) `button` is
     /// tapped.
+    #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     pub fn get_splash_color(&self, button: &MaterialButton) -> Color {
         if let Some(splash_color) = button.splash_color {
             return splash_color;
@@ -641,68 +633,67 @@ impl ButtonThemeData {
         {
             return splash_color;
         }
-        self.get_text_color(button)
-            .with_values(Some(0.12), None, None, None, None)
+        self.get_text_color(button).with_opacity(0.12)
     }
 
     /// The fill color of the button when it has input focus.
+    #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     pub fn get_focus_color(&self, button: &MaterialButton) -> Color {
-        button.focus_color.or(self.focus_color).unwrap_or_else(|| {
-            self.get_text_color(button)
-                .with_values(Some(0.12), None, None, None, None)
-        })
+        button
+            .focus_color
+            .or(self.focus_color)
+            .unwrap_or_else(|| self.get_text_color(button).with_opacity(0.12))
     }
 
     /// The fill color of the button when a pointer is hovering over it.
+    #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     pub fn get_hover_color(&self, button: &MaterialButton) -> Color {
-        button.hover_color.or(self.hover_color).unwrap_or_else(|| {
-            self.get_text_color(button)
-                .with_values(Some(0.04), None, None, None, None)
-        })
+        button
+            .hover_color
+            .or(self.hover_color)
+            .unwrap_or_else(|| self.get_text_color(button).with_opacity(0.04))
     }
 
-    /// The color of the overlay that appears when the [button] is pressed.
+    /// The color of the overlay that appears when the `button` is pressed.
+    #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     pub fn get_highlight_color(&self, button: &MaterialButton) -> Color {
         if let Some(highlight_color) = button.highlight_color {
             return highlight_color;
         }
         match self.get_text_theme(button) {
-            ButtonTextTheme::Normal | ButtonTextTheme::Accent => {
-                self.highlight_color.unwrap_or_else(|| {
-                    self.get_text_color(button)
-                        .with_values(Some(0.16), None, None, None, None)
-                })
-            }
+            ButtonTextTheme::Normal | ButtonTextTheme::Accent => self
+                .highlight_color
+                .unwrap_or_else(|| self.get_text_color(button).with_opacity(0.16)),
             ButtonTextTheme::Primary => Colors::TRANSPARENT,
         }
     }
 
-    /// The [button]'s elevation when it is enabled and has not been pressed.
+    /// The `button`'s elevation when it is enabled and has not been pressed.
     pub fn get_elevation(&self, button: &MaterialButton) -> f64 {
         button.elevation.unwrap_or(2.0)
     }
 
-    /// The [button]'s elevation when it is enabled and has focus.
+    /// The `button`'s elevation when it is enabled and has focus.
     pub fn get_focus_elevation(&self, button: &MaterialButton) -> f64 {
         button.focus_elevation.unwrap_or(4.0)
     }
 
-    /// The [button]'s elevation when it is enabled and hovered.
+    /// The `button`'s elevation when it is enabled and hovered.
     pub fn get_hover_elevation(&self, button: &MaterialButton) -> f64 {
         button.hover_elevation.unwrap_or(4.0)
     }
 
-    /// The [button]'s elevation when it is enabled and pressed.
+    /// The `button`'s elevation when it is enabled and pressed.
     pub fn get_highlight_elevation(&self, button: &MaterialButton) -> f64 {
         button.highlight_elevation.unwrap_or(8.0)
     }
 
-    /// The [button]'s elevation when `on_pressed` is null.
+    /// The `button`'s elevation when `on_pressed` is null.
     pub fn get_disabled_elevation(&self, button: &MaterialButton) -> f64 {
         button.disabled_elevation.unwrap_or(0.0)
     }
 
-    /// Padding for the [button]'s child (typically the button's label).
+    /// Padding for the `button`'s child (typically the button's label).
     pub fn get_padding(&self, button: &MaterialButton) -> EdgeInsetsGeometry {
         button
             .padding
@@ -715,22 +706,22 @@ impl ButtonThemeData {
             })
     }
 
-    /// The shape of the [button]'s `Material`.
+    /// The shape of the `button`'s `Material`.
     pub fn get_shape(&self, button: &MaterialButton) -> ShapeBorderRef {
         button.shape.clone().unwrap_or_else(|| self.shape())
     }
 
-    /// The duration of the [button]'s highlight animation.
+    /// The duration of the `button`'s highlight animation.
     pub fn get_animation_duration(&self, button: &MaterialButton) -> Duration {
         button.animation_duration.unwrap_or(K_THEME_CHANGE_DURATION)
     }
 
-    /// The `BoxConstraints` that define the [button]'s size.
+    /// The `BoxConstraints` that define the `button`'s size.
     pub fn get_constraints(&self, _button: &MaterialButton) -> BoxConstraints {
         self.constraints()
     }
 
-    /// The minimum size of the [button]'s tap target.
+    /// The minimum size of the `button`'s tap target.
     pub fn get_material_tap_target_size(&self, button: &MaterialButton) -> MaterialTapTargetSize {
         button
             .material_tap_target_size

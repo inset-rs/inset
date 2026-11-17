@@ -109,6 +109,10 @@ impl Default for GridTileBar {
 }
 
 impl StatelessWidget for GridTileBar {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
         let dark_theme = Rc::new(ThemeData::dark(app, None));
         let padding = EdgeInsetsDirectional::only(
@@ -226,6 +230,23 @@ mod tests {
 
     fn height(tester: &waft_widgets::testing::WidgetTester) -> f64 {
         tester.get_size(find::by_type::<GridTileBar>()).height()
+    }
+
+    #[test]
+    fn grid_tile_bar_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            let theme = ThemeData::builder().build(&tester.cell.borrow());
+            tester.pump_widget(material_app(
+                theme,
+                Center::new()
+                    .child(SizedBox::shrink().child(GridTileBar::new().title(Text::new("X"))))
+                    .into_widget(),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<GridTileBar>()),
+                waft_embedder::Size::ZERO
+            );
+        });
     }
 
     #[test]
