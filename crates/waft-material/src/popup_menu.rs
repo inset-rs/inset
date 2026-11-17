@@ -42,8 +42,8 @@ use waft_widgets::{
     RouteSettingsRef, ScrollPositionAlignmentPolicy, Scrollable, Semantics,
     SingleChildRenderObjectWidget, SingleChildScrollView, SingleTickerProviderStateMixin,
     SingleTickerProviderStateMixinData, StandardComponentType, State, StateData, StatefulWidget,
-    TransitionRoute, TransitionRouteData, TraversalEdgeBehavior, WidgetRef, WidgetState,
-    WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
+    TransitionRoute, TransitionRouteBase, TransitionRouteData, TraversalEdgeBehavior, WidgetRef,
+    WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
     downcast_widget,
 };
 
@@ -1891,18 +1891,6 @@ impl<T: Clone + PartialEq + 'static> PopupMenuRoute<T> {
             None,
         );
     }
-
-    /// Dart's `TransitionRoute.createAnimation`, which the override runs as `super`: the
-    /// trait's default body.
-    fn transition_route_create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
-        debug_assert!(
-            !TransitionRoute::debug_transition_completed(self, app),
-            "cannot reuse a route after disposing it"
-        );
-        let controller =
-            TransitionRoute::controller(self, app).expect("createAnimationController ran first");
-        controller.keep(app).into_erased()
-    }
 }
 
 // Dart's `_PopupMenuRoute.dispose` disposes its curved animation and runs `super.dispose()`,
@@ -2032,7 +2020,7 @@ impl<T: Clone + PartialEq + 'static> TransitionRoute for PopupMenuRoute<T> {
             if let Some(animation) = app.get(self).animation.as_ref() {
                 return animation.erase();
             }
-            let parent = self.transition_route_create_animation(app);
+            let parent = TransitionRouteBase::create_animation(self, app);
             let curve = style
                 .as_ref()
                 .and_then(|style| style.curve.clone())
@@ -2051,7 +2039,7 @@ impl<T: Clone + PartialEq + 'static> TransitionRoute for PopupMenuRoute<T> {
             app.get_mut(self).animation = Some(animation.clone());
             return animation.into_erased();
         }
-        self.transition_route_create_animation(app)
+        TransitionRouteBase::create_animation(self, app)
     }
 }
 
