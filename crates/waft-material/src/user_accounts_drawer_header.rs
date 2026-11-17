@@ -706,7 +706,7 @@ impl State for UserAccountsDrawerHeaderState {
             .child(
                 DrawerHeader::new(Some(child.into_widget()))
                     .decoration(decoration)
-                    .margin(widget.margin.clone())
+                    .margin(widget.margin)
                     .padding(EdgeInsetsDirectional::only(16.0, 16.0, 0.0, 0.0).into()),
             )
             .into_widget()

@@ -1126,7 +1126,7 @@ mod tests {
                 theme,
                 RefreshIndicator::adaptive(refresh, list()).into_widget(),
             ));
-            let _ = state(tester).show(&mut tester.cell.borrow_mut(), true);
+            drop(state(tester).show(&mut tester.cell.borrow_mut(), true));
             tester.pump();
             assert_eq!(
                 find::by_type::<waft_cupertino::CupertinoActivityIndicator>()
