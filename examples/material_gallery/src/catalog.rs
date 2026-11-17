@@ -28,11 +28,16 @@ pub enum Entry {
     Dialogs,
     Menus,
     Pickers,
+    Autocomplete,
+    ReorderableListView,
+    DataTables,
+    Search,
+    Carousels,
 }
 
 impl Entry {
     /// Index order — the order the tiles appear in.
-    pub const ALL: [Entry; 16] = [
+    pub const ALL: [Entry; 21] = [
         Entry::Buttons,
         Entry::AppBars,
         Entry::Lists,
@@ -49,6 +54,11 @@ impl Entry {
         Entry::Dialogs,
         Entry::Menus,
         Entry::Pickers,
+        Entry::Autocomplete,
+        Entry::ReorderableListView,
+        Entry::DataTables,
+        Entry::Search,
+        Entry::Carousels,
     ];
 
     /// The entry named by its variant, case-insensitively: how a launcher picks a page.
@@ -78,6 +88,11 @@ impl Entry {
             Entry::Dialogs => "Dialogs",
             Entry::Menus => "Menus",
             Entry::Pickers => "Date & Time Pickers",
+            Entry::Autocomplete => "Autocomplete",
+            Entry::ReorderableListView => "Reorderable Lists",
+            Entry::DataTables => "Data Tables",
+            Entry::Search => "Search",
+            Entry::Carousels => "Carousels",
         }
     }
 
@@ -100,6 +115,11 @@ impl Entry {
             Entry::Dialogs => Icons::chat_bubble(),
             Entry::Menus => Icons::more_vert(),
             Entry::Pickers => Icons::event(),
+            Entry::Autocomplete => Icons::manage_search(),
+            Entry::ReorderableListView => Icons::reorder(),
+            Entry::DataTables => Icons::table_chart(),
+            Entry::Search => Icons::search(),
+            Entry::Carousels => Icons::view_carousel(),
         }
     }
 
@@ -133,6 +153,11 @@ impl Entry {
             Entry::Dialogs => pages::dialogs::body(app, context),
             Entry::Menus => pages::menus::body(app, context),
             Entry::Pickers => pages::pickers::body(app, context),
+            Entry::Autocomplete => pages::autocomplete::body(app, context),
+            Entry::ReorderableListView => pages::reorderable_list_view::body(app, context),
+            Entry::DataTables => pages::data_tables::body(app, context),
+            Entry::Search => pages::search::body(app, context),
+            Entry::Carousels => pages::carousels::body(app, context),
         }
     }
 

@@ -53,6 +53,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/animated_cross_fade.rs → animated_cross_fade.dart
 - widgets/sliver_fill.rs → sliver_fill.dart
 - widgets/raw_radio.rs → raw_radio.dart
+- widgets/drag_boundary.rs → drag_boundary.dart
+- widgets/sliver_prototype_extent_list.rs → sliver_prototype_extent_list.dart
 
 ## widgets/preferred_size.rs → preferred_size.dart (+ the `Size` subclass mechanism)
 
@@ -216,7 +218,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the binding raises no system-font change yet.
   Affect: a banner does not repaint when the system fonts change.
 
-## widgets/basic.rs → basic.dart (+ `WidgetBuilder` from framework.dart, `Spacer` from spacer.dart, `IndexedStack` from indexed_stack.dart)
+## widgets/basic.rs → basic.dart (+ `WidgetBuilder` from framework.dart, `Spacer` from spacer.dart, `IndexedStack` from indexed_stack.dart, `IndexedWidgetBuilder` from framework.dart)
 
 - Change: a Dart constructor assert on one argument runs on its setter, and one across arguments in the widget's `debug_check_constructor`, when it is turned into a `WidgetRef` (`into_widget`); `Flex`, `RawIndexedStack`, `CustomPaint` and `Table` still check theirs when the element creates or updates the render object.
   Reason: language — a struct literal has no constructor body, and a fluent setter cannot see the arguments a later setter will supply.
@@ -714,6 +716,30 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — the constraints are a `BoxConstraints` subclass instance only through rendering's wrapper (D17).
   Affect: a builder reads fields through deref and calls `.constraints()` to hand the plain value on; a parent that changes only a subclass field reruns the builder, as in Dart.
 
+## widgets/reorderable_list.rs → reorderable_list.dart
+
+- Change: `ReorderableList` and `SliverReorderableList` start a drag from a recognizer of one concrete type, which a drag start listener names when it is compiled.
+  Reason: language — the gestures crate has the multi-drag recognizer only as a trait over its concrete recognizers, with no erased form to pass or return.
+  Affect: a drag start listener subclass creates a recognizer of a type fixed at compile time, where a Dart override may pick the type at run time.
+- Change: `EdgeDraggingAutoScroller` keeps its `on_scroll_view_scrolled` callback after `stop_auto_scroll`, so an animation in flight when the list's state is freed calls the state's `handle_scrollable_auto_scrolled` once after disposal, as Dart's `_scroll` calls `_handleScrollableAutoScrolled` on the disposed state.
+  Reason: language — the callback is a tear-off of the state's handle, which the arena skips once the state is freed, where Dart's bound method keeps the disposed state alive and runs.
+  Affect: a debug build logs "a listener whose receiver was freed without removing it was skipped" when a list is torn down with an auto-scroll animation in flight; the call does nothing in either.
+
+## widgets/autocomplete.rs → autocomplete.dart
+
+- Change: `RawAutocomplete`'s options builder returns a task, and a builder with its options at hand returns a ready one.
+  Reason: language — Rust has no union of a value and a future, as Dart's `FutureOr` is.
+  Affect: every options builder is written as returning a task, and its options reach the state at the next checkpoint either way, as Dart's await delivers even a plain value in a microtask.
+- Change: `RawAutocomplete`'s first constructor shows an option by its `Display` form, and a second constructor takes the function that turns an option into text.
+  Reason: language — every Dart object has the `toString` Dart's default calls, and a Rust type has a `Display` form only when it implements one.
+  Affect: an option type without a `Display` form is built with the second constructor.
+- Change: `RawAutocomplete` compares a newly selected option with the current selection by the option type's equality.
+  Reason: language — a Rust value has no identity, which Dart's default equality compares.
+  Affect: selecting an option equal to the current one does nothing, where Dart selects a distinct object with equal fields again.
+- Change: `RawAutocomplete` adds one focus listener to the caller's focus node and removes another, as Dart's source does, and the listener left behind does nothing once the state is freed.
+  Reason: language — a listener bound to a state's handle is skipped once the arena has freed the state, where Dart's closure keeps the disposed state and runs.
+  Affect: a caller's focus node that outlives the autocomplete keeps one inert listener, where Dart's runs on a disposed state.
+
 ## Deferred
 
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
@@ -786,7 +812,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - Scroll semantics: `ScrollContext.setSemanticsActions`, scrollable.rs's semantics widget and its render object with `excludeFromSemantics` and `semanticChildCount`, and scroll_position.rs's semantic action bookkeeping. Trigger: the semantics tree.
 - scrollable.rs: the selection handler and container delegate around a scrollable. Trigger: `SelectionContainer` / `SelectionRegistrar`.
 - scrollable.rs, scroll_configuration.rs, primary_scroll_controller.rs: diagnostics, and `ScrollableDetails.hashCode` (no `Hash` over an erased physics). Trigger: diagnostics; a map keyed by scrollable details.
-- scroll_view.rs: `ListView.prototypeItem` and its branch of the child layout. Trigger: `sliver_prototype_extent_list.dart`.
 - scroll_view.rs: the scroll view diagnostics. Trigger: diagnostics.
 - single_child_scroll_view.rs: the semantics clip and the approximate paint clip (deferred crate-wide in rendering's PORTING.md), and its diagnostics. Trigger: the semantics tree; the inspector; diagnostics.
 - scrollbar.rs: the painter's semantics and the structured error reports, which are plain assert messages here. Trigger: the semantics tree; diagnostics.
@@ -808,4 +833,11 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - overlay.rs: the theater's clip layer handle and the entry location's compositing-bits update. Trigger: layer handles and compositing bits in `waft-rendering`.
 - overlay.rs: the deferred-child gates on the theater's `markNeedsLayout` and the layout box's dirty flag. Trigger: a public `RenderBox` super-hook for `markNeedsLayout` and a readable dirty flag in `waft-rendering`.
 - heroes.rs: the hero diagnostics and the structured report behind the duplicate-tag check (a `debug_assert!` carrying Dart's message meanwhile). Trigger: diagnostics.
+- reorderable_list.rs: 'SliverReorderableList item has correct semantics' and 'SliverReorderableList custom semantics action has correct label'. Trigger: the semantics tree.
+- reorderable_list.rs: 'When creating a new item, be in the correct position'. Trigger: `Finder.hitTestable(at:)` in `waft_widgets::testing`.
+- reorderable_list.rs: 'Tests the correctness of the drop animation in various scenarios'. Trigger: `WidgetTester.timedDrag` in `waft_widgets::testing`.
+- autocomplete.rs: the results-found and no-results announcements, and autocomplete_test's three announcement cases. Trigger: the semantics tree.
+- autocomplete.rs: the two "when field scrolled offscreen" cases (desktop and mobile). Trigger: flutter_test's `scrollUntilVisible` in `waft_widgets::testing`.
 
+## Skipped
+- reorderable_list.rs: the second 'ReorderableList supports items with nested list views without throwing layout exception.', a repeat of the first in Dart's file.

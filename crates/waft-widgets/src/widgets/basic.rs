@@ -6973,6 +6973,19 @@ fn debug_items_have_duplicate_keys(items: &[WidgetRef]) -> bool {
 /// [`App`] because a Rust callback cannot capture what it mutates.
 pub type WidgetBuilder = Rc<dyn Fn(&mut App, BuildContext) -> WidgetRef>;
 
+/// Signature for a function that creates a widget for a given index, e.g., in a list.
+///
+/// Used by `ReorderableList.itemBuilder`.
+///
+/// See also:
+///
+///  * [`WidgetBuilder`], which is similar but only takes a [`BuildContext`].
+///  * `NullableIndexedWidgetBuilder`, which is similar but may return `None`.
+///
+/// Flutter's `Widget Function(BuildContext context, int index)` from `framework.dart`;
+/// receives [`App`] because a Rust callback cannot capture what it mutates.
+pub type IndexedWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, i32) -> WidgetRef>;
+
 /// A stateless utility widget whose [`build`](StatelessWidget::build) method uses its
 /// [`builder`](Self::builder) callback to create the widget's child.
 ///
