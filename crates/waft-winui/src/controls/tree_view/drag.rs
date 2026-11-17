@@ -20,7 +20,7 @@ use crate::*;
 use std::{cell::Cell, rc::Rc, time::Duration};
 use waft_embedder::{Offset, Rect};
 use waft_foundation::{App, Handle, Listener, OptionRetained, Timer};
-use waft_gestures::{GestureMultiDragStartCallback, RecognizerRef};
+use waft_gestures::{GestureMultiDragStartCallback, MultiDragRecognizerRef};
 use waft_widgets::*;
 
 /// XAML `DataPackageOperation`, as a drag within the tree ends.
@@ -184,7 +184,7 @@ impl DraggableWidget for TreeViewItemDraggable {
         &self,
         app: &mut App,
         on_start: GestureMultiDragStartCallback,
-    ) -> RecognizerRef {
+    ) -> MultiDragRecognizerRef {
         let data = self.draggable.data.clone().expect("a row's drag data");
         self.draggable.create_recognizer(
             app,

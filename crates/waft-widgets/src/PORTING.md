@@ -718,9 +718,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## widgets/reorderable_list.rs → reorderable_list.dart
 
-- Change: `ReorderableList` and `SliverReorderableList` start a drag from a recognizer of one concrete type, which a drag start listener names when it is compiled.
-  Reason: language — the gestures crate has the multi-drag recognizer only as a trait over its concrete recognizers, with no erased form to pass or return.
-  Affect: a drag start listener subclass creates a recognizer of a type fixed at compile time, where a Dart override may pick the type at run time.
 - Change: `EdgeDraggingAutoScroller` keeps its `on_scroll_view_scrolled` callback after `stop_auto_scroll`, so an animation in flight when the list's state is freed calls the state's `handle_scrollable_auto_scrolled` once after disposal, as Dart's `_scroll` calls `_handleScrollableAutoScrolled` on the disposed state.
   Reason: language — the callback is a tear-off of the state's handle, which the arena skips once the state is freed, where Dart's bound method keeps the disposed state alive and runs.
   Affect: a debug build logs "a listener whose receiver was freed without removing it was skipped" when a list is torn down with an auto-scroll animation in flight; the call does nothing in either.

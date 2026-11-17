@@ -1,6 +1,8 @@
 //! Flutter counterpart: `gestures/multidrag.dart`.
 
+use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -284,6 +286,136 @@ pub trait MultiDragGestureRecognizer: RecognizerLeaf {
         app.get_mut(self)
             .recognizer_mut()
             .set_allowed_buttons_filter(value);
+    }
+
+    /// This recognizer as the erased [`AnyMultiDragGestureRecognizer`] — what to pass where a
+    /// Dart API takes a `MultiDragGestureRecognizer`.
+    ///
+    /// The object is untouched; this mints an erased second handle to it, so concrete members
+    /// stay reachable through the typed one.
+    fn as_multi_drag_recognizer(self: Handle<Self>) -> AnyMultiDragGestureRecognizer {
+        AnyMultiDragGestureRecognizer {
+            id: self.id(),
+            vtable: const { &MultiDragGestureRecognizerVTable::of::<Self>() },
+        }
+    }
+}
+
+/// A field Dart types as `MultiDragGestureRecognizer`, kept: the erased recognizer with its
+/// count.
+pub type MultiDragRecognizerRef = Retained<AnyMultiDragGestureRecognizer>;
+
+waft_foundation::erased_handle!(AnyMultiDragGestureRecognizer: MultiDragGestureRecognizer => MultiDragGestureRecognizer::as_multi_drag_recognizer);
+
+/// The vtable of an erased [`AnyMultiDragGestureRecognizer`]: one `&'static` table per leaf
+/// type, built by [`MultiDragGestureRecognizerVTable::of`]. Copied out of the handle before a
+/// virtual call, so the slot is not borrowed across it.
+struct MultiDragGestureRecognizerVTable {
+    type_id: fn() -> TypeId,
+    type_name: fn() -> &'static str,
+    add_pointer: fn(&mut App, HandleId, PointerDownEvent),
+    set_on_start: fn(&mut App, HandleId, Option<GestureMultiDragStartCallback>),
+    set_allowed_buttons_filter: fn(&mut App, HandleId, AllowedButtonsFilter),
+    set_gesture_settings: fn(&mut App, HandleId, Option<DeviceGestureSettings>),
+    dispose: fn(&mut App, HandleId),
+    debug_description: fn(HandleId) -> &'static str,
+}
+
+impl MultiDragGestureRecognizerVTable {
+    const fn of<R: MultiDragGestureRecognizer>() -> MultiDragGestureRecognizerVTable {
+        MultiDragGestureRecognizerVTable {
+            type_id: TypeId::of::<R>,
+            type_name: std::any::type_name::<R>,
+            add_pointer: |app, id, event| {
+                RecognizerLeaf::add_pointer(Handle::<R>::from_id(id), app, event)
+            },
+            set_on_start: |app, id, value| {
+                MultiDragGestureRecognizer::set_on_start(Handle::<R>::from_id(id), app, value)
+            },
+            set_allowed_buttons_filter: |app, id, value| {
+                MultiDragGestureRecognizer::set_allowed_buttons_filter(
+                    Handle::<R>::from_id(id),
+                    app,
+                    value,
+                )
+            },
+            set_gesture_settings: |app, id, value| {
+                MultiDragGestureRecognizer::set_gesture_settings(
+                    Handle::<R>::from_id(id),
+                    app,
+                    value,
+                )
+            },
+            dispose: |app, id| RecognizerLeaf::dispose(Handle::<R>::from_id(id), app),
+            debug_description: |id| RecognizerLeaf::debug_description(Handle::<R>::from_id(id)),
+        }
+    }
+}
+
+/// Erased `MultiDragGestureRecognizer`: what a field or parameter Dart types as
+/// `MultiDragGestureRecognizer` becomes.
+///
+/// The leaf stays in the [`App`] under its own type; [`downcast`](Self::downcast) gets the
+/// typed handle back, and [`type_id`](Self::type_id) is Dart's `runtimeType`.
+///
+/// Equality is Dart's `==` on an object reference.
+#[derive(Clone, Copy)]
+pub struct AnyMultiDragGestureRecognizer {
+    id: HandleId,
+    vtable: &'static MultiDragGestureRecognizerVTable,
+}
+
+impl fmt::Debug for AnyMultiDragGestureRecognizer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}({:?})", (self.vtable.type_name)(), self.id)
+    }
+}
+
+impl AnyMultiDragGestureRecognizer {
+    /// The arena id behind this handle.
+    pub fn id(self) -> HandleId {
+        self.id
+    }
+
+    /// Dart's `runtimeType`: the leaf type this handle was minted from.
+    pub fn type_id(self) -> TypeId {
+        (self.vtable.type_id)()
+    }
+
+    /// Dart's `recognizer as T`: the typed handle when this recognizer is a `T`, else `None`.
+    pub fn downcast<T: 'static>(self, app: &App) -> Option<Handle<T>> {
+        app.handle::<T>(self.id)
+    }
+
+    /// Registers a new pointer that might be relevant to this gesture recognizer.
+    pub fn add_pointer(self, app: &mut App, event: &PointerDownEvent) {
+        (self.vtable.add_pointer)(app, self.id, event.clone());
+    }
+
+    /// Sets the callback that starts the drag when the gesture is accepted.
+    pub fn set_on_start(self, app: &mut App, value: Option<GestureMultiDragStartCallback>) {
+        (self.vtable.set_on_start)(app, self.id, value);
+    }
+
+    /// Sets the filter that decides whether a pointer's buttons may start this gesture.
+    pub fn set_allowed_buttons_filter(self, app: &mut App, value: AllowedButtonsFilter) {
+        (self.vtable.set_allowed_buttons_filter)(app, self.id, value);
+    }
+
+    /// Optional device-specific configuration for device gestures.
+    pub fn set_gesture_settings(self, app: &mut App, value: Option<DeviceGestureSettings>) {
+        (self.vtable.set_gesture_settings)(app, self.id, value);
+    }
+
+    /// Releases any resources used by the object and frees its arena slot. Every handle to it
+    /// is stale afterwards.
+    pub fn dispose(self, app: &mut App) {
+        (self.vtable.dispose)(app, self.id);
+    }
+
+    /// Returns a very short pretty description of the gesture that the recognizer looks for.
+    pub fn debug_description(self) -> &'static str {
+        (self.vtable.debug_description)(self.id)
     }
 }
 
