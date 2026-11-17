@@ -307,6 +307,33 @@ mod tests {
     }
 
     #[test]
+    fn popping_until_the_current_destination_changes_skips_same_pane_entries() {
+        let mut strategy = ThreePaneSceneStrategy::list_detail(wide_directive());
+        strategy.back_navigation_behavior =
+            BackNavigationBehavior::PopUntilCurrentDestinationChange;
+        let stack = vec![
+            item(ListDetailPaneScaffoldRole::LIST, None),
+            item(ListDetailPaneScaffoldRole::DETAIL, Some(1)),
+            item(ListDetailPaneScaffoldRole::DETAIL, Some(2)),
+        ];
+        let scene = strategy.calculate_scene(&stack).expect("a scene");
+        assert_eq!(scene.back_stack_len_after_back, 1);
+    }
+
+    #[test]
+    fn popping_until_the_content_changes_skips_the_same_content() {
+        let mut strategy = ThreePaneSceneStrategy::list_detail(wide_directive());
+        strategy.back_navigation_behavior = BackNavigationBehavior::PopUntilContentChange;
+        let stack = vec![
+            item(ListDetailPaneScaffoldRole::LIST, None),
+            item(ListDetailPaneScaffoldRole::DETAIL, Some(1)),
+            item(ListDetailPaneScaffoldRole::DETAIL, Some(1)),
+        ];
+        let scene = strategy.calculate_scene(&stack).expect("a scene");
+        assert_eq!(scene.back_stack_len_after_back, 1);
+    }
+
+    #[test]
     fn an_extra_pane_takes_a_partition_on_a_wide_window() {
         let strategy = ThreePaneSceneStrategy::list_detail(wide_directive());
         let stack = vec![
