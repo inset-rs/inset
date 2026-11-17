@@ -1289,6 +1289,59 @@ mod tests {
         a == b
     }
 
+    /// Dart has no case measuring this, but `Drawer` lays the drawer out at its `_kWidth`, 304,
+    /// and the destination's indicator takes the width of its padded tile. The theme's 336 is
+    /// wider than the 280 that leaves, so it is clamped to the row's own rect.
+    #[test]
+    fn a_destinations_indicator_covers_its_row() {
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            widget_setup(tester, 800.0, 1000.0);
+            pump_drawer(tester, m3, &key, move |_app| {
+                NavigationDrawer::new([
+                    destination(Icons::explore(), "Explore"),
+                    destination(Icons::chat(), "Chats"),
+                ])
+                .on_destination_selected(select_nothing())
+                .into_widget()
+            });
+            open_drawer(tester, &key);
+            tester.pump_by(Duration::from_secs(1));
+
+            let drawer = navigation_drawer(tester);
+            let drawer_rect = tester.get_rect(drawer);
+            assert_eq!(drawer_rect.width(), 304.0, "Drawer._kWidth");
+            let row = *tester
+                .descendants_of_type::<InkWell>(drawer)
+                .first()
+                .expect("the destination's row");
+            let row_rect = tester.get_rect(row);
+            assert_eq!(row_rect.left, drawer_rect.left + 12.0, "tilePadding");
+            assert_eq!(row_rect.width(), 304.0 - 2.0 * 12.0);
+            assert_eq!(row_rect.height(), 56.0, "tileHeight");
+
+            let indicator = *tester
+                .descendants_of_type::<NavigationIndicator>(drawer)
+                .first()
+                .expect("the selected indicator");
+            let indicator_ink = *tester
+                .descendants_of_type::<Ink>(indicator)
+                .first()
+                .expect("the indicator's ink");
+            assert_eq!(tester.get_rect(indicator_ink), row_rect);
+
+            let label = *find::text("Explore")
+                .evaluate(tester)
+                .first()
+                .expect("the label");
+            assert_eq!(
+                tester.get_rect(label).left,
+                row_rect.left + 16.0 + 24.0 + 12.0,
+                "the row's leading inset"
+            );
+        });
+    }
+
     // 'Navigation drawer updates destinations when tapped'.
     #[test]
     fn navigation_drawer_updates_destinations_when_tapped() {

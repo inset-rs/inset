@@ -2330,13 +2330,14 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{TextAffinity, TextPosition, TextRange};
+    use waft_embedder::{TextAffinity, TextBaseline, TextPosition, TextRange};
     use waft_painting::TextSpan;
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{SystemMouseCursors, TextInputClient, TextInputFormatterRef};
     use waft_widgets::{
-        AnyElement, AnyFocusNode, Builder, Center, Column, FocusScope, IntoWidget, MediaQueryData,
-        Opacity, Overlay, OverlayEntry, SizedBox, Text, TextEditingController, WidgetStates,
+        AnyElement, AnyFocusNode, Builder, Center, Column, FocusScope, GestureDetector, IntoWidget,
+        MediaQueryData, Opacity, Overlay, OverlayEntry, SizedBox, Text, TextEditingController,
+        WidgetStates,
     };
 
     use waft_rendering::testing::{
@@ -2345,8 +2346,8 @@ mod tests {
     };
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
-        finds_one_widget, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_n_widgets,
+        finds_nothing, finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -2369,7 +2370,8 @@ mod tests {
     use waft_foundation::UniqueKey;
     use waft_test::{MockClipboard, TestPlatform};
     use waft_widgets::{
-        Container, IntrinsicHeight, MainAxisAlignment, MainAxisSize, Row, TickerMode,
+        Container, CrossAxisAlignment, IntrinsicHeight, MainAxisAlignment, MainAxisSize, Row,
+        TickerMode,
     };
     use waft_widgets::{FocusNodeLeaf, ScrollControllerLeaf, TextEditingControllerLeaf};
 
@@ -2395,6 +2397,7 @@ mod tests {
     const K_THREE_LINES: &str =
         "First line of text is\nSecond line goes until\nThird line of stuff";
     const K_MORE_THAN_FOUR_LINES: &str = "First line of text is\nSecond line goes until\nThird line of stuff\nFourth line won't display and ends at";
+    const ATWATER: &str = "Atwater Peel Sherbrooke Bonaventure";
 
     /// A tester on `platform` with flutter_test's fonts, so a `Text` measures as in Flutter's
     /// tests.
@@ -7558,6 +7561,54 @@ mod tests {
     }
 
     #[test]
+    fn can_select_text_with_a_mouse_when_wrapped_in_a_gesture_detector_with_tap_and_double_tap_callbacks()
+     {
+        test_widgets_variant(TargetPlatformVariant::desktop(), |tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                GestureDetector::new()
+                    .on_tap(Listener::new(|_app| {}))
+                    .on_double_tap(Listener::new(|_app| {}))
+                    .child(
+                        TextField::new()
+                            .drag_start_behavior(DragStartBehavior::Down)
+                            .controller(controller.erase()),
+                    ),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(find::by_type::<TextField>(), "abc def ghi");
+            skip_past_scrolling_animation(tester);
+            let text = "abc def ghi";
+            let e = text_offset_to_position(tester, text.find('e').unwrap() as i32);
+            let g = text_offset_to_position(tester, text.find('g').unwrap() as i32);
+
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut pointer, e);
+            tester.pump();
+            tester.up(&pointer);
+            // This is to allow the GestureArena to decide a winner between
+            // TapGestureRecognizer, DoubleTapGestureRecognizer, and
+            // BaseTapAndDragGestureRecognizer.
+            tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
+            let selection_now = selection(tester, controller.handle());
+            assert!(selection_now.is_collapsed());
+            assert_eq!(selection_now.base_offset, text.find('e').unwrap() as i32);
+
+            tester.down(&mut pointer, e);
+            tester.pump();
+            tester.move_to(&mut pointer, g, true);
+            tester.pump();
+            tester.up(&pointer);
+            tester.pump_and_settle();
+
+            let selection_now = selection(tester, controller.handle());
+            assert_eq!(selection_now.base_offset, text.find('e').unwrap() as i32);
+            assert_eq!(selection_now.extent_offset, text.find('g').unwrap() as i32);
+        });
+    }
+
+    #[test]
     fn dragging_in_opposite_direction_also_works() {
         test_widgets(|tester| {
             let controller = controller_with(tester, "");
@@ -8608,5 +8659,408 @@ mod tests {
             assert_eq!(seen.iter().copied().fold(f64::INFINITY, f64::min), 0.0);
             assert_eq!(seen.iter().copied().fold(f64::NEG_INFINITY, f64::max), 50.0);
         });
+    }
+
+    #[test]
+    fn text_field_baseline_alignment() {
+        test_widgets(|tester| {
+            let controller_a = controller_with(tester, "A");
+            let controller_b = controller_with(tester, "B");
+            let key_a: KeyRef = UniqueKey::new().into();
+            let key_b: KeyRef = UniqueKey::new().into();
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    Material::new().child(
+                        Row::new()
+                            .cross_axis_alignment(CrossAxisAlignment::Baseline)
+                            .text_baseline(TextBaseline::Alphabetic)
+                            .children([
+                                waft_widgets::Expanded::new(
+                                    TextField::new()
+                                        .key(key_a.clone())
+                                        .decoration(None)
+                                        .controller(controller_a.erase())
+                                        .style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(12.0),
+                                        ),
+                                )
+                                .into_widget(),
+                                Text::new("abc")
+                                    .style(
+                                        TextStyle::new().font_family("FlutterTest").font_size(24.0),
+                                    )
+                                    .into_widget(),
+                                waft_widgets::Expanded::new(
+                                    TextField::new()
+                                        .key(key_b.clone())
+                                        .decoration(None)
+                                        .controller(controller_b.erase())
+                                        .style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(36.0),
+                                        ),
+                                )
+                                .into_widget(),
+                            ]),
+                    ),
+                ),
+            );
+            tester.pump_widget(root);
+            let row_bottom = tester.get_bottom_left(find::by_type::<Row>()).dy();
+            assert_eq!(
+                tester.get_bottom_left(find::by_key(key_a)).dy(),
+                row_bottom - 6.0
+            );
+            assert_eq!(
+                tester.get_bottom_left(find::text("abc")).dy(),
+                row_bottom - 3.0
+            );
+            assert_eq!(tester.get_bottom_left(find::by_key(key_b)).dy(), row_bottom);
+        });
+    }
+    #[test]
+    fn can_align_to_center() {
+        test_widgets(|tester| {
+            let root = overlay(
+                tester,
+                MediaQuery::new(
+                    MediaQueryData::new().size(waft_embedder::Size::new(800.0, 600.0)),
+                    SizedBox::new().width(300.0).child(
+                        TextField::new()
+                            .text_align(TextAlign::Center)
+                            .decoration(None),
+                    ),
+                )
+                .into_widget(),
+            );
+            tester.pump_widget(root);
+            let editable = render_editable(tester);
+            {
+                let app = tester.cell.borrow();
+                assert_eq!(editable.size(&app).width(), 300.0);
+            }
+            let caret_at = |tester: &mut WidgetTester, offset: i32| {
+                let mut app = tester.cell.borrow_mut();
+                let rect = editable.get_local_rect_for_caret(&mut app, TextPosition::new(offset));
+                editable
+                    .as_box()
+                    .local_to_global(&app, rect.top_left(), None)
+            };
+            assert_eq!(caret_at(tester, 0).dx(), 399.0);
+
+            tester.enter_text(find::by_type::<TextField>(), "abcd");
+            tester.pump();
+            assert_eq!(caret_at(tester, 2).dx(), 399.0);
+        });
+    }
+
+    #[test]
+    fn can_align_to_center_within_center() {
+        test_widgets(|tester| {
+            let root = overlay(
+                tester,
+                MediaQuery::new(
+                    MediaQueryData::new().size(waft_embedder::Size::new(800.0, 600.0)),
+                    SizedBox::new().width(300.0).child(
+                        Center::new().child(
+                            TextField::new()
+                                .text_align(TextAlign::Center)
+                                .decoration(None),
+                        ),
+                    ),
+                )
+                .into_widget(),
+            );
+            tester.pump_widget(root);
+            let editable = render_editable(tester);
+            let caret_at = |tester: &mut WidgetTester, offset: i32| {
+                let mut app = tester.cell.borrow_mut();
+                let rect = editable.get_local_rect_for_caret(&mut app, TextPosition::new(offset));
+                editable
+                    .as_box()
+                    .local_to_global(&app, rect.top_left(), None)
+            };
+            assert_eq!(caret_at(tester, 0).dx(), 399.0);
+
+            tester.enter_text(find::by_type::<TextField>(), "abcd");
+            tester.pump();
+            assert_eq!(caret_at(tester, 2).dx(), 399.0);
+        });
+    }
+    #[test]
+    fn text_field_scrolls_the_caret_into_view() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    Material::new().child(
+                        MediaQuery::new(
+                            MediaQueryData::new().size(waft_embedder::Size::new(800.0, 600.0)),
+                            SizedBox::new().width(100.0).child(
+                                TextField::new()
+                                    .controller(controller.erase())
+                                    .decoration(None),
+                            ),
+                        )
+                        .into_widget(),
+                    ),
+                ),
+            );
+            tester.pump_widget(root);
+
+            let long_text = "a".repeat(20);
+            tester.enter_text(find::by_type::<TextField>(), &long_text);
+            skip_past_scrolling_animation(tester);
+
+            let scrollable = |tester: &WidgetTester| {
+                let element = find::by_type::<waft_widgets::Scrollable>().evaluate(tester)[0];
+                element
+                    .state_handle::<waft_widgets::ScrollableState>(&tester.cell.borrow())
+                    .expect("a Scrollable state")
+            };
+            let pixels = |tester: &WidgetTester| {
+                scrollable(tester)
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow())
+            };
+            assert_eq!(pixels(tester), 0.0);
+
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text(&long_text)
+                    .selection(TextSelection::collapsed(
+                        long_text.len() as i32,
+                        TextAffinity::Downstream,
+                    )),
+            );
+            tester.pump();
+            skip_past_scrolling_animation(tester);
+
+            assert_eq!(pixels(tester), 222.0);
+        });
+    }
+    #[test]
+    fn keyboard_down_and_up_test_2() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_lines(Some(3)),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(
+                find::by_type::<TextField>(),
+                "a big house\njumped over a mouse\nOne more line yay",
+            );
+            tester.cell.checkpoint();
+            tester.tap(find::by_type::<TextField>());
+            tester.pump_and_settle();
+
+            for _ in 0..5 {
+                tester.send_key_down_event(
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
+                tester.pump_and_settle();
+                tester.send_key_up_event(
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
+                tester.pump_and_settle();
+            }
+            for (expected, up) in [(12, false), (32, false), (12, true), (0, true), (-5, true)] {
+                tester.send_key_down_event(
+                    PhysicalKeyboardKey::SHIFT_LEFT,
+                    LogicalKeyboardKey::SHIFT_LEFT,
+                );
+                let (physical, logical) = if up {
+                    (PhysicalKeyboardKey::ARROW_UP, LogicalKeyboardKey::ARROW_UP)
+                } else {
+                    (
+                        PhysicalKeyboardKey::ARROW_DOWN,
+                        LogicalKeyboardKey::ARROW_DOWN,
+                    )
+                };
+                tester.send_key_event(physical, logical);
+                tester.pump_and_settle();
+                tester.send_key_up_event(
+                    PhysicalKeyboardKey::SHIFT_LEFT,
+                    LogicalKeyboardKey::SHIFT_LEFT,
+                );
+                tester.pump_and_settle();
+                assert_eq!(
+                    selection_delta(tester, controller.handle()),
+                    expected,
+                    "{}",
+                    if up { "up" } else { "down" }
+                );
+            }
+        });
+    }
+    #[test]
+    fn custom_toolbar_test_android_text_selection_controls() {
+        test_widgets(|_tester| {
+            let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
+            clipboard.set_clipboard_data(Some("Clipboard data".to_owned()));
+            let tester = &mut tester;
+            let controller = controller_with(tester, ATWATER);
+            let root = material_home(
+                theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .controller(controller.erase())
+                        .selection_controls(material_text_selection_controls()),
+                ),
+            );
+            tester.pump_widget(root);
+            let start = tester.get_top_left(find::by_type::<TextField>());
+            tester.tap_at(start + Offset::new(150.0, 9.0), 1);
+            tester.pump_by(Duration::from_millis(50));
+            tester.tap_at(start + Offset::new(150.0, 9.0), 2);
+            tester.pump_and_settle();
+
+            expect(
+                tester,
+                &find::by_type::<crate::text_button::TextButton>(),
+                finds_n_widgets(4),
+            );
+            expect(tester, &find::text("Cut"), finds_one_widget());
+            expect(tester, &find::text("Copy"), finds_one_widget());
+            expect(tester, &find::text("Paste"), finds_one_widget());
+            expect(tester, &find::text("Select all"), finds_one_widget());
+        });
+    }
+
+    #[test]
+    fn custom_toolbar_test_cupertino_text_selection_controls() {
+        test_widgets(|_tester| {
+            let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
+            clipboard.set_clipboard_data(Some("Clipboard data".to_owned()));
+            let tester = &mut tester;
+            let controller = controller_with(tester, ATWATER);
+            let root = material_home(
+                theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .controller(controller.erase())
+                        .selection_controls(waft_cupertino::cupertino_text_selection_controls()),
+                ),
+            );
+            tester.pump_widget(root);
+            let start = tester.get_top_left(find::by_type::<TextField>());
+            tester.tap_at(start + Offset::new(150.0, 9.0), 1);
+            tester.pump_by(Duration::from_millis(50));
+            tester.tap_at(start + Offset::new(150.0, 9.0), 2);
+            tester.pump_and_settle();
+
+            expect(
+                tester,
+                &find::by_type::<waft_cupertino::CupertinoButton>(),
+                finds_n_widgets(3),
+            );
+        });
+    }
+
+    #[test]
+    fn double_tap_selects_word_and_first_tap_of_double_tap_moves_cursor_and_shows_toolbar() {
+        for platform in [
+            TargetPlatform::Android,
+            TargetPlatform::Fuchsia,
+            TargetPlatform::Linux,
+            TargetPlatform::Windows,
+        ] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |_tester| {
+                let (mut tester, clipboard) = tester_with_clipboard(platform);
+                clipboard.set_clipboard_data(Some("Clipboard data".to_owned()));
+                let tester = &mut tester;
+                let controller = controller_with(tester, ATWATER);
+                let root = material_home(
+                    theme(tester),
+                    Center::new().child(TextField::new().controller(controller.erase())),
+                );
+                tester.pump_widget(root);
+                let start = tester.get_top_left(find::by_type::<TextField>());
+
+                tester.tap_at(start + Offset::new(50.0, 9.0), 1);
+                tester.pump_by(Duration::from_millis(500));
+                tester.tap_at(start + Offset::new(150.0, 9.0), 2);
+                tester.pump_by(Duration::from_millis(50));
+                assert_eq!(
+                    selection(tester, controller.handle()),
+                    TextSelection::collapsed(9, TextAffinity::Downstream),
+                    "{platform:?}"
+                );
+                tester.tap_at(start + Offset::new(150.0, 9.0), 3);
+                tester.pump_and_settle();
+                assert_eq!(
+                    selection(tester, controller.handle()),
+                    TextSelection::new(8, 12),
+                    "{platform:?}"
+                );
+
+                let has_share = platform == TargetPlatform::Android;
+                expect(
+                    tester,
+                    &find::by_type::<crate::text_button::TextButton>(),
+                    finds_n_widgets(if has_share { 5 } else { 4 }),
+                );
+                for label in ["Cut", "Copy", "Paste", "Select all"] {
+                    expect(tester, &find::text(label), finds_one_widget());
+                }
+                expect(
+                    tester,
+                    &find::text("Share"),
+                    if has_share {
+                        finds_one_widget()
+                    } else {
+                        finds_nothing()
+                    },
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn text_selection_menu_hides_after_select_all_on_desktop() {
+        for platform in [TargetPlatform::Linux, TargetPlatform::Windows] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, ATWATER);
+                let root = material_home(
+                    theme(tester),
+                    Material::new().child(TextField::new().controller(controller.erase())),
+                );
+                tester.pump_widget(root);
+                let select_all = "Select all";
+                expect(tester, &find::text(select_all), finds_nothing());
+                expect(tester, &find::text("Copy"), finds_nothing());
+
+                let at =
+                    Offset::new(10.0, 0.0) + text_offset_to_position(tester, ATWATER.len() as i32);
+                let mut gesture = TestPointer::mouse(1, waft_gestures::K_SECONDARY_BUTTON);
+                tester.down(&mut gesture, at);
+                tester.pump();
+                tester.up(&gesture);
+                tester.pump_and_settle();
+
+                assert_eq!(
+                    selection(tester, controller.handle()),
+                    TextSelection::collapsed(ATWATER.len() as i32, TextAffinity::Upstream),
+                    "{platform:?}"
+                );
+                expect(tester, &find::text(select_all), finds_one_widget());
+
+                tester.tap(find::text(select_all));
+                tester.pump();
+                expect(tester, &find::text(select_all), finds_nothing());
+                expect(tester, &find::text("Copy"), finds_nothing());
+            });
+        }
     }
 }

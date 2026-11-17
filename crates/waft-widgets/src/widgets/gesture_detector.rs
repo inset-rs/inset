@@ -1,8 +1,8 @@
 //! Flutter counterpart: `widgets/gesture_detector.dart`.
 //!
 //! The recognizer factories, [`RawGestureDetector`] with its state, and [`GestureDetector`]
-//! over the recognizers ported so far (tap, long press, vertical and horizontal drag, pan, scale).
-//! The semantics half
+//! over the recognizers ported so far (tap, double tap, long press, vertical and horizontal
+//! drag, pan, scale). The semantics half
 //! (`excludeFromSemantics`, `semantics`, `SemanticsGestureDelegate`, `_GestureSemantics`) is
 //! accessibility and waits.
 
@@ -15,18 +15,18 @@ use std::rc::Rc;
 use waft_embedder::{Offset, PointerDeviceKind};
 use waft_foundation::{App, Handle, Ref};
 use waft_gestures::{
-    AnyGestureRecognizer, DeviceGestureSettings, DragGestureRecognizer, DragStartBehavior,
-    GestureDragCancelCallback, GestureDragDownCallback, GestureDragEndCallback,
-    GestureDragStartCallback, GestureDragUpdateCallback, GestureLongPressCallback,
-    GestureLongPressCancelCallback, GestureLongPressDownCallback, GestureLongPressEndCallback,
-    GestureLongPressMoveUpdateCallback, GestureLongPressStartCallback, GestureLongPressUpCallback,
-    GestureRecognizerLeaf, GestureScaleEndCallback, GestureScaleStartCallback,
-    GestureScaleUpdateCallback, GestureTapCallback, GestureTapCancelCallback,
-    GestureTapDownCallback, GestureTapMoveCallback, GestureTapUpCallback,
-    HorizontalDragGestureRecognizer, K_DEFAULT_TRACKPAD_SCROLL_TO_SCALE_FACTOR,
-    LongPressGestureRecognizer, MultitouchDragStrategy, PanGestureRecognizer, PointerDownEvent,
-    PointerPanZoomStartEvent, RecognizerRef, ScaleGestureRecognizer, TapGestureRecognizer,
-    VerticalDragGestureRecognizer,
+    AnyGestureRecognizer, DeviceGestureSettings, DoubleTapGestureRecognizer, DragGestureRecognizer,
+    DragStartBehavior, GestureDoubleTapCallback, GestureDragCancelCallback,
+    GestureDragDownCallback, GestureDragEndCallback, GestureDragStartCallback,
+    GestureDragUpdateCallback, GestureLongPressCallback, GestureLongPressCancelCallback,
+    GestureLongPressDownCallback, GestureLongPressEndCallback, GestureLongPressMoveUpdateCallback,
+    GestureLongPressStartCallback, GestureLongPressUpCallback, GestureRecognizerLeaf,
+    GestureScaleEndCallback, GestureScaleStartCallback, GestureScaleUpdateCallback,
+    GestureTapCallback, GestureTapCancelCallback, GestureTapDownCallback, GestureTapMoveCallback,
+    GestureTapUpCallback, HorizontalDragGestureRecognizer,
+    K_DEFAULT_TRACKPAD_SCROLL_TO_SCALE_FACTOR, LongPressGestureRecognizer, MultitouchDragStrategy,
+    PanGestureRecognizer, PointerDownEvent, PointerPanZoomStartEvent, RecognizerRef,
+    ScaleGestureRecognizer, TapGestureRecognizer, VerticalDragGestureRecognizer,
 };
 use waft_rendering::HitTestBehavior;
 
@@ -362,6 +362,38 @@ pub struct GestureDetector {
     ///
     ///  * `K_TERTIARY_BUTTON`, the button this callback responds to.
     pub on_tertiary_tap_cancel: Option<GestureTapCancelCallback>,
+
+    /// A pointer that might cause a double tap has contacted the screen at a
+    /// particular location.
+    ///
+    /// Triggered immediately after the down event of the second tap.
+    ///
+    /// If the user completes the double tap and the gesture wins,
+    /// [`on_double_tap`](Self::on_double_tap) will be called after this callback. Otherwise,
+    /// [`on_double_tap_cancel`](Self::on_double_tap_cancel) will be called after this
+    /// callback.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_double_tap_down: Option<GestureTapDownCallback>,
+
+    /// The user has tapped the screen with a primary button at the same location
+    /// twice in quick succession.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_double_tap: Option<GestureDoubleTapCallback>,
+
+    /// The pointer that previously triggered
+    /// [`on_double_tap_down`](Self::on_double_tap_down) will not end up causing a double
+    /// tap.
+    ///
+    /// See also:
+    ///
+    ///  * `K_PRIMARY_BUTTON`, the button this callback responds to.
+    pub on_double_tap_cancel: Option<GestureTapCancelCallback>,
 
     /// The pointer has contacted the screen with a primary button, which might
     /// be the start of a long-press.
@@ -886,6 +918,9 @@ impl Default for GestureDetector {
             on_tertiary_tap_down: None,
             on_tertiary_tap_up: None,
             on_tertiary_tap_cancel: None,
+            on_double_tap_down: None,
+            on_double_tap: None,
+            on_double_tap_cancel: None,
             on_long_press_down: None,
             on_long_press_cancel: None,
             on_long_press: None,
@@ -1039,6 +1074,30 @@ impl GestureDetector {
         on_tertiary_tap_cancel: GestureTapCancelCallback,
     ) -> GestureDetector {
         self.on_tertiary_tap_cancel = Some(on_tertiary_tap_cancel);
+        self
+    }
+
+    /// Dart `GestureDetector(on_double_tap_down:)`.
+    pub fn on_double_tap_down(
+        mut self,
+        on_double_tap_down: GestureTapDownCallback,
+    ) -> GestureDetector {
+        self.on_double_tap_down = Some(on_double_tap_down);
+        self
+    }
+
+    /// Dart `GestureDetector(on_double_tap:)`.
+    pub fn on_double_tap(mut self, on_double_tap: GestureDoubleTapCallback) -> GestureDetector {
+        self.on_double_tap = Some(on_double_tap);
+        self
+    }
+
+    /// Dart `GestureDetector(on_double_tap_cancel:)`.
+    pub fn on_double_tap_cancel(
+        mut self,
+        on_double_tap_cancel: GestureTapCancelCallback,
+    ) -> GestureDetector {
+        self.on_double_tap_cancel = Some(on_double_tap_cancel);
         self
     }
 
@@ -1473,6 +1532,12 @@ impl GestureDetector {
             || self.on_tertiary_tap_cancel.is_some()
     }
 
+    fn has_double_tap_callback(&self) -> bool {
+        self.on_double_tap.is_some()
+            || self.on_double_tap_down.is_some()
+            || self.on_double_tap_cancel.is_some()
+    }
+
     fn has_long_press_callback(&self) -> bool {
         self.on_long_press_down.is_some()
             || self.on_long_press_cancel.is_some()
@@ -1553,6 +1618,30 @@ impl GestureDetector {
                 instance.set_on_tertiary_tap_down(app, this.on_tertiary_tap_down.clone());
                 instance.set_on_tertiary_tap_up(app, this.on_tertiary_tap_up.clone());
                 instance.set_on_tertiary_tap_cancel(app, this.on_tertiary_tap_cancel.clone());
+                instance.set_gesture_settings(app, gesture_settings);
+                instance.set_supported_devices(app, this.supported_devices.clone());
+            },
+        )
+        .into_factory()
+    }
+
+    /// The `DoubleTapGestureRecognizer` factory of Dart's `build`.
+    fn double_tap_factory(
+        &self,
+        gesture_settings: Option<DeviceGestureSettings>,
+    ) -> GestureRecognizerFactoryRef {
+        let this = self.clone();
+        let constructed = self.clone();
+        GestureRecognizerFactoryWithHandlers::<DoubleTapGestureRecognizer>::new(
+            move |app| {
+                let instance = DoubleTapGestureRecognizer::new(app);
+                instance.set_supported_devices(app, constructed.supported_devices.clone());
+                instance
+            },
+            move |app, instance| {
+                instance.set_on_double_tap_down(app, this.on_double_tap_down.clone());
+                instance.set_on_double_tap(app, this.on_double_tap.clone());
+                instance.set_on_double_tap_cancel(app, this.on_double_tap_cancel.clone());
                 instance.set_gesture_settings(app, gesture_settings);
                 instance.set_supported_devices(app, this.supported_devices.clone());
             },
@@ -1758,6 +1847,13 @@ impl StatelessWidget for GestureDetector {
             gestures.push((
                 TypeId::of::<TapGestureRecognizer>(),
                 self.tap_factory(gesture_settings),
+            ));
+        }
+
+        if self.has_double_tap_callback() {
+            gestures.push((
+                TypeId::of::<DoubleTapGestureRecognizer>(),
+                self.double_tap_factory(gesture_settings),
             ));
         }
 
@@ -2115,6 +2211,7 @@ impl Debug for RawGestureDetectorState {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
+    use std::time::Duration;
 
     use waft_embedder::{Matrix4, Offset, SceneBuilder, Size, TextDirection, ViewId};
     use waft_foundation::{App, AppCell, Handle, HandleId, Listener};
@@ -2556,6 +2653,52 @@ mod tests {
             *log.borrow(),
             ["down Offset(20.0, 30.0)", "up Offset(20.0, 30.0)", "tap"]
         );
+    }
+
+    #[test]
+    fn a_gesture_detector_fires_its_double_tap_callbacks_end_to_end() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let down_log = Rc::clone(&log);
+        let tap_log = Rc::clone(&log);
+        mount(
+            &mut app,
+            GestureDetector::new()
+                .on_double_tap_down(Rc::new(move |_app, details: TapDownDetails| {
+                    down_log
+                        .borrow_mut()
+                        .push(format!("down {:?}", details.local_position));
+                }))
+                .on_double_tap(Listener::new(move |_app| {
+                    tap_log.borrow_mut().push("double tap".into())
+                }))
+                .behavior(HitTestBehavior::Opaque)
+                .child(Sized {
+                    size: Size::new(100.0, 100.0),
+                })
+                .into_widget(),
+        );
+
+        tap_at(
+            &mut app,
+            1,
+            Offset::new(20.0, 30.0),
+            PointerDeviceKind::Touch,
+        );
+        assert!(log.borrow().is_empty(), "the first tap waits for a second");
+
+        drop(app);
+        cell.elapse(Duration::from_millis(100));
+        let mut app = cell.borrow_mut();
+
+        tap_at(
+            &mut app,
+            2,
+            Offset::new(21.0, 29.0),
+            PointerDeviceKind::Touch,
+        );
+        assert_eq!(*log.borrow(), ["down Offset(21.0, 29.0)", "double tap"]);
     }
 
     #[test]

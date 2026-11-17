@@ -1706,7 +1706,6 @@ impl InkResponseState {
 
     /// Dart's `handleDoubleTap`, which the gesture detector calls once it recognizes double
     /// taps.
-    #[allow(dead_code)]
     fn handle_double_tap(self: Handle<Self>, app: &mut App) {
         if let Some(current_splash) = app.get_mut(self).current_splash.take() {
             current_splash.confirm(app);
@@ -2109,7 +2108,10 @@ impl State for InkResponseState {
                 .on_tap(Listener::new(move |app| self.handle_tap(app)))
                 .on_tap_cancel(Listener::new(move |app| self.handle_tap_cancel(app)));
         }
-        // `onDoubleTap: handleDoubleTap` waits with `DoubleTapGestureRecognizer` (PORTING.md).
+        if response.on_double_tap.is_some() {
+            detector =
+                detector.on_double_tap(Listener::new(move |app| self.handle_double_tap(app)));
+        }
         if response.on_long_press.is_some() {
             detector =
                 detector.on_long_press(Listener::new(move |app| self.handle_long_press(app)));
@@ -2426,6 +2428,7 @@ mod tests {
                 Center::new().child(
                     InkWell::new()
                         .on_tap(logger(&log, "tap"))
+                        .on_double_tap(logger(&log, "double-tap"))
                         .on_long_press(logger(&log, "long-press"))
                         .on_long_press_up(logger(&log, "long-press-up"))
                         .on_tap_down(logged(&log, "tap-down"))
@@ -2437,6 +2440,11 @@ mod tests {
             tester.tap_at(center_of_view(), 1);
             tester.pump_by(Duration::from_secs(1));
             assert_eq!(take(&log), ["tap-down", "tap-up", "tap"]);
+
+            tester.tap_at(center_of_view(), 2);
+            tester.pump_by(Duration::from_millis(100));
+            tester.tap_at(center_of_view(), 3);
+            assert_eq!(take(&log), ["double-tap"]);
 
             tester.long_press_at(center_of_view(), 4);
             assert_eq!(
@@ -2462,6 +2470,82 @@ mod tests {
             );
             tester.cancel(&gesture);
             assert_eq!(take(&log), ["tap-down", "tap-cancel"]);
+        });
+    }
+
+    #[test]
+    fn ink_well_highlight_should_not_survive_after_on_tap_down_on_double_tap_sequence() {
+        test_widgets(|tester| {
+            let log: Log = Rc::default();
+            tester.pump_widget(ltr(Material::new().child(
+                Center::new().child(
+                    InkWell::new()
+                        .on_tap(logger(&log, "tap"))
+                        .on_double_tap(logger(&log, "double-tap"))
+                        .on_tap_down(logged(&log, "tap-down"))
+                        .on_tap_cancel(logger(&log, "tap-cancel")),
+                ),
+            )));
+            let location = tester.get_center(find::by_type::<InkWell>().evaluate(tester)[0]);
+
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, location);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(*log.borrow(), ["tap-down"]);
+            tester.up(&gesture);
+            tester.pump_by(Duration::from_millis(100));
+
+            tester.tap_at(location, 2);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(take(&log), ["tap-down", "double-tap"]);
+
+            tester.pump_and_settle();
+            assert_eq!(
+                count_calls(tester.ink_list().ops(), CanvasMethod::DrawRect),
+                0
+            );
+        });
+    }
+
+    #[test]
+    fn ink_well_splash_should_not_survive_after_on_tap_down_on_tap_down_on_tap_cancel_on_double_tap_sequence()
+     {
+        test_widgets(|tester| {
+            let log: Log = Rc::default();
+            tester.pump_widget(ltr(Material::new().child(
+                Center::new().child(
+                    InkWell::new()
+                        .on_tap(logger(&log, "tap"))
+                        .on_double_tap(logger(&log, "double-tap"))
+                        .on_tap_down(logged(&log, "tap-down"))
+                        .on_tap_cancel(logger(&log, "tap-cancel")),
+                ),
+            )));
+            let location = tester.get_center(find::by_type::<InkWell>().evaluate(tester)[0]);
+
+            let mut first = TestPointer::touch(1);
+            tester.down(&mut first, location);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(*log.borrow(), ["tap-down"]);
+            tester.up(&first);
+            tester.pump_by(Duration::from_millis(100));
+
+            let mut second = TestPointer::touch(2);
+            tester.down(&mut second, location);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(*log.borrow(), ["tap-down", "tap-down"]);
+            tester.up(&second);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(
+                take(&log),
+                ["tap-down", "tap-down", "tap-cancel", "double-tap"]
+            );
+
+            tester.pump_and_settle();
+            assert_eq!(
+                count_calls(tester.ink_list().ops(), CanvasMethod::DrawCircle),
+                0
+            );
         });
     }
 
