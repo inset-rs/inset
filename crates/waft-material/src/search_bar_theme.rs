@@ -406,13 +406,12 @@ impl InheritedWidget for SearchBarTheme {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{Size, TextAffinity, TextEditingValue, TextSelection};
+    use waft_embedder::Size;
     use waft_painting::{BorderRadiusGeometry, EdgeInsets, RoundedRectangleBorder};
-    use waft_services::TextInputClient;
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
     use waft_widgets::{
-        Builder, Center, EditableText, EditableTextState, Icon, SizedBox, Text, WidgetState,
-        WidgetStatePropertyAll, WidgetStates,
+        Builder, Center, EditableText, Icon, SizedBox, Text, WidgetState, WidgetStatePropertyAll,
+        WidgetStates,
     };
 
     use super::*;
@@ -654,7 +653,7 @@ mod tests {
         );
         assert_eq!(hint_style.font_size, hint_style_value().font_size);
 
-        enter_text(tester, "input");
+        tester.enter_text(find::by_type::<TextField>(), "input");
         let (input_style, text_capitalization) = tester
             .widget(find::text("input"), |text: &EditableText| {
                 (text.style.clone(), text.text_capitalization)
@@ -675,27 +674,6 @@ mod tests {
         assert_eq!(leading_rect.right, text_field_rect.left - 16.0);
         assert_eq!(text_field_rect.right, trailing_rect.left - 16.0);
         assert_eq!(trailing_rect.right, bar_rect.right - 16.0);
-    }
-
-    fn enter_text(tester: &mut WidgetTester, text: &str) {
-        let element = tester.element(
-            find::descendant(
-                find::by_type::<SearchBar>(),
-                find::by_type::<EditableText>(),
-            )
-            .first(),
-        );
-        let state = element
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        let length = text.encode_utf16().count() as i32;
-        let value = TextEditingValue::new()
-            .text(text)
-            .selection(TextSelection::collapsed(length, TextAffinity::Downstream));
-        TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-        tester.cell.checkpoint();
     }
 
     /// A theme argument of Dart's `buildFrame`: absent, empty or the full theme (built inside

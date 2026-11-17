@@ -5328,16 +5328,14 @@ pub(crate) mod tests {
     use std::rc::Rc;
     use std::time::Duration;
     use waft_embedder::{Offset, Size, TargetPlatform};
-    use waft_embedder::{TextAffinity, TextEditingValue, TextSelection};
     use waft_foundation::Listener;
     use waft_painting::{EdgeInsets, TextScaler, TextStyle};
     use waft_rendering::testing::{PaintCall, assert_paints};
-    use waft_services::TextInputClient;
+    use waft_widgets::EditableText;
     use waft_widgets::{
         AnyElement, BuildContext, Builder, Icon, IntoWidget, MediaQuery, MediaQueryData,
         Orientation, SizedBox, Text,
     };
-    use waft_widgets::{EditableText, EditableTextState};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum MaterialType {
@@ -6591,25 +6589,6 @@ pub(crate) mod tests {
         });
     }
 
-    /// Dart's `tester.enterText(find.byType(TextField).at(index), text)`.
-    fn enter_text_at(tester: &mut WidgetTester, index: usize, text: &str) {
-        let editable = tester.element(find::by_type::<EditableText>().at(index));
-        let state = editable
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        let length = text.encode_utf16().count() as i32;
-        TextInputClient::update_editing_value(
-            state,
-            &mut tester.cell.borrow_mut(),
-            TextEditingValue::new()
-                .text(text)
-                .selection(TextSelection::collapsed(length, TextAffinity::Downstream)),
-        );
-        tester.cell.checkpoint();
-    }
-
     fn text_field_count(tester: &WidgetTester) -> usize {
         find::by_type::<crate::text_field::TextField>()
             .evaluate(tester)
@@ -6713,7 +6692,7 @@ pub(crate) mod tests {
                 boilerplate.error_invalid_text = Some("Custom validation error".to_string());
                 media_query_boilerplate(tester, size, boilerplate);
                 // Input invalid time (hour) to force validation error
-                enter_text_at(tester, 0, "88");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "88");
                 // Tap the ok button to trigger the validation error with custom translation
                 tester.tap(find::text(OK_STRING));
                 tester.pump_and_settle_by(Duration::from_secs(1));
@@ -6946,8 +6925,8 @@ pub(crate) mod tests {
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
                 start_picker(tester, &result, parameters);
-                enter_text_at(tester, 0, "9");
-                enter_text_at(tester, 1, "12");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "9");
+                tester.enter_text(find::by_type::<EditableText>().at(1), "12");
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(9, 12)));
             });
@@ -6962,8 +6941,8 @@ pub(crate) mod tests {
                 let mut parameters = StartPicker::new(material_type);
                 parameters.entry_mode = TimePickerEntryMode::Input;
                 start_picker(tester, &result, parameters);
-                enter_text_at(tester, 0, "8");
-                enter_text_at(tester, 1, "15");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "8");
+                tester.enter_text(find::by_type::<EditableText>().at(1), "15");
                 tap_icon(tester, &crate::icons::Icons::access_time());
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(8, 15)));
@@ -6981,19 +6960,19 @@ pub(crate) mod tests {
                 start_picker(tester, &result, parameters);
 
                 // Invalid hour.
-                enter_text_at(tester, 0, "88");
-                enter_text_at(tester, 1, "15");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "88");
+                tester.enter_text(find::by_type::<EditableText>().at(1), "15");
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), None);
 
                 // Invalid minute.
-                enter_text_at(tester, 0, "8");
-                enter_text_at(tester, 1, "95");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "8");
+                tester.enter_text(find::by_type::<EditableText>().at(1), "95");
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), None);
 
-                enter_text_at(tester, 0, "8");
-                enter_text_at(tester, 1, "15");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "8");
+                tester.enter_text(find::by_type::<EditableText>().at(1), "15");
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(8, 15)));
             });
@@ -7055,8 +7034,8 @@ pub(crate) mod tests {
                 assert_eq!(fields[0], (String::new(), None)); // hour
                 assert_eq!(fields[1], (String::new(), None)); // minute
 
-                enter_text_at(tester, 0, "11");
-                enter_text_at(tester, 1, "30");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "11");
+                tester.enter_text(find::by_type::<EditableText>().at(1), "30");
                 finish_picker(tester);
 
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(11, 30)));
@@ -7077,8 +7056,8 @@ pub(crate) mod tests {
                 assert_eq!(fields[0].0, "7"); // hour
                 assert_eq!(fields[1].0, "00"); // minute
 
-                enter_text_at(tester, 0, "8");
-                enter_text_at(tester, 1, "15");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "8");
+                tester.enter_text(find::by_type::<EditableText>().at(1), "15");
                 tester.pump();
                 finish_picker(tester);
 
@@ -7151,7 +7130,7 @@ pub(crate) mod tests {
                 assert_eq!(border_painter_size(tester), Size::new(96.0, 70.0));
 
                 // Enter invalid hour.
-                enter_text_at(tester, 0, "AB");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "AB");
                 tester.tap(find::text(OK_STRING));
 
                 assert_eq!(border_painter_size(tester), Size::new(96.0, 70.0));
@@ -7479,7 +7458,7 @@ pub(crate) mod tests {
                 tester.tap_at(center, 1);
                 assert!(has_focus(tester, 0), "{material_type:?}");
 
-                enter_text_at(tester, 0, "08");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "08");
                 assert!(!has_focus(tester, 0), "{material_type:?}");
                 assert!(has_focus(tester, last), "{material_type:?}");
 
@@ -7487,16 +7466,9 @@ pub(crate) mod tests {
                     field(tester, last).text_input_action,
                     Some(waft_services::TextInputAction::Done)
                 );
-                let minute_editable = tester.element(find::by_type::<EditableText>().at(last));
-                let state = minute_editable
-                    .state_handle::<EditableTextState>(&tester.cell.borrow())
-                    .expect("an EditableText state");
-                TextInputClient::perform_action(
-                    state,
-                    &mut tester.cell.borrow_mut(),
-                    waft_services::TextInputAction::Done,
-                );
-                tester.cell.checkpoint();
+                tester
+                    .test_text_input()
+                    .receive_action(waft_services::TextInputAction::Done);
                 assert!(!has_focus(tester, 0), "{material_type:?}");
                 assert!(!has_focus(tester, last), "{material_type:?}");
             });

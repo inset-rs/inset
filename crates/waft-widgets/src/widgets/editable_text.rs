@@ -7059,7 +7059,9 @@ mod tests {
     use std::cell::RefCell;
 
     use crate::test_harness::Harness;
-    use crate::testing::{TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant};
+    use crate::testing::{
+        TargetPlatformVariant, WidgetTester, find, test_widgets, test_widgets_variant,
+    };
     use crate::widgets::basic::{Center, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
 
@@ -7678,26 +7680,6 @@ mod tests {
             }
         }
 
-        /// Dart's `tester.showKeyboard`: the field takes the focus and opens its connection.
-        fn show_keyboard(&self, tester: &mut WidgetTester) {
-            self.state.request_keyboard(&mut tester.cell.borrow_mut());
-            tester.pump_by(Duration::ZERO);
-        }
-
-        /// Dart's `tester.enterText`: the keyboard is shown, then the platform sends `text`
-        /// with the caret at its end.
-        fn enter_text(&self, tester: &mut WidgetTester, text: &str) {
-            self.show_keyboard(tester);
-            let value = TextEditingValue::new()
-                .text(text)
-                .selection(TextSelection::collapsed(
-                    utf16_len(text),
-                    TextAffinity::Downstream,
-                ));
-            TextInputClient::update_editing_value(self.state, &mut tester.cell.borrow_mut(), value);
-            tester.cell.checkpoint();
-        }
-
         /// The `StatefulBuilder`'s `setState(() { obscureText = obscure_text; })`.
         fn set_obscure_text(&self, tester: &WidgetTester, obscure_text: bool) {
             self.obscure_text.set(obscure_text);
@@ -7744,9 +7726,9 @@ mod tests {
         test_widgets_variant(mobile(), |tester| {
             let field = ObscuredField::pump(tester);
 
-            field.enter_text(tester, "AA");
+            tester.enter_text(find::by_type::<EditableText>(), "AA");
             tester.pump();
-            field.enter_text(tester, "AAA");
+            tester.enter_text(find::by_type::<EditableText>(), "AAA");
             tester.pump();
 
             assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}A");
@@ -7764,7 +7746,7 @@ mod tests {
         let tester = &mut WidgetTester::on(TargetPlatform::IOS);
         let field = ObscuredField::pump(tester);
         field.set_obscure_text(tester, false);
-        field.enter_text(tester, "Text1");
+        tester.enter_text(find::by_type::<EditableText>(), "Text1");
         tester.pump();
 
         let sent = selection_rects_sent(tester);
@@ -7788,8 +7770,8 @@ mod tests {
         assert_eq!(selection_rects_sent(tester).len(), sent.len(), "sent once");
 
         let tester = &mut WidgetTester::on(TargetPlatform::Android);
-        let field = ObscuredField::pump(tester);
-        field.enter_text(tester, "Text1");
+        let _field = ObscuredField::pump(tester);
+        tester.enter_text(find::by_type::<EditableText>(), "Text1");
         tester.pump();
         assert!(selection_rects_sent(tester).is_empty(), "iOS alone");
     }
@@ -7800,9 +7782,9 @@ mod tests {
         test_widgets(|tester| {
             let field = ObscuredField::pump(tester);
 
-            field.enter_text(tester, "AA");
+            tester.enter_text(find::by_type::<EditableText>(), "AA");
             tester.pump();
-            field.enter_text(tester, "AAA");
+            tester.enter_text(find::by_type::<EditableText>(), "AAA");
             tester.pump();
 
             tester.platform().set_briefly_show_password(false);
@@ -7820,11 +7802,11 @@ mod tests {
     fn prevent_last_character_visibility_in_obscure_text_when_obscure_text_is_toggled_on_mobile() {
         test_widgets_variant(mobile(), |tester| {
             let field = ObscuredField::pump(tester);
-            field.show_keyboard(tester);
+            tester.show_keyboard(find::by_type::<EditableText>());
 
-            field.enter_text(tester, "H");
+            tester.enter_text(find::by_type::<EditableText>(), "H");
             tester.pump();
-            field.enter_text(tester, "HH");
+            tester.enter_text(find::by_type::<EditableText>(), "HH");
             tester.pump();
 
             assert_eq!(field.shown_text(tester), "\u{2022}H");
@@ -7833,7 +7815,7 @@ mod tests {
             tester.pump_by(HALF_A_BLINK);
             assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}");
 
-            field.enter_text(tester, "HHH");
+            tester.enter_text(find::by_type::<EditableText>(), "HHH");
             tester.pump();
 
             assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}H");

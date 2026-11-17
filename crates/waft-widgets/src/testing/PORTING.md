@@ -3,7 +3,10 @@ Flutter home: packages/flutter_test/lib/src
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Identical
-- gestures.rs → test_pointer.dart, controller.dart (`tap`, `tapAt`, `fling`, `flingFrom` with `initialOffset`, `drag`, `dragFrom`, `longPress`, `longPressAt`, `moveBy`, `sendKeyEvent`, `nextPointer`)
+- gestures.rs → test_pointer.dart, controller.dart (`tap`, `tapAt`, `fling`, `flingFrom` with `initialOffset`, `drag`, `dragFrom`, `longPress`, `longPressAt`, `moveBy`, `sendKeyEvent`, `sendKeyDownEvent`, `sendKeyUpEvent`, `nextPointer`)
+- test_widgets_app.rs → test_widgets_app.dart (`TestWidgetsApp`)
+- test_text_field.rs → packages/flutter/test/widgets/editable_text_tester.dart (`TestTextField`, `TestTextSelectionHandleControls`)
+- text_input.rs → test_text_input.dart, widget_tester.dart (`TestTextInput`, `showKeyboard`, `enterText`)
 - matchers.rs → matchers.dart (`findsNothing`, `findsOneWidget`, `findsWidgets`, `findsNWidgets`, `findsAtLeastNWidgets`)
 
 ## tester.rs → widget_tester.dart, binding.dart (`AutomatedTestWidgetsFlutterBinding`)
@@ -47,6 +50,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 ## Deferred
 
 - tester.rs: the end-of-test check for an exception the case did not take (`takeException`). Trigger: `FlutterError.reportError`.
+- test_text_field.rs: `autofillHints`, `contextMenuBuilder`, `groupId` and `onChanged`. Trigger: a case that needs one.
 - finder.rs: `find.bySemanticsLabel` and the semantics finders. Trigger: the semantics tree.
 - finder.rs: `find.image`, `find.widgetWithImage`, `find.bySubtype`, `find.byElementType`, `find.backButton`, `find.closeButton` and `Finder.hitTestable`. Trigger: a case that needs one.
 - finders.rs: the older eager helpers (`elements`, `ancestors`, `is_onstage`, `find_onstage_by_key`, `descendants_of_type`, `ancestor_of_type`, `center_of`, `global_rect`, `render_box_of`) and the cases that hold an `AnyElement` to hand them, which Dart writes as a finder (`find.descendant(of:)`, `find.ancestor(of:)`, `tester.renderObject(finder)`, `tester.getRect(finder)`). No `find::by_element` stands in: flutter_test has none, and a tester method already takes an element. Trigger: the next edit of each case's file.

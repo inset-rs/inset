@@ -2523,11 +2523,11 @@ mod tests {
 
     use super::*;
     use crate::testing::{
-        TestPointer, WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+        TestPointer, TestWidgetsApp, WidgetTester, expect, find, finds_nothing, finds_one_widget,
+        test_widgets,
     };
-    use crate::widgets::app::WidgetsApp;
     use crate::widgets::basic::{
-        Align, Center, Column, Expanded, Row, StateSetter, StatefulBuilder, WidgetBuilder,
+        Align, Center, Column, Expanded, Row, StateSetter, StatefulBuilder,
     };
     use crate::widgets::container::Container;
     use crate::widgets::gesture_detector::GestureDetector;
@@ -2537,9 +2537,6 @@ mod tests {
     use crate::widgets::icon_theme_data::IconThemeData;
     use crate::widgets::layout_builder::LayoutBuilder;
     use crate::widgets::media_query::MediaQueryData;
-    use crate::widgets::navigator::{RouteSettings, RouteSettingsRef};
-    use crate::widgets::pages::{PageRouteBuilder, PageRouteRef};
-    use crate::widgets::routes::RoutePageBuilder;
     use crate::widgets::scroll_controller::ScrollController;
     use crate::widgets::scroll_physics::ClampingScrollPhysics;
     use crate::widgets::scroll_view::ListView;
@@ -2574,22 +2571,6 @@ mod tests {
             let item = items.remove(from_index as usize);
             items.insert(to_index as usize, item);
         }
-    }
-
-    /// Dart's `PageRouteBuilder` default of `TestWidgetsApp.pageRouteBuilder`.
-    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> PageRouteRef {
-        let page_builder: RoutePageBuilder =
-            Rc::new(move |app, context, _animation, _secondary| builder(app, context));
-        let route = PageRouteBuilder::new(app, page_builder)
-            .settings(app, RouteSettingsRef::Settings(settings.clone()));
-        route.erase()
-    }
-
-    /// Dart's `TestWidgetsApp(home: home)`.
-    fn test_widgets_app<K>(home: impl IntoWidget<K>) -> WidgetsApp {
-        WidgetsApp::new(Color::new(0xFFFFFFFF))
-            .page_route_builder(page_route)
-            .home(home)
     }
 
     /// Dart's `tester.startGesture(at)`.
@@ -2667,58 +2648,61 @@ mod tests {
         if let Some(icon_color) = icon_color {
             icon_theme_data = icon_theme_data.color(icon_color);
         }
-        test_widgets_app(DefaultTextStyle::new(
-            style,
-            IconTheme::new(
-                icon_theme_data,
-                StatefulBuilder::new(move |_app, _outer_context, set_state: StateSetter| {
-                    let builder_items = Rc::clone(&items);
-                    let reorder_items = Rc::clone(&items);
-                    let item_count = items.borrow().len() as i32;
-                    let mut list = SliverReorderableList::new(
-                        move |_app, _context, index| {
-                            let item = builder_items.borrow()[index as usize];
-                            Container::new()
-                                .key(ValueKey::new(item).into())
-                                .height(100.0)
-                                .color(if item % 2 == 1 {
-                                    K_RED_COLOR
-                                } else {
-                                    K_GREEN_COLOR
-                                })
-                                .child(ReorderableDragStartListener::new(
-                                    Row::new()
-                                        .cross_axis_alignment(CrossAxisAlignment::Start)
-                                        .children([
-                                            Text::new(format!("item {item}")).into_widget(),
-                                            Icon::new(Some(k_drag_handle_icon_data()))
-                                                .into_widget(),
-                                        ]),
-                                    index,
-                                ))
-                                .into_widget()
-                        },
-                        item_count,
-                    )
-                    .on_reorder_item(move |app, from_index, to_index| {
-                        let items = Rc::clone(&reorder_items);
-                        set_state(app, &mut |_app| {
-                            let mut items = items.borrow_mut();
-                            let item = items.remove(from_index as usize);
-                            items.insert(to_index as usize, item);
-                        });
-                    });
-                    list.proxy_decorator = proxy_decorator.clone();
-                    list.on_reorder_start = on_reorder_start.clone();
-                    list.on_reorder_end = on_reorder_end.clone();
-                    CustomScrollView::new()
-                        .reverse(reverse)
-                        .slivers([list.into_widget()])
-                        .into_widget()
-                }),
-            ),
-        ))
-        .into_widget()
+        TestWidgetsApp::new()
+            .home(DefaultTextStyle::new(
+                style,
+                IconTheme::new(
+                    icon_theme_data,
+                    StatefulBuilder::new(move |_app, _outer_context, set_state: StateSetter| {
+                        let builder_items = Rc::clone(&items);
+                        let reorder_items = Rc::clone(&items);
+                        let item_count = items.borrow().len() as i32;
+                        let mut list = SliverReorderableList::new(
+                            move |_app, _context, index| {
+                                let item = builder_items.borrow()[index as usize];
+                                Container::new()
+                                    .key(ValueKey::new(item).into())
+                                    .height(100.0)
+                                    .color(if item % 2 == 1 {
+                                        K_RED_COLOR
+                                    } else {
+                                        K_GREEN_COLOR
+                                    })
+                                    .child(ReorderableDragStartListener::new(
+                                        Row::new()
+                                            .cross_axis_alignment(CrossAxisAlignment::Start)
+                                            .children([
+                                                Text::new(format!("item {item}")).into_widget(),
+                                                Icon::new(Some(k_drag_handle_icon_data()))
+                                                    .into_widget(),
+                                            ]),
+                                        index,
+                                    ))
+                                    .into_widget()
+                            },
+                            item_count,
+                        )
+                        .on_reorder_item(
+                            move |app, from_index, to_index| {
+                                let items = Rc::clone(&reorder_items);
+                                set_state(app, &mut |_app| {
+                                    let mut items = items.borrow_mut();
+                                    let item = items.remove(from_index as usize);
+                                    items.insert(to_index as usize, item);
+                                });
+                            },
+                        );
+                        list.proxy_decorator = proxy_decorator.clone();
+                        list.on_reorder_start = on_reorder_start.clone();
+                        list.on_reorder_end = on_reorder_end.clone();
+                        CustomScrollView::new()
+                            .reverse(reverse)
+                            .slivers([list.into_widget()])
+                            .into_widget()
+                    }),
+                ),
+            ))
+            .into_widget()
     }
 
     #[test]
@@ -2730,20 +2714,23 @@ mod tests {
             let items = items(item_count);
 
             // The list has five elements of height 100
-            tester.pump_widget(test_widgets_app(
-                MediaQuery::new(
-                    MediaQueryData::new().gesture_settings(DeviceGestureSettings::new(Some(8.0))),
-                    CustomScrollView::new()
-                        .slivers([SliverReorderableList::new(
-                            sized_item(&items, false, true),
-                            item_count,
-                        )
-                        .on_reorder_item(handle_reorder(&items, &on_reorder_call_count))
-                        .into_widget()])
-                        .into_widget(),
-                )
-                .into_widget(),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    MediaQuery::new(
+                        MediaQueryData::new()
+                            .gesture_settings(DeviceGestureSettings::new(Some(8.0))),
+                        CustomScrollView::new()
+                            .slivers([SliverReorderableList::new(
+                                sized_item(&items, false, true),
+                                item_count,
+                            )
+                            .on_reorder_item(handle_reorder(&items, &on_reorder_call_count))
+                            .into_widget()])
+                            .into_widget(),
+                    )
+                    .into_widget(),
+                ),
+            );
 
             // Start gesture on first item
             let at = tester.get_center(find::text("item 0"));
@@ -2773,7 +2760,7 @@ mod tests {
             let item_count = Rc::new(Cell::new(7));
             let state_setter: Rc<RefCell<Option<StateSetter>>> = Rc::default();
 
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new({
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new({
                 let finder_called = Rc::clone(&finder_called);
                 let item_count = Rc::clone(&item_count);
                 let state_setter = Rc::clone(&state_setter);
@@ -2818,25 +2805,29 @@ mod tests {
             let calls = Rc::new(Cell::new(0));
 
             let builder_items = Rc::clone(&items);
-            tester.pump_widget(test_widgets_app(
-                ReorderableList::new(
-                    move |_app, _context, index| {
-                        let item = builder_items.borrow()[index as usize];
-                        ReorderableDragStartListener::new(
-                            SizedBox::new().height(100.0).child(
-                                Row::new()
-                                    .cross_axis_alignment(CrossAxisAlignment::Start)
-                                    .children([Text::new(format!("item {item}")).into_widget()]),
-                            ),
-                            index,
-                        )
-                        .key(ValueKey::new(item).into())
-                        .into_widget()
-                    },
-                    3,
-                )
-                .on_reorder_item(handle_reorder(&items, &calls)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    ReorderableList::new(
+                        move |_app, _context, index| {
+                            let item = builder_items.borrow()[index as usize];
+                            ReorderableDragStartListener::new(
+                                SizedBox::new().height(100.0).child(
+                                    Row::new()
+                                        .cross_axis_alignment(CrossAxisAlignment::Start)
+                                        .children(
+                                            [Text::new(format!("item {item}")).into_widget()],
+                                        ),
+                                ),
+                                index,
+                            )
+                            .key(ValueKey::new(item).into())
+                            .into_widget()
+                        },
+                        3,
+                    )
+                    .on_reorder_item(handle_reorder(&items, &calls)),
+                ),
+            );
 
             let at = tester.get_center(find::text("item 0"));
             let mut drag1 = start_gesture(tester, at);
@@ -2858,7 +2849,7 @@ mod tests {
     fn negative_item_count_should_assert() {
         test_widgets(|tester| {
             let items = Rc::new(RefCell::new(vec![1, 2, 3]));
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                 move |_app, _outer_context, _set_state| {
                     let items = Rc::clone(&items);
                     CustomScrollView::new()
@@ -2886,7 +2877,7 @@ mod tests {
     fn zero_item_count_should_not_build_widget() {
         test_widgets(|tester| {
             let items = Rc::new(RefCell::new(vec![1, 2, 3]));
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                 move |_app, _outer_context, _set_state| {
                     let items = Rc::clone(&items);
                     CustomScrollView::new()
@@ -3173,41 +3164,42 @@ mod tests {
     fn reorderable_list_supports_items_with_nested_list_views_without_throwing_layout_exception() {
         test_widgets(|tester| {
             tester.pump_widget(
-                test_widgets_app(
-                    ReorderableList::new(
-                        |_app, _context, index| {
-                            ReorderableDragStartListener::new(
-                                Column::new().children([ListView::new()
-                                    .shrink_wrap(true)
-                                    .physics(Rc::new(ClampingScrollPhysics::new()))
-                                    .children([
-                                        Text::new("Other data").into_widget(),
-                                        Text::new("Other data").into_widget(),
-                                        Text::new("Other data").into_widget(),
-                                    ])
-                                    .into_widget()]),
-                                index,
-                            )
-                            .key(ValueKey::new(index).into())
-                            .into_widget()
-                        },
-                        10,
+                TestWidgetsApp::new()
+                    .home(
+                        ReorderableList::new(
+                            |_app, _context, index| {
+                                ReorderableDragStartListener::new(
+                                    Column::new().children([ListView::new()
+                                        .shrink_wrap(true)
+                                        .physics(Rc::new(ClampingScrollPhysics::new()))
+                                        .children([
+                                            Text::new("Other data").into_widget(),
+                                            Text::new("Other data").into_widget(),
+                                            Text::new("Other data").into_widget(),
+                                        ])
+                                        .into_widget()]),
+                                    index,
+                                )
+                                .key(ValueKey::new(index).into())
+                                .into_widget()
+                            },
+                            10,
+                        )
+                        .on_reorder_item(|_app, _from, _to| {}),
                     )
-                    .on_reorder_item(|_app, _from, _to| {}),
-                )
-                .builder(|app, context, child| {
-                    // Ensure there is always a top padding to simulate a phone with
-                    // safe area at the top. If the nested list doesn't have the
-                    // padding removed before it is put into the overlay it will
-                    // overflow the layout by the top padding.
-                    MediaQuery::new(
-                        MediaQuery::of(app, context)
-                            .copy_with()
-                            .padding(EdgeInsets::only(0.0, 50.0, 0.0, 0.0)),
-                        child.expect("a child").clone(),
-                    )
-                    .into_widget()
-                }),
+                    .builder(|app, context, child| {
+                        // Ensure there is always a top padding to simulate a phone with
+                        // safe area at the top. If the nested list doesn't have the
+                        // padding removed before it is put into the overlay it will
+                        // overflow the layout by the top padding.
+                        MediaQuery::new(
+                            MediaQuery::of(app, context)
+                                .copy_with()
+                                .padding(EdgeInsets::only(0.0, 50.0, 0.0, 0.0)),
+                            child.expect("a child").clone(),
+                        )
+                        .into_widget()
+                    }),
             );
 
             // Start gesture on first item.
@@ -3261,41 +3253,44 @@ mod tests {
                 )
                 .erase();
                 let builder_items = Rc::clone(&items);
-                tester.pump_widget(test_widgets_app(
-                    CustomScrollView::new()
-                        .controller(controller.clone())
-                        .slivers([SliverReorderableList::new(
-                            move |_app, _context, index| {
-                                let item = builder_items.borrow()[index as usize];
-                                Container::new()
-                                    .key(ValueKey::new(item).into())
-                                    .height(100.0)
-                                    .color(if item % 2 == 1 {
-                                        K_RED_COLOR
-                                    } else {
-                                        K_GREEN_COLOR
-                                    })
-                                    .child(
-                                        ReorderableDragStartListener::new(
-                                            Row::new()
-                                                .cross_axis_alignment(CrossAxisAlignment::Start)
-                                                .children([
-                                                    Text::new(format!("item {item}")).into_widget(),
-                                                    Icon::new(Some(k_drag_handle_icon_data()))
-                                                        .into_widget(),
-                                                ]),
-                                            index,
+                tester.pump_widget(
+                    TestWidgetsApp::new().home(
+                        CustomScrollView::new()
+                            .controller(controller.clone())
+                            .slivers([SliverReorderableList::new(
+                                move |_app, _context, index| {
+                                    let item = builder_items.borrow()[index as usize];
+                                    Container::new()
+                                        .key(ValueKey::new(item).into())
+                                        .height(100.0)
+                                        .color(if item % 2 == 1 {
+                                            K_RED_COLOR
+                                        } else {
+                                            K_GREEN_COLOR
+                                        })
+                                        .child(
+                                            ReorderableDragStartListener::new(
+                                                Row::new()
+                                                    .cross_axis_alignment(CrossAxisAlignment::Start)
+                                                    .children([
+                                                        Text::new(format!("item {item}"))
+                                                            .into_widget(),
+                                                        Icon::new(Some(k_drag_handle_icon_data()))
+                                                            .into_widget(),
+                                                    ]),
+                                                index,
+                                            )
+                                            .into_widget(),
                                         )
-                                        .into_widget(),
-                                    )
-                                    .into_widget()
-                            },
-                            items.borrow().len() as i32,
-                        )
-                        .on_reorder_item(|_app, _from, _to| {})
-                        .auto_scroller_velocity_scalar(auto_scroller_velocity_scalar)
-                        .into_widget()]),
-                ));
+                                        .into_widget()
+                                },
+                                items.borrow().len() as i32,
+                            )
+                            .on_reorder_item(|_app, _from, _to| {})
+                            .auto_scroller_velocity_scalar(auto_scroller_velocity_scalar)
+                            .into_widget()]),
+                    ),
+                );
 
                 assert_eq!(controller.offset(&tester.cell.borrow()), 0.0);
 
@@ -3767,7 +3762,7 @@ mod tests {
                 .on_reorder_item(handle_reorder(&items, &calls));
             list.on_reorder_start = Some(record_index(&start_index));
             list.on_reorder_end = Some(record_index(&end_index));
-            tester.pump_widget(test_widgets_app(list));
+            tester.pump_widget(TestWidgetsApp::new().home(list));
 
             check_reorder_start_and_end(tester, K_LONG_PRESS_TIMEOUT, &start_index, &end_index);
         });
@@ -3827,14 +3822,16 @@ mod tests {
             let on_reorder_call_count = Rc::new(Cell::new(0));
             let items = items(5);
 
-            tester.pump_widget(test_widgets_app(
-                CustomScrollView::new().slivers([SliverReorderableList::new(
-                    sized_item(&items, false, true),
-                    5,
-                )
-                .on_reorder(handle_old_reorder(&items, &on_reorder_call_count))
-                .into_widget()]),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    CustomScrollView::new().slivers([SliverReorderableList::new(
+                        sized_item(&items, false, true),
+                        5,
+                    )
+                    .on_reorder(handle_old_reorder(&items, &on_reorder_call_count))
+                    .into_widget()]),
+                ),
+            );
 
             drag_item_0_down_then_up(tester, || {
                 assert_eq!(on_reorder_call_count.get(), 1);
@@ -3852,14 +3849,16 @@ mod tests {
             let calls = Rc::new(Cell::new(0));
             let items = items(5);
 
-            tester.pump_widget(test_widgets_app(
-                CustomScrollView::new().slivers([SliverReorderableList::new(
-                    sized_item(&items, false, true),
-                    5,
-                )
-                .on_reorder_item(handle_reorder(&items, &calls))
-                .into_widget()]),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    CustomScrollView::new().slivers([SliverReorderableList::new(
+                        sized_item(&items, false, true),
+                        5,
+                    )
+                    .on_reorder_item(handle_reorder(&items, &calls))
+                    .into_widget()]),
+                ),
+            );
 
             drag_item_0_down_then_up(tester, || {
                 assert_eq!(*items.borrow(), vec![1, 0, 2, 3, 4]);
@@ -3895,10 +3894,12 @@ mod tests {
             let on_reorder_call_count = Rc::new(Cell::new(0));
             let items = items(5);
 
-            tester.pump_widget(test_widgets_app(
-                ReorderableList::new(sized_item(&items, false, true), 5)
-                    .on_reorder(handle_old_reorder(&items, &on_reorder_call_count)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    ReorderableList::new(sized_item(&items, false, true), 5)
+                        .on_reorder(handle_old_reorder(&items, &on_reorder_call_count)),
+                ),
+            );
 
             drag_item_0_down_then_up(tester, || {
                 assert_eq!(on_reorder_call_count.get(), 1);
@@ -3916,10 +3917,12 @@ mod tests {
             let calls = Rc::new(Cell::new(0));
             let items = items(5);
 
-            tester.pump_widget(test_widgets_app(
-                ReorderableList::new(sized_item(&items, false, true), 5)
-                    .on_reorder_item(handle_reorder(&items, &calls)),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    ReorderableList::new(sized_item(&items, false, true), 5)
+                        .on_reorder_item(handle_reorder(&items, &calls)),
+                ),
+            );
 
             drag_item_0_down_then_up(tester, || {
                 assert_eq!(*items.borrow(), vec![1, 0, 2, 3, 4]);
@@ -3987,22 +3990,24 @@ mod tests {
             // index.
             let builder_items = Rc::clone(&items);
             let extent_items = Rc::clone(&items);
-            tester.pump_widget(test_widgets_app(
-                ReorderableList::new(
-                    move |_app, _context, index| {
-                        // Dart's `ValueKey<double>`: a double's bits, as `f64` has no `Hash`.
-                        SizedBox::new()
-                            .key(ValueKey::new(builder_items[index as usize].to_bits()).into())
-                            .child(Text::new(format!("Item {index}")))
-                            .into_widget()
-                    },
-                    item_count,
-                )
-                .on_reorder_item(|_app, _from, _to| {})
-                .item_extent_builder(Rc::new(move |index, _dimensions| {
-                    Some(extent_items[index as usize])
-                })),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    ReorderableList::new(
+                        move |_app, _context, index| {
+                            // Dart's `ValueKey<double>`: a double's bits, as `f64` has no `Hash`.
+                            SizedBox::new()
+                                .key(ValueKey::new(builder_items[index as usize].to_bits()).into())
+                                .child(Text::new(format!("Item {index}")))
+                                .into_widget()
+                        },
+                        item_count,
+                    )
+                    .on_reorder_item(|_app, _from, _to| {})
+                    .item_extent_builder(Rc::new(move |index, _dimensions| {
+                        Some(extent_items[index as usize])
+                    })),
+                ),
+            );
 
             let expected_extents: HashMap<i32, f64> =
                 HashMap::from([(0, 10.0), (1, 20.0), (2, 30.0), (3, 40.0), (4, 50.0)]);
@@ -4046,7 +4051,7 @@ mod tests {
 
             let reorder_numbers = Rc::clone(&numbers);
             let builder_numbers = Rc::clone(&numbers);
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                 move |_app, _context, _set_state| {
                     let reorder_numbers = Rc::clone(&reorder_numbers);
                     ReorderableList::new(number_item(&builder_numbers), 3)
@@ -4069,7 +4074,7 @@ mod tests {
         test_widgets(|tester| {
             let numbers = Rc::new(RefCell::new(vec![0, 1, 2]));
 
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                 move |_app, _context, _set_state| {
                     ReorderableList::new(number_item(&numbers), 3)
                         .prototype_item(SizedBox::new().height(30.0).child(Text::new("3")))
@@ -4095,10 +4100,12 @@ mod tests {
         let items = items(5);
 
         // The list has five elements of height 100
-        tester.pump_widget(test_widgets_app(
-            ReorderableList::new(sized_item(&items, delayed, enabled), 5)
-                .on_reorder_item(handle_reorder(&items, &on_reorder_call_count)),
-        ));
+        tester.pump_widget(
+            TestWidgetsApp::new().home(
+                ReorderableList::new(sized_item(&items, delayed, enabled), 5)
+                    .on_reorder_item(handle_reorder(&items, &on_reorder_call_count)),
+            ),
+        );
         if settle_first {
             tester.pump_and_settle();
         }
@@ -4168,7 +4175,7 @@ mod tests {
             let items = items(item_count);
             let show_list = Rc::new(Cell::new(false));
 
-            tester.pump_widget(test_widgets_app(StatefulBuilder::new(
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
                 move |_app, _context, set_state| {
                     if !show_list.get() {
                         let show_list = Rc::clone(&show_list);
@@ -4246,27 +4253,29 @@ mod tests {
 
             let reorder_items = Rc::clone(&items);
             let builder_items = Rc::clone(&items);
-            tester.pump_widget(test_widgets_app(
-                ReorderableList::new(
-                    move |_app, _context, index| {
-                        ReorderableDragStartListener::new(
-                            test_list_tile(Text::new(
-                                builder_items.borrow()[index as usize].clone(),
-                            )),
-                            index,
-                        )
-                        .key(ValueKey::new(format!("{index}")).into())
-                        .into_widget()
-                    },
-                    item_count,
-                )
-                .on_reorder_item(move |_app, old_index, new_index| {
-                    let mut items = reorder_items.borrow_mut();
-                    let item = items.remove(old_index as usize);
-                    items.insert(new_index as usize, item);
-                })
-                .reverse(true),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    ReorderableList::new(
+                        move |_app, _context, index| {
+                            ReorderableDragStartListener::new(
+                                test_list_tile(Text::new(
+                                    builder_items.borrow()[index as usize].clone(),
+                                )),
+                                index,
+                            )
+                            .key(ValueKey::new(format!("{index}")).into())
+                            .into_widget()
+                        },
+                        item_count,
+                    )
+                    .on_reorder_item(move |_app, old_index, new_index| {
+                        let mut items = reorder_items.borrow_mut();
+                        let item = items.remove(old_index as usize);
+                        items.insert(new_index as usize, item);
+                    })
+                    .reverse(true),
+                ),
+            );
 
             // Start gesture on last item
             let at = tester.get_center(find::text("Item 5"));
@@ -4305,9 +4314,10 @@ mod tests {
                 .on_reorder_item(|_app, _from, _to| {});
                 list.item_extent = item_extent;
                 list.prototype_item = prototype_item;
-                tester.pump_widget(test_widgets_app(
-                    CustomScrollView::new().slivers([list.into_widget()]),
-                ));
+                tester.pump_widget(
+                    TestWidgetsApp::new()
+                        .home(CustomScrollView::new().slivers([list.into_widget()])),
+                );
 
                 let at = tester.get_center(find::text("0"));
                 let mut drag = start_gesture(tester, at);
@@ -4343,30 +4353,32 @@ mod tests {
         test_widgets(|tester| {
             let item_layout_constraints: Rc<RefCell<HashMap<i32, BoxConstraints>>> = Rc::default();
             let recorded = Rc::clone(&item_layout_constraints);
-            tester.pump_widget(test_widgets_app(
-                CustomScrollView::new().slivers([SliverReorderableList::new(
-                    move |_app, _context, index| {
-                        let recorded = Rc::clone(&recorded);
-                        LayoutBuilder::new(move |_app, _context, constraints| {
-                            recorded
-                                .borrow_mut()
-                                .insert(index, constraints.constraints());
-                            SizedBox::new()
-                                .height(100.0)
-                                .child(ReorderableDragStartListener::new(
-                                    Text::new(index.to_string()),
-                                    index,
-                                ))
-                                .into_widget()
-                        })
-                        .key(ValueKey::new(index).into())
-                        .into_widget()
-                    },
-                    5,
-                )
-                .on_reorder_item(|_app, _from, _to| {})
-                .into_widget()]),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    CustomScrollView::new().slivers([SliverReorderableList::new(
+                        move |_app, _context, index| {
+                            let recorded = Rc::clone(&recorded);
+                            LayoutBuilder::new(move |_app, _context, constraints| {
+                                recorded
+                                    .borrow_mut()
+                                    .insert(index, constraints.constraints());
+                                SizedBox::new()
+                                    .height(100.0)
+                                    .child(ReorderableDragStartListener::new(
+                                        Text::new(index.to_string()),
+                                        index,
+                                    ))
+                                    .into_widget()
+                            })
+                            .key(ValueKey::new(index).into())
+                            .into_widget()
+                        },
+                        5,
+                    )
+                    .on_reorder_item(|_app, _from, _to| {})
+                    .into_widget()]),
+                ),
+            );
             let pre_drag_layout_constraints = item_layout_constraints.borrow().clone();
             item_layout_constraints.borrow_mut().clear();
             let at = tester.get_center(find::text("0"));
@@ -4386,28 +4398,30 @@ mod tests {
     #[test]
     fn drag_boundary_defines_the_boundary_for_reorderable_list() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(
-                Align::new().alignment(AlignmentGeometry::TOP_LEFT).child(
-                    Container::new()
-                        .margin(EdgeInsetsGeometry::only(0.0, 100.0, 0.0, 0.0))
-                        .height(300.0)
-                        .child(DragBoundary::new(
-                            CustomScrollView::new().slivers([SliverReorderableList::new(
-                                |_app, _context, index| {
-                                    ReorderableDragStartListener::new(
-                                        Text::new(index.to_string()),
-                                        index,
-                                    )
-                                    .key(ValueKey::new(index).into())
-                                    .into_widget()
-                                },
-                                5,
-                            )
-                            .on_reorder_item(|_app, _from, _to| {})
-                            .into_widget()]),
-                        )),
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Align::new().alignment(AlignmentGeometry::TOP_LEFT).child(
+                        Container::new()
+                            .margin(EdgeInsetsGeometry::only(0.0, 100.0, 0.0, 0.0))
+                            .height(300.0)
+                            .child(DragBoundary::new(
+                                CustomScrollView::new().slivers([SliverReorderableList::new(
+                                    |_app, _context, index| {
+                                        ReorderableDragStartListener::new(
+                                            Text::new(index.to_string()),
+                                            index,
+                                        )
+                                        .key(ValueKey::new(index).into())
+                                        .into_widget()
+                                    },
+                                    5,
+                                )
+                                .on_reorder_item(|_app, _from, _to| {})
+                                .into_widget()]),
+                            )),
+                    ),
                 ),
-            ));
+            );
             let at = tester.get_center(find::text("0"));
             let mut drag = start_gesture(tester, at);
             tester.pump_by(K_LONG_PRESS_TIMEOUT);
@@ -4437,21 +4451,23 @@ mod tests {
     #[test]
     fn reorderable_list_does_not_crash_at_zero_area() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(
-                Center::new().child(
-                    SizedBox::shrink().child(
-                        ReorderableList::new(
-                            |_app, _context, _index| {
-                                Text::new("X")
-                                    .key(ValueKey::new("x".to_string()).into())
-                                    .into_widget()
-                            },
-                            3,
-                        )
-                        .on_reorder_item(|_app, _from, _to| {}),
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Center::new().child(
+                        SizedBox::shrink().child(
+                            ReorderableList::new(
+                                |_app, _context, _index| {
+                                    Text::new("X")
+                                        .key(ValueKey::new("x".to_string()).into())
+                                        .into_widget()
+                                },
+                                3,
+                            )
+                            .on_reorder_item(|_app, _from, _to| {}),
+                        ),
                     ),
                 ),
-            ));
+            );
             assert_eq!(
                 tester.get_size(find::by_type::<ReorderableList>()),
                 Size::ZERO
@@ -4462,7 +4478,7 @@ mod tests {
     #[test]
     fn reorderable_drag_start_listener_does_not_crash_at_zero_area() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(Center::new().child(
+            tester.pump_widget(TestWidgetsApp::new().home(Center::new().child(
                 SizedBox::shrink().child(ReorderableDragStartListener::new(Text::new("X"), 1)),
             )));
             assert_eq!(
@@ -4475,12 +4491,14 @@ mod tests {
     #[test]
     fn reorderable_delayed_drag_start_listener_does_not_crash_at_zero_area() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(
-                Center::new().child(
-                    SizedBox::shrink()
-                        .child(ReorderableDelayedDragStartListener::new(Text::new("X"), 1)),
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    Center::new().child(
+                        SizedBox::shrink()
+                            .child(ReorderableDelayedDragStartListener::new(Text::new("X"), 1)),
+                    ),
                 ),
-            ));
+            );
             assert_eq!(
                 tester.get_size(find::by_type::<ReorderableDelayedDragStartListener>()),
                 Size::ZERO
