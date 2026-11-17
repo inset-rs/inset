@@ -238,7 +238,8 @@ impl<T: Clone + PartialEq + Display + 'static> RawAutocomplete<T> {
     ///
     /// [`display_string_for_option`](Self::display_string_for_option) defaults to
     /// [`default_string_for_option`](Self::default_string_for_option), which needs `T`'s
-    /// `Display` form.
+    /// `Display` form; an option type without one is built with
+    /// [`new_with_display_string`](Self::new_with_display_string).
     pub fn new(
         options_view_builder: impl Fn(
             &mut App,
@@ -249,20 +250,11 @@ impl<T: Clone + PartialEq + Display + 'static> RawAutocomplete<T> {
         + 'static,
         options_builder: impl Fn(&mut App, TextEditingValue) -> Task<Vec<T>> + 'static,
     ) -> RawAutocomplete<T> {
-        RawAutocomplete {
-            key: None,
-            field_view_builder: None,
-            focus_node: None,
-            options_view_builder: Rc::new(options_view_builder),
-            options_view_open_direction: OptionsViewOpenDirection::Down,
-            display_string_for_option: Rc::new(|option: &T| {
-                RawAutocomplete::<T>::default_string_for_option(option)
-            }),
-            on_selected: None,
-            options_builder: Rc::new(options_builder),
-            text_editing_controller: None,
-            initial_value: None,
-        }
+        RawAutocomplete::new_with_display_string(
+            options_view_builder,
+            options_builder,
+            |option: &T| RawAutocomplete::<T>::default_string_for_option(option),
+        )
     }
 
     /// The default way to convert an option to a string in
@@ -271,6 +263,36 @@ impl<T: Clone + PartialEq + Display + 'static> RawAutocomplete<T> {
     /// Uses the `Display` form of the given `option`.
     pub fn default_string_for_option(option: &dyn Display) -> String {
         option.to_string()
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> RawAutocomplete<T> {
+    /// Create an instance of RawAutocomplete whose options are shown as
+    /// `display_string_for_option` gives them, for an option type with or without a `Display`
+    /// form.
+    pub fn new_with_display_string(
+        options_view_builder: impl Fn(
+            &mut App,
+            BuildContext,
+            AutocompleteOnSelected<T>,
+            &[T],
+        ) -> WidgetRef
+        + 'static,
+        options_builder: impl Fn(&mut App, TextEditingValue) -> Task<Vec<T>> + 'static,
+        display_string_for_option: impl Fn(&T) -> String + 'static,
+    ) -> RawAutocomplete<T> {
+        RawAutocomplete {
+            key: None,
+            field_view_builder: None,
+            focus_node: None,
+            options_view_builder: Rc::new(options_view_builder),
+            options_view_open_direction: OptionsViewOpenDirection::Down,
+            display_string_for_option: Rc::new(display_string_for_option),
+            on_selected: None,
+            options_builder: Rc::new(options_builder),
+            text_editing_controller: None,
+            initial_value: None,
+        }
     }
 }
 
@@ -1359,7 +1381,9 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{Color, Offset, Size, TextDirection, TextInputAction, ViewPadding};
+    use waft_embedder::{
+        Color, Offset, Size, TextDirection, TextInputAction, View, ViewPadding,
+    };
     use waft_foundation::{Completer, Timer};
     use waft_painting::{EdgeInsetsGeometry, TextStyle};
     use waft_services::{PhysicalKeyboardKey, TextInputClient};
@@ -3328,7 +3352,17 @@ mod tests {
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
-            assert_eq!(captured.options().len(), 6);
+            assert_eq!(
+                captured.options(),
+                strings(&[
+                    "chameleon",
+                    "elephant",
+                    "goose",
+                    "lemur",
+                    "mouse",
+                    "northern white rhinoceros",
+                ])
+            );
 
             // Jump to the bottom.
             with_control(
@@ -3390,7 +3424,17 @@ mod tests {
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
-            assert_eq!(captured.options().len(), 6);
+            assert_eq!(
+                captured.options(),
+                strings(&[
+                    "chameleon",
+                    "elephant",
+                    "goose",
+                    "lemur",
+                    "mouse",
+                    "northern white rhinoceros",
+                ])
+            );
 
             // Jump down. Stops at the bottom and doesn't wrap.
             for expected in [4, 5, 5] {
@@ -3551,7 +3595,17 @@ mod tests {
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
-            assert_eq!(captured.options().len(), 6);
+            assert_eq!(
+                captured.options(),
+                strings(&[
+                    "chameleon",
+                    "elephant",
+                    "goose",
+                    "lemur",
+                    "mouse",
+                    "northern white rhinoceros",
+                ])
+            );
 
             // Move the highlighted option down and check the highlighted index.
             assert_eq!(captured.last_highlighted.get(), 0);
@@ -4533,6 +4587,7 @@ mod tests {
             tester.pump();
 
             // The options view has shrunk to the available height.
+            assert_eq!(tester.view().metrics().padding.bottom, PADDING);
             assert_more_or_less_equals_within(
                 tester.get_size(find::by_type::<Placeholder>()).height(),
                 initial_size - PADDING,
@@ -4544,6 +4599,10 @@ mod tests {
                 ..ViewPadding::ZERO
             });
             tester.pump();
+
+            // The options view has shrunk to the available height.
+            assert_eq!(tester.view().metrics().padding.bottom, PADDING);
+            assert_eq!(tester.view().metrics().view_insets.bottom, BOTTOM_INSETS);
 
             tester.tap(find::by_type::<TestTextField>());
             enter_text(tester, find::by_type::<TestTextField>(), "abc");

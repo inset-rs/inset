@@ -43,7 +43,7 @@ use crate::theme::Theme;
 ///
 ///  * [`RawAutocomplete`], which is what Autocomplete is built upon, and which contains more
 ///    detailed examples.
-pub struct Autocomplete<T: Clone + PartialEq + Hash + Debug + Display + 'static> {
+pub struct Autocomplete<T: Clone + PartialEq + Hash + Debug + 'static> {
     pub key: Option<KeyRef>,
 
     /// Returns the string to display in the field when the option is selected.
@@ -121,14 +121,30 @@ pub struct Autocomplete<T: Clone + PartialEq + Hash + Debug + Display + 'static>
 
 impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> Autocomplete<T> {
     /// Creates an instance of [`Autocomplete`].
+    ///
+    /// [`display_string_for_option`](Self::display_string_for_option) defaults to the option's
+    /// `Display` form; an option type without one is built with
+    /// [`new_with_display_string`](Self::new_with_display_string).
     pub fn new(
         options_builder: impl Fn(&mut App, TextEditingValue) -> Task<Vec<T>> + 'static,
     ) -> Autocomplete<T> {
+        Autocomplete::new_with_display_string(options_builder, |option: &T| {
+            RawAutocomplete::<T>::default_string_for_option(option)
+        })
+    }
+}
+
+impl<T: Clone + PartialEq + Hash + Debug + 'static> Autocomplete<T> {
+    /// Creates an instance of [`Autocomplete`] whose options are shown as
+    /// `display_string_for_option` gives them, for an option type with or without a `Display`
+    /// form.
+    pub fn new_with_display_string(
+        options_builder: impl Fn(&mut App, TextEditingValue) -> Task<Vec<T>> + 'static,
+        display_string_for_option: impl Fn(&T) -> String + 'static,
+    ) -> Autocomplete<T> {
         Autocomplete {
             key: None,
-            display_string_for_option: Rc::new(|option: &T| {
-                RawAutocomplete::<T>::default_string_for_option(option)
-            }),
+            display_string_for_option: Rc::new(display_string_for_option),
             field_view_builder: Rc::new(Self::default_field_view_builder),
             focus_node: None,
             on_selected: None,
@@ -245,7 +261,7 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> Autocomplete<T> {
     }
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> Debug for Autocomplete<T> {
+impl<T: Clone + PartialEq + Hash + Debug + 'static> Debug for Autocomplete<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Autocomplete")
             .field(
@@ -260,7 +276,7 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> Debug for Autocomp
     }
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> StatelessWidget for Autocomplete<T> {
+impl<T: Clone + PartialEq + Hash + Debug + 'static> StatelessWidget for Autocomplete<T> {
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
     }
@@ -288,13 +304,13 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> StatelessWidget fo
                     })
                 }
             };
-        let mut raw_autocomplete = RawAutocomplete::<T>::new(
+        let mut raw_autocomplete = RawAutocomplete::<T>::new_with_display_string(
             move |app, context, on_selected, options| {
                 options_view_builder(app, context, on_selected, options)
             },
             move |app, text_editing_value| options_builder(app, text_editing_value),
+            move |option| display_string_for_option(option),
         )
-        .display_string_for_option(move |option| display_string_for_option(option))
         .field_view_builder(
             move |app, context, text_editing_controller, focus_node, on_field_submitted| {
                 field_view_builder(
@@ -355,7 +371,7 @@ impl StatelessWidget for AutocompleteField {
 }
 
 /// Dart's `_AutocompleteOptions`: the default Material-style Autocomplete options.
-struct AutocompleteOptions<T: Clone + PartialEq + Hash + Debug + Display + 'static> {
+struct AutocompleteOptions<T: Clone + PartialEq + Hash + Debug + 'static> {
     display_string_for_option: AutocompleteOptionToString<T>,
     on_selected: AutocompleteOnSelected<T>,
     open_direction: OptionsViewOpenDirection,
@@ -363,7 +379,7 @@ struct AutocompleteOptions<T: Clone + PartialEq + Hash + Debug + Display + 'stat
     options_max_height: f64,
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> Debug for AutocompleteOptions<T> {
+impl<T: Clone + PartialEq + Hash + Debug + 'static> Debug for AutocompleteOptions<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AutocompleteOptions")
             .field("open_direction", &self.open_direction)
@@ -373,7 +389,7 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> Debug for Autocomp
     }
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> StatelessWidget
+impl<T: Clone + PartialEq + Hash + Debug + 'static> StatelessWidget
     for AutocompleteOptions<T>
 {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -395,14 +411,14 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> StatelessWidget
 }
 
 /// Dart's `_AutocompleteOptionsList`.
-struct AutocompleteOptionsList<T: Clone + PartialEq + Hash + Debug + Display + 'static> {
+struct AutocompleteOptionsList<T: Clone + PartialEq + Hash + Debug + 'static> {
     display_string_for_option: AutocompleteOptionToString<T>,
     highlighted_index: usize,
     on_selected: AutocompleteOnSelected<T>,
     options: Vec<T>,
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> Debug for AutocompleteOptionsList<T> {
+impl<T: Clone + PartialEq + Hash + Debug + 'static> Debug for AutocompleteOptionsList<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AutocompleteOptionsList")
             .field("highlighted_index", &self.highlighted_index)
@@ -411,7 +427,7 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> Debug for Autocomp
     }
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> StatefulWidget
+impl<T: Clone + PartialEq + Hash + Debug + 'static> StatefulWidget
     for AutocompleteOptionsList<T>
 {
     type State = AutocompleteOptionsListState<T>;
@@ -425,14 +441,14 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> StatefulWidget
 }
 
 /// Dart's `_AutocompleteOptionsListState`.
-struct AutocompleteOptionsListState<T: Clone + PartialEq + Hash + Debug + Display + 'static> {
+struct AutocompleteOptionsListState<T: Clone + PartialEq + Hash + Debug + 'static> {
     state: StateData<AutocompleteOptionsList<T>>,
     /// Dart's `final ScrollController _scrollController = ScrollController()`, made in
     /// `init_state`, which has the `App` a constructor needs.
     scroll_controller: Option<Ref<ScrollController>>,
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> AutocompleteOptionsListState<T> {
+impl<T: Clone + PartialEq + Hash + Debug + 'static> AutocompleteOptionsListState<T> {
     fn scroll_controller(self: Handle<Self>, app: &App) -> Ref<ScrollController> {
         app.get(self)
             .scroll_controller
@@ -447,7 +463,7 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> AutocompleteOption
     }
 }
 
-impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> State
+impl<T: Clone + PartialEq + Hash + Debug + 'static> State
     for AutocompleteOptionsListState<T>
 {
     type Widget = AutocompleteOptionsList<T>;
@@ -489,7 +505,7 @@ impl<T: Clone + PartialEq + Hash + Debug + Display + 'static> State
                                 highlighted_context,
                                 0.5,
                                 Duration::ZERO,
-                                Curves::linear(),
+                                Curves::ease(),
                                 ScrollPositionAlignmentPolicy::Explicit,
                             ));
                         }
@@ -999,6 +1015,33 @@ mod tests {
             );
             expect(tester, &find::by_type::<ListView>(), finds_nothing());
             assert_eq!(field_text(tester), K_OPTIONS_USERS[0].name);
+        });
+    }
+
+    /// Not a Dart case: an option type with no `Display` form is shown through the function the
+    /// second constructor takes.
+    #[test]
+    fn an_option_type_without_display_is_shown_by_its_display_string() {
+        #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+        struct Animal(&'static str);
+
+        test_widgets(|tester| {
+            pump_in_scaffold(
+                tester,
+                Autocomplete::new_with_display_string(
+                    |_app, _value| Task::ready(vec![Animal("aardvark"), Animal("bobcat")]),
+                    |animal: &Animal| animal.0.to_uppercase(),
+                ),
+            );
+
+            tester.tap(find::by_type::<TextFormField>());
+            tester.pump();
+            expect(tester, &find::text("AARDVARK"), finds_one_widget());
+            expect(tester, &find::text("BOBCAT"), finds_one_widget());
+
+            tester.tap(find::by_type::<InkWell>().first());
+            tester.pump();
+            assert_eq!(field_text(tester), "AARDVARK");
         });
     }
 
