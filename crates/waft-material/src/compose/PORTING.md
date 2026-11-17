@@ -16,6 +16,9 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
 - Change: `WindowSizeClass::of` and `maybe_of` read the nearest `MediaQuery`'s size through the `App`, where Compose reads `currentWindowAdaptiveInfoV2()`.
   Reason: framework — Flutter's window size is a `MediaQuery` a widget reads with its context, not an ambient Compose value.
   Affect: a widget calls `WindowSizeClass::of(app, context)` and rebuilds when `MediaQuery` changes; there is no scope widget.
+- Change: `WindowWidthSizeClass::margin` answers Material 3's window margin, 16 when Compact and 24 from Medium, which neither androidx.window nor Compose carries.
+  Reason: framework — Compose's `PaneScaffoldDirective` dropped its `contentPadding` before 1.0 and leaves margins to the app, and an app needs the spec's value to give `Pane::margins`.
+  Affect: an app reads the margin for its window instead of writing 16 or 24 itself.
 
 ## pane_scaffold_directive.rs → PaneScaffoldDirective.kt
 - Change: `PaneScaffoldDirective` has no `excluded_bounds` or `should_auto_focus_current_destination`, and its constructors ignore posture, tabletop and hinges.
@@ -33,6 +36,9 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
   Affect: an app maps its entries to destinations, asks for a scene, and builds one page per entry before it plus one page holding the scaffold.
 
 ## three_pane_scaffold.rs → ThreePaneScaffold.kt, Pane.kt
+- Change: `Pane::margins` takes fixed margins only, without the `RectRulers` insets Compose's `paneMargins` also accepts.
+  Reason: framework — Flutter has no rulers; its insets are `MediaQuery` padding, which a pane's content already reads.
+  Affect: a pane keeps its margins from the scaffold's edges, and its content still pads itself for the system's insets.
 - Change: a hidden pane stays mounted under an `Offstage`, where Compose disposes it once its exit motion ends and keeps its saved state in a `SaveableStateHolder`.
   Reason: framework — Flutter keeps a subtree's state by keeping its element, and has no saveable state holder.
   Affect: a list hidden behind its detail keeps its scroll position and its live state, and comes back as it was.
@@ -52,13 +58,16 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
 - Change: the suite builds Waft's `NavigationBar`, `NavigationRail` and `NavigationDrawer`, and removes the padding that the bar or rail covers from the content's `MediaQuery`.
   Reason: framework — Flutter's navigation widgets already carry their own layout and Material styling.
   Affect: an app gets the existing Material themes and the content starts inside the bar's or rail's inset.
+- Change: `NavigationSuiteColors` carries only the bar's, rail's and drawer's container colours, and the scaffold has no `contentColor`.
+  Reason: framework — Flutter's navigation widgets and `Material` take their foreground colours from their themes, not from a content colour passed down.
+  Affect: an app sets icon and label colours through `NavigationBarTheme`, `NavigationRailTheme` and `NavigationDrawerTheme`.
 
 ## Deferred
 - levitated panes (`AdaptStrategy::Levitate`, the scrim and drag-to-resize state). Trigger: a modal pane layer in `ThreePaneScaffold`.
 - pane expansion (`PaneExpansionState`, the draggable divider). Trigger: an optional field on `ThreePaneScaffold`.
 - predictive back inside a scene (`seekTo`, `PredictiveBackScaleState`). Trigger: the scaffold observing the back gesture; single-pane steps are already pages.
 - custom pane enter and exit transitions (`AnimatedPane`'s transitions and transition scope). Trigger: optional fields on `Pane`.
-- pane margins (`PaneMargins`, `RectRulers`). Trigger: a pane inset model beyond `SafeArea` and `MediaQuery`.
+- pane margins from insets (`RectRulers`). Trigger: a pane inset model beyond `SafeArea` and `MediaQuery`.
 - auto-focus of the current destination, and several scenes keyed in one stack (`sceneKey`). Trigger: `FocusNode` support and a key on the destination item.
 - `NavigationSuiteScaffoldState` (show and hide the suite). Trigger: a controller for the suite.
 - Compose's short navigation bar, its wide navigation rail, and a modal drawer chosen by platform. Trigger: those components' own Material ports.

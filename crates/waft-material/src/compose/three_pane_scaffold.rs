@@ -4,14 +4,14 @@
 use std::rc::Rc;
 
 use waft_animation::{AnimationBehavior, AnimationController, AnyAnimation};
-use waft_embedder::{Clip, Offset, Rect, Size};
+use waft_embedder::{Clip, Offset, Rect, Size, TextDirection};
 use waft_foundation::{App, Handle, Listenable, MergingListenable, Ref, ValueKey};
 use waft_painting::AlignmentGeometry;
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
-    BuildContext, ClipRect, Directionality, IgnorePointer, IntoWidget, KeyRef, LayoutBuilder,
-    ListenableBuilder, Offstage, OverflowBox, Positioned, Stack, State, StateData, StatefulWidget,
-    TickerProviderStateMixin, TickerProviderStateMixinData, Transform, WidgetRef,
+    BuildContext, ClipPath, ClipRect, Directionality, IgnorePointer, IntoWidget, KeyRef,
+    LayoutBuilder, ListenableBuilder, Offstage, OverflowBox, Positioned, Stack, State, StateData,
+    StatefulWidget, TickerProviderStateMixin, TickerProviderStateMixinData, Transform, WidgetRef,
 };
 
 use crate::compose::pane_motion::{
@@ -249,11 +249,9 @@ impl ThreePaneScaffoldState {
         context: BuildContext,
         size: Size,
     ) -> WidgetRef {
-        let ltr_order = self
-            .widget(app)
-            .pane_order
-            .to_ltr(Directionality::of(app, context));
-        self.lay_out(app, size, ltr_order);
+        let text_direction = Directionality::of(app, context);
+        let ltr_order = self.widget(app).pane_order.to_ltr(text_direction);
+        self.lay_out(app, size, ltr_order, text_direction);
         let unplaced = Rect::from_ltwh(0.0, 0.0, size.width(), size.height());
         let motion_data = self.motion_data(app, ltr_order, size.width(), unplaced);
         let (progress, delayed_progress) = self.progress(app);
@@ -272,7 +270,7 @@ impl ThreePaneScaffoldState {
                 motion_data.panes[index].motion.motion_type() == PaneMotionType::Exiting;
             let drawn = drawn_pane(
                 role,
-                pane.child.clone(),
+                pane,
                 motion_data.frame(index, progress, delayed_progress),
                 is_shown,
                 !is_shown && (settled || !is_exiting),
@@ -294,8 +292,9 @@ impl ThreePaneScaffoldState {
         app: &mut App,
         size: Size,
         ltr_order: ThreePaneScaffoldHorizontalOrder,
+        text_direction: TextDirection,
     ) {
-        let targets = pane_bounds(self.widget(app), size, ltr_order);
+        let targets = pane_bounds(self.widget(app), size, ltr_order, text_direction);
         let state = app.get_mut(self);
         state.scaffold_width = size.width();
         for (index, role) in ltr_order.roles().into_iter().enumerate() {
@@ -310,7 +309,7 @@ impl ThreePaneScaffoldState {
 /// its element, and its state, through each motion.
 fn drawn_pane(
     role: ThreePaneScaffoldRole,
-    child: WidgetRef,
+    pane: &Pane,
     frame: PaneFrame,
     is_shown: bool,
     offstage: bool,
@@ -324,14 +323,21 @@ fn drawn_pane(
         .alignment(AlignmentGeometry::CENTER)
         .min_width(frame.content_width)
         .max_width(frame.content_width)
-        .child(Transform::translate(Offset::new(frame.content_offset, 0.0)).child(child));
+        .child(
+            Transform::translate(Offset::new(frame.content_offset, 0.0)).child(pane.child.clone()),
+        );
+    let clipped = ClipRect::new().clip_behavior(clip_behavior).child(content);
+    // The shape clips the pane's bounds as they move, as Compose's `clip(shape)` comes after its
+    // bounds animation.
+    let shaped = match &pane.shape {
+        Some(shape) => ClipPath::shape(shape.clone()).child(clipped).into_widget(),
+        None => clipped.into_widget(),
+    };
     Positioned::from_rect(
         frame.bounds,
-        Offstage::new().offstage(offstage).child(
-            IgnorePointer::new()
-                .ignoring(!is_shown)
-                .child(ClipRect::new().clip_behavior(clip_behavior).child(content)),
-        ),
+        Offstage::new()
+            .offstage(offstage)
+            .child(IgnorePointer::new().ignoring(!is_shown).child(shaped)),
     )
     .key(ValueKey::new(role).into())
     .into_widget()
@@ -427,8 +433,25 @@ fn settled_controller(
 ///
 /// Expanded panes take their preferred widths; the leftover goes to the one with the highest
 /// priority, and they all shrink in proportion when they do not fit. A reflowed pane takes the
-/// bottom of its anchor's partition, at most half.
+/// bottom of its anchor's partition, at most half. Each pane's margins then move the edges it
+/// shares with the scaffold, as Compose's `doMeasureAndPlace` does after measuring.
 fn pane_bounds(
+    scaffold: &ThreePaneScaffold,
+    size: Size,
+    ltr_order: ThreePaneScaffoldHorizontalOrder,
+    text_direction: TextDirection,
+) -> [Option<Rect>; 3] {
+    let mut bounds = partition_bounds(scaffold, size, ltr_order);
+    for (index, role) in ltr_order.roles().into_iter().enumerate() {
+        if let (Some(rect), Some(pane)) = (bounds[index], scaffold.pane(role)) {
+            bounds[index] = Some(pane.within_margins(rect, size, text_direction));
+        }
+    }
+    bounds
+}
+
+/// The bounds of each shown pane, left to right, before margins.
+fn partition_bounds(
     scaffold: &ThreePaneScaffold,
     size: Size,
     ltr_order: ThreePaneScaffoldHorizontalOrder,
@@ -515,7 +538,10 @@ mod tests {
     use waft_embedder::{Size, TextDirection};
     use waft_foundation::ValueKey;
     use waft_painting::EdgeInsetsGeometry;
-    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+    use waft_painting::{BorderRadius, BorderSide, RoundedRectangleBorder};
+    use waft_widgets::testing::{
+        WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
     use waft_widgets::{Directionality, Padding, SizedBox};
 
     use super::*;
@@ -668,6 +694,83 @@ mod tests {
             assert_eq!(
                 rect_of(tester, 2),
                 Rect::from_ltwh(0.0, 412.0, 400.0, 388.0)
+            );
+        });
+    }
+
+    #[test]
+    fn margins_move_only_the_edges_a_pane_shares_with_the_scaffold() {
+        test_widgets(|tester| {
+            let margins = EdgeInsetsGeometry::all(24.0);
+            pump(
+                tester,
+                1000.0,
+                600.0,
+                ThreePaneScaffold::list_detail(
+                    expanded_directive(),
+                    list_and_detail(),
+                    pane(1).margins(margins.clone()),
+                    pane(2).margins(margins),
+                ),
+            );
+            assert_eq!(
+                rect_of(tester, 1),
+                Rect::from_ltrb(24.0, 24.0, 360.0, 576.0)
+            );
+            assert_eq!(
+                rect_of(tester, 2),
+                Rect::from_ltrb(384.0, 24.0, 976.0, 576.0)
+            );
+        });
+    }
+
+    #[test]
+    fn directional_margins_follow_the_text_direction() {
+        test_widgets(|tester| {
+            pump_in(
+                tester,
+                TextDirection::Rtl,
+                1000.0,
+                600.0,
+                ThreePaneScaffold::list_detail(
+                    expanded_directive(),
+                    list_and_detail(),
+                    pane(1).margins(EdgeInsetsGeometry::directional(24.0, 0.0, 0.0, 0.0)),
+                    pane(2),
+                ),
+            );
+            assert_eq!(
+                rect_of(tester, 1),
+                Rect::from_ltrb(640.0, 0.0, 976.0, 600.0)
+            );
+        });
+    }
+
+    #[test]
+    fn a_shaped_pane_is_clipped_to_its_shape() {
+        test_widgets(|tester| {
+            let shape =
+                RoundedRectangleBorder::new(BorderSide::NONE, BorderRadius::circular(16.0).into());
+            pump(
+                tester,
+                1000.0,
+                600.0,
+                ThreePaneScaffold::list_detail(
+                    expanded_directive(),
+                    list_and_detail(),
+                    pane(1).shape(shape),
+                    pane(2),
+                ),
+            );
+            expect(
+                tester,
+                &find::ancestor(find::by_key(ValueKey::new(1)), find::by_type::<ClipPath>()),
+                finds_one_widget(),
+            );
+            expect(
+                tester,
+                &find::ancestor(find::by_key(ValueKey::new(2)), find::by_type::<ClipPath>()),
+                finds_nothing(),
             );
         });
     }

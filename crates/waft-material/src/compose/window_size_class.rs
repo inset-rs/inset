@@ -19,6 +19,25 @@ pub enum WindowWidthSizeClass {
     ExtraLarge,
 }
 
+impl WindowWidthSizeClass {
+    /// Material 3's window margin at this width, in logical pixels: the space between the
+    /// window's edge, or its navigation, and the panes. 16 when Compact and 24 from Medium, from
+    /// the margins of m3.material.io/foundations/layout/applying-layout/window-size-classes.
+    ///
+    /// Compose leaves margins to the app; a pane takes them with [`Pane::margins`].
+    ///
+    /// [`Pane::margins`]: crate::compose::Pane::margins
+    pub fn margin(self) -> f64 {
+        match self {
+            WindowWidthSizeClass::Compact => 16.0,
+            WindowWidthSizeClass::Medium
+            | WindowWidthSizeClass::Expanded
+            | WindowWidthSizeClass::Large
+            | WindowWidthSizeClass::ExtraLarge => 24.0,
+        }
+    }
+}
+
 /// Material's height breakpoints, in logical pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WindowHeightSizeClass {
@@ -143,5 +162,12 @@ mod tests {
                 "height {height}"
             );
         }
+    }
+
+    #[test]
+    fn the_margin_is_16_when_compact_and_24_from_medium() {
+        assert_eq!(WindowWidthSizeClass::Compact.margin(), 16.0);
+        assert_eq!(WindowWidthSizeClass::Medium.margin(), 24.0);
+        assert_eq!(WindowWidthSizeClass::ExtraLarge.margin(), 24.0);
     }
 }

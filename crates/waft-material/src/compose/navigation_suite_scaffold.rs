@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use waft_embedder::TextDirection;
+use waft_embedder::{Color, TextDirection};
 use waft_foundation::{App, ValueChanged};
 use waft_painting::RoundedRectangleBorder;
 use waft_widgets::{
@@ -12,9 +12,11 @@ use waft_widgets::{
 
 use crate::compose::{WindowHeightSizeClass, WindowSizeClass, WindowWidthSizeClass};
 use crate::drawer_theme::DrawerTheme;
+use crate::material::Material;
 use crate::navigation_bar::{NavigationBar, NavigationDestination};
 use crate::navigation_drawer::{NavigationDrawer, NavigationDrawerDestination};
 use crate::navigation_rail::{NavigationRail, NavigationRailDestination, NavigationRailLabelType};
+use crate::theme::Theme;
 
 /// Compose's `PrimaryActionContentPadding`: the primary action's gap to the bar and the end edge.
 const PRIMARY_ACTION_CONTENT_PADDING: f64 = 16.0;
@@ -51,6 +53,19 @@ impl NavigationSuiteType {
             }
         }
     }
+}
+
+/// Compose's `NavigationSuiteColors`: the container colour of each navigation widget the suite
+/// can show. `None` keeps the widget's own, from its theme or Material's defaults, as Compose's
+/// `NavigationSuiteDefaults.colors()` does; `Colors::TRANSPARENT` shows the suite's container.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NavigationSuiteColors {
+    /// The bar's background.
+    pub navigation_bar_container_color: Option<Color>,
+    /// The rail's background, extended or not.
+    pub navigation_rail_container_color: Option<Color>,
+    /// The permanent drawer's background.
+    pub navigation_drawer_container_color: Option<Color>,
 }
 
 /// One destination in a navigation suite.
@@ -110,6 +125,11 @@ pub struct NavigationSuiteScaffold {
     pub navigation_suite_type: Option<NavigationSuiteType>,
     /// The rail's leading widget, the drawer's header, or a button above the bar's end.
     pub primary_action: Option<WidgetRef>,
+    /// The background of each navigation widget.
+    pub navigation_suite_colors: NavigationSuiteColors,
+    /// The background behind the navigation widget and the content; `None` is the scheme's
+    /// surface, Compose's `colorScheme.background`.
+    pub container_color: Option<Color>,
     /// The content beside the navigation widget.
     pub content: WidgetRef,
 }
@@ -127,6 +147,8 @@ impl NavigationSuiteScaffold {
             on_destination_selected: None,
             navigation_suite_type: None,
             primary_action: None,
+            navigation_suite_colors: NavigationSuiteColors::default(),
+            container_color: None,
             content: content.into_widget(),
         }
     }
@@ -164,6 +186,21 @@ impl NavigationSuiteScaffold {
         self
     }
 
+    /// Sets the background of each navigation widget.
+    pub fn navigation_suite_colors(
+        mut self,
+        navigation_suite_colors: NavigationSuiteColors,
+    ) -> NavigationSuiteScaffold {
+        self.navigation_suite_colors = navigation_suite_colors;
+        self
+    }
+
+    /// Sets the background behind the navigation widget and the content.
+    pub fn container_color(mut self, container_color: Color) -> NavigationSuiteScaffold {
+        self.container_color = Some(container_color);
+        self
+    }
+
     /// Sets the scaffold's key.
     pub fn key(mut self, key: KeyRef) -> NavigationSuiteScaffold {
         self.key = Some(key);
@@ -185,6 +222,9 @@ impl NavigationSuiteScaffold {
             })
             .collect::<Vec<_>>();
         let mut bar = NavigationBar::new(destinations).selected_index(self.selected_index);
+        if let Some(color) = self.navigation_suite_colors.navigation_bar_container_color {
+            bar = bar.background_color(color);
+        }
         if let Some(on_selected) = &self.on_destination_selected {
             let on_selected = on_selected.clone();
             bar = bar.on_destination_selected(move |app, index| on_selected(app, index));
@@ -217,6 +257,9 @@ impl NavigationSuiteScaffold {
                 .label_type(NavigationRailLabelType::None)
                 .min_extended_width(256.0);
         }
+        if let Some(color) = self.navigation_suite_colors.navigation_rail_container_color {
+            rail = rail.background_color(color);
+        }
         if let Some(primary_action) = &self.primary_action {
             rail = rail.leading(primary_action.clone());
         }
@@ -247,6 +290,12 @@ impl NavigationSuiteScaffold {
         let mut drawer = NavigationDrawer::new(destinations)
             .selected_index(Some(self.selected_index as i32))
             .elevation(0.0);
+        if let Some(color) = self
+            .navigation_suite_colors
+            .navigation_drawer_container_color
+        {
+            drawer = drawer.background_color(color);
+        }
         if let Some(primary_action) = &self.primary_action {
             drawer = drawer.header(primary_action.clone());
         }
@@ -333,7 +382,10 @@ impl StatelessWidget for NavigationSuiteScaffold {
             NavigationSuiteType::from_window_size_class(WindowSizeClass::of(app, context))
         });
         let content = self.content_without_padding(app, context, suite_type);
-        match suite_type {
+        let container_color = self
+            .container_color
+            .unwrap_or_else(|| Theme::of(app, context).color_scheme.surface);
+        let suite = match suite_type {
             NavigationSuiteType::None => content,
             NavigationSuiteType::NavigationBar => {
                 let content = self.content_with_primary_action(app, context, content);
@@ -353,7 +405,12 @@ impl StatelessWidget for NavigationSuiteScaffold {
                     Expanded::new(content).into_widget(),
                 ])
                 .into_widget(),
-        }
+        };
+        // Compose's `Surface(color = containerColor)` around the suite and its content.
+        Material::new()
+            .color(container_color)
+            .child(suite)
+            .into_widget()
     }
 }
 
@@ -500,6 +557,52 @@ mod tests {
                 1
             );
             assert_eq!(find::by_type::<NavigationRail>().evaluate(tester).len(), 0);
+        });
+    }
+
+    #[test]
+    fn the_suite_sits_on_its_container_color_and_the_rail_takes_its_own() {
+        test_widgets(|tester| {
+            let container = Color::from_argb(255, 1, 2, 3);
+            let rail = Color::from_argb(0, 0, 0, 0);
+            pump(
+                tester,
+                800.0,
+                700.0,
+                suite()
+                    .container_color(container)
+                    .navigation_suite_colors(NavigationSuiteColors {
+                        navigation_rail_container_color: Some(rail),
+                        ..NavigationSuiteColors::default()
+                    }),
+            );
+            let suite_color = tester.widget(
+                find::ancestor(
+                    find::by_type::<NavigationRail>(),
+                    find::by_type::<Material>(),
+                )
+                .last(),
+                |material: &Material| material.color,
+            );
+            assert_eq!(suite_color, Some(container));
+            let rail_color = tester.widget(
+                find::by_type::<NavigationRail>(),
+                |navigation_rail: &NavigationRail| navigation_rail.background_color,
+            );
+            assert_eq!(rail_color, Some(rail));
+        });
+    }
+
+    #[test]
+    fn the_container_defaults_to_the_scheme_s_surface() {
+        test_widgets(|tester| {
+            pump(tester, 400.0, 700.0, suite());
+            let surface = ThemeData::new(&tester.cell.borrow()).color_scheme.surface;
+            let suite_color = tester.widget(
+                find::ancestor(find::text("content"), find::by_type::<Material>()).last(),
+                |material: &Material| material.color,
+            );
+            assert_eq!(suite_color, Some(surface));
         });
     }
 
