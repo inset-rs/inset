@@ -1864,16 +1864,14 @@ mod tests {
 
     use crate::framework::{Notification, StatelessWidget};
     use crate::testing::{
-        Finder, WidgetTester, expect, find, finds_nothing, finds_widgets, test_widgets,
+        Finder, TestWidgetsApp, WidgetTester, expect, find, finds_nothing, finds_widgets,
+        test_widgets,
     };
     use crate::widgets::actions::IntentRef;
     use crate::widgets::basic::SizedBox;
     use crate::widgets::focus_manager::{AnyFocusNode, FocusManager, FocusNodeLeaf, primary_focus};
     use crate::widgets::focus_scope::Focus;
     use crate::widgets::localizations::WidgetsLocalizations;
-    use crate::widgets::navigator::RouteSettingsRef;
-    use crate::widgets::pages::PageRouteBuilder;
-    use crate::widgets::routes::RoutePageBuilder;
 
     /// The `color` every test app is given.
     const COLOR: Color = Color::new(0xFF2196F3);
@@ -1921,19 +1919,6 @@ mod tests {
         }
     }
 
-    /// The `pageRouteBuilder` a test app hands to [`WidgetsApp`].
-    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> PageRouteRef {
-        let page_builder: RoutePageBuilder =
-            Rc::new(move |app, context, _animation, _secondary| builder(app, context));
-        let route = PageRouteBuilder::new(app, page_builder)
-            .settings(app, RouteSettingsRef::Settings(settings.clone()));
-        route.into_erased()
-    }
-
-    fn widgets_app() -> WidgetsApp {
-        WidgetsApp::new(COLOR).page_route_builder(page_route)
-    }
-
     /// Dart's `find.byType(W, skipOffstage: false)`.
     fn built<W: 'static>() -> Finder {
         find::by_type::<W>().skip_offstage(false)
@@ -1955,7 +1940,12 @@ mod tests {
     #[test]
     fn home_is_shown_by_the_first_route_of_the_navigator_the_app_builds() {
         test_widgets(|tester| {
-            tester.pump_widget(widgets_app().home(Marker).into_widget());
+            tester.pump_widget(
+                TestWidgetsApp::new()
+                    .color(COLOR)
+                    .home(Marker)
+                    .into_widget(),
+            );
             tester.pump_and_settle();
             // The app builds one.
             expect(tester, &built::<Navigator>(), finds_widgets());
@@ -1979,10 +1969,20 @@ mod tests {
     #[test]
     fn pumping_the_app_with_a_new_home_shows_the_new_page() {
         test_widgets(|tester| {
-            tester.pump_widget(widgets_app().home(Marker).into_widget());
+            tester.pump_widget(
+                TestWidgetsApp::new()
+                    .color(COLOR)
+                    .home(Marker)
+                    .into_widget(),
+            );
             tester.pump_and_settle();
 
-            tester.pump_widget(widgets_app().home(OtherMarker).into_widget());
+            tester.pump_widget(
+                TestWidgetsApp::new()
+                    .color(COLOR)
+                    .home(OtherMarker)
+                    .into_widget(),
+            );
             tester.pump_and_settle();
             // The new home shows.
             expect(tester, &built::<OtherMarker>(), finds_widgets());
@@ -1996,7 +1996,8 @@ mod tests {
         test_widgets(|tester| {
             let builder: WidgetBuilder = Rc::new(|_app, _context| Marker.into_widget());
             tester.pump_widget(
-                widgets_app()
+                TestWidgetsApp::new()
+                    .color(COLOR)
                     .routes([(String::from("/"), builder)])
                     .into_widget(),
             );
@@ -2030,7 +2031,8 @@ mod tests {
             let had_child = Rc::new(Cell::new(false));
             let sink = Rc::clone(&had_child);
             tester.pump_widget(
-                widgets_app()
+                TestWidgetsApp::new()
+                    .color(COLOR)
                     .home(SizedBox::shrink())
                     .builder(move |_app, _context, child| {
                         sink.set(child.is_some());
@@ -2053,7 +2055,8 @@ mod tests {
             let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
             let sink = Rc::clone(&captured);
             tester.pump_widget(
-                widgets_app()
+                TestWidgetsApp::new()
+                    .color(COLOR)
                     .home(Builder::new(move |_app, context| {
                         sink.set(Some(context));
                         Marker.into_widget()
@@ -2070,7 +2073,7 @@ mod tests {
 
             let context = captured.get().expect("the home built");
             let settings = RouteSettings::new().name("second");
-            let route = page_route(
+            let route = TestWidgetsApp::default_page_route_builder(
                 &mut app,
                 &settings,
                 Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
@@ -2206,7 +2209,8 @@ mod tests {
             let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
             let sink = Rc::clone(&captured);
             tester.pump_widget(
-                widgets_app()
+                TestWidgetsApp::new()
+                    .color(COLOR)
                     .home(Builder::new(move |_app, context| {
                         sink.set(Some(context));
                         Marker.into_widget()
@@ -2223,7 +2227,7 @@ mod tests {
 
             let context = captured.get().expect("the home built");
             let settings = RouteSettings::new().name("/one");
-            let route = page_route(
+            let route = TestWidgetsApp::default_page_route_builder(
                 &mut app,
                 &settings,
                 Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
@@ -2261,7 +2265,8 @@ mod tests {
         drop(app);
         mount_in_every_view(
             &cell,
-            widgets_app()
+            TestWidgetsApp::new()
+                .color(COLOR)
                 .home(Builder::new(move |_app, context| {
                     sink.borrow_mut().push(context);
                     Marker.into_widget()
@@ -2279,7 +2284,7 @@ mod tests {
         };
         let second = home_in(&app, ViewId(1));
         let settings = RouteSettings::new().name("/one");
-        let route = page_route(
+        let route = TestWidgetsApp::default_page_route_builder(
             &mut app,
             &settings,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
@@ -2398,7 +2403,12 @@ mod tests {
     #[test]
     fn the_debug_banner_is_built_unless_it_is_turned_off() {
         test_widgets(|tester| {
-            tester.pump_widget(widgets_app().home(Marker).into_widget());
+            tester.pump_widget(
+                TestWidgetsApp::new()
+                    .color(COLOR)
+                    .home(Marker)
+                    .into_widget(),
+            );
             tester.pump_and_settle();
             // The banner is a debug-mode widget.
             let banner = if cfg!(debug_assertions) {
@@ -2410,7 +2420,8 @@ mod tests {
         });
         test_widgets(|tester| {
             tester.pump_widget(
-                widgets_app()
+                WidgetsApp::new(COLOR)
+                    .page_route_builder(TestWidgetsApp::default_page_route_builder)
                     .home(Marker)
                     .debug_show_checked_mode_banner(false)
                     .into_widget(),
@@ -2424,7 +2435,8 @@ mod tests {
     fn a_restoration_scope_id_names_the_root_restoration_scope() {
         test_widgets(|tester| {
             tester.pump_widget(
-                widgets_app()
+                TestWidgetsApp::new()
+                    .color(COLOR)
                     .home(Marker)
                     .restoration_scope_id("app")
                     .into_widget(),
@@ -2437,7 +2449,12 @@ mod tests {
             assert_eq!(restoration_id.as_deref(), Some("app"));
         });
         test_widgets(|tester| {
-            tester.pump_widget(widgets_app().home(Marker).into_widget());
+            tester.pump_widget(
+                TestWidgetsApp::new()
+                    .color(COLOR)
+                    .home(Marker)
+                    .into_widget(),
+            );
             tester.pump_and_settle();
             let restoration_id = tester.widget(
                 built::<RootRestorationScope>().first(),
@@ -2453,7 +2470,8 @@ mod tests {
             &mut WidgetTester::with_platform(TestPlatform::new().with_default_route("/deep"));
         let deep: WidgetBuilder = Rc::new(|_app, _context| Marker.into_widget());
         tester.pump_widget(
-            widgets_app()
+            TestWidgetsApp::new()
+                .color(COLOR)
                 .initial_route("/ignored")
                 .routes([
                     (

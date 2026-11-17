@@ -984,16 +984,14 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use waft_animation::AnimationStatus;
-    use waft_embedder::{Color, Offset, Size, TextAffinity, TextSelection};
+    use waft_embedder::{Color, Offset, Size};
     use waft_foundation::Retained;
-    use waft_services::{PhysicalKeyboardKey, TextInputClient};
+    use waft_services::PhysicalKeyboardKey;
     use waft_test::{MockClipboard, TestPlatform};
     use waft_widgets::testing::{
         WidgetTester, expect, find, finds_nothing, finds_one_widget, finds_widgets, test_widgets,
     };
-    use waft_widgets::{
-        EditableText, EditableTextState, PreferredSize, RouteSettingsRef, Text, WidgetsBinding,
-    };
+    use waft_widgets::{EditableText, PreferredSize, RouteSettingsRef, Text, WidgetsBinding};
 
     use super::*;
     use crate::elevated_button::ElevatedButton;
@@ -1319,26 +1317,6 @@ mod tests {
         );
     }
 
-    fn enter_text(tester: &mut WidgetTester, text: &str) {
-        let element = tester.element(find::by_type::<EditableText>());
-        let state = element
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        TextInputClient::update_editing_value(
-            state,
-            &mut tester.cell.borrow_mut(),
-            TextEditingValue::new()
-                .text(text)
-                .selection(TextSelection::collapsed(
-                    text.encode_utf16().count() as i32,
-                    TextAffinity::Downstream,
-                )),
-        );
-        tester.cell.checkpoint();
-    }
-
     fn open_search(tester: &mut WidgetTester) {
         tester.tap(find::by_tooltip("Search"));
         tester.pump_and_settle();
@@ -1433,7 +1411,7 @@ mod tests {
 
             delegate.queries_for_suggestions.borrow_mut().clear();
             for typed in ["W", "Wo", "Wow"] {
-                enter_text(tester, typed);
+                tester.enter_text(find::by_type::<EditableText>(), typed);
                 tester.pump_and_settle();
                 assert_eq!(delegate.query(&tester.cell.borrow()), typed);
             }
@@ -1452,7 +1430,7 @@ mod tests {
             let results = Rc::default();
             home_page(tester, &delegate, &results, None);
             open_search(tester);
-            enter_text(tester, "Wow");
+            tester.enter_text(find::by_type::<EditableText>(), "Wow");
             tester.pump_and_settle();
             tester.tap(find::text("Suggestions"));
             tester.pump_and_settle();
@@ -1484,7 +1462,7 @@ mod tests {
             expect(tester, &find::text("Results"), finds_nothing());
 
             delegate.queries_for_suggestions.borrow_mut().clear();
-            enter_text(tester, "Wow");
+            tester.enter_text(find::by_type::<EditableText>(), "Wow");
             tester.pump_and_settle();
             assert_eq!(*delegate.queries_for_suggestions.borrow(), vec!["Wow"]);
             assert!(delegate.queries_for_results.borrow().is_empty());
@@ -1508,7 +1486,7 @@ mod tests {
             );
             assert_eq!(*delegate.queries_for_results.borrow(), vec!["Wow"]);
 
-            enter_text(tester, "Foo");
+            tester.enter_text(find::by_type::<EditableText>(), "Foo");
             tester.pump_and_settle();
             assert_eq!(delegate.query(&tester.cell.borrow()), "Foo");
             assert_eq!(
@@ -1789,12 +1767,7 @@ mod tests {
     /// Dart's `tester.showKeyboard(find.byType(TextField))`: what the text input was configured
     /// with.
     fn keyboard_input_action(tester: &mut WidgetTester) -> TextInputAction {
-        let element = tester.element(find::by_type::<EditableText>());
-        let state = element
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
+        tester.show_keyboard(find::by_type::<EditableText>());
         tester
             .view()
             .test_host()

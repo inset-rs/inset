@@ -1935,17 +1935,14 @@ fn debug_assert_widget_invariants(state: Handle<CupertinoTextFieldState>, app: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use waft_widgets::TextEditingController;
 
     use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
     use crate::app::CupertinoApp;
-    use waft_embedder::{KeyData, KeyEventDeviceType, KeyEventType, TextAffinity, TextSelection};
+    use waft_embedder::{TextAffinity, TextSelection};
     use waft_gestures::{K_PRIMARY_BUTTON, K_SECONDARY_BUTTON};
     use waft_rendering::HitTestBehavior;
-    use waft_services::{
-        KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient,
-    };
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient};
     use waft_widgets::testing::{
         TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_widgets,
         test_widgets, test_widgets_variant,
@@ -2068,52 +2065,6 @@ mod tests {
         (controller, key)
     }
 
-    /// One key down and up, the way the shell delivers a platform key.
-    fn send_key(
-        app: &mut App,
-        physical: PhysicalKeyboardKey,
-        logical: LogicalKeyboardKey,
-        character: Option<&str>,
-    ) {
-        press_key(app, physical, logical, character);
-        release_key(app, physical, logical);
-    }
-
-    fn press_key(
-        app: &mut App,
-        physical: PhysicalKeyboardKey,
-        logical: LogicalKeyboardKey,
-        character: Option<&str>,
-    ) {
-        KeyEventManager::instance(app).handle_key_data(
-            app,
-            KeyData {
-                time_stamp: Duration::ZERO,
-                event_type: KeyEventType::Down,
-                device_type: KeyEventDeviceType::Keyboard,
-                physical: physical.usb_hid_usage,
-                logical: logical.key_id,
-                character: character.map(str::to_owned),
-                synthesized: false,
-            },
-        );
-    }
-
-    fn release_key(app: &mut App, physical: PhysicalKeyboardKey, logical: LogicalKeyboardKey) {
-        KeyEventManager::instance(app).handle_key_data(
-            app,
-            KeyData {
-                time_stamp: Duration::ZERO,
-                event_type: KeyEventType::Up,
-                device_type: KeyEventDeviceType::Keyboard,
-                physical: physical.usb_hid_usage,
-                logical: logical.key_id,
-                character: None,
-                synthesized: false,
-            },
-        );
-    }
-
     /// Clicks the field so it takes focus, which is what puts it under the shortcuts.
     fn focus_field(tester: &mut WidgetTester, key: &GlobalKey) {
         let at = field_point(&mut tester.cell.borrow_mut(), key, Offset::new(12.0, 12.0));
@@ -2207,14 +2158,10 @@ mod tests {
             });
             tester.pump();
 
-            tester.update(|app| {
-                send_key(
-                    app,
-                    PhysicalKeyboardKey::BACKSPACE,
-                    LogicalKeyboardKey::BACKSPACE,
-                    None,
-                )
-            });
+            tester.send_key_event(
+                PhysicalKeyboardKey::BACKSPACE,
+                LogicalKeyboardKey::BACKSPACE,
+            );
             tester.pump();
 
             assert_eq!(
@@ -2294,25 +2241,20 @@ mod tests {
             let (controller, key) = mount_field(tester, "Hello world");
             focus_field(tester, &key);
 
-            tester.update(|app| {
-                press_key(
-                    app,
-                    PhysicalKeyboardKey::META_LEFT,
-                    LogicalKeyboardKey::META_LEFT,
-                    None,
-                );
-                send_key(
-                    app,
-                    PhysicalKeyboardKey::KEY_A,
-                    LogicalKeyboardKey::KEY_A,
-                    Some("a"),
-                );
-                release_key(
-                    app,
-                    PhysicalKeyboardKey::META_LEFT,
-                    LogicalKeyboardKey::META_LEFT,
-                );
-            });
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::META_LEFT,
+                LogicalKeyboardKey::META_LEFT,
+            );
+            tester.send_key_down_event_with_character(
+                PhysicalKeyboardKey::KEY_A,
+                LogicalKeyboardKey::KEY_A,
+                "a",
+            );
+            tester.send_key_up_event(PhysicalKeyboardKey::KEY_A, LogicalKeyboardKey::KEY_A);
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::META_LEFT,
+                LogicalKeyboardKey::META_LEFT,
+            );
             tester.pump();
 
             let selection = controller.selection(&tester.cell.borrow());
@@ -2335,14 +2277,10 @@ mod tests {
             });
             tester.pump();
             let arrow_right = |tester: &mut WidgetTester| {
-                tester.update(|app| {
-                    send_key(
-                        app,
-                        PhysicalKeyboardKey::ARROW_RIGHT,
-                        LogicalKeyboardKey::ARROW_RIGHT,
-                        None,
-                    )
-                });
+                tester.send_key_event(
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
                 tester.pump();
             };
 
@@ -2372,25 +2310,18 @@ mod tests {
             });
             tester.pump();
 
-            tester.update(|app| {
-                press_key(
-                    app,
-                    PhysicalKeyboardKey::SHIFT_LEFT,
-                    LogicalKeyboardKey::SHIFT_LEFT,
-                    None,
-                );
-                send_key(
-                    app,
-                    PhysicalKeyboardKey::ARROW_RIGHT,
-                    LogicalKeyboardKey::ARROW_RIGHT,
-                    None,
-                );
-                release_key(
-                    app,
-                    PhysicalKeyboardKey::SHIFT_LEFT,
-                    LogicalKeyboardKey::SHIFT_LEFT,
-                );
-            });
+            tester.send_key_down_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            tester.send_key_event(
+                PhysicalKeyboardKey::ARROW_RIGHT,
+                LogicalKeyboardKey::ARROW_RIGHT,
+            );
+            tester.send_key_up_event(
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
             tester.pump();
 
             let selection = controller.selection(&tester.cell.borrow());

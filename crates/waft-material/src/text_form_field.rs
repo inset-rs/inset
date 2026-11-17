@@ -1059,7 +1059,6 @@ impl State for TextFormFieldState {
 mod tests {
     use std::cell::{Cell, RefCell};
 
-    use waft_embedder::{TextAffinity, TextSelection};
     use waft_services::TextInputClient;
     use waft_widgets::{
         AnyElement, Center, Form, FormState, GlobalKey, ListView, StateSetter, StatefulBuilder,
@@ -1099,25 +1098,6 @@ mod tests {
 
     fn text_field(tester: &WidgetTester) -> AnyElement {
         find::by_type::<TextField>().evaluate(tester)[0]
-    }
-
-    /// Dart's `tester.showKeyboard(find.byType(TextField))`.
-    fn show_keyboard(tester: &mut WidgetTester) {
-        let state = editable_state(tester);
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-    }
-
-    /// Dart's `tester.enterText(finder, text)`.
-    fn enter_text(tester: &mut WidgetTester, text: &str) {
-        show_keyboard(tester);
-        let state = editable_state(tester);
-        let length = text.encode_utf16().count() as i32;
-        let value = TextEditingValue::new()
-            .text(text)
-            .selection(TextSelection::collapsed(length, TextAffinity::Downstream));
-        TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-        tester.cell.checkpoint();
     }
 
     #[test]
@@ -1198,13 +1178,10 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            show_keyboard(tester);
-            let state = editable_state(tester);
-            TextInputClient::perform_action(
-                state,
-                &mut tester.cell.borrow_mut(),
-                TextInputAction::Done,
-            );
+            tester.show_keyboard(find::by_type::<TextFormField>());
+            tester
+                .test_text_input()
+                .receive_action(TextInputAction::Done);
             tester.pump();
             assert!(called.get());
         });
@@ -1221,7 +1198,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            enter_text(tester, "Soup");
+            tester.enter_text(find::by_type::<TextFormField>(), "Soup");
             tester.pump();
             assert_eq!(*value.borrow(), "Soup");
         });
@@ -1243,7 +1220,7 @@ mod tests {
         tester.pump_widget(root);
 
         assert_eq!(validate_called.get(), 1);
-        enter_text(tester, "a");
+        tester.enter_text(find::by_type::<TextFormField>(), "a");
         tester.pump();
         assert_eq!(validate_called.get(), 2);
     }
@@ -1275,7 +1252,7 @@ mod tests {
 
             assert_eq!(find::text("0 of 10").evaluate(tester).len(), 1);
 
-            enter_text(tester, "01234");
+            tester.enter_text(find::by_type::<TextFormField>(), "01234");
             tester.pump();
 
             assert_eq!(find::text("5 of 10").evaluate(tester).len(), 1);
@@ -1313,7 +1290,7 @@ mod tests {
             let root = centered(tester, TextFormField::new().initial_value("initialValue"));
             tester.pump_widget(root);
 
-            enter_text(tester, "changedValue");
+            tester.enter_text(find::by_type::<TextFormField>(), "changedValue");
 
             let state = field_state(tester);
             state.reset(&mut tester.cell.borrow_mut());
@@ -1335,7 +1312,7 @@ mod tests {
             let root = centered(tester, TextFormField::new().controller(controller.erase()));
             tester.pump_widget(root);
 
-            enter_text(tester, "changedValue");
+            tester.enter_text(find::by_type::<TextFormField>(), "changedValue");
 
             let state = field_state(tester);
             state.reset(&mut tester.cell.borrow_mut());
@@ -1379,7 +1356,7 @@ mod tests {
 
             state_slot.set(Some(field_state(tester)));
 
-            enter_text(tester, "Soup");
+            tester.enter_text(find::by_type::<TextFormField>(), "Soup");
 
             assert!(called.get());
         });
@@ -1421,7 +1398,7 @@ mod tests {
             assert_eq!(*value.borrow(), "initialValue");
 
             // Change value to 'changedValue'.
-            enter_text(tester, "changedValue");
+            tester.enter_text(find::by_type::<TextFormField>(), "changedValue");
             assert_eq!(field_value(tester).as_deref(), Some("changedValue"));
             assert_eq!(*value.borrow(), "changedValue");
 
@@ -1551,7 +1528,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            enter_text(tester, "Changed");
+            tester.enter_text(find::by_type::<TextFormField>(), "Changed");
             tester.pump();
             assert_eq!(controller.text_value(&tester.cell.borrow()), "Changed");
 

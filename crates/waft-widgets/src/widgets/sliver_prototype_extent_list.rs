@@ -681,21 +681,17 @@ impl RenderSliver for RenderSliverPrototypeExtentList {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{Color, TextDirection};
+    use waft_embedder::TextDirection;
     use waft_foundation::ValueKey;
     use waft_painting::AlignmentGeometry;
 
     use super::*;
     use crate::framework::{GlobalKey, StatelessWidget};
     use crate::testing::{
-        WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+        TestWidgetsApp, WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
     };
-    use crate::widgets::app::WidgetsApp;
-    use crate::widgets::basic::{Directionality, WidgetBuilder};
+    use crate::widgets::basic::Directionality;
     use crate::widgets::container::Container;
-    use crate::widgets::navigator::{RouteSettings, RouteSettingsRef};
-    use crate::widgets::pages::{PageRouteBuilder, PageRouteRef};
-    use crate::widgets::routes::RoutePageBuilder;
     use crate::widgets::scroll_view::CustomScrollView;
     use crate::widgets::text::Text;
 
@@ -783,23 +779,6 @@ mod tests {
         .into_widget()
     }
 
-    /// flutter_test's `TestWidgetsApp._defaultPageRouteBuilder`: a page with no transition.
-    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> PageRouteRef {
-        let page_builder: RoutePageBuilder =
-            Rc::new(move |app, context, _animation, _secondary| builder(app, context));
-        let route = PageRouteBuilder::new(app, page_builder)
-            .settings(app, RouteSettingsRef::Settings(settings.clone()));
-        route.into_erased()
-    }
-
-    /// flutter_test's `TestWidgetsApp(home: home)`.
-    fn test_widgets_app<K>(home: impl IntoWidget<K>) -> WidgetRef {
-        WidgetsApp::new(Color::new(0xFFFFFFFF))
-            .page_route_builder(page_route)
-            .home(home)
-            .into_widget()
-    }
-
     fn item_builder(_app: &mut App, _context: BuildContext, index: i32) -> Option<WidgetRef> {
         Some(TestItem::new(index).into_widget())
     }
@@ -839,14 +818,16 @@ mod tests {
     #[test]
     fn sliver_prototype_extent_list_builder_test() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(
-                CustomScrollView::new().slivers([SliverPrototypeExtentList::builder(
-                    item_builder,
-                    TestItem::new(-1).height(Some(100.0)),
-                )
-                .item_count(20)
-                .into_widget()]),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    CustomScrollView::new().slivers([SliverPrototypeExtentList::builder(
+                        item_builder,
+                        TestItem::new(-1).height(Some(100.0)),
+                    )
+                    .item_count(20)
+                    .into_widget()]),
+                ),
+            );
 
             // The viewport is 600 pixels high, lazily created items are 100 pixels high.
             expect_items_along(tester, 6, Axis::Vertical, 100.0);
@@ -857,14 +838,16 @@ mod tests {
     #[test]
     fn sliver_prototype_extent_list_builder_test_with_eight_items() {
         test_widgets(|tester| {
-            tester.pump_widget(test_widgets_app(
-                CustomScrollView::new().slivers([SliverPrototypeExtentList::builder(
-                    item_builder,
-                    TestItem::new(-1).height(Some(100.0)),
-                )
-                .item_count(8)
-                .into_widget()]),
-            ));
+            tester.pump_widget(
+                TestWidgetsApp::new().home(
+                    CustomScrollView::new().slivers([SliverPrototypeExtentList::builder(
+                        item_builder,
+                        TestItem::new(-1).height(Some(100.0)),
+                    )
+                    .item_count(8)
+                    .into_widget()]),
+                ),
+            );
 
             // The viewport is 600 pixels high, lazily created items are 100 pixels high.
             expect_items_along(tester, 6, Axis::Vertical, 100.0);

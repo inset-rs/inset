@@ -369,14 +369,10 @@ impl InheritedWidget for SearchViewTheme {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{TextAffinity, TextEditingValue, TextSelection};
     use waft_foundation::Task;
     use waft_painting::{BorderRadiusGeometry, RoundedRectangleBorder};
-    use waft_services::TextInputClient;
     use waft_widgets::testing::{Finder, WidgetTester, find, test_widgets};
-    use waft_widgets::{
-        Builder, Center, ConstrainedBox, EditableText, EditableTextState, Icon, SizedBox, Text,
-    };
+    use waft_widgets::{Builder, Center, ConstrainedBox, EditableText, Icon, SizedBox, Text};
 
     use super::*;
     use crate::color_scheme::ColorScheme;
@@ -557,26 +553,6 @@ mod tests {
         find::by_type::<ViewContent>()
     }
 
-    fn enter_text(tester: &mut WidgetTester, text: &str) {
-        let element = tester.element(find::by_type::<TextField>().first());
-        let state = element.state_handle::<EditableTextState>(&tester.cell.borrow());
-        let state = match state {
-            Some(state) => state,
-            None => tester
-                .element(find::by_type::<EditableText>().first())
-                .state_handle::<EditableTextState>(&tester.cell.borrow())
-                .expect("an EditableText state"),
-        };
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        let length = text.encode_utf16().count() as i32;
-        let value = TextEditingValue::new()
-            .text(text)
-            .selection(TextSelection::collapsed(length, TextAffinity::Downstream));
-        TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-        tester.cell.checkpoint();
-    }
-
     fn check_search_view(tester: &mut WidgetTester) {
         let (elevation, color, surface_tint_color, material_shape) = tester.widget(
             find::descendant(find_view_content(), find::by_type::<Material>()).first(),
@@ -619,7 +595,7 @@ mod tests {
             ))
             .height();
         assert_eq!(bar_height, HEADER_HEIGHT);
-        enter_text(tester, "input");
+        tester.enter_text(find::by_type::<TextField>(), "input");
         let input_style = tester.widget(find::text("input"), |text: &EditableText| {
             text.style.clone()
         });

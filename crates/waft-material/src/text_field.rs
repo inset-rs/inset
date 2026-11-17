@@ -2453,30 +2453,6 @@ mod tests {
         tester.get_rect(element).center()
     }
 
-    /// Dart's `tester.showKeyboard(finder)` on the `index`th field.
-    fn show_keyboard(tester: &mut WidgetTester, index: usize) {
-        let state = editable_state_at(tester, index);
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-    }
-
-    /// Dart's `tester.enterText(finder, text)` on the `index`th field: the keyboard is shown,
-    /// then the platform sends the text with the caret at its end.
-    fn enter_text_at(tester: &mut WidgetTester, index: usize, text: &str) {
-        show_keyboard(tester, index);
-        let state = editable_state_at(tester, index);
-        let length = text.encode_utf16().count() as i32;
-        let value = TextEditingValue::new()
-            .text(text)
-            .selection(TextSelection::collapsed(length, TextAffinity::Downstream));
-        TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-        tester.cell.checkpoint();
-    }
-
-    fn enter_text(tester: &mut WidgetTester, text: &str) {
-        enter_text_at(tester, 0, text);
-    }
-
     /// Dart's `skipPastScrollingAnimation(tester)`.
     fn skip_past_scrolling_animation(tester: &mut WidgetTester) {
         tester.pump();
@@ -2718,7 +2694,7 @@ mod tests {
             let click = |tester: &mut WidgetTester, index: usize, pointer: i64| {
                 let center = text_field_center(tester, index);
                 tester.tap_at(center, pointer);
-                enter_text_at(tester, index, "Hello");
+                tester.enter_text(find::by_type::<EditableText>().at(index), "Hello");
                 tester.pump();
             };
 
@@ -2732,7 +2708,7 @@ mod tests {
             assert_eq!(outside(), (false, false, false));
 
             click(tester, 0, 1);
-            show_keyboard(tester, 0);
+            tester.show_keyboard(find::by_type::<EditableText>().at(0));
             assert_eq!(outside(), (false, false, false));
 
             click(tester, 1, 2);
@@ -2800,7 +2776,7 @@ mod tests {
             assert_eq!(selection(tester, controller.handle()).extent_offset, -1);
 
             let test_value = "abc def ghi";
-            enter_text(tester, test_value);
+            tester.enter_text(find::by_type::<EditableText>().at(0), test_value);
             skip_past_scrolling_animation(tester);
 
             // Tap to reposition the caret.
@@ -2835,7 +2811,7 @@ mod tests {
             assert_eq!(selection(tester, controller.handle()).extent_offset, -1);
 
             let test_value = "abc def ghi";
-            enter_text(tester, test_value);
+            tester.enter_text(find::by_type::<EditableText>().at(0), test_value);
             skip_past_scrolling_animation(tester);
 
             // Tap would ordinarily reposition the caret.
@@ -2860,7 +2836,7 @@ mod tests {
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
-            enter_text(tester, test_value);
+            tester.enter_text(find::by_type::<EditableText>().at(0), test_value);
             assert_eq!(text(tester, controller.handle()), test_value);
             skip_past_scrolling_animation(tester);
 
@@ -2902,7 +2878,7 @@ mod tests {
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
-            enter_text(tester, test_value);
+            tester.enter_text(find::by_type::<EditableText>().at(0), test_value);
             assert_eq!(text(tester, controller.handle()), test_value);
             skip_past_scrolling_animation(tester);
 
@@ -2975,7 +2951,7 @@ mod tests {
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
-            enter_text(tester, test_value);
+            tester.enter_text(find::by_type::<EditableText>().at(0), test_value);
             assert_eq!(text(tester, controller.handle()), test_value);
             skip_past_scrolling_animation(tester);
 
@@ -3005,7 +2981,7 @@ mod tests {
                 );
                 tester.pump_widget(root);
 
-                enter_text(tester, "abc def ghi");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "abc def ghi");
                 skip_past_scrolling_animation(tester);
 
                 let e_pos = text_offset_to_position(tester, 5);
@@ -3070,7 +3046,7 @@ mod tests {
                 );
                 tester.pump_widget(root);
 
-                enter_text(tester, "abc def ghi");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "abc def ghi");
                 skip_past_scrolling_animation(tester);
 
                 let e_pos = text_offset_to_position(tester, 5);
@@ -3168,7 +3144,7 @@ mod tests {
                     .obscure_text(true),
             );
             tester.pump_widget(root);
-            enter_text(tester, "abcdefghi");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "abcdefghi");
             skip_past_scrolling_animation(tester);
             assert!(selection(tester, controller.handle()).is_collapsed());
 
@@ -3193,7 +3169,7 @@ mod tests {
                     .enable_interactive_selection(false),
             );
             tester.pump_widget(root);
-            enter_text(tester, "abcdefghi");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "abcdefghi");
             skip_past_scrolling_animation(tester);
             assert!(selection(tester, controller.handle()).is_collapsed());
 
@@ -3218,7 +3194,7 @@ mod tests {
                     .read_only(true),
             );
             tester.pump_widget(root);
-            enter_text(tester, "abcdefghi");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "abcdefghi");
             skip_past_scrolling_animation(tester);
             assert!(selection(tester, controller.handle()).is_collapsed());
 
@@ -3241,7 +3217,7 @@ mod tests {
                     .obscure_text(true),
             );
             tester.pump_widget(root);
-            enter_text(tester, "abcde fghi");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "abcde fghi");
             skip_past_scrolling_animation(tester);
 
             // Long press does select text.
@@ -3283,7 +3259,7 @@ mod tests {
                     .decoration(None),
             );
             tester.pump_widget(root);
-            enter_text(tester, "abc\ndef");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "abc\ndef");
             assert_eq!(text(tester, controller.handle()), "abcdef");
         });
     }
@@ -3300,7 +3276,10 @@ mod tests {
                     .input_formatters(vec![formatter(DenyLowercase("#"))]),
             );
             tester.pump_widget(root);
-            enter_text(tester, "a一b二c三\nd四e五f六");
+            tester.enter_text(
+                find::by_type::<EditableText>().at(0),
+                "a一b二c三\nd四e五f六",
+            );
             // The default single line formatter replaces \n with empty string.
             assert_eq!(text(tester, controller.handle()), "#一#二#三#四#五#六");
         });
@@ -3322,7 +3301,7 @@ mod tests {
                     ]),
             );
             tester.pump_widget(root);
-            enter_text(tester, "a1b2c3");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "a1b2c3");
             // The first formatter turns it into
             // 12\n112\n212\n3
             // The second formatter turns it into
@@ -3374,12 +3353,12 @@ mod tests {
 
             let first = text_field_center(tester, 0);
             tester.tap_at(first, 1);
-            enter_text_at(tester, 0, "abcd");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "abcd");
             tester.pump();
 
             let second = text_field_center(tester, 1);
             tester.tap_at(second, 2);
-            enter_text_at(tester, 1, "dcba");
+            tester.enter_text(find::by_type::<EditableText>().at(1), "dcba");
             tester.pump();
 
             // Focus and selection is active on first TextField, so the second TextFields
@@ -3423,7 +3402,7 @@ mod tests {
                     .max_length(10),
             );
             tester.pump_widget(root);
-            enter_text(tester, "0123456789101112");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "0123456789101112");
             assert_eq!(text(tester, controller.handle()), "0123456789");
         });
     }
@@ -3440,7 +3419,10 @@ mod tests {
             );
             tester.pump_widget(root);
             let surrogate_pair = "😆";
-            enter_text(tester, &format!("{surrogate_pair}0123456789101112"));
+            tester.enter_text(
+                find::by_type::<EditableText>().at(0),
+                &format!("{surrogate_pair}0123456789101112"),
+            );
             assert_eq!(
                 text(tester, controller.handle()),
                 format!("{surrogate_pair}012345678")
@@ -3460,7 +3442,10 @@ mod tests {
             );
             tester.pump_widget(root);
             let grapheme_cluster = "👨\u{200d}👩\u{200d}👦";
-            enter_text(tester, &format!("{grapheme_cluster}0123456789101112"));
+            tester.enter_text(
+                find::by_type::<EditableText>().at(0),
+                &format!("{grapheme_cluster}0123456789101112"),
+            );
             assert_eq!(
                 text(tester, controller.handle()),
                 format!("{grapheme_cluster}012345678")
@@ -3482,15 +3467,18 @@ mod tests {
             tester.pump_widget(root);
 
             // Max out the character limit in the field.
-            enter_text(tester, test_value);
+            tester.enter_text(find::by_type::<EditableText>().at(0), test_value);
             assert_eq!(text(tester, controller.handle()), test_value);
 
             // Entering more characters at the end does nothing.
-            enter_text(tester, &format!("{test_value}9999999"));
+            tester.enter_text(
+                find::by_type::<EditableText>().at(0),
+                &format!("{test_value}9999999"),
+            );
             assert_eq!(text(tester, controller.handle()), test_value);
 
             // Entering text in the middle of the field also does nothing.
-            enter_text(tester, "0123455555555556789");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "0123455555555556789");
             assert_eq!(text(tester, controller.handle()), test_value);
         });
     }
@@ -3507,7 +3495,7 @@ mod tests {
                     .max_length(10),
             );
             tester.pump_widget(root);
-            enter_text(tester, "0123456789101112");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "0123456789101112");
             assert_eq!(text(tester, controller.handle()), "0123456789");
         });
     }
@@ -3524,7 +3512,10 @@ mod tests {
                     .input_formatters(vec![formatter(DenyLowercase("#"))]),
             );
             tester.pump_widget(root);
-            enter_text(tester, "a一b二c三\nd四e五f六");
+            tester.enter_text(
+                find::by_type::<EditableText>().at(0),
+                "a一b二c三\nd四e五f六",
+            );
             // The default single line formatter replaces \n with empty string.
             assert_eq!(text(tester, controller.handle()), "#一#二#三#四#五");
         });
@@ -3542,7 +3533,7 @@ mod tests {
                     .max_length_enforcement(MaxLengthEnforcement::None),
             );
             tester.pump_widget(root);
-            enter_text(tester, "0123456789101112");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "0123456789101112");
             assert_eq!(text(tester, controller.handle()), "0123456789101112");
         });
     }
@@ -3565,14 +3556,14 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            enter_text(tester, "0123456789101112");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "0123456789101112");
             tester.pump();
 
             assert_eq!(text(tester, controller.handle()), "0123456789101112");
             expect(tester, &find::text("16/10"), finds_one_widget());
             assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
-            enter_text(tester, "0123456789");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "0123456789");
             tester.pump();
 
             assert_eq!(text(tester, controller.handle()), "0123456789");
@@ -3599,7 +3590,7 @@ mod tests {
         tester.pump_widget(root);
 
         let long = format!("{prefix}012345678910111");
-        enter_text(tester, &long);
+        tester.enter_text(find::by_type::<EditableText>().at(0), &long);
         tester.pump();
 
         assert_eq!(text(tester, controller.handle()), long);
@@ -3607,7 +3598,7 @@ mod tests {
         assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
         let full = format!("{prefix}012345678");
-        enter_text(tester, &full);
+        tester.enter_text(find::by_type::<EditableText>().at(0), &full);
         tester.pump();
 
         assert_eq!(text(tester, controller.handle()), full);
@@ -3647,14 +3638,14 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            enter_text(tester, "0123456789101112");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "0123456789101112");
             tester.pump();
 
             assert_eq!(text(tester, controller.handle()), "0123456789101112");
             expect(tester, &find::text("16/10"), finds_one_widget());
             assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
-            enter_text(tester, "0123456789");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "0123456789");
             tester.pump();
 
             assert_eq!(text(tester, controller.handle()), "0123456789");
@@ -3674,7 +3665,7 @@ mod tests {
 
             expect(tester, &find::text("0/10"), finds_one_widget());
 
-            enter_text(tester, "01234");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "01234");
             tester.pump();
 
             expect(tester, &find::text("5/10"), finds_one_widget());
@@ -3692,7 +3683,7 @@ mod tests {
 
             expect(tester, &find::text("0/10"), finds_one_widget());
 
-            enter_text(tester, "😆");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "😆");
             tester.pump();
 
             expect(tester, &find::text("1/10"), finds_one_widget());
@@ -3710,7 +3701,10 @@ mod tests {
 
             expect(tester, &find::text("0/10"), finds_one_widget());
 
-            enter_text(tester, "👨\u{200d}👩\u{200d}👦");
+            tester.enter_text(
+                find::by_type::<EditableText>().at(0),
+                "👨\u{200d}👩\u{200d}👦",
+            );
             tester.pump();
 
             expect(tester, &find::text("1/10"), finds_one_widget());
@@ -3728,7 +3722,7 @@ mod tests {
 
             expect(tester, &find::text("0"), finds_one_widget());
 
-            enter_text(tester, "01234");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "01234");
             tester.pump();
 
             expect(tester, &find::text("5"), finds_one_widget());
@@ -3757,7 +3751,7 @@ mod tests {
 
             expect(tester, &find::text("0 of 10"), finds_one_widget());
 
-            enter_text(tester, "01234");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "01234");
             tester.pump();
 
             expect(tester, &find::text("5 of 10"), finds_one_widget());
@@ -4495,7 +4489,7 @@ mod tests {
                 tester.pump_widget(root);
 
                 let test_value = "abc def ghi";
-                enter_text(tester, test_value);
+                tester.enter_text(find::by_type::<EditableText>().at(0), test_value);
                 skip_past_scrolling_animation(tester);
 
                 // Long press the 'e' to select 'def'.
@@ -5197,7 +5191,7 @@ mod tests {
             let mut tester = restored(None);
             expect(&tester, &find::text(text), finds_nothing());
 
-            enter_text(&mut tester, text);
+            tester.enter_text(find::by_type::<EditableText>().at(0), text);
             skip_past_scrolling_animation(&mut tester);
 
             let data = tester.restoration_data();
@@ -5205,7 +5199,7 @@ mod tests {
             assert_eq!(current_value(&tester).text, text);
 
             let mut tester = restored(data.clone());
-            enter_text(&mut tester, alternative_text);
+            tester.enter_text(find::by_type::<EditableText>().at(0), alternative_text);
             skip_past_scrolling_animation(&mut tester);
             assert_eq!(current_value(&tester).text, alternative_text);
 

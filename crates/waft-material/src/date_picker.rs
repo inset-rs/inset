@@ -4437,13 +4437,11 @@ pub(crate) mod tests {
     use crate::tooltip::tests::{m2, m3};
     use std::cell::RefCell;
     use std::rc::Rc;
-    use waft_embedder::{Offset, Size, TextAffinity, TextEditingValue, TextSelection};
+    use waft_embedder::{Offset, Size};
     use waft_foundation::{DateTime, Listener};
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder, ShapeBorderRef};
-    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient};
-    use waft_widgets::{
-        AnyElement, Builder, Center, EditableText, EditableTextState, IntoWidget, Text,
-    };
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
+    use waft_widgets::{AnyElement, Builder, Center, EditableText, IntoWidget, Text};
 
     /// Dart's `tester.widget<TextField>(find.byType(TextField)).controller!.text`: the text of
     /// the first `TextField`'s controller.
@@ -4628,24 +4626,6 @@ pub(crate) mod tests {
             .borrow()
             .as_ref()
             .is_some_and(|future| future.peek().is_some())
-    }
-
-    pub(super) fn enter_text(tester: &mut WidgetTester, text: &str) {
-        let editable = tester.element(find::by_type::<EditableText>().at(0));
-        let state = editable
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        let length = text.encode_utf16().count() as i32;
-        TextInputClient::update_editing_value(
-            state,
-            &mut tester.cell.borrow_mut(),
-            TextEditingValue::new()
-                .text(text)
-                .selection(TextSelection::collapsed(length, TextAffinity::Downstream)),
-        );
-        tester.cell.checkpoint();
     }
 
     /// Dart's `find.text(text), findsOneWidget`.
@@ -4898,7 +4878,7 @@ pub(crate) mod tests {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
             let result = prepare_date_picker(tester, &options);
-            enter_text(tester, "12/25/2016");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "12/25/2016");
             tap_icon(tester, &Icons::calendar_today());
             tester.tap(find::text("OK"));
             tester.pump_and_settle();
@@ -4912,7 +4892,7 @@ pub(crate) mod tests {
             let mut options = DatePickerOptions::new();
             options.initial_entry_mode = DatePickerEntryMode::Input;
             let result = prepare_date_picker(tester, &options);
-            enter_text(tester, "12/25/2016");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "12/25/2016");
             tester.tap(find::text("OK"));
             tester.pump_and_settle();
             assert_eq!(picked_date(&result), Some(local_date(2016, 12, 25)));
@@ -4927,7 +4907,7 @@ pub(crate) mod tests {
             options.error_format_text = Some("oops".to_string());
             prepare_date_picker(tester, &options);
             tester.pump_and_settle();
-            enter_text(tester, "1225");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "1225");
             assert!(has_no_text(tester, "oops"));
 
             tester.tap(find::text("OK"));
@@ -4944,7 +4924,10 @@ pub(crate) mod tests {
             options.error_format_text = Some("oops".to_string());
             prepare_date_picker(tester, &options);
             tester.pump_and_settle();
-            enter_text(tester, "20 days, 3 months, 2003");
+            tester.enter_text(
+                find::by_type::<EditableText>().at(0),
+                "20 days, 3 months, 2003",
+            );
             // Dart's `find.text` finds the `EditableText` showing it; `find_text` reads `Text` only.
             assert_eq!(
                 text_field_controller_text(tester),
@@ -4966,7 +4949,7 @@ pub(crate) mod tests {
             options.error_invalid_text = Some("oops".to_string());
             prepare_date_picker(tester, &options);
             tester.pump_and_settle();
-            enter_text(tester, "08/10/1969");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "08/10/1969");
             assert!(has_no_text(tester, "oops"));
 
             tester.tap(find::text("OK"));
@@ -4982,7 +4965,7 @@ pub(crate) mod tests {
             options.initial_entry_mode = DatePickerEntryMode::InputOnly;
             prepare_date_picker(tester, &options);
             // Enter text input mode and type an invalid date to get error.
-            enter_text(tester, "1234567");
+            tester.enter_text(find::by_type::<EditableText>().at(0), "1234567");
             tester.tap(find::text("OK"));
             tester.pump_and_settle();
             assert!(has_text(tester, "Invalid format."));
@@ -5018,25 +5001,6 @@ pub(crate) mod tests {
             local_date(start.0, start.1, start.2),
             local_date(end.0, end.1, end.2),
         )
-    }
-
-    /// Enters `text` in the `index`th text field of the input range picker.
-    pub(super) fn enter_text_in_field(tester: &mut WidgetTester, index: usize, text: &str) {
-        let editable = tester.element(find::by_type::<EditableText>().at(index));
-        let state = editable
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        let length = text.encode_utf16().count() as i32;
-        TextInputClient::update_editing_value(
-            state,
-            &mut tester.cell.borrow_mut(),
-            TextEditingValue::new()
-                .text(text)
-                .selection(TextSelection::collapsed(length, TextAffinity::Downstream)),
-        );
-        tester.cell.checkpoint();
     }
 
     #[derive(Clone, Copy)]
@@ -5163,8 +5127,8 @@ pub(crate) mod tests {
 
         use super::*;
         use super::{
-            DatePickerOptions, enter_text, has_no_text, has_text, picked_date, prepare_date_picker,
-            size_view, tap_icon, text_field_count,
+            DatePickerOptions, has_no_text, has_text, picked_date, prepare_date_picker, size_view,
+            tap_icon, text_field_count,
         };
         use crate::colors::Colors;
         use crate::date::GregorianCalendarDelegate;
@@ -5432,7 +5396,7 @@ pub(crate) mod tests {
 
                 // Enter text input mode and type an invalid date to get error.
                 tap_icon(tester, &Icons::edit());
-                enter_text(tester, "1234567");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "1234567");
                 tester.tap(find::text("OK"));
                 tester.pump_and_settle();
                 assert!(has_text(tester, "Invalid format."));
@@ -5443,7 +5407,7 @@ pub(crate) mod tests {
                 assert!(has_no_text(tester, "Invalid format."));
 
                 // Edit the text, the error should not be showing until ok is tapped
-                enter_text(tester, "1234567");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "1234567");
                 tester.pump_and_settle();
                 assert!(has_no_text(tester, "Invalid format."));
             });
@@ -7148,10 +7112,10 @@ pub(crate) mod tests {
         fn input_mode_invalid_entered_text_shows_error_on_autovalidate() {
             test_widgets(|tester| {
                 prepare_date_picker(tester, &input_group_options());
-                enter_text(tester, "");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "");
 
                 // Enter some text to trigger autovalidate.
-                enter_text(tester, "xyz");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "xyz");
                 tester.tap(find::text("OK"));
                 tester.pump_and_settle();
 
@@ -7159,10 +7123,10 @@ pub(crate) mod tests {
                 expect(tester, &find::text("Invalid format."), finds_one_widget());
 
                 // Clear the text.
-                enter_text(tester, "");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "");
 
                 // Enter an invalid date that is too long while autovalidate is still on.
-                enter_text(tester, "10/05/2023666777889");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "10/05/2023666777889");
                 pump_zero(tester);
 
                 // Invalid format validation error should be shown.
@@ -7369,7 +7333,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 let result = open_date_input_picker(tester);
 
-                enter_text(tester, "20240620");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "20240620");
                 pump_zero(tester);
 
                 tester.tap(find::text("OK"));
@@ -7384,7 +7348,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 open_date_input_picker(tester);
 
-                enter_text(tester, "2024-06-20");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "2024-06-20");
                 pump_zero(tester);
 
                 // Verify that hyphens were removed by the formatter.
@@ -7397,7 +7361,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 open_date_input_picker(tester);
 
-                enter_text(tester, "20ab24cd0620");
+                tester.enter_text(find::by_type::<EditableText>().at(0), "20ab24cd0620");
                 pump_zero(tester);
 
                 // Only digits should remain in the controller.
@@ -7426,10 +7390,7 @@ pub(crate) mod tests {
         use waft_widgets::{AnyElement, BuildContext, Builder, Center, Icon, IntoWidget, Text};
 
         use super::*;
-        use super::{
-            PickerResult, enter_text_in_field, picked_range, range, size_view, tap_icon,
-            text_field_count,
-        };
+        use super::{PickerResult, picked_range, range, size_view, tap_icon, text_field_count};
         use crate::colors::Colors;
         use crate::date::{DateTimeRange, GregorianCalendarDelegate};
         use crate::dialog::Dialog;
@@ -8329,7 +8290,7 @@ pub(crate) mod tests {
         }
 
         fn enter_in(tester: &mut WidgetTester, index: usize, text: &str) {
-            enter_text_in_field(tester, index, text);
+            tester.enter_text(find::by_type::<EditableText>().at(index), text);
         }
 
         fn input_text_field_decoration(

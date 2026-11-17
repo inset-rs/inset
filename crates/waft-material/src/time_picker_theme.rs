@@ -1647,20 +1647,7 @@ mod tests {
     }
 
     fn enter_invalid_hour_and_tap_ok(tester: &mut WidgetTester) {
-        let editable = tester.element(find::by_type::<waft_widgets::EditableText>().at(0));
-        let state = editable
-            .state_handle::<waft_widgets::EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        waft_services::TextInputClient::update_editing_value(
-            state,
-            &mut tester.cell.borrow_mut(),
-            waft_embedder::TextEditingValue::new().text("AB").selection(
-                waft_embedder::TextSelection::collapsed(2, waft_embedder::TextAffinity::Downstream),
-            ),
-        );
-        tester.cell.checkpoint();
+        tester.enter_text(find::by_type::<waft_widgets::EditableText>().at(0), "AB");
         let ok = text_element(tester, "OK");
         let center = tester.get_center(ok);
         tester.tap_at(center, 1);

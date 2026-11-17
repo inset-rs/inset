@@ -756,27 +756,6 @@ fn the_time_picker_opens_and_answers_with_ok() {
     });
 }
 
-/// Types `text` into the `index`th text field on the page, as the platform's keyboard would.
-fn enter_text_in_field(fixture: &mut Fixture, index: usize, text: &str) {
-    use waft_services::TextInputClient;
-
-    let element = fixture
-        .tester
-        .element(find::by_type::<waft_widgets::EditableText>().at(index));
-    let state = element
-        .state_handle::<waft_widgets::EditableTextState>(&fixture.tester.cell.borrow())
-        .expect("an EditableText state");
-    state.request_keyboard(&mut fixture.tester.cell.borrow_mut());
-    fixture.settle();
-    let length = text.encode_utf16().count() as i32;
-    let value = waft_services::TextEditingValue::new().text(text).selection(
-        waft_embedder::TextSelection::collapsed(length, waft_embedder::TextAffinity::Downstream),
-    );
-    TextInputClient::update_editing_value(state, &mut fixture.tester.cell.borrow_mut(), value);
-    fixture.tester.cell.checkpoint();
-    fixture.settle();
-}
-
 /// The first autocomplete lists the fruits that contain the text, and a tap on one selects it.
 #[test]
 fn an_autocomplete_filters_its_options_and_selects_one() {
@@ -791,7 +770,10 @@ fn an_autocomplete_filters_its_options_and_selects_one() {
         fixture.tap(find::by_type::<waft_material::TextFormField>().first());
         fixture.expect_shown("Apple");
 
-        enter_text_in_field(fixture, 0, "cher");
+        fixture
+            .tester
+            .enter_text(find::by_type::<waft_widgets::EditableText>().at(0), "cher");
+        fixture.settle();
         fixture.expect_gone("Apple");
         fixture.tap_text("Cherry");
         fixture.expect_shown("Selected: Cherry");
@@ -808,7 +790,10 @@ fn an_autocomplete_of_a_custom_type_shows_the_display_string() {
         fixture.open_from_index(Entry::Autocomplete);
 
         fixture.tap(find::by_type::<waft_material::TextFormField>().at(1));
-        enter_text_in_field(fixture, 1, "bob");
+        fixture
+            .tester
+            .enter_text(find::by_type::<waft_widgets::EditableText>().at(1), "bob");
+        fixture.settle();
         fixture.tap_text("Bob");
         fixture.expect_shown("Selected: Bob");
 
