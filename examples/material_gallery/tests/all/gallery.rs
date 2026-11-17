@@ -16,8 +16,8 @@ use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
 use waft_embedder::{Brightness, Offset, Size, TargetPlatform};
 use waft_material::{
     AppBar, BackButton, Drawer, DrawerButton, DrawerHeader, ElevatedButton, EndDrawerButton,
-    FilledButton, IconButton, ListTile, OutlinedButton, Scaffold, SliverAppBar, SnackBar,
-    TextButton, Theme,
+    FilledButton, IconButton, Ink, InkWell, ListTile, NavigationDrawer, NavigationIndicator,
+    OutlinedButton, Scaffold, SliverAppBar, SnackBar, TextButton, Theme,
 };
 use waft_rendering::{RenderAnimatedOpacity, RenderAnimatedOpacityMixin, RenderOpacity};
 use waft_widgets::testing::{
@@ -963,5 +963,46 @@ fn the_account_header_shows_the_account() {
         fixture.open_from_index(Entry::AccountHeader);
         fixture.expect_shown("Jane Doe");
         fixture.expect_shown("jane@example.com");
+    });
+}
+
+/// The page's inline `NavigationDrawer` is a `Drawer`: 304 points wide, as `Drawer`'s
+/// `_kWidth` is, and its selected destination's indicator covers the row it belongs to. A
+/// vertical `ListView` hands its children a tight width, so the drawer's own width only applies
+/// inside a layout that loosens it, as the page's `Align` does.
+#[test]
+fn the_inline_navigation_drawer_keeps_its_width_and_indicator_placement() {
+    on_each_platform(|fixture| {
+        let ratio = fixture.tester.device_pixel_ratio();
+        fixture
+            .tester
+            .view()
+            .set_physical_size(Size::new(VIEW[0] * ratio, 1600.0 * ratio));
+        fixture.open_from_index(Entry::Drawers);
+        let tester = &*fixture.tester;
+
+        let drawer = *find::by_type::<NavigationDrawer>()
+            .evaluate(tester)
+            .first()
+            .expect("the inline NavigationDrawer");
+        let drawer_rect = tester.get_rect(drawer);
+        assert_eq!(drawer_rect.width(), 304.0, "Drawer._kWidth");
+
+        let row = *tester
+            .descendants_of_type::<InkWell>(drawer)
+            .first()
+            .expect("the selected destination's row");
+        let row_rect = tester.get_rect(row);
+        assert_eq!(row_rect.left, drawer_rect.left + 12.0, "tilePadding");
+
+        let indicator = *tester
+            .descendants_of_type::<NavigationIndicator>(drawer)
+            .first()
+            .expect("the selected indicator");
+        let indicator_ink = *tester
+            .descendants_of_type::<Ink>(indicator)
+            .first()
+            .expect("the indicator's ink");
+        assert_eq!(tester.get_rect(indicator_ink), row_rect);
     });
 }

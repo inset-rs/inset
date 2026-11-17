@@ -17,11 +17,11 @@ use waft_material::{
     NavigationRail, NavigationRailDestination, NavigationRailLabelType, Scaffold, ScaffoldState,
     Theme,
 };
-use waft_painting::{BoxDecoration, EdgeInsetsGeometry};
+use waft_painting::{AlignmentGeometry, BoxDecoration, EdgeInsetsGeometry};
 
 use waft_widgets::{
-    BuildContext, Builder, Icon, IconData, IntoWidget, ListView, Padding, PreferredSizeWidgetRef,
-    Row, SizedBox, State, StateData, StatefulWidget, Text, WidgetRef,
+    Align, BuildContext, Builder, Icon, IconData, IntoWidget, ListView, Padding,
+    PreferredSizeWidgetRef, Row, SizedBox, State, StateData, StatefulWidget, Text, WidgetRef,
 };
 
 use crate::catalog::Entry;
@@ -219,15 +219,18 @@ fn navigation_drawer(state: Handle<DrawersDemoState>, selected: i32) -> WidgetRe
     children.extend(SECTIONS.iter().map(|(name, icon)| {
         NavigationDrawerDestination::new(Icon::new(Some(icon())), Text::new(*name)).into_widget()
     }));
-    SizedBox::new()
-        .height(260.0)
-        .width(304.0)
+    // The page's `ListView` gives its children a tight width, so `Align` loosens it and lets
+    // the `Drawer`'s own 304 through.
+    Align::new()
+        .alignment(AlignmentGeometry::CENTER_LEFT)
         .child(
-            NavigationDrawer::new(children)
-                .selected_index(Some(selected))
-                .on_destination_selected(Rc::new(move |app: &mut App, index: i32| {
-                    state.set_state(app, |state| state.drawer_index = index);
-                })),
+            SizedBox::new().height(260.0).width(304.0).child(
+                NavigationDrawer::new(children)
+                    .selected_index(Some(selected))
+                    .on_destination_selected(Rc::new(move |app: &mut App, index: i32| {
+                        state.set_state(app, |state| state.drawer_index = index);
+                    })),
+            ),
         )
         .into_widget()
 }
