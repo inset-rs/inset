@@ -12,8 +12,8 @@ use waft_embedder::TextInputType;
 use waft_foundation::{App, DateTime, Handle, Listener};
 use waft_material::{
     DatePickerEntryMode, DatePickerMode, DateTimeRange, FilledButton, GregorianCalendarDelegate,
-    OutlinedButton, ShowDatePicker, ShowDateRangePicker, TimeOfDay, TimePickerEntryMode,
-    show_time_picker,
+    OutlinedButton, ShowDatePicker, ShowDateRangePicker, ShowTimePicker, TimeOfDay,
+    TimePickerEntryMode,
 };
 use waft_widgets::{
     BuildContext, Builder, IntoWidget, ListView, RouteResult, State, StateData, StatefulWidget,
@@ -172,29 +172,11 @@ fn time_button(
     Builder::new(move |_app: &mut App, context: BuildContext| {
         FilledButton::new(
             Some(Listener::new(move |app: &mut App| {
-                let future = show_time_picker(
-                    app,
-                    context,
-                    TimeOfDay::new(9, 30),
-                    None,
-                    true,
-                    None,
-                    None,
-                    true,
-                    entry_mode,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                );
+                let future = {
+                    let mut show = ShowTimePicker::new(TimeOfDay::new(9, 30));
+                    show = show.initial_entry_mode(entry_mode);
+                    show.show(app, context)
+                };
                 future.then(app, move |app, result| {
                     if let Some(time) = answer::<TimeOfDay>(&result) {
                         let text = format!("{:02}:{:02}", time.hour, time.minute);
