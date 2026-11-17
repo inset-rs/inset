@@ -22,10 +22,6 @@ use std::future::Future;
 use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
-#[cfg(any(not(target_family = "wasm"), test))]
-use std::sync::{Arc, Mutex, PoisonError};
-#[cfg(any(not(target_family = "wasm"), test))]
-use std::task::{Context, Poll, Waker};
 
 use crate::ViewId;
 
@@ -274,14 +270,16 @@ impl PickedFile {
     }
 }
 
-/// The whole file at `path`, read on a thread of its own so a large read stays off the UI thread.
-#[cfg(not(target_family = "wasm"))]
+/// The whole file at `path`.
+///
+/// WASI starts no thread, and a local read of a picked file is cheap, so a component reads it in
+/// place; a host reads it on a thread of its own, keeping a large file off the UI thread.
 async fn read_path(path: PathBuf) -> io::Result<Vec<u8>> {
-    let (answer, read) = one_shot();
-    std::thread::Builder::new()
-        .name("waft-read-picked-file".to_owned())
-        .spawn(move || answer.give(std::fs::read(path)))?;
-    read.await
+    #[cfg(target_family = "wasm")]
+    return read_in_place(path).await;
+
+    #[cfg(not(target_family = "wasm"))]
+    return on_a_thread::read(path).await;
 }
 
 /// The whole file at `path`, read in place: WASI starts no thread, and a picked file's read is
@@ -291,10 +289,67 @@ async fn read_in_place(path: PathBuf) -> io::Result<Vec<u8>> {
     std::fs::read(path)
 }
 
-/// The whole file at `path`, read where the platform has no thread to read it on.
-#[cfg(target_family = "wasm")]
-async fn read_path(path: PathBuf) -> io::Result<Vec<u8>> {
-    read_in_place(path).await
+/// Reading a picked file on a thread of its own, so a large read stays off the UI thread.
+#[cfg(not(target_family = "wasm"))]
+mod on_a_thread {
+    use std::future::Future;
+    use std::io;
+    use std::path::PathBuf;
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex, PoisonError};
+    use std::task::{Context, Poll, Waker};
+
+    /// The whole file at `path`.
+    pub(super) async fn read(path: PathBuf) -> io::Result<Vec<u8>> {
+        let (answer, read) = one_shot();
+        std::thread::Builder::new()
+            .name("waft-read-picked-file".to_owned())
+            .spawn(move || answer.give(std::fs::read(path)))?;
+        read.await
+    }
+
+    /// An answer given once, from any thread, and the future that waits for it.
+    fn one_shot<T>() -> (Answer<T>, Answered<T>) {
+        let shared = Arc::new(Mutex::new((None, None)));
+        (Answer(Arc::clone(&shared)), Answered(shared))
+    }
+
+    type Shared<T> = Arc<Mutex<(Option<io::Result<T>>, Option<Waker>)>>;
+
+    struct Answer<T>(Shared<T>);
+
+    impl<T> Answer<T> {
+        fn give(self, value: io::Result<T>) {
+            let waker = {
+                let mut shared = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+                shared.0 = Some(value);
+                shared.1.take()
+            };
+            if let Some(waker) = waker {
+                waker.wake();
+            }
+        }
+    }
+
+    struct Answered<T>(Shared<T>);
+
+    impl<T> Future for Answered<T> {
+        type Output = io::Result<T>;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<T>> {
+            let mut shared = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            match shared.0.take() {
+                Some(value) => Poll::Ready(value),
+                None if Arc::strong_count(&self.0) == 1 => {
+                    Poll::Ready(Err(io::Error::other("the read ended without an answer")))
+                }
+                None => {
+                    shared.1 = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }
+        }
+    }
 }
 
 async fn read_handle(handle: &dyn FileHandle) -> io::Result<Vec<u8>> {
@@ -321,58 +376,10 @@ async fn read_stream(stream: &mut dyn FileStream) -> io::Result<Vec<u8>> {
     }
 }
 
-/// An answer given once, from any thread, and the future that waits for it.
-#[cfg(not(target_family = "wasm"))]
-fn one_shot<T>() -> (Answer<T>, Answered<T>) {
-    let shared = Arc::new(Mutex::new((None, None)));
-    (Answer(Arc::clone(&shared)), Answered(shared))
-}
-
-#[cfg(not(target_family = "wasm"))]
-type Shared<T> = Arc<Mutex<(Option<io::Result<T>>, Option<Waker>)>>;
-
-#[cfg(not(target_family = "wasm"))]
-struct Answer<T>(Shared<T>);
-
-#[cfg(not(target_family = "wasm"))]
-impl<T> Answer<T> {
-    fn give(self, value: io::Result<T>) {
-        let waker = {
-            let mut shared = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            shared.0 = Some(value);
-            shared.1.take()
-        };
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
-}
-
-#[cfg(not(target_family = "wasm"))]
-struct Answered<T>(Shared<T>);
-
-#[cfg(not(target_family = "wasm"))]
-impl<T> Future for Answered<T> {
-    type Output = io::Result<T>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<T>> {
-        let mut shared = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        match shared.0.take() {
-            Some(value) => Poll::Ready(value),
-            None if Arc::strong_count(&self.0) == 1 => {
-                Poll::Ready(Err(io::Error::other("the read ended without an answer")))
-            }
-            None => {
-                shared.1 = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::task::{Context, Poll, Waker};
 
     use super::*;
 
