@@ -926,3 +926,18 @@ fn a_carousel_item_reports_its_tap() {
         );
     });
 }
+
+/// The adaptive page's inbox opens a mail as a page on a phone, and back returns to the list.
+#[test]
+fn an_adaptive_mail_opens_its_detail_and_back_returns_to_the_list() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Adaptive);
+        fixture.expect_shown("Mail 1");
+
+        fixture.tap_text("Mail 1");
+        fixture.expect_shown("Message 1");
+
+        fixture.tap(find::by_type::<BackButton>().first());
+        fixture.expect_shown("Mail 1");
+    });
+}

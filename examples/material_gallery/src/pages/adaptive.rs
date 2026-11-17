@@ -1,0 +1,167 @@
+//! Adaptive layout: a navigation suite over an inbox whose list and detail share a page on a
+//! wide window, and where each mail is its own page on a phone.
+//!
+//! Resize the window: the bar becomes a rail and then an extended rail, and the inbox regroups.
+
+use std::rc::Rc;
+
+use waft_foundation::{App, Handle, Listener};
+use waft_material::{
+    AppBar, FloatingActionButton, Icons, ListDetailPaneScaffoldRole, ListTile, Material,
+    NavigationSuiteDestination, NavigationSuiteScaffold, Pane, PanePreferredSize,
+    PaneScaffoldDirective, Scaffold, ThreePaneNavigator, ThreePaneScaffold,
+    ThreePaneScaffoldDestinationItem, ThreePaneSceneStrategy, WindowSizeClass,
+};
+use waft_widgets::{
+    BuildContext, Center, Icon, IntoWidget, ListView, PreferredSizeWidgetRef, State, StateData,
+    StatefulWidget, Text, WidgetRef,
+};
+
+use crate::catalog::Entry;
+use crate::support::page;
+
+pub fn body(_app: &mut App, _context: BuildContext) -> WidgetRef {
+    page(Entry::Adaptive.title(), AdaptiveDemo.into_widget()).into_widget()
+}
+
+/// The demo's state: the selected destination and the inbox's back stack.
+#[derive(Debug)]
+pub struct AdaptiveDemo;
+
+/// Dart would spell this `_AdaptiveDemoState`.
+pub struct AdaptiveDemoState {
+    state: StateData<AdaptiveDemo>,
+    destination: usize,
+    /// `None` is the inbox's home; the list and each mail are panes.
+    stack: Vec<Option<ThreePaneScaffoldDestinationItem<u32>>>,
+}
+
+impl StatefulWidget for AdaptiveDemo {
+    type State = AdaptiveDemoState;
+
+    fn create_state(&self) -> AdaptiveDemoState {
+        let list = Some(ThreePaneScaffoldDestinationItem::new(
+            ListDetailPaneScaffoldRole::LIST,
+            None,
+        ));
+        AdaptiveDemoState {
+            state: StateData::new(),
+            destination: 0,
+            stack: vec![None, list],
+        }
+    }
+}
+
+impl State for AdaptiveDemoState {
+    type Widget = AdaptiveDemo;
+    waft_widgets::state_accessors!();
+
+    fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
+        let destination = app.get(self).destination;
+        let content = match destination {
+            0 => inbox(self, app, context),
+            1 => Center::new().child(Text::new("Starred")).into_widget(),
+            _ => Center::new().child(Text::new("Settings")).into_widget(),
+        };
+        NavigationSuiteScaffold::new(
+            vec![
+                NavigationSuiteDestination::new(Icon::new(Some(Icons::inbox())), "Inbox"),
+                NavigationSuiteDestination::new(Icon::new(Some(Icons::star_outline())), "Starred")
+                    .selected_icon(Icon::new(Some(Icons::star()))),
+                NavigationSuiteDestination::new(Icon::new(Some(Icons::settings())), "Settings"),
+            ],
+            content,
+        )
+        .selected_index(destination)
+        .on_destination_selected(Rc::new(move |app, index| {
+            self.set_state(app, |state| state.destination = index);
+        }))
+        .primary_action(FloatingActionButton::new(None).child(Icon::new(Some(Icons::edit()))))
+        .into_widget()
+    }
+}
+
+fn inbox(self_: Handle<AdaptiveDemoState>, app: &mut App, context: BuildContext) -> WidgetRef {
+    let strategy = ThreePaneSceneStrategy::list_detail(
+        PaneScaffoldDirective::from_window_size_class(WindowSizeClass::of(app, context)),
+    );
+    let stack = app.get(self_).stack.clone();
+    let directive = strategy.directive.clone();
+    let stack_for_pages = stack.clone();
+    let stack_for_scene = stack.clone();
+    ThreePaneNavigator::new(strategy, stack)
+        .entry_page(move |app, context, index| {
+            match stack_for_pages[index]
+                .as_ref()
+                .map(|item| (item.pane, item.content_key))
+            {
+                Some((ListDetailPaneScaffoldRole::DETAIL, Some(mail))) => {
+                    mail_detail(mail).into_widget()
+                }
+                Some((ListDetailPaneScaffoldRole::LIST, _)) => mail_list(self_, app, context, None),
+                _ => Center::new().child(Text::new("Inbox")).into_widget(),
+            }
+        })
+        .scene_page(move |app, context, scene| {
+            let open_mail = scene
+                .entry_for(ListDetailPaneScaffoldRole::DETAIL)
+                .and_then(|index| stack_for_scene[index].as_ref()?.content_key);
+            ThreePaneScaffold::list_detail(
+                directive.clone(),
+                scene.value,
+                Pane::new(mail_list(self_, app, context, open_mail))
+                    .preferred_width(PanePreferredSize::Fixed(300.0)),
+                Pane::new(mail_detail_of(open_mail)),
+            )
+            .into_widget()
+        })
+        .on_truncate(move |app, len| {
+            self_.set_state(app, |state| state.stack.truncate(len));
+        })
+        .into_widget()
+}
+
+fn mail_list(
+    self_: Handle<AdaptiveDemoState>,
+    _app: &mut App,
+    _context: BuildContext,
+    selected: Option<u32>,
+) -> WidgetRef {
+    Material::new()
+        .child(ListView::new().children((1..=8).map(|mail| {
+            ListTile::new()
+                .title(Text::new(format!("Mail {mail}")))
+                .selected(selected == Some(mail))
+                .on_tap(Listener::new(move |app| {
+                    self_.set_state(app, |state| {
+                        state.stack.push(Some(ThreePaneScaffoldDestinationItem::new(
+                            ListDetailPaneScaffoldRole::DETAIL,
+                            Some(mail),
+                        )));
+                    });
+                }))
+                .into_widget()
+        })))
+        .into_widget()
+}
+
+fn mail_detail(mail: u32) -> Scaffold {
+    Scaffold::new()
+        .app_bar(PreferredSizeWidgetRef::new(
+            AppBar::new().title(Text::new(format!("Mail {mail}"))),
+        ))
+        .body(
+            Center::new()
+                .child(Text::new(format!("Message {mail}")))
+                .into_widget(),
+        )
+}
+
+fn mail_detail_of(mail: Option<u32>) -> WidgetRef {
+    match mail {
+        Some(mail) => mail_detail(mail).into_widget(),
+        None => Center::new()
+            .child(Text::new("Select a mail"))
+            .into_widget(),
+    }
+}
