@@ -816,7 +816,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - sliver.rs: `SliverOpacity`, `SliverIgnorePointer`, `SliverOffstage`, `SliverConstrainedCrossAxis`, `SliverCrossAxisExpanded`, `SliverCrossAxisGroup` and `SliverMainAxisGroup`. Trigger: each one's render sliver.
 - sliver.rs: `SliverEnsureSemantics`. Trigger: the semantics tree.
 - Two-dimensional scrolling: the two-dimensional viewport, its scrollable and scopes, its child delegates, `DiagonalDragBehavior`, and sliver.rs's `KeepAlive` under such a viewport. Trigger: `two_dimensional_viewport.dart`.
-- scroll_delegate.rs: the `_SelectionKeepAlive` the delegates put inside each child's `AutomaticKeepAlive`, and the delegate description's exception branch. Trigger: `selection_container.dart`; diagnostics.
+- scroll_delegate.rs: the delegate description's exception branch. Trigger: diagnostics.
 - viewport.rs: the viewport diagnostics. Trigger: diagnostics.
 - Scroll semantics: `ScrollContext.setSemanticsActions`, scrollable.rs's semantics widget and its render object with `excludeFromSemantics` and `semanticChildCount`, and scroll_position.rs's semantic action bookkeeping. Trigger: the semantics tree.
 - scrollable.rs: the selection handler and container delegate around a scrollable. Trigger: `SelectionContainer` / `SelectionRegistrar`.
