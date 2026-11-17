@@ -3489,19 +3489,6 @@ fn global_to_paragraph(
 }
 
 impl SelectableFragment {
-    fn get_line_at_offset(
-        self: Handle<Self>,
-        app: &mut App,
-        position: TextPosition,
-    ) -> TextSelection {
-        let range = app.get(self).range;
-        let line = app.get(self).paragraph.get_line_at_offset(app, position);
-        TextSelection::new(
-            line.base_offset.clamp(range.start, range.end),
-            line.extent_offset.clamp(range.start, range.end),
-        )
-    }
-
     fn bounding_boxes(self: Handle<Self>, app: &mut App) -> Vec<Rect> {
         if let Some(cached) = &app.get(self).cached_bounding_boxes {
             return cached.clone();
