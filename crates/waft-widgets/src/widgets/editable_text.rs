@@ -23,8 +23,8 @@ use waft_foundation::{
 };
 use waft_gestures::{DragStartBehavior, PointerDownEvent, PointerUpEvent};
 use waft_painting::{
-    AxisDirection, EdgeInsets, InlineSpanRef, RenderComparison, TextScaler, TextSpan, TextStyle,
-    TextWidthBasis,
+    AxisDirection, EdgeInsets, InlineSpanRef, RenderComparison, StrutStyle, TextScaler, TextSpan,
+    TextStyle, TextWidthBasis,
 };
 use waft_physics::{Simulation, Tolerance};
 use waft_rendering::{
@@ -87,7 +87,7 @@ use crate::widgets::spell_check::{
     SpellCheckConfiguration, build_text_span_with_spell_check_suggestions,
 };
 use crate::widgets::tap_region::{TapRegionGroupId, TextFieldTapRegion};
-use crate::widgets::text::DefaultTextHeightBehavior;
+use crate::widgets::text::{DefaultTextHeightBehavior, apply_text_spacing_overrides};
 use crate::widgets::text_editing_intents::{
     CopySelectionTextIntent, DeleteCharacterIntent, DeleteToLineBreakIntent,
     DeleteToNextWordBoundaryIntent, DirectionalCaretMovementIntent, DirectionalTextEditingIntent,
@@ -1131,6 +1131,20 @@ pub struct EditableText {
     pub smart_quotes_type: Option<SmartQuotesType>,
     pub enable_suggestions: bool,
     pub style: TextStyle,
+    /// The strut style used for the vertical layout.
+    ///
+    /// [`StrutStyle`] is used to establish a predictable vertical layout. Since fonts may
+    /// vary depending on user input and due to font fallback, [`StrutStyle::force_strut_height`]
+    /// is enabled by default to lock all lines to the height of the base [`style`](Self::style).
+    ///
+    /// If `None`, the strut used will inherit values from the style and will have
+    /// [`StrutStyle::force_strut_height`] set to true. To disable strut-based vertical
+    /// alignment and allow dynamic vertical layout based on the glyphs typed, use
+    /// [`StrutStyle::DISABLED`].
+    ///
+    /// Within editable text and text fields, omitted strut properties are inherited from
+    /// [`style`](Self::style); see [`StrutStyle::inherit_from_text_style`].
+    strut_style: Option<StrutStyle>,
     pub cursor_color: Color,
     pub background_cursor_color: Color,
     pub text_align: TextAlign,
@@ -1255,6 +1269,7 @@ impl EditableText {
             smart_quotes_type: None,
             enable_suggestions: true,
             style,
+            strut_style: None,
             cursor_color,
             background_cursor_color,
             text_align: TextAlign::Start,
@@ -1323,6 +1338,20 @@ impl EditableText {
         }
     }
 
+    /// Dart `EditableText.strutStyle`: the strut this editable lays its lines out with.
+    ///
+    /// With no explicit strut, one is derived from [`style`](Self::style) with
+    /// [`StrutStyle::force_strut_height`] set; an explicit one inherits its unset values from
+    /// the style.
+    pub fn effective_strut_style(&self) -> StrutStyle {
+        if let Some(strut_style) = &self.strut_style {
+            return strut_style.inherit_from_text_style(Some(&self.style));
+        }
+        StrutStyle::from_text_style(&self.style)
+            .force_strut_height(true)
+            .build()
+    }
+
     /// Dart `EditableText(key:)`.
     pub fn key(mut self, key: KeyRef) -> Self {
         self.key = Some(key);
@@ -1374,6 +1403,12 @@ impl EditableText {
     /// Dart `EditableText(enableSuggestions:)`.
     pub fn enable_suggestions(mut self, enable_suggestions: bool) -> Self {
         self.enable_suggestions = enable_suggestions;
+        self
+    }
+
+    /// Dart `EditableText(strutStyle:)`.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> Self {
+        self.strut_style = Some(strut_style);
         self
     }
 
@@ -4854,7 +4889,21 @@ impl EditableTextState {
         context: BuildContext,
         offset: ViewportOffsetRef,
     ) -> WidgetRef {
-        let inline_span = self.build_text_span(app, context).into_span();
+        let line_height_scale_factor =
+            MediaQuery::maybe_line_height_scale_factor_override_of(app, context);
+        let letter_spacing = MediaQuery::maybe_letter_spacing_override_of(app, context);
+        let word_spacing = MediaQuery::maybe_word_spacing_override_of(app, context);
+        let inline_span = apply_text_spacing_overrides(
+            line_height_scale_factor,
+            letter_spacing,
+            word_spacing,
+            self.build_text_span(app, context),
+        )
+        .into_span();
+        let mut strut_style = self.widget(app).effective_strut_style();
+        if let Some(height) = line_height_scale_factor {
+            strut_style = strut_style.merge(Some(&StrutStyle::new().height(height)));
+        }
         let value = self.value(app);
         let cursor_color = self.cursor_color(app);
         let background_cursor_color = self.widget(app).background_cursor_color;
@@ -4920,6 +4969,7 @@ impl EditableTextState {
             obscure_text,
             text_height_behavior,
             text_width_basis,
+            strut_style,
             offset,
             renderer_ignores_pointer,
             cursor_width,
@@ -6036,6 +6086,7 @@ struct Editable {
     obscure_text: bool,
     text_height_behavior: Option<TextHeightBehavior>,
     text_width_basis: TextWidthBasis,
+    strut_style: StrutStyle,
     offset: ViewportOffsetRef,
     renderer_ignores_pointer: bool,
     cursor_width: f64,
@@ -6085,6 +6136,7 @@ impl Editable {
         render_object.get_mut(app).ignore_pointer = self.renderer_ignores_pointer;
         render_object.set_text_height_behavior(app, self.text_height_behavior);
         render_object.set_text_width_basis(app, self.text_width_basis);
+        render_object.set_strut_style(app, Some(self.strut_style.clone()));
         render_object.set_obscuring_character(app, self.obscuring_character.clone());
         render_object.set_obscure_text(app, self.obscure_text);
         render_object.set_cursor_width(app, self.cursor_width);
@@ -7208,10 +7260,10 @@ mod tests {
             .expect("laid out");
         assert!(offset.dx() > 0.0, "after \"ab\"");
         assert_eq!(inline.size(&app), Size::new(30.0, 20.0));
-        assert!(
-            editable.size(&app).height() >= 20.0,
-            "the line grows to the widget"
-        );
+        // The editable's default strut forces every line to the style's 14 px height, so the
+        // 20 px widget overflows the line instead of growing it, as Flutter's
+        // `forceStrutHeight` does when `EditableText` derives its strut from the style.
+        assert_eq!(editable.size(&app).height(), 14.0);
     }
 
     // editable_text_test.dart 'cut and copy do nothing in obscured mode even if explicitly
@@ -7836,5 +7888,53 @@ mod tests {
             tester.pump();
             assert_eq!(field.shown_text(tester), "\u{2022}\u{2022}\u{2022}");
         });
+    }
+
+    #[test]
+    fn editable_text_respects_the_media_query_spacing_overrides_on_its_strut() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        install_fonts(&mut app);
+        let controller = TextEditingController::new(&mut app);
+        let focus_node = FocusNode::new(&mut app);
+        let color = Color::from_argb(255, 0, 0, 0);
+        let editable_text = EditableText::new(
+            controller.erase(),
+            focus_node.into_erased(),
+            TextStyle::new().font_weight(FontWeight::NORMAL),
+            color,
+            color,
+        )
+        .strut_style(StrutStyle::new().height(0.9));
+        let tree = MediaQuery::new(
+            MediaQueryData::new()
+                .line_height_scale_factor_override(2.0)
+                .letter_spacing_override(2.0)
+                .word_spacing_override(2.0),
+            Directionality::new(TextDirection::Ltr, editable_text),
+        )
+        .into_widget();
+        let harness = Harness::mount(&mut app, tree);
+        harness.pump(&mut app);
+        controller.set_text(&mut app, "foo");
+        harness.pump(&mut app);
+
+        let editable =
+            find_editable(&app, harness.render_root(&app).as_object()).expect("a RenderEditable");
+        let style = editable
+            .text(&app)
+            .expect("an editable has text")
+            .style()
+            .cloned()
+            .expect("a style");
+        assert_eq!(style.height, Some(2.0));
+        assert_eq!(style.letter_spacing, Some(2.0));
+        assert_eq!(style.word_spacing, Some(2.0));
+        assert_eq!(
+            editable
+                .strut_style(&app)
+                .and_then(|strut_style| strut_style.height),
+            Some(2.0)
+        );
     }
 }

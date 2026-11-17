@@ -27,7 +27,7 @@ use waft_foundation::{
 };
 use waft_gestures::{DragStartBehavior, GestureTapCallback, PointerDownEvent, PointerUpEvent};
 use waft_painting::{
-    AnyTextStyle, EdgeInsets, TextAlign, TextAlignVertical, TextDirection, TextStyle,
+    AnyTextStyle, EdgeInsets, StrutStyle, TextAlign, TextAlignVertical, TextDirection, TextStyle,
 };
 use waft_rendering::HitTestBehavior;
 use waft_services::{
@@ -154,6 +154,8 @@ pub struct TextField {
     /// or `body_large` (Material 3). A `WidgetStateTextStyle` is resolved against the field's
     /// states.
     pub style: Option<AnyTextStyle>,
+    /// {@macro flutter.widgets.editableText.strutStyle}
+    pub strut_style: Option<StrutStyle>,
     /// {@macro flutter.widgets.editableText.textAlign}
     pub text_align: TextAlign,
     /// {@macro cupertino_ui.InputDecorator.textAlignVertical}
@@ -366,6 +368,7 @@ impl TextField {
             text_input_action: None,
             text_capitalization: TextCapitalization::None,
             style: None,
+            strut_style: None,
             text_align: TextAlign::Start,
             text_align_vertical: None,
             text_direction: None,
@@ -487,6 +490,12 @@ impl TextField {
     /// Dart `TextField(style:)`.
     pub fn style(mut self, style: impl Into<AnyTextStyle>) -> TextField {
         self.style = Some(style.into());
+        self
+    }
+
+    /// Dart `TextField(strutStyle:)`.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> TextField {
+        self.strut_style = Some(strut_style);
         self
     }
 
@@ -2001,6 +2010,9 @@ impl State for TextFieldState {
         if let Some(min_lines) = widget.min_lines {
             editable = editable.min_lines(min_lines);
         }
+        if let Some(strut_style) = widget.strut_style.clone() {
+            editable = editable.strut_style(strut_style);
+        }
         // Only show the selection highlight when the text field is focused.
         if focus_node.has_focus(app) {
             editable = editable.selection_color(selection_color);
@@ -2330,7 +2342,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{TextAffinity, TextBaseline, TextPosition, TextRange};
+    use waft_embedder::{Size, TextAffinity, TextBaseline, TextPosition, TextRange};
     use waft_painting::TextSpan;
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{SystemMouseCursors, TextInputClient, TextInputFormatterRef};
@@ -8722,6 +8734,230 @@ mod tests {
             assert_eq!(tester.get_bottom_left(find::by_key(key_b)).dy(), row_bottom);
         });
     }
+    #[test]
+    fn text_field_baseline_alignment_no_strut() {
+        test_widgets(|tester| {
+            let controller_a = controller_with(tester, "A");
+            let controller_b = controller_with(tester, "B");
+            let key_a: KeyRef = UniqueKey::new().into();
+            let key_b: KeyRef = UniqueKey::new().into();
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    Material::new().child(
+                        Row::new()
+                            .cross_axis_alignment(CrossAxisAlignment::Baseline)
+                            .text_baseline(TextBaseline::Alphabetic)
+                            .children([
+                                waft_widgets::Expanded::new(
+                                    TextField::new()
+                                        .key(key_a.clone())
+                                        .decoration(None)
+                                        .controller(controller_a.erase())
+                                        .strut_style(StrutStyle::DISABLED)
+                                        .style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(12.0),
+                                        ),
+                                )
+                                .into_widget(),
+                                Text::new("abc")
+                                    .style(
+                                        TextStyle::new().font_family("FlutterTest").font_size(24.0),
+                                    )
+                                    .into_widget(),
+                                waft_widgets::Expanded::new(
+                                    TextField::new()
+                                        .key(key_b.clone())
+                                        .decoration(None)
+                                        .controller(controller_b.erase())
+                                        .strut_style(StrutStyle::DISABLED)
+                                        .style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(36.0),
+                                        ),
+                                )
+                                .into_widget(),
+                            ]),
+                    ),
+                ),
+            );
+            tester.pump_widget(root);
+            let row_bottom = tester.get_bottom_left(find::by_type::<Row>()).dy();
+            assert_eq!(
+                tester.get_bottom_left(find::by_key(key_a)).dy(),
+                row_bottom - 6.0
+            );
+            assert_eq!(
+                tester.get_bottom_left(find::text("abc")).dy(),
+                row_bottom - 3.0
+            );
+            assert_eq!(tester.get_bottom_left(find::by_key(key_b)).dy(), row_bottom);
+        });
+    }
+
+    #[test]
+    fn collapsed_hint_text_placement() {
+        test_widgets(|tester| {
+            let root = overlay(
+                tester,
+                Theme::new(
+                    m2_theme(tester),
+                    TextField::new()
+                        .decoration(Some(InputDecoration::collapsed(Some("hint".to_owned()))))
+                        .strut_style(StrutStyle::DISABLED),
+                ),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_top_left(find::text("hint")),
+                tester.get_top_left(find::by_type::<EditableText>())
+            );
+        });
+    }
+
+    #[test]
+    fn strut_basic_single_line() {
+        test_widgets(|tester| {
+            let root = material_home(theme(tester), Center::new().child(TextField::new()));
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>().evaluate(tester)[0]),
+                // The TextField is as tall as the decoration (24) plus the default TextStyle's
+                // metrics (16), or 40; below the kMinInteractiveDimension, it grows to 48.
+                Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
+            );
+        });
+    }
+
+    #[test]
+    fn strut_text_style_increases_height() {
+        test_widgets(|tester| {
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(TextField::new().style(TextStyle::new().font_size(20.0))),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>().evaluate(tester)[0]),
+                // The strut inherits the TextStyle's size by default, so the height is the
+                // same as when it is disabled; 44 < 48.
+                Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
+            );
+
+            let root = material_home(
+                theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .style(TextStyle::new().font_size(20.0))
+                        .strut_style(StrutStyle::DISABLED),
+                ),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>().evaluate(tester)[0]),
+                Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
+            );
+        });
+    }
+
+    #[test]
+    fn strut_basic_multi_line() {
+        test_widgets(|tester| {
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(TextField::new().max_lines(Some(6))),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>().evaluate(tester)[0]),
+                // The input decoration (24) plus six times the strut height (16).
+                Size::new(800.0, 120.0)
+            );
+        });
+    }
+
+    #[test]
+    fn strut_no_force_small_strut() {
+        test_widgets(|tester| {
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .max_lines(Some(6))
+                        // The smaller strut is overtaken by the larger TextStyle size.
+                        .strut_style(StrutStyle::new().font_size(5.0)),
+                ),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>().evaluate(tester)[0]),
+                Size::new(800.0, 120.0)
+            );
+        });
+    }
+
+    #[test]
+    fn strut_no_force_large_strut() {
+        test_widgets(|tester| {
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .max_lines(Some(6))
+                        .strut_style(StrutStyle::new().font_size(25.0)),
+                ),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>().evaluate(tester)[0]),
+                Size::new(800.0, 174.0)
+            );
+        });
+    }
+
+    #[test]
+    fn strut_height_override() {
+        test_widgets(|tester| {
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .max_lines(Some(3))
+                        .strut_style(StrutStyle::new().font_size(8.0).force_strut_height(true)),
+                ),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>().evaluate(tester)[0]),
+                // The smaller strut font makes the field shorter than normal.
+                Size::new(800.0, 48.0)
+            );
+        });
+    }
+
+    #[test]
+    fn strut_forces_field_taller() {
+        test_widgets(|tester| {
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .max_lines(Some(3))
+                        .style(TextStyle::new().font_size(10.0))
+                        .strut_style(StrutStyle::new().font_size(18.0).force_strut_height(true)),
+                ),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>().evaluate(tester)[0]),
+                Size::new(800.0, 78.0)
+            );
+        });
+    }
+
     #[test]
     fn can_align_to_center() {
         test_widgets(|tester| {

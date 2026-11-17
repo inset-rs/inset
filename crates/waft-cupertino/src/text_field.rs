@@ -22,7 +22,7 @@ use waft_gestures::{
 };
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, Border, BorderRadius, BorderSide, BorderStyle,
-    BoxDecoration, EdgeInsets, EdgeInsetsGeometry, TextAlignVertical, TextStyle,
+    BoxDecoration, EdgeInsets, EdgeInsetsGeometry, StrutStyle, TextAlignVertical, TextStyle,
 };
 use waft_rendering::{BoxHitTestResult, CrossAxisAlignment, HitTestBehavior};
 use waft_services::{
@@ -148,6 +148,8 @@ pub struct CupertinoTextField {
     pub text_capitalization: TextCapitalization,
     /// The style to use for the text being edited.
     pub style: Option<TextStyle>,
+    /// {@macro flutter.widgets.editableText.strutStyle}
+    pub strut_style: Option<StrutStyle>,
     /// {@macro flutter.widgets.editableText.textAlign}
     pub text_align: TextAlign,
     /// {@macro flutter.material.InputDecorator.textAlignVertical}
@@ -279,6 +281,7 @@ impl CupertinoTextField {
             text_input_action: None,
             text_capitalization: TextCapitalization::None,
             style: None,
+            strut_style: None,
             text_align: TextAlign::Start,
             text_align_vertical: None,
             text_direction: None,
@@ -471,6 +474,12 @@ impl CupertinoTextField {
     /// Dart `CupertinoTextField(style:)`.
     pub fn style(mut self, style: TextStyle) -> CupertinoTextField {
         self.style = Some(style);
+        self
+    }
+
+    /// Dart `CupertinoTextField(strutStyle:)`.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> CupertinoTextField {
+        self.strut_style = Some(strut_style);
         self
     }
 
@@ -1659,6 +1668,9 @@ impl State for CupertinoTextFieldState {
         }
         if let Some(min_lines) = min_lines {
             editable = editable.min_lines(min_lines);
+        }
+        if let Some(strut_style) = self.widget(app).strut_style.clone() {
+            editable = editable.strut_style(strut_style);
         }
         if has_focus {
             editable = editable.selection_color(selection_color);

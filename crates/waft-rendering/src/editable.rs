@@ -16,8 +16,8 @@ use waft_embedder::{
 use waft_foundation::{App, Handle, Listener, ValueNotifier};
 use waft_gestures::TapDownDetails;
 use waft_painting::{
-    ClipContext, InlineSpanRef, PaintingBinding, PlaceholderDimensions, TextPainter, TextScaler,
-    TextWidthBasis,
+    ClipContext, InlineSpanRef, PaintingBinding, PlaceholderDimensions, StrutStyle, TextPainter,
+    TextScaler, TextWidthBasis,
 };
 use waft_services::{AnyTextSelectionDelegate, SelectionChangedCause, TextLayoutMetrics};
 
@@ -671,6 +671,21 @@ impl RenderEditable {
         self.get_mut(app)
             .text_painter
             .set_text_height_behavior(value);
+        self.mark_needs_layout(app);
+    }
+
+    /// The [`StrutStyle`] used by the renderer's internal [`TextPainter`] to determine the
+    /// strut.
+    pub fn strut_style(self: RenderHandle<Self>, app: &App) -> Option<&StrutStyle> {
+        self.get(app).text_painter.strut_style()
+    }
+
+    /// Sets [`strut_style`](Self::strut_style).
+    pub fn set_strut_style(self: RenderHandle<Self>, app: &mut App, value: Option<StrutStyle>) {
+        if self.strut_style(app) == value.as_ref() {
+            return;
+        }
+        self.get_mut(app).text_painter.set_strut_style(value);
         self.mark_needs_layout(app);
     }
 

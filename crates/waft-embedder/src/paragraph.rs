@@ -11,8 +11,9 @@ use std::ops::Range;
 
 use crate::fonts::FontCollection;
 use crate::text::{
-    FontFeature, FontStyle, FontVariation, FontWeight, TextAlign, TextBaseline, TextDecoration,
-    TextDecorationStyle, TextDirection, TextHeightBehavior, TextLeadingDistribution,
+    FontFeature, FontStyle, FontVariation, FontWeight, K_TEXT_HEIGHT_NONE, TextAlign, TextBaseline,
+    TextDecoration, TextDecorationStyle, TextDirection, TextHeightBehavior,
+    TextLeadingDistribution,
 };
 use crate::{Canvas, Color, Offset, Paint, Rect, Shadow};
 
@@ -446,6 +447,135 @@ fn native_decoration(
     })
 }
 
+/// Defines the strut, which sets the minimum height a line can be relative to the baseline.
+///
+/// Strut applies to all lines in the paragraph. Strut is a feature that allows minimum line
+/// heights to be set. The effect is as if a zero width space was included at the beginning of
+/// each line in the paragraph. This imaginary space is "shaped" according the properties
+/// defined in this class.
+///
+/// Omitted or `None` properties take the engine's defaults: family unset (the platform's
+/// default font), size 14, the font's own ascent and descent when `height` is unset, normal
+/// weight, upright, and no forced height.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StrutStyle {
+    /// The name of the font to use when calculating the strut (e.g., Roboto). If the font
+    /// is defined in a package this is prefixed with `packages/package_name/`.
+    ///
+    /// No glyphs from the font are drawn; the font is used purely for metrics.
+    pub font_family: Option<String>,
+
+    /// The ordered list of font families to fall back on when a higher priority font family
+    /// cannot be found.
+    ///
+    /// When [`font_family`](Self::font_family) is `None`, the first value here acts as the
+    /// preferred family. When neither is provided, the default platform font is used.
+    pub font_family_fallback: Option<Vec<String>>,
+
+    /// The size of the ascent plus descent in logical pixels, and the basis of the leading
+    /// calculation.
+    ///
+    /// This value cannot be negative. The default is 14 logical pixels.
+    pub font_size: Option<f64>,
+
+    /// The multiple of [`font_size`](Self::font_size) the line's height should be.
+    ///
+    /// When `None` (or [`K_TEXT_HEIGHT_NONE`]) the line takes the font's ascent and descent.
+    pub height: Option<f64>,
+
+    /// How the extra vertical space added by [`height`](Self::height) is distributed over and
+    /// under the strut.
+    ///
+    /// Defaults to `None`, which distributes it proportionally.
+    pub leading_distribution: Option<TextLeadingDistribution>,
+
+    /// The additional leading to apply to the strut as a multiple of
+    /// [`font_size`](Self::font_size), independent of [`height`](Self::height).
+    ///
+    /// Half of the leading is added above the text and half below. Defaults to `None`, which
+    /// adds none.
+    pub leading: Option<f64>,
+
+    /// The typeface thickness to use when calculating the strut (e.g. bold).
+    ///
+    /// The default is w400.
+    pub font_weight: Option<FontWeight>,
+
+    /// The typeface variant to use when calculating the strut (e.g. italic).
+    ///
+    /// The default is upright.
+    pub font_style: Option<FontStyle>,
+
+    /// Whether all lines should take exactly the strut's height, ignoring the text's own
+    /// metrics.
+    ///
+    /// The default is `None`, which raises each side of a line to the strut's only where the
+    /// text is shorter.
+    pub force_strut_height: Option<bool>,
+}
+
+impl StrutStyle {
+    /// Creates a strut style with every field unset.
+    pub fn new() -> StrutStyle {
+        StrutStyle::default()
+    }
+
+    /// Whether the engine would encode this style: whether any field but
+    /// [`font_family_fallback`](Self::font_family_fallback) is set.
+    ///
+    /// A strut whose only field is the fallback list is not encoded, as in `dart:ui`'s
+    /// `_encodeStrut`, and a height of [`K_TEXT_HEIGHT_NONE`] is the absence of a height.
+    fn is_enabled(&self) -> bool {
+        self.font_family.is_some()
+            || self.font_size.is_some()
+            || self
+                .height
+                .is_some_and(|height| height != K_TEXT_HEIGHT_NONE)
+            || self.leading_distribution.is_some()
+            || self.leading.is_some()
+            || self.font_weight.is_some()
+            || self.font_style.is_some()
+            || self.force_strut_height.is_some()
+    }
+
+    /// This style as valo's, as the engine's `ParagraphBuilder` maps dart:ui's encoded strut
+    /// (flutter/engine `lib/ui/text/paragraph_builder.cc`).
+    fn to_native(&self) -> valo::StrutStyle {
+        if !self.is_enabled() {
+            return valo::StrutStyle::default();
+        }
+        let mut families = Vec::new();
+        if let Some(font_family) = &self.font_family {
+            families.push(font_family.clone());
+        }
+        if let Some(fallback) = &self.font_family_fallback {
+            families.extend(fallback.iter().cloned());
+        }
+        if families.is_empty() {
+            // The engine pushes an empty family so the platform default font is used.
+            families.push(String::new());
+        }
+        valo::StrutStyle {
+            enabled: true,
+            families,
+            weight: self
+                .font_weight
+                .map_or(400, |font_weight| font_weight.value as u16),
+            italic: self.font_style == Some(FontStyle::Italic),
+            // Skia's `MakeSkFontStyle` uses the normal width.
+            stretch: 100.0,
+            size: self.font_size.unwrap_or(14.0) as f32,
+            height: self.height.unwrap_or(1.0) as f32,
+            height_override: self
+                .height
+                .is_some_and(|height| height != K_TEXT_HEIGHT_NONE),
+            leading: self.leading.map(|leading| leading as f32),
+            half_leading: self.leading_distribution == Some(TextLeadingDistribution::Even),
+            force_height: self.force_strut_height.unwrap_or(false),
+        }
+    }
+}
+
 /// An opaque object that determines the configuration used by [`ParagraphBuilder`] to
 /// position lines within a [`Paragraph`] of text.
 ///
@@ -463,6 +593,8 @@ pub struct ParagraphStyle {
     pub font_weight: Option<FontWeight>,
     pub font_style: Option<FontStyle>,
     pub ellipsis: Option<String>,
+    /// The strut every line keeps room for, as [`StrutStyle`] describes it.
+    pub strut_style: Option<StrutStyle>,
 }
 
 impl ParagraphStyle {
@@ -496,6 +628,11 @@ impl ParagraphStyle {
             text_height_behavior: self
                 .text_height_behavior
                 .map(native_height_behavior)
+                .unwrap_or_default(),
+            strut_style: self
+                .strut_style
+                .as_ref()
+                .map(StrutStyle::to_native)
                 .unwrap_or_default(),
         }
     }
@@ -736,7 +873,9 @@ impl ParagraphBuilder {
             .text_direction
             .unwrap_or(TextDirection::Ltr);
         let mut builder = valo::ParagraphBuilder::new(fonts);
-        builder.style(self.paragraph_style.to_native());
+        let native_style = self.paragraph_style.to_native();
+        let strut_enabled = native_style.strut_style.enabled;
+        builder.style(native_style);
         for piece in &self.pieces {
             match piece {
                 Piece::Text(text, style) => builder.add_text(text, style),
@@ -745,11 +884,18 @@ impl ParagraphBuilder {
                 }
             };
         }
+        if self.pieces.is_empty() {
+            // Skia measures an empty paragraph by the paragraph's default text style, which
+            // the engine sets from `ParagraphStyle`. valo has no default style field, so the
+            // base style rides an empty span to give the glyphless line the same metrics.
+            builder.add_text("", &self.current_style());
+        }
         let inner = builder.build();
         Paragraph {
             code_units: CodeUnits::of(inner.text()),
             inner,
             direction,
+            strut_enabled,
             layout_width: 0.0,
             disposed: false,
         }
@@ -812,6 +958,9 @@ pub struct Paragraph {
     inner: valo::Paragraph,
     code_units: CodeUnits,
     direction: TextDirection,
+    /// Whether a strut raises this paragraph's lines, which decides what a
+    /// [`BoxHeightStyle::Strut`] box is.
+    strut_enabled: bool,
     /// The width given to the last [`layout`](Self::layout); Skia's `getMaxWidth`.
     layout_width: f64,
     disposed: bool,
@@ -890,8 +1039,10 @@ impl Paragraph {
 
     /// Returns a list of text boxes that enclose the given text range.
     ///
-    /// The host returns tight boxes only: `box_height_style` and `box_width_style` do not
-    /// change the result.
+    /// A [`BoxHeightStyle::Tight`] box is the run's font-metric box, unless the run's style
+    /// has a height multiplier, where the line's box is used; the other height styles are the
+    /// line's box, so `Strut` includes the strut only as far as it raises the line.
+    /// `box_width_style` does not change the result.
     pub fn get_boxes_for_range(
         &self,
         start: i32,
@@ -899,13 +1050,83 @@ impl Paragraph {
         box_height_style: BoxHeightStyle,
         box_width_style: BoxWidthStyle,
     ) -> Vec<TextBox> {
-        let _ = (box_height_style, box_width_style);
+        let _ = box_width_style;
         let range = self.code_units.byte(start)..self.code_units.byte(end);
-        self.inner
-            .rects_for_range(range)
-            .into_iter()
-            .map(|rect| text_box(rect, self.direction))
-            .collect()
+        let mut boxes: Vec<TextBox> = Vec::new();
+        for line in self.inner.lines() {
+            if range.end <= line.range.start || range.start >= line.range.end {
+                continue;
+            }
+            let line_top = line.baseline - line.ascent;
+            let line_bottom = line.baseline + line.descent;
+            let mut previous: Option<&valo::PlacedRun> = None;
+            for run in &line.runs {
+                let mut glyphs = run
+                    .glyphs
+                    .iter()
+                    .filter(|glyph| glyph.cluster >= range.start && glyph.cluster < range.end);
+                let Some(first) = glyphs.next() else {
+                    continue;
+                };
+                let (mut left, mut right) = (
+                    first.x.min(first.x + first.advance),
+                    first.x.max(first.x + first.advance),
+                );
+                for glyph in glyphs {
+                    left = left.min(glyph.x.min(glyph.x + glyph.advance));
+                    right = right.max(glyph.x.max(glyph.x + glyph.advance));
+                }
+                let tight = match box_height_style {
+                    BoxHeightStyle::Tight => true,
+                    // Without a strut, Skia leaves the run's own box where the measured
+                    // clip was.
+                    BoxHeightStyle::Strut => !self.strut_enabled,
+                    _ => false,
+                };
+                let (mut top, mut bottom) =
+                    if tight && !run.height.is_some_and(|height| height > 0.0) {
+                        (run.bounds.y, run.bounds.y + run.bounds.height)
+                    } else {
+                        (line_top, line_bottom)
+                    };
+                if let (Some(last), Some(before)) = (boxes.last_mut(), previous) {
+                    let touching = (last.right - f64::from(left)).abs() < 1e-3
+                        || (f64::from(right) - last.left).abs() < 1e-3;
+                    // Skia merges the boxes of text runs in one direction, font and height
+                    // multiplier that touch, as valo's `boxes_join` does.
+                    if touching
+                        && before.placeholder.is_none()
+                        && run.placeholder.is_none()
+                        && before.rtl == run.rtl
+                        && before.font == run.font
+                        && before.size == run.size
+                        && before.height == run.height
+                    {
+                        last.left = last.left.min(f64::from(left));
+                        last.top = last.top.min(f64::from(top));
+                        last.right = last.right.max(f64::from(right));
+                        last.bottom = last.bottom.max(f64::from(bottom));
+                        previous = Some(run);
+                        continue;
+                    }
+                }
+                if top < line_top {
+                    top = line_top;
+                }
+                if bottom > line_bottom {
+                    bottom = line_bottom;
+                }
+                boxes.push(TextBox::from_ltrbd(
+                    f64::from(left),
+                    f64::from(top),
+                    f64::from(right),
+                    f64::from(bottom),
+                    self.direction,
+                ));
+                previous = Some(run);
+            }
+        }
+        boxes
     }
 
     /// Returns a list of text boxes that enclose all placeholders in the paragraph.
@@ -1257,6 +1478,59 @@ mod tests {
                 Piece::Placeholder(..) => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_strut_style_maps_to_valos_as_the_engine_maps_it() {
+        let style = ParagraphStyle {
+            strut_style: Some(StrutStyle {
+                font_family: Some("Serif".to_owned()),
+                font_family_fallback: Some(vec!["Sans".to_owned()]),
+                font_size: Some(10.0),
+                height: Some(2.0),
+                leading_distribution: Some(TextLeadingDistribution::Even),
+                leading: Some(0.5),
+                font_weight: Some(FontWeight::W700),
+                font_style: Some(FontStyle::Italic),
+                force_strut_height: Some(true),
+            }),
+            ..ParagraphStyle::default()
+        };
+        let native = style.to_native().strut_style;
+        assert!(native.enabled);
+        assert_eq!(native.families, ["Serif", "Sans"]);
+        assert_eq!(native.weight, 700);
+        assert!(native.italic);
+        assert_eq!(native.size, 10.0);
+        assert_eq!(native.height, 2.0);
+        assert!(native.height_override);
+        assert_eq!(native.leading, Some(0.5));
+        assert!(native.half_leading);
+        assert!(native.force_height);
+
+        // A fallback list alone is not encoded, as in `dart:ui`'s `_encodeStrut`.
+        let fallback_only = ParagraphStyle {
+            strut_style: Some(StrutStyle {
+                font_family_fallback: Some(vec!["Sans".to_owned()]),
+                ..StrutStyle::default()
+            }),
+            ..ParagraphStyle::default()
+        };
+        assert!(!fallback_only.to_native().strut_style.enabled);
+
+        // A height of `kTextHeightNone` is the absence of a height override.
+        let no_height = ParagraphStyle {
+            strut_style: Some(StrutStyle {
+                font_size: Some(10.0),
+                height: Some(K_TEXT_HEIGHT_NONE),
+                ..StrutStyle::default()
+            }),
+            ..ParagraphStyle::default()
+        };
+        let native = no_height.to_native().strut_style;
+        assert!(native.enabled);
+        assert!(!native.height_override);
+        assert_eq!(native.families, [""], "the platform default font");
     }
 
     #[test]
