@@ -13,11 +13,12 @@ use std::fmt;
 use waft_embedder::Radius;
 use waft_foundation::App;
 use waft_painting::{
-    BorderRadius, BorderRadiusGeometry, BorderSide, OutlinedBorderRef, RoundedRectangleBorder,
+    BorderRadiusDirectional, BorderRadiusGeometry, BorderSide, OutlinedBorderRef,
+    RoundedRectangleBorder,
 };
 use waft_widgets::{
-    BuildContext, IntoWidget, KeyRef, MainAxisAlignment, Row, StatelessWidget, VerticalDirection,
-    WidgetRef,
+    BuildContext, CrossAxisAlignment, IntoWidget, KeyRef, MainAxisAlignment, MainAxisSize, Row,
+    StatelessWidget, WidgetRef,
 };
 
 use crate::compose::split_button::SplitButtonDefaults;
@@ -102,11 +103,12 @@ impl ButtonGroupDefaults {
     }
 }
 
-/// A shape whose start corners are `start` and end corners `end`.
+/// A shape whose start corners are `start` and end corners `end`, flipped for right-to-left text
+/// as Compose's `RoundedCornerShape(topStart, topEnd, bottomEnd, bottomStart)` is.
 fn rounded(start: Radius, end: Radius) -> OutlinedBorderRef {
     OutlinedBorderRef::new(RoundedRectangleBorder::new(
         BorderSide::NONE,
-        BorderRadiusGeometry::BorderRadius(BorderRadius::only(start, end, start, end)),
+        BorderRadiusGeometry::Directional(BorderRadiusDirectional::only(start, end, start, end)),
     ))
 }
 
@@ -121,8 +123,8 @@ pub struct ButtonGroup {
     pub spacing: f64,
     /// How the buttons are placed along the row.
     pub horizontal_alignment: MainAxisAlignment,
-    /// How a button shorter than the row is aligned vertically.
-    pub vertical_alignment: VerticalDirection,
+    /// How a button shorter than the group is aligned vertically; Compose's default is the top.
+    pub vertical_alignment: CrossAxisAlignment,
 }
 
 impl ButtonGroup {
@@ -134,7 +136,7 @@ impl ButtonGroup {
             children: children.into_iter().collect(),
             spacing: ButtonGroupDefaults::BETWEEN_SPACE,
             horizontal_alignment: MainAxisAlignment::Start,
-            vertical_alignment: VerticalDirection::Down,
+            vertical_alignment: CrossAxisAlignment::Start,
         }
     }
 
@@ -167,7 +169,7 @@ impl ButtonGroup {
     }
 
     /// Compose's `verticalAlignment:` argument.
-    pub fn vertical_alignment(mut self, vertical_alignment: VerticalDirection) -> ButtonGroup {
+    pub fn vertical_alignment(mut self, vertical_alignment: CrossAxisAlignment) -> ButtonGroup {
         self.vertical_alignment = vertical_alignment;
         self
     }
@@ -189,8 +191,9 @@ impl StatelessWidget for ButtonGroup {
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         Row::new()
+            .main_axis_size(MainAxisSize::Min)
             .main_axis_alignment(self.horizontal_alignment)
-            .vertical_direction(self.vertical_alignment)
+            .cross_axis_alignment(self.vertical_alignment)
             .spacing(self.spacing)
             .children(self.children.clone())
             .into_widget()
@@ -199,8 +202,8 @@ impl StatelessWidget for ButtonGroup {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::Radius;
-    use waft_widgets::testing::{find, test_widgets};
+    use waft_embedder::{Radius, Rect};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
     use waft_widgets::{Center, IntoWidget, SizedBox, Text};
 
     use super::*;
@@ -216,7 +219,14 @@ mod tests {
         .into_widget()
     }
 
-    fn pump(tester: &mut waft_widgets::testing::WidgetTester, group: ButtonGroup) {
+    fn sized_button(label: &'static str, height: f64) -> WidgetRef {
+        SizedBox::new()
+            .height(height)
+            .child(button(label))
+            .into_widget()
+    }
+
+    fn pump<K>(tester: &mut WidgetTester, group: impl IntoWidget<K>) {
         let theme = ThemeData::builder().build(&tester.cell.borrow());
         tester.pump_widget(material_app(
             theme,
@@ -224,27 +234,34 @@ mod tests {
         ));
     }
 
-    /// Compose's `default_positioning`: the buttons sit 12 apart and the first starts at the
-    /// group's start.
+    fn button_rects(tester: &WidgetTester) -> Vec<Rect> {
+        find::by_type::<FilledButton>()
+            .evaluate(tester)
+            .into_iter()
+            .map(|element| tester.get_rect(element))
+            .collect()
+    }
+
+    /// Compose's `default_positioning`, whose twin `differentHorizontalSpacing_positioning` asserts
+    /// the same: the buttons sit 12 apart and the group wraps them.
     #[test]
-    fn buttons_are_spaced_apart() {
+    fn default_positioning() {
         test_widgets(|tester| {
             pump(
                 tester,
-                ButtonGroup::new(vec![button("One"), button("Two"), button("Three")]),
+                ButtonGroup::new(vec![button("A"), button("B"), button("C"), button("D")]),
             );
-            let buttons: Vec<_> = find::by_type::<FilledButton>()
-                .evaluate(tester)
-                .into_iter()
-                .map(|element| tester.get_rect(element))
-                .collect();
+            let wrapper = tester.get_rect(find::by_type::<ButtonGroup>());
+            let buttons = button_rects(tester);
+            assert_eq!(buttons[0].left - wrapper.left, 0.0);
             assert_eq!(buttons[1].left - buttons[0].right, 12.0);
             assert_eq!(buttons[2].left - buttons[1].right, 12.0);
+            assert_eq!(buttons[3].left - buttons[2].right, 12.0);
+            assert_eq!(wrapper.right - buttons[3].right, 0.0);
         });
     }
 
-    /// Compose's `differentHorizontalSpacing_positioning`: a spacing of zero puts the buttons
-    /// edge to edge.
+    /// Not a Compose test: a spacing of zero puts the buttons edge to edge.
     #[test]
     fn a_custom_spacing_puts_the_buttons_edge_to_edge() {
         test_widgets(|tester| {
@@ -252,39 +269,93 @@ mod tests {
                 tester,
                 ButtonGroup::new(vec![button("One"), button("Two")]).spacing(0.0),
             );
-            let buttons: Vec<_> = find::by_type::<FilledButton>()
-                .evaluate(tester)
-                .into_iter()
-                .map(|element| tester.get_rect(element))
-                .collect();
-            assert_eq!(buttons[1].left, buttons[0].right);
+            let buttons = button_rects(tester);
+            assert!((buttons[1].left - buttons[0].right).abs() < 1e-3);
         });
     }
 
-    /// Compose's `horizontalArrangement_centerArrangement_buttonGroupPositioning`: a centred
-    /// group keeps its buttons centred in the space it is given.
-    #[test]
-    fn a_centred_group_centres_its_buttons() {
+    /// Compose's `horizontalArrangement_*Arrangement_buttonGroupPositioning`: a group as wide as
+    /// a phone's screen, 360 here, places three buttons so that they cover the point `fraction` of
+    /// its width.
+    fn check_arrangement(alignment: MainAxisAlignment, fraction: f64) {
         test_widgets(|tester| {
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                SizedBox::new()
-                    .width(400.0)
-                    .child(
-                        ButtonGroup::new(vec![button("One"), button("Two")])
-                            .horizontal_alignment(MainAxisAlignment::Center),
-                    )
-                    .into_widget(),
-            ));
-            let buttons: Vec<_> = find::by_type::<FilledButton>()
-                .evaluate(tester)
-                .into_iter()
-                .map(|element| tester.get_rect(element))
-                .collect();
-            let group = tester.get_rect(find::by_type::<ButtonGroup>());
-            let middle = (buttons[0].left + buttons[1].right) / 2.0;
-            assert!((middle - group.center().dx()).abs() < 1.0);
+            pump(
+                tester,
+                SizedBox::new().width(360.0).child(
+                    ButtonGroup::new(vec![button("0"), button("1"), button("2")])
+                        .horizontal_alignment(alignment),
+                ),
+            );
+            let screen = tester.get_rect(find::by_type::<ButtonGroup>());
+            let buttons = button_rects(tester);
+            let expected_positioning = screen.left + screen.width() * fraction;
+            assert!((buttons[0].left..=buttons[2].right).contains(&expected_positioning));
+        });
+    }
+
+    #[test]
+    fn horizontal_arrangement_start_arrangement_button_group_positioning() {
+        check_arrangement(MainAxisAlignment::Start, 1.0 / 3.0);
+    }
+
+    #[test]
+    fn horizontal_arrangement_center_arrangement_button_group_positioning() {
+        check_arrangement(MainAxisAlignment::Center, 1.0 / 2.0);
+    }
+
+    #[test]
+    fn horizontal_arrangement_end_arrangement_button_group_positioning() {
+        check_arrangement(MainAxisAlignment::End, 2.0 / 3.0);
+    }
+
+    /// Compose's `buttonGroup_verticalAlignment_is*`: buttons 48 and 64 high, aligned by the
+    /// group's vertical alignment.
+    fn aligned_button_rects(tester: &mut WidgetTester, alignment: CrossAxisAlignment) -> Vec<Rect> {
+        pump(
+            tester,
+            ButtonGroup::new(vec![sized_button("A", 48.0), sized_button("B", 64.0)])
+                .vertical_alignment(alignment),
+        );
+        button_rects(tester)
+    }
+
+    #[test]
+    fn button_group_vertical_alignment_is_top() {
+        test_widgets(|tester| {
+            let buttons = aligned_button_rects(tester, CrossAxisAlignment::Start);
+            assert_eq!(buttons[0].top, buttons[1].top);
+        });
+    }
+
+    #[test]
+    fn button_group_vertical_alignment_is_center() {
+        test_widgets(|tester| {
+            let buttons = aligned_button_rects(tester, CrossAxisAlignment::Center);
+            assert_eq!(
+                buttons[0].center().dy().round(),
+                buttons[1].center().dy().round()
+            );
+        });
+    }
+
+    #[test]
+    fn button_group_vertical_alignment_is_bottom() {
+        test_widgets(|tester| {
+            let buttons = aligned_button_rects(tester, CrossAxisAlignment::End);
+            assert_eq!(buttons[0].bottom, buttons[1].bottom);
+        });
+    }
+
+    /// The default vertical alignment is Compose's `Alignment.Top`.
+    #[test]
+    fn button_group_vertical_alignment_defaults_to_top() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                ButtonGroup::new(vec![sized_button("A", 48.0), sized_button("B", 64.0)]),
+            );
+            let buttons = button_rects(tester);
+            assert_eq!(buttons[0].top, buttons[1].top);
         });
     }
 
@@ -293,19 +364,19 @@ mod tests {
             .as_any()
             .downcast_ref::<RoundedRectangleBorder>()
             .expect("a rounded rectangle");
-        let BorderRadiusGeometry::BorderRadius(radius) = shape.border_radius else {
-            panic!("a resolved border radius");
+        let BorderRadiusGeometry::Directional(radius) = shape.border_radius else {
+            panic!("a directional border radius");
         };
         [
-            radius.top_left,
-            radius.top_right,
-            radius.bottom_left,
-            radius.bottom_right,
+            radius.top_start,
+            radius.top_end,
+            radius.bottom_start,
+            radius.bottom_end,
         ]
     }
 
-    /// Compose's `ButtonGroupDefaults.connectedLeadingButtonShapes`: the outer corners take the
-    /// full height's radius, the inner ones the small and pressed inner corner.
+    /// Not a Compose test: `connectedLeadingButtonShapes`' outer corners take the full height's
+    /// radius, the inner ones the connected group's resting and pressed inner corner.
     #[test]
     fn the_connected_leading_shapes_follow_their_corners() {
         let (shape, pressed, checked) =
@@ -331,7 +402,7 @@ mod tests {
         assert_eq!([20.0; 4].map(Radius::circular), corners(&checked));
     }
 
-    /// Compose's `connectedMiddleButtonShapes` and `connectedTrailingButtonShapes`.
+    /// Not a Compose test: `connectedMiddleButtonShapes` and `connectedTrailingButtonShapes`' corners.
     #[test]
     fn the_connected_middle_and_trailing_shapes_follow_their_corners() {
         let (middle, pressed, _) = ButtonGroupDefaults::connected_middle_button_shapes_for(40.0);

@@ -76,9 +76,9 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
 - Change: the outer corners are the circle radius of the height the shapes were chosen for, where Compose's `CornerSize(50%)` resolves against the part's measured size.
   Reason: framework — Flutter's border radii are absolute, with no percentage corner.
   Affect: a part with a custom height keeps the radius of its token size, so a part much taller than its size has slightly less round outer corners than Compose's.
-- Change: the layout is an `IntrinsicHeight` around a `Row` whose children stretch, and the leading part is laid out first, where Compose measures the trailing part first for width and forces both to the taller intrinsic height.
-  Reason: framework — Flutter has no multi-child render object to add here, and its `Row` measures in child order.
-  Affect: both parts still share one height; under a width too small for the pair the leading part keeps its width and the trailing one shrinks, the opposite priority to Compose.
+- Change: the trailing toggle's checked state changes only its shape; Compose also draws the content colour at the pressed state-layer opacity over a checked part.
+  Reason: framework — a Flutter `ButtonStyle` has no layer for a selected state, and the part does not know its variant's content colour.
+  Affect: a checked trailing part turns round but does not darken as Compose's does.
 - Change: the trailing part's content is centred by its equal start and end padding; Compose's optical centring for unequal paddings is not ported.
   Reason: framework — Flutter's button padding has no optical-centring step.
   Affect: a trailing part with different start and end padding looks off-centre where Compose shifts its content to the middle of the shape.
@@ -88,9 +88,9 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
 - Change: a group lays out buttons the app builds, and an app styles a connected group's buttons from `ButtonGroupDefaults`' three shapes, where Compose's `ButtonGroupScope` builds `clickableItem`s and `toggleableItem`s itself.
   Reason: framework — Flutter has no content scope; a child list is its equivalent, and a child's style belongs to the child.
   Affect: an app makes each button and asks for the connected shapes it needs.
-- Change: the standard and connected arrangements are a `Row` with the group's spacing and alignment.
-  Reason: framework — Flutter's `Row` already spaces and aligns children.
-  Affect: the buttons sit at Compose's spacings, 12 and 2.
+- Change: a connected group's shapes take the height they are for, and their full corners are that height's circle radius, where Compose's `CornerFull` is half of the button's measured height.
+  Reason: framework — Flutter's border radii are absolute, with no percentage corner.
+  Affect: a connected button taller than the height its shapes were made for has less round outer corners than Compose's.
 
 ## Deferred
 - split button shape morphing on the Expressive spring, and a part's own `ButtonColors`, `ButtonElevation`, border and interaction source. Trigger: an animation scheme on the button, and style arguments on a part.
