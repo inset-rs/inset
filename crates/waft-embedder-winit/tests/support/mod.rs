@@ -156,9 +156,18 @@ pub mod appkit {
             .is_some_and(|metal_layer| metal_layer.device().is_some())
     }
 
-    /// Clicks the close button of the window titled `title`, as a person would.
+    /// Clicks the close button of the window titled `title`, as a person would: on a turn of the
+    /// main run loop of its own, once winit's current call into the embedder has returned. The
+    /// click runs the run loop while it highlights the button, and winit's event-loop proxy
+    /// calls into the embedder from there; inside a call of winit's, that call would be a second
+    /// one at once, which winit panics on.
     pub fn press_close_button(title: &str) {
-        window_titled(title).expect("the window").performClose(None);
+        let title = title.to_owned();
+        DispatchQueue::main().exec_async(move || {
+            window_titled(&title)
+                .expect("the window")
+                .performClose(None);
+        });
     }
 
     /// Asks the application to quit as Cmd-Q does: `terminate:`, which asks its delegate first.
