@@ -122,7 +122,6 @@ Ported against: 34b89b2086d4
 - dropdown_menu_theme.rs → dropdown_menu_theme.dart
 - button_theme.rs → button_theme.dart
 - dropdown_menu_form_field.rs → dropdown_menu_form_field.dart
-- carousel.rs → carousel.dart
 
 ## colors.rs → colors.dart
 - Change: `MaterialColor` and `MaterialAccentColor` are colour extensions of their own that deref to painting's `ColorSwatch<i32>`; each `Colors` swatch is one of them, and it becomes a `Color` through `primary()` or an `AnyColor` through `into_any()`.
@@ -597,56 +596,57 @@ Ported against: 34b89b2086d4
   Affect: code ported from Dart drops the argument.
 
 ## autocomplete.rs → autocomplete.dart
-- Change: `Autocomplete<T>` needs `T: Clone + PartialEq + Hash + Debug + Display`, and the default options list keys each option with a global key that compares and hashes as the option's value.
-  Reason: language — Dart's `GlobalObjectKey(option)` compares the option by identity, which a Rust value does not have, and every Dart object has a `toString` that `Display` stands for.
-  Affect: an option type must implement `Hash`, `Debug` and `Display`, and two equal options in one list share a key, so the framework reports a duplicate global key where Dart's distinct objects with equal values would not.
+- Change: `Autocomplete` keys each option of its default options list with a global key that is equal for equal options, so an option type must hash and print itself for that key.
+  Reason: language — Dart's object key compares the option by identity, which a Rust value does not have.
+  Affect: two equal options in one list are a duplicate global key, which the framework reports, where Dart's distinct objects with equal values are not.
+- Change: `Autocomplete`'s first constructor shows an option by its `Display` form, and a second constructor takes the function that turns an option into text.
+  Reason: language — every Dart object has the `toString` Dart's default calls, and a Rust type has a `Display` form only when it implements one.
+  Affect: an option type without a `Display` form is built with the second constructor.
+
+## carousel.rs → carousel.dart
+- Change: `CarouselView` compares its flex weights by value when the widget is updated, where Dart compares the two lists by identity.
+  Reason: language — a Rust vector has no identity.
+  Affect: rebuilding with a new list of the same weights leaves the carousel as it is, where Dart lays it out again and notifies the controller's listeners.
 
 ## reorderable_list.rs → reorderable_list.dart
-- Change: `ReorderableListView::new` takes the children by value, and its `item_builder` hands out clones of them.
-  Reason: language — Dart's `itemBuilder` closes over the caller's `List`, which the caller can go on mutating and the list view then reads; a moved `Vec` has no second owner.
-  Affect: a caller that reorders its own children and rebuilds the same widget sees the old order until it builds a new `ReorderableListView` from the new list, as a state's `build` does.
-
-## search.rs → search.dart
-- Change: `SearchDelegate` is a trait whose shared state is a `SearchDelegateData` every delegate holds and answers from `search_delegate_data`; Dart's delegate is a class whose private fields (`query`, `_currentBody`, `_route` and the rest) hold that state.
-  Reason: language — a Rust trait cannot hold fields, and the page and the route need one mutable copy.
-  Affect: a delegate implements `search_delegate_data`, and reads `query(app)` or writes `set_query(app, ..)` where Dart reads `query` and assigns it.
+- Change: `ReorderableListView`'s list constructor takes the children by value and builds each item from a clone of them.
+  Reason: language — Dart's item builder reads the caller's list, which the caller can go on changing, and a moved list has no second owner.
+  Affect: a caller that reorders its own children sees the new order only once it builds a new list view from them, as a state's build does.
 
 ## search_anchor.rs → search_anchor.dart
-- Change: `SearchAnchor::bar` returns a `SearchAnchorWithSearchBar`, whose setters are `SearchAnchor.bar`'s arguments and whose `into_widget` builds the `SearchAnchor`.
-  Reason: language — an associated function here has one argument shape, so Dart's second constructor is a type of its own.
-  Affect: `SearchAnchor::bar(..)` is built up and turned into a widget where Dart returns a `SearchAnchor` itself, and a type lookup finds the built `SearchAnchor`.
-- Change: `suggestions_builder` answers a `CompleterFuture<Vec<WidgetRef>>` for Dart's `FutureOr<Iterable<Widget>>`, and a builder with its suggestions at hand answers `CompleterFuture::ready`.
-  Reason: language — Rust has no `FutureOr`, so the framework's future is used for both.
-  Affect: a builder returns a future, `CompleterFuture::ready(vec![..])` when the suggestions are already known.
+- Change: `SearchAnchor`'s bar constructor returns a builder of its own, which becomes a plain `SearchAnchor` when it is turned into a widget.
+  Reason: language — Dart's factory returns a private subclass, and a Rust struct cannot extend another.
+  Affect: the tree holds a `SearchAnchor` where Dart's holds the private subclass, so a lookup by exact type finds the anchor here and not in Dart.
+- Change: `SearchAnchor`'s suggestions builder returns a task, and a builder with its suggestions at hand returns a ready one.
+  Reason: language — Rust has no union of a value and a future, as Dart's `FutureOr` is.
+  Affect: every suggestions builder is written as returning a task, and its suggestions reach the view at the next checkpoint either way, as Dart's await delivers even a plain value in a microtask.
 
 ## search_anchor.rs → search_anchor.dart, search_view_theme.rs → search_view_theme.dart (view side)
-- Change: `SearchAnchor::view_side` and `SearchViewThemeData::side` are `AnyBorderSide`s, and the theme's `lerp` gives a plain border side.
-  Reason: language — a Dart `BorderSide` field can hold a `WidgetStateBorderSide` subclass, which a plain `BorderSide` cannot.
-  Affect: a caller passes a `BorderSide` (through `Into`) or `WidgetStateBorderSide::into_any()`; the anchor paints the plain value the subclass carries, as Dart does.
+- Change: the view side of `SearchAnchor` and of `SearchViewThemeData` holds an erased border side, and the theme's lerp gives a plain one.
+  Reason: language — a Dart border side field can hold the state-dependent subclass, which a plain Rust border side cannot.
+  Affect: a caller passes a plain side or a state-dependent one in its erased form, and the anchor paints the plain value the state-dependent side carries, as Dart does.
 
-## data_table.rs → data_table.dart, paginated_data_table.rs → paginated_data_table.dart
-- Change: Dart's `DataTable` and `PaginatedDataTable` constructor asserts (the columns are non-empty, the sort index is in range, every row's cells match the columns, the heights are ordered, `rows_per_page > 0`, the available page sizes contain it, and no controller is given with `primary`) run in `debug_check_constructor` when the widget is turned into a `WidgetRef`.
-  Reason: language — a fluent chain has no point at which it has seen every argument.
-  Affect: a bad table panics where it is handed to the tree, not where it is made.
-- Change: the deprecated `data_row_height` setters of `DataTable`, `PaginatedDataTable` and `DataTableThemeData` set both heights; the asserts that it is not given with a min or max, and that the theme's max is not below its min, do not run.
-  Reason: language — a fluent chain has no call that sees every argument.
-  Affect: giving both keeps the later setter's value, and a theme with max below min is built, where Dart fails in a debug build.
-
-## data_table_source.rs → data_table_source.dart
-- Change: `DataTableSource` is a trait on an arena object that implements `ListenableObject` and holds a `ChangeNotifierData`, not a class extending `ChangeNotifier`.
-  Reason: language — a Rust trait cannot extend a class or hold its fields.
-  Affect: a source implements `DataTableSource` and `ListenableObject`, forwarding the latter to its `ChangeNotifierData`, and its `get_row` and `row_count` take the app and a typed handle.
+## data_table.rs → data_table.dart, paginated_data_table.rs → paginated_data_table.dart, data_table_theme.rs → data_table_theme.dart
+- Change: the deprecated row height setter of `DataTable`, `PaginatedDataTable` and `DataTableThemeData` sets both the minimum and the maximum row height, and Dart's asserts that it is not given with either, and that the theme's maximum is not below its minimum, are not kept.
+  Reason: language — a fluent chain has no call that sees every argument at once.
+  Affect: giving both keeps the later setter's value, and a theme whose maximum is below its minimum is built, where Dart fails in a debug build.
 
 ## data_table.rs, data_table_theme.rs, paginated_data_table.rs, search_anchor.rs, search_bar_theme.rs, carousel_theme.rs → their .dart files (state-dependent fields)
-- Change: the state-dependent fields (`data_row_color`, `heading_row_color`, `side`, `elevation`, `background_color`, `overlay_color` and the like) take a `WidgetStatePropertyRef<Option<T>>`; a `WidgetStatePropertyAll<Color>` or a property of the non-null type cannot be given to them as it is.
-  Reason: language — Rust generics are invariant, where Dart's `WidgetStateProperty<Color>` is a `WidgetStateProperty<Color?>`.
-  Affect: a caller writes `resolve_with(|states| Some(..))` or `WidgetStatePropertyAll::new(Some(c))` where Dart passes the property itself.
+- Change: the state-dependent colours, sides and elevations of these types take a property of an optional value, so a property of the plain value cannot be given to them as it is.
+  Reason: language — Rust generics are invariant, where Dart's property of a colour is also a property of an optional colour.
+  Affect: a caller resolves to an optional value where Dart passes the property itself.
 
 ## Deferred
 - reorderable_list.rs: reorderable_list_test 'Vertical drag in progress golden image' and 'Horizontal drag in progress golden image'. Trigger: golden comparison in waft-test.
 - reorderable_list.rs: reorderable_list_test "Doesn't hide accessibility when a child declares its own semantics" (reads the semantics tree of a `SwitchListTile` item). Trigger: the semantics tree.
-- reorderable_list.rs: reorderable_list_test 'ReorderableListView auto scrolls speed is configurable' (offsets in a ratio of 3 where Dart's is 4, as the widgets' `SliverReorderableList` case); the widget tester resumed awaited code a frame late. Trigger: inset-rs/inset#65, which fixes that; un-defer once it merges.
-- autocomplete.rs: the `Semantics` of the default options (`button`, `selected`) are ported, and autocomplete_test's 'autocomplete options have button semantics' is not. Trigger: the semantics tree.
+- reorderable_list.rs: reorderable_list_test 'ReorderableListView auto scrolls speed is configurable', whose offsets came out in a ratio of 3 where Dart's is 4, the tester resuming awaited code a frame late. Trigger: inset-rs/inset#65, the tester pumping as the shell does.
+- autocomplete.rs: autocomplete_test's 'autocomplete options have button semantics'; the options' semantics are ported. Trigger: the semantics tree.
+- search_anchor.rs: search_anchor_test's pass-through cases (text capitalization, keyboard type and text input action, each for SearchBar, SearchAnchor and SearchAnchor.bar; the two scrollPadding cases; contextMenuBuilder; 'iOS uses the system context menu by default if supported'; 'readOnly disallows SystemContextMenu'; 'smartDashesType and smartQuotesType are properly forwarded to inner text fields'), 'Block entering text on disabled widget with SearchAnchor.bar' and 'suggestionsBuilder with Future is not called twice on layout resize'. Trigger: none, portable now.
+- search_anchor.rs, search.rs: the semantics cases (search_anchor_test's two semantics-node cases, three labeledTapTargetGuideline cases and 'SearchAnchor with enableTapHandling provides tap semantics for passive child'; search_test's four routeName cases). Trigger: the semantics tree.
+- data_table.rs: data_table_test's 'DataTable overflow test - header with spaces', 'Material3 - DataRow renders custom colors when pressed', 'DataTable can render inside an AlertDialog' and 'DataTable dataRowMinHeight smaller or equal dataRowMaxHeight validation'. Trigger: none, portable now.
+- data_table.rs: data_table_test's three semantics cases. Trigger: the semantics tree.
+- paginated_data_table.rs: paginated_data_table_test's 'PaginatedDataTable with large text' and the two 'PaginatedDataTable custom horizontal padding' cases. Trigger: none, portable now.
+- carousel.rs: carousel_test's 'CarouselView.weighted respect itemSnapping when fling', 'The item that currently occupies max weight stays when the flexWeights is updated', 'Updating CarouselView does not cause exception', 'CarouselView with enableSplash false - container is clickable without triggering children onTap', 'CarouselView should not crash when using PageStorageKey' and the four item clipBehavior cases of the weighted view and the theme. Trigger: none, portable now.
 - input_decorator.rs: the 13 cases Dart runs on a `TextField`, the 16 Material 2 cases and the `customLabel` twins listed in the step 11 review. Trigger: none, portable now.
 - text_form_field.rs: the ~38 text_form_field_test cases not ported. Trigger: none, portable now.
 - switch.rs: switch_test 'Material2/3 - Switch does not get distorted upon changing constraints with parent' (golden-only). Trigger: golden comparison in waft-test.

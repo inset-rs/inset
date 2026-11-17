@@ -423,9 +423,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — `PointerEvent.respond` is omitted on signal events (waft-gestures records it).
   Affect: an embedder that would scroll the page itself is not told the scrollable took the event.
 
-- Change: `EdgeDraggingAutoScroller` starts each scroll step at the checkpoint after the frame that ended the previous one.
-  Reason: language — foundation's `Task` entry: an awaited task resumes at a checkpoint, never within the frame in which what it awaits completes.
-  Affect: each auto-scroll step costs one extra frame, so a drag held past the edge scrolls more slowly than Flutter's.
+- Change: `EdgeDraggingAutoScroller` starts each scroll step one frame after the step before it ends.
+  Reason: language — an awaited task resumes at a checkpoint, never within the frame in which what it awaits completes.
+  Affect: a drag held past the edge scrolls more slowly than Flutter's.
 
 ## widgets/scroll_view.rs → scroll_view.dart
 
@@ -722,23 +722,24 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## widgets/reorderable_list.rs → reorderable_list.dart
 
-- Change: `ReorderableListState::start_item_drag_reorder` and `SliverReorderableListState::start_item_drag_reorder` take the recognizer as a `Ref<R>` of any `MultiDragGestureRecognizer` leaf, and a drag start listener is a `ReorderableDragStartListenerWidget` whose `create_recognizer` returns its associated `Recognizer` type; `ReorderableDelayedDragStartListener` holds its superclass's fields as `listener`.
-  Reason: language — waft-gestures has `MultiDragGestureRecognizer` only as a trait over its leaves, with no erased form to pass or return, so the list sets `on_start` on the typed recognizer and then keeps it as a `RecognizerRef`.
-  Affect: a listener subclass returns one recognizer type fixed when it is compiled, where a Dart override may pick the type at run time.
+- Change: `ReorderableList` and `SliverReorderableList` start a drag from a recognizer of one concrete type, which a drag start listener names when it is compiled.
+  Reason: language — the gestures crate has the multi-drag recognizer only as a trait over its concrete recognizers, with no erased form to pass or return.
+  Affect: a drag start listener subclass creates a recognizer of a type fixed at compile time, where a Dart override may pick the type at run time.
 
 ## widgets/autocomplete.rs → autocomplete.dart
 
-- Note, kept on purpose: `RawAutocompleteState::init_state` adds `_onFocusChange` to the caller's focus node, while `did_update_widget` and `dispose` remove `_updateOptionsViewVisibility` instead, as Flutter's source does, so the first listener is never removed. Here a stale listener is skipped once the state is freed.
-
-- Change: `AutocompleteOptionsBuilder` returns a `Task<Vec<T>>`; a builder that has its options at hand returns `Task::ready`.
-  Reason: language — Rust has no `FutureOr` union of a value and a future.
-  Affect: every options builder is written as returning a task, and its options reach the state at the next checkpoint either way, as Dart's `await` delivers even a plain value in a microtask.
-- Change: `RawAutocomplete::new` fills `display_string_for_option` with `default_string_for_option`, the option's `Display` form, so `new` needs `T: Display`.
-  Reason: language — a Rust value has no `toString` every type answers.
-  Affect: an option type with no `Display` cannot use `new`, even when it sets its own `display_string_for_option`.
-- Change: Dart's constructor asserts across `fieldViewBuilder`, `key`, `focusNode`, `textEditingController` and `initialValue` run when the widget is turned into a `WidgetRef` (`into_widget`).
-  Reason: language — those fields arrive through fluent setters after `new`, so they are only complete once the chain ends (basic.rs's assert entry).
-  Affect: a widget missing its field, or with both a controller and an initial value, panics where it is handed to the tree, not where it is written.
+- Change: `RawAutocomplete`'s options builder returns a task, and a builder with its options at hand returns a ready one.
+  Reason: language — Rust has no union of a value and a future, as Dart's `FutureOr` is.
+  Affect: every options builder is written as returning a task, and its options reach the state at the next checkpoint either way, as Dart's await delivers even a plain value in a microtask.
+- Change: `RawAutocomplete`'s first constructor shows an option by its `Display` form, and a second constructor takes the function that turns an option into text.
+  Reason: language — every Dart object has the `toString` Dart's default calls, and a Rust type has a `Display` form only when it implements one.
+  Affect: an option type without a `Display` form is built with the second constructor.
+- Change: `RawAutocomplete` compares a newly selected option with the current selection by the option type's equality.
+  Reason: language — a Rust value has no identity, which Dart's default equality compares.
+  Affect: selecting an option equal to the current one does nothing, where Dart selects a distinct object with equal fields again.
+- Change: `RawAutocomplete` adds one focus listener to the caller's focus node and removes another, as Dart's source does, and the listener left behind does nothing once the state is freed.
+  Reason: language — a listener bound to a state's handle is skipped once the arena has freed the state, where Dart's closure keeps the disposed state and runs.
+  Affect: a caller's focus node that outlives the autocomplete keeps one inert listener, where Dart's runs on a disposed state.
 
 ## Deferred
 
@@ -836,8 +837,8 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - reorderable_list.rs: 'SliverReorderableList item has correct semantics' and 'SliverReorderableList custom semantics action has correct label'. Trigger: the semantics tree.
 - reorderable_list.rs: 'When creating a new item, be in the correct position'. Trigger: `Finder.hitTestable(at:)` in `waft_widgets::testing`.
 - reorderable_list.rs: 'Tests the correctness of the drop animation in various scenarios'. Trigger: `WidgetTester.timedDrag` in `waft_widgets::testing`.
-- reorderable_list.rs: 'SliverReorderableList auto scrolls speed is configurable' (offsets 120 and 40, a ratio of 3 where Dart's is 4). Trigger: a task resumed within the frame in which what it awaits completes (scrollable_helpers.rs's auto-scroll entry).
-- autocomplete.rs: the `_announceSemantics` results-found / no-results announcement through `SemanticsService`, and autocomplete_test.dart's three announcement cases. Trigger: the semantics tree.
+- reorderable_list.rs: 'SliverReorderableList auto scrolls speed is configurable', whose offsets came out as 120 and 40, a ratio of 3 where Dart's is 4. Trigger: inset-rs/inset#65, the tester pumping as the shell does.
+- autocomplete.rs: the results-found and no-results announcements, and autocomplete_test's three announcement cases. Trigger: the semantics tree.
 - autocomplete.rs: the two "when field scrolled offscreen" cases (desktop and mobile). Trigger: flutter_test's `scrollUntilVisible` in `waft_widgets::testing`.
 
 ## Skipped
