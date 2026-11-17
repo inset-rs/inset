@@ -742,6 +742,12 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — a listener bound to a state's handle is skipped once the arena has freed the state, where Dart's closure keeps the disposed state and runs.
   Affect: a caller's focus node that outlives the autocomplete keeps one inert listener, where Dart's runs on a disposed state.
 
+## heroes.rs → heroes.dart
+
+- Change: a hero's tag is Dart's `Object`, erased as `Rc<dyn AnyEq>`, and a tag is made by wrapping the value: `Rc::new("photo")`.
+  Reason: language — a tag is only compared with `==` and hashed, so one erased trait in `waft-foundation` serves it where Dart's `Object` needs no declaration.
+  Affect: a tag is a shared trait object; two tags of different types never match, as two Dart objects of different classes do not.
+
 ## Deferred
 
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
