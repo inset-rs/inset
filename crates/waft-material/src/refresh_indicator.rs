@@ -116,6 +116,9 @@ pub struct RefreshIndicator {
     /// to demonstrate that they want the app to refresh.
     pub on_refresh: RefreshCallback,
     /// Called to get the current status of the refresh indicator to update the UI as needed.
+    ///
+    /// Dart declares this on the `RefreshIndicator.noSpinner` constructor only; here every
+    /// constructor shares the field, so any of them can set it (PORTING.md).
     pub on_status_change: Option<ValueChanged<Option<RefreshIndicatorStatus>>>,
     /// The progress indicator's foreground color.
     pub color: Option<Color>,
@@ -614,9 +617,6 @@ impl RefreshIndicatorState {
                 new_mode == RefreshIndicatorStatus::Canceled
                     || new_mode == RefreshIndicatorStatus::Done
             );
-            if !self.mounted(app) {
-                return;
-            }
             self.set_state(app, |state| state.status = Some(new_mode));
             self.notify_status_change(app);
             let animated = match new_mode {

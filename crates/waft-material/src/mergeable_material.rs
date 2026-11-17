@@ -1121,7 +1121,7 @@ mod tests {
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
     use waft_widgets::{
         AnimatedContainer, Container, DecoratedBox, IntoWidget, SingleChildScrollView, SizedBox,
-        WidgetRef,
+        Text, WidgetRef,
     };
 
     use super::{MaterialGap, MaterialSlice, MergeableMaterial, MergeableMaterialItem};
@@ -1320,6 +1320,34 @@ mod tests {
 
             render_box = mergeable_material_box(tester);
             assert_eq!(height(tester, render_box), 200.0);
+        });
+    }
+
+    #[test]
+    fn replacing_the_last_slice_with_a_new_key_updates_the_list() {
+        test_widgets(|tester| {
+            let labeled_slice = |key: &'static str, label: &'static str| -> MergeableMaterialItem {
+                MaterialSlice::new(
+                    ValueKey::new(key),
+                    SizedBox::new()
+                        .width(100.0)
+                        .height(100.0)
+                        .child(Text::new(label)),
+                )
+                .into()
+            };
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([labeled_slice("A", "First")])
+            ));
+            assert_eq!(find::text("First").evaluate(tester).len(), 1);
+
+            tester.pump_widget(app(
+                MergeableMaterial::new().children([labeled_slice("B", "Second")])
+            ));
+            tester.pump_and_settle();
+            assert!(find::text("First").evaluate(tester).is_empty());
+            assert_eq!(find::text("Second").evaluate(tester).len(), 1);
+            assert_eq!(height(tester, mergeable_material_box(tester)), 100.0);
         });
     }
 

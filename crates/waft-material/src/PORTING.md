@@ -656,6 +656,16 @@ Ported against: 34b89b2086d4
   Reason: language — Rust has no subclassing, and Dart's two subclasses are the only kinds the widget handles, so the abstract base becomes a closed set of two.
   Affect: an item list names each item's kind, or converts a slice or gap into an item, where Dart lists the slices and gaps as they are.
 
+- Change: the update loop stops at the end of the new children, where Dart's `while (newOnly.contains(newChildren[i].key))` reads one past the last new child.
+  Reason: language — Rust's index is bounds-checked where Dart's throws a `RangeError`, and that read is a crash rather than behaviour to keep.
+  Affect: replacing the last child with one whose key is new updates the list where Dart throws.
+
+## refresh_indicator.rs → refresh_indicator.dart
+
+- Change: a refresh indicator's status callback can be set on any constructor, where Dart declares it on the `noSpinner` constructor alone.
+  Reason: language — Rust constructors are associated functions over one shared struct, so no one of them can own a field.
+  Affect: a default or adaptive indicator reports its status changes where Dart's cannot be asked to.
+
 ## expansion_panel.rs → expansion_panel.dart
 - Change: a radio panel holds the plain panel it extends, beside its value, and the radio list takes its panels through its own constructor only.
   Reason: language — Rust has no subclassing, so the radio panel cannot be a plain panel that the list's children accept.
