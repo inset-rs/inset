@@ -423,10 +423,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — `PointerEvent.respond` is omitted on signal events (waft-gestures records it).
   Affect: an embedder that would scroll the page itself is not told the scrollable took the event.
 
-- Change: `EdgeDraggingAutoScroller` starts each scroll step one frame after the step before it ends.
-  Reason: language — an awaited task resumes at a checkpoint, never within the frame in which what it awaits completes.
-  Affect: a drag held past the edge scrolls more slowly than Flutter's.
-
 ## widgets/scroll_view.rs → scroll_view.dart
 
 - Change: the physics a primary scroll view implies is substituted in `build`, not stored on the widget.
@@ -837,7 +833,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - reorderable_list.rs: 'SliverReorderableList item has correct semantics' and 'SliverReorderableList custom semantics action has correct label'. Trigger: the semantics tree.
 - reorderable_list.rs: 'When creating a new item, be in the correct position'. Trigger: `Finder.hitTestable(at:)` in `waft_widgets::testing`.
 - reorderable_list.rs: 'Tests the correctness of the drop animation in various scenarios'. Trigger: `WidgetTester.timedDrag` in `waft_widgets::testing`.
-- reorderable_list.rs: 'SliverReorderableList auto scrolls speed is configurable', whose offsets came out as 120 and 40, a ratio of 3 where Dart's is 4. Trigger: inset-rs/inset#65, the tester pumping as the shell does.
 - autocomplete.rs: the results-found and no-results announcements, and autocomplete_test's three announcement cases. Trigger: the semantics tree.
 - autocomplete.rs: the two "when field scrolled offscreen" cases (desktop and mobile). Trigger: flutter_test's `scrollUntilVisible` in `waft_widgets::testing`.
 

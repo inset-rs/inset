@@ -2547,6 +2547,7 @@ mod tests {
     use crate::widgets::navigator::{RouteSettings, RouteSettingsRef};
     use crate::widgets::pages::{PageRouteBuilder, PageRouteRef};
     use crate::widgets::routes::RoutePageBuilder;
+    use crate::widgets::scroll_controller::ScrollController;
     use crate::widgets::scroll_physics::ClampingScrollPhysics;
     use crate::widgets::scroll_view::ListView;
     use crate::widgets::text::{DefaultTextStyle, RichText, Text};
@@ -3236,6 +3237,114 @@ mod tests {
         tester.pump_and_settle();
         tester.up(&drag);
         tester.pump();
+    }
+
+    /// Dart's `pumpFor` of 'SliverReorderableList auto scrolls speed is configurable': a frame
+    /// now, then a frame each `interval` plus a millisecond until `duration` has passed.
+    fn pump_for(tester: &mut WidgetTester, duration: Duration, interval: Duration) {
+        tester.pump();
+        let mut times = duration.as_millis().div_ceil(interval.as_millis());
+        while times > 0 {
+            tester.pump_by(interval + Duration::from_millis(1));
+            times -= 1;
+        }
+    }
+
+    #[test]
+    fn sliver_reorderable_list_auto_scroll_speed_is_configurable() {
+        test_widgets(|tester| {
+            fn pump_list_and_drag(
+                tester: &mut WidgetTester,
+                auto_scroller_velocity_scalar: f64,
+            ) -> f64 {
+                let items = items(10);
+                let controller: ScrollControllerRef = ScrollController::new(
+                    &mut tester.cell.borrow_mut(),
+                    0.0,
+                    true,
+                    None,
+                    None,
+                    None,
+                )
+                .erase();
+                let builder_items = Rc::clone(&items);
+                tester.pump_widget(test_widgets_app(
+                    CustomScrollView::new()
+                        .controller(controller.clone())
+                        .slivers([SliverReorderableList::new(
+                            move |_app, _context, index| {
+                                let item = builder_items.borrow()[index as usize];
+                                Container::new()
+                                    .key(ValueKey::new(item).into())
+                                    .height(100.0)
+                                    .color(if item % 2 == 1 {
+                                        K_RED_COLOR
+                                    } else {
+                                        K_GREEN_COLOR
+                                    })
+                                    .child(
+                                        ReorderableDragStartListener::new(
+                                            Row::new()
+                                                .cross_axis_alignment(CrossAxisAlignment::Start)
+                                                .children([
+                                                    Text::new(format!("item {item}")).into_widget(),
+                                                    Icon::new(Some(k_drag_handle_icon_data()))
+                                                        .into_widget(),
+                                                ]),
+                                            index,
+                                        )
+                                        .into_widget(),
+                                    )
+                                    .into_widget()
+                            },
+                            items.borrow().len() as i32,
+                        )
+                        .on_reorder_item(|_app, _from, _to| {})
+                        .auto_scroller_velocity_scalar(auto_scroller_velocity_scalar)
+                        .into_widget()]),
+                ));
+
+                assert_eq!(controller.offset(&tester.cell.borrow()), 0.0);
+
+                let item = find::text("item 0");
+                let mut drag = start_gesture(tester, tester.get_center(item));
+
+                // Drag just enough to touch the edge but not surpass it, so the auto scroller
+                // is not yet triggered.
+                tester.move_by(&mut drag, Offset::new(0.0, 500.0), true);
+                pump_for(
+                    tester,
+                    Duration::from_millis(200),
+                    Duration::from_millis(50),
+                );
+
+                assert_eq!(controller.offset(&tester.cell.borrow()), 0.0);
+
+                // Now drag a little bit more so the auto scroller triggers.
+                tester.move_by(&mut drag, Offset::new(0.0, 50.0), true);
+                pump_for(
+                    tester,
+                    Duration::from_millis(600),
+                    Duration::from_millis((1000.0 / auto_scroller_velocity_scalar).round() as u64),
+                );
+
+                controller.offset(&tester.cell.borrow())
+            }
+
+            const FAST_VELOCITY_SCALAR: f64 = 20.0;
+            let offset_for_fast_scroller = pump_list_and_drag(tester, FAST_VELOCITY_SCALAR);
+
+            // Reset widget tree
+            tester.pump_widget(SizedBox::new());
+
+            const SLOW_VELOCITY_SCALAR: f64 = 5.0;
+            let offset_for_slow_scroller = pump_list_and_drag(tester, SLOW_VELOCITY_SCALAR);
+
+            assert_eq!(
+                offset_for_fast_scroller / offset_for_slow_scroller,
+                FAST_VELOCITY_SCALAR / SLOW_VELOCITY_SCALAR
+            );
+        });
     }
 
     #[test]
