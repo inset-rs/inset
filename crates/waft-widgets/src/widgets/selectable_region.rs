@@ -1765,6 +1765,13 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
 /// Dart's `_compareVertically`: two rectangles in screen order by their vertical positions only,
 /// equal when one cannot be placed above the other within the threshold.
 pub(crate) fn compare_vertically(a: Rect, b: Rect) -> Ordering {
+    // A selectable a sliver no longer paints, such as a kept-alive child with a selection, has
+    // a zero transform. Dart's `transformRect` turns that into NaN, whose comparisons make it
+    // sort before the others; `transform_rect` here keeps the infinities, which would sort it
+    // last, so it is put before them here.
+    if !a.is_finite() || !b.is_finite() {
+        return Ordering::Less;
+    }
     if (a.top - b.top < K_SELECTABLE_VERTICAL_COMPARING_THRESHOLD
         && a.bottom - b.bottom > -K_SELECTABLE_VERTICAL_COMPARING_THRESHOLD)
         || (b.top - a.top < K_SELECTABLE_VERTICAL_COMPARING_THRESHOLD

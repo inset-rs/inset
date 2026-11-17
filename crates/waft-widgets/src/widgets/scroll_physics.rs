@@ -145,6 +145,18 @@ pub trait ScrollPhysics: Debug {
         ScrollPhysicsBase::should_accept_user_offset(self, position)
     }
 
+    /// Whether a viewport may scroll to reveal more content when a selection gesture extends
+    /// past the visible area, i.e. the viewport's edge.
+    ///
+    /// Paged scrollables that want to prevent selection gestures from revealing an adjacent page
+    /// override this to `false` in their physics, as `PageScrollPhysics` does.
+    fn allow_selection_edge_scrolling(&self) -> bool {
+        match self.parent() {
+            None => true,
+            Some(parent) => parent.allow_selection_edge_scrolling(),
+        }
+    }
+
     /// Provides a heuristic to determine if expensive frame-bound tasks should be
     /// deferred.
     ///

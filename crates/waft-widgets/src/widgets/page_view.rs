@@ -1032,6 +1032,10 @@ impl ScrollPhysics for PageScrollPhysics {
     fn allow_implicit_scrolling(&self) -> bool {
         false
     }
+
+    fn allow_selection_edge_scrolling(&self) -> bool {
+        false
+    }
 }
 
 impl Debug for PageScrollPhysics {

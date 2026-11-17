@@ -445,11 +445,24 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a selectable's bounding boxes are read through `&mut App`, which the comparator a getter returned could not carry.
   Affect: a subclass overrides `compare_order(self, app, a, b)` where Dart overrides `compareOrder`.
 
+- Change: a selectable with no finite screen rectangle — a kept-alive sliver child the list no longer paints — sorts before the others, where it would sort after them here.
+  Reason: language — `transform_rect` keeps the infinities a zero transform maps to, where Dart's `transformRect` turns them into NaN, whose comparisons then order it first.
+  Affect: a selection scrolled through a list orders the kept-alive selected children where Flutter orders them, so the items revealed at the end stay in the range.
+
 ## widgets/text.rs → text.dart (selection)
 
 - Change: the text delegate records where each fragment of the paragraph after its first starts in it when the selectables change, where Dart reads it from the fragment's first box while it computes the range.
   Reason: language — `Selectable::bounding_boxes` and `RenderParagraph::get_position_for_offset` take `&mut App` here, and `SelectionHandler::selection` has `&App`.
   Affect: a paragraph split by a `WidgetSpan` reports the range its selectables had when they last changed; a re-layout that moves a fragment without changing the selectables does not recompute where the fragment starts.
+
+## widgets/scrollable.rs → scrollable.dart (selection)
+
+- Change: `ScrollPhysics::allow_selection_edge_scrolling` is a trait method whose default is its parent's answer or `true`; `PageScrollPhysics` answers `false`.
+  Reason: platform — the scrollable's selection delegate asks the physics before edge scrolling, as Dart's does; `PageScrollPhysics` is the only class Dart has that refuses it.
+
+- Change: these `scrollable_selection_test.dart` cases are not ported: the horizontal forward and backward drags (the same delegate path as the vertical ones), the double- and triple-click drags and the handle drags (the selection overlay and its handles), the keyboard auto-scroll cases (the region's keyboard actions), the `PageView` and nested-scrollable cases (a selectable region over a page view and nested selection containers), and 'selection starts outside of the scrollable' (a drag from outside the list, which the region sends).
+  Reason: platform — each needs `SelectableRegion`, its overlay or its key actions, none ported yet.
+  Affect: the kept-alive selection, the forward and backward edge scrolls, and the physics that refuses edge scrolling are covered; a page view's or a nested scrollable's edge behavior is not.
 
 ## widgets/scroll_view.rs → scroll_view.dart
 
@@ -841,7 +854,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - scroll_delegate.rs: the delegate description's exception branch. Trigger: diagnostics.
 - viewport.rs: the viewport diagnostics. Trigger: diagnostics.
 - Scroll semantics: `ScrollContext.setSemanticsActions`, scrollable.rs's semantics widget and its render object with `excludeFromSemantics` and `semanticChildCount`, and scroll_position.rs's semantic action bookkeeping. Trigger: the semantics tree.
-- scrollable.rs: the selection handler and container delegate around a scrollable. Trigger: `SelectionContainer` / `SelectionRegistrar`.
 - scrollable.rs, scroll_configuration.rs, primary_scroll_controller.rs: diagnostics, and `ScrollableDetails.hashCode` (no `Hash` over an erased physics). Trigger: diagnostics; a map keyed by scrollable details.
 - scroll_view.rs: the scroll view diagnostics. Trigger: diagnostics.
 - single_child_scroll_view.rs: the semantics clip and the approximate paint clip (deferred crate-wide in rendering's PORTING.md), and its diagnostics. Trigger: the semantics tree; the inspector; diagnostics.
