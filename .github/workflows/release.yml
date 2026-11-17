@@ -1,0 +1,33 @@
+# A release is one tag, `v<version>`: its tests pass, every published crate goes to crates.io at
+# the tag's version together, and an app written by the published `cargo waft new` builds from
+# crates.io alone. WaOS's SDK names these crates, so a WaOS release that needs a newer Waft
+# follows this one.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: The tag names the workspace's version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "waft") | .version')
+          test "${GITHUB_REF_NAME#v}" = "$version" || { echo "tag $GITHUB_REF_NAME, workspace $version"; exit 1; }
+      - name: Tests
+        run: cargo test --workspace
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --workspace
+      - name: A new app builds from crates.io alone
+        working-directory: ${{ runner.temp }}
+        run: |
+          cargo install waft-cli --version "${GITHUB_REF_NAME#v}" --locked
+          cargo waft new release-check
+          cd release-check
+          cargo build
