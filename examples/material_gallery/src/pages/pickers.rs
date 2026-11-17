@@ -12,7 +12,7 @@ use waft_embedder::TextInputType;
 use waft_foundation::{App, DateTime, Handle, Listener};
 use waft_material::{
     DatePickerEntryMode, DatePickerMode, DateTimeRange, FilledButton, GregorianCalendarDelegate,
-    OutlinedButton, ShowDatePicker, TimeOfDay, TimePickerEntryMode, show_date_range_picker,
+    OutlinedButton, ShowDatePicker, ShowDateRangePicker, TimeOfDay, TimePickerEntryMode,
     show_time_picker,
 };
 use waft_widgets::{
@@ -135,39 +135,13 @@ fn range_button(
     Builder::new(move |_app: &mut App, context: BuildContext| {
         OutlinedButton::new(
             Some(Listener::new(move |app: &mut App| {
-                let future = show_date_range_picker(
-                    app,
-                    context,
-                    None,
+                let future = ShowDateRangePicker::new(
                     DateTime::utc(2000, 1, 1),
                     DateTime::utc(2100, 12, 31),
-                    None,
-                    entry_mode,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    true,
-                    None,
-                    None,
-                    true,
-                    None,
-                    None,
-                    None,
-                    TextInputType::DATETIME,
-                    None,
-                    None,
-                    None,
-                    Rc::new(GregorianCalendarDelegate),
-                );
+                )
+                .initial_entry_mode(entry_mode)
+                .calendar_delegate(Rc::new(GregorianCalendarDelegate))
+                .show(app, context);
                 future.then(app, move |app, result| {
                     if let Some(range) = answer::<DateTimeRange>(&result) {
                         let text = format!(
