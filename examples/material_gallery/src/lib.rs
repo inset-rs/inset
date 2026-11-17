@@ -23,5 +23,15 @@ fn main(app: &mut waft::App) {
     let opening = std::env::var("GALLERY_ENTRY")
         .ok()
         .and_then(|name| Entry::from_name(&name));
-    run_gallery(app, opening);
+    // `GALLERY_WINDOW=1300x850` opens the window at that logical size.
+    let size = std::env::var("GALLERY_WINDOW")
+        .ok()
+        .and_then(|size| window_size_from(&size));
+    run_gallery(app, opening, size);
+}
+
+/// `"1300x850"` as a logical window size.
+fn window_size_from(text: &str) -> Option<[f64; 2]> {
+    let (width, height) = text.split_once('x')?;
+    Some([width.parse().ok()?, height.parse().ok()?])
 }

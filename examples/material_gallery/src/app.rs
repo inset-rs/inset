@@ -105,13 +105,14 @@ fn theme(app: &App, brightness: Brightness) -> ThemeData {
         .build(app)
 }
 
-/// Runs the gallery, then opens `opening` over the index once the tree is attached: the page
-/// a user would tap to, reached without input, for a bench or a smoke run.
-pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
+/// Runs the gallery in a window of `size`, a phone's when `None`, then opens `opening` over the
+/// index once the tree is attached: the page a user would tap to, reached without input, for a
+/// bench, a smoke run or a screenshot.
+pub fn run_gallery(app: &mut App, opening: Option<Entry>, size: Option<[f64; 2]>) {
     let navigator = GlobalKey::new();
     let window = WindowConfig {
         title: "Waft — material gallery".to_owned(),
-        size: [420.0, 720.0],
+        size: size.unwrap_or([420.0, 720.0]),
         ..WindowConfig::default()
     };
     run_app_with(
