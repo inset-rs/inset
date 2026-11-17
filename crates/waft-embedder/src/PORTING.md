@@ -100,9 +100,9 @@ Ported against Flutter `9c427b5d7b`.
   Reason: platform — valo has no default font manager, so an empty `families` list would walk fallbacks and land on `FontId(0)`.
   Affect: text that leaves `font_family` unset paints in the platform UI font instead of whichever face happened to be registered first.
 
-- Change: `Paragraph` and `ParagraphBuilder` wrap valo's, with offsets in UTF-16 code units; box height styles are answered from valo's runs and lines (`Tight` is the run's font-metric box, or the line's for a run with a height multiplier; `Max`, `Strut` and the include-line-spacing styles are the line's box), and the ideographic baseline is the first line's bottom.
-  Reason: platform — valo's paragraph exposes its runs and lines but no box-style or ideographic metrics API.
-  Affect: a range's `TextBox::direction` is the paragraph's rather than the run's (a placeholder's is its run's), a `Strut` box is the strut-raised line rather than the strut alone on a line with taller text, and the include-line-spacing styles measure as `Max`.
+- Change: `Paragraph` and `ParagraphBuilder` wrap valo's, with offsets in UTF-16 code units; box height styles follow skparagraph's `getRectsForRange` from valo's runs, lines and fonts, except that a `Strut` box under a sized strut, a run's measured clip when it has a height multiplier, and the include-line-spacing styles are the line's box; and the ideographic baseline is the first line's bottom.
+  Reason: platform — valo's paragraph exposes no box-style API, strut metrics, scaled run metrics, raw line metrics or ideographic metrics.
+  Affect: a range's `TextBox::direction` is the paragraph's rather than the run's (a placeholder's is its run's); a `Strut` box, and so a caret, is the strut-raised line rather than the strut alone, taller where the line has taller text or the strut has leading; without a strut, a caret in a run with a height multiplier is as tall as its line rather than its run; and the include-line-spacing styles measure as `Max`.
 
 - Change: a run carries no decoration style, font features or variations, baseline or leading distribution; a combined decoration paints underline, else overline, else line-through, and an unset `font_size` shapes at valo's 14.
   Reason: platform — those are not valo span fields.

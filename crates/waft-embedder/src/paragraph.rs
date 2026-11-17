@@ -540,7 +540,10 @@ impl StrutStyle {
 
     /// This style as valo's, as the engine's `ParagraphBuilder` maps dart:ui's encoded strut
     /// (flutter/engine `lib/ui/text/paragraph_builder.cc`).
-    fn to_native(&self) -> valo::StrutStyle {
+    ///
+    /// `paragraph_distribution` is the paragraph's `TextHeightBehavior.leadingDistribution`,
+    /// which dart:ui's `ParagraphBuilder` encodes for a strut that sets none.
+    fn to_native(&self, paragraph_distribution: TextLeadingDistribution) -> valo::StrutStyle {
         if !self.is_enabled() {
             return valo::StrutStyle::default();
         }
@@ -570,7 +573,8 @@ impl StrutStyle {
                 .height
                 .is_some_and(|height| height != K_TEXT_HEIGHT_NONE),
             leading: self.leading.map(|leading| leading as f32),
-            half_leading: self.leading_distribution == Some(TextLeadingDistribution::Even),
+            half_leading: self.leading_distribution.unwrap_or(paragraph_distribution)
+                == TextLeadingDistribution::Even,
             force_height: self.force_strut_height.unwrap_or(false),
         }
     }
@@ -618,6 +622,15 @@ impl ParagraphStyle {
         }
     }
 
+    /// dart:ui's `ParagraphStyle._leadingDistribution`: the text height behavior's, else
+    /// proportional.
+    fn leading_distribution(&self) -> TextLeadingDistribution {
+        self.text_height_behavior
+            .map_or(TextLeadingDistribution::Proportional, |behavior| {
+                behavior.leading_distribution
+            })
+    }
+
     fn to_native(&self) -> valo::ParagraphStyle {
         valo::ParagraphStyle {
             align: native_align(self.text_align, self.text_direction),
@@ -632,7 +645,7 @@ impl ParagraphStyle {
             strut_style: self
                 .strut_style
                 .as_ref()
-                .map(StrutStyle::to_native)
+                .map(|strut_style| strut_style.to_native(self.leading_distribution()))
                 .unwrap_or_default(),
         }
     }
@@ -874,7 +887,9 @@ impl ParagraphBuilder {
             .unwrap_or(TextDirection::Ltr);
         let mut builder = valo::ParagraphBuilder::new(fonts);
         let native_style = self.paragraph_style.to_native();
-        let strut_enabled = native_style.strut_style.enabled;
+        // skparagraph's `kStrut` boxes take the strut's metrics only for a sized strut.
+        let strut_sizes_boxes =
+            native_style.strut_style.enabled && native_style.strut_style.size > 0.0;
         builder.style(native_style);
         for piece in &self.pieces {
             match piece {
@@ -895,7 +910,7 @@ impl ParagraphBuilder {
             code_units: CodeUnits::of(inner.text()),
             inner,
             direction,
-            strut_enabled,
+            strut_sizes_boxes,
             layout_width: 0.0,
             disposed: false,
         }
@@ -958,9 +973,9 @@ pub struct Paragraph {
     inner: valo::Paragraph,
     code_units: CodeUnits,
     direction: TextDirection,
-    /// Whether a strut raises this paragraph's lines, which decides what a
-    /// [`BoxHeightStyle::Strut`] box is.
-    strut_enabled: bool,
+    /// Whether an enabled strut with a positive font size sizes this paragraph's lines, which
+    /// decides what a [`BoxHeightStyle::Strut`] box is.
+    strut_sizes_boxes: bool,
     /// The width given to the last [`layout`](Self::layout); Skia's `getMaxWidth`.
     layout_width: f64,
     disposed: bool,
@@ -1039,10 +1054,10 @@ impl Paragraph {
 
     /// Returns a list of text boxes that enclose the given text range.
     ///
-    /// A [`BoxHeightStyle::Tight`] box is the run's font-metric box, unless the run's style
-    /// has a height multiplier, where the line's box is used; the other height styles are the
-    /// line's box, so `Strut` includes the strut only as far as it raises the line.
-    /// `box_width_style` does not change the result.
+    /// Each run's box spans its glyphs in the range, and its height is as skparagraph's
+    /// `TextLine::getRectsForRange` gives it for `box_height_style`, from what valo exposes:
+    /// see [`run_box_extent`](Self::run_box_extent). `box_width_style` does not change the
+    /// result.
     pub fn get_boxes_for_range(
         &self,
         start: i32,
@@ -1052,81 +1067,78 @@ impl Paragraph {
     ) -> Vec<TextBox> {
         let _ = box_width_style;
         let range = self.code_units.byte(start)..self.code_units.byte(end);
-        let mut boxes: Vec<TextBox> = Vec::new();
+        let mut rects: Vec<valo::Rect> = Vec::new();
         for line in self.inner.lines() {
             if range.end <= line.range.start || range.start >= line.range.end {
                 continue;
             }
-            let line_top = line.baseline - line.ascent;
-            let line_bottom = line.baseline + line.descent;
             let mut previous: Option<&valo::PlacedRun> = None;
             for run in &line.runs {
-                let mut glyphs = run
-                    .glyphs
-                    .iter()
-                    .filter(|glyph| glyph.cluster >= range.start && glyph.cluster < range.end);
-                let Some(first) = glyphs.next() else {
+                let Some((left, right)) = glyph_span(run, &range) else {
                     continue;
                 };
-                let (mut left, mut right) = (
-                    first.x.min(first.x + first.advance),
-                    first.x.max(first.x + first.advance),
-                );
-                for glyph in glyphs {
-                    left = left.min(glyph.x.min(glyph.x + glyph.advance));
-                    right = right.max(glyph.x.max(glyph.x + glyph.advance));
-                }
-                let tight = match box_height_style {
-                    BoxHeightStyle::Tight => true,
-                    // Without a strut, Skia leaves the run's own box where the measured
-                    // clip was.
-                    BoxHeightStyle::Strut => !self.strut_enabled,
-                    _ => false,
-                };
-                let (mut top, mut bottom) =
-                    if tight && !run.height.is_some_and(|height| height > 0.0) {
-                        (run.bounds.y, run.bounds.y + run.bounds.height)
-                    } else {
-                        (line_top, line_bottom)
-                    };
-                if let (Some(last), Some(before)) = (boxes.last_mut(), previous) {
-                    let touching = (last.right - f64::from(left)).abs() < 1e-3
-                        || (f64::from(right) - last.left).abs() < 1e-3;
-                    // Skia merges the boxes of text runs in one direction, font and height
-                    // multiplier that touch, as valo's `boxes_join` does.
-                    if touching
-                        && before.placeholder.is_none()
-                        && run.placeholder.is_none()
-                        && before.rtl == run.rtl
-                        && before.font == run.font
-                        && before.size == run.size
-                        && before.height == run.height
-                    {
-                        last.left = last.left.min(f64::from(left));
-                        last.top = last.top.min(f64::from(top));
-                        last.right = last.right.max(f64::from(right));
-                        last.bottom = last.bottom.max(f64::from(bottom));
-                        previous = Some(run);
-                        continue;
+                let (top, bottom) = self.run_box_extent(line, run, box_height_style);
+                let rect = valo::Rect::from_ltrb(left, top, right, bottom);
+                match (rects.last_mut(), previous) {
+                    (Some(last), Some(before)) if boxes_join(before, run, last, &rect) => {
+                        *last = last.union(&rect);
                     }
+                    _ => rects.push(rect),
                 }
-                if top < line_top {
-                    top = line_top;
-                }
-                if bottom > line_bottom {
-                    bottom = line_bottom;
-                }
-                boxes.push(TextBox::from_ltrbd(
-                    f64::from(left),
-                    f64::from(top),
-                    f64::from(right),
-                    f64::from(bottom),
-                    self.direction,
-                ));
                 previous = Some(run);
             }
         }
-        boxes
+        rects
+            .into_iter()
+            .map(|rect| text_box(rect, self.direction))
+            .collect()
+    }
+
+    /// The top and bottom of `run`'s box on `line` for `box_height_style`.
+    ///
+    /// `Tight` is the run's font ascent and descent when it has a height multiplier, and its
+    /// measured clip otherwise. `Strut` is the measured clip when no strut sizes the lines, and
+    /// the line's box when one does, for valo exposes no strut metrics. `Max` is the line's
+    /// box, and so are the include-line-spacing styles, for valo exposes no raw line metrics.
+    fn run_box_extent(
+        &self,
+        line: &valo::Line,
+        run: &valo::PlacedRun,
+        box_height_style: BoxHeightStyle,
+    ) -> (f32, f32) {
+        let line_box = (line.baseline - line.ascent, line.baseline + line.descent);
+        match box_height_style {
+            BoxHeightStyle::Tight if run.height.is_some_and(|height| height > 0.0) => {
+                (run.bounds.y, run.bounds.bottom())
+            }
+            BoxHeightStyle::Tight => self.measured_clip(run).unwrap_or(line_box),
+            BoxHeightStyle::Strut if !self.strut_sizes_boxes => {
+                self.measured_clip(run).unwrap_or(line_box)
+            }
+            BoxHeightStyle::Strut
+            | BoxHeightStyle::Max
+            | BoxHeightStyle::IncludeLineSpacingMiddle
+            | BoxHeightStyle::IncludeLineSpacingTop
+            | BoxHeightStyle::IncludeLineSpacingBottom => line_box,
+        }
+    }
+
+    /// skparagraph's measured clip of a run without a height multiplier: its font's ascent
+    /// and descent with half the font's line gap on each, as `Run::calculateMetrics` sets
+    /// them. A placeholder's is its box. `None` for a run with a height multiplier, whose
+    /// scaled metrics valo does not expose.
+    fn measured_clip(&self, run: &valo::PlacedRun) -> Option<(f32, f32)> {
+        if run.placeholder.is_some() {
+            return Some((run.bounds.y, run.bounds.bottom()));
+        }
+        if run.height.is_some_and(|height| height > 0.0) {
+            return None;
+        }
+        let font = self.inner.faces().get(run.font);
+        let half_gap =
+            (font.line_height_px(run.size) - font.ascent_px(run.size) - font.descent_px(run.size))
+                / 2.0;
+        Some((run.bounds.y - half_gap, run.bounds.bottom() + half_gap))
     }
 
     /// Returns a list of text boxes that enclose all placeholders in the paragraph.
@@ -1349,6 +1361,42 @@ fn line_height(line: &valo::Line) -> f64 {
     (f64::from(line.ascent) + f64::from(line.descent)).round()
 }
 
+/// The left and right edges of `run`'s glyphs whose clusters start in `range`, or `None` when
+/// it has none there.
+fn glyph_span(run: &valo::PlacedRun, range: &Range<usize>) -> Option<(f32, f32)> {
+    run.glyphs
+        .iter()
+        .filter(|glyph| glyph.cluster >= range.start && glyph.cluster < range.end)
+        .map(|glyph| {
+            let end = glyph.x + glyph.advance;
+            (glyph.x.min(end), glyph.x.max(end))
+        })
+        .reduce(|(left, right), (glyph_left, glyph_right)| {
+            (left.min(glyph_left), right.max(glyph_right))
+        })
+}
+
+/// Whether `rect`, the box of `run`, continues `last`, the box of `before`, the run left of it:
+/// skparagraph merges the boxes of text runs in one direction, font and height multiplier that
+/// share a top and bottom and touch, as valo's `rects_for_range` does.
+fn boxes_join(
+    before: &valo::PlacedRun,
+    run: &valo::PlacedRun,
+    last: &valo::Rect,
+    rect: &valo::Rect,
+) -> bool {
+    let nearly_equal = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    before.placeholder.is_none()
+        && run.placeholder.is_none()
+        && before.rtl == run.rtl
+        && before.font == run.font
+        && before.size == run.size
+        && before.height == run.height
+        && nearly_equal(last.y, rect.y)
+        && nearly_equal(last.bottom(), rect.bottom())
+        && (nearly_equal(last.right(), rect.x) || nearly_equal(rect.right(), last.x))
+}
+
 fn text_box(rect: valo::Rect, direction: TextDirection) -> TextBox {
     TextBox::from_ltrbd(
         f64::from(rect.x),
@@ -1531,6 +1579,21 @@ mod tests {
         assert!(native.enabled);
         assert!(!native.height_override);
         assert_eq!(native.families, [""], "the platform default font");
+
+        // A strut that sets no leading distribution takes the paragraph's, as dart:ui's
+        // `ParagraphBuilder` encodes it.
+        let paragraph_even = ParagraphStyle {
+            text_height_behavior: Some(TextHeightBehavior {
+                leading_distribution: TextLeadingDistribution::Even,
+                ..TextHeightBehavior::default()
+            }),
+            strut_style: Some(StrutStyle {
+                height: Some(2.0),
+                ..StrutStyle::default()
+            }),
+            ..ParagraphStyle::default()
+        };
+        assert!(paragraph_even.to_native().strut_style.half_leading);
     }
 
     #[test]
@@ -2056,5 +2119,117 @@ mod layout_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod box_height_style_tests {
+    //! These measure boxes against FlutterTest, whose metrics are exact.
+
+    use super::*;
+    use crate::Platform;
+
+    /// FlutterTest's metrics: ascent 0.75 em, descent 0.25 em, no line gap.
+    fn flutter_test_paragraph(spans: &[(&str, TextStyle)], style: ParagraphStyle) -> Paragraph {
+        let mut fonts = FontCollection::new();
+        crate::set_default_font_manager(
+            &mut fonts,
+            Box::new(crate::TestFontSource::new()),
+            &crate::InertPlatform.default_font_families(),
+        );
+        let mut builder = ParagraphBuilder::new(style);
+        for (text, style) in spans {
+            builder.push_style(style.clone());
+            builder.add_text(text);
+            builder.pop();
+        }
+        let mut paragraph = builder.build(&mut fonts);
+        paragraph.layout(ParagraphConstraints::new(f64::INFINITY));
+        paragraph
+    }
+
+    /// skparagraph's `kTight` box of a run with a height multiplier is its font's ascent and
+    /// descent at the baseline, where `kMax` is the line's box.
+    #[test]
+    fn a_tight_box_of_a_run_with_a_height_is_its_font_box() {
+        let tall = TextStyle {
+            font_size: Some(10.0),
+            height: Some(3.0),
+            ..TextStyle::default()
+        };
+        let paragraph = flutter_test_paragraph(&[("A", tall)], ParagraphStyle::new());
+        assert_eq!(paragraph.height(), 30.0);
+        let baseline = paragraph.alphabetic_baseline();
+        let tight =
+            paragraph.get_boxes_for_range(0, 1, BoxHeightStyle::Tight, BoxWidthStyle::Tight);
+        assert_eq!(
+            tight,
+            [TextBox::from_ltrbd(
+                0.0,
+                baseline - 7.5,
+                10.0,
+                baseline + 2.5,
+                TextDirection::Ltr
+            )]
+        );
+        let max = paragraph.get_boxes_for_range(0, 1, BoxHeightStyle::Max, BoxWidthStyle::Tight);
+        assert_eq!(
+            max,
+            [TextBox::from_ltrbd(
+                0.0,
+                0.0,
+                10.0,
+                30.0,
+                TextDirection::Ltr
+            )]
+        );
+    }
+
+    /// Without a strut, skparagraph's `kStrut` box is the run's measured clip, as for a strut
+    /// whose font size is 0.
+    #[test]
+    fn a_strut_box_without_a_sized_strut_is_the_runs_box() {
+        let spans = [
+            (
+                "A",
+                TextStyle {
+                    font_size: Some(10.0),
+                    ..TextStyle::default()
+                },
+            ),
+            (
+                "B",
+                TextStyle {
+                    font_size: Some(20.0),
+                    ..TextStyle::default()
+                },
+            ),
+        ];
+        let paragraph = flutter_test_paragraph(&spans, ParagraphStyle::new());
+        let baseline = paragraph.alphabetic_baseline();
+        let small_run = TextBox::from_ltrbd(
+            0.0,
+            baseline - 7.5,
+            10.0,
+            baseline + 2.5,
+            TextDirection::Ltr,
+        );
+        assert_eq!(
+            paragraph.get_boxes_for_range(0, 1, BoxHeightStyle::Strut, BoxWidthStyle::Tight),
+            [small_run]
+        );
+
+        let zero_size_strut = ParagraphStyle {
+            strut_style: Some(StrutStyle {
+                font_size: Some(0.0),
+                ..StrutStyle::default()
+            }),
+            ..ParagraphStyle::default()
+        };
+        let paragraph = flutter_test_paragraph(&spans, zero_size_strut);
+        assert_eq!(
+            paragraph.get_boxes_for_range(0, 1, BoxHeightStyle::Strut, BoxWidthStyle::Tight),
+            [small_run]
+        );
     }
 }
