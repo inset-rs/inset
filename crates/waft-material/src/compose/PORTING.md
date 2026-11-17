@@ -2,6 +2,8 @@
 Compose home: compose/material3/adaptive (adaptive, adaptive-layout, adaptive-navigation3) and compose/material3/material3-adaptive-navigation-suite
 Ported against: b8f12c706099a47e1e44d9772d03e14a4ae37146
 
+Reasons are the porting skill's `language` and `platform`, plus `framework`: Compose's mechanism has no place in Flutter's model.
+
 ## window_size_class.rs → androidx.window's WindowSizeClass
 - Change: `WindowSizeClass::of` and `maybe_of` read the nearest `MediaQuery`'s size through the `App`, where Compose reads `currentWindowAdaptiveInfoV2()`.
   Reason: framework — Flutter's window size is a `MediaQuery` a widget reads with its context, not an ambient Compose value.
