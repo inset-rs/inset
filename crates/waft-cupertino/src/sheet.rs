@@ -222,7 +222,7 @@ type GetSheetDragged = Rc<dyn Fn(&App) -> bool>;
 /// See also:
 ///
 ///  * [`CupertinoSheetRoute`] the basic route version of the sheet view.
-///  * [`show_cupertino_dialog`](crate::show_cupertino_dialog) which displays an iOS-styled
+///  * [`ShowCupertinoDialog`] which displays an iOS-styled
 ///    dialog.
 ///  * <https://developer.apple.com/design/human-interface-guidelines/sheets>
 #[expect(

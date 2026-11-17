@@ -9,7 +9,7 @@ use waft_animation::{
     AnimationRef, AnimationStyle, AnimationWithParent, Curve, CurvedAnimation, Curves,
 };
 
-use waft_cupertino::{CupertinoAlertDialog, show_cupertino_dialog};
+use waft_cupertino::{CupertinoAlertDialog, ShowCupertinoDialog};
 use waft_embedder::{Brightness, Clip, Color, SemanticsHitTestBehavior, SemanticsRole};
 use waft_embedder::{TargetPlatform, TextAlign, lerp_double};
 use waft_foundation::{App, CompleterFuture, Handle, OptionRetained, Ref};
@@ -1998,7 +1998,7 @@ impl Page for DialogContentPage {
 ///  * [`SimpleDialog`], which handles the scrolling of the contents and does
 ///    not show buttons below its body.
 ///  * [`Dialog`], on which [`SimpleDialog`] and [`AlertDialog`] are based.
-///  * `show_cupertino_dialog`, which displays an iOS-style dialog.
+///  * `ShowCupertinoDialog`, which displays an iOS-style dialog.
 ///  * `show_general_dialog`, which allows for customization of the dialog popup.
 ///  * [`DialogRoute`], the route this pushes.
 ///  * <https://material.io/design/components/dialogs.html>
@@ -2347,17 +2347,21 @@ impl ShowAdaptiveDialog {
                 }
                 show.show(app, context)
             }
-            TargetPlatform::IOS | TargetPlatform::MacOS => show_cupertino_dialog(
-                app,
-                context,
-                builder,
-                barrier_label,
-                None,
-                use_root_navigator,
-                barrier_dismissible.unwrap_or(false),
-                route_settings,
-                request_focus,
-            ),
+            TargetPlatform::IOS | TargetPlatform::MacOS => {
+                let mut show = ShowCupertinoDialog::new(builder)
+                    .use_root_navigator(use_root_navigator)
+                    .barrier_dismissible(barrier_dismissible.unwrap_or(false));
+                if let Some(barrier_label) = barrier_label {
+                    show = show.barrier_label(barrier_label);
+                }
+                if let Some(route_settings) = route_settings {
+                    show = show.route_settings(route_settings);
+                }
+                if let Some(request_focus) = request_focus {
+                    show = show.request_focus(request_focus);
+                }
+                show.show(app, context)
+            }
         }
     }
 }
@@ -2444,7 +2448,7 @@ fn dialog_page_builder(
 ///
 ///  * [`ShowDialog`], which is a way to display a [`DialogRoute`].
 ///  * `show_general_dialog`, which allows for customization of the dialog popup.
-///  * `show_cupertino_dialog`, which displays an iOS-style dialog.
+///  * `ShowCupertinoDialog`, which displays an iOS-style dialog.
 pub struct DialogRoute {
     route: RouteData,
     overlay_route: OverlayRouteData,

@@ -1506,7 +1506,7 @@ impl StatelessWidget for ActionSheetGestureDetector {
 /// given to this action sheet.
 ///
 /// An action sheet is typically passed as the child widget to
-/// [`show_cupertino_modal_popup`](crate::show_cupertino_modal_popup), which displays the
+/// [`ShowCupertinoModalPopup`], which displays the
 /// action sheet by sliding it up from the bottom of the screen.
 ///
 /// See also:

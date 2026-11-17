@@ -2254,7 +2254,7 @@ fn create_standard_simulation<R: TransitionRoute>(
 /// Such a popup is an alternative to a menu or a dialog and prevents the user from interacting
 /// with the rest of the app.
 ///
-/// It is used internally by [`show_cupertino_modal_popup`] or can be directly pushed onto the
+/// It is used internally by [`ShowCupertinoModalPopup`] or can be directly pushed onto the
 /// [`Navigator`] stack to enable state restoration.
 ///
 /// The `barrier_color` argument determines the color of the barrier underneath the popup. When
@@ -2515,13 +2515,7 @@ impl PopupRoute for CupertinoModalPopupRoute {}
 ///
 ///  * `CupertinoActionSheet`, which is the widget usually returned by the `builder` argument.
 ///  * <https://developer.apple.com/design/human-interface-guidelines/ios/views/action-sheets/>
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_cupertino_modal_popup(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowCupertinoModalPopup {
     builder: WidgetBuilder,
     filter: Option<ImageFilter>,
     barrier_color: AnyColor,
@@ -2530,23 +2524,98 @@ pub fn show_cupertino_modal_popup(
     semantics_dismissible: bool,
     route_settings: Option<RouteSettingsRef>,
     request_focus: Option<bool>,
-) -> CompleterFuture<RouteResult> {
-    let resolved_barrier_color = CupertinoDynamicColor::resolve(&barrier_color, app, context);
-    let mut route = CupertinoModalPopupRoute::new(app, builder)
-        .barrier_color(app, Some(resolved_barrier_color))
-        .barrier_dismissible(app, barrier_dismissible)
-        .semantics_dismissible(app, semantics_dismissible);
-    if let Some(filter) = filter {
-        route = route.filter(app, filter);
+}
+
+impl ShowCupertinoModalPopup {
+    /// Creates a builder for a Cupertino modal popup; Dart's `showCupertinoModalPopup` required
+    /// argument is the `builder`, and every other argument is a setter.
+    pub fn new(builder: WidgetBuilder) -> ShowCupertinoModalPopup {
+        ShowCupertinoModalPopup {
+            builder,
+            filter: None,
+            barrier_color: K_CUPERTINO_MODAL_BARRIER_COLOR,
+            barrier_dismissible: true,
+            use_root_navigator: true,
+            semantics_dismissible: false,
+            route_settings: None,
+            request_focus: None,
+        }
     }
-    if let Some(route_settings) = route_settings {
-        route = route.settings(app, route_settings);
+
+    /// An image filter applied to the popup's barrier.
+    pub fn filter(mut self, filter: ImageFilter) -> ShowCupertinoModalPopup {
+        self.filter = Some(filter);
+        self
     }
-    if let Some(request_focus) = request_focus {
-        route = route.request_focus(app, request_focus);
+
+    /// The color of the barrier underneath the popup.
+    pub fn barrier_color(mut self, barrier_color: impl Into<AnyColor>) -> ShowCupertinoModalPopup {
+        self.barrier_color = barrier_color.into();
+        self
     }
-    let navigator = Navigator::of(app, context, use_root_navigator);
-    navigator.push(app, route.into_erased())
+
+    /// Whether clicking outside the popup dismisses it. Defaults to `true`.
+    pub fn barrier_dismissible(mut self, barrier_dismissible: bool) -> ShowCupertinoModalPopup {
+        self.barrier_dismissible = barrier_dismissible;
+        self
+    }
+
+    /// Whether to push the popup to the root navigator. Defaults to `true`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowCupertinoModalPopup {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// Whether the modal barrier's semantics are included in the semantics tree. Defaults to
+    /// `false`.
+    pub fn semantics_dismissible(mut self, semantics_dismissible: bool) -> ShowCupertinoModalPopup {
+        self.semantics_dismissible = semantics_dismissible;
+        self
+    }
+
+    /// The route settings passed to the popup's route.
+    pub fn route_settings(mut self, route_settings: RouteSettingsRef) -> ShowCupertinoModalPopup {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// Whether the popup's route requests focus when it is pushed.
+    pub fn request_focus(mut self, request_focus: bool) -> ShowCupertinoModalPopup {
+        self.request_focus = Some(request_focus);
+        self
+    }
+
+    /// Shows the popup and returns a future that resolves to the value passed to
+    /// [`Navigator::pop`] when it closes.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowCupertinoModalPopup {
+            builder,
+            filter,
+            barrier_color,
+            barrier_dismissible,
+            use_root_navigator,
+            semantics_dismissible,
+            route_settings,
+            request_focus,
+        } = self;
+
+        let resolved_barrier_color = CupertinoDynamicColor::resolve(&barrier_color, app, context);
+        let mut route = CupertinoModalPopupRoute::new(app, builder)
+            .barrier_color(app, Some(resolved_barrier_color))
+            .barrier_dismissible(app, barrier_dismissible)
+            .semantics_dismissible(app, semantics_dismissible);
+        if let Some(filter) = filter {
+            route = route.filter(app, filter);
+        }
+        if let Some(route_settings) = route_settings {
+            route = route.settings(app, route_settings);
+        }
+        if let Some(request_focus) = request_focus {
+            route = route.request_focus(app, request_focus);
+        }
+        let navigator = Navigator::of(app, context, use_root_navigator);
+        navigator.push(app, route.into_erased())
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2574,7 +2643,7 @@ fn build_cupertino_dialog_transitions(
 ///
 /// This function takes a `builder` which typically builds a `CupertinoAlertDialog` widget.
 /// Content below the dialog is dimmed with a `ModalBarrier`. The widget returned by the
-/// `builder` does not share a context with the location that [`show_cupertino_dialog`] is
+/// `builder` does not share a context with the location that [`ShowCupertinoDialog`] is
 /// originally called from.
 ///
 /// The `context` argument is used to look up the [`Navigator`] for the dialog. It is only used
@@ -2592,13 +2661,7 @@ fn build_cupertino_dialog_transitions(
 ///  * `CupertinoAlertDialog`, an iOS-style alert dialog.
 ///  * `show_general_dialog`, which allows for customization of the dialog popup.
 ///  * <https://developer.apple.com/design/human-interface-guidelines/alerts/>
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_cupertino_dialog(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowCupertinoDialog {
     builder: WidgetBuilder,
     barrier_label: Option<String>,
     barrier_color: Option<Color>,
@@ -2606,28 +2669,94 @@ pub fn show_cupertino_dialog(
     barrier_dismissible: bool,
     route_settings: Option<RouteSettingsRef>,
     request_focus: Option<bool>,
-) -> CompleterFuture<RouteResult> {
-    let mut route = CupertinoDialogRoute::new(app, builder, context)
-        .barrier_dismissible(app, barrier_dismissible);
-    if let Some(barrier_label) = barrier_label {
-        route = route.barrier_label(app, barrier_label);
+}
+
+impl ShowCupertinoDialog {
+    /// Creates a builder for an iOS-style dialog; Dart's `showCupertinoDialog` required
+    /// argument is the `builder`, and every other argument is a setter.
+    pub fn new(builder: WidgetBuilder) -> ShowCupertinoDialog {
+        ShowCupertinoDialog {
+            builder,
+            barrier_label: None,
+            barrier_color: None,
+            use_root_navigator: true,
+            barrier_dismissible: false,
+            route_settings: None,
+            request_focus: None,
+        }
     }
-    if let Some(barrier_color) = barrier_color {
-        route = route.barrier_color(app, Some(barrier_color));
+
+    /// The semantic label of the dialog's modal barrier.
+    pub fn barrier_label(mut self, barrier_label: impl Into<String>) -> ShowCupertinoDialog {
+        self.barrier_label = Some(barrier_label.into());
+        self
     }
-    if let Some(route_settings) = route_settings {
-        route = route.settings(app, route_settings);
+
+    /// The color of the dialog's modal barrier.
+    pub fn barrier_color(mut self, barrier_color: Color) -> ShowCupertinoDialog {
+        self.barrier_color = Some(barrier_color);
+        self
     }
-    if let Some(request_focus) = request_focus {
-        route = route.request_focus(app, request_focus);
+
+    /// Whether to push the dialog to the root navigator. Defaults to `true`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowCupertinoDialog {
+        self.use_root_navigator = use_root_navigator;
+        self
     }
-    let navigator = Navigator::of(app, context, use_root_navigator);
-    navigator.push(app, route.into_erased())
+
+    /// Whether tapping the barrier dismisses the dialog. Defaults to `false`.
+    pub fn barrier_dismissible(mut self, barrier_dismissible: bool) -> ShowCupertinoDialog {
+        self.barrier_dismissible = barrier_dismissible;
+        self
+    }
+
+    /// The route settings passed to the dialog's route.
+    pub fn route_settings(mut self, route_settings: RouteSettingsRef) -> ShowCupertinoDialog {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// Whether the dialog's route requests focus when it is pushed.
+    pub fn request_focus(mut self, request_focus: bool) -> ShowCupertinoDialog {
+        self.request_focus = Some(request_focus);
+        self
+    }
+
+    /// Shows the dialog and returns a future that resolves to the value passed to
+    /// [`Navigator::pop`] when it closes.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowCupertinoDialog {
+            builder,
+            barrier_label,
+            barrier_color,
+            use_root_navigator,
+            barrier_dismissible,
+            route_settings,
+            request_focus,
+        } = self;
+
+        let mut route = CupertinoDialogRoute::new(app, builder, context)
+            .barrier_dismissible(app, barrier_dismissible);
+        if let Some(barrier_label) = barrier_label {
+            route = route.barrier_label(app, barrier_label);
+        }
+        if let Some(barrier_color) = barrier_color {
+            route = route.barrier_color(app, Some(barrier_color));
+        }
+        if let Some(route_settings) = route_settings {
+            route = route.settings(app, route_settings);
+        }
+        if let Some(request_focus) = request_focus {
+            route = route.request_focus(app, request_focus);
+        }
+        let navigator = Navigator::of(app, context, use_root_navigator);
+        navigator.push(app, route.into_erased())
+    }
 }
 
 /// A dialog route that shows an iOS-style dialog.
 ///
-/// It is used internally by [`show_cupertino_dialog`] or can be directly pushed onto the
+/// It is used internally by [`ShowCupertinoDialog`] or can be directly pushed onto the
 /// [`Navigator`] stack to enable state restoration.
 ///
 /// This route takes a `builder` which typically builds a dialog widget. Content below the
@@ -2648,7 +2777,7 @@ pub fn show_cupertino_dialog(
 ///
 /// See also:
 ///
-///  * [`show_cupertino_dialog`], which is a way to display an iOS-style dialog.
+///  * [`ShowCupertinoDialog`], which is a way to display an iOS-style dialog.
 ///  * `show_general_dialog`, which allows for customization of the dialog popup.
 pub struct CupertinoDialogRoute {
     route: RouteData,
@@ -3124,17 +3253,7 @@ mod tests {
     #[test]
     fn a_frame_of_a_cupertino_dialog_leaves_no_new_arena_objects() {
         assert_a_mid_push_frame_leaves_nothing(|app, context, _state| {
-            let _popped = show_cupertino_dialog(
-                app,
-                context,
-                plain_page(),
-                None,
-                None,
-                true,
-                false,
-                None,
-                None,
-            );
+            let _popped = ShowCupertinoDialog::new(plain_page()).show(app, context);
         });
     }
 
@@ -3297,24 +3416,14 @@ mod tests {
             let key: KeyRef = popup_key.clone().into();
             let context = page_context.get().expect("the page built");
             let popped = tester.update(|app| {
-                show_cupertino_modal_popup(
-                    app,
-                    context,
-                    Rc::new(move |_app, _context| {
-                        SizedBox::new()
-                            .key(key.clone())
-                            .width(200.0)
-                            .height(100.0)
-                            .into_widget()
-                    }),
-                    None,
-                    K_CUPERTINO_MODAL_BARRIER_COLOR,
-                    true,
-                    true,
-                    false,
-                    None,
-                    None,
-                )
+                ShowCupertinoModalPopup::new(Rc::new(move |_app, _context| {
+                    SizedBox::new()
+                        .key(key.clone())
+                        .width(200.0)
+                        .height(100.0)
+                        .into_widget()
+                }))
+                .show(app, context)
             });
             for _ in 0..3 {
                 tester.pump_by(Duration::from_millis(20));
@@ -3346,17 +3455,8 @@ mod tests {
             let dialog_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
             let context = page_context.get().expect("the page built");
             let popped = tester.update(|app| {
-                show_cupertino_dialog(
-                    app,
-                    context,
-                    context_page(Rc::clone(&dialog_context)),
-                    None,
-                    None,
-                    true,
-                    false,
-                    None,
-                    None,
-                )
+                ShowCupertinoDialog::new(context_page(Rc::clone(&dialog_context)))
+                    .show(app, context)
             });
             for _ in 0..2 {
                 tester.pump_by(Duration::from_millis(20));
