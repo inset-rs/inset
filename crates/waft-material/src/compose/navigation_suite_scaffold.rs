@@ -68,6 +68,30 @@ pub struct NavigationSuiteColors {
     pub navigation_drawer_container_color: Option<Color>,
 }
 
+/// Compose's `navigationItemVerticalArrangement`: where a rail's destinations sit along its
+/// height.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NavigationItemVerticalArrangement {
+    /// Under the primary action, Compose's `NavigationSuiteDefaults.verticalArrangement`.
+    #[default]
+    Top,
+    /// In the middle of the room the primary action leaves.
+    Center,
+    /// At the bottom.
+    Bottom,
+}
+
+impl NavigationItemVerticalArrangement {
+    /// The rail's `group_alignment` for this arrangement.
+    fn group_alignment(self) -> f64 {
+        match self {
+            NavigationItemVerticalArrangement::Top => -1.0,
+            NavigationItemVerticalArrangement::Center => 0.0,
+            NavigationItemVerticalArrangement::Bottom => 1.0,
+        }
+    }
+}
+
 /// One destination in a navigation suite.
 #[derive(Clone)]
 pub struct NavigationSuiteDestination {
@@ -127,6 +151,8 @@ pub struct NavigationSuiteScaffold {
     pub primary_action: Option<WidgetRef>,
     /// The background of each navigation widget.
     pub navigation_suite_colors: NavigationSuiteColors,
+    /// Where a rail's destinations sit along its height.
+    pub navigation_item_vertical_arrangement: NavigationItemVerticalArrangement,
     /// The background behind the navigation widget and the content; `None` is the scheme's
     /// surface, Compose's `colorScheme.background`.
     pub container_color: Option<Color>,
@@ -148,6 +174,7 @@ impl NavigationSuiteScaffold {
             navigation_suite_type: None,
             primary_action: None,
             navigation_suite_colors: NavigationSuiteColors::default(),
+            navigation_item_vertical_arrangement: NavigationItemVerticalArrangement::Top,
             container_color: None,
             content: content.into_widget(),
         }
@@ -192,6 +219,15 @@ impl NavigationSuiteScaffold {
         navigation_suite_colors: NavigationSuiteColors,
     ) -> NavigationSuiteScaffold {
         self.navigation_suite_colors = navigation_suite_colors;
+        self
+    }
+
+    /// Sets where a rail's destinations sit along its height.
+    pub fn navigation_item_vertical_arrangement(
+        mut self,
+        navigation_item_vertical_arrangement: NavigationItemVerticalArrangement,
+    ) -> NavigationSuiteScaffold {
+        self.navigation_item_vertical_arrangement = navigation_item_vertical_arrangement;
         self
     }
 
@@ -250,7 +286,8 @@ impl NavigationSuiteScaffold {
             })
             .collect::<Vec<_>>();
         let mut rail = NavigationRail::new(destinations, Some(self.selected_index))
-            .label_type(NavigationRailLabelType::All);
+            .label_type(NavigationRailLabelType::All)
+            .group_alignment(self.navigation_item_vertical_arrangement.group_alignment());
         if extended {
             rail = rail
                 .extended(true)
@@ -590,6 +627,25 @@ mod tests {
                 |navigation_rail: &NavigationRail| navigation_rail.background_color,
             );
             assert_eq!(rail_color, Some(rail));
+        });
+    }
+
+    #[test]
+    fn a_centred_arrangement_centres_the_rail_s_destinations() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                800.0,
+                700.0,
+                suite().navigation_item_vertical_arrangement(
+                    NavigationItemVerticalArrangement::Center,
+                ),
+            );
+            let alignment = tester.widget(
+                find::by_type::<NavigationRail>(),
+                |rail: &NavigationRail| rail.group_alignment,
+            );
+            assert_eq!(alignment, Some(0.0));
         });
     }
 

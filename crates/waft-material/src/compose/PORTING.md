@@ -61,6 +61,9 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
 - Change: `NavigationSuiteColors` carries only the bar's, rail's and drawer's container colours, and the scaffold has no `contentColor`.
   Reason: framework — Flutter's navigation widgets and `Material` take their foreground colours from their themes, not from a content colour passed down.
   Affect: an app sets icon and label colours through `NavigationBarTheme`, `NavigationRailTheme` and `NavigationDrawerTheme`.
+- Change: `navigation_item_vertical_arrangement` places the rail's destinations through Flutter's `group_alignment`, and leaves the permanent drawer's at the top.
+  Reason: framework — Flutter's `NavigationDrawer` is a scrolling list with no group alignment, where Compose's drawer sheet is a column it can space.
+  Affect: a centred arrangement centres a rail's destinations, and a drawer still lists them under its header.
 
 ## Deferred
 - levitated panes (`AdaptStrategy::Levitate`, the scrim and drag-to-resize state). Trigger: a modal pane layer in `ThreePaneScaffold`.
