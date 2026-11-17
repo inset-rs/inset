@@ -85,16 +85,10 @@ impl ShowSearch {
         }
     }
 
-    /// The initial query; defaults to the empty string.
-    pub fn query(mut self, query: impl Into<String>) -> ShowSearch {
-        self.query = Some(query.into());
-        self
-    }
-
-    /// Dart's `query: null`: starts from the delegate's current query instead of the empty
-    /// string.
-    pub fn query_none(mut self) -> ShowSearch {
-        self.query = None;
+    /// The initial query; Dart's `Some(String::new())` by default, and `None` keeps the
+    /// delegate's current query.
+    pub fn query(mut self, query: Option<String>) -> ShowSearch {
+        self.query = query;
         self
     }
 
@@ -1306,10 +1300,7 @@ mod tests {
                                                 .maintain_state(maintain_state);
                                             // Dart's `query` argument defaults to `''`.
                                             if pass_in_initial_query {
-                                                match initial_query {
-                                                    Some(query) => show = show.query(query),
-                                                    None => show = show.query_none(),
-                                                }
+                                                show = show.query(initial_query.map(str::to_owned));
                                             }
                                             show.show(app, context)
                                         }
