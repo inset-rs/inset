@@ -1414,7 +1414,9 @@ impl SliverReorderableListState {
             app.get(self).items.values().copied().collect();
         for &item in &items {
             let index = item.index(app);
-            if (reverse && index == drag_index) || !item.mounted(app) {
+            // Skip the dragged item so its original slot does not compete with the other
+            // items when determining the insertion index.
+            if index == drag_index || !item.mounted(app) {
                 continue;
             }
 
@@ -1449,12 +1451,6 @@ impl SliverReorderableListState {
                     new_index = index + 1;
                 } else if proxy_item_start > item_end && new_index > index {
                     new_index = index;
-                }
-            } else if index == drag_index {
-                // If end of the proxy is not in ending half of item,
-                // we don't process, because it's original dragged item.
-                if item_middle <= proxy_item_end && proxy_item_end <= item_end {
-                    new_index = drag_index;
                 }
             } else if item_start <= proxy_item_start && proxy_item_start <= item_middle {
                 // The start of the proxy is in the beginning half of the item, so
@@ -2527,7 +2523,7 @@ mod tests {
         test_widgets,
     };
     use crate::widgets::basic::{
-        Align, Center, Column, Expanded, Row, StateSetter, StatefulBuilder,
+        Align, Center, Column, Expanded, Row, SizedBox, StateSetter, StatefulBuilder,
     };
     use crate::widgets::container::Container;
     use crate::widgets::gesture_detector::GestureDetector;
@@ -4503,6 +4499,76 @@ mod tests {
                 tester.get_size(find::by_type::<ReorderableDelayedDragStartListener>()),
                 Size::ZERO
             );
+        });
+    }
+
+    /// Upstream regression: a taller item dragged over a shorter one keeps the gap in place
+    /// while the pointer creeps upward, instead of flipping it back on small movements.
+    #[test]
+    fn sliver_reorderable_list_gap_does_not_flip_when_dragging_a_taller_item_over_a_shorter_one() {
+        const ITEM_HEIGHTS: [f64; 8] = [68.0, 85.0, 126.0, 97.0, 54.0, 106.0, 110.0, 119.0];
+        test_widgets(|tester| {
+            let items: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new((0..8).collect()));
+            let builder_items = Rc::clone(&items);
+            let reorder_items = Rc::clone(&items);
+            tester.pump_widget(TestWidgetsApp::new().home(StatefulBuilder::new(
+                move |_app, _context, set_state: StateSetter| {
+                    let builder_items = Rc::clone(&builder_items);
+                    let reorder_items = Rc::clone(&reorder_items);
+                    let item_count = builder_items.borrow().len() as i32;
+                    CustomScrollView::new()
+                        .slivers([SliverReorderableList::new(
+                            move |_app, _context, index| {
+                                let item = builder_items.borrow()[index as usize];
+                                SizedBox::new()
+                                    .key(ValueKey::new(item).into())
+                                    .height(ITEM_HEIGHTS[item as usize])
+                                    .child(ReorderableDragStartListener::new(
+                                        Text::new(format!("item {item}")),
+                                        index,
+                                    ))
+                                    .into_widget()
+                            },
+                            item_count,
+                        )
+                        .on_reorder_item(move |app, from_index, to_index| {
+                            let reorder_items = Rc::clone(&reorder_items);
+                            set_state(app, &mut |_app| {
+                                let mut items = reorder_items.borrow_mut();
+                                let item = items.remove(from_index as usize);
+                                items.insert(to_index as usize, item);
+                            });
+                        })
+                        .into_widget()])
+                        .into_widget()
+                },
+            )));
+
+            let item4 = find::text("item 4");
+            let item5 = find::text("item 5");
+            assert_eq!(tester.get_top_left(&item4).dy(), 376.0);
+            assert_eq!(tester.get_top_left(&item5).dy(), 430.0);
+
+            // Pick up item 5 (106 tall) and move it up into the top half of item 4 (54 tall).
+            let mut pointer = TestPointer::touch(tester.next_pointer());
+            tester.down(&mut pointer, tester.get_center(&item5));
+            tester.pump_by(K_PRESS_TIMEOUT);
+            tester.move_by(&mut pointer, Offset::new(0.0, -48.5), true);
+            tester.pump_and_settle();
+
+            // Item 4 is pushed down by item 5's extent: 376 + 106.
+            let pushed_down = tester.get_top_left(&item4).dy();
+            assert_eq!(pushed_down, 482.0);
+
+            // Creep upward half a pixel at a time; item 4 must not flip back to 376.
+            for _ in 0..8 {
+                tester.move_by(&mut pointer, Offset::new(0.0, -0.5), true);
+                tester.pump_and_settle();
+                assert_eq!(tester.get_top_left(&item4).dy(), pushed_down);
+            }
+
+            tester.up(&pointer);
+            tester.pump_and_settle();
         });
     }
 }

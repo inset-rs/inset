@@ -1057,10 +1057,9 @@ impl<T: Clone + PartialEq + 'static> State for RawAutocompleteState<T> {
         }
         if old_widget.focus_node != self.widget(app).focus_node {
             if let Some(focus_node) = &old_widget.focus_node {
-                focus_node.handle().remove_listener(
-                    app,
-                    &Listener::handle_method(self, Self::update_options_view_visibility),
-                );
+                focus_node
+                    .handle()
+                    .remove_listener(app, &Listener::handle_method(self, Self::on_focus_change));
             }
             if old_widget.focus_node.is_none()
                 && let Some(focus_node) = app.get_mut(self).internal_focus_node.take()
@@ -1068,11 +1067,15 @@ impl<T: Clone + PartialEq + 'static> State for RawAutocompleteState<T> {
                 focus_node.dispose(app);
             }
             if let Some(focus_node) = self.widget(app).focus_node.clone() {
-                focus_node.handle().add_listener(
-                    app,
-                    Listener::handle_method(self, Self::update_options_view_visibility),
-                );
+                focus_node
+                    .handle()
+                    .add_listener(app, Listener::handle_method(self, Self::on_focus_change));
             }
+            // The new node's focus state may not match the old node's. Update `has_focus`, but
+            // not the options view visibility, because this runs during build, when the overlay
+            // portal controller can't show or hide.
+            let has_focus = self.focus_node(app).handle().has_focus(app);
+            app.get_mut(self).has_focus = has_focus;
         }
     }
 
@@ -1086,10 +1089,9 @@ impl<T: Clone + PartialEq + 'static> State for RawAutocompleteState<T> {
             controller.dispose(app);
         }
         if let Some(focus_node) = self.widget(app).focus_node.clone() {
-            focus_node.handle().remove_listener(
-                app,
-                &Listener::handle_method(self, Self::update_options_view_visibility),
-            );
+            focus_node
+                .handle()
+                .remove_listener(app, &Listener::handle_method(self, Self::on_focus_change));
         }
         if let Some(focus_node) = app.get(self).internal_focus_node.clone() {
             focus_node.dispose(app);
@@ -1394,8 +1396,12 @@ mod tests {
         assert_more_or_less_equals_within, delayed, expect, find, finds_n_widgets, finds_nothing,
         finds_one_widget, finds_widgets, test_widgets,
     };
+    use waft_foundation::ChangeNotifier;
+
+    use crate::widgets::editable_text::TextEditingControllerLeaf;
+
     use crate::widgets::basic::{
-        Center, Column, Directionality, Expanded, Padding, Row, StatefulBuilder,
+        Center, Column, Directionality, Expanded, Padding, Row, SizedBox, StatefulBuilder,
     };
     use crate::widgets::container::Container;
     use crate::widgets::focus_manager::{AnyFocusNode, UnfocusDisposition};
@@ -4530,6 +4536,217 @@ mod tests {
             tester.pump_and_settle();
 
             assert!(tester.update(|app| focus_of(&target_focus).has_focus(app)));
+        });
+    }
+
+    /// Dart's `focusNode.hasListeners`, on the caller's node.
+    fn focus_has_listeners(tester: &WidgetTester, node: &Ref<FocusNode>) -> bool {
+        tester.update(|app| app.get(node).change_notifier_data().has_listeners())
+    }
+
+    /// Dart's `pumpRawAutocomplete` of the case: one autocomplete over `controller` and
+    /// `focus_node`, with `options` filtered by the field's text and a keyed options view.
+    fn pump_autocomplete_with_field(
+        tester: &mut WidgetTester,
+        options_key: &GlobalKey,
+        focus_node: &Ref<FocusNode>,
+        controller: &Ref<TextEditingController>,
+    ) {
+        let key = options_key.clone();
+        tester.pump_widget(
+            TestWidgetsApp::new().home(
+                RawAutocomplete::new(
+                    move |_app,
+                          _context,
+                          _on_selected: AutocompleteOnSelected<String>,
+                          _options: &[String]| {
+                        SizedBox::new().key(key.clone().into()).into_widget()
+                    },
+                    string_options,
+                )
+                .focus_node(focus_node.erase())
+                .text_editing_controller(controller.erase())
+                .field_view_builder(|_app, _context, controller, focus_node, _on_submitted| {
+                    TestTextField::new()
+                        .controller(controller)
+                        .focus_node(focus_node)
+                        .into_widget()
+                })
+                .into_widget(),
+            ),
+        );
+    }
+
+    fn pump_empty(tester: &mut WidgetTester) {
+        tester.pump_widget(TestWidgetsApp::new().home(SizedBox::shrink()));
+    }
+
+    #[test]
+    fn removes_the_listener_from_a_caller_provided_focus_node_on_dispose() {
+        test_widgets(|tester| {
+            let (controller, focus_node) = own_field(tester);
+            let options_key = GlobalKey::new();
+            pump_autocomplete_with_field(tester, &options_key, &focus_node, &controller);
+            assert!(focus_has_listeners(tester, &focus_node));
+
+            // Unmounting the autocomplete removes everything it added to the caller-owned
+            // focus node, so that it cannot fire on a disposed state.
+            pump_empty(tester);
+            assert!(!focus_has_listeners(tester, &focus_node));
+        });
+    }
+
+    #[test]
+    fn refreshes_the_internal_focus_state_when_the_focus_node_changes() {
+        test_widgets(|tester| {
+            let options_key = GlobalKey::new();
+            let (controller, focus_node1) = own_field(tester);
+            let focus_node2 = tester.update(FocusNode::new);
+
+            // Focus the field, then enter text that matches no options.
+            pump_autocomplete_with_field(tester, &options_key, &focus_node1, &controller);
+            tester.update(|app| focus_of(&focus_node1).request_focus(app, None));
+            tester.pump();
+            tester.pump();
+            expect(tester, &by_key(&options_key), finds_one_widget());
+            tester.update(|app| {
+                controller.handle().set_value(app, value_at("xyz", 3));
+            });
+            tester.pump();
+            expect(tester, &by_key(&options_key), finds_nothing());
+
+            // Swap in a focus node that, unlike the old one, is unfocused.
+            pump_autocomplete_with_field(tester, &options_key, &focus_node2, &controller);
+            tester.pump();
+            assert!(focus_has_listeners(tester, &focus_node2));
+            assert!(!tester.update(|app| focus_of(&focus_node2).has_focus(app)));
+            assert!(!focus_has_listeners(tester, &focus_node1));
+
+            // Make options available again, without changing the focus state.
+            tester.update(|app| controller.handle().set_value(app, value_at("", 0)));
+            tester.pump();
+            expect(tester, &by_key(&options_key), finds_nothing());
+
+            // Focusing the new node opens the options view: the internal focus state was
+            // refreshed at the swap, not left stale from the old node.
+            tester.update(|app| focus_of(&focus_node2).request_focus(app, None));
+            tester.pump();
+            tester.pump();
+            expect(tester, &by_key(&options_key), finds_one_widget());
+
+            // The listener that the swap added to the new node is removed on dispose too.
+            pump_empty(tester);
+            assert!(!focus_has_listeners(tester, &focus_node2));
+        });
+    }
+
+    #[test]
+    fn does_not_update_options_view_visibility_when_the_focus_node_changes() {
+        test_widgets(|tester| {
+            let options_key = GlobalKey::new();
+            let (controller, focus_node1) = own_field(tester);
+            let focus_node2 = tester.update(FocusNode::new);
+
+            pump_autocomplete_with_field(tester, &options_key, &focus_node1, &controller);
+            tester.update(|app| focus_of(&focus_node1).request_focus(app, None));
+            tester.pump();
+            tester.pump();
+            expect(tester, &by_key(&options_key), finds_one_widget());
+
+            // Swap in an unfocused node while the options view is showing. One might expect
+            // the view to hide, since the new node is unfocused, but the new listener is
+            // registered during build, when the overlay portal controller can't show or hide.
+            pump_autocomplete_with_field(tester, &options_key, &focus_node2, &controller);
+            tester.pump();
+            assert!(!tester.update(|app| focus_of(&focus_node2).has_focus(app)));
+            expect(tester, &by_key(&options_key), finds_one_widget());
+
+            // The next visibility update, here from a text change, consults the new node's
+            // focus state and hides the options view.
+            tester.update(|app| controller.handle().set_value(app, value_at("a", 1)));
+            tester.pump();
+            expect(tester, &by_key(&options_key), finds_nothing());
+        });
+    }
+
+    /// Dart's `pumpRawAutocomplete()` of the swap case: the internal field and controllers
+    /// unless a node and controller are given, and the field's own focus node recorded.
+    fn pump_swapping_autocomplete(
+        tester: &mut WidgetTester,
+        options_key: &GlobalKey,
+        field_focus_node: &std::rc::Rc<RefCell<Option<AnyFocusNode>>>,
+        focus_node: Option<Ref<FocusNode>>,
+        text_editing_controller: Option<Ref<TextEditingController>>,
+    ) {
+        let key = options_key.clone();
+        let field = std::rc::Rc::clone(field_focus_node);
+        let mut autocomplete = RawAutocomplete::new(
+            move |_app,
+                  _context,
+                  _on_selected: AutocompleteOnSelected<String>,
+                  _options: &[String]| {
+                SizedBox::new().key(key.clone().into()).into_widget()
+            },
+            string_options,
+        )
+        .field_view_builder(
+            move |_app, _context, controller, focus_node, _on_submitted| {
+                *field.borrow_mut() = Some(focus_node.handle());
+                TestTextField::new()
+                    .controller(controller)
+                    .focus_node(focus_node)
+                    .into_widget()
+            },
+        );
+        if let Some(focus_node) = focus_node {
+            autocomplete = autocomplete.focus_node(focus_node.erase());
+        }
+        if let Some(text_editing_controller) = text_editing_controller {
+            autocomplete = autocomplete.text_editing_controller(text_editing_controller.erase());
+        }
+        tester.pump_widget(TestWidgetsApp::new().home(autocomplete.into_widget()));
+    }
+
+    #[test]
+    fn keeps_working_when_swapping_between_internal_and_caller_provided_focus_node() {
+        test_widgets(|tester| {
+            let options_key = GlobalKey::new();
+            let custom_focus_node = tester.update(FocusNode::new);
+            let custom_controller = tester.update(TextEditingController::new);
+            let field_focus_node: std::rc::Rc<RefCell<Option<AnyFocusNode>>> =
+                std::rc::Rc::default();
+
+            let check_focus_opens_and_closes_options =
+                |tester: &mut WidgetTester, focus_node: AnyFocusNode| {
+                    tester.update(|app| focus_node.request_focus(app, None));
+                    tester.pump();
+                    tester.pump();
+                    expect(tester, &by_key(&options_key), finds_one_widget());
+                    tester.update(|app| focus_node.unfocus(app, UnfocusDisposition::Scope));
+                    tester.pump();
+                    tester.pump();
+                    expect(tester, &by_key(&options_key), finds_nothing());
+                };
+
+            // Start with the internal focus node (no focus node parameter).
+            pump_swapping_autocomplete(tester, &options_key, &field_focus_node, None, None);
+            let internal = field_focus_node.borrow().expect("the field was built");
+            check_focus_opens_and_closes_options(tester, internal);
+
+            // Swap internal → caller-provided.
+            pump_swapping_autocomplete(
+                tester,
+                &options_key,
+                &field_focus_node,
+                Some(custom_focus_node.clone()),
+                Some(custom_controller.clone()),
+            );
+            check_focus_opens_and_closes_options(tester, focus_of(&custom_focus_node));
+
+            // Swap caller-provided → internal.
+            pump_swapping_autocomplete(tester, &options_key, &field_focus_node, None, None);
+            let internal = field_focus_node.borrow().expect("the field was built");
+            check_focus_opens_and_closes_options(tester, internal);
         });
     }
 }
