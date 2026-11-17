@@ -16,7 +16,7 @@ use waft_embedder::{
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Ref};
 use waft_painting::{
     ClipContext, InlineSpanRef, PaintingBinding, PlaceholderDimensions, PlaceholderSpan,
-    RenderComparison, TextOverflow, TextPainter, TextScaler, TextWidthBasis,
+    RenderComparison, StrutStyle, TextOverflow, TextPainter, TextScaler, TextWidthBasis,
 };
 
 use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
@@ -633,6 +633,20 @@ impl RenderParagraph {
         self.mark_needs_layout(app);
     }
 
+    /// The strut style used by this paragraph's internal [`TextPainter`].
+    pub fn strut_style(self: RenderHandle<Self>, app: &App) -> Option<&StrutStyle> {
+        self.painter(app).strut_style()
+    }
+
+    /// Sets [`strut_style`](Self::strut_style).
+    pub fn set_strut_style(self: RenderHandle<Self>, app: &mut App, value: Option<StrutStyle>) {
+        if self.painter(app).strut_style() == value.as_ref() {
+            return;
+        }
+        self.painter_mut(app).set_strut_style(value);
+        self.mark_needs_layout(app);
+    }
+
     /// The height of a space in [`text`](Self::text) in logical pixels.
     pub fn preferred_line_height(self: RenderHandle<Self>, app: &mut App) -> f64 {
         let (painter, fonts) = self.painter_with_fonts(app);
@@ -660,6 +674,7 @@ impl RenderParagraph {
         intrinsics.set_ellipsis(painter.ellipsis().map(str::to_owned));
         intrinsics.set_text_width_basis(painter.text_width_basis());
         intrinsics.set_text_height_behavior(painter.text_height_behavior());
+        intrinsics.set_strut_style(painter.strut_style().cloned());
         (intrinsics, fonts)
     }
 
@@ -3795,6 +3810,41 @@ mod tests {
         let wrapped = box_.get_min_intrinsic_height(&mut app, max_width / 2.0);
         assert!(wrapped > one_line, "half the width takes more lines");
         assert_eq!(box_.get_max_intrinsic_height(&mut app, max_width), one_line);
+    }
+
+    // paragraph_intrinsics_test.dart 'strutStyle affects intrinsics'.
+    #[test]
+    fn strut_style_affects_intrinsics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        crate::testing::install_test_fonts(&mut app);
+        let paragraph = RenderParagraph::new(
+            &mut app,
+            TextSpan::new()
+                .text("Hello World")
+                .style(TextStyle::new().font_size(10.0))
+                .into_span(),
+            TextDirection::Ltr,
+            None,
+        );
+
+        assert_eq!(
+            paragraph
+                .as_box()
+                .get_max_intrinsic_height(&mut app, f64::INFINITY),
+            10.0
+        );
+
+        paragraph.set_strut_style(
+            &mut app,
+            Some(StrutStyle::new().font_size(100.0).force_strut_height(true)),
+        );
+        assert_eq!(
+            paragraph
+                .as_box()
+                .get_max_intrinsic_height(&mut app, f64::INFINITY),
+            100.0
+        );
     }
 
     /// The dry layout of a paragraph is the size it lays out to, and its dry baseline is the

@@ -241,7 +241,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -252,7 +252,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1312,7 +1312,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1469,7 +1469,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3083,7 +3083,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3870,7 +3870,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4380,7 +4380,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4692,7 +4692,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4855,9 +4855,9 @@ dependencies = [
 
 [[package]]
 name = "valo"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4215be27c22a4af6966c31fce75134cf037bf0777a5c1957bfd1ca5d06f301e"
+checksum = "d1977642b87099c761f65b7d571a08508de2606f59456fea6d7aa281e9958259"
 dependencies = [
  "futures-channel",
  "objc2",
@@ -4873,9 +4873,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2baf412796d93b9baa375a3fb8540f9180618a9c5d27dfec34e74d4704d3c36c"
+checksum = "833a76e961391973b2d4d70fcc2902e9c595b26650dd5d21e9a8b307409542a6"
 dependencies = [
  "valo",
  "wgpu",
@@ -4883,9 +4883,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-apple"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "997bff08964c213ac91ceaa8f90e82ff73e0ca4cb4aa8286377c9c151d75df13"
+checksum = "93b514afb8fb2ebd9ba1bed153d298bf500b1a5b299773e6301ea6102612e046"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -4902,9 +4902,9 @@ dependencies = [
 
 [[package]]
 name = "valo-codec-software"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "272835f5f61a11d845a7d4049e8fa9c605360a864902103c4c84a515ba5cb8ae"
+checksum = "2497509f8559cb6377e52bc9f6efc424c63505f1bbaf92708b6a3b6dc359df7a"
 dependencies = [
  "gif",
  "image",
@@ -4917,9 +4917,9 @@ dependencies = [
 
 [[package]]
 name = "valo-dl"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f69d518a4cf7055eb4aa72298dba0b4eeb4548ee94f941df8c9e5d9faa57d282"
+checksum = "8976e92320be0b247a00f784cf0f77b6678ab67afc859a17c1f5ea835c41963a"
 dependencies = [
  "naga",
  "valo-geometry",
@@ -4929,9 +4929,9 @@ dependencies = [
 
 [[package]]
 name = "valo-fontmgr"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "738100b28cb64696aff954a69f86071afc27bb9519f3e9a51b915c0fb3e55a37"
+checksum = "3a8b516c0e9829d2ee6144fce5c910ddba81e6b1f6d642f64dbaf9532299ae77"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -4943,9 +4943,9 @@ dependencies = [
 
 [[package]]
 name = "valo-geometry"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4309c83a87a9448c4089e14372b1037d46a339a3bdd49b983ddadce0af9e4c0"
+checksum = "45a27191288737f04f20295146a0d5e11ae08e79a2c7d0ff3bda997a7ab62343"
 dependencies = [
  "glam",
  "valo-pathops",
@@ -4953,9 +4953,9 @@ dependencies = [
 
 [[package]]
 name = "valo-paragraph"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "218e4e453d8091f9ffd57fb98a2066535d46a404412ca82513e8d9792ef306c0"
+checksum = "18ab031d022851cf64c8caf3fdd0e1e5fb6047ae9bd04cdc65c13bd78e7ab594"
 dependencies = [
  "unicode-bidi",
  "unicode-linebreak",
@@ -4967,15 +4967,15 @@ dependencies = [
 
 [[package]]
 name = "valo-pathops"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee65af1749dbce8d3573a7dbc13df40acbb2ec2e9680936e03305232c29c9e52"
+checksum = "1cbf8542bff956a2562310ccb680d5893956ec2a1812e34f788d7136ce58f900"
 
 [[package]]
 name = "valo-renderer"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf8357040b616a966f749fb02cb1f309e101a172d77c1b5825725abf7fec4fc"
+checksum = "852e261167ada7fa89248d4f3895563bd25464df958c9bb0eb88781576e95fa3"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -4991,9 +4991,9 @@ dependencies = [
 
 [[package]]
 name = "valo-system-fonts"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "093c9bd65df08aaea45044f5f93a8bfde4677bac22ba5126c540b4f3bd709202"
+checksum = "3758391cb4f9ad13cd4c4d6fd792565b9e69f5ec19d72c52240f36df6c9f8d78"
 dependencies = [
  "valo-fontmgr",
  "valo-text",
@@ -5001,9 +5001,9 @@ dependencies = [
 
 [[package]]
 name = "valo-text"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b6df9e6e17ab826602c14d9b33c0a3528c24f2538f33394a8e909446c08dce2"
+checksum = "f0f57b3946d085862520398822059585f71414e17052c0c9813b66fd41121a67"
 dependencies = [
  "allsorts",
  "harfrust",
@@ -5942,7 +5942,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -1,11 +1,13 @@
 //! Flutter counterpart: `widgets/text.dart`, plus the public `RichText` from `basic.dart`.
 //!
 //! [`Text`] builds only the [`RichText`] branch: selection (`SelectionContainer.maybeOf`,
-//! `_SelectableTextContainer`, `selectionColor`), `Locale`, `StrutStyle`, and `Semantics` wait.
+//! `_SelectableTextContainer`, `selectionColor`), `Locale`, and `Semantics` wait.
 
 use waft_embedder::{Color, FontWeight, TextAlign, TextDirection, TextHeightBehavior};
 use waft_foundation::App;
-use waft_painting::{InlineSpanRef, TextOverflow, TextScaler, TextSpan, TextStyle, TextWidthBasis};
+use waft_painting::{
+    InlineSpanRef, StrutStyle, TextOverflow, TextScaler, TextSpan, TextStyle, TextWidthBasis,
+};
 use waft_rendering::{
     AnyRenderObject, RenderBox, RenderHandle, RenderParagraph, SelectionRegistrarRef,
 };
@@ -536,6 +538,14 @@ pub struct Text {
     /// enclosing [`DefaultTextStyle`]. Otherwise, the style will replace the closest
     /// enclosing [`DefaultTextStyle`].
     pub style: Option<TextStyle>,
+    /// The strut style to use. Strut style defines the strut, which sets minimum vertical
+    /// layout metrics.
+    ///
+    /// Omitting or providing `None` will disable strut.
+    ///
+    /// The user or platform may override this strut's [`StrutStyle::height`] via a
+    /// [`MediaQuery`] ancestor's `MediaQueryData.lineHeightScaleFactorOverride`.
+    pub strut_style: Option<StrutStyle>,
     /// How the text should be aligned horizontally.
     pub text_align: Option<TextAlign>,
     /// The directionality of the text.
@@ -629,6 +639,7 @@ impl Text {
             data,
             text_span,
             style: None,
+            strut_style: None,
             text_align: None,
             text_direction: None,
             soft_wrap: None,
@@ -651,6 +662,12 @@ impl Text {
     /// Dart `Text(style:)`.
     pub fn style(mut self, style: TextStyle) -> Text {
         self.style = Some(style);
+        self
+    }
+
+    /// Dart `Text(strutStyle:)`.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> Text {
+        self.strut_style = Some(strut_style);
         self
     }
 
@@ -753,6 +770,12 @@ impl StatelessWidget for Text {
                 ..TextSpan::default()
             },
         );
+        let effective_strut_style = self.strut_style.as_ref().map(|strut_style| {
+            line_height_scale_factor.map_or_else(
+                || strut_style.clone(),
+                |height| strut_style.merge(Some(&StrutStyle::new().height(height))),
+            )
+        });
         let text_scaler = self
             .text_scaler
             .clone()
@@ -790,6 +813,9 @@ impl StatelessWidget for Text {
         if let Some(text_height_behavior) = text_height_behavior {
             rich_text = rich_text.text_height_behavior(text_height_behavior);
         }
+        if let Some(strut_style) = effective_strut_style {
+            rich_text = rich_text.strut_style(strut_style);
+        }
         let mut result = rich_text.into_widget();
         if self.semantics_label.is_some() || self.semantics_identifier.is_some() {
             let mut semantics = Semantics::new();
@@ -819,7 +845,7 @@ impl StatelessWidget for Text {
 
 /// Dart's `_OverridingTextStyleTextSpanUtils.applyTextSpacingOverrides`: overrides the text
 /// styles of a [`TextSpan`] tree with the `MediaQuery` spacing overrides.
-fn apply_text_spacing_overrides(
+pub(crate) fn apply_text_spacing_overrides(
     line_height_scale_factor: Option<f64>,
     letter_spacing: Option<f64>,
     word_spacing: Option<f64>,
@@ -949,6 +975,9 @@ pub struct RichText {
     /// If this is 1, text will not wrap. Otherwise, text will be wrapped at the edge of the
     /// box.
     pub max_lines: Option<i32>,
+    /// The strut style to use. Strut style defines the strut, which sets minimum vertical
+    /// layout metrics.
+    pub strut_style: Option<StrutStyle>,
     /// Defines how to measure the width of the rendered text.
     pub text_width_basis: TextWidthBasis,
     /// Defines how to apply `TextStyle.height` over and under text.
@@ -981,6 +1010,7 @@ impl RichText {
             overflow: TextOverflow::Clip,
             text_scaler: TextScaler::NO_SCALING,
             max_lines: None,
+            strut_style: None,
             text_width_basis: TextWidthBasis::Parent,
             text_height_behavior: None,
             selection_registrar: None,
@@ -1029,6 +1059,12 @@ impl RichText {
     pub fn max_lines(mut self, max_lines: i32) -> RichText {
         debug_assert!(max_lines > 0);
         self.max_lines = Some(max_lines);
+        self
+    }
+
+    /// Dart `RichText(strutStyle:)`.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> RichText {
+        self.strut_style = Some(strut_style);
         self
     }
 
@@ -1088,6 +1124,7 @@ impl RenderObjectWidget for RichText {
         render_object.set_max_lines(app, self.max_lines);
         render_object.set_text_width_basis(app, self.text_width_basis);
         render_object.set_text_height_behavior(app, self.text_height_behavior);
+        render_object.set_strut_style(app, self.strut_style.clone());
         render_object.set_device_pixel_ratio(app, device_pixel_ratio);
         render_object.set_registrar(app, self.selection_registrar.clone());
         render_object.set_selection_color(app, self.selection_color);
@@ -1112,6 +1149,7 @@ impl RenderObjectWidget for RichText {
         render_object.set_max_lines(app, self.max_lines);
         render_object.set_text_width_basis(app, self.text_width_basis);
         render_object.set_text_height_behavior(app, self.text_height_behavior);
+        render_object.set_strut_style(app, self.strut_style.clone());
         let device_pixel_ratio = Self::device_pixel_ratio(app, context);
         render_object.set_device_pixel_ratio(app, device_pixel_ratio);
         render_object.set_registrar(app, self.selection_registrar.clone());
@@ -1129,9 +1167,11 @@ impl MultiChildRenderObjectWidget for RichText {
 mod tests {
     use waft_foundation::AppCell;
 
-    use waft_embedder::{Color, TextLeadingDistribution};
+    use waft_embedder::{Color, Size, TextLeadingDistribution};
     use waft_foundation::ValueKey;
     use waft_painting::PaintingBinding;
+
+    use crate::{PlaceholderDimensions, TextPainter};
 
     use super::*;
     use crate::test_harness::Harness;
@@ -1455,5 +1495,129 @@ mod tests {
         assert_eq!(style.letter_spacing, Some(3.0));
         assert_eq!(style.word_spacing, Some(4.0));
         assert_eq!(paragraph.text_scaler(&app), TextScaler::linear(2.0));
+    }
+
+    #[test]
+    fn force_strut_height_applies_to_widget_spans() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let fonts = PaintingBinding::instance(&mut app).install_flutter_test_fonts(&mut app);
+        let span = TextSpan::new()
+            .children(vec![
+                WidgetSpan::new(crate::widgets::basic::SizedBox::new()).into_span(),
+            ])
+            .into_span();
+        let mut painter = TextPainter::new();
+        painter.set_text(Some(span));
+        painter.set_text_direction(Some(TextDirection::Ltr));
+        painter.set_strut_style(Some(
+            StrutStyle::new()
+                .height(10.0)
+                .font_size(10.0)
+                .force_strut_height(true),
+        ));
+        painter.set_placeholder_dimensions(Some(vec![PlaceholderDimensions::new(
+            Size::new(1000.0, 1000.0),
+            waft_embedder::PlaceholderAlignment::Bottom,
+        )]));
+        painter.layout(app.get_mut(fonts), 0.0, f64::INFINITY);
+        assert_eq!(painter.height(), 100.0);
+    }
+
+    #[test]
+    fn text_rich_respects_the_media_query_spacing_overrides_on_its_strut() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let overridden = MediaQuery::new(
+            MediaQueryData::new()
+                .line_height_scale_factor_override(2.0)
+                .letter_spacing_override(2.0)
+                .word_spacing_override(2.0),
+            Text::rich(TextSpan::new().text("Hello").into_span())
+                .text_direction(TextDirection::Ltr)
+                .strut_style(StrutStyle::new().height(0.9)),
+        )
+        .into_widget();
+        let harness = mount(&mut app, overridden);
+        let paragraph = paragraph_under_root(&harness, &app);
+        let span_style = paragraph.text(&app).style().cloned();
+        assert_eq!(
+            span_style.as_ref().and_then(|style| style.height),
+            Some(2.0)
+        );
+        assert_eq!(
+            span_style.as_ref().and_then(|style| style.letter_spacing),
+            Some(2.0)
+        );
+        assert_eq!(
+            span_style.as_ref().and_then(|style| style.word_spacing),
+            Some(2.0)
+        );
+        assert_eq!(
+            paragraph
+                .strut_style(&app)
+                .and_then(|strut_style| strut_style.height),
+            Some(2.0)
+        );
+
+        harness.set_child(
+            &mut app,
+            ltr(Text::rich(TextSpan::new().text("Hello").into_span())
+                .text_direction(TextDirection::Ltr)
+                .strut_style(StrutStyle::new().height(0.9))
+                .into_widget()),
+        );
+        harness.pump(&mut app);
+        let paragraph = paragraph_under_root(&harness, &app);
+        let span_style = paragraph.text(&app).style().cloned();
+        assert_eq!(span_style.as_ref().and_then(|style| style.height), None);
+        assert_eq!(
+            span_style.as_ref().and_then(|style| style.letter_spacing),
+            None
+        );
+        assert_eq!(
+            span_style.as_ref().and_then(|style| style.word_spacing),
+            None
+        );
+        assert_eq!(
+            paragraph
+                .strut_style(&app)
+                .and_then(|strut_style| strut_style.height),
+            Some(0.9)
+        );
+    }
+
+    #[test]
+    fn rich_text_ignores_the_media_query_spacing_overrides() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let overridden = MediaQuery::new(
+            MediaQueryData::new()
+                .line_height_scale_factor_override(2.0)
+                .letter_spacing_override(2.0)
+                .word_spacing_override(2.0),
+            RichText::new(TextSpan::new().text("Hello").into_span())
+                .text_direction(TextDirection::Ltr)
+                .strut_style(StrutStyle::new().height(0.9)),
+        )
+        .into_widget();
+        let harness = mount(&mut app, overridden);
+        let paragraph = paragraph_under_root(&harness, &app);
+        let span_style = paragraph.text(&app).style().cloned();
+        assert_eq!(span_style.as_ref().and_then(|style| style.height), None);
+        assert_eq!(
+            span_style.as_ref().and_then(|style| style.letter_spacing),
+            None
+        );
+        assert_eq!(
+            span_style.as_ref().and_then(|style| style.word_spacing),
+            None
+        );
+        assert_eq!(
+            paragraph
+                .strut_style(&app)
+                .and_then(|strut_style| strut_style.height),
+            Some(0.9)
+        );
     }
 }
