@@ -23,12 +23,19 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - proxy_box.rs → RenderSemanticsAnnotations, RenderBlockSemantics, RenderMergeSemantics, RenderExcludeSemantics, RenderIndexedSemantics
 - object.rs / box.rs → getTransformTo, globalToLocal, localToGlobal
 - editable.rs → TextSelectionPoint
+- selection.rs → selection.dart (`SelectionUtils`, the geometry and content values)
 - pipeline_owner.rs → object.dart (PipelineOwner)
 - sliver_fixed_extent_list.rs → sliver_fixed_extent_list.dart
 - image.rs → image.dart (RenderImage)
 - wrap.rs → wrap.dart
 - list_body.rs → list_body.dart
 - sliver_fill.rs → sliver_fill.dart
+
+## selection.rs → selection.dart
+
+- Change: `SelectionEvent` is one enum with a variant per Dart subclass, and `SelectionRegistrar` and `Selectable` are traits whose abstract types are erased arena handles, `AnySelectionRegistrar` and `AnySelectable`.
+  Reason: language — Rust has no subclassing or class downcasts, so the event subclasses become enum variants and a registrar holds selectables of more than one kind through the erased handle.
+  Affect: callers match the event variant instead of downcasting `SelectableRegion`'s event class, and a registrar adds and removes `AnySelectable`s.
 
 ## debug.rs → debug.dart
 
