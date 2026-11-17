@@ -1883,15 +1883,6 @@ mod tests {
             .field_view_builder(field_view(captured, field_key))
     }
 
-    /// The case's own synchronous statements up to its next `await`, then the end of that
-    /// event: the checkpoint runs the microtasks and the continuations they left, which
-    /// flutter_test's next `pump` flushes before its frame.
-    fn act<R>(tester: &mut WidgetTester, body: impl FnOnce(&mut App) -> R) -> R {
-        let result = tester.update(body);
-        tester.cell.checkpoint();
-        result
-    }
-
     /// Dart's `const TextEditingValue(text: text, selection: TextSelection.collapsed(..))`
     /// with the caret at `offset`.
     fn value_at(text: &str, offset: i32) -> TextEditingValue {
@@ -1924,14 +1915,12 @@ mod tests {
         let state = editable_text_state(tester, field);
         let value = value_at(text, text.encode_utf16().count() as i32);
         TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-        tester.cell.checkpoint();
     }
 
     /// Dart's `tester.testTextInput.receiveAction(action)` on the field with the connection.
     fn receive_action(tester: &mut WidgetTester, field: Finder, action: TextInputAction) {
         let state = editable_text_state(tester, field);
         TextInputClient::perform_action(state, &mut tester.cell.borrow_mut(), action);
-        tester.cell.checkpoint();
     }
 
     /// Dart's `tester.sendKeyDownEvent(key)` or `sendKeyUpEvent(key)`: one key event.
@@ -1958,7 +1947,6 @@ mod tests {
             );
             app.drain_microtasks();
         }
-        tester.cell.checkpoint();
     }
 
     fn send_key(
@@ -2056,7 +2044,7 @@ mod tests {
 
             // Focus the empty field. All the options are displayed.
             let focus_node = captured.focus_node();
-            act(tester, |app| focus_node.request_focus(app, None));
+            tester.update(|app| focus_node.request_focus(app, None));
             tester.pump();
             expect(
                 tester,
@@ -2067,9 +2055,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let controller = captured.controller();
-            act(tester, |app| {
-                controller.handle().set_value(app, value_at("ele", 3))
-            });
+            tester.update(|app| controller.handle().set_value(app, value_at("ele", 3)));
             tester.pump();
             expect(tester, &find::by_global_key(&field_key), finds_one_widget());
             expect(
@@ -2082,16 +2068,14 @@ mod tests {
             // Select an option. The options hide and the field updates to show the selection.
             let selection = captured.options()[1].clone();
             let on_selected = captured.on_selected();
-            act(tester, |app| on_selected(app, selection.clone()));
+            tester.update(|app| on_selected(app, selection.clone()));
             tester.pump();
             expect(tester, &find::by_global_key(&field_key), finds_one_widget());
             expect(tester, &find::by_global_key(&options_key), finds_nothing());
             assert_eq!(text_of(tester, &controller), selection);
 
             // Modify the field text. The options appear again and are filtered.
-            act(tester, |app| {
-                controller.handle().set_value(app, value_at("e", 1))
-            });
+            tester.update(|app| controller.handle().set_value(app, value_at("e", 1)));
             tester.pump();
             expect(tester, &find::by_global_key(&field_key), finds_one_widget());
             expect(
@@ -2195,7 +2179,7 @@ mod tests {
 
     fn set_state(tester: &mut WidgetTester, setter: &CapturedSetter, mut change: impl FnMut()) {
         let setter = setter.borrow().clone().expect("the builder ran");
-        act(tester, |app| setter(app, &mut |_app| change()));
+        tester.update(|app| setter(app, &mut |_app| change()));
     }
 
     fn by_key(key: &GlobalKey) -> Finder {
@@ -2276,7 +2260,7 @@ mod tests {
             expect(tester, &by_key(&options_key), finds_nothing());
 
             // Focus the empty field. All the options are displayed.
-            act(tester, |app| focus_of(&focus_node).request_focus(app, None));
+            tester.update(|app| focus_of(&focus_node).request_focus(app, None));
             tester.pump();
             expect(tester, &by_key(&options_key), finds_one_widget());
             assert_eq!(captured.options().len(), K_OPTIONS.len());
@@ -2284,9 +2268,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let controller: TextEditingControllerRef = text_editing_controller.erase();
-            act(tester, |app| {
-                controller.handle().set_value(app, value_at("ele", 3))
-            });
+            tester.update(|app| controller.handle().set_value(app, value_at("ele", 3)));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -2295,16 +2277,14 @@ mod tests {
             // Select an option. The options hide and the field updates to show the selection.
             let selection = captured.options()[1].clone();
             let on_selected = captured.on_selected();
-            act(tester, |app| on_selected(app, selection.clone()));
+            tester.update(|app| on_selected(app, selection.clone()));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
             assert_eq!(text_of(tester, &controller), selection);
 
             // Modify the field text. The options appear again and are filtered.
-            act(tester, |app| {
-                controller.handle().set_value(app, value_at("e", 1))
-            });
+            tester.update(|app| controller.handle().set_value(app, value_at("e", 1)));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -2625,7 +2605,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 controller.handle().set_value(app, value_at("example", 7));
             });
@@ -2638,7 +2618,7 @@ mod tests {
             // Select an option. The options hide and onSelected is called.
             let selection = captured.options()[1].clone();
             let on_selected = captured.on_selected();
-            act(tester, |app| on_selected(app, selection.clone()));
+            tester.update(|app| on_selected(app, selection.clone()));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -2647,9 +2627,7 @@ mod tests {
 
             // Modify the field text. The options appear again and are filtered, this time by
             // name instead of email.
-            act(tester, |app| {
-                controller.handle().set_value(app, value_at("B", 1))
-            });
+            tester.update(|app| controller.handle().set_value(app, value_at("B", 1)));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -2677,7 +2655,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 controller.handle().set_value(app, value_at("example", 7));
             });
@@ -2691,7 +2669,7 @@ mod tests {
             // text set to the selection's display string.
             let selection = captured.options()[1].clone();
             let on_selected = captured.on_selected();
-            act(tester, |app| on_selected(app, selection.clone()));
+            tester.update(|app| on_selected(app, selection.clone()));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -2700,9 +2678,7 @@ mod tests {
 
             // Modify the field text. The options appear again and are filtered, this time by
             // name instead of email.
-            act(tester, |app| {
-                controller.handle().set_value(app, value_at("B", 1))
-            });
+            tester.update(|app| controller.handle().set_value(app, value_at("B", 1)));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -2727,7 +2703,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 controller.handle().set_value(app, value_at("ele", 3));
             });
@@ -2739,7 +2715,7 @@ mod tests {
             // Select the current string, as if the field was submitted. The options hide and
             // the field updates to show the selection.
             let on_field_submitted = captured.on_field_submitted.borrow().clone().expect("built");
-            act(tester, |app| on_field_submitted(app));
+            tester.update(|app| on_field_submitted(app));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -2989,7 +2965,7 @@ mod tests {
 
             // Enter text to show the options.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 controller.handle().set_value(app, value_at("ele", 3));
             });
@@ -3050,7 +3026,7 @@ mod tests {
             // Focus the empty field. The options are not displayed because optionsBuilder
             // returns nothing for an empty field query.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 controller.handle().set_value(app, value_at("", 0));
             });
@@ -3058,9 +3034,7 @@ mod tests {
             expect(tester, &by_key(&options_key), finds_nothing());
 
             // Enter text. Now the options appear, filtered by the text.
-            act(tester, |app| {
-                controller.handle().set_value(app, value_at("ele", 3))
-            });
+            tester.update(|app| controller.handle().set_value(app, value_at("ele", 3)));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -3104,7 +3078,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let controller: TextEditingControllerRef = text_editing_controller.erase();
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_of(&focus_node).request_focus(app, None);
                 controller.handle().set_value(app, value_at("ele", 3));
             });
@@ -3148,7 +3122,7 @@ mod tests {
 
             // Focus the empty field. All the options are displayed.
             let focus_node = captured.focus_node();
-            act(tester, |app| focus_node.request_focus(app, None));
+            tester.update(|app| focus_node.request_focus(app, None));
             tester.pump();
             expect(tester, &by_key(&options_key), finds_one_widget());
             assert_eq!(captured.options()[0], "lemur");
@@ -3156,7 +3130,7 @@ mod tests {
             // Select an option. The options hide and the field updates to show the selection.
             let selection = captured.options()[0].clone();
             let on_selected = captured.on_selected();
-            act(tester, |app| on_selected(app, selection.clone()));
+            tester.update(|app| on_selected(app, selection.clone()));
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
             expect(tester, &by_key(&options_key), finds_nothing());
@@ -3229,7 +3203,7 @@ mod tests {
 
             // Enter text to build the options with delay.
             let focus_node = captured.focus_node();
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 delay.set(Some(Duration::from_millis(500)));
             });
@@ -3273,7 +3247,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| focus_node.request_focus(app, None));
+            tester.update(|app| focus_node.request_focus(app, None));
             enter_text(tester, by_key(&field_key), "ele");
             tester.pump_and_settle();
             expect(tester, &by_key(&field_key), finds_one_widget());
@@ -3291,7 +3265,7 @@ mod tests {
             assert_eq!(text_of(tester, &controller), "elephant");
 
             // Modify the field text. The options appear again and are filtered.
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 controller.handle().clear(app);
             });
@@ -3342,7 +3316,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 controller.handle().clear(app);
             });
@@ -3414,7 +3388,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
                 controller.handle().clear(app);
             });
@@ -3472,7 +3446,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let (focus_node, controller) = (captured.focus_node(), captured.controller());
-            act(tester, |app| focus_node.request_focus(app, None));
+            tester.update(|app| focus_node.request_focus(app, None));
             enter_text(tester, by_key(&field_key), "ele");
             tester.pump_and_settle();
             expect(tester, &by_key(&field_key), finds_one_widget());
@@ -3500,12 +3474,10 @@ mod tests {
             expect(tester, &by_key(&options_key), finds_nothing());
 
             // Show the options again by re-focusing the field.
-            act(tester, |app| {
-                focus_node.unfocus(app, UnfocusDisposition::Scope)
-            });
+            tester.update(|app| focus_node.unfocus(app, UnfocusDisposition::Scope));
             tester.pump();
             expect(tester, &by_key(&options_key), finds_nothing());
-            act(tester, |app| focus_node.request_focus(app, None));
+            tester.update(|app| focus_node.request_focus(app, None));
             tester.pump();
             expect(tester, &by_key(&options_key), finds_one_widget());
             escape(tester);
@@ -3520,7 +3492,7 @@ mod tests {
             escape(tester);
             tester.pump();
             expect(tester, &by_key(&options_key), finds_nothing());
-            act(tester, |app| {
+            tester.update(|app| {
                 controller
                     .handle()
                     .set_selection(app, TextSelection::collapsed(3, TextAffinity::Downstream))
@@ -3554,7 +3526,7 @@ mod tests {
 
             // Enter text to show options.
             let focus_node = captured.focus_node();
-            act(tester, |app| focus_node.request_focus(app, None));
+            tester.update(|app| focus_node.request_focus(app, None));
             enter_text(tester, by_key(&field_key), "ele");
             tester.pump_and_settle();
             expect(tester, &by_key(&field_key), finds_one_widget());
@@ -3588,7 +3560,7 @@ mod tests {
 
             // Enter text. The options are filtered by the text.
             let focus_node = captured.focus_node();
-            act(tester, |app| focus_node.request_focus(app, None));
+            tester.update(|app| focus_node.request_focus(app, None));
             enter_text(tester, by_key(&field_key), "e");
             tester.pump();
             expect(tester, &by_key(&field_key), finds_one_widget());
@@ -3651,7 +3623,7 @@ mod tests {
             // Pretend that the only option is selected. This does not change the text in the
             // text field.
             let on_selected = captured.on_selected();
-            act(tester, |app| on_selected(app, K_OPTIONS[0].to_string()));
+            tester.update(|app| on_selected(app, K_OPTIONS[0].to_string()));
             tester.pump();
             expect(tester, &by_key(&options_key), finds_nothing());
         });
@@ -4241,7 +4213,7 @@ mod tests {
             let long_request_delay = Duration::from_millis(5000);
             let short_request_delay = Duration::from_millis(1000);
             let focus_node = captured.focus_node();
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
 
                 // Enter the first letter.
@@ -4289,7 +4261,7 @@ mod tests {
             let first_request_delay = Duration::from_millis(1000);
             let second_request_delay = Duration::from_millis(2000);
             let third_request_delay = Duration::from_millis(3000);
-            act(tester, |app| {
+            tester.update(|app| {
                 focus_node.request_focus(app, None);
 
                 // Enter the first letter.
@@ -4477,16 +4449,14 @@ mod tests {
             expect(tester, &by_key(&options_key), finds_one_widget());
 
             let on_selected = captured.on_selected();
-            act(tester, |app| on_selected(app, K_OPTIONS[0].to_string()));
+            tester.update(|app| on_selected(app, K_OPTIONS[0].to_string()));
             tester.pump();
             expect(tester, &by_key(&options_key), finds_nothing());
 
             let focus_node = captured.focus_node();
-            act(tester, |app| {
-                focus_node.unfocus(app, UnfocusDisposition::Scope)
-            });
+            tester.update(|app| focus_node.unfocus(app, UnfocusDisposition::Scope));
             tester.pump();
-            act(tester, |app| focus_node.request_focus(app, None));
+            tester.update(|app| focus_node.request_focus(app, None));
             tester.pump_and_settle();
 
             expect(tester, &by_key(&options_key), finds_one_widget());
@@ -4540,9 +4510,7 @@ mod tests {
             set_state(tester, &setter, || show_autocomplete.set(false));
             tester.pump();
 
-            act(tester, |app| {
-                options_completer.complete(app, strings(&["option1", "option2"]))
-            });
+            tester.update(|app| options_completer.complete(app, strings(&["option1", "option2"])));
             tester.pump();
         });
     }
@@ -4771,9 +4739,7 @@ mod tests {
 
             // Clear text.
             tester.tap(find::text("Clear"));
-            act(tester, |app| {
-                focus_of(&text_focus).unfocus(app, UnfocusDisposition::Scope)
-            });
+            tester.update(|app| focus_of(&text_focus).unfocus(app, UnfocusDisposition::Scope));
             tester.pump_and_settle();
             assert_eq!(text_of(tester, &controller), "");
 

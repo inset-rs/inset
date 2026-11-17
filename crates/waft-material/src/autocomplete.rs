@@ -692,13 +692,6 @@ mod tests {
         tester.pump_widget(app);
     }
 
-    /// The end of one event of the case: the checkpoint runs what it left.
-    fn act<R>(tester: &mut WidgetTester, body: impl FnOnce(&mut App) -> R) -> R {
-        let result = tester.update(body);
-        tester.cell.checkpoint();
-        result
-    }
-
     fn editable_state(tester: &WidgetTester) -> Handle<EditableTextState> {
         let element: AnyElement = tester.element(find::descendant(
             find::by_type::<TextFormField>(),
@@ -719,7 +712,6 @@ mod tests {
             .text(text)
             .selection(TextSelection::collapsed(length, TextAffinity::Downstream));
         TextInputClient::update_editing_value(state, &mut tester.cell.borrow_mut(), value);
-        tester.cell.checkpoint();
     }
 
     /// Dart's `tester.sendKeyDownEvent(key)` or `sendKeyUpEvent(key)`.
@@ -746,7 +738,6 @@ mod tests {
             );
             app.drain_microtasks();
         }
-        tester.cell.checkpoint();
     }
 
     fn arrow_down(tester: &mut WidgetTester) {
@@ -1127,7 +1118,7 @@ mod tests {
             // provided text had been entered into the field.
             fn default_options_height(tester: &mut WidgetTester, entered_text: &str) -> f64 {
                 let controller = field_controller(tester);
-                act(tester, |app| controller.handle().clear(app));
+                tester.update(|app| controller.handle().clear(app));
                 tester.tap(find::by_type::<TextFormField>());
                 enter_text(tester, entered_text);
                 tester.pump();
@@ -1380,7 +1371,7 @@ mod tests {
             );
             let change_alignment = |tester: &mut WidgetTester, to: AlignmentGeometry| {
                 let setter = set_state.borrow().clone().expect("the builder ran");
-                act(tester, |app| setter(app, &mut |_app| alignment.set(to)));
+                tester.update(|app| setter(app, &mut |_app| alignment.set(to)));
                 tester.pump();
             };
 
@@ -1526,14 +1517,14 @@ mod tests {
             tester.tap(find::text(TEXT_SELECTION));
 
             // Unfocus and scroll to deconstruct the widget.
-            act(tester, |app| {
+            tester.update(|app| {
                 node.handle().unfocus(app, UnfocusDisposition::Scope);
                 scroll_controller.handle().jump_to(app, 2000.0);
             });
             tester.pump_and_settle();
 
             // Scroll to go back to the widget.
-            act(tester, |app| scroll_controller.handle().jump_to(app, 0.0));
+            tester.update(|app| scroll_controller.handle().jump_to(app, 0.0));
             tester.pump_and_settle();
 
             // Checks that the option selected is still present.
@@ -1660,7 +1651,6 @@ mod tests {
                 TextEditingValue::new()
                     .selection(TextSelection::collapsed(0, TextAffinity::Downstream)),
             );
-            tester.cell.checkpoint();
             tester.pump_and_settle();
             expect(tester, &find::text("test"), finds_one_widget());
 
@@ -1671,9 +1661,7 @@ mod tests {
 
             // Clear text using the icon button.
             tester.tap(find::by_key(clear_key));
-            act(tester, |app| {
-                focus.handle().unfocus(app, UnfocusDisposition::Scope)
-            });
+            tester.update(|app| focus.handle().unfocus(app, UnfocusDisposition::Scope));
             tester.pump_and_settle();
             assert_eq!(controller_text(tester, &controller), "");
 
