@@ -536,7 +536,9 @@ fn item_content(
         parts.push(
             Margin::new(
                 m,
-                Transform::scale(None, Some(r.selector_bar_item_icon_scale), None)
+                // The template's `IconTransform` sets both `ScaleX` and `ScaleY` to
+                // `SelectorBarItemIconScale`.
+                Transform::scale(Some(r.selector_bar_item_icon_scale), None, None)
                     .child(icon.clone()),
             )
             .into_widget(),
