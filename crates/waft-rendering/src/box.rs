@@ -1191,6 +1191,13 @@ pub struct RenderBoxData {
 }
 
 impl RenderBoxData {
+    /// The constraints most recently supplied by the parent, or `None` before layout.
+    pub fn constraints(&self) -> Option<BoxConstraints> {
+        self.constraints
+            .as_ref()
+            .map(AnyBoxConstraints::constraints)
+    }
+
     /// Unlaid-out box state.
     pub fn new() -> RenderBoxData {
         RenderBoxData {
