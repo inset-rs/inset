@@ -1,6 +1,6 @@
 //! Flutter counterpart: material_ui's `search.dart`.
 //!
-//! A full-screen search page: [`show_search`] pushes it, and a [`SearchDelegate`] says what its
+//! A full-screen search page: [`ShowSearch`] pushes it, and a [`SearchDelegate`] says what its
 //! app bar, suggestions and results are. The route and the page share the delegate, so the state
 //! Dart keeps in the delegate's private fields lives in [`SearchDelegateData`], which every
 //! delegate holds and answers from [`SearchDelegate::search_delegate_data`].
@@ -66,21 +66,66 @@ use crate::theme_data::ThemeData;
 /// The delegate's [`SearchDelegate::build_results`] method result is given back to the caller
 /// through the future this function returns, when the page is closed with
 /// [`SearchDelegate::close`].
-pub fn show_search(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowSearch {
     delegate: Rc<dyn SearchDelegate>,
-    query: Option<&str>,
+    query: Option<String>,
     use_root_navigator: bool,
     maintain_state: bool,
-) -> CompleterFuture<RouteResult> {
-    let data = delegate.search_delegate_data();
-    delegate.set_query(app, query.unwrap_or(&delegate.query(app)).to_owned());
-    data.current_body_notifier
-        .handle()
-        .set_value(app, Some(SearchBody::Suggestions));
-    let route = SearchPageRoute::new(app, delegate, maintain_state);
-    Navigator::of(app, context, use_root_navigator).push(app, route.into_erased())
+}
+
+impl ShowSearch {
+    /// Creates a builder for a full screen search page; Dart's `showSearch` required argument is
+    /// the delegate, and every other argument is a setter.
+    pub fn new(delegate: Rc<dyn SearchDelegate>) -> ShowSearch {
+        ShowSearch {
+            delegate,
+            query: Some(String::new()),
+            use_root_navigator: false,
+            maintain_state: false,
+        }
+    }
+
+    /// The initial query; defaults to the empty string.
+    pub fn query(mut self, query: impl Into<String>) -> ShowSearch {
+        self.query = Some(query.into());
+        self
+    }
+
+    /// Dart's `query: null`: starts from the delegate's current query instead of the empty
+    /// string.
+    pub fn query_none(mut self) -> ShowSearch {
+        self.query = None;
+        self
+    }
+
+    /// Whether to push the search page to the root navigator. Defaults to `false`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowSearch {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// Whether the route should remain in memory when it is inactive. Defaults to `false`.
+    pub fn maintain_state(mut self, maintain_state: bool) -> ShowSearch {
+        self.maintain_state = maintain_state;
+        self
+    }
+
+    /// Shows the search page and returns the result selected by the user.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowSearch {
+            delegate,
+            query,
+            use_root_navigator,
+            maintain_state,
+        } = self;
+        let data = delegate.search_delegate_data();
+        delegate.set_query(app, query.unwrap_or_else(|| delegate.query(app)));
+        data.current_body_notifier
+            .handle()
+            .set_value(app, Some(SearchBody::Suggestions));
+        let route = SearchPageRoute::new(app, delegate, maintain_state);
+        Navigator::of(app, context, use_root_navigator).push(app, route.into_erased())
+    }
 }
 
 /// Which of the delegate's two bodies the page shows.
@@ -245,7 +290,7 @@ impl SearchDelegateData {
     }
 }
 
-/// Delegate for [`show_search`] to define the content of the search page.
+/// Delegate for [`ShowSearch`] to define the content of the search page.
 ///
 /// The search page always shows an [`AppBar`] at the top where users can enter their search
 /// queries. The buttons shown before and after the search query text field can be customized via
@@ -265,9 +310,9 @@ impl SearchDelegateData {
 ///
 /// Once the user has selected a search result, [`close`](Self::close) should be called to remove
 /// the search page from the screen and to return the selected search result back to the caller of
-/// [`show_search`].
+/// [`ShowSearch`].
 ///
-/// A delegate in use by [`show_search`] is shared with the route, so what Dart keeps in the
+/// A delegate in use by [`ShowSearch`] is shared with the route, so what Dart keeps in the
 /// delegate's fields is read through [`search_delegate_data`](Self::search_delegate_data).
 pub trait SearchDelegate: 'static {
     /// The state this delegate shares with its route and page.
@@ -298,7 +343,7 @@ pub trait SearchDelegate: 'static {
     /// Typically, this method returns a [`ListView`](waft_widgets::ListView) with the search
     /// results. When the user taps on a particular search result, [`close`](Self::close) should be
     /// called with the selected result as argument. This will close the search page and communicate
-    /// the result back to the initial caller of [`show_search`].
+    /// the result back to the initial caller of [`ShowSearch`].
     fn build_results(&self, app: &mut App, context: BuildContext) -> WidgetRef;
 
     /// A widget to display before the current query in the [`AppBar`].
@@ -425,7 +470,7 @@ pub trait SearchDelegate: 'static {
             .set_value(app, Some(SearchBody::Suggestions));
     }
 
-    /// Closes the search page and returns `result` to the caller of [`show_search`].
+    /// Closes the search page and returns `result` to the caller of [`ShowSearch`].
     ///
     /// Might be called when the user taps on a search result shown by
     /// [`build_results`](Self::build_results).
@@ -1257,19 +1302,19 @@ mod tests {
                                 IconButton::new(
                                     Some(Listener::new(move |app: &mut App| {
                                         let results = Rc::clone(&results);
-                                        show_search(
-                                            app,
-                                            context,
-                                            Rc::clone(&delegate),
+                                        {
+                                            let mut show = ShowSearch::new(Rc::clone(&delegate))
+                                                .use_root_navigator(use_root_navigator)
+                                                .maintain_state(maintain_state);
                                             // Dart's `query` argument defaults to `''`.
                                             if pass_in_initial_query {
-                                                initial_query
-                                            } else {
-                                                Some("")
-                                            },
-                                            use_root_navigator,
-                                            maintain_state,
-                                        )
+                                                match initial_query {
+                                                    Some(query) => show = show.query(query),
+                                                    None => show = show.query_none(),
+                                                }
+                                            }
+                                            show.show(app, context)
+                                        }
                                         .then(
                                             app,
                                             move |_app, result| {
@@ -1757,19 +1802,13 @@ mod tests {
         results: &Results,
     ) {
         let results = Rc::clone(results);
-        show_search(
-            app,
-            context,
-            Rc::clone(delegate) as Rc<dyn SearchDelegate>,
-            None,
-            false,
-            false,
-        )
-        .then(app, move |_app, result| {
-            results
-                .borrow_mut()
-                .push(result.and_then(|r| r.downcast_ref::<String>().cloned()));
-        });
+        ShowSearch::new(Rc::clone(delegate) as Rc<dyn SearchDelegate>)
+            .show(app, context)
+            .then(app, move |_app, result| {
+                results
+                    .borrow_mut()
+                    .push(result.and_then(|r| r.downcast_ref::<String>().cloned()));
+            });
     }
 
     /// The engine's `popRoute` on `flutter/navigation`.
@@ -2215,14 +2254,11 @@ mod tests {
                     let delegate = Rc::clone(&delegate);
                     crate::text_button::TextButton::new(
                         Some(Listener::new(move |app: &mut App| {
-                            drop(show_search(
-                                app,
-                                context,
-                                Rc::clone(&delegate) as Rc<dyn SearchDelegate>,
-                                None,
-                                use_root_navigator,
-                                false,
-                            ));
+                            drop(
+                                ShowSearch::new(Rc::clone(&delegate) as Rc<dyn SearchDelegate>)
+                                    .use_root_navigator(use_root_navigator)
+                                    .show(app, context),
+                            );
                         })),
                         Some(Text::new(label)),
                     )
@@ -2345,14 +2381,11 @@ mod tests {
                     let delegate = Rc::clone(&delegate);
                     crate::text_button::TextButton::new(
                         Some(Listener::new(move |app: &mut App| {
-                            drop(show_search(
-                                app,
-                                context,
-                                Rc::clone(&delegate) as Rc<dyn SearchDelegate>,
-                                None,
-                                false,
-                                maintain_state,
-                            ));
+                            drop(
+                                ShowSearch::new(Rc::clone(&delegate) as Rc<dyn SearchDelegate>)
+                                    .maintain_state(maintain_state)
+                                    .show(app, context),
+                            );
                         })),
                         Some(Text::new(label)),
                     )
